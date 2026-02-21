@@ -176,7 +176,9 @@ class TestOrderModel:
 class TestAllTablesRegistered:
     """Verify all models are registered in Base metadata."""
 
-    EXPECTED_TABLES = {"markets", "segments", "instruments", "candles", "signals", "orders"}
+    EXPECTED_TABLES = frozenset(
+        {"markets", "segments", "instruments", "candles", "signals", "orders"}
+    )
 
     def test_all_tables_in_metadata(self) -> None:
         registered = set(Base.metadata.tables.keys())
