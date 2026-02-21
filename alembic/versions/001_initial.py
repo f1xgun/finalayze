@@ -107,9 +107,7 @@ def upgrade() -> None:
     )
 
     # Convert candles to TimescaleDB hypertable
-    op.execute(
-        "SELECT create_hypertable('candles', 'timestamp', migrate_data => true)"
-    )
+    op.execute("SELECT create_hypertable('candles', 'timestamp', migrate_data => true)")
 
     # --- signals ---
     op.create_table(
