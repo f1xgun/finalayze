@@ -3,6 +3,48 @@
 This document defines the development workflow for the Finalayze project.
 All contributors (human and AI agents) must follow these conventions.
 
+## Superpowers Development Lifecycle
+
+Every feature, bugfix, or refactor follows this mandatory sequence:
+
+### 1. Brainstorm (design before code)
+- **Skill:** `brainstorming`
+- Explore requirements, constraints, and edge cases through dialogue
+- Output: validated design document
+- **Gate:** Design must be approved before proceeding
+
+### 2. Isolate (git worktree)
+- **Skill:** `using-git-worktrees`
+- Create isolated worktree for the feature
+- Verify clean test baseline before touching code
+
+### 3. Plan (implementation plan)
+- **Skill:** `writing-plans`
+- Break work into bite-sized tasks (2-5 minutes each)
+- Document exact file paths, code, test steps, verification commands
+- Save to `docs/plans/YYYY-MM-DD-<feature-name>.md`
+
+### 4. Execute (TDD + subagents)
+- **Skill:** `subagent-driven-development` (same session) or `executing-plans` (batch mode)
+- Each task uses `test-driven-development`: RED-GREEN-REFACTOR
+  - Write failing test first
+  - Verify it fails correctly
+  - Write minimal code to pass
+  - Verify it passes
+  - Refactor if needed
+- If bugs arise, use `systematic-debugging` (root cause first, never guess)
+- Use `dispatching-parallel-agents` for independent tasks
+- `requesting-code-review` after each task (spec compliance + code quality)
+
+### 5. Verify (evidence before claims)
+- **Skill:** `verification-before-completion`
+- Run full test suite fresh, read output, check exit code
+- Never claim "done" without evidence
+
+### 6. Finish (merge or PR)
+- **Skill:** `finishing-a-development-branch`
+- Options: merge locally, create PR, keep branch, or discard
+
 ## Branch Strategy
 
 - `main` -- production-ready code, protected
@@ -64,6 +106,7 @@ docs(architecture): update data flow diagram
 - [ ] Docstrings: Google style on all public functions and classes
 - [ ] Configuration: no hardcoded values; use `config/settings.py`
 - [ ] Secrets: no credentials in code; use environment variables
+- [ ] TDD evidence: tests written before implementation code
 
 ## Quality Gates
 
@@ -127,7 +170,7 @@ cp .env.example .env
 # Edit .env with your credentials
 
 # Start infrastructure
-docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.dev.yml up -d
 
 # Run migrations
 uv run alembic upgrade head

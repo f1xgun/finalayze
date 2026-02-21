@@ -4,37 +4,37 @@ Finalayze is an AI-powered multi-market stock trading system. It ingests news,
 social sentiment, and market data; analyzes them with LLMs and ML ensembles;
 and executes trades on US (Alpaca) and MOEX (Tinkoff Invest) markets.
 
-## Table of Contents
+## Superpowers Workflow (mandatory)
+
+Follow this sequence for ALL work. Skills trigger automatically -- invoke them.
+
+1. **Brainstorm** before any feature/change (design first, code never)
+2. **Worktree** -- isolate work in a git worktree
+3. **Write plan** -- save to `docs/plans/YYYY-MM-DD-<name>.md`
+4. **Execute plan** via subagent-driven-development or executing-plans
+5. **TDD** -- RED-GREEN-REFACTOR for all implementations
+6. **Verify** before claiming completion (run tests, read output)
+7. **Finish branch** -- merge, PR, or keep
+
+## Documentation Map
 
 | Document | Purpose |
 |---|---|
 | [docs/INDEX.md](docs/INDEX.md) | Master index of all documentation |
-| [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md) | High-level system architecture |
+| [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md) | System architecture |
 | [docs/architecture/DEPENDENCY_LAYERS.md](docs/architecture/DEPENDENCY_LAYERS.md) | Import layering rules |
 | [docs/architecture/DATA_FLOW.md](docs/architecture/DATA_FLOW.md) | Event flow diagrams |
-| [docs/architecture/DECISIONS.md](docs/architecture/DECISIONS.md) | Architecture Decision Records |
-| [docs/design/MARKETS.md](docs/design/MARKETS.md) | Multi-market design (US, MOEX) |
-| [docs/design/SEGMENTS.md](docs/design/SEGMENTS.md) | Stock segment system |
-| [docs/design/STRATEGIES.md](docs/design/STRATEGIES.md) | Trading strategy design |
-| [docs/design/RISK.md](docs/design/RISK.md) | Risk management design |
-| [docs/design/NEWS_PIPELINE.md](docs/design/NEWS_PIPELINE.md) | News ingestion pipeline |
-| [docs/design/ML_PIPELINE.md](docs/design/ML_PIPELINE.md) | ML ensemble pipeline |
+| [docs/design/](docs/design/) | MARKETS, SEGMENTS, STRATEGIES, RISK, NEWS, ML |
 | [docs/api/ENDPOINTS.md](docs/api/ENDPOINTS.md) | API contract reference |
 | [docs/quality/GRADES.md](docs/quality/GRADES.md) | Quality grades per domain |
 | [docs/quality/GAPS.md](docs/quality/GAPS.md) | Tech debt tracker |
-| [docs/quality/TEST_STRATEGY.md](docs/quality/TEST_STRATEGY.md) | Testing approach per module |
-| [docs/operations/RUNBOOK.md](docs/operations/RUNBOOK.md) | Operational runbook |
-| [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md) | Deployment guide |
-| [docs/operations/MONITORING.md](docs/operations/MONITORING.md) | Monitoring & alerting |
 | [docs/plans/ROADMAP.md](docs/plans/ROADMAP.md) | Phase overview with status |
 | [docs/plans/PHASE_1.md](docs/plans/PHASE_1.md) | Phase 1 execution plan |
 | [WORKFLOW.md](WORKFLOW.md) | Development process conventions |
-| [CHANGELOG.md](CHANGELOG.md) | Project changelog |
 
 ## Dependency Layering Rules
 
-Imports must flow **downward only**. A module may import from its own layer
-or any layer with a smaller number. Never import upward.
+Imports must flow **downward only**. Never import upward.
 
 ```
 Layer 0: Types & Schemas       core/schemas.py, core/exceptions.py
@@ -46,21 +46,20 @@ Layer 5: Execution              execution/
 Layer 6: API / Dashboard        api/, dashboard/
 ```
 
-## Active Coding Conventions
+## Coding Conventions
 
 - Python 3.12, strict typing, `from __future__ import annotations`
-- Formatter/linter: ruff (line-length 99), type checker: mypy (strict)
+- Formatter/linter: ruff (line-length 100), type checker: mypy (strict)
 - Package manager: uv, lockfile committed
 - Async-first: SQLAlchemy 2.0 async, httpx for HTTP
 - Pydantic v2 for all schemas and settings
-- Test files mirror source: `tests/<module>/test_<name>.py`
-- Docstrings: Google style, required on all public functions
+- TDD mandatory: write failing test FIRST, then implement
 - 4 work modes: debug, sandbox, test, real
 
 ## Current Phase
 
 **Phase 1 -- Foundation, US Market & Sandbox** (not started).
-See [docs/plans/PHASE_1.md](docs/plans/PHASE_1.md) for the detailed plan.
+See [docs/plans/PHASE_1.md](docs/plans/PHASE_1.md).
 
 ## Quick Commands
 
