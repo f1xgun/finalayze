@@ -1,0 +1,25 @@
+segment_id: us_finance
+strategies:
+  mean_reversion:
+    enabled: true
+    weight: 0.4
+    params:
+      bb_period: 20
+      bb_std_dev: 2.0
+      min_confidence: 0.6
+  momentum:
+    enabled: true
+    weight: 0.3
+    params:
+      rsi_period: 14
+      rsi_oversold: 30
+      rsi_overbought: 70
+      macd_fast: 12
+      macd_slow: 26
+      min_confidence: 0.6
+  event_driven:
+    enabled: true
+    weight: 0.3
+    params:
+      min_sentiment: 0.65
+      event_types: [interest_rate, earnings, regulatory, macro]

@@ -1,0 +1,19 @@
+segment_id: us_broad
+strategies:
+  momentum:
+    enabled: true
+    weight: 0.5
+    params:
+      rsi_period: 14
+      rsi_oversold: 30
+      rsi_overbought: 70
+      macd_fast: 12
+      macd_slow: 26
+      min_confidence: 0.55
+  mean_reversion:
+    enabled: true
+    weight: 0.5
+    params:
+      bb_period: 20
+      bb_std_dev: 2.0
+      min_confidence: 0.6

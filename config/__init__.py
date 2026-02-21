@@ -1,0 +1,1 @@
+"""Finalayze configuration package."""

@@ -1,0 +1,25 @@
+segment_id: us_healthcare
+strategies:
+  event_driven:
+    enabled: true
+    weight: 0.5
+    params:
+      min_sentiment: 0.65
+      event_types: [fda, clinical_trial, earnings, regulatory]
+  mean_reversion:
+    enabled: true
+    weight: 0.3
+    params:
+      bb_period: 20
+      bb_std_dev: 2.0
+      min_confidence: 0.7
+  momentum:
+    enabled: true
+    weight: 0.2
+    params:
+      rsi_period: 14
+      rsi_oversold: 35
+      rsi_overbought: 65
+      macd_fast: 12
+      macd_slow: 26
+      min_confidence: 0.65

@@ -1,0 +1,25 @@
+segment_id: ru_energy
+strategies:
+  momentum:
+    enabled: true
+    weight: 0.3
+    params:
+      rsi_period: 14
+      rsi_oversold: 25
+      rsi_overbought: 75
+      macd_fast: 12
+      macd_slow: 26
+      min_confidence: 0.6
+  event_driven:
+    enabled: true
+    weight: 0.5
+    params:
+      min_sentiment: 0.6
+      event_types: [opec, oil_price, sanctions, commodity_price, geopolitical]
+  mean_reversion:
+    enabled: true
+    weight: 0.2
+    params:
+      bb_period: 20
+      bb_std_dev: 2.5
+      min_confidence: 0.7

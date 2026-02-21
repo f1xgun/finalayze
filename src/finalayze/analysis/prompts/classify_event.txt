@@ -1,0 +1,18 @@
+Classify the following financial news article into event categories and determine
+its geographic scope.
+
+Event types: earnings, regulatory, macro, merger_acquisition, geopolitical,
+fda, product_launch, interest_rate, cbr_rate, sanctions, opec, oil_price,
+commodity_price, clinical_trial, bankruptcy, ipo, dividend, stock_split, other.
+
+Scope: global, us, russia, sector.
+
+Respond in JSON format:
+{
+  "event_types": [<list of event type strings>],
+  "scope": "<global|us|russia|sector>",
+  "affected_sectors": [<list of sector strings>],
+  "affected_tickers": [<list of ticker strings>],
+  "impact_magnitude": <float 0-1>,
+  "reasoning": "<brief explanation>"
+}

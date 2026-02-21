@@ -1,0 +1,170 @@
+[project]
+name = "finalayze"
+version = "0.1.0"
+description = "AI-powered multi-market stock trading system"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    # Web framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    # Database
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    # Cache / Event bus
+    "redis>=5.2.0",
+    # Task scheduling
+    "apscheduler>=3.10.4",
+    "celery[redis]>=5.4.0",
+    # Configuration
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    # ML
+    "xgboost>=2.1.0",
+    "lightgbm>=4.5.0",
+    "torch>=2.5.0",
+    # Data & Analysis
+    "pandas>=2.2.0",
+    "polars>=1.17.0",
+    "pandas-ta>=0.3.14b1",
+    "numpy>=1.26.0",
+    # LLM
+    "anthropic>=0.42.0",
+    # Brokers
+    "alpaca-py>=0.33.0",
+    # News & Data
+    "httpx>=0.28.0",
+    "yfinance>=0.2.50",
+    "finnhub-python>=2.4.20",
+    # Dashboard
+    "streamlit>=1.41.0",
+    # Utilities
+    "python-dotenv>=1.0.1",
+    "structlog>=24.4.0",
+    "pyyaml>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "pytest-mock>=3.14.0",
+    "mypy>=1.14.0",
+    "ruff>=0.9.0",
+    "pre-commit>=4.0.0",
+    "types-PyYAML>=6.0.12",
+    "types-redis>=4.6.0",
+]
+# moex extra: tinkoff-investments is currently quarantined on PyPI.
+# Will be added in Phase 2 when the package is restored.
+# Install manually: pip install git+https://github.com/Tinkoff/invest-python.git
+
+[build-system]
+requires = ["uv_build>=0.10.4,<0.11.0"]
+build-backend = "uv_build"
+
+# Restrict resolution to Unix-like platforms (no Windows)
+[tool.uv]
+environments = ["sys_platform != 'win32'"]
+
+# ──────────────────────────────────────────────
+# Ruff (linter + formatter)
+# ──────────────────────────────────────────────
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "A",      # flake8-builtins
+    "C4",     # flake8-comprehensions
+    "DTZ",    # flake8-datetimez (enforce timezone-aware datetimes)
+    "T20",    # flake8-print (no print statements in production code)
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "RUF",    # ruff-specific rules
+    "S",      # flake8-bandit (security)
+    "PT",     # flake8-pytest-style
+    "RET",    # flake8-return
+    "ARG",    # flake8-unused-arguments
+    "PL",     # pylint rules
+    "PERF",   # perflint
+    "FURB",   # refurb
+    "LOG",    # flake8-logging
+    "TID",    # flake8-tidy-imports
+]
+ignore = [
+    "S101",     # assert used -- we use it in tests
+    "PLR0913",  # too many arguments -- trading functions often need many params
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "T20", "ARG"]
+"scripts/**" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["finalayze"]
+
+# ──────────────────────────────────────────────
+# mypy (type checker)
+# ──────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+disallow_untyped_calls = true
+check_untyped_defs = true
+no_implicit_reexport = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "finnhub.*",
+    "pandas_ta.*",
+    "yfinance.*",
+    "alpaca.*",
+    "tinkoff.*",
+    "streamlit.*",
+    "celery.*",
+    "apscheduler.*",
+    "xgboost.*",
+    "lightgbm.*",
+    "torch.*",
+]
+ignore_missing_imports = true
+
+# ──────────────────────────────────────────────
+# pytest
+# ──────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--cov=src/finalayze",
+    "--cov-report=term-missing",
+    "--cov-fail-under=50",
+]
+markers = [
+    "unit: Unit tests (fast, no I/O)",
+    "integration: Integration tests (requires DB/Redis)",
+    "e2e: End-to-end tests (full system)",
+    "slow: Slow tests (model training, backtests)",
+]

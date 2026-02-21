@@ -1,0 +1,1 @@
+"""Finalayze application entry point."""
