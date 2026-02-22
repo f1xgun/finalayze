@@ -161,6 +161,7 @@ class SimulatedBroker(BrokerBase):
             self._positions[order.symbol] = remaining
         else:
             self._positions.pop(order.symbol, None)
+            self._stop_losses.pop(order.symbol, None)
 
         self._last_prices[order.symbol] = fill_candle.close
 

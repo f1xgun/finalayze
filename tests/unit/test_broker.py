@@ -258,3 +258,16 @@ class TestSimulatedBrokerEquity:
         expected_cash = INITIAL_CASH - SHARE_PRICE * ORDER_QTY
         expected_equity = expected_cash + new_price * ORDER_QTY
         assert portfolio.equity == expected_equity
+
+    def test_sell_clears_stop_loss_entry(self) -> None:
+        """Selling a position must remove its stop-loss to avoid stale entries."""
+        broker = SimulatedBroker(initial_cash=INITIAL_CASH)
+        buy_candle = _candle(SHARE_PRICE)
+        broker.submit_order(OrderRequest("AAPL", "BUY", ORDER_QTY), buy_candle)
+        broker.set_stop_loss("AAPL", STOP_PRICE)
+
+        sell_candle = _candle(Decimal(160), day=1)
+        broker.submit_order(OrderRequest("AAPL", "SELL", ORDER_QTY), sell_candle)
+
+        # Stop-loss entry must be cleared after position is fully closed
+        assert "AAPL" not in broker._stop_losses
