@@ -168,8 +168,9 @@ MarketDefinition (us / moex)
   market via `market_id`. The `InstrumentRegistry` maps `(symbol, market_id)`
   to `Instrument` metadata (name, type, FIGI for MOEX, lot size, currency).
 
-The `segment_id` field on `Signal` and `Candle` schemas links runtime data
-back to the segment that generated or owns it.
+The `segment_id` field on `Signal` links runtime data back to the segment that
+generated it. `Candle` carries `market_id` (not `segment_id`) because a candle
+belongs to a market, not a segment.
 
 ## 7. How to Add a New Segment
 
@@ -202,7 +203,7 @@ SegmentConfig(
 
 | Segment | Phase 1 | Notes |
 |---|---|---|
-| us_tech | Operational | 6 symbols, momentum + mean_reversion presets |
+| us_tech | Operational | 6 symbols, momentum + mean_reversion + event_driven presets |
 | us_healthcare | Operational | 5 symbols, event_driven placeholder in preset |
 | us_finance | Operational | 5 symbols |
 | us_broad | Operational | 3 ETFs, balanced preset |

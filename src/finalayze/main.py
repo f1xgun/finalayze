@@ -20,15 +20,15 @@ from finalayze.api.v1.router import api_router
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+_settings = Settings()
+setup_logging(_settings.mode)
 log = structlog.get_logger()
 
 
 @asynccontextmanager
 async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
-    """Configure logging and emit a startup message."""
-    settings = Settings()
-    setup_logging(settings.mode)
-    log.info("finalayze started", mode=settings.mode.value)
+    """Emit a startup message."""
+    log.info("finalayze started", mode=_settings.mode.value)
     yield
 
 

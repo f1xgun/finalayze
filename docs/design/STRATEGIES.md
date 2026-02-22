@@ -75,12 +75,20 @@ Convergence Divergence). A signal fires only when **both** conditions align:
 ### Confidence Calculation
 
 ```python
-rsi_distance = (rsi_oversold - current_rsi) / rsi_oversold   # for BUY
+# BUY: distance as fraction of the oversold threshold
+rsi_distance = (rsi_oversold - current_rsi) / rsi_oversold
+
+# SELL: distance as fraction of the remaining range above overbought
+rsi_distance = (current_rsi - rsi_overbought) / (100.0 - rsi_overbought)
+
 confidence = min(1.0, 0.5 + rsi_distance * 0.3 + abs(macd_hist) * 0.1)
 ```
 
 The confidence combines how far RSI is from the threshold with the magnitude
-of the MACD histogram. Signals below `min_confidence` (from YAML) are discarded.
+of the MACD histogram. The denominators differ: BUY normalizes against the
+oversold level itself, while SELL normalizes against the remaining headroom
+above the overbought level (i.e. `100 - rsi_overbought`).
+Signals below `min_confidence` (from YAML) are discarded.
 
 ### Minimum Data Requirement
 
@@ -167,17 +175,18 @@ for strategy_name, strategy_cfg in strategies_cfg.items():
     weight = Decimal(str(strategy_cfg["weight"]))
     signal = strategy.generate_signal(symbol, candles, segment_id)
     if signal is None:
-        continue
+        continue   # weight is NOT added for strategies that return no signal
     score = +1 if signal.direction == BUY else -1
     weighted_score += score * Decimal(str(signal.confidence)) * weight
-    total_weight += weight
+    total_weight += weight   # only accumulated when a signal fired
 
-net = weighted_score / total_weight   # normalized net score
+net = weighted_score / total_weight   # normalized over strategies that fired
 ```
 
 - `net > 0` → combined BUY with `confidence = abs(net)`
 - `net < 0` → combined SELL with `confidence = abs(net)`
 - `abs(net) < 0.50` (`_MIN_COMBINED_CONFIDENCE`) → no combined signal
+- `total_weight == 0` (no strategy fired) → `None` returned immediately
 
 ### Key Design Choices
 
