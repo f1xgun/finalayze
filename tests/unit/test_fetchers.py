@@ -68,9 +68,7 @@ class TestYFinanceFetcher:
         )
 
     @patch("finalayze.data.fetchers.yfinance.yf")
-    def test_fetch_returns_candles(
-        self, mock_yf: MagicMock, fetcher: YFinanceFetcher
-    ) -> None:
+    def test_fetch_returns_candles(self, mock_yf: MagicMock, fetcher: YFinanceFetcher) -> None:
         """fetch_candles returns correct Candle objects from yfinance data."""
         mock_yf.download.return_value = self._make_mock_dataframe()
 

@@ -61,9 +61,15 @@ class TestSegmentModel:
     def test_required_columns_exist(self) -> None:
         col_names = {c.name for c in SegmentModel.__table__.columns}
         expected = {
-            "id", "market_id", "name", "description",
-            "active_strategies", "strategy_params", "ml_model_id",
-            "max_allocation_pct", "news_languages",
+            "id",
+            "market_id",
+            "name",
+            "description",
+            "active_strategies",
+            "strategy_params",
+            "ml_model_id",
+            "max_allocation_pct",
+            "news_languages",
         }
         assert expected.issubset(col_names)
 
@@ -88,8 +94,15 @@ class TestInstrumentModel:
     def test_required_columns_exist(self) -> None:
         col_names = {c.name for c in InstrumentModel.__table__.columns}
         expected = {
-            "symbol", "market_id", "segment_id", "name", "figi",
-            "instrument_type", "currency", "lot_size", "is_active",
+            "symbol",
+            "market_id",
+            "segment_id",
+            "name",
+            "figi",
+            "instrument_type",
+            "currency",
+            "lot_size",
+            "is_active",
         }
         assert expected.issubset(col_names)
 
@@ -114,8 +127,16 @@ class TestCandleModel:
     def test_required_columns_exist(self) -> None:
         col_names = {c.name for c in CandleModel.__table__.columns}
         expected = {
-            "symbol", "market_id", "timeframe", "timestamp",
-            "open", "high", "low", "close", "volume", "source",
+            "symbol",
+            "market_id",
+            "timeframe",
+            "timestamp",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "source",
         }
         assert expected.issubset(col_names)
 
@@ -135,9 +156,17 @@ class TestSignalModel:
     def test_required_columns_exist(self) -> None:
         col_names = {c.name for c in SignalModel.__table__.columns}
         expected = {
-            "id", "strategy_name", "symbol", "market_id", "segment_id",
-            "direction", "confidence", "features", "reasoning",
-            "created_at", "mode",
+            "id",
+            "strategy_name",
+            "symbol",
+            "market_id",
+            "segment_id",
+            "direction",
+            "confidence",
+            "features",
+            "reasoning",
+            "created_at",
+            "mode",
         }
         assert expected.issubset(col_names)
 
@@ -162,13 +191,25 @@ class TestOrderModel:
     def test_required_columns_exist(self) -> None:
         col_names = {c.name for c in OrderModel.__table__.columns}
         expected = {
-            "id", "signal_id", "broker", "broker_order_id",
-            "symbol", "market_id", "side", "order_type",
-            "quantity", "limit_price", "stop_price",
-            "currency", "status",
-            "filled_quantity", "filled_avg_price",
-            "submitted_at", "filled_at",
-            "risk_checks", "mode",
+            "id",
+            "signal_id",
+            "broker",
+            "broker_order_id",
+            "symbol",
+            "market_id",
+            "side",
+            "order_type",
+            "quantity",
+            "limit_price",
+            "stop_price",
+            "currency",
+            "status",
+            "filled_quantity",
+            "filled_avg_price",
+            "submitted_at",
+            "filled_at",
+            "risk_checks",
+            "mode",
         }
         assert expected.issubset(col_names)
 

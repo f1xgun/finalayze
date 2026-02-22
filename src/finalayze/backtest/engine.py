@@ -83,9 +83,7 @@ class BacktestEngine:
                 if sr.filled and sr.fill_price is not None:
                     entry = entry_prices.pop(sr.symbol, sr.fill_price)
                     pnl = (sr.fill_price - entry) * sr.quantity
-                    pnl_pct = (
-                        (sr.fill_price - entry) / entry if entry != 0 else Decimal(0)
-                    )
+                    pnl_pct = (sr.fill_price - entry) / entry if entry != 0 else Decimal(0)
                     trades.append(
                         TradeResult(
                             signal_id=uuid4(),
@@ -110,14 +108,10 @@ class BacktestEngine:
                 fill_candle = candles[i + 1]
 
                 if signal.direction == SignalDirection.BUY:
-                    self._handle_buy(
-                        broker, checker, fill_candle, symbol, history, entry_prices
-                    )
+                    self._handle_buy(broker, checker, fill_candle, symbol, history, entry_prices)
 
                 elif signal.direction == SignalDirection.SELL:
-                    self._handle_sell(
-                        broker, fill_candle, symbol, entry_prices, trades
-                    )
+                    self._handle_sell(broker, fill_candle, symbol, entry_prices, trades)
 
             # (f) Record portfolio snapshot
             snapshots.append(broker.get_portfolio())
@@ -201,11 +195,7 @@ class BacktestEngine:
         if order_result.filled and order_result.fill_price is not None:
             entry = entry_prices.pop(symbol, order_result.fill_price)
             pnl = (order_result.fill_price - entry) * order_result.quantity
-            pnl_pct = (
-                (order_result.fill_price - entry) / entry
-                if entry != 0
-                else Decimal(0)
-            )
+            pnl_pct = (order_result.fill_price - entry) / entry if entry != 0 else Decimal(0)
             trades.append(
                 TradeResult(
                     signal_id=uuid4(),

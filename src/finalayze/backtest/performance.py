@@ -42,17 +42,13 @@ class PerformanceAnalyzer:
 
         gross_profit = sum((t.pnl for t in trades if t.pnl > 0), start=Decimal(0))
         gross_loss = abs(sum((t.pnl for t in trades if t.pnl < 0), start=Decimal(0)))
-        profit_factor = (
-            gross_profit / gross_loss if gross_loss > 0 else Decimal(999)
-        )
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else Decimal(999)
 
         # Total return from equity curve
         if len(snapshots) >= 2:  # noqa: PLR2004
             initial = snapshots[0].equity
             final = snapshots[-1].equity
-            total_return = (
-                (final - initial) / initial if initial > 0 else Decimal(0)
-            )
+            total_return = (final - initial) / initial if initial > 0 else Decimal(0)
         else:
             total_return = Decimal(0)
 

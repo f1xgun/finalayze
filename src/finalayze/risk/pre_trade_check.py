@@ -67,9 +67,7 @@ class PreTradeChecker:
 
         # 2. Cash check
         if order_value > available_cash:
-            violations.append(
-                f"Insufficient cash: need {order_value}, have {available_cash}"
-            )
+            violations.append(f"Insufficient cash: need {order_value}, have {available_cash}")
 
         # 3. Position count check
         if open_position_count >= self._max_positions:

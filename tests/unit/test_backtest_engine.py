@@ -47,9 +47,7 @@ class StubStrategy(BaseStrategy):
     def supported_segments(self) -> list[str]:
         return ["us_large_cap"]
 
-    def generate_signal(
-        self, symbol: str, candles: list[Candle], segment_id: str
-    ) -> Signal | None:
+    def generate_signal(self, symbol: str, candles: list[Candle], segment_id: str) -> Signal | None:
         idx = len(candles) - 1
         if idx == TRADE_DAY_BUY:
             return Signal(
@@ -89,9 +87,7 @@ class SilentStrategy(BaseStrategy):
     def supported_segments(self) -> list[str]:
         return ["us_large_cap"]
 
-    def generate_signal(
-        self, symbol: str, candles: list[Candle], segment_id: str
-    ) -> Signal | None:
+    def generate_signal(self, symbol: str, candles: list[Candle], segment_id: str) -> Signal | None:
         return None
 
     def get_parameters(self, segment_id: str) -> dict[str, object]:

@@ -14,7 +14,7 @@ INITIAL_EQUITY = Decimal(100000)
 EQUITY_STEP_1 = Decimal(100100)  # +100
 EQUITY_STEP_2 = Decimal(100050)  # -50
 EQUITY_STEP_3 = Decimal(100250)  # +200
-EQUITY_STEP_4 = Decimal(99800)   # -450 (drawdown)
+EQUITY_STEP_4 = Decimal(99800)  # -450 (drawdown)
 EQUITY_STEP_5 = Decimal(100500)  # +700
 
 TRADE_PNL_WIN_1 = Decimal(100)
@@ -33,6 +33,7 @@ MIN_SNAPSHOTS_FOR_SHARPE = 3
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
+
 
 def _make_trades() -> list[TradeResult]:
     """Create 3 trades: +100, -50, +200."""

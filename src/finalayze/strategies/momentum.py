@@ -46,9 +46,7 @@ class MomentumStrategy(BaseStrategy):
             data = yaml.safe_load(f)
         return dict(data["strategies"]["momentum"]["params"])
 
-    def generate_signal(
-        self, symbol: str, candles: list[Candle], segment_id: str
-    ) -> Signal | None:
+    def generate_signal(self, symbol: str, candles: list[Candle], segment_id: str) -> Signal | None:
         """Generate a momentum signal from RSI and MACD indicators."""
         if len(candles) < _MIN_CANDLES:
             return None
@@ -59,7 +57,11 @@ class MomentumStrategy(BaseStrategy):
 
         current_rsi, current_hist, prev_hist, min_confidence = indicators
         result = self._evaluate_signal(
-            current_rsi, current_hist, prev_hist, min_confidence, segment_id,
+            current_rsi,
+            current_hist,
+            prev_hist,
+            min_confidence,
+            segment_id,
         )
         if result is None:
             return None
@@ -82,8 +84,7 @@ class MomentumStrategy(BaseStrategy):
                 "macd_hist": round(current_hist, 4),
             },
             reasoning=(
-                f"RSI={current_rsi:.1f} ({rsi_label})"
-                f", MACD histogram crossed {cross_label} zero"
+                f"RSI={current_rsi:.1f} ({rsi_label}), MACD histogram crossed {cross_label} zero"
             ),
         )
 
@@ -149,7 +150,8 @@ class MomentumStrategy(BaseStrategy):
             return None
 
         confidence = min(
-            1.0, 0.5 + rsi_distance * 0.3 + abs(current_hist) * 0.1,
+            1.0,
+            0.5 + rsi_distance * 0.3 + abs(current_hist) * 0.1,
         )
         if confidence < min_confidence:
             return None

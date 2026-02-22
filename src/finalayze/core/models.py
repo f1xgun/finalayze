@@ -50,22 +50,29 @@ class SegmentModel(Base):
 
     id: Mapped[str] = mapped_column(String(30), primary_key=True)
     market_id: Mapped[str] = mapped_column(
-        String(10), ForeignKey("markets.id"), nullable=False,
+        String(10),
+        ForeignKey("markets.id"),
+        nullable=False,
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     active_strategies: Mapped[list[str] | None] = mapped_column(
-        ARRAY(Text), nullable=True,
+        ARRAY(Text),
+        nullable=True,
     )
     strategy_params: Mapped[dict[str, object] | None] = mapped_column(
-        JSONB, nullable=True,
+        JSONB,
+        nullable=True,
     )
     ml_model_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     max_allocation_pct: Mapped[Decimal] = mapped_column(
-        Numeric(5, 4), nullable=False, default=Decimal("0.30"),
+        Numeric(5, 4),
+        nullable=False,
+        default=Decimal("0.30"),
     )
     news_languages: Mapped[list[str] | None] = mapped_column(
-        ARRAY(Text), nullable=True,
+        ARRAY(Text),
+        nullable=True,
     )
 
     market: Mapped[MarketModel] = relationship(back_populates="segments")
@@ -79,7 +86,9 @@ class InstrumentModel(Base):
     symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
     market_id: Mapped[str] = mapped_column(String(10), primary_key=True)
     segment_id: Mapped[str | None] = mapped_column(
-        String(30), ForeignKey("segments.id"), nullable=True,
+        String(30),
+        ForeignKey("segments.id"),
+        nullable=True,
     )
     name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     figi: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -98,7 +107,8 @@ class CandleModel(Base):
     market_id: Mapped[str] = mapped_column(String(10), primary_key=True)
     timeframe: Mapped[str] = mapped_column(String(5), primary_key=True)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), primary_key=True,
+        DateTime(timezone=True),
+        primary_key=True,
     )
     open: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     high: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
@@ -114,7 +124,9 @@ class SignalModel(Base):
     __tablename__ = "signals"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
     )
     strategy_name: Mapped[str] = mapped_column(String(50), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -123,11 +135,13 @@ class SignalModel(Base):
     direction: Mapped[str] = mapped_column(String(4), nullable=False)
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
     features: Mapped[dict[str, object] | None] = mapped_column(
-        JSONB, nullable=True,
+        JSONB,
+        nullable=True,
     )
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
     )
     mode: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
@@ -140,10 +154,14 @@ class OrderModel(Base):
     __tablename__ = "orders"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
     )
     signal_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("signals.id"), nullable=True,
+        UUID(as_uuid=True),
+        ForeignKey("signals.id"),
+        nullable=True,
     )
     broker: Mapped[str] = mapped_column(String(20), nullable=False)
     broker_order_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -157,19 +175,25 @@ class OrderModel(Base):
     currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     filled_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(12, 4), nullable=False, default=Decimal(0),
+        Numeric(12, 4),
+        nullable=False,
+        default=Decimal(0),
     )
     filled_avg_price: Mapped[Decimal | None] = mapped_column(
-        Numeric(12, 4), nullable=True,
+        Numeric(12, 4),
+        nullable=True,
     )
     submitted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
     filled_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
     risk_checks: Mapped[dict[str, object] | None] = mapped_column(
-        JSONB, nullable=True,
+        JSONB,
+        nullable=True,
     )
     mode: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
