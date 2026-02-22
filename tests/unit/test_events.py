@@ -164,8 +164,11 @@ class TestEventBus:
         mock_redis.xread.return_value = []
         await event_bus.read(TEST_STREAM, count=READ_COUNT, last_id=READ_LAST_ID)
         mock_redis.xread.assert_called_once()
-        call_kwargs = mock_redis.xread.call_args[1]
-        assert call_kwargs.get("count") == READ_COUNT
+        call_kwargs = mock_redis.xread.call_args
+        # xread is called as xread({stream: last_id}, count=count)
+        streams_arg = call_kwargs[0][0]  # first positional arg
+        assert streams_arg == {TEST_STREAM: READ_LAST_ID}
+        assert call_kwargs[1].get("count") == READ_COUNT
 
     @pytest.mark.asyncio
     async def test_read_returns_empty_list_when_no_messages(

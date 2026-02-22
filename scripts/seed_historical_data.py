@@ -47,10 +47,15 @@ def main() -> None:
     normalizer = DataNormalizer(market_id="us", source="yfinance")
 
     for symbol in args.symbols:
-        LOG.info("Fetching %s from %s to %s", symbol, start.date(), end.date())
-        candles = fetcher.fetch_candles(symbol, start, end)
-        normalized = normalizer.normalize_batch(candles)
-        print(f"{symbol}: fetched {len(normalized)} candles from {start.date()} to {end.date()}")
+        try:
+            LOG.info("Fetching %s from %s to %s", symbol, start.date(), end.date())
+            candles = fetcher.fetch_candles(symbol, start, end)
+            normalized = normalizer.normalize_batch(candles)
+            n = len(normalized)
+            print(f"{symbol}: fetched {n} candles from {start.date()} to {end.date()}")
+        except Exception as exc:
+            LOG.warning("Failed to fetch %s: %s", symbol, exc)
+            print(f"{symbol}: FAILED — {exc}")
 
     print("Done.")
 

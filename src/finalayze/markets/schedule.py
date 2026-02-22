@@ -8,6 +8,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+_FIRST_WEEKEND_WEEKDAY = 5  # Monday=0 … Friday=4, Saturday=5, Sunday=6
+
 
 class MarketSchedule:
     """Trading hours for a single market/exchange.
@@ -43,6 +45,8 @@ class MarketSchedule:
         """
         utc_dt = dt if dt is not None else datetime.now(tz=UTC)
         local_dt = utc_dt.astimezone(self._tz)
+        if local_dt.weekday() >= _FIRST_WEEKEND_WEEKDAY:
+            return False
         local_time = local_dt.time()
         return self._open_time <= local_time < self._close_time
 
@@ -71,6 +75,10 @@ class MarketSchedule:
             microsecond=0,
         )
         if candidate <= local_dt:
+            candidate += timedelta(days=1)
+
+        # Skip weekends
+        while candidate.weekday() >= _FIRST_WEEKEND_WEEKDAY:
             candidate += timedelta(days=1)
 
         return candidate.astimezone(UTC)
