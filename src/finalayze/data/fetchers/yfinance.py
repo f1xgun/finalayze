@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+import pandas as pd
 import yfinance as yf
 
 from finalayze.core.schemas import Candle
@@ -39,7 +40,13 @@ class YFinanceFetcher(BaseFetcher):
             List of Candle objects sorted by timestamp ascending,
             or an empty list if no data is available.
         """
-        df = yf.download(symbol, start=start, end=end, interval=timeframe, progress=False)
+        df = yf.download(
+            symbol, start=start, end=end, interval=timeframe, progress=False, auto_adjust=True
+        )
+        # yfinance >= 0.2 may return multi-level columns when downloading a single ticker;
+        # flatten to single-level so column access by name works correctly.
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
         if df.empty:
             return []

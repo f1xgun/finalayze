@@ -95,6 +95,20 @@ class TestCandle:
     def test_timestamp_is_utc(self, candle: Candle) -> None:
         assert candle.timestamp.tzinfo is not None
 
+    def test_naive_timestamp_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            Candle(
+                symbol="AAPL",
+                market_id="us",
+                timeframe="1d",
+                timestamp=datetime(2024, 1, 15, 14, 30),  # noqa: DTZ001  # intentionally naive
+                open=CANDLE_OPEN,
+                high=CANDLE_HIGH,
+                low=CANDLE_LOW,
+                close=CANDLE_CLOSE,
+                volume=CANDLE_VOLUME,
+            )
+
     def test_frozen(self, candle: Candle) -> None:
         with pytest.raises(ValidationError):
             candle.symbol = "GOOG"  # type: ignore[misc]
@@ -142,6 +156,32 @@ class TestSignal:
 
     def test_direction_type(self, signal: Signal) -> None:
         assert isinstance(signal.direction, SignalDirection)
+
+    def test_confidence_out_of_range_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            Signal(
+                strategy_name="momentum_v1",
+                symbol="AAPL",
+                market_id="us",
+                segment_id="large_cap",
+                direction=SignalDirection.BUY,
+                confidence=1.5,  # out of range
+                features={},
+                reasoning="test",
+            )
+
+    def test_confidence_negative_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            Signal(
+                strategy_name="momentum_v1",
+                symbol="AAPL",
+                market_id="us",
+                segment_id="large_cap",
+                direction=SignalDirection.BUY,
+                confidence=-0.1,  # negative
+                features={},
+                reasoning="test",
+            )
 
 
 # ── TradeResult ──────────────────────────────────────────────────────────
@@ -205,6 +245,15 @@ class TestPortfolioState:
 
     def test_timestamp_is_utc(self, portfolio: PortfolioState) -> None:
         assert portfolio.timestamp.tzinfo is not None
+
+    def test_naive_timestamp_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            PortfolioState(
+                cash=PORTFOLIO_CASH,
+                positions={"AAPL": PORTFOLIO_POSITION_QTY},
+                equity=PORTFOLIO_EQUITY,
+                timestamp=datetime(2024, 1, 15, 16, 0),  # noqa: DTZ001  # intentionally naive
+            )
 
     def test_frozen(self, portfolio: PortfolioState) -> None:
         with pytest.raises(ValidationError):

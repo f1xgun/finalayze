@@ -8,7 +8,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-import pandas as pd  # type: ignore[import-untyped]
+import pandas as pd
 
 if TYPE_CHECKING:
     from finalayze.core.schemas import Candle

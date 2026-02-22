@@ -15,6 +15,11 @@ from finalayze.core.schemas import BacktestResult, PortfolioState, TradeResult
 _TRADING_DAYS_PER_YEAR = 252
 _QUANTIZE_4DP = Decimal("0.0001")
 
+# Sentinel value returned for profit_factor when there are no losing trades.
+# A real profit factor is undefined (division by zero) when gross_loss == 0;
+# we use 999 as a large-but-finite sentinel so the result remains a valid Decimal.
+_INFINITE_PROFIT_FACTOR = Decimal(999)
+
 
 class PerformanceAnalyzer:
     """Compute performance metrics from backtest trades and equity snapshots."""
@@ -42,7 +47,7 @@ class PerformanceAnalyzer:
 
         gross_profit = sum((t.pnl for t in trades if t.pnl > 0), start=Decimal(0))
         gross_loss = abs(sum((t.pnl for t in trades if t.pnl < 0), start=Decimal(0)))
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else Decimal(999)
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else _INFINITE_PROFIT_FACTOR
 
         # Total return from equity curve
         if len(snapshots) >= 2:  # noqa: PLR2004

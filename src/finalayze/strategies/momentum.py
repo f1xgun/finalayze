@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd  # type: ignore[import-untyped]
+import pandas as pd
 import pandas_ta as ta
 import yaml
 

@@ -58,7 +58,9 @@ class PreTradeChecker:
         violations: list[str] = []
 
         # 1. Position size check
-        if portfolio_equity > 0:
+        if portfolio_equity == 0:
+            violations.append("Portfolio equity is zero; no trades permitted")
+        else:
             pct = float(order_value / portfolio_equity)
             if pct > self._max_position_pct:
                 violations.append(

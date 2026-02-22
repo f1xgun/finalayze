@@ -100,9 +100,9 @@ class TestYFinanceFetcher:
         assert c1.close == AAPL_CLOSE_2
         assert c1.volume == AAPL_VOLUME_2
 
-        # Verify yf.download was called correctly
+        # Verify yf.download was called correctly (auto_adjust=True flattens adjusted prices)
         mock_yf.download.assert_called_once_with(
-            "AAPL", start=start, end=end, interval="1d", progress=False
+            "AAPL", start=start, end=end, interval="1d", progress=False, auto_adjust=True
         )
 
     @patch("finalayze.data.fetchers.yfinance.yf")

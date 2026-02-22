@@ -10,7 +10,7 @@ from decimal import Decimal  # noqa: TC003
 from enum import StrEnum
 from uuid import UUID  # noqa: TC003
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class SignalDirection(StrEnum):
@@ -36,9 +36,24 @@ class Candle(BaseModel):
     close: Decimal
     volume: int
 
+    @field_validator("timestamp")
+    @classmethod
+    def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; all timestamps must be UTC-aware."""
+        if v.tzinfo is None:
+            msg = "timestamp must be timezone-aware (UTC)"
+            raise ValueError(msg)
+        return v
+
 
 class Signal(BaseModel):
-    """Trading signal produced by a strategy."""
+    """Trading signal produced by a strategy.
+
+    Notes:
+        ``confidence`` is typed as ``float`` (not ``Decimal``) because it
+        represents a probability/ratio in [0.0, 1.0], not a monetary value.
+        The "Decimal for money fields" rule does not apply here.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -50,6 +65,15 @@ class Signal(BaseModel):
     confidence: float
     features: dict[str, float]
     reasoning: str
+
+    @field_validator("confidence")
+    @classmethod
+    def confidence_must_be_probability(cls, v: float) -> float:
+        """Validate that confidence is a probability in [0.0, 1.0]."""
+        if not (0.0 <= v <= 1.0):
+            msg = f"confidence must be in [0.0, 1.0], got {v}"
+            raise ValueError(msg)
+        return v
 
 
 class TradeResult(BaseModel):
@@ -76,6 +100,15 @@ class PortfolioState(BaseModel):
     positions: dict[str, Decimal]
     equity: Decimal
     timestamp: datetime
+
+    @field_validator("timestamp")
+    @classmethod
+    def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; all timestamps must be UTC-aware."""
+        if v.tzinfo is None:
+            msg = "timestamp must be timezone-aware (UTC)"
+            raise ValueError(msg)
+        return v
 
 
 class BacktestResult(BaseModel):

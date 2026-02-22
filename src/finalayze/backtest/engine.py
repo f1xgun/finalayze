@@ -5,7 +5,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -116,6 +116,27 @@ class BacktestEngine:
             # (f) Record portfolio snapshot
             snapshots.append(broker.get_portfolio())
 
+        # Close any remaining open positions at the last candle's close price
+        if candles:
+            last_candle = candles[-1]
+            for open_symbol, qty in list(broker._positions.items()):
+                close_price = last_candle.close
+                entry = entry_prices.pop(open_symbol, close_price)
+                pnl = (close_price - entry) * qty
+                pnl_pct = (close_price - entry) / entry if entry != 0 else Decimal(0)
+                trades.append(
+                    TradeResult(
+                        signal_id=uuid4(),
+                        symbol=open_symbol,
+                        side="SELL",
+                        quantity=qty,
+                        entry_price=entry,
+                        exit_price=close_price,
+                        pnl=pnl,
+                        pnl_pct=pnl_pct,
+                    )
+                )
+
         return trades, snapshots
 
     def _handle_buy(
@@ -128,6 +149,10 @@ class BacktestEngine:
         entry_prices: dict[str, Decimal],
     ) -> None:
         """Process a BUY signal: size, check, fill, stop-loss."""
+        # Skip if a position is already open for this symbol
+        if symbol in broker._positions:
+            return
+
         portfolio = broker.get_portfolio()
 
         # Compute position size via Half-Kelly
@@ -156,7 +181,7 @@ class BacktestEngine:
         fill_price = fill_candle.open
         if fill_price <= 0:
             return
-        quantity = (position_value / fill_price).to_integral_value()
+        quantity = (position_value / fill_price).to_integral_value(rounding=ROUND_DOWN)
         if quantity <= 0:
             return
 
