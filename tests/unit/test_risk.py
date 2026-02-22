@@ -13,11 +13,11 @@ from finalayze.risk.stop_loss import compute_atr_stop_loss
 # ── Constants (ruff PLR2004: no magic numbers) ───────────────────────────
 
 # Position sizer constants
-WIN_RATE = 0.6
+WIN_RATE = Decimal("0.6")
 AVG_WIN_RATIO = Decimal("2.0")
 EQUITY = Decimal(100_000)
-KELLY_FRACTION = 0.5
-MAX_POSITION_PCT = 0.20
+KELLY_FRACTION = Decimal("0.5")
+MAX_POSITION_PCT = Decimal("0.20")
 ZERO = Decimal(0)
 
 # Expected Kelly computation:
@@ -28,7 +28,7 @@ EXPECTED_HALF_KELLY_POSITION = Decimal("20000.00")
 POSITION_TOLERANCE = Decimal("0.01")
 
 # Capping test constants
-HIGH_WIN_RATE = 0.9
+HIGH_WIN_RATE = Decimal("0.9")
 HIGH_AVG_WIN_RATIO = Decimal("5.0")
 # f* = (0.9 * 5.0 - 0.1) / 5.0 = (4.5 - 0.1) / 5.0 = 0.88
 # half_kelly = 0.88 * 0.5 = 0.44
@@ -36,7 +36,7 @@ HIGH_AVG_WIN_RATIO = Decimal("5.0")
 EXPECTED_CAPPED_POSITION = Decimal("20000.0")
 
 # Negative Kelly constants (edge with zero or below)
-LOW_WIN_RATE = 0.2
+LOW_WIN_RATE = Decimal("0.2")
 LOW_AVG_WIN_RATIO = Decimal("1.0")
 # f* = (0.2 * 1.0 - 0.8) / 1.0 = -0.6 -> negative -> return 0
 
@@ -57,6 +57,7 @@ HUGE_ORDER = Decimal(60_000)
 MAX_POSITIONS = 10
 POSITION_COUNT_OK = 5
 POSITION_COUNT_AT_MAX = 10
+MAX_POSITION_PCT_DECIMAL = Decimal("0.20")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────

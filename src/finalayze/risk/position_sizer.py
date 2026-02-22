@@ -9,11 +9,11 @@ from decimal import Decimal
 
 
 def compute_position_size(
-    win_rate: float,
+    win_rate: Decimal,
     avg_win_ratio: Decimal,
     equity: Decimal,
-    kelly_fraction: float = 0.5,
-    max_position_pct: float = 0.20,
+    kelly_fraction: Decimal = Decimal("0.5"),
+    max_position_pct: Decimal = Decimal("0.20"),
 ) -> Decimal:
     """Compute position size using Half-Kelly criterion.
 
@@ -31,17 +31,14 @@ def compute_position_size(
     Returns:
         Position size in currency units, or zero if Kelly is non-positive.
     """
-    if equity <= 0 or avg_win_ratio <= 0:
+    if avg_win_ratio <= 0 or win_rate <= 0:
         return Decimal(0)
 
-    loss_rate = 1.0 - win_rate
-    kelly_f = (win_rate * float(avg_win_ratio) - loss_rate) / float(avg_win_ratio)
+    b = avg_win_ratio
+    f_star = (win_rate * b - (Decimal(1) - win_rate)) / b
 
-    if kelly_f <= 0:
+    half_kelly = f_star * kelly_fraction
+    if half_kelly <= 0:
         return Decimal(0)
 
-    half_kelly = kelly_f * kelly_fraction
-    position = equity * Decimal(str(half_kelly))
-    max_position = equity * Decimal(str(max_position_pct))
-
-    return min(position, max_position)
+    return min(equity * half_kelly, equity * max_position_pct)

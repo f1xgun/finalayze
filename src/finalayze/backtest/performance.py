@@ -33,12 +33,23 @@ class PerformanceAnalyzer:
         total_trades = len(trades)
 
         if total_trades == 0:
+            # Still compute equity-curve metrics from snapshots if available
+            max_drawdown = self._compute_max_drawdown(snapshots)
+            sharpe = self._compute_sharpe(snapshots)
+            if len(snapshots) >= 2:  # noqa: PLR2004
+                initial = snapshots[0].equity
+                final = snapshots[-1].equity
+                total_return = (final - initial) / initial if initial > 0 else Decimal(0)
+            else:
+                total_return = Decimal(0)
             return BacktestResult(
-                sharpe=Decimal(0),
-                max_drawdown=Decimal(0),
+                sharpe=sharpe,
+                max_drawdown=max_drawdown,
                 win_rate=Decimal(0),
                 profit_factor=Decimal(0),
-                total_return=Decimal(0),
+                total_return=(
+                    total_return.quantize(_QUANTIZE_4DP) if total_return != 0 else Decimal(0)
+                ),
                 total_trades=0,
             )
 

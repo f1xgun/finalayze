@@ -25,7 +25,7 @@ def main() -> None:
     parser.add_argument("--segment", required=True, help="Segment ID (e.g., us_tech)")
     parser.add_argument("--start", default="2023-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default="2024-12-31", help="End date (YYYY-MM-DD)")
-    parser.add_argument("--cash", type=float, default=100_000, help="Initial cash")
+    parser.add_argument("--cash", type=Decimal, default=Decimal(100000), help="Initial cash")
     args = parser.parse_args()
 
     start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=UTC)
@@ -44,7 +44,7 @@ def main() -> None:
     strategy = MomentumStrategy()
     engine = BacktestEngine(
         strategy=strategy,
-        initial_cash=Decimal(str(args.cash)),
+        initial_cash=args.cash,
     )
     trades, snapshots = engine.run(
         symbol=args.symbol,
@@ -61,7 +61,7 @@ def main() -> None:
     print("=" * 50)
     print(f"  Period:         {args.start} to {args.end}")
     print(f"  Strategy:       {strategy.name}")
-    print(f"  Initial Cash:   ${args.cash:,.2f}")
+    print(f"  Initial Cash:   ${float(args.cash):,.2f}")
     print("-" * 50)
     print(f"  Total Return:   {float(result.total_return):.2%}")
     print(f"  Sharpe Ratio:   {result.sharpe}")

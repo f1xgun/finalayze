@@ -23,6 +23,7 @@ class SimulatedBroker(BrokerBase):
         self._positions: dict[str, Decimal] = {}
         self._stop_losses: dict[str, Decimal] = {}
         self._last_prices: dict[str, Decimal] = {}
+        self._current_timestamp: datetime | None = None
 
     def submit_order(self, order: OrderRequest, fill_candle: Candle) -> OrderResult:
         """Fill an order at the candle's open price.
@@ -43,6 +44,10 @@ class SimulatedBroker(BrokerBase):
             side=order.side,
             reason=f"Unknown side: {order.side}",
         )
+
+    def set_timestamp(self, ts: datetime) -> None:
+        """Set the current simulation timestamp (used in portfolio snapshots)."""
+        self._current_timestamp = ts
 
     def set_stop_loss(self, symbol: str, price: Decimal) -> None:
         """Set a stop-loss price for a symbol."""
@@ -93,12 +98,15 @@ class SimulatedBroker(BrokerBase):
             for symbol, qty in self._positions.items()
         )
         equity = self._cash + position_value
+        timestamp = (
+            self._current_timestamp if self._current_timestamp is not None else datetime.now(tz=UTC)
+        )
 
         return PortfolioState(
             cash=self._cash,
             positions=dict(self._positions),
             equity=equity,
-            timestamp=datetime.now(tz=UTC),
+            timestamp=timestamp,
         )
 
     def _execute_buy(

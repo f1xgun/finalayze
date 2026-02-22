@@ -13,6 +13,7 @@ from finalayze.strategies.momentum import MomentumStrategy
 
 MIN_CANDLES_FOR_INDICATORS = 35
 RSI_PERIOD = 14
+MIN_SUPPORTED_SEGMENTS = 2
 
 
 def _make_candles(prices: list[float], start_year: int = 2024) -> list[Candle]:
@@ -47,9 +48,11 @@ class TestMomentumStrategy:
         assert MomentumStrategy().name == "momentum"
 
     def test_supported_segments(self) -> None:
-        segments = MomentumStrategy().supported_segments()
-        assert "us_tech" in segments
-        assert "us_broad" in segments
+        supported = MomentumStrategy().supported_segments()
+        assert "us_tech" in supported
+        assert "us_broad" in supported
+        assert "nonexistent_segment" not in supported  # should not be there without preset
+        assert len(supported) >= MIN_SUPPORTED_SEGMENTS
 
     def test_get_parameters_us_tech(self) -> None:
         params = MomentumStrategy().get_parameters("us_tech")
@@ -64,11 +67,30 @@ class TestMomentumStrategy:
         assert MomentumStrategy().generate_signal("AAPL", flat, "us_tech") is None
 
     def test_buy_signal_on_oversold_rsi(self) -> None:
-        prices = [200.0 - i * 2 for i in range(MIN_CANDLES_FOR_INDICATORS)]
-        prices.extend([prices[-1] + 1, prices[-1] + 2, prices[-1] + 3])
+        # Build a deterministic sequence that forces RSI < 30 and MACD histogram cross above zero.
+        # Verified manually: this pattern produces RSI=23.7, hist crosses 0 at the last candle.
+        # Phase 1: 40 stable candles at 200 -- seeds EMA(12) and EMA(26) at the same level.
+        # Phase 2: 16 crash candles dropping 4 points each -> RSI near 0.
+        # Phase 3: 3 level candles (no change) -> allows MACD to recover slightly.
+        # Phase 4: 4 recovery candles at +2 -> MACD histogram crossover at RSI=23.7.
+        stable_price = 200.0
+        stable_count = 40
+        crash_drop = 4.0
+        crash_count = 16
+        level_count = 3
+        recovery_step = 2.0
+        recovery_count = 4
+        prices: list[float] = [stable_price] * stable_count
+        crash_bottom = stable_price - crash_drop * crash_count
+        prices.extend([stable_price - crash_drop * (i + 1) for i in range(crash_count)])
+        prices.extend([crash_bottom] * level_count)
+        prices.extend([crash_bottom + recovery_step * (i + 1) for i in range(recovery_count)])
         candles = _make_candles(prices)
         signal = MomentumStrategy().generate_signal("AAPL", candles, "us_tech")
-        if signal is not None:
-            assert signal.direction == SignalDirection.BUY
-            assert signal.strategy_name == "momentum"
-            assert 0.0 <= signal.confidence <= 1.0
+        assert signal is not None, (
+            "Expected a BUY signal after a crash+level+recovery pattern with RSI < 30 "
+            "and MACD histogram cross above zero"
+        )
+        assert signal.direction == SignalDirection.BUY
+        assert signal.strategy_name == "momentum"
+        assert 0.0 <= signal.confidence <= 1.0

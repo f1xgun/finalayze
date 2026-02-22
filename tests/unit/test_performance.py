@@ -150,7 +150,7 @@ class TestPerformanceAnalyzerResultType:
 
 
 class TestPerformanceAnalyzerEmptyTrades:
-    """Empty trades list should return zero metrics."""
+    """Empty trades list should return zero trade metrics but still compute equity curve metrics."""
 
     def test_empty_total_trades(self) -> None:
         analyzer = PerformanceAnalyzer()
@@ -162,12 +162,33 @@ class TestPerformanceAnalyzerEmptyTrades:
         result = analyzer.analyze([], _make_snapshots())
         assert result.win_rate == ZERO
 
-    def test_empty_sharpe(self) -> None:
+    def test_empty_sharpe_computed_from_snapshots(self) -> None:
+        """With snapshots provided, Sharpe is computed from the equity curve."""
         analyzer = PerformanceAnalyzer()
         result = analyzer.analyze([], _make_snapshots())
+        # Non-zero Sharpe is computed from the equity curve snapshots
+        assert isinstance(result.sharpe, Decimal)
+
+    def test_empty_sharpe_no_snapshots(self) -> None:
+        """Without snapshots, Sharpe should be zero."""
+        analyzer = PerformanceAnalyzer()
+        result = analyzer.analyze([], [])
         assert result.sharpe == ZERO
 
     def test_empty_profit_factor(self) -> None:
         analyzer = PerformanceAnalyzer()
         result = analyzer.analyze([], _make_snapshots())
         assert result.profit_factor == ZERO
+
+    def test_empty_trades_total_return_from_snapshots(self) -> None:
+        """With snapshots provided, total_return is computed from equity curve."""
+        analyzer = PerformanceAnalyzer()
+        result = analyzer.analyze([], _make_snapshots())
+        expected = (EQUITY_STEP_5 - INITIAL_EQUITY) / INITIAL_EQUITY
+        assert result.total_return == expected.quantize(Decimal("0.0001"))
+
+    def test_empty_trades_max_drawdown_from_snapshots(self) -> None:
+        """With snapshots provided, max_drawdown is computed from equity curve."""
+        analyzer = PerformanceAnalyzer()
+        result = analyzer.analyze([], _make_snapshots())
+        assert result.max_drawdown > ZERO

@@ -8,8 +8,6 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-import pandas as pd
-
 if TYPE_CHECKING:
     from finalayze.core.schemas import Candle
 
@@ -37,18 +35,15 @@ def compute_atr_stop_loss(
     if len(candles) < atr_period + 1:
         return None
 
-    highs = pd.Series([float(c.high) for c in candles])
-    lows = pd.Series([float(c.low) for c in candles])
-    closes = pd.Series([float(c.close) for c in candles])
+    recent = candles[-(atr_period + 1) :]
+    true_ranges: list[Decimal] = []
+    for i in range(1, len(recent)):
+        prev_close = recent[i - 1].close
+        high = recent[i].high
+        low = recent[i].low
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        true_ranges.append(tr)
 
-    tr1 = highs - lows
-    tr2 = (highs - closes.shift(1)).abs()
-    tr3 = (lows - closes.shift(1)).abs()
-
-    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = true_range.rolling(window=atr_period).mean().iloc[-1]
-
-    if pd.isna(atr):
-        return None
-
-    return entry_price - Decimal(str(atr)) * atr_multiplier
+    atr = sum(true_ranges, Decimal(0)) / Decimal(len(true_ranges))
+    stop = entry_price - atr * atr_multiplier
+    return max(stop, Decimal(0))

@@ -94,7 +94,7 @@ def upgrade() -> None:
     op.create_table(
         "candles",
         sa.Column("symbol", sa.String(20), nullable=False),
-        sa.Column("market_id", sa.String(10), nullable=False),
+        sa.Column("market_id", sa.String(10), sa.ForeignKey("markets.id"), nullable=False),
         sa.Column("timeframe", sa.String(5), nullable=False),
         sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False),
         sa.Column("open", sa.Numeric(12, 4), nullable=False),

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from finalayze.strategies.base import BaseStrategy
 
 # Default Half-Kelly parameters
-_DEFAULT_WIN_RATE = 0.5
+_DEFAULT_WIN_RATE = Decimal("0.5")
 _DEFAULT_AVG_WIN_RATIO = Decimal("1.5")
 
 
@@ -36,9 +36,9 @@ class BacktestEngine:
         self,
         strategy: BaseStrategy,
         initial_cash: Decimal = Decimal(100000),
-        max_position_pct: float = 0.20,
+        max_position_pct: Decimal = Decimal("0.20"),
         max_positions: int = 10,
-        kelly_fraction: float = 0.5,
+        kelly_fraction: Decimal = Decimal("0.5"),
         atr_multiplier: Decimal = Decimal("2.0"),
     ) -> None:
         self._strategy = strategy
@@ -77,7 +77,13 @@ class BacktestEngine:
         for i in range(len(candles)):
             candle = candles[i]
 
-            # (a) Check stop-losses
+            # (a) Update simulation timestamp
+            broker.set_timestamp(candle.timestamp)
+
+            # (b) Update broker prices first (before stop-loss check)
+            broker.update_prices(candle)
+
+            # (c) Check stop-losses after prices are updated
             stop_results = broker.check_stop_losses(candle)
             for sr in stop_results:
                 if sr.filled and sr.fill_price is not None:
@@ -97,10 +103,7 @@ class BacktestEngine:
                         )
                     )
 
-            # (b) Update broker prices
-            broker.update_prices(candle)
-
-            # (c) Generate signal from strategy
+            # (d) Generate signal from strategy
             history = candles[: i + 1]
             signal = self._strategy.generate_signal(symbol, history, segment_id)
 
@@ -113,7 +116,7 @@ class BacktestEngine:
                 elif signal.direction == SignalDirection.SELL:
                     self._handle_sell(broker, fill_candle, symbol, entry_prices, trades)
 
-            # (f) Record portfolio snapshot
+            # (e) Record portfolio snapshot
             snapshots.append(broker.get_portfolio())
 
         # Close any remaining open positions at the last candle's close price

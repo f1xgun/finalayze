@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -52,13 +53,14 @@ class YFinanceFetcher(BaseFetcher):
             return []
 
         candles: list[Candle] = []
-        for timestamp, row in df.iterrows():
+        for raw_ts, row in df.iterrows():
+            ts = raw_ts.replace(tzinfo=UTC) if raw_ts.tzinfo is None else raw_ts.astimezone(UTC)
             candles.append(
                 Candle(
                     symbol=symbol,
                     market_id=self._market_id,
                     timeframe=timeframe,
-                    timestamp=timestamp,
+                    timestamp=ts,
                     open=Decimal(str(row["Open"])),
                     high=Decimal(str(row["High"])),
                     low=Decimal(str(row["Low"])),

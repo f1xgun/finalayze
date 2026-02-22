@@ -6,10 +6,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from decimal import Decimal
+from decimal import Decimal
 
 
 @dataclass(frozen=True)
@@ -31,7 +28,7 @@ class PreTradeChecker:
 
     def __init__(
         self,
-        max_position_pct: float = 0.20,
+        max_position_pct: Decimal = Decimal("0.20"),
         max_positions_per_market: int = 10,
     ) -> None:
         self._max_position_pct = max_position_pct
@@ -61,11 +58,10 @@ class PreTradeChecker:
         if portfolio_equity == 0:
             violations.append("Portfolio equity is zero; no trades permitted")
         else:
-            pct = float(order_value / portfolio_equity)
+            pct = order_value / portfolio_equity
             if pct > self._max_position_pct:
-                violations.append(
-                    f"Position size {pct:.1%} exceeds max {self._max_position_pct:.1%}"
-                )
+                max_pct = float(self._max_position_pct)
+                violations.append(f"Position size {float(pct):.1%} exceeds max {max_pct:.1%}")
 
         # 2. Cash check
         if order_value > available_cash:

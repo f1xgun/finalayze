@@ -8,6 +8,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Literal
 
 from finalayze.core.schemas import Candle, PortfolioState  # noqa: TC001
 
@@ -17,7 +18,7 @@ class OrderRequest:
     """A request to buy or sell a given quantity of a symbol."""
 
     symbol: str
-    side: str  # "BUY" or "SELL"
+    side: Literal["BUY", "SELL"]
     quantity: Decimal
 
 
@@ -28,7 +29,7 @@ class OrderResult:
     filled: bool
     fill_price: Decimal | None = None
     symbol: str = ""
-    side: str = ""
+    side: Literal["BUY", "SELL"] | str = ""
     quantity: Decimal = Decimal(0)
     reason: str = ""
 

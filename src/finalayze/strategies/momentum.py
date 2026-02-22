@@ -41,10 +41,13 @@ class MomentumStrategy(BaseStrategy):
 
     def get_parameters(self, segment_id: str) -> dict[str, object]:
         """Load momentum parameters from the YAML preset for the given segment."""
-        preset_path = _PRESETS_DIR / f"{segment_id}.yaml"
-        with preset_path.open() as f:
-            data = yaml.safe_load(f)
-        return dict(data["strategies"]["momentum"]["params"])
+        try:
+            preset_path = _PRESETS_DIR / f"{segment_id}.yaml"
+            with preset_path.open() as f:
+                data = yaml.safe_load(f)
+            return dict(data["strategies"]["momentum"]["params"])
+        except FileNotFoundError:
+            return {}
 
     def generate_signal(self, symbol: str, candles: list[Candle], segment_id: str) -> Signal | None:
         """Generate a momentum signal from RSI and MACD indicators."""
