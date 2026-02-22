@@ -122,7 +122,7 @@ class BacktestEngine:
         # Close any remaining open positions at the last candle's close price
         if candles:
             last_candle = candles[-1]
-            for open_symbol, qty in list(broker._positions.items()):
+            for open_symbol, qty in broker.get_positions().items():
                 close_price = last_candle.close
                 entry = entry_prices.pop(open_symbol, close_price)
                 pnl = (close_price - entry) * qty
@@ -153,7 +153,7 @@ class BacktestEngine:
     ) -> None:
         """Process a BUY signal: size, check, fill, stop-loss."""
         # Skip if a position is already open for this symbol
-        if symbol in broker._positions:
+        if broker.has_position(symbol):
             return
 
         portfolio = broker.get_portfolio()

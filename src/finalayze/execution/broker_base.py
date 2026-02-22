@@ -46,3 +46,13 @@ class BrokerBase(ABC):
     def get_portfolio(self) -> PortfolioState:
         """Return the current portfolio state."""
         ...
+
+    @abstractmethod
+    def has_position(self, symbol: str) -> bool:
+        """Return True if the broker holds a non-zero position in symbol."""
+        ...
+
+    @abstractmethod
+    def get_positions(self) -> dict[str, Decimal]:
+        """Return a copy of the current open positions keyed by symbol."""
+        ...
