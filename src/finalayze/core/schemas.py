@@ -10,7 +10,7 @@ from decimal import Decimal  # noqa: TC003
 from enum import StrEnum
 from uuid import UUID  # noqa: TC003
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SignalDirection(StrEnum):
@@ -34,7 +34,8 @@ class Candle(BaseModel):
     high: Decimal
     low: Decimal
     close: Decimal
-    volume: int
+    volume: int = Field(ge=0)
+    source: str | None = None
 
     @field_validator("timestamp")
     @classmethod
