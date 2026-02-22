@@ -5,21 +5,24 @@ All notable changes to the Finalayze project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] — Phase 1: Foundation, US Market & Sandbox
 
 ### Added
+- Core: exception hierarchy (12 classes), ModeManager (WorkMode enum, real-mode guard), Clock abstraction (RealClock + SimulatedClock), Redis Streams EventBus (MarketDataEvent, SignalEvent)
+- Data: FinnhubFetcher (OHLCV + RateLimitError on 429), YFinanceFetcher (multi-level column fix, UTC normalization), RateLimiter (token bucket, async acquire), DataNormalizer (OHLCV validation, batch mode)
+- Markets: MarketRegistry (US + MOEX), MarketSchedule (US 09:30-16:00 ET + MOEX weekday guards), CurrencyConverter stub (USD/RUB)
+- Strategies: MomentumStrategy (RSI + MACD, per-segment YAML), MeanReversionStrategy (Bollinger Bands), StrategyCombiner (weighted ensemble), YAML presets for us_tech + us_broad
+- Risk: Half-Kelly position sizer, ATR stop-loss (pure Decimal), pre-trade check pipeline (11 checks)
+- Execution: SimulatedBroker (fill at candle open, stop-loss, portfolio tracking), BrokerBase ABC
+- Backtest: BacktestEngine (historical replay), PerformanceAnalyzer (Sharpe, drawdown, win rate), scripts/run_backtest.py CLI
+- API: FastAPI app (GET /api/v1/health, GET+POST /api/v1/mode), CORS middleware
+- Config: structlog setup (JSON, per-mode log level), segment definitions, Pydantic settings
+- CI: GitHub Actions (lint, typecheck, test), Claude Code GitHub App integration
+- Scripts: scripts/seed_historical_data.py (yfinance-based, per-symbol error handling)
 - Pydantic schemas: Candle, Signal, TradeResult, PortfolioState, BacktestResult (Layer 0)
 - SQLAlchemy ORM models for markets, segments, instruments, candles, signals, orders (Layer 2)
 - Alembic initial migration with TimescaleDB hypertable for candles (Layer 2)
-- MarketRegistry with US and MOEX definitions (Layer 2)
-- YFinanceFetcher for historical OHLCV data (Layer 2)
-- MomentumStrategy using RSI+MACD with per-segment YAML parameters (Layer 4)
-- Half-Kelly position sizing, ATR stop-loss, pre-trade risk checks (Layer 4)
-- SimulatedBroker: fills at next candle open, stop-loss monitoring (Layer 5)
-- BacktestEngine: full candle iteration with signal processing and risk management
-- PerformanceAnalyzer: Sharpe ratio, max drawdown, win rate, profit factor
-- CLI runner: scripts/run_backtest.py for single-symbol backtest
-- 135 unit tests, 93%+ coverage across all new modules
+- 349 unit tests, 95.64% coverage across all implemented modules
 
 ## [0.0.1] - 2026-02-21
 

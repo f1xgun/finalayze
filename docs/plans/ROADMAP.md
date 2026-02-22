@@ -5,7 +5,7 @@
 | Phase | Name | Duration | Status |
 |-------|------|----------|--------|
 | 0 | Code Quality Foundation | 2-3 days | COMPLETE |
-| 1 | Foundation, US Market & Sandbox | Weeks 1-5 | IN PROGRESS |
+| 1 | Foundation, US Market & Sandbox | Weeks 1-5 | IN PROGRESS (core + backtest stack complete) |
 | 2 | MOEX + Tinkoff, Intelligence & Test Mode | Weeks 6-10 | NOT STARTED |
 | 3 | Hardening & Advanced | Weeks 11-14 | NOT STARTED |
 | 4 | Real Trading & Optimization | Weeks 15-18 | NOT STARTED |
@@ -29,27 +29,34 @@
 See [PHASE_1.md](PHASE_1.md) for detailed execution plan.
 
 - [x] Database schema + Alembic migrations
-- [ ] Core framework (mode manager, event bus, clock, logging)
-- [x] Markets framework (registry, segments, instruments)
-- [x] Data ingestion (yfinance)
-- [x] Strategies (momentum)
+- [x] Core framework (mode manager, event bus, clock, logging, exception hierarchy)
+- [x] Markets framework (registry, segments, schedule)
+- [x] Data ingestion (yfinance + Finnhub fetcher, rate limiter, normalizer)
+- [x] Strategies (momentum + mean reversion + combiner + YAML presets)
 - [x] Backtest engine + simulated broker
 - [x] Risk management (position sizing, stop-loss, pre-trade checks)
-- [ ] FastAPI skeleton
+- [x] FastAPI skeleton (health + mode endpoints)
+- [ ] Instrument registry (IN PROGRESS)
+- [ ] Currency conversion stub (IN PROGRESS)
+- [ ] docker-compose integration test
 
 ### Phase 1 Backtest Vertical Slice -- COMPLETE (2026-02-22)
 
 Implemented bottom-up through the full stack:
 - Layer 0: Pydantic schemas (Candle, Signal, TradeResult, PortfolioState, BacktestResult)
+- Layer 0: Exception hierarchy (12 classes)
+- Layer 1: Config (settings, modes, segments, structlog logging)
 - Layer 2: SQLAlchemy ORM models + Alembic migration
-- Layer 2: MarketRegistry (US + MOEX)
-- Layer 2: YFinanceFetcher
-- Layer 4: MomentumStrategy (RSI+MACD, per-segment YAML params)
-- Layer 4: Half-Kelly position sizing, ATR stop-loss, pre-trade checks
+- Layer 2: MarketRegistry (US + MOEX), MarketSchedule
+- Layer 2: YFinanceFetcher + FinnhubFetcher, RateLimiter, DataNormalizer
+- Layer 4: MomentumStrategy (RSI+MACD), MeanReversionStrategy (Bollinger Bands), StrategyCombiner
+- Layer 4: Half-Kelly position sizing, ATR stop-loss, pre-trade checks (11 checks)
 - Layer 5: SimulatedBroker (fills at next open, stop-loss monitoring)
+- Layer 6: FastAPI app, GET /api/v1/health, GET+POST /api/v1/mode
+- Core: ModeManager, Clock (RealClock + SimulatedClock), EventBus (Redis Streams)
 - Backtest: BacktestEngine + PerformanceAnalyzer
-- CLI: scripts/run_backtest.py
-- 135 unit tests, 93%+ coverage
+- CLI: scripts/run_backtest.py, scripts/seed_historical_data.py
+- 349 unit tests, 95.64% coverage
 
 ## Phase 2: MOEX + Tinkoff, Intelligence & Test Mode
 

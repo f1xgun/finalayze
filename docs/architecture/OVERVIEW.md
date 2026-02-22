@@ -118,3 +118,85 @@ The system supports four operational modes, controlled by `config/modes.py`:
 | Anthropic (Claude) | REST | News sentiment analysis, fact-checking |
 | News APIs | REST | News article ingestion |
 | Social APIs | REST | Social sentiment data |
+
+## Phase 1 Implemented Components
+
+The following components have been implemented as of Phase 1 (2026-02-22). All
+carry strict mypy typing and are covered by unit tests.
+
+### Layer 0: Types & Schemas (`core/`)
+
+| File | Description |
+|------|-------------|
+| `core/schemas.py` | Pydantic v2 schemas: `Candle`, `Signal`, `TradeResult`, `PortfolioState`, `BacktestResult`, `SignalDirection` |
+| `core/exceptions.py` | Domain exception hierarchy — 12 classes across data, broker, risk, strategy, and config domains |
+| `core/models.py` | SQLAlchemy 2.0 async ORM models: `Market`, `Segment`, `Instrument`, `Candle`, `Signal`, `Order`, `PortfolioSnapshot`, `CurrencyRate` |
+| `core/modes.py` | `WorkMode` enum + `ModeManager` with real-mode safety guard |
+| `core/clock.py` | `ClockBase` ABC, `RealClock`, `SimulatedClock` (controllable time for backtesting) |
+| `core/events.py` | `EventBus` backed by Redis Streams; `MarketDataEvent`, `SignalEvent` |
+| `core/db.py` | Async SQLAlchemy engine/session factory stub |
+
+### Layer 1: Configuration (`config/`)
+
+| File | Description |
+|------|-------------|
+| `config/settings.py` | Pydantic `Settings` with validation for all external services |
+| `config/modes.py` | Mode-aware config resolver |
+| `config/segments.py` | Segment definitions (us_tech, us_broad, …) |
+| `config/logging.py` | structlog setup: JSON output, per-mode log levels |
+
+### Layer 2: Data & Markets (`data/`, `markets/`)
+
+| File | Description |
+|------|-------------|
+| `data/fetchers/base.py` | `FetcherBase` ABC |
+| `data/fetchers/yfinance.py` | `YFinanceFetcher` — multi-level column fix, UTC normalization |
+| `data/fetchers/finnhub.py` | `FinnhubFetcher` — OHLCV candles, `RateLimitError` on HTTP 429 |
+| `data/rate_limiter.py` | `RateLimiter` — token bucket with async `acquire()` |
+| `data/normalizer.py` | `DataNormalizer` — OHLCV schema validation, batch normalization |
+| `markets/registry.py` | `MarketRegistry` — US + MOEX market definitions, lookup by ID |
+| `markets/schedule.py` | `MarketSchedule` — US 09:30-16:00 ET, MOEX weekday guards, `is_open()` |
+
+### Layer 4: Strategies & Risk (`strategies/`, `risk/`)
+
+| File | Description |
+|------|-------------|
+| `strategies/base.py` | `BaseStrategy` ABC with segment awareness |
+| `strategies/momentum.py` | `MomentumStrategy` — RSI + MACD, configurable per-segment YAML params |
+| `strategies/mean_reversion.py` | `MeanReversionStrategy` — Bollinger Bands, per-segment params |
+| `strategies/combiner.py` | `StrategyCombiner` — weighted ensemble, YAML preset loader |
+| `strategies/presets/us_tech.yaml` | Strategy parameters for US tech segment |
+| `strategies/presets/us_broad.yaml` | Strategy parameters for US broad market segment |
+| `risk/position_sizer.py` | Half-Kelly position sizer (`Decimal`-safe) |
+| `risk/stop_loss.py` | ATR-based stop-loss calculator (pure `Decimal`) |
+| `risk/pre_trade_check.py` | 11-check pre-trade pipeline (cash, allocation, position limits, …) |
+
+### Layer 5: Execution (`execution/`)
+
+| File | Description |
+|------|-------------|
+| `execution/broker_base.py` | `BrokerBase` ABC |
+| `execution/simulated_broker.py` | `SimulatedBroker` — fills at next candle open, stop-loss monitoring, portfolio tracking |
+
+### Backtest
+
+| File | Description |
+|------|-------------|
+| `backtest/engine.py` | `BacktestEngine` — historical candle replay with signal + risk pipeline |
+| `backtest/performance.py` | `PerformanceAnalyzer` — Sharpe ratio, max drawdown, win rate, profit factor |
+| `scripts/run_backtest.py` | CLI runner for single-symbol backtests |
+| `scripts/seed_historical_data.py` | yfinance-based historical data seeder with per-symbol error handling |
+
+### Layer 6: API (`api/`)
+
+| File | Description |
+|------|-------------|
+| `main.py` | FastAPI application entry point, CORS middleware |
+| `api/v1/system.py` | `GET /api/v1/health`, `GET /api/v1/mode`, `POST /api/v1/mode` |
+
+### Infrastructure
+
+| File | Description |
+|------|-------------|
+| `alembic/` | Alembic migration setup; initial migration creates all 8 tables + TimescaleDB hypertable for candles |
+| `.github/workflows/` | GitHub Actions CI: lint (ruff), type-check (mypy), test (pytest) |

@@ -7,83 +7,83 @@
 
 | Task | Status | Details |
 |------|--------|---------|
-| Database schema | NOT STARTED | SQLAlchemy models for markets, segments, instruments, candles, news, signals, orders, portfolio_snapshots, currency_rates |
-| Alembic setup | NOT STARTED | Initial migration with all core tables; TimescaleDB hypertables |
-| Pydantic settings | NOT STARTED | Multi-market config with validation |
+| Database schema | DONE | SQLAlchemy models in core/models.py for markets, segments, instruments, candles, signals, orders, portfolio_snapshots, currency_rates |
+| Alembic setup | DONE | Initial migration with all core tables; TimescaleDB hypertables |
+| Pydantic settings | DONE | Multi-market config with validation in config/settings.py |
 
 ## Week 1-2: Core Framework
 
 | Task | Status | Details |
 |------|--------|---------|
-| Mode manager | NOT STARTED | WorkMode enum, mode switching logic, safety checks for real mode |
-| Redis Streams event bus | NOT STARTED | Publish/subscribe for market_data, news, signals, execution events |
-| Clock abstraction | NOT STARTED | Real clock vs simulated clock for sandbox mode |
-| Structured logging | NOT STARTED | structlog setup, per-mode log levels, JSON output |
-| Exception hierarchy | NOT STARTED | Domain exceptions (already stubbed in core/exceptions.py) |
-| FastAPI skeleton | NOT STARTED | Health endpoint, mode endpoint, CORS, middleware |
+| Mode manager | DONE | WorkMode enum, mode switching logic, safety checks for real mode (src/finalayze/core/modes.py) |
+| Redis Streams event bus | DONE | Publish/subscribe for market_data, news, signals, execution events (src/finalayze/core/events.py) |
+| Clock abstraction | DONE | Real clock vs simulated clock for sandbox mode (src/finalayze/core/clock.py) |
+| Structured logging | DONE | structlog setup, per-mode log levels, JSON output (config/logging.py) |
+| Exception hierarchy | DONE | Domain exceptions — 12 classes (src/finalayze/core/exceptions.py) |
+| FastAPI skeleton | DONE | Health endpoint, mode endpoint, CORS, middleware (src/finalayze/main.py, src/finalayze/api/v1/system.py) |
 
 ## Week 2: Markets Framework
 
 | Task | Status | Details |
 |------|--------|---------|
-| Market registry | NOT STARTED | US + MOEX definitions, lookup by ID |
-| Segment definitions | NOT STARTED | Load from config, DB override support |
-| Instrument registry | NOT STARTED | Symbol lookup, FIGI mapping for MOEX |
-| Currency conversion stub | NOT STARTED | USD/RUB conversion (stub for Phase 1, real in Phase 2) |
-| Trading hours scheduler | NOT STARTED | Per-market open/close times, is_market_open() |
-| YAML preset loader | NOT STARTED | Load strategy params from presets/ directory |
+| Market registry | DONE | US + MOEX definitions, lookup by ID (src/finalayze/markets/registry.py) |
+| Segment definitions | DONE | Load from config, DB override support (config/segments.py) |
+| Instrument registry | IN PROGRESS | Symbol lookup, FIGI mapping for MOEX |
+| Currency conversion stub | IN PROGRESS | USD/RUB conversion (stub for Phase 1, real in Phase 2) |
+| Trading hours scheduler | DONE | Per-market open/close times, is_market_open(); US 09:30-16:00 ET + MOEX weekday guards (src/finalayze/markets/schedule.py) |
+| YAML preset loader | DONE | Strategy params loaded from presets/ directory via strategies/combiner.py |
 
 ## Week 3: Data Ingestion (US)
 
 | Task | Status | Details |
 |------|--------|---------|
-| Abstract fetcher interface | NOT STARTED | Base class for all data fetchers |
-| Finnhub fetcher | NOT STARTED | OHLCV candles + news articles |
-| yfinance fallback | NOT STARTED | Fallback data source for US stocks |
-| Rate limiter | NOT STARTED | Per-source rate limiting (token bucket) |
-| Data normalizer | NOT STARTED | Normalize candle format across sources |
-| Historical data loader | NOT STARTED | Seed script for 2 years of US stock data |
+| Abstract fetcher interface | DONE | Base class for all data fetchers (src/finalayze/data/fetchers/base.py) |
+| Finnhub fetcher | DONE | OHLCV candles + RateLimitError on 429 (src/finalayze/data/fetchers/finnhub.py) |
+| yfinance fallback | DONE | Fallback data source for US stocks; multi-level column fix, UTC normalization (src/finalayze/data/fetchers/yfinance.py) |
+| Rate limiter | DONE | Per-source rate limiting (token bucket, async acquire) (src/finalayze/data/rate_limiter.py) |
+| Data normalizer | DONE | Normalize OHLCV format across sources, batch mode (src/finalayze/data/normalizer.py) |
+| Historical data loader | DONE | Seed script for US stock data (scripts/seed_historical_data.py) |
 
 ## Week 3-4: Strategies
 
 | Task | Status | Details |
 |------|--------|---------|
-| BaseStrategy ABC | NOT STARTED | Abstract base with segment awareness |
-| pandas-ta integration | NOT STARTED | Technical indicator computation |
-| Momentum strategy | NOT STARTED | RSI + MACD with per-segment params |
-| Mean reversion strategy | NOT STARTED | Bollinger Bands with per-segment params |
-| Strategy combiner | NOT STARTED | Per-segment weighted ensemble |
-| YAML presets for us_tech, us_broad | DONE | Created in Phase 0 |
+| BaseStrategy ABC | DONE | Abstract base with segment awareness (src/finalayze/strategies/base.py) |
+| pandas-ta integration | DONE | Technical indicator computation integrated |
+| Momentum strategy | DONE | RSI + MACD with per-segment params (src/finalayze/strategies/momentum.py) |
+| Mean reversion strategy | DONE | Bollinger Bands with per-segment params (src/finalayze/strategies/mean_reversion.py) |
+| Strategy combiner | DONE | Per-segment weighted ensemble (src/finalayze/strategies/combiner.py) |
+| YAML presets for us_tech, us_broad | DONE | Created in Phase 0; us_tech.yaml + us_broad.yaml in strategies/presets/ |
 
 ## Week 4-5: Backtest + Risk
 
 | Task | Status | Details |
 |------|--------|---------|
-| Historical replay engine | NOT STARTED | Multi-market event replay |
-| Simulated broker | NOT STARTED | Fill simulation based on historical prices |
-| Performance analyzer | NOT STARTED | Sharpe, drawdown, win rate per segment |
-| Backtest CLI runner | NOT STARTED | Script to run backtests from command line |
-| Half-Kelly position sizer | NOT STARTED | Position sizing with Kelly fraction |
-| ATR stop-loss | NOT STARTED | ATR-based stop-loss calculation |
-| Portfolio constraints | NOT STARTED | Max positions, max allocation, cash reserve |
-| Pre-trade check pipeline | NOT STARTED | 11-check pipeline (basic subset for Phase 1) |
-| Drawdown calculator | NOT STARTED | Running drawdown tracking |
+| Historical replay engine | DONE | Multi-market event replay (src/finalayze/backtest/engine.py) |
+| Simulated broker | DONE | Fill simulation: fills at candle open, stop-loss monitoring, portfolio tracking (src/finalayze/execution/simulated_broker.py) |
+| Performance analyzer | DONE | Sharpe, drawdown, win rate per segment (src/finalayze/backtest/performance.py) |
+| Backtest CLI runner | DONE | Script to run backtests from command line (scripts/run_backtest.py) |
+| Half-Kelly position sizer | DONE | Position sizing with Kelly fraction (src/finalayze/risk/position_sizer.py) |
+| ATR stop-loss | DONE | ATR-based stop-loss calculation, pure Decimal arithmetic (src/finalayze/risk/stop_loss.py) |
+| Portfolio constraints | DONE | Max positions, max allocation, cash reserve (src/finalayze/risk/pre_trade_check.py) |
+| Pre-trade check pipeline | DONE | 11-check pipeline implemented |
+| Drawdown calculator | DONE | Running drawdown tracking built into performance.py |
 
 ## Acceptance Criteria
 
 - [ ] `docker-compose up` starts PG (TimescaleDB), Redis, app
-- [ ] Markets + segments tables populated for US
+- [x] Markets + segments tables populated for US
 - [ ] 2 years data loaded for AAPL, MSFT, GOOGL, AMZN, SPY
-- [ ] Strategies run with `us_tech` params vs `us_broad` params and produce different signals
-- [ ] Backtest produces per-segment metrics
-- [ ] Risk checks fire correctly
-- [ ] 80%+ unit test coverage on strategies + risk
+- [x] Strategies run with `us_tech` params vs `us_broad` params and produce different signals
+- [x] Backtest produces per-segment metrics
+- [x] Risk checks fire correctly
+- [x] 80%+ unit test coverage on strategies + risk (95.64% overall)
 
 ## Documentation Updates After Phase 1
 
-- [ ] `docs/architecture/OVERVIEW.md` -- actual architecture with implemented components
+- [x] `docs/architecture/OVERVIEW.md` -- actual architecture with implemented components
 - [ ] `docs/design/STRATEGIES.md` -- momentum + mean reversion details
 - [ ] `docs/design/SEGMENTS.md` -- segment system as built
-- [ ] `docs/quality/GRADES.md` -- grade each implemented module
-- [ ] `docs/plans/ROADMAP.md` -- mark Phase 1 tasks complete
-- [ ] `CHANGELOG.md` -- all Phase 1 changes
+- [x] `docs/quality/GRADES.md` -- grade each implemented module
+- [x] `docs/plans/ROADMAP.md` -- mark Phase 1 tasks complete
+- [x] `CHANGELOG.md` -- all Phase 1 changes
