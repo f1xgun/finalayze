@@ -31,10 +31,20 @@ class MeanReversionStrategy(BaseStrategy):
         """Return segment IDs where mean_reversion strategy is enabled."""
         segments: list[str] = []
         for preset_path in sorted(_PRESETS_DIR.glob("*.yaml")):
-            if _has_mean_reversion(preset_path):
+            try:
                 with preset_path.open() as f:
                     data = yaml.safe_load(f)
-                segments.append(data["segment_id"])
+                if not isinstance(data, dict):
+                    continue
+                segment_id = data.get("segment_id")
+                if segment_id is None:
+                    continue
+                strats = data.get("strategies", {})
+                mr_cfg = strats.get("mean_reversion", {}) if isinstance(strats, dict) else {}
+                if mr_cfg.get("enabled", False):
+                    segments.append(str(segment_id))
+            except (OSError, yaml.YAMLError):
+                continue
         return segments
 
     def get_parameters(self, segment_id: str) -> dict[str, object]:
@@ -43,8 +53,10 @@ class MeanReversionStrategy(BaseStrategy):
             preset_path = _PRESETS_DIR / f"{segment_id}.yaml"
             with preset_path.open() as f:
                 data = yaml.safe_load(f)
+            if not isinstance(data, dict):
+                return {}
             return dict(data.get("strategies", {}).get("mean_reversion", {}).get("params", {}))
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError, yaml.YAMLError):
             return {}
 
     def generate_signal(self, symbol: str, candles: list[Candle], segment_id: str) -> Signal | None:
@@ -130,13 +142,3 @@ def _find_bb_column(bb: pd.DataFrame, prefix: str) -> str | None:
         if str(col).startswith(prefix):
             return str(col)
     return None
-
-
-def _has_mean_reversion(preset_path: Path) -> bool:
-    """Return True if the preset enables the mean_reversion strategy."""
-    try:
-        with preset_path.open() as f:
-            data = yaml.safe_load(f)
-        return bool(data.get("strategies", {}).get("mean_reversion", {}).get("enabled", False))
-    except (OSError, yaml.YAMLError):
-        return False

@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
-from unittest.mock import patch
+from typing import TYPE_CHECKING, Any
+from unittest.mock import mock_open, patch
+
+import yaml
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.base import BaseStrategy
@@ -239,3 +244,82 @@ class TestStrategyCombiner:
         assert signal is not None
         assert "momentum_confidence" in signal.features
         assert "momentum_direction" in signal.features
+
+
+class TestStrategyCombinerYAMLErrorHandling:
+    """Tests that malformed or missing YAML in _load_config never crashes."""
+
+    def test_load_config_malformed_yaml_returns_empty_dict(self, tmp_path: Path) -> None:
+        """A YAML parse error must not propagate; empty dict is returned."""
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        strategy = MockStrategy("momentum", buy_signal)
+        combiner = StrategyCombiner([strategy])
+        combiner._presets_dir = tmp_path
+
+        bad_preset = tmp_path / "bad_segment.yaml"
+        bad_preset.write_text(": bad: yaml: ][")
+
+        result = combiner._load_config("bad_segment")
+        assert result == {}
+
+    def test_load_config_empty_yaml_returns_empty_dict(self, tmp_path: Path) -> None:
+        """An empty YAML file (safe_load returns None) must return empty dict."""
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        strategy = MockStrategy("momentum", buy_signal)
+        combiner = StrategyCombiner([strategy])
+        combiner._presets_dir = tmp_path
+
+        empty_preset = tmp_path / "empty_segment.yaml"
+        empty_preset.write_text("")
+
+        result = combiner._load_config("empty_segment")
+        assert result == {}
+
+    def test_load_config_yaml_error_via_mock(self) -> None:
+        """yaml.YAMLError raised during safe_load must be caught and return empty dict."""
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        strategy = MockStrategy("momentum", buy_signal)
+        combiner = StrategyCombiner([strategy])
+
+        with (
+            patch("builtins.open", mock_open(read_data=b"")),
+            patch("yaml.safe_load", side_effect=yaml.YAMLError("bad yaml")),
+        ):
+            result = combiner._load_config("us_broad")
+        assert result == {}
+
+    def test_load_config_oserror_returns_empty_dict(self, tmp_path: Path) -> None:
+        """An OSError (e.g. permission denied) must be caught and return empty dict."""
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        strategy = MockStrategy("momentum", buy_signal)
+        combiner = StrategyCombiner([strategy])
+        combiner._presets_dir = tmp_path
+
+        with patch("builtins.open", side_effect=OSError("permission denied")):
+            result = combiner._load_config("us_broad")
+        assert result == {}
+
+    def test_load_config_missing_file_returns_empty_dict(self, tmp_path: Path) -> None:
+        """A FileNotFoundError must return empty dict (no preset file)."""
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        strategy = MockStrategy("momentum", buy_signal)
+        combiner = StrategyCombiner([strategy])
+        combiner._presets_dir = tmp_path
+
+        result = combiner._load_config("nonexistent_segment")
+        assert result == {}
+
+    def test_generate_signal_with_malformed_yaml_returns_none(self, tmp_path: Path) -> None:
+        """generate_signal must not crash when the preset YAML is malformed."""
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        strategy = MockStrategy("momentum", buy_signal)
+        combiner = StrategyCombiner([strategy])
+        combiner._presets_dir = tmp_path
+
+        bad_preset = tmp_path / "bad_segment.yaml"
+        bad_preset.write_text(": bad: yaml: ][")
+
+        candles = _make_candles()
+        # No strategies config loaded -> total_weight == 0 -> returns None
+        signal = combiner.generate_signal("AAPL", candles, "bad_segment")
+        assert signal is None

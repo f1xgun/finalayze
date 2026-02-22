@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING
+from unittest.mock import mock_open, patch
+
+import yaml
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from finalayze.core.schemas import Candle, SignalDirection
 from finalayze.strategies.mean_reversion import MeanReversionStrategy
@@ -115,3 +122,68 @@ class TestMeanReversionStrategy:
         assert signal.segment_id == "us_tech"
         assert signal.strategy_name == "mean_reversion"
         assert 0.0 <= signal.confidence <= 1.0
+
+
+class TestMeanReversionYAMLErrorHandling:
+    """Tests that malformed or missing YAML never crashes the strategy."""
+
+    def test_get_parameters_malformed_yaml_returns_empty_dict(self, tmp_path: Path) -> None:
+        """A YAML parse error must not propagate; empty dict is returned."""
+        strategy = MeanReversionStrategy()
+        bad_yaml_content = ": this is: not: valid: yaml: ]["
+        preset = tmp_path / "bad_segment.yaml"
+        preset.write_text(bad_yaml_content)
+        with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
+            result = strategy.get_parameters("bad_segment")
+        assert result == {}
+
+    def test_get_parameters_empty_yaml_returns_empty_dict(self, tmp_path: Path) -> None:
+        """An empty YAML file (safe_load returns None) must return empty dict."""
+        strategy = MeanReversionStrategy()
+        preset = tmp_path / "empty_segment.yaml"
+        preset.write_text("")
+        with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
+            result = strategy.get_parameters("empty_segment")
+        assert result == {}
+
+    def test_get_parameters_yaml_error_via_mock(self) -> None:
+        """yaml.YAMLError raised during open must be caught and return empty dict."""
+        strategy = MeanReversionStrategy()
+        with (
+            patch("builtins.open", mock_open(read_data=b"")),
+            patch("yaml.safe_load", side_effect=yaml.YAMLError("bad yaml")),
+        ):
+            result = strategy.get_parameters("us_tech")
+        assert result == {}
+
+    def test_supported_segments_malformed_yaml_skips_file(self, tmp_path: Path) -> None:
+        """A YAML parse error in one preset must skip that file, not crash."""
+        strategy = MeanReversionStrategy()
+        # Create one valid preset and one malformed one
+        valid_preset = tmp_path / "seg_a.yaml"
+        valid_preset.write_text(
+            "segment_id: seg_a\nstrategies:\n  mean_reversion:\n    enabled: true\n"
+        )
+        bad_preset = tmp_path / "seg_b.yaml"
+        bad_preset.write_text(": bad: yaml: ][")
+        with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
+            segments = strategy.supported_segments()
+        assert segments == ["seg_a"]
+
+    def test_supported_segments_missing_segment_id_skips_file(self, tmp_path: Path) -> None:
+        """A preset without a segment_id key must be silently skipped."""
+        strategy = MeanReversionStrategy()
+        preset = tmp_path / "no_id.yaml"
+        preset.write_text("strategies:\n  mean_reversion:\n    enabled: true\n")
+        with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
+            segments = strategy.supported_segments()
+        assert segments == []
+
+    def test_supported_segments_empty_yaml_skips_file(self, tmp_path: Path) -> None:
+        """An empty YAML file must be silently skipped."""
+        strategy = MeanReversionStrategy()
+        preset = tmp_path / "empty.yaml"
+        preset.write_text("")
+        with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
+            segments = strategy.supported_segments()
+        assert segments == []

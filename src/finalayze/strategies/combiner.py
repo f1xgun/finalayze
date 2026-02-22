@@ -97,11 +97,11 @@ class StrategyCombiner:
         )
 
     def _load_config(self, segment_id: str) -> dict[str, object]:
-        """Load segment YAML preset, returning an empty dict if not found."""
+        """Load segment YAML preset, returning an empty dict if not found or malformed."""
         try:
             path = self._presets_dir / f"{segment_id}.yaml"
             with path.open() as f:
                 result = yaml.safe_load(f)
-            return dict(result) if result else {}
-        except FileNotFoundError:
+            return dict(result) if isinstance(result, dict) else {}
+        except (FileNotFoundError, OSError, yaml.YAMLError):
             return {}
