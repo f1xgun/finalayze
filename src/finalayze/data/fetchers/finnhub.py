@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
+from pydantic import ValidationError
 
 from finalayze.core.exceptions import DataFetchError, RateLimitError
 from finalayze.core.schemas import Candle
@@ -143,29 +144,30 @@ class FinnhubFetcher(BaseFetcher):
             closes = [float(v) for v in _require_list(data, "c")]  # type: ignore[arg-type]
             volumes = [int(v) for v in _require_list(data, "v")]  # type: ignore[call-overload]
             timestamps = [int(v) for v in _require_list(data, "t")]  # type: ignore[call-overload]
-        except (KeyError, TypeError, ValueError) as exc:
+
+            return sorted(
+                [
+                    Candle(
+                        symbol=symbol,
+                        market_id=self._market_id,
+                        timeframe=timeframe,
+                        timestamp=datetime.fromtimestamp(ts, tz=UTC),
+                        open=Decimal(str(o)),
+                        high=Decimal(str(h)),
+                        low=Decimal(str(lo)),
+                        close=Decimal(str(c)),
+                        volume=int(v),
+                        source="finnhub",
+                    )
+                    for ts, o, h, lo, c, v in zip(
+                        timestamps, opens, highs, lows, closes, volumes, strict=True
+                    )
+                ],
+                key=lambda candle: candle.timestamp,
+            )
+        except (KeyError, TypeError, ValueError, ValidationError) as exc:
             msg = f"Unexpected response format from Finnhub: {exc}"
             raise DataFetchError(msg) from exc
-
-        candles: list[Candle] = [
-            Candle(
-                symbol=symbol,
-                market_id=self._market_id,
-                timeframe=timeframe,
-                timestamp=datetime.fromtimestamp(ts, tz=UTC),
-                open=Decimal(str(o)),
-                high=Decimal(str(h)),
-                low=Decimal(str(lo)),
-                close=Decimal(str(c)),
-                volume=int(v),
-                source="finnhub",
-            )
-            for ts, o, h, lo, c, v in zip(
-                timestamps, opens, highs, lows, closes, volumes, strict=True
-            )
-        ]
-
-        return sorted(candles, key=lambda candle: candle.timestamp)
 
 
 def _require_list(data: dict[str, object], key: str) -> list[object]:

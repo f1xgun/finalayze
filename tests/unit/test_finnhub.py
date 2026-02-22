@@ -324,3 +324,32 @@ class TestFinnhubFetcherErrors:
         start, end = date_range
         with pytest.raises(RateLimitError):
             fetcher.fetch_candles(SYMBOL, start, end)
+
+    @patch("finalayze.data.fetchers.finnhub.httpx.Client")
+    def test_fetch_candles_mismatched_arrays_raises(
+        self,
+        mock_client_cls: MagicMock,
+        fetcher: FinnhubFetcher,
+        date_range: tuple[datetime, datetime],
+    ) -> None:
+        """Mismatched array lengths (e.g. 2 timestamps, 1 open) raise DataFetchError.
+
+        zip(..., strict=True) raises ValueError when array lengths differ; this
+        must be caught and re-raised as DataFetchError, not allowed to escape.
+        """
+        mismatched_body: dict[str, object] = {
+            "s": "ok",
+            "t": [TS_1, TS_2],  # 2 timestamps
+            "o": [float(OPEN_1)],  # only 1 open — intentional mismatch
+            "h": [float(HIGH_1), float(HIGH_2)],
+            "l": [float(LOW_1), float(LOW_2)],
+            "c": [float(CLOSE_1), float(CLOSE_2)],
+            "v": [VOLUME_1, VOLUME_2],
+        }
+        mock_client_cls.return_value.__enter__.return_value.get.return_value = _mock_httpx_response(
+            HTTP_OK, mismatched_body
+        )
+
+        start, end = date_range
+        with pytest.raises(DataFetchError, match="Unexpected response format from Finnhub"):
+            fetcher.fetch_candles(SYMBOL, start, end)
