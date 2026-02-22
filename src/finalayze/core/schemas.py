@@ -35,6 +35,7 @@ class Candle(BaseModel):
     low: Decimal
     close: Decimal
     volume: int
+    source: str | None = None
 
     @field_validator("timestamp")
     @classmethod
