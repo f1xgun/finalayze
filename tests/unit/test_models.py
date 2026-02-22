@@ -7,8 +7,10 @@ from finalayze.core.models import (
     CandleModel,
     InstrumentModel,
     MarketModel,
+    NewsArticleModel,
     OrderModel,
     SegmentModel,
+    SentimentScoreModel,
     SignalModel,
 )
 
@@ -224,3 +226,11 @@ class TestAllTablesRegistered:
     def test_all_tables_in_metadata(self) -> None:
         registered = set(Base.metadata.tables.keys())
         assert self.EXPECTED_TABLES.issubset(registered)
+
+
+class TestNewsModels:
+    def test_news_article_model_has_tablename(self) -> None:
+        assert NewsArticleModel.__tablename__ == "news_articles"
+
+    def test_sentiment_score_model_has_tablename(self) -> None:
+        assert SentimentScoreModel.__tablename__ == "sentiment_scores"

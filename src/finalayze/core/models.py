@@ -20,6 +20,7 @@ from sqlalchemy import (
     Text,
     Time,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -198,3 +199,48 @@ class OrderModel(Base):
     mode: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
     signal: Mapped[SignalModel | None] = relationship(back_populates="orders")
+
+
+class NewsArticleModel(Base):
+    """ORM model for news articles."""
+
+    __tablename__ = "news_articles"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    language: Mapped[str] = mapped_column(String(5), nullable=False, server_default="en")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    symbols: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String(20)), nullable=False, server_default="{}"
+    )
+    affected_segments: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String(30)), nullable=False, server_default="{}"
+    )
+    scope: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    raw_sentiment: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    credibility_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    llm_analysis: Mapped[dict[str, object] | None] = mapped_column(postgresql.JSONB, nullable=True)
+    is_processed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
+
+class SentimentScoreModel(Base):
+    """ORM model for sentiment scores (TimescaleDB hypertable on timestamp)."""
+
+    __tablename__ = "sentiment_scores"
+
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, primary_key=True)
+    market_id: Mapped[str] = mapped_column(String(10), nullable=False, primary_key=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, primary_key=True
+    )
+    news_sentiment: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    social_sentiment: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    composite_sentiment: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
