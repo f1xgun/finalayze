@@ -271,3 +271,14 @@ class TestSimulatedBrokerEquity:
 
         # Stop-loss entry must be cleared after position is fully closed
         assert "AAPL" not in broker._stop_losses
+
+
+class TestSimulatedBrokerFillCandleOptional:
+    """SimulatedBroker must raise ValueError when fill_candle is None."""
+
+    def test_submit_order_raises_if_no_candle(self) -> None:
+        """SimulatedBroker must reject orders when no candle is provided."""
+        broker = SimulatedBroker(initial_cash=INITIAL_CASH)
+        order = OrderRequest(symbol="AAPL", side="BUY", quantity=Decimal(1))
+        with pytest.raises(ValueError, match="fill_candle"):
+            broker.submit_order(order, fill_candle=None)

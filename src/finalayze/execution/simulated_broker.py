@@ -25,12 +25,15 @@ class SimulatedBroker(BrokerBase):
         self._last_prices: dict[str, Decimal] = {}
         self._current_timestamp: datetime | None = None
 
-    def submit_order(self, order: OrderRequest, fill_candle: Candle) -> OrderResult:
+    def submit_order(self, order: OrderRequest, fill_candle: Candle | None = None) -> OrderResult:
         """Fill an order at the candle's open price.
 
         BUY: deducts cash, adds to position.
         SELL: adds proceeds to cash, reduces/removes position.
         """
+        if fill_candle is None:
+            msg = "SimulatedBroker requires fill_candle to determine the fill price"
+            raise ValueError(msg)
         fill_price = fill_candle.open
 
         if order.side == "BUY":
