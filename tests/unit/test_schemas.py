@@ -119,6 +119,36 @@ class TestCandle:
         assert isinstance(candle.low, Decimal)
         assert isinstance(candle.close, Decimal)
 
+    def test_negative_volume_rejected(self) -> None:
+        """Candle with volume < 0 must raise ValidationError."""
+        with pytest.raises(ValidationError):
+            Candle(
+                symbol="AAPL",
+                market_id="us",
+                timeframe="1d",
+                timestamp=datetime(2024, 1, 15, 14, 30, tzinfo=UTC),
+                open=CANDLE_OPEN,
+                high=CANDLE_HIGH,
+                low=CANDLE_LOW,
+                close=CANDLE_CLOSE,
+                volume=-1,
+            )
+
+    def test_zero_volume_accepted(self) -> None:
+        """Candle with volume=0 must be valid (e.g. pre-market no-trade bar)."""
+        candle = Candle(
+            symbol="AAPL",
+            market_id="us",
+            timeframe="1d",
+            timestamp=datetime(2024, 1, 15, 14, 30, tzinfo=UTC),
+            open=CANDLE_OPEN,
+            high=CANDLE_HIGH,
+            low=CANDLE_LOW,
+            close=CANDLE_CLOSE,
+            volume=0,
+        )
+        assert candle.volume == 0
+
 
 # ── Signal ───────────────────────────────────────────────────────────────
 

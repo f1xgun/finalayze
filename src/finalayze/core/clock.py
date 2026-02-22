@@ -6,9 +6,10 @@ Used in sandbox mode for historical replay at configurable speed.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
+@runtime_checkable
 class Clock(Protocol):
     """Protocol for time providers.
 
@@ -47,8 +48,17 @@ class SimulatedClock:
         Args:
             seconds: Number of seconds to advance (ignored when ``delta`` is given).
             delta: Optional timedelta to advance by. Takes precedence over ``seconds``.
+
+        Raises:
+            ValueError: If the provided value would move the clock backwards.
         """
         if delta is not None:
+            if delta.total_seconds() < 0:
+                msg = "Cannot advance clock by negative timedelta"
+                raise ValueError(msg)
             self._current += delta
         else:
+            if seconds < 0:
+                msg = "Cannot advance clock by negative seconds"
+                raise ValueError(msg)
             self._current += timedelta(seconds=seconds)

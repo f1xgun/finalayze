@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -14,6 +14,8 @@ from finalayze.data.rate_limiter import RateLimiter
 # ---------------------------------------------------------------------------
 RATE_10_PER_SECOND = 10.0
 CAPACITY_10 = 10.0
+CAPACITY_ZERO = 0.0
+CAPACITY_NEGATIVE = -5.0
 TOKENS_WITHIN_LIMIT = 5
 TOKENS_EXCEEDING_LIMIT = 11
 SLEEP_CALL_COUNT = 1
@@ -68,6 +70,16 @@ class TestRateLimiterBasic:
         with pytest.raises(ConfigurationError):
             RateLimiter(name="bad", rate=-1.0)
 
+    def test_rate_limiter_rejects_zero_capacity(self) -> None:
+        """Creating a RateLimiter with capacity=0 must raise ConfigurationError."""
+        with pytest.raises(ConfigurationError, match="Capacity"):
+            RateLimiter(name="bad", rate=RATE_10_PER_SECOND, capacity=CAPACITY_ZERO)
+
+    def test_rate_limiter_rejects_negative_capacity(self) -> None:
+        """Creating a RateLimiter with capacity<0 must raise ConfigurationError."""
+        with pytest.raises(ConfigurationError, match="Capacity"):
+            RateLimiter(name="bad", rate=RATE_10_PER_SECOND, capacity=CAPACITY_NEGATIVE)
+
     def test_acquire_returns_self_for_context_manager(self) -> None:
         """RateLimiter can be used as a context manager with `with limiter:`."""
         with patch("finalayze.data.rate_limiter.time") as mock_time:
@@ -108,3 +120,47 @@ class TestRateLimiterRefill:
             mock_time.sleep.reset_mock()
             limiter.acquire()
             mock_time.sleep.assert_not_called()
+
+
+_ASYNCIO_SLEEP_PATH = "finalayze.data.rate_limiter.asyncio.sleep"
+
+
+class TestRateLimiterAsync:
+    """Tests for async acquire and async context manager."""
+
+    @pytest.mark.asyncio
+    async def test_aacquire_within_limit_does_not_sleep(self) -> None:
+        """aacquire() within capacity should not call asyncio.sleep."""
+        with patch("finalayze.data.rate_limiter.time") as mock_time:
+            mock_time.monotonic.return_value = MONOTONIC_T0
+            mock_time.sleep = MagicMock()
+            limiter = RateLimiter(name="async-test", rate=RATE_10_PER_SECOND)
+            with patch(_ASYNCIO_SLEEP_PATH, new_callable=AsyncMock) as mock_sleep:
+                for _ in range(TOKENS_WITHIN_LIMIT):
+                    await limiter.aacquire()
+                mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_aacquire_exceeds_limit_uses_asyncio_sleep(self) -> None:
+        """aacquire() beyond capacity must use asyncio.sleep, not time.sleep."""
+        with patch("finalayze.data.rate_limiter.time") as mock_time:
+            mock_time.monotonic.return_value = MONOTONIC_T0
+            mock_time.sleep = MagicMock()
+            limiter = RateLimiter(name="async-test", rate=RATE_10_PER_SECOND, capacity=CAPACITY_10)
+            with patch(_ASYNCIO_SLEEP_PATH, new_callable=AsyncMock) as mock_sleep:
+                for _ in range(TOKENS_EXCEEDING_LIMIT):
+                    await limiter.aacquire()
+                assert mock_sleep.call_count >= SLEEP_CALL_COUNT
+                # Synchronous time.sleep must NOT have been called
+                mock_time.sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager_returns_self(self) -> None:
+        """async with limiter: must yield the limiter itself."""
+        with patch("finalayze.data.rate_limiter.time") as mock_time:
+            mock_time.monotonic.return_value = MONOTONIC_T0
+            mock_time.sleep = MagicMock()
+            limiter = RateLimiter(name="async-ctx", rate=RATE_10_PER_SECOND)
+            with patch(_ASYNCIO_SLEEP_PATH, new_callable=AsyncMock):
+                async with limiter as ctx:
+                    assert ctx is limiter

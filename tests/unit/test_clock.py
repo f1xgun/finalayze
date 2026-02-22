@@ -13,12 +13,12 @@ from finalayze.core.clock import Clock, RealClock, SimulatedClock
 # ---------------------------------------------------------------------------
 ADVANCE_SECONDS = 60.0
 ADVANCE_HOURS = 1
-TOLERANCE_SECONDS = 2.0
 START_YEAR = 2024
 START_MONTH = 1
 START_DAY = 15
 START_HOUR = 10
 START_MINUTE = 30
+NEGATIVE_SECONDS = -100.0
 
 
 def _start_dt() -> datetime:
@@ -36,7 +36,7 @@ class TestRealClock:
         result = clock.now()
         after = datetime.now(tz=UTC)
         assert result.tzinfo is not None
-        assert before <= result <= after + timedelta(seconds=TOLERANCE_SECONDS)
+        assert before <= result <= after
 
     def test_real_clock_is_utc_aware(self) -> None:
         """RealClock.now() must return a timezone-aware datetime."""
@@ -94,6 +94,25 @@ class TestSimulatedClock:
         expected = start + timedelta(seconds=ADVANCE_SECONDS * 2)
         assert clock.now() == expected
 
+    def test_advance_negative_seconds_raises(self) -> None:
+        """advance(seconds=-100) must raise ValueError."""
+        clock = SimulatedClock(start=_start_dt())
+        with pytest.raises(ValueError, match="negative"):
+            clock.advance(seconds=NEGATIVE_SECONDS)
+
+    def test_advance_negative_timedelta_raises(self) -> None:
+        """advance(delta=timedelta(seconds=-100)) must raise ValueError."""
+        clock = SimulatedClock(start=_start_dt())
+        with pytest.raises(ValueError, match="negative"):
+            clock.advance(delta=timedelta(seconds=NEGATIVE_SECONDS))
+
+    def test_advance_zero_seconds_is_allowed(self) -> None:
+        """advance(seconds=0) is valid and does not move the clock."""
+        start = _start_dt()
+        clock = SimulatedClock(start=start)
+        clock.advance(seconds=0.0)
+        assert clock.now() == start
+
 
 class TestClockProtocol:
     """Verify both clocks satisfy the Clock protocol."""
@@ -109,3 +128,10 @@ class TestClockProtocol:
         clock: Clock = SimulatedClock(start=_start_dt())
         result = clock.now()
         assert isinstance(result, datetime)
+
+    def test_clock_protocol_is_runtime_checkable(self) -> None:
+        """isinstance(obj, Clock) must not raise TypeError (runtime_checkable)."""
+        real = RealClock()
+        simulated = SimulatedClock(start=_start_dt())
+        assert isinstance(real, Clock)
+        assert isinstance(simulated, Clock)

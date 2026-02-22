@@ -29,8 +29,11 @@ CLOSE = Decimal("153.00")
 VOLUME = 1000
 
 NEGATIVE_PRICE = Decimal("-1.00")
+ZERO_PRICE = Decimal("0.00")
 PRICE_ABOVE_HIGH = Decimal("160.00")
 PRICE_BELOW_LOW = Decimal("140.00")
+OPEN_ABOVE_HIGH = Decimal("160.00")
+OPEN_BELOW_LOW = Decimal("140.00")
 
 
 def _make_candle(
@@ -99,6 +102,48 @@ class TestDataNormalizerSingle:
         normalizer = DataNormalizer(market_id=MARKET_ID, source=SOURCE)
         candle = _make_candle(close=PRICE_BELOW_LOW)
         with pytest.raises(DataFetchError):
+            normalizer.normalize(candle)
+
+    def test_normalize_rejects_zero_open(self) -> None:
+        """Candle with open=0 must raise DataFetchError (non-positive price)."""
+        normalizer = DataNormalizer(market_id=MARKET_ID, source=SOURCE)
+        candle = _make_candle(open_=ZERO_PRICE)
+        with pytest.raises(DataFetchError, match="non-positive"):
+            normalizer.normalize(candle)
+
+    def test_normalize_rejects_zero_high(self) -> None:
+        """Candle with high=0 must raise DataFetchError (non-positive price)."""
+        normalizer = DataNormalizer(market_id=MARKET_ID, source=SOURCE)
+        # low=0 <= high=0 is valid ordering, but 0 price is invalid
+        candle = _make_candle(open_=ZERO_PRICE, high=ZERO_PRICE, low=ZERO_PRICE, close=ZERO_PRICE)
+        with pytest.raises(DataFetchError, match="non-positive"):
+            normalizer.normalize(candle)
+
+    def test_normalize_error_message_includes_all_ohlc(self) -> None:
+        """Error message for non-positive price must include all four OHLC values."""
+        normalizer = DataNormalizer(market_id=MARKET_ID, source=SOURCE)
+        candle = _make_candle(open_=ZERO_PRICE, high=ZERO_PRICE, low=ZERO_PRICE, close=ZERO_PRICE)
+        with pytest.raises(DataFetchError, match="open=") as exc_info:
+            normalizer.normalize(candle)
+        msg = str(exc_info.value)
+        assert "high=" in msg
+        assert "low=" in msg
+        assert "close=" in msg
+
+    def test_normalize_rejects_open_above_high(self) -> None:
+        """Candle where open > high must raise DataFetchError."""
+        normalizer = DataNormalizer(market_id=MARKET_ID, source=SOURCE)
+        # open=160, high=155, low=149: open is outside [low, high]
+        candle = _make_candle(open_=OPEN_ABOVE_HIGH)
+        with pytest.raises(DataFetchError, match="open"):
+            normalizer.normalize(candle)
+
+    def test_normalize_rejects_open_below_low(self) -> None:
+        """Candle where open < low must raise DataFetchError."""
+        normalizer = DataNormalizer(market_id=MARKET_ID, source=SOURCE)
+        # open=140, low=149, high=155: open is outside [low, high]
+        candle = _make_candle(open_=OPEN_BELOW_LOW)
+        with pytest.raises(DataFetchError, match="open"):
             normalizer.normalize(candle)
 
     def test_normalize_passes_valid_candle(self) -> None:
