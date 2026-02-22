@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import httpx
 
-from finalayze.core.exceptions import DataFetchError
+from finalayze.core.exceptions import DataFetchError, RateLimitError
 from finalayze.core.schemas import Candle
 from finalayze.data.fetchers.base import BaseFetcher
 
@@ -90,7 +90,7 @@ class FinnhubFetcher(BaseFetcher):
 
         if response.status_code == _HTTP_RATE_LIMIT:
             msg = f"Finnhub rate limit exceeded (HTTP {_HTTP_RATE_LIMIT})"
-            raise DataFetchError(msg)
+            raise RateLimitError(msg)
 
         if response.status_code != _HTTP_OK:
             msg = f"Finnhub API error: HTTP {response.status_code}"
@@ -105,6 +105,10 @@ class FinnhubFetcher(BaseFetcher):
 
         if status != _STATUS_OK:
             msg = f"Finnhub returned unexpected status: {status!r}"
+            raise DataFetchError(msg)
+
+        if not data.get("t"):
+            msg = "no data available"
             raise DataFetchError(msg)
 
         return self._parse_candles(data, symbol=symbol, timeframe=timeframe)
@@ -132,12 +136,16 @@ class FinnhubFetcher(BaseFetcher):
         timeframe: str,
     ) -> list[Candle]:
         """Build sorted Candle list from a successful Finnhub response dict."""
-        opens: list[float] = data["o"]  # type: ignore[assignment]
-        highs: list[float] = data["h"]  # type: ignore[assignment]
-        lows: list[float] = data["l"]  # type: ignore[assignment]
-        closes: list[float] = data["c"]  # type: ignore[assignment]
-        volumes: list[int] = data["v"]  # type: ignore[assignment]
-        timestamps: list[int] = data["t"]  # type: ignore[assignment]
+        try:
+            opens = [float(v) for v in _require_list(data, "o")]  # type: ignore[arg-type]
+            highs = [float(v) for v in _require_list(data, "h")]  # type: ignore[arg-type]
+            lows = [float(v) for v in _require_list(data, "l")]  # type: ignore[arg-type]
+            closes = [float(v) for v in _require_list(data, "c")]  # type: ignore[arg-type]
+            volumes = [int(v) for v in _require_list(data, "v")]  # type: ignore[call-overload]
+            timestamps = [int(v) for v in _require_list(data, "t")]  # type: ignore[call-overload]
+        except (KeyError, TypeError, ValueError) as exc:
+            msg = f"Unexpected response format from Finnhub: {exc}"
+            raise DataFetchError(msg) from exc
 
         candles: list[Candle] = [
             Candle(
@@ -158,3 +166,16 @@ class FinnhubFetcher(BaseFetcher):
         ]
 
         return sorted(candles, key=lambda candle: candle.timestamp)
+
+
+def _require_list(data: dict[str, object], key: str) -> list[object]:
+    """Extract a list field from a Finnhub response dict.
+
+    Raises:
+        DataFetchError: When the key is missing or its value is not a list.
+    """
+    val = data.get(key)
+    if not isinstance(val, list):
+        msg = f"Missing or non-list field '{key}' in Finnhub response"
+        raise DataFetchError(msg)
+    return val

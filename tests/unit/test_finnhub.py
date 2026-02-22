@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
-from finalayze.core.exceptions import DataFetchError
+from finalayze.core.exceptions import DataFetchError, RateLimitError
 from finalayze.core.schemas import Candle
 from finalayze.data.fetchers.finnhub import FinnhubFetcher
 
@@ -250,3 +251,76 @@ class TestFinnhubFetcherErrors:
         start, end = date_range
         with pytest.raises(DataFetchError, match="Unsupported timeframe"):
             fetcher.fetch_candles(SYMBOL, start, end, timeframe="5m")
+
+    @patch("finalayze.data.fetchers.finnhub.httpx.Client")
+    def test_fetch_candles_empty_arrays_raises(
+        self,
+        mock_client_cls: MagicMock,
+        fetcher: FinnhubFetcher,
+        date_range: tuple[datetime, datetime],
+    ) -> None:
+        """s='ok' with empty arrays raises DataFetchError with 'no data available'."""
+        empty_body: dict[str, object] = {
+            "s": "ok",
+            "c": [],
+            "t": [],
+            "o": [],
+            "h": [],
+            "l": [],
+            "v": [],
+        }
+        mock_client_cls.return_value.__enter__.return_value.get.return_value = _mock_httpx_response(
+            HTTP_OK, empty_body
+        )
+
+        start, end = date_range
+        with pytest.raises(DataFetchError, match="no data available"):
+            fetcher.fetch_candles(SYMBOL, start, end)
+
+    @patch("finalayze.data.fetchers.finnhub.httpx.Client")
+    def test_fetch_candles_http_timeout_raises(
+        self,
+        mock_client_cls: MagicMock,
+        fetcher: FinnhubFetcher,
+        date_range: tuple[datetime, datetime],
+    ) -> None:
+        """TimeoutException from httpx is wrapped in DataFetchError."""
+        mock_get = mock_client_cls.return_value.__enter__.return_value.get
+        mock_get.side_effect = httpx.TimeoutException("request timed out")
+
+        start, end = date_range
+        with pytest.raises(DataFetchError, match="HTTP request failed"):
+            fetcher.fetch_candles(SYMBOL, start, end)
+
+    @patch("finalayze.data.fetchers.finnhub.httpx.Client")
+    def test_fetch_candles_http_generic_error_raises(
+        self,
+        mock_client_cls: MagicMock,
+        fetcher: FinnhubFetcher,
+        date_range: tuple[datetime, datetime],
+    ) -> None:
+        """HTTP 500 response raises DataFetchError."""
+        http_500 = 500
+        mock_client_cls.return_value.__enter__.return_value.get.return_value = _mock_httpx_response(
+            http_500, {}
+        )
+
+        start, end = date_range
+        with pytest.raises(DataFetchError, match="Finnhub API error"):
+            fetcher.fetch_candles(SYMBOL, start, end)
+
+    @patch("finalayze.data.fetchers.finnhub.httpx.Client")
+    def test_fetch_candles_rate_limit_raises_rate_limit_error(
+        self,
+        mock_client_cls: MagicMock,
+        fetcher: FinnhubFetcher,
+        date_range: tuple[datetime, datetime],
+    ) -> None:
+        """HTTP 429 raises RateLimitError specifically (not just DataFetchError)."""
+        mock_client_cls.return_value.__enter__.return_value.get.return_value = _mock_httpx_response(
+            HTTP_RATE_LIMIT, {}
+        )
+
+        start, end = date_range
+        with pytest.raises(RateLimitError):
+            fetcher.fetch_candles(SYMBOL, start, end)
