@@ -10,20 +10,23 @@ Quality is assessed per module domain. Grades are re-evaluated after each phase.
 - **F**: Broken, untested, or missing
 - **N/A**: Not yet implemented
 
-## Current Grades (Post Phase 0)
+## Current Grades (Post Phase 1 Backtest Slice)
 
 | Module | Grade | Coverage | Notes |
 |--------|-------|----------|-------|
-| `core/` | D | Minimal | Exceptions defined, schemas/events/clock empty |
-| `config/` | C | Partial | Settings, modes, segments defined; no tests yet |
-| `data/` | N/A | -- | Not implemented |
+| `core/schemas.py` | A | 100% | Full Pydantic v2 schemas, fully tested, type-safe |
+| `core/models.py` | B | 100% | ORM models defined and schema-tested; not integration-tested against real DB |
+| `core/exceptions.py` | A | 100% | All exception types defined and tested |
+| `core/db.py` | D | 0% | Async engine/session factory stub; not tested |
+| `config/` | C | Partial | Settings, modes, segments defined and tested; settings.py not unit-tested |
+| `markets/registry.py` | A | 100% | MarketRegistry fully tested including open/closed logic |
+| `data/fetchers/` | B | 100% | Unit-tested with mocks; no live API integration test |
 | `analysis/` | N/A | -- | Not implemented |
-| `strategies/` | N/A | -- | YAML presets created; no code |
-| `markets/` | N/A | -- | Not implemented |
+| `strategies/momentum.py` | B | 80% | Unit-tested; some edge-case branches not covered |
 | `ml/` | N/A | -- | Not implemented |
-| `risk/` | N/A | -- | Not implemented |
-| `execution/` | N/A | -- | Not implemented |
-| `backtest/` | N/A | -- | Not implemented |
+| `risk/` | A | 97% | Fully tested financial safety modules (position sizer, stop-loss, pre-trade checks) |
+| `execution/simulated_broker.py` | B | 95% | Unit-tested; simulated only, no live broker integration |
+| `backtest/` | B | 89% | Unit-tested engine and performance analyzer; no real-DB integration test |
 | `dashboard/` | N/A | -- | Not implemented |
 | `api/` | N/A | -- | Not implemented |
 
@@ -32,3 +35,4 @@ Quality is assessed per module domain. Grades are re-evaluated after each phase.
 | Date | Phase | Changes |
 |------|-------|---------|
 | 2026-02-21 | Phase 0 | Initial grades assigned |
+| 2026-02-22 | Phase 1 Backtest Slice | Updated grades for core, markets, data, strategies, risk, execution, backtest |
