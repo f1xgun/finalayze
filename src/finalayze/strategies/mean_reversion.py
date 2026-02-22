@@ -6,7 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
-import pandas_ta as ta  # type: ignore[import-untyped]
+import pandas_ta as ta
 import yaml
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
@@ -50,7 +50,11 @@ class MeanReversionStrategy(BaseStrategy):
     def generate_signal(self, symbol: str, candles: list[Candle], segment_id: str) -> Signal | None:
         """Generate a mean reversion signal using Bollinger Bands."""
         params = self.get_parameters(segment_id)
-        bb_period: int = int(params.get("bb_period", _DEFAULT_BB_PERIOD))  # type: ignore[arg-type]
+        bb_period_raw = params.get("bb_period", _DEFAULT_BB_PERIOD)
+        if isinstance(bb_period_raw, (int, float, str)):
+            bb_period = int(bb_period_raw)
+        else:
+            bb_period = _DEFAULT_BB_PERIOD
         bb_std = Decimal(str(params.get("bb_std_dev", _DEFAULT_BB_STD)))
         min_confidence = Decimal(str(params.get("min_confidence", _DEFAULT_MIN_CONFIDENCE)))
 
@@ -58,7 +62,8 @@ class MeanReversionStrategy(BaseStrategy):
             return None
 
         closes = pd.Series([float(c.close) for c in candles])
-        bb = ta.bbands(closes, length=bb_period, std=float(bb_std))
+        bb_std_float = float(bb_std)
+        bb = ta.bbands(closes, length=bb_period, lower_std=bb_std_float, upper_std=bb_std_float)
         if bb is None or bb.empty:
             return None
 
@@ -112,7 +117,8 @@ class MeanReversionStrategy(BaseStrategy):
                 "close": last_close,
             },
             reasoning=(
-                f"Price {last_close:.2f} {'below lower' if direction == SignalDirection.BUY else 'above upper'}"
+                f"Price {last_close:.2f} "
+                f"{'below lower' if direction == SignalDirection.BUY else 'above upper'}"
                 f" BB [{lower:.2f}, {upper:.2f}] ({band_label} band breach)"
             ),
         )
@@ -131,8 +137,6 @@ def _has_mean_reversion(preset_path: Path) -> bool:
     try:
         with preset_path.open() as f:
             data = yaml.safe_load(f)
-        return bool(
-            data.get("strategies", {}).get("mean_reversion", {}).get("enabled", False)
-        )
+        return bool(data.get("strategies", {}).get("mean_reversion", {}).get("enabled", False))
     except (OSError, yaml.YAMLError):
         return False

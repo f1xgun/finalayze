@@ -5,20 +5,18 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-import pytest
-
 from finalayze.core.schemas import Candle, SignalDirection
 from finalayze.strategies.mean_reversion import MeanReversionStrategy
 
 # Constants (no magic numbers)
-BASE_PRICE = Decimal("100")
+BASE_PRICE = Decimal(100)
 BAND_PERIOD = 20
 VOLUME = 1_000_000
-STABLE_HIGH_PRICE = Decimal("200")
-CRASH_PRICE = Decimal("50")
-SPIKE_PRICE = Decimal("300")
-CANDLE_HIGH_OFFSET = Decimal("1")
-CANDLE_LOW_OFFSET = Decimal("1")
+STABLE_HIGH_PRICE = Decimal(200)
+CRASH_PRICE = Decimal(50)
+SPIKE_PRICE = Decimal(300)
+CANDLE_HIGH_OFFSET = Decimal(1)
+CANDLE_LOW_OFFSET = Decimal(1)
 STABLE_COUNT = 25
 EXTRA_CANDLE_COUNT = 5
 MIN_CANDLES_INSUFFICIENT = 5
@@ -84,7 +82,7 @@ class TestMeanReversionStrategy:
         crash_candle = _candle(CRASH_PRICE, STABLE_COUNT)
         candles.append(crash_candle)
         signal = strategy.generate_signal("AAPL", candles, "us_tech")
-        assert signal is not None, "Expected BUY signal when price crashes below lower Bollinger Band"
+        assert signal is not None, "Expected BUY signal: price crashed below lower BB"
         assert signal.direction == SignalDirection.BUY
 
     def test_no_signal_when_price_near_midline(self) -> None:
@@ -102,7 +100,7 @@ class TestMeanReversionStrategy:
         spike_candle = _candle(SPIKE_PRICE, STABLE_COUNT)
         candles.append(spike_candle)
         signal = strategy.generate_signal("AAPL", candles, "us_tech")
-        assert signal is not None, "Expected SELL signal when price spikes above upper Bollinger Band"
+        assert signal is not None, "Expected SELL signal: price spiked above upper BB"
         assert signal.direction == SignalDirection.SELL
 
     def test_generate_signal_returns_correct_metadata(self) -> None:
