@@ -28,8 +28,8 @@
 |------|--------|---------|
 | Market registry | DONE | US + MOEX definitions, lookup by ID (src/finalayze/markets/registry.py) |
 | Segment definitions | DONE | Load from config, DB override support (config/segments.py) |
-| Instrument registry | IN PROGRESS | Symbol lookup, FIGI mapping for MOEX |
-| Currency conversion stub | IN PROGRESS | USD/RUB conversion (stub for Phase 1, real in Phase 2) |
+| Instrument registry | DONE | Symbol lookup with InstrumentNotFoundError, 7 default US instruments (src/finalayze/markets/instruments.py) |
+| Currency conversion stub | DONE | USD/RUB stub with rate validation, Decimal arithmetic, fallback rate (src/finalayze/markets/currency.py) |
 | Trading hours scheduler | DONE | Per-market open/close times, is_market_open(); US 09:30-16:00 ET + MOEX weekday guards (src/finalayze/markets/schedule.py) |
 | YAML preset loader | DONE | Strategy params loaded from presets/ directory via strategies/combiner.py |
 

@@ -29,6 +29,23 @@ services:
       timeout: 5s
       retries: 5
 
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: finalayze-app
+    ports:
+      - "8000:8000"
+    environment:
+      FINALAYZE_DATABASE_URL: "postgresql+asyncpg://finalayze:secret@postgres:5432/finalayze"
+      FINALAYZE_REDIS_URL: "redis://redis:6379/0"
+      FINALAYZE_MODE: "debug"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   pgdata:
   redisdata:
