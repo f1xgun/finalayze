@@ -21,7 +21,8 @@ UNKNOWN_SYMBOL = "UNKN"
 UNKNOWN_MARKET = "unknown"
 
 EXPECTED_DEFAULT_SYMBOLS = {"AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "SPY", "QQQ"}
-EXPECTED_DEFAULT_COUNT = 7
+EXPECTED_DEFAULT_US_COUNT = 7
+EXPECTED_DEFAULT_COUNT = 15  # 7 US + 8 MOEX
 EXPECTED_COUNT_AFTER_TWO = 2
 
 
@@ -86,6 +87,7 @@ def test_build_default_registry_has_us_instruments() -> None:
 def test_build_default_registry_has_expected_count() -> None:
     registry = build_default_registry()
     assert len(registry) == EXPECTED_DEFAULT_COUNT
+    assert len(registry.list_by_market(US_MARKET)) == EXPECTED_DEFAULT_US_COUNT
 
 
 def test_register_overwrites() -> None:
@@ -105,3 +107,38 @@ def test_len() -> None:
     assert len(registry) == 1
     registry.register(make_instrument(symbol=MSFT_SYMBOL))
     assert len(registry) == EXPECTED_COUNT_AFTER_TWO
+
+
+EXPECTED_MOEX_INSTRUMENT_COUNT = 8
+EXPECTED_MOEX_SYMBOLS = {"SBER", "GAZP", "LKOH", "GMKN", "YNDX", "NVTK", "ROSN", "VTBR"}
+
+
+def test_default_registry_includes_moex_instruments() -> None:
+    """Default registry must include all 8 MOEX instruments."""
+    registry = build_default_registry()
+    moex_instruments = registry.list_by_market("moex")
+    assert len(moex_instruments) == EXPECTED_MOEX_INSTRUMENT_COUNT
+
+
+def test_moex_instruments_have_figi() -> None:
+    """All MOEX instruments must have a non-empty FIGI identifier."""
+    registry = build_default_registry()
+    for inst in registry.list_by_market("moex"):
+        assert inst.figi is not None, f"{inst.symbol} missing FIGI"
+        assert inst.figi != "", f"{inst.symbol} has empty FIGI"
+
+
+def test_moex_instruments_symbols() -> None:
+    """Default registry must contain exactly the expected MOEX symbols."""
+    registry = build_default_registry()
+    symbols = {i.symbol for i in registry.list_by_market("moex")}
+    assert symbols == EXPECTED_MOEX_SYMBOLS
+
+
+def test_moex_instruments_currency_is_rub() -> None:
+    """All MOEX instruments must be denominated in RUB."""
+    registry = build_default_registry()
+    for inst in registry.list_by_market("moex"):
+        assert inst.currency == "RUB", (
+            f"{inst.symbol} currency is {inst.currency!r}, expected 'RUB'"
+        )
