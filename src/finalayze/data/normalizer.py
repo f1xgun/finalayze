@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from finalayze.core.exceptions import DataFetchError
-from finalayze.core.schemas import Candle
+
+if TYPE_CHECKING:
+    from finalayze.core.schemas import Candle
 
 logger = logging.getLogger(__name__)
 
-_ZERO = Decimal("0")
+_ZERO = Decimal(0)
 
 
 class DataNormalizer:
@@ -42,12 +45,7 @@ class DataNormalizer:
 
     def _validate(self, candle: Candle) -> None:
         """Raise DataFetchError if the candle fails OHLCV integrity checks."""
-        if (
-            candle.open < _ZERO
-            or candle.high < _ZERO
-            or candle.low < _ZERO
-            or candle.close < _ZERO
-        ):
+        if candle.open < _ZERO or candle.high < _ZERO or candle.low < _ZERO or candle.close < _ZERO:
             msg = f"Candle has negative price: open={candle.open}"
             raise DataFetchError(msg)
         if candle.low > candle.high:

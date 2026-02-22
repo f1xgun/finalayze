@@ -19,6 +19,8 @@ SOURCE = "alpaca"
 SYMBOL = "AAPL"
 TIMEFRAME = "1m"
 TIMESTAMP = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
+BATCH_SIZE_3 = 3
+BATCH_SIZE_2 = 2
 
 OPEN = Decimal("150.00")
 HIGH = Decimal("155.00")
@@ -130,20 +132,20 @@ class TestDataNormalizerBatch:
     def test_normalize_batch_all_valid(self) -> None:
         """normalize_batch() returns all candles when all are valid."""
         normalizer = DataNormalizer(market_id=MARKET_ID, source=SOURCE)
-        candles = [_make_candle() for _ in range(3)]
+        candles = [_make_candle() for _ in range(BATCH_SIZE_3)]
         results = normalizer.normalize_batch(candles)
-        assert len(results) == 3
+        assert len(results) == BATCH_SIZE_3
 
     def test_normalize_batch_all_invalid(self) -> None:
         """normalize_batch() returns empty list when all candles are invalid."""
         normalizer = DataNormalizer(market_id=MARKET_ID, source=SOURCE)
-        candles = [_make_candle(open_=NEGATIVE_PRICE) for _ in range(2)]
+        candles = [_make_candle(open_=NEGATIVE_PRICE) for _ in range(BATCH_SIZE_2)]
         results = normalizer.normalize_batch(candles)
         assert results == []
 
     def test_normalize_batch_sets_source_on_all(self) -> None:
         """normalize_batch() sets source on every returned candle."""
         normalizer = DataNormalizer(market_id=MARKET_ID, source=SOURCE)
-        candles = [_make_candle() for _ in range(3)]
+        candles = [_make_candle() for _ in range(BATCH_SIZE_3)]
         results = normalizer.normalize_batch(candles)
         assert all(c.source == SOURCE for c in results)

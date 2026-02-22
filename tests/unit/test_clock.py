@@ -80,7 +80,8 @@ class TestSimulatedClock:
 
     def test_simulated_clock_rejects_naive_datetime(self) -> None:
         """SimulatedClock must raise ValueError for a naive (no-tzinfo) datetime."""
-        naive = datetime(START_YEAR, START_MONTH, START_DAY, START_HOUR, START_MINUTE)
+        # Construct an aware datetime then strip tzinfo to produce a naive one
+        naive = _start_dt().replace(tzinfo=None)
         with pytest.raises(ValueError, match="timezone-aware"):
             SimulatedClock(start=naive)
 
