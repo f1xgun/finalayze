@@ -187,3 +187,42 @@ class TestMeanReversionYAMLErrorHandling:
         with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
             segments = strategy.supported_segments()
         assert segments == []
+
+    def test_get_parameters_non_dict_strategies_returns_empty(self, tmp_path: Path) -> None:
+        """If data['strategies'] is not a dict (e.g. a list), return empty dict (issue #62)."""
+        strategy = MeanReversionStrategy()
+        # YAML where 'strategies' is a list, not a dict
+        preset = tmp_path / "bad_strategies.yaml"
+        preset.write_text("segment_id: bad_strategies\nstrategies:\n  - item_one\n  - item_two\n")
+        with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
+            result = strategy.get_parameters("bad_strategies")
+        assert result == {}
+
+    def test_get_parameters_non_dict_mr_cfg_returns_empty(self, tmp_path: Path) -> None:
+        """If data['strategies']['mean_reversion'] is not a dict, return empty dict (issue #62)."""
+        strategy = MeanReversionStrategy()
+        # YAML where 'mean_reversion' is a scalar string
+        preset = tmp_path / "bad_mr.yaml"
+        preset.write_text("segment_id: bad_mr\nstrategies:\n  mean_reversion: disabled\n")
+        with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
+            result = strategy.get_parameters("bad_mr")
+        assert result == {}
+
+    def test_get_parameters_non_dict_params_returns_empty(self, tmp_path: Path) -> None:
+        """If data['strategies']['mean_reversion']['params'] is not a dict, return empty dict."""
+        strategy = MeanReversionStrategy()
+        # YAML where 'params' is a list instead of a mapping
+        preset = tmp_path / "bad_params.yaml"
+        yaml_content = (
+            "segment_id: bad_params\n"
+            "strategies:\n"
+            "  mean_reversion:\n"
+            "    enabled: true\n"
+            "    params:\n"
+            "      - bb_period\n"
+            "      - 20\n"
+        )
+        preset.write_text(yaml_content)
+        with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
+            result = strategy.get_parameters("bad_params")
+        assert result == {}

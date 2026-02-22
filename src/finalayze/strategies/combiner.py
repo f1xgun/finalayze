@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -54,7 +54,10 @@ class StrategyCombiner:
             if strategy is None:
                 continue
 
-            weight = Decimal(str(strategy_cfg.get("weight", "1.0")))
+            try:
+                weight = Decimal(str(strategy_cfg.get("weight", "1.0")))
+            except InvalidOperation:
+                weight = Decimal("1.0")
             signal = strategy.generate_signal(symbol, candles, segment_id)
             if signal is None:
                 continue

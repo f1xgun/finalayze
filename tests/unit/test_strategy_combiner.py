@@ -323,3 +323,39 @@ class TestStrategyCombinerYAMLErrorHandling:
         # No strategies config loaded -> total_weight == 0 -> returns None
         signal = combiner.generate_signal("AAPL", candles, "bad_segment")
         assert signal is None
+
+    def test_generate_signal_invalid_weight_falls_back_to_default(self) -> None:
+        """weight: 'bad' in YAML must not raise InvalidOperation; falls back to 1.0 (issue #63)."""
+        bad_weight_config: dict[str, object] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": "bad"},
+            }
+        }
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        strategy = MockStrategy("momentum", buy_signal)
+        combiner = StrategyCombiner([strategy])
+        candles = _make_candles()
+        with patch.object(combiner, "_load_config", return_value=bad_weight_config):
+            # Must not raise; should produce a BUY signal using fallback weight=1.0
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY
+
+    def test_generate_signal_nan_weight_falls_back_to_default(self) -> None:
+        """weight: 'NaN' in YAML is a valid Decimal but edge-case; ensure signal still produced."""
+        # Decimal('NaN') is technically valid and will not raise InvalidOperation,
+        # but 'not-a-number' will raise it -- verify that path is handled.
+        invalid_weight_config: dict[str, object] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": "not-a-number"},
+            }
+        }
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        strategy = MockStrategy("momentum", buy_signal)
+        combiner = StrategyCombiner([strategy])
+        candles = _make_candles()
+        with patch.object(combiner, "_load_config", return_value=invalid_weight_config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        # Fallback weight=1.0 applied -> should still generate a BUY signal
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY

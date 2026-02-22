@@ -55,7 +55,14 @@ class MeanReversionStrategy(BaseStrategy):
                 data = yaml.safe_load(f)
             if not isinstance(data, dict):
                 return {}
-            return dict(data.get("strategies", {}).get("mean_reversion", {}).get("params", {}))
+            strategies = data.get("strategies", {})
+            if not isinstance(strategies, dict):
+                return {}
+            mr_cfg = strategies.get("mean_reversion", {})
+            if not isinstance(mr_cfg, dict):
+                return {}
+            params = mr_cfg.get("params", {})
+            return dict(params) if isinstance(params, dict) else {}
         except (FileNotFoundError, OSError, yaml.YAMLError):
             return {}
 
