@@ -12,7 +12,9 @@ from pydantic import ValidationError
 from finalayze.core.schemas import (
     BacktestResult,
     Candle,
+    NewsArticle,
     PortfolioState,
+    SentimentResult,
     Signal,
     SignalDirection,
     TradeResult,
@@ -327,3 +329,63 @@ class TestBacktestResult:
         assert isinstance(result.win_rate, Decimal)
         assert isinstance(result.profit_factor, Decimal)
         assert isinstance(result.total_return, Decimal)
+
+
+# ── NewsArticle ──────────────────────────────────────────────────────────
+
+
+class TestNewsArticleSchema:
+    def test_valid_news_article(self) -> None:
+        article = NewsArticle(
+            id=uuid4(),
+            source="newsapi",
+            title="Fed raises rates",
+            content="The Federal Reserve raised interest rates by 25bps.",
+            url="https://example.com/article",
+            language="en",
+            published_at=datetime(2024, 1, 15, 10, 0, tzinfo=UTC),
+        )
+        assert article.language == "en"
+        assert article.symbols == []
+        assert article.affected_segments == []
+
+    def test_news_article_rejects_naive_timestamp(self) -> None:
+        with pytest.raises(ValidationError):
+            NewsArticle(
+                id=uuid4(),
+                source="newsapi",
+                title="Test",
+                content="Test",
+                url="https://example.com",
+                language="en",
+                published_at=datetime(2024, 1, 15, 10, 0),  # noqa: DTZ001  # intentionally naive
+            )
+
+
+# ── SentimentResult ──────────────────────────────────────────────────────
+
+SENTIMENT_POSITIVE = 0.7
+SENTIMENT_CONFIDENCE = 0.9
+SENTIMENT_OUT_OF_RANGE = 1.5
+CONFIDENCE_NEGATIVE = -0.1
+SENTIMENT_MID = 0.5
+
+
+class TestSentimentResultSchema:
+    def test_valid_sentiment(self) -> None:
+        result = SentimentResult(
+            sentiment=SENTIMENT_POSITIVE, confidence=SENTIMENT_CONFIDENCE, reasoning="positive news"
+        )
+        assert result.sentiment == SENTIMENT_POSITIVE
+
+    def test_sentiment_out_of_range_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            SentimentResult(
+                sentiment=SENTIMENT_OUT_OF_RANGE, confidence=SENTIMENT_CONFIDENCE, reasoning="bad"
+            )
+
+    def test_confidence_out_of_range_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            SentimentResult(
+                sentiment=SENTIMENT_MID, confidence=CONFIDENCE_NEGATIVE, reasoning="bad"
+            )
