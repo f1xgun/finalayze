@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from finalayze.core.exceptions import ModeError
 from finalayze.core.modes import ModeManager, WorkMode
@@ -32,6 +32,8 @@ def get_mode_manager() -> ModeManager:
 class HealthResponse(BaseModel):
     """Response model for the health endpoint."""
 
+    model_config = ConfigDict(frozen=True)
+
     status: str
     mode: str
     version: str
@@ -39,6 +41,8 @@ class HealthResponse(BaseModel):
 
 class ModeResponse(BaseModel):
     """Response model for mode endpoints."""
+
+    model_config = ConfigDict(frozen=True)
 
     mode: str
 

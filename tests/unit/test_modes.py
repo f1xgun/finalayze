@@ -110,6 +110,19 @@ class TestModeManagerInit:
         mgr = ModeManager()
         assert isinstance(mgr.current_mode, WorkMode)
 
+    def test_init_real_without_env_raises_mode_error(self) -> None:
+        os.environ.pop(ENV_VAR_REAL_CONFIRMED, None)
+        with pytest.raises(ModeError):
+            ModeManager(initial_mode=WorkMode.REAL)
+
+    def test_init_real_with_true_env_succeeds(self) -> None:
+        os.environ[ENV_VAR_REAL_CONFIRMED] = "true"
+        try:
+            mgr = ModeManager(initial_mode=WorkMode.REAL)
+            assert mgr.current_mode == WorkMode.REAL
+        finally:
+            os.environ.pop(ENV_VAR_REAL_CONFIRMED, None)
+
 
 class TestModeManagerTransition:
     def test_transition_to_sandbox(self) -> None:

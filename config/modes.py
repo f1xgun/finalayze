@@ -1,17 +1,7 @@
-"""Work mode definitions for Finalayze.
-
-See docs/architecture/OVERVIEW.md for mode descriptions.
-"""
-
+# config/modes.py — re-export for backwards compatibility.
+# WorkMode and ModeManager are now canonical in src/finalayze/core/modes.py.
 from __future__ import annotations
 
-from enum import StrEnum
+from finalayze.core.modes import ModeManager, WorkMode
 
-
-class WorkMode(StrEnum):
-    """Operating modes with progressive risk."""
-
-    DEBUG = "debug"
-    SANDBOX = "sandbox"
-    TEST = "test"
-    REAL = "real"
+__all__ = ["ModeManager", "WorkMode"]

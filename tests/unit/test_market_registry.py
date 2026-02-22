@@ -7,6 +7,7 @@ from datetime import UTC, datetime, time
 
 import pytest
 
+from finalayze.core.exceptions import MarketNotFoundError
 from finalayze.markets.registry import (
     MarketDefinition,
     MarketRegistry,
@@ -96,7 +97,7 @@ class TestMarketRegistry:
         assert moex.close_time == time(MOEX_CLOSE_HOUR, MOEX_CLOSE_MINUTE)
 
     def test_get_unknown_market_raises(self, registry: MarketRegistry) -> None:
-        with pytest.raises(KeyError):
+        with pytest.raises(MarketNotFoundError):
             registry.get_market("unknown")
 
     def test_list_markets(self, registry: MarketRegistry) -> None:

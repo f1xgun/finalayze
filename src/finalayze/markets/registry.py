@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
+from finalayze.core.exceptions import MarketNotFoundError
+
 # ── Weekend day threshold ───────────────────────────────────────────────
 _SATURDAY = 5
 
@@ -50,8 +52,11 @@ class MarketRegistry:
         self._markets = dict(markets)
 
     def get_market(self, market_id: str) -> MarketDefinition:
-        """Return market definition by id, or raise KeyError."""
-        return self._markets[market_id]
+        """Return market definition by id, or raise MarketNotFoundError."""
+        try:
+            return self._markets[market_id]
+        except KeyError:
+            raise MarketNotFoundError(f"Market '{market_id}' not found") from None
 
     def list_markets(self) -> list[MarketDefinition]:
         """Return all registered market definitions."""

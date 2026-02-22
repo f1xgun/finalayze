@@ -49,6 +49,11 @@ class ModeManager:
     """
 
     def __init__(self, initial_mode: WorkMode = WorkMode.DEBUG) -> None:
+        if initial_mode == WorkMode.REAL:
+            confirmed = os.getenv("FINALAYZE_REAL_CONFIRMED", "").lower()
+            if confirmed != "true":
+                msg = "Set FINALAYZE_REAL_CONFIRMED=true to enable real trading"
+                raise ModeError(msg)
         self._mode: WorkMode = initial_mode
 
     @property

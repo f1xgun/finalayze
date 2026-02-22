@@ -91,6 +91,14 @@ class SimulatedBroker(BrokerBase):
         """Update last known price for a symbol from a candle's close."""
         self._last_prices[candle.symbol] = candle.close
 
+    def has_position(self, symbol: str) -> bool:
+        """Return True if the broker holds a non-zero position in symbol."""
+        return symbol in self._positions and self._positions[symbol] > 0
+
+    def get_positions(self) -> dict[str, Decimal]:
+        """Return a copy of the current open positions keyed by symbol."""
+        return dict(self._positions)
+
     def get_portfolio(self) -> PortfolioState:
         """Return current portfolio state with computed equity."""
         position_value = sum(
