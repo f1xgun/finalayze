@@ -55,7 +55,9 @@ class Settings(BaseSettings):
     circuit_breaker_l3: float = 0.15
 
     # LLM
-    llm_model: str = "claude-sonnet-4-20250514"
+    llm_model: str = "meta-llama/llama-3.1-8b-instruct:free"
+    llm_provider: str = "openrouter"  # "openrouter" | "openai" | "anthropic"
+    llm_api_key: str = ""  # API key for selected provider
 
     # Safety
     real_confirmed: bool = False
