@@ -67,3 +67,6 @@ docker/data/
 *.pem
 *.key
 credentials.json
+
+# Worktrees
+.worktrees/

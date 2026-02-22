@@ -56,6 +56,7 @@ dev = [
     "pre-commit>=4.0.0",
     "types-PyYAML>=6.0.12",
     "types-redis>=4.6.0",
+    "pandas-stubs>=3.0.0",
 ]
 # moex extra: tinkoff-investments is currently quarantined on PyPI.
 # Will be added in Phase 2 when the package is restored.
@@ -135,6 +136,8 @@ show_error_codes = true
 [[tool.mypy.overrides]]
 module = [
     "finnhub.*",
+    "pandas",
+    "pandas.*",
     "pandas_ta.*",
     "yfinance.*",
     "alpaca.*",
@@ -168,3 +171,4 @@ markers = [
     "e2e: End-to-end tests (full system)",
     "slow: Slow tests (model training, backtests)",
 ]
+
