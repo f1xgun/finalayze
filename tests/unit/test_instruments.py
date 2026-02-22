@@ -83,6 +83,11 @@ def test_build_default_registry_has_us_instruments() -> None:
         assert instrument.market_id == US_MARKET
 
 
+def test_build_default_registry_has_expected_count() -> None:
+    registry = build_default_registry()
+    assert len(registry) == EXPECTED_DEFAULT_COUNT
+
+
 def test_register_overwrites() -> None:
     registry = InstrumentRegistry()
     original = Instrument(symbol=AAPL_SYMBOL, market_id=US_MARKET, name="Apple Original")

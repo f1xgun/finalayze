@@ -68,6 +68,18 @@ def test_set_rate_zero_raises() -> None:
         converter.set_rate("USDRUB", ZERO_RATE)
 
 
+def test_set_rate_rejects_non_positive_rate() -> None:
+    converter = CurrencyConverter()
+    with pytest.raises(ValueError, match=MATCH_RATE_POSITIVE):
+        converter.set_rate("USDRUB", NEGATIVE_RATE)
+
+
+def test_set_rate_rejects_invalid_pair_length() -> None:
+    converter = CurrencyConverter()
+    with pytest.raises(ValueError, match="6 characters"):
+        converter.set_rate("USDRUBL", Decimal(95))
+
+
 def test_to_base_converts_to_base_currency() -> None:
     converter = CurrencyConverter(base_currency=USD)
     result = converter.to_base(AMOUNT_9000_RUB, RUB)
