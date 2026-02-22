@@ -45,6 +45,30 @@ Every feature, bugfix, or refactor follows this mandatory sequence:
 - **Skill:** `finishing-a-development-branch`
 - Options: merge locally, create PR, keep branch, or discard
 
+### 7. PR Review-Fix Cycle (mandatory for PRs)
+
+After CI passes on a PR, run an automated review-fix loop until no issues remain:
+
+1. **Dispatch review subagent** — reads all changed files, creates GitHub issues for every
+   problem found (bugs, convention violations, missing tests, type safety, etc.)
+2. **Dispatch fix subagent** — reads all open issues on the PR, fixes them on the branch,
+   pushes, and verifies CI still passes
+3. **Repeat** steps 1-2 until the review subagent finds zero new issues to create
+4. **Merge** once CI is green and the review cycle is clean
+
+Each review issue must be:
+- Specific (file:line reference)
+- Actionable (exact description of the fix)
+- Labeled correctly (`bug`, `enhancement`, `test`, etc.)
+
+```bash
+# Create a review issue
+gh issue create --repo owner/repo --title "..." --body "file:line — ..." --label "bug"
+
+# Close fixed issues from a commit message
+gh issue close <number> --comment "Fixed in <commit-sha>"
+```
+
 ## Branch Strategy
 
 - `main` -- production-ready code, protected
@@ -93,8 +117,12 @@ docs(architecture): update data flow diagram
    - **What** changed and **why**.
    - Link to the relevant phase/task in `docs/plans/`.
    - Test plan or evidence of testing.
-5. At least one approval required before merge.
-6. Squash-merge to keep history clean.
+5. Wait for all CI jobs to pass (lint, typecheck, test).
+6. Run the **PR Review-Fix Cycle** (see Step 7 above) — dispatch review subagent,
+   fix all issues, repeat until clean.
+7. Squash-merge to keep history clean once CI is green and no open review issues remain.
+
+> **First PR for this project:** https://github.com/f1xgun/finalayze/pull/1 (Phase 1 backtest slice)
 
 ## Code Review Checklist
 
