@@ -23,3 +23,11 @@ strategies:
       bb_period: 20
       bb_std_dev: 2.5
       min_confidence: 0.7
+  pairs:
+    enabled: true
+    weight: 0.2
+    params:
+      pairs: [[SBER, VTBR], [GAZP, LKOH]]
+      z_entry: 2.0
+      z_exit: 0.5
+      min_confidence: 0.6
