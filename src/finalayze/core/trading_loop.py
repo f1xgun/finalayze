@@ -91,6 +91,9 @@ class TradingLoop:
         self._sentiment_cache: dict[str, float] = {}
         self._sentiment_lock = threading.Lock()
 
+        # Daily baseline equities: market_id -> equity at start of trading day
+        self._baseline_equities: dict[str, Decimal] = {}
+
         self._scheduler: BackgroundScheduler | None = None
         self._stop_event = threading.Event()
 
@@ -153,10 +156,15 @@ class TradingLoop:
             except Exception:
                 _log.exception("_news_cycle: error processing article %s", article.id)
 
+    async def _analyze_article(self, article: NewsArticle) -> tuple[object, object]:
+        """Run both async analysis calls concurrently."""
+        sentiment = await self._news_analyzer.analyze(article)
+        event = await self._event_classifier.classify(article)
+        return sentiment, event
+
     def _process_news_article(self, article: NewsArticle) -> None:
         """Analyze a single article and update sentiment cache."""
-        sentiment = asyncio.run(self._news_analyzer.analyze(article))
-        event = asyncio.run(self._event_classifier.classify(article))
+        sentiment, event = asyncio.run(self._analyze_article(article))
         active_segments = self._collect_active_segments()
         impacts = self._impact_estimator.estimate(
             article,
@@ -192,9 +200,10 @@ class TradingLoop:
                 continue
 
             market_equities[market_id] = equity
-            baseline_equities[market_id] = equity
+            baseline = self._baseline_equities.get(market_id, equity)
+            baseline_equities[market_id] = baseline
 
-            level = cb.check(current_equity=equity, baseline_equity=equity)
+            level = cb.check(current_equity=equity, baseline_equity=baseline)
             self._handle_market_level(market_id, level)
 
         if self._cross_market_breaker.check(market_equities, baseline_equities):
@@ -251,9 +260,21 @@ class TradingLoop:
             _log.exception("_strategy_cycle: failed to fetch candles for %s", instrument.symbol)
             return
 
-        signal = self._strategy.generate_signal(instrument.symbol, candles, seg_id)
+        with self._sentiment_lock:
+            sentiment_score = self._sentiment_cache.get(seg_id, _DEFAULT_SENTIMENT)
+
+        signal = self._strategy.generate_signal(
+            instrument.symbol, candles, seg_id, sentiment_score=sentiment_score
+        )
         if signal is None:
             return
+
+        _log.debug(
+            "_process_instrument: signal=%s sentiment_score=%.3f symbol=%s",
+            signal.direction,
+            sentiment_score,
+            instrument.symbol,
+        )
 
         broker = self._broker_router.route(market_id)
         portfolio = broker.get_portfolio()
@@ -294,7 +315,7 @@ class TradingLoop:
         try:
             result = self._broker_router.submit(order, market_id=market_id)
             if result.filled:
-                self._alerter.on_trade_filled(result, market_id, broker="alpaca")
+                self._alerter.on_trade_filled(result, market_id, broker=market_id)
             else:
                 self._alerter.on_trade_rejected(order, result.reason)
         except Exception:
@@ -311,6 +332,7 @@ class TradingLoop:
                 portfolio = broker.get_portfolio()
                 equity = portfolio.equity
                 new_baselines[market_id] = equity
+                self._baseline_equities[market_id] = equity
                 market_pnl[market_id] = _ZERO  # simplified: actual P&L tracked separately
                 cb.reset_daily(new_baseline=equity)
             except Exception:
@@ -343,4 +365,8 @@ class TradingLoop:
             if qty <= _ZERO:
                 continue
             order = OrderRequest(symbol=symbol, side="SELL", quantity=qty)
-            broker.submit_order(order)
+            try:
+                broker.submit_order(order)
+            except Exception as exc:
+                _log.error("liquidation_order_failed", extra={"symbol": symbol, "error": str(exc)})
+                self._alerter.on_error("TradingLoop", f"Liquidation failed for {symbol}: {exc}")

@@ -82,7 +82,9 @@ class MockStrategy(BaseStrategy):
     def get_parameters(self, segment_id: str) -> dict[str, object]:
         return {}
 
-    def generate_signal(self, symbol: str, candles: list[Candle], segment_id: str) -> Signal | None:
+    def generate_signal(
+        self, symbol: str, candles: list[Candle], segment_id: str, sentiment_score: float = 0.0
+    ) -> Signal | None:
         return self._return_signal
 
 
@@ -202,7 +204,11 @@ class TestStrategyCombiner:
                 return {}
 
             def generate_signal(
-                self, symbol: str, candles: list[Candle], segment_id: str
+                self,
+                symbol: str,
+                candles: list[Candle],
+                segment_id: str,
+                sentiment_score: float = 0.0,
             ) -> Signal | None:
                 called_tracker.append(True)
                 return _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")

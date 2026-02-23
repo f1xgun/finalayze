@@ -47,12 +47,14 @@ class CircuitBreaker:
         l1_threshold: float = _DEFAULT_L1,
         l2_threshold: float = _DEFAULT_L2,
         l3_threshold: float = _DEFAULT_L3,
+        baseline: Decimal = _ZERO,
     ) -> None:
         self._market_id = market_id
         self._l1 = Decimal(str(l1_threshold))
         self._l2 = Decimal(str(l2_threshold))
         self._l3 = Decimal(str(l3_threshold))
         self._level: CircuitLevel = CircuitLevel.NORMAL
+        self._baseline: Decimal = baseline
 
     @property
     def level(self) -> CircuitLevel:
@@ -63,6 +65,11 @@ class CircuitBreaker:
     def market_id(self) -> str:
         """Return the market identifier this breaker guards."""
         return self._market_id
+
+    @property
+    def baseline(self) -> Decimal:
+        """Return the stored baseline equity for the current trading day."""
+        return self._baseline
 
     def check(self, current_equity: Decimal, baseline_equity: Decimal) -> CircuitLevel:
         """Compute drawdown, update level, and return the new level.
@@ -91,15 +98,16 @@ class CircuitBreaker:
 
         return self._level
 
-    def reset_daily(self, new_baseline: Decimal) -> None:  # noqa: ARG002
+    def reset_daily(self, new_baseline: Decimal) -> None:
         """Daily auto-reset: clears CAUTION and HALTED; updates baseline.
 
         LIQUIDATE is intentionally preserved -- it requires ``reset_manual``.
 
         Args:
             new_baseline: New baseline equity (typically today's opening equity).
-                Stored for future use; currently the breaker is stateless.
+                Stored so ``_strategy_cycle`` can retrieve the day-start snapshot.
         """
+        self._baseline = new_baseline
         if self._level in (CircuitLevel.CAUTION, CircuitLevel.HALTED):
             self._level = CircuitLevel.NORMAL
 

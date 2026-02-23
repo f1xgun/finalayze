@@ -19,7 +19,7 @@ class BaseStrategy(ABC):
 
     @abstractmethod
     def generate_signal(
-        self, symbol: str, candles: list[Candle], segment_id: str
+        self, symbol: str, candles: list[Candle], segment_id: str, sentiment_score: float = 0.0
     ) -> Signal | None: ...
 
     @abstractmethod
