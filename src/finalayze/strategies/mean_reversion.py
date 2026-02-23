@@ -67,7 +67,11 @@ class MeanReversionStrategy(BaseStrategy):
             return {}
 
     def generate_signal(
-        self, symbol: str, candles: list[Candle], segment_id: str, sentiment_score: float = 0.0  # noqa: ARG002
+        self,
+        symbol: str,
+        candles: list[Candle],
+        segment_id: str,
+        sentiment_score: float = 0.0,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a mean reversion signal using Bollinger Bands."""
         params = self.get_parameters(segment_id)
