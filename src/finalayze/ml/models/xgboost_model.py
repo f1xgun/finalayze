@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import xgboost as xgb
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from finalayze.core.exceptions import InsufficientDataError
 from finalayze.ml.models.base import BaseMLModel
@@ -49,3 +54,16 @@ class XGBoostModel(BaseMLModel):
             verbosity=0,
         )
         self._model.fit(x_arr, y_arr)
+
+    def save(self, path: Path) -> None:
+        """Persist model to disk using joblib."""
+        import joblib  # noqa: PLC0415, import-untyped
+
+        joblib.dump(self, path)
+
+    @classmethod
+    def load_from(cls, path: Path) -> XGBoostModel:
+        """Load a previously saved XGBoostModel."""
+        import joblib  # noqa: PLC0415, import-untyped
+
+        return joblib.load(path)  # type: ignore[no-any-return]
