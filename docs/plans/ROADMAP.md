@@ -5,8 +5,8 @@
 | Phase | Name | Duration | Status |
 |-------|------|----------|--------|
 | 0 | Code Quality Foundation | 2-3 days | COMPLETE |
-| 1 | Foundation, US Market & Sandbox | Weeks 1-5 | IN PROGRESS (core + backtest stack complete) |
-| 2 | MOEX + Tinkoff, Intelligence & Test Mode | Weeks 6-10 | NOT STARTED |
+| 1 | Foundation, US Market & Sandbox | Weeks 1-5 | COMPLETE |
+| 2 | MOEX + Tinkoff, Intelligence & Test Mode | Weeks 6-10 | COMPLETE |
 | 3 | Hardening & Advanced | Weeks 11-14 | NOT STARTED |
 | 4 | Real Trading & Optimization | Weeks 15-18 | NOT STARTED |
 
@@ -24,7 +24,7 @@
 - [x] .gitignore
 - [x] Git initialized
 
-## Phase 1: Foundation, US Market & Sandbox -- IN PROGRESS
+## Phase 1: Foundation, US Market & Sandbox -- COMPLETE
 
 See [PHASE_1.md](PHASE_1.md) for detailed execution plan.
 
@@ -58,16 +58,23 @@ Implemented bottom-up through the full stack:
 - CLI: scripts/run_backtest.py, scripts/seed_historical_data.py
 - 349 unit tests, 95.64% coverage
 
-## Phase 2: MOEX + Tinkoff, Intelligence & Test Mode
+## Phase 2: MOEX + Tinkoff, Intelligence & Test Mode -- COMPLETE (2026-02-23)
 
-- [ ] Tinkoff gRPC integration
-- [ ] MOEX historical data seeding
-- [ ] Claude news analysis pipeline (EN + RU)
-- [ ] ML pipeline (XGBoost + LightGBM per segment)
-- [ ] Event-driven strategy
-- [ ] Broker router (Alpaca + Tinkoff)
-- [ ] Test mode (paper trading on both markets)
-- [ ] Streamlit dashboard
+PRs: #90 (Track A — Intelligence), #91 (Track B — MOEX). 489 tests, 93% coverage.
+
+- [x] Tinkoff gRPC integration (`TinkoffFetcher` via t-tech-investments SDK)
+- [x] 8 MOEX instruments with FIGI identifiers (SBER, GAZP, LKOH, GMKN, YNDX, NVTK, ROSN, VTBR)
+- [x] Abstract LLM client (OpenRouter default, OpenAI, Anthropic) + cache + retry
+- [x] News analysis pipeline (NewsApiFetcher, NewsAnalyzer EN/RU, EventClassifier, ImpactEstimator)
+- [x] ML pipeline scaffold (XGBoost + LightGBM per segment, EnsembleModel, MLModelRegistry)
+- [x] Event-driven strategy (reads YAML min_sentiment threshold per segment)
+- [x] AlpacaBroker (paper/live via alpaca-py)
+- [x] TinkoffBroker (sandbox/live via t-tech-investments, lot-size aware)
+- [x] BrokerRouter (dispatches orders by market_id)
+- [x] Alembic migration 002 (news_articles + sentiment_scores tables)
+- [ ] MOEX historical data seeding (deferred to Phase 3)
+- [ ] Test mode controller (deferred to Phase 3)
+- [ ] Streamlit dashboard (deferred to Phase 3)
 
 ## Phase 3: Hardening & Advanced
 
