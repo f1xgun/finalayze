@@ -28,6 +28,7 @@ class Instrument:
     lot_size: int = 1  # MOEX instruments often have lot sizes > 1
     currency: str = "USD"
     is_active: bool = True
+    segment_id: str = ""  # optional segment the instrument belongs to
 
 
 class InstrumentRegistry:
