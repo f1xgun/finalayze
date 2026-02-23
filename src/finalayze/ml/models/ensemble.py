@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
+
+from finalayze.core.exceptions import InsufficientDataError
 
 if TYPE_CHECKING:
     from finalayze.ml.models.base import BaseMLModel
@@ -47,8 +50,15 @@ class EnsembleModel:
         return sum(probs) / len(probs)
 
     def fit(self, X: list[dict[str, float]], y: list[int]) -> None:  # noqa: N803
-        """Train all constituent models (including LSTM if present)."""
+        """Train all constituent models (including LSTM if present).
+
+        Each model is trained independently. If a model raises InsufficientDataError
+        (e.g. LSTM when len(X) < sequence_length), it is left untrained and will
+        return 0.5 in predict_proba — graceful degradation.
+        """
         for model in self._models:
-            model.fit(X, y)
+            with contextlib.suppress(InsufficientDataError):
+                model.fit(X, y)
         if self._lstm_model is not None:
-            self._lstm_model.fit(X, y)
+            with contextlib.suppress(InsufficientDataError):
+                self._lstm_model.fit(X, y)

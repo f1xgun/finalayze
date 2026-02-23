@@ -9,18 +9,24 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-# Ensure src/ is importable when run directly
+# Ensure src/ and project root are importable when run directly
 _PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+sys.path.insert(0, str(_PROJECT_ROOT))  # for config.settings
 
 # torch must be imported before lightgbm to prevent OpenMP thread-pool conflicts
 import torch  # noqa: F401
+from config.settings import Settings
 from sklearn.metrics import accuracy_score
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from finalayze.core.models import CandleModel
 from finalayze.core.schemas import Candle
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
 from finalayze.ml.features.technical import compute_features
@@ -33,6 +39,7 @@ _TRAIN_RATIO = 0.8
 _LOOKBACK_DAYS = 730  # 2 years of history
 _DEFAULT_OUTPUT_DIR = "models/"
 _SEQUENCE_LENGTH = 20
+_MIN_CANDLES = _WINDOW_SIZE + 1  # need at least WINDOW_SIZE + 1 for one sample
 
 # Map segment_id → representative symbols for yfinance fallback
 _SEGMENT_SYMBOLS: dict[str, list[str]] = {
@@ -47,29 +54,71 @@ _SEGMENT_SYMBOLS: dict[str, list[str]] = {
 }
 
 
-def _fetch_candles(segment_id: str, symbols: list[str]) -> list[Candle]:
-    """Fetch candles from yfinance for the given symbols."""
+def _orm_to_candle(row: CandleModel) -> Candle:
+    """Convert a CandleModel ORM row to a Candle schema object."""
+    return Candle(
+        symbol=row.symbol,
+        market_id=row.market_id,
+        timeframe=row.timeframe,
+        timestamp=row.timestamp,
+        open=row.open,
+        high=row.high,
+        low=row.low,
+        close=row.close,
+        volume=row.volume,
+    )
+
+
+async def _fetch_from_db(symbol: str, market_id: str, settings: Settings) -> list[Candle]:
+    """Try to load candles from DB. Returns empty list on failure."""
+    try:
+        engine = create_async_engine(settings.database_url, echo=False)
+        async with AsyncSession(engine) as session:
+            result = await session.execute(
+                select(CandleModel)
+                .where(CandleModel.symbol == symbol, CandleModel.market_id == market_id)
+                .order_by(CandleModel.timestamp)
+            )
+            rows = result.scalars().all()
+            return [_orm_to_candle(row) for row in rows]
+    except Exception:
+        return []
+
+
+def _fetch_symbol_candles(symbol: str, market_id: str, settings: Settings) -> list[Candle]:
+    """Fetch candles for a single symbol: DB first, yfinance fallback."""
+    candles = asyncio.run(_fetch_from_db(symbol, market_id, settings))
+    if candles:
+        return candles
+    # Fallback to yfinance
     end = datetime.now(tz=UTC)
     start = end - timedelta(days=_LOOKBACK_DAYS)
-    market_id = segment_id.split("_", maxsplit=1)[0]
     fetcher = YFinanceFetcher(market_id=market_id)
+    try:
+        return fetcher.fetch_candles(symbol, start, end)
+    except Exception as exc:
+        print(f"  [warn] Could not fetch {symbol} from yfinance: {exc}")
+        return []
+
+
+def _fetch_candles(
+    segment_id: str, symbols: list[str], settings: Settings | None = None
+) -> list[Candle]:
+    """Fetch candles for all symbols in a segment, processing each independently."""
+    if settings is None:
+        settings = Settings()
+    market_id = segment_id.split("_", maxsplit=1)[0]
     candles: list[Candle] = []
     for symbol in symbols:
-        try:
-            fetched = fetcher.fetch_candles(symbol, start, end)
-            candles.extend(fetched)
-        except Exception as exc:
-            print(f"  [warn] Could not fetch {symbol}: {exc}")
+        symbol_candles = _fetch_symbol_candles(symbol, market_id, settings)
+        candles.extend(symbol_candles)
     return candles
 
 
-def _build_dataset(
-    candles: list[Candle],
-) -> tuple[list[dict[str, float]], list[int]]:
-    """Build (features, labels) from windowed candles."""
+def _build_windows(candles: list[Candle]) -> tuple[list[dict[str, float]], list[int]]:
+    """Build (features, labels) from a single contiguous candle series."""
     features_list: list[dict[str, float]] = []
     label_list: list[int] = []
-    # Sort candles by timestamp
     sorted_candles = sorted(candles, key=lambda c: c.timestamp)
     for i in range(len(sorted_candles) - _WINDOW_SIZE):
         window = sorted_candles[i : i + _WINDOW_SIZE]
@@ -85,20 +134,43 @@ def _build_dataset(
     return features_list, label_list
 
 
+def _build_dataset(
+    segment_id: str,
+    symbols: list[str],
+    settings: Settings | None = None,
+) -> tuple[list[dict[str, float]], list[int]]:
+    """Build (features, labels) by processing each symbol's candles independently."""
+    if settings is None:
+        settings = Settings()
+    market_id = segment_id.split("_", maxsplit=1)[0]
+    features_out: list[dict[str, float]] = []
+    labels_out: list[int] = []
+    for symbol in symbols:
+        candles = _fetch_symbol_candles(symbol, market_id, settings)
+        if len(candles) < _MIN_CANDLES:
+            continue
+        x_sym, y_sym = _build_windows(candles)
+        features_out.extend(x_sym)
+        labels_out.extend(y_sym)
+    return features_out, labels_out
+
+
 def train_one_segment(
     segment_id: str,
     symbols: list[str],
     output_dir: Path,
+    settings: Settings | None = None,
 ) -> None:
     """Train and save models for a single segment."""
+    if settings is None:
+        settings = Settings()
     print(f"\n[{segment_id}] Fetching candles for {symbols}...")
-    candles = _fetch_candles(segment_id, symbols)
 
-    if not candles:
+    features_list, label_list = _build_dataset(segment_id, symbols, settings)
+    if not features_list:
         print(f"[{segment_id}] No candles — skipping.")
         return
 
-    features_list, label_list = _build_dataset(candles)
     if len(features_list) < _WINDOW_SIZE:
         print(f"[{segment_id}] Only {len(features_list)} samples — need {_WINDOW_SIZE}+, skipping.")
         return

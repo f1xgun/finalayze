@@ -61,7 +61,9 @@ class PairsStrategy(BaseStrategy):
         except (FileNotFoundError, KeyError):
             return {}
 
-    def generate_signal(self, symbol: str, candles: list[Candle], segment_id: str) -> Signal | None:
+    def generate_signal(
+        self, symbol: str, candles: list[Candle], segment_id: str, sentiment_score: float = 0.0  # noqa: ARG002
+    ) -> Signal | None:
         """Generate a pairs trading signal for symbol.
 
         Requires peer candles to be set via set_peer_candles() for all symbols
@@ -143,9 +145,9 @@ class PairsStrategy(BaseStrategy):
         if float(p_value) > _COINT_P_THRESHOLD:
             return None
 
-        # OLS beta
+        # OLS beta — use np.cov for both terms to ensure consistent N-1 denominator
         cov_matrix = np.cov(log_a, log_b)
-        beta = float(cov_matrix[0, 1] / np.var(log_b))
+        beta = float(cov_matrix[0, 1] / cov_matrix[1, 1])
 
         # Spread and z-score
         spread = log_a - beta * log_b
@@ -169,6 +171,13 @@ class PairsStrategy(BaseStrategy):
             return None  # between z_exit and z_entry — ambiguous zone
 
         confidence = min(1.0, abs(z) / z_entry)
+
+        # Gate on min_confidence parameter from YAML preset
+        params = self.get_parameters(segment_id)
+        min_conf = float(params.get("min_confidence", 0.6))  # type: ignore[arg-type]
+        if confidence < min_conf:
+            return None
+
         market_id = candles_a[0].market_id
 
         return Signal(

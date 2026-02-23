@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
@@ -59,24 +60,36 @@ class LSTMModel(BaseMLModel):
         self._hidden_size = hidden_size
         self._num_layers = num_layers
         self._n_features: int | None = None
+        self._feature_names: list[str] | None = None
         self._model: _LSTMNet | None = None
         self._trained: bool = False
         self._feature_buffer: deque[list[float]] = deque(maxlen=sequence_length)
+        self._lock = threading.Lock()
 
     def predict_proba(self, features: dict[str, float]) -> float:
         """Return BUY probability in [0.0, 1.0]. Returns 0.5 when untrained."""
         if not self._trained or self._model is None:
             return _UNTRAINED_PROB
 
+        if self._feature_names is not None and sorted(features.keys()) != self._feature_names:
+            msg = (
+                f"Feature mismatch: expected {self._feature_names}, "
+                f"got {sorted(features.keys())}"
+            )
+            raise InsufficientDataError(msg)
+
         sorted_vals = [features[k] for k in sorted(features)]
-        self._feature_buffer.append(sorted_vals)
 
-        if len(self._feature_buffer) < self._sequence_length:
-            # Pad with the current observation repeated until buffer is full
-            while len(self._feature_buffer) < self._sequence_length:
-                self._feature_buffer.appendleft(sorted_vals)
+        with self._lock:
+            self._feature_buffer.append(sorted_vals)
 
-        seq = list(self._feature_buffer)
+            if len(self._feature_buffer) < self._sequence_length:
+                # Pad with the current observation repeated until buffer is full
+                while len(self._feature_buffer) < self._sequence_length:
+                    self._feature_buffer.appendleft(sorted_vals)
+
+            seq = list(self._feature_buffer)
+
         tensor = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)
         self._model.eval()
         with torch.no_grad():
@@ -100,6 +113,7 @@ class LSTMModel(BaseMLModel):
         feature_keys = sorted(X[0])
         n_features = len(feature_keys)
         self._n_features = n_features
+        self._feature_names = feature_keys
 
         # Build tensor: shape (n_sequences, sequence_length, n_features)
         sequences: list[list[list[float]]] = []
@@ -131,7 +145,7 @@ class LSTMModel(BaseMLModel):
         """Save model state dict and config to path."""
         if self._model is None:
             msg = "Cannot save an untrained LSTMModel"
-            raise InsufficientDataError(msg)
+            raise ValueError(msg)
         payload: dict[str, Any] = {
             "state_dict": self._model.state_dict(),
             "config": {
