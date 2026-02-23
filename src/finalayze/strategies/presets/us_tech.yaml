@@ -23,3 +23,11 @@ strategies:
     params:
       min_sentiment: 0.7
       event_types: [earnings, fda, product_launch]
+  pairs:
+    enabled: true
+    weight: 0.15
+    params:
+      pairs: [[AAPL, MSFT]]
+      z_entry: 2.0
+      z_exit: 0.5
+      min_confidence: 0.6

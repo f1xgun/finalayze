@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+# torch must be imported before lightgbm to prevent OpenMP thread-pool conflicts
+# that cause segmentation faults when both libraries are used together.
+import torch  # noqa: F401  # isort: skip
 import pytest
 from config.modes import WorkMode
 from config.settings import Settings

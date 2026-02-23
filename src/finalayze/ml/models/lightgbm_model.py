@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import lightgbm as lgb
 import numpy as np
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from finalayze.core.exceptions import InsufficientDataError
 from finalayze.ml.models.base import BaseMLModel
@@ -45,3 +50,16 @@ class LightGBMModel(BaseMLModel):
             n_estimators=100, max_depth=4, learning_rate=0.1, verbosity=-1
         )
         self._model.fit(x_arr, y_arr)
+
+    def save(self, path: Path) -> None:
+        """Persist model to disk using joblib."""
+        import joblib  # noqa: PLC0415, import-untyped
+
+        joblib.dump(self, path)
+
+    @classmethod
+    def load_from(cls, path: Path) -> LightGBMModel:
+        """Load a previously saved LightGBMModel."""
+        import joblib  # noqa: PLC0415, import-untyped
+
+        return joblib.load(path)  # type: ignore[no-any-return]

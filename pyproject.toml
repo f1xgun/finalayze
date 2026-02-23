@@ -30,6 +30,7 @@ dependencies = [
     "polars>=1.17.0",
     "pandas-ta>=0.3.14b1",
     "numpy>=1.26.0",
+    "statsmodels>=0.14.0",
     # LLM
     "anthropic>=0.42.0",
     "openai>=1.50.0",
@@ -117,8 +118,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "T20", "ARG"]
-"scripts/**" = ["T20"]
+"tests/**" = ["S101", "T20", "ARG", "PLC0415", "N806", "TC001", "RUF100", "PT018", "S108", "F401", "SLF001", "PLR2004", "TC003"]
+"scripts/**" = ["T20", "E402", "S112", "TC001"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["finalayze"]
@@ -160,6 +161,8 @@ module = [
     "torch.*",
     "openai.*",
     "t_tech.*",
+    "statsmodels.*",
+    "joblib.*",
 ]
 ignore_missing_imports = true
 
