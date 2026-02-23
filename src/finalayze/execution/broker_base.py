@@ -62,3 +62,12 @@ class BrokerBase(ABC):
     def get_positions(self) -> dict[str, Decimal]:
         """Return a copy of the current open positions keyed by symbol."""
         ...
+
+    @abstractmethod
+    def cancel_order(self, order_id: str) -> None:
+        """Cancel a pending order by its ID.
+
+        Args:
+            order_id: The broker-assigned order identifier to cancel.
+        """
+        ...

@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from t_tech.invest import AsyncClient, CandleInterval
+from t_tech.invest.sandbox.async_client import AsyncSandboxClient
 
 from finalayze.core.exceptions import DataFetchError, InstrumentNotFoundError
 from finalayze.core.schemas import Candle
@@ -87,7 +88,8 @@ class TinkoffFetcher(BaseFetcher):
         interval: CandleInterval,
     ) -> list[Any]:
         """Async call to Tinkoff SDK get_all_candles."""
-        async with AsyncClient(self._token) as client:
+        client_cls = AsyncSandboxClient if self._sandbox else AsyncClient
+        async with client_cls(self._token) as client:
             response = await client.market_data.get_candles(
                 figi=figi,
                 from_=start,

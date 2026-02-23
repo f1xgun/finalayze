@@ -124,3 +124,11 @@ class AlpacaBroker(BrokerBase):
             msg = f"Alpaca positions fetch failed: {exc}"
             raise BrokerError(msg) from exc
         return {p.symbol: Decimal(str(p.qty)) for p in positions}  # type: ignore[union-attr]
+
+    def cancel_order(self, order_id: str) -> None:
+        """Cancel a pending Alpaca order by ID."""
+        try:
+            self._client.cancel_order_by_id(order_id)
+        except Exception as exc:
+            msg = f"Alpaca cancel_order failed for {order_id}: {exc}"
+            raise BrokerError(msg) from exc

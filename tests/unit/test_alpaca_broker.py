@@ -164,3 +164,24 @@ class TestAlpacaBrokerHasPosition:
         with patch("finalayze.execution.alpaca_broker.TradingClient", return_value=mock_client):
             broker = _make_broker()
             assert broker.has_position("MSFT") is False
+
+
+class TestAlpacaBrokerCancelOrder:
+    def test_cancel_order_success(self) -> None:
+        mock_client = _mock_trading_client()
+        mock_client.cancel_order_by_id.return_value = None
+
+        with patch("finalayze.execution.alpaca_broker.TradingClient", return_value=mock_client):
+            broker = _make_broker()
+            broker.cancel_order("order-123")
+
+        mock_client.cancel_order_by_id.assert_called_once_with("order-123")
+
+    def test_cancel_order_api_error_raises(self) -> None:
+        mock_client = _mock_trading_client()
+        mock_client.cancel_order_by_id.side_effect = Exception("order not found")
+
+        with patch("finalayze.execution.alpaca_broker.TradingClient", return_value=mock_client):
+            broker = _make_broker()
+            with pytest.raises(BrokerError, match="order not found"):
+                broker.cancel_order("order-999")

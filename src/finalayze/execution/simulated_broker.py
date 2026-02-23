@@ -102,6 +102,10 @@ class SimulatedBroker(BrokerBase):
         """Return a copy of the current open positions keyed by symbol."""
         return dict(self._positions)
 
+    def cancel_order(self, order_id: str) -> None:
+        """No-op for simulated broker — stop-loss keyed by symbol, not order ID."""
+        self._stop_losses.pop(order_id, None)
+
     def get_portfolio(self) -> PortfolioState:
         """Return current portfolio state with computed equity."""
         position_value = sum(

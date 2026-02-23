@@ -31,21 +31,18 @@ def _make_router() -> tuple[BrokerRouter, MagicMock, MagicMock]:
 class TestBrokerRouterRoute:
     def test_routes_us_order_to_alpaca(self) -> None:
         router, us_broker, _ = _make_router()
-        order = OrderRequest(symbol="AAPL", side="BUY", quantity=Decimal(10))
-        routed = router.route(order, market_id="us")
+        routed = router.route("us")
         assert routed is us_broker
 
     def test_routes_moex_order_to_tinkoff(self) -> None:
         router, _, moex_broker = _make_router()
-        order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
-        routed = router.route(order, market_id="moex")
+        routed = router.route("moex")
         assert routed is moex_broker
 
     def test_unknown_market_raises_broker_error(self) -> None:
         router, _, _ = _make_router()
-        order = OrderRequest(symbol="XYZ", side="BUY", quantity=Decimal(1))
         with pytest.raises(BrokerError, match="No broker registered for market"):
-            router.route(order, market_id="london")
+            router.route("london")
 
 
 class TestBrokerRouterSubmit:
@@ -75,9 +72,8 @@ class TestBrokerRouterSubmit:
 class TestBrokerRouterRegistration:
     def test_empty_router_raises_on_route(self) -> None:
         router = BrokerRouter({})
-        order = OrderRequest(symbol="AAPL", side="BUY", quantity=Decimal(1))
         with pytest.raises(BrokerError, match="No broker registered"):
-            router.route(order, market_id="us")
+            router.route("us")
 
     def test_registered_markets(self) -> None:
         router, _, _ = _make_router()

@@ -27,14 +27,14 @@ class BrokerRouter:
             "us": alpaca_broker,
             "moex": tinkoff_broker,
         })
-        broker = router.route(order, market_id="us")
+        broker = router.route("us")
         result = router.submit(order, market_id="moex")
     """
 
     def __init__(self, brokers: dict[str, BrokerBase]) -> None:
         self._brokers = dict(brokers)
 
-    def route(self, order: OrderRequest, market_id: str) -> BrokerBase:  # noqa: ARG002
+    def route(self, market_id: str) -> BrokerBase:
         """Return the broker registered for market_id.
 
         Raises:
@@ -63,7 +63,7 @@ class BrokerRouter:
         Returns:
             OrderResult from the routed broker.
         """
-        broker = self.route(order, market_id)
+        broker = self.route(market_id)
         return broker.submit_order(order, fill_candle=fill_candle)  # type: ignore[arg-type]
 
     @property

@@ -145,14 +145,31 @@ class TinkoffBroker(BrokerBase):
     def has_position(self, symbol: str) -> bool:
         """Return True if Tinkoff account holds a non-zero position in symbol."""
         instrument = self._registry.get(symbol, _MOEX_MARKET_ID)
+        if instrument.figi is None:
+            msg = f"Instrument '{symbol}' has no FIGI assigned"
+            raise InstrumentNotFoundError(msg)
         figi = instrument.figi
         portfolio = self.get_portfolio()
-        held = portfolio.positions.get(figi or "", Decimal(0))
+        held = portfolio.positions.get(figi, Decimal(0))
         return held > 0
 
     def get_positions(self) -> dict[str, Decimal]:
         """Return current Tinkoff positions (FIGI-keyed) as Decimal quantities."""
         return dict(self.get_portfolio().positions)
+
+    def cancel_order(self, order_id: str) -> None:
+        """Cancel a pending Tinkoff order by ID."""
+        try:
+            asyncio.run(self._cancel_order_async(order_id))
+        except Exception as exc:
+            msg = f"Tinkoff cancel_order failed for {order_id}: {exc}"
+            raise BrokerError(msg) from exc
+
+    async def _cancel_order_async(self, order_id: str) -> None:
+        """Async call to Tinkoff SDK cancel_order."""
+        client_cls = AsyncSandboxClient if self._sandbox else AsyncClient
+        async with client_cls(self._token) as client:
+            await client.orders.cancel_order(account_id="", order_id=order_id)
 
     @staticmethod
     def _quotation_to_decimal(q: object) -> Decimal:
