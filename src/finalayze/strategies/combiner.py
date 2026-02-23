@@ -33,6 +33,7 @@ class StrategyCombiner:
         symbol: str,
         candles: list[Candle],
         segment_id: str,
+        sentiment_score: float = 0.0,
     ) -> Signal | None:
         """Generate a combined signal by weighting enabled strategy signals."""
         config = self._load_config(segment_id)
@@ -58,7 +59,9 @@ class StrategyCombiner:
                 weight = Decimal(str(strategy_cfg.get("weight", "1.0")))
             except InvalidOperation:
                 weight = Decimal("1.0")
-            signal = strategy.generate_signal(symbol, candles, segment_id)
+            signal = strategy.generate_signal(
+                symbol, candles, segment_id, sentiment_score=sentiment_score
+            )
             if signal is None:
                 continue
 

@@ -49,7 +49,13 @@ class MomentumStrategy(BaseStrategy):
         except FileNotFoundError:
             return {}
 
-    def generate_signal(self, symbol: str, candles: list[Candle], segment_id: str) -> Signal | None:
+    def generate_signal(
+        self,
+        symbol: str,
+        candles: list[Candle],
+        segment_id: str,
+        sentiment_score: float = 0.0,  # noqa: ARG002
+    ) -> Signal | None:
         """Generate a momentum signal from RSI and MACD indicators."""
         if len(candles) < _MIN_CANDLES:
             return None

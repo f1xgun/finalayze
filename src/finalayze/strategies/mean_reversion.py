@@ -66,7 +66,13 @@ class MeanReversionStrategy(BaseStrategy):
         except (FileNotFoundError, OSError, yaml.YAMLError):
             return {}
 
-    def generate_signal(self, symbol: str, candles: list[Candle], segment_id: str) -> Signal | None:
+    def generate_signal(
+        self,
+        symbol: str,
+        candles: list[Candle],
+        segment_id: str,
+        sentiment_score: float = 0.0,  # noqa: ARG002
+    ) -> Signal | None:
         """Generate a mean reversion signal using Bollinger Bands."""
         params = self.get_parameters(segment_id)
         bb_period_raw = params.get("bb_period", _DEFAULT_BB_PERIOD)

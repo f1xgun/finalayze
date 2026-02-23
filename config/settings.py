@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     llm_provider: Literal["openrouter", "openai", "anthropic"] = "openrouter"
     llm_api_key: str = ""  # API key for selected provider
 
+    # Cycle intervals (restart required to apply changes)
+    news_cycle_minutes: int = 30  # FINALAYZE_NEWS_CYCLE_MINUTES
+    strategy_cycle_minutes: int = 60  # FINALAYZE_STRATEGY_CYCLE_MINUTES
+    daily_reset_hour_utc: int = 0  # FINALAYZE_DAILY_RESET_HOUR_UTC
+
+    # Telegram alerting
+    telegram_bot_token: str = ""  # FINALAYZE_TELEGRAM_BOT_TOKEN
+    telegram_chat_id: str = ""  # FINALAYZE_TELEGRAM_CHAT_ID
+
     # Safety
     real_confirmed: bool = False
 
