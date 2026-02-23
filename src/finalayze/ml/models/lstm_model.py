@@ -72,10 +72,7 @@ class LSTMModel(BaseMLModel):
             return _UNTRAINED_PROB
 
         if self._feature_names is not None and sorted(features.keys()) != self._feature_names:
-            msg = (
-                f"Feature mismatch: expected {self._feature_names}, "
-                f"got {sorted(features.keys())}"
-            )
+            msg = f"Feature mismatch: expected {self._feature_names}, got {sorted(features.keys())}"
             raise InsufficientDataError(msg)
 
         sorted_vals = [features[k] for k in sorted(features)]
