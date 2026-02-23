@@ -123,3 +123,68 @@ class BacktestResult(BaseModel):
     profit_factor: Decimal
     total_return: Decimal
     total_trades: int
+
+
+class NewsArticle(BaseModel):
+    """A news article fetched from an external source."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    source: str
+    title: str
+    content: str
+    url: str
+    language: str  # "en" | "ru"
+    published_at: datetime
+    symbols: list[str] = []
+    affected_segments: list[str] = []
+    scope: str | None = None  # "global" | "us" | "russia" | "sector"
+    raw_sentiment: float | None = None
+    credibility_score: float | None = None
+
+    @field_validator("published_at")
+    @classmethod
+    def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes."""
+        if v.tzinfo is None:
+            msg = "published_at must be timezone-aware (UTC)"
+            raise ValueError(msg)
+        return v
+
+    @field_validator("raw_sentiment")
+    @classmethod
+    def sentiment_in_range(cls, v: float | None) -> float | None:
+        """Validate sentiment is in [-1.0, 1.0] when provided."""
+        if v is not None and not (-1.0 <= v <= 1.0):
+            msg = f"raw_sentiment must be in [-1.0, 1.0], got {v}"
+            raise ValueError(msg)
+        return v
+
+
+class SentimentResult(BaseModel):
+    """Result of LLM sentiment analysis on a news article."""
+
+    model_config = ConfigDict(frozen=True)
+
+    sentiment: float  # -1.0 to +1.0
+    confidence: float  # 0.0 to 1.0
+    reasoning: str
+
+    @field_validator("sentiment")
+    @classmethod
+    def sentiment_in_range(cls, v: float) -> float:
+        """Validate sentiment is in [-1.0, 1.0]."""
+        if not (-1.0 <= v <= 1.0):
+            msg = f"sentiment must be in [-1.0, 1.0], got {v}"
+            raise ValueError(msg)
+        return v
+
+    @field_validator("confidence")
+    @classmethod
+    def confidence_in_range(cls, v: float) -> float:
+        """Validate confidence is in [0.0, 1.0]."""
+        if not (0.0 <= v <= 1.0):
+            msg = f"confidence must be in [0.0, 1.0], got {v}"
+            raise ValueError(msg)
+        return v

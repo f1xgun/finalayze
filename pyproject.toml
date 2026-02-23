@@ -21,6 +21,7 @@ dependencies = [
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
     # ML
+    "scikit-learn>=1.5.0",
     "xgboost>=2.1.0",
     "lightgbm>=4.5.0",
     "torch>=2.5.0",
@@ -31,6 +32,7 @@ dependencies = [
     "numpy>=1.26.0",
     # LLM
     "anthropic>=0.42.0",
+    "openai>=1.50.0",
     # Brokers
     "alpaca-py>=0.33.0",
     # News & Data
@@ -58,10 +60,6 @@ dev = [
     "types-redis>=4.6.0",
     "pandas-stubs>=3.0.0",
 ]
-# moex extra: tinkoff-investments is currently quarantined on PyPI.
-# Will be added in Phase 2 when the package is restored.
-# Install manually: pip install git+https://github.com/Tinkoff/invest-python.git
-
 [build-system]
 requires = ["uv_build>=0.10.4,<0.11.0"]
 build-backend = "uv_build"
@@ -145,9 +143,12 @@ module = [
     "streamlit.*",
     "celery.*",
     "apscheduler.*",
+    "sklearn.*",
     "xgboost.*",
     "lightgbm.*",
     "torch.*",
+    "openai.*",
+    "t_tech.*",
 ]
 ignore_missing_imports = true
 

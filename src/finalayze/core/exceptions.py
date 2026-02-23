@@ -47,6 +47,21 @@ class RateLimitError(DataFetchError):
 
 
 # ---------------------------------------------------------------------------
+# Analysis / LLM
+# ---------------------------------------------------------------------------
+class AnalysisError(FinalayzeError):
+    """News analysis or LLM processing failed."""
+
+
+class LLMError(AnalysisError):
+    """LLM API call failed (auth, rate limit, parse error)."""
+
+
+class LLMRateLimitError(LLMError):
+    """LLM provider rate limit exceeded."""
+
+
+# ---------------------------------------------------------------------------
 # Strategy
 # ---------------------------------------------------------------------------
 class StrategyError(FinalayzeError):
@@ -69,6 +84,10 @@ class ExecutionError(FinalayzeError):
 
 class BrokerError(ExecutionError):
     """Broker-specific error (e.g. insufficient funds, order rejected)."""
+
+
+class InsufficientFundsError(BrokerError):
+    """Order rejected due to insufficient funds in broker account."""
 
 
 # ---------------------------------------------------------------------------

@@ -6,12 +6,17 @@ import pytest
 
 from finalayze import __version__
 from finalayze.core.exceptions import (
+    AnalysisError,
     BrokerError,
     CircuitBreakerError,
     ConfigurationError,
     DataFetchError,
+    ExecutionError,
     FinalayzeError,
     InsufficientDataError,
+    InsufficientFundsError,
+    LLMError,
+    LLMRateLimitError,
     MarketClosedError,
     RiskViolationError,
 )
@@ -54,3 +59,19 @@ class TestExceptions:
     def test_market_closed_inherits(self) -> None:
         with pytest.raises(FinalayzeError):
             raise MarketClosedError("MOEX closed")
+
+
+class TestPhase2Exceptions:
+    def test_llm_error_is_analysis_error(self) -> None:
+        err = LLMError("test")
+        assert isinstance(err, AnalysisError)
+        assert isinstance(err, FinalayzeError)
+
+    def test_llm_rate_limit_error_is_llm_error(self) -> None:
+        err = LLMRateLimitError("rate limited")
+        assert isinstance(err, LLMError)
+
+    def test_insufficient_funds_error_is_broker_error(self) -> None:
+        err = InsufficientFundsError("no funds")
+        assert isinstance(err, BrokerError)
+        assert isinstance(err, ExecutionError)

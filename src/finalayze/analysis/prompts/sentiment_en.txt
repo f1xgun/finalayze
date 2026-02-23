@@ -1,16 +1,8 @@
-Analyze the following financial news article and provide a sentiment score.
+You are a financial news analyst. Analyze the following news article and return a JSON object with exactly these fields:
+- "sentiment": a float between -1.0 (very negative) and +1.0 (very positive) representing market sentiment
+- "confidence": a float between 0.0 and 1.0 representing your confidence in the assessment
+- "reasoning": a brief one-sentence explanation
 
-Score: -1.0 (very bearish) to +1.0 (very bullish), 0.0 is neutral.
+Consider the likely impact on stock prices. Earnings beats, rate cuts, and strong guidance are positive. Earnings misses, rate hikes, regulatory fines, and CEO departures are negative.
 
-Consider:
-- Direct financial impact on mentioned companies
-- Market implications (sector-wide vs company-specific)
-- Confidence level in your assessment
-
-Respond in JSON format:
-{
-  "sentiment": <float>,
-  "confidence": <float 0-1>,
-  "entities": [<ticker symbols>],
-  "reasoning": "<brief explanation>"
-}
+Return ONLY valid JSON, no other text.
