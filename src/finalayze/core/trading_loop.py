@@ -29,11 +29,11 @@ from finalayze.risk.circuit_breaker import CircuitLevel
 if TYPE_CHECKING:
     from config.settings import Settings
 
-    from finalayze.analysis.event_classifier import EventClassifier
+    from finalayze.analysis.event_classifier import EventClassifier, EventType
     from finalayze.analysis.impact_estimator import ImpactEstimator
     from finalayze.analysis.news_analyzer import NewsAnalyzer
     from finalayze.core.alerts import TelegramAlerter
-    from finalayze.core.schemas import Candle, Signal
+    from finalayze.core.schemas import Candle, Signal, SentimentResult
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
     from finalayze.execution.broker_base import BrokerBase
     from finalayze.execution.broker_router import BrokerRouter
@@ -156,7 +156,7 @@ class TradingLoop:
             except Exception:
                 _log.exception("_news_cycle: error processing article %s", article.id)
 
-    async def _analyze_article(self, article: NewsArticle) -> tuple[object, object]:
+    async def _analyze_article(self, article: NewsArticle) -> tuple[SentimentResult, EventType]:
         """Run both async analysis calls concurrently."""
         sentiment = await self._news_analyzer.analyze(article)
         event = await self._event_classifier.classify(article)
