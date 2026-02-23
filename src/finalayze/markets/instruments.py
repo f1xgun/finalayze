@@ -114,9 +114,89 @@ DEFAULT_US_INSTRUMENTS: list[Instrument] = [
 ]
 
 
+# Default MOEX instruments for Phase 2
+# FIGI identifiers from Tinkoff Invest API instrument catalogue.
+DEFAULT_MOEX_INSTRUMENTS: list[Instrument] = [
+    Instrument(
+        symbol="SBER",
+        market_id="moex",
+        name="Sberbank",
+        instrument_type="stock",
+        figi="BBG004730N88",
+        lot_size=10,
+        currency="RUB",
+    ),
+    Instrument(
+        symbol="GAZP",
+        market_id="moex",
+        name="Gazprom",
+        instrument_type="stock",
+        figi="BBG004730RP0",
+        lot_size=10,
+        currency="RUB",
+    ),
+    Instrument(
+        symbol="LKOH",
+        market_id="moex",
+        name="Lukoil",
+        instrument_type="stock",
+        figi="BBG004731032",
+        lot_size=1,
+        currency="RUB",
+    ),
+    Instrument(
+        symbol="GMKN",
+        market_id="moex",
+        name="Norilsk Nickel",
+        instrument_type="stock",
+        figi="BBG004731489",
+        lot_size=1,
+        currency="RUB",
+    ),
+    Instrument(
+        symbol="YNDX",
+        market_id="moex",
+        name="Yandex",
+        instrument_type="stock",
+        figi="BBG006L8G4H1",
+        lot_size=1,
+        currency="RUB",
+    ),
+    Instrument(
+        symbol="NVTK",
+        market_id="moex",
+        name="Novatek",
+        instrument_type="stock",
+        figi="BBG00475KKY8",
+        lot_size=1,
+        currency="RUB",
+    ),
+    Instrument(
+        symbol="ROSN",
+        market_id="moex",
+        name="Rosneft",
+        instrument_type="stock",
+        figi="BBG004731354",
+        lot_size=1,
+        currency="RUB",
+    ),
+    Instrument(
+        symbol="VTBR",
+        market_id="moex",
+        name="VTB Bank",
+        instrument_type="stock",
+        figi="BBG004730ZJ9",
+        lot_size=10,
+        currency="RUB",
+    ),
+]
+
+
 def build_default_registry() -> InstrumentRegistry:
     """Build and return a registry pre-populated with default instruments."""
     registry = InstrumentRegistry()
     for instrument in DEFAULT_US_INSTRUMENTS:
+        registry.register(instrument)
+    for instrument in DEFAULT_MOEX_INSTRUMENTS:
         registry.register(instrument)
     return registry

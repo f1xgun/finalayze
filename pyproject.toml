@@ -35,6 +35,7 @@ dependencies = [
     "openai>=1.50.0",
     # Brokers
     "alpaca-py>=0.33.0",
+    "t-tech-investments>=0.2.0; sys_platform != 'win32'",
     # News & Data
     "httpx>=0.28.0",
     "yfinance>=0.2.50",
@@ -67,6 +68,14 @@ build-backend = "uv_build"
 # Restrict resolution to Unix-like platforms (no Windows)
 [tool.uv]
 environments = ["sys_platform != 'win32'"]
+
+[[tool.uv.index]]
+name = "tbank"
+url = "https://opensource.tbank.ru/api/v4/projects/238/packages/pypi/simple"
+explicit = true
+
+[tool.uv.sources]
+t-tech-investments = { index = "tbank" }
 
 # ──────────────────────────────────────────────
 # Ruff (linter + formatter)
@@ -140,6 +149,8 @@ module = [
     "yfinance.*",
     "alpaca.*",
     "tinkoff.*",
+    "t_tech.*",
+    "openai.*",
     "streamlit.*",
     "celery.*",
     "apscheduler.*",

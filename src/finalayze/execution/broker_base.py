@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 
-from finalayze.core.schemas import Candle, PortfolioState  # noqa: TC001
+from finalayze.core.schemas import Candle, PortfolioState  # noqa: TC001  # needed for abstract sig
 
 
 @dataclass(frozen=True)
@@ -38,8 +38,14 @@ class BrokerBase(ABC):
     """Abstract base class for all broker implementations."""
 
     @abstractmethod
-    def submit_order(self, order: OrderRequest, fill_candle: Candle) -> OrderResult:
-        """Submit an order for execution against the given candle."""
+    def submit_order(self, order: OrderRequest, fill_candle: Candle | None = None) -> OrderResult:
+        """Submit an order for execution.
+
+        Args:
+            order: The order to execute.
+            fill_candle: For simulated brokers -- fill price is taken from candle open.
+                         Live brokers ignore this parameter (pass None).
+        """
         ...
 
     @abstractmethod
@@ -55,4 +61,13 @@ class BrokerBase(ABC):
     @abstractmethod
     def get_positions(self) -> dict[str, Decimal]:
         """Return a copy of the current open positions keyed by symbol."""
+        ...
+
+    @abstractmethod
+    def cancel_order(self, order_id: str) -> None:
+        """Cancel a pending order by its ID.
+
+        Args:
+            order_id: The broker-assigned order identifier to cancel.
+        """
         ...
