@@ -30,6 +30,7 @@ dependencies = [
     "polars>=1.17.0",
     "pandas-ta>=0.3.14b1",
     "numpy>=1.26.0",
+    "statsmodels>=0.14.0",
     # LLM
     "anthropic>=0.42.0",
     "openai>=1.50.0",
@@ -160,6 +161,7 @@ module = [
     "torch.*",
     "openai.*",
     "t_tech.*",
+    "statsmodels.*",
 ]
 ignore_missing_imports = true
 
