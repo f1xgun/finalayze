@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from finalayze.analysis.impact_estimator import ImpactEstimator
     from finalayze.analysis.news_analyzer import NewsAnalyzer
     from finalayze.core.alerts import TelegramAlerter
-    from finalayze.core.schemas import Candle, Signal, SentimentResult
+    from finalayze.core.schemas import Candle, SentimentResult, Signal
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
     from finalayze.execution.broker_base import BrokerBase
     from finalayze.execution.broker_router import BrokerRouter
