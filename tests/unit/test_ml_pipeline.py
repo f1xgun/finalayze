@@ -70,6 +70,76 @@ class TestXGBoostModel:
         result = model.predict_proba(_make_features())
         assert 0.0 <= result <= 1.0
 
+    def test_consistent_prediction_regardless_of_dict_insertion_order(self) -> None:
+        """predict_proba must return same result for same features regardless of dict order."""
+        model = XGBoostModel(segment_id="us_tech")
+        x_data = [_make_features()] * 50
+        y = [1] * 25 + [0] * 25
+        model.fit(x_data, y)
+
+        features = _make_features(sentiment=0.5)
+        # Build same features with reversed insertion order
+        features_reversed = dict(reversed(list(features.items())))
+
+        result1 = model.predict_proba(features)
+        result2 = model.predict_proba(features_reversed)
+        assert result1 == pytest.approx(result2)
+
+    def test_feature_mismatch_raises_insufficient_data_error(self) -> None:
+        """predict_proba raises InsufficientDataError when feature keys differ from training."""
+        model = XGBoostModel(segment_id="us_tech")
+        x_data = [_make_features()] * 50
+        y = [1] * 25 + [0] * 25
+        model.fit(x_data, y)
+
+        # Remove a feature key — should raise
+        features = _make_features()
+        bad_features = {k: v for k, v in features.items() if k != "rsi_14"}
+        with pytest.raises(InsufficientDataError):
+            model.predict_proba(bad_features)
+
+
+class TestLightGBMModel:
+    def test_predict_proba_before_fit_returns_half(self) -> None:
+        model = LightGBMModel(segment_id="us_tech")
+        features = _make_features()
+        result = model.predict_proba(features)
+        assert result == pytest.approx(0.5)
+
+    def test_fit_and_predict(self) -> None:
+        model = LightGBMModel(segment_id="us_tech")
+        x_data = [_make_features()] * 50
+        y = [1] * 25 + [0] * 25
+        model.fit(x_data, y)
+        result = model.predict_proba(_make_features())
+        assert 0.0 <= result <= 1.0
+
+    def test_consistent_prediction_regardless_of_dict_insertion_order(self) -> None:
+        """predict_proba must return same result for same features regardless of dict order."""
+        model = LightGBMModel(segment_id="us_tech")
+        x_data = [_make_features()] * 50
+        y = [1] * 25 + [0] * 25
+        model.fit(x_data, y)
+
+        features = _make_features(sentiment=0.5)
+        features_reversed = dict(reversed(list(features.items())))
+
+        result1 = model.predict_proba(features)
+        result2 = model.predict_proba(features_reversed)
+        assert result1 == pytest.approx(result2)
+
+    def test_feature_mismatch_raises_insufficient_data_error(self) -> None:
+        """predict_proba raises InsufficientDataError when feature keys differ from training."""
+        model = LightGBMModel(segment_id="us_tech")
+        x_data = [_make_features()] * 50
+        y = [1] * 25 + [0] * 25
+        model.fit(x_data, y)
+
+        features = _make_features()
+        bad_features = {k: v for k, v in features.items() if k != "rsi_14"}
+        with pytest.raises(InsufficientDataError):
+            model.predict_proba(bad_features)
+
 
 class TestEnsembleModel:
     def test_predict_averages_two_models(self) -> None:

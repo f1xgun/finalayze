@@ -93,13 +93,12 @@ class OpenRouterClient(_CachingLLMClient):
 
     def __init__(self, api_key: str, model: str) -> None:
         super().__init__()
-        self._api_key = api_key
         self._model = model
+        self._client = openai.AsyncOpenAI(api_key=api_key, base_url=self._BASE_URL)
 
     async def _complete_once(self, prompt: str, system: str) -> str:
-        client = openai.AsyncOpenAI(api_key=self._api_key, base_url=self._BASE_URL)
         try:
-            completion = await client.chat.completions.create(
+            completion = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[
                     {"role": "system", "content": system},
@@ -126,13 +125,12 @@ class OpenAIClient(_CachingLLMClient):
 
     def __init__(self, api_key: str, model: str) -> None:
         super().__init__()
-        self._api_key = api_key
         self._model = model
+        self._client = openai.AsyncOpenAI(api_key=api_key)
 
     async def _complete_once(self, prompt: str, system: str) -> str:
-        client = openai.AsyncOpenAI(api_key=self._api_key)
         try:
-            completion = await client.chat.completions.create(
+            completion = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[
                     {"role": "system", "content": system},
@@ -159,13 +157,12 @@ class AnthropicClient(_CachingLLMClient):
 
     def __init__(self, api_key: str, model: str) -> None:
         super().__init__()
-        self._api_key = api_key
         self._model = model
+        self._client = anthropic.AsyncAnthropic(api_key=api_key)
 
     async def _complete_once(self, prompt: str, system: str) -> str:
-        client = anthropic.AsyncAnthropic(api_key=self._api_key)
         try:
-            message = await client.messages.create(
+            message = await self._client.messages.create(
                 model=self._model,
                 max_tokens=1024,
                 system=system,

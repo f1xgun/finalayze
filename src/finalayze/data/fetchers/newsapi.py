@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
+from pydantic import ValidationError
 
 from finalayze.core.exceptions import DataFetchError, RateLimitError
 from finalayze.core.schemas import NewsArticle
@@ -91,15 +92,22 @@ class NewsApiFetcher:
         try:
             # NewsAPI returns RFC 3339 timestamps like "2024-01-03T10:00:00Z"
             published_at = datetime.fromisoformat(str(published_raw))
+            # Normalize naive datetimes (no tzinfo) to UTC-aware
+            if published_at.tzinfo is None:
+                published_at = published_at.replace(tzinfo=UTC)
         except (ValueError, TypeError):
             published_at = datetime.now(UTC)
 
-        return NewsArticle(
-            id=uuid4(),
-            source=str(source_name),
-            title=str(raw.get("title") or ""),
-            content=str(raw.get("content") or raw.get("description") or ""),
-            url=str(raw.get("url") or ""),
-            language=self._language,
-            published_at=published_at,
-        )
+        try:
+            return NewsArticle(
+                id=uuid4(),
+                source=str(source_name),
+                title=str(raw.get("title") or ""),
+                content=str(raw.get("content") or raw.get("description") or ""),
+                url=str(raw.get("url") or ""),
+                language=self._language,
+                published_at=published_at,
+            )
+        except ValidationError as exc:
+            msg = f"NewsAPI article failed schema validation: {exc}"
+            raise DataFetchError(msg) from exc

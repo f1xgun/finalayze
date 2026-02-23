@@ -78,6 +78,75 @@ class TestNewsApiFetcherSuccess:
         assert articles == []
 
 
+class TestNewsApiFetcherNaiveTimestamp:
+    def test_naive_timestamp_is_normalized_to_utc(self) -> None:
+        """Articles with naive timestamps (no timezone) must be parsed as UTC."""
+        naive_response = {
+            "status": "ok",
+            "totalResults": 1,
+            "articles": [
+                {
+                    "source": {"name": "Reuters"},
+                    "title": "Oil price surge",
+                    "description": "desc",
+                    "content": "content",
+                    "url": "https://reuters.com/article/2",
+                    "publishedAt": "2024-01-03T10:00:00",  # no 'Z' / no timezone
+                }
+            ],
+        }
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = naive_response
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_cls.return_value = mock_client
+
+            fetcher = NewsApiFetcher(api_key=_API_KEY)
+            articles = fetcher.fetch_news("oil", _FROM_DATE, _TO_DATE)
+
+        assert len(articles) == 1
+        assert articles[0].published_at.tzinfo is not None
+        assert articles[0].published_at.tzinfo == UTC
+
+    def test_naive_timestamp_does_not_raise_validation_error(self) -> None:
+        """Naive timestamps must not propagate as ValidationError; DataFetchError instead."""
+        naive_response = {
+            "status": "ok",
+            "totalResults": 1,
+            "articles": [
+                {
+                    "source": {"name": "Test"},
+                    "title": "Test",
+                    "description": "desc",
+                    "content": "content",
+                    "url": "https://test.com",
+                    "publishedAt": "2024-01-03T10:00:00",
+                }
+            ],
+        }
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = naive_response
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_cls.return_value = mock_client
+
+            fetcher = NewsApiFetcher(api_key=_API_KEY)
+            # Must not raise ValidationError — should succeed with UTC normalization
+            articles = fetcher.fetch_news("test", _FROM_DATE, _TO_DATE)
+
+        assert len(articles) == 1
+
+
 class TestNewsApiFetcherErrors:
     def test_rate_limit_raises_rate_limit_error(self) -> None:
         mock_response = MagicMock()

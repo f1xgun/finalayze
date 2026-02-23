@@ -5,6 +5,8 @@ See docs/architecture/OVERVIEW.md for configuration details.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic_settings import BaseSettings
 
 from config.modes import WorkMode
@@ -56,7 +58,7 @@ class Settings(BaseSettings):
 
     # LLM
     llm_model: str = "meta-llama/llama-3.1-8b-instruct:free"
-    llm_provider: str = "openrouter"  # "openrouter" | "openai" | "anthropic"
+    llm_provider: Literal["openrouter", "openai", "anthropic"] = "openrouter"
     llm_api_key: str = ""  # API key for selected provider
 
     # Safety
