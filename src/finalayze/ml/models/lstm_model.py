@@ -151,6 +151,7 @@ class LSTMModel(BaseMLModel):
                 "hidden_size": self._hidden_size,
                 "num_layers": self._num_layers,
                 "n_features": self._n_features,
+                "feature_names": self._feature_names,
             },
         }
         torch.save(payload, path)
@@ -168,3 +169,5 @@ class LSTMModel(BaseMLModel):
         self._model.eval()
         self._trained = True
         self._feature_buffer = deque(maxlen=self._sequence_length)
+        feature_names = cfg.get("feature_names")
+        self._feature_names = list(feature_names) if feature_names is not None else None
