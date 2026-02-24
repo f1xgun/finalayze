@@ -216,12 +216,12 @@ def trading_loop(
     """Build a TradingLoop with all external dependencies mocked."""
     # Mock fetchers: return BUY-signal candles for each symbol in their market
     us_fetcher = MagicMock()
-    us_fetcher.fetch_candles.side_effect = lambda symbol, start, end, timeframe="1d": (
+    us_fetcher.fetch_candles.side_effect = lambda symbol, market_id, limit: (
         _make_buy_signal_candles(symbol, "us")
     )
 
     moex_fetcher = MagicMock()
-    moex_fetcher.fetch_candles.side_effect = lambda symbol, start, end, timeframe="1d": (
+    moex_fetcher.fetch_candles.side_effect = lambda symbol, market_id, limit: (
         _make_buy_signal_candles(symbol, "moex")
     )
 
