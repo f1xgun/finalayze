@@ -65,6 +65,7 @@ RECOVERY_STEP = 2.0
 RECOVERY_COUNT = 4
 EXPECTED_LIQUIDATE_SELL_COUNT = 2  # AAPL + MSFT
 EXPECTED_LIQUIDATE_SYMBOLS = {"AAPL", "MSFT"}
+MIN_SUBMIT_CALLS_AFTER_RESET = 1
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +403,14 @@ class TestCircuitBreakerTripAndRecovery:
         )
         assert market_arg == "us"
 
+        # Verify the level argument was LIQUIDATE
+        level_arg = call_kwargs.kwargs.get("level") if call_kwargs.kwargs else None
+        if level_arg is None and len(call_kwargs.args) > 1:
+            level_arg = call_kwargs.args[1]
+        assert level_arg == CircuitLevel.LIQUIDATE, (
+            f"Expected on_circuit_breaker_trip called with level=LIQUIDATE, got {spy.call_args}"
+        )
+
     def test_manual_reset_restores_normal_level(
         self,
         cb_us: CircuitBreaker,
@@ -419,14 +428,14 @@ class TestCircuitBreakerTripAndRecovery:
         alerter_with_token: TelegramAlerter,
         cb_us: CircuitBreaker,
     ) -> None:
-        """on_circuit_breaker_reset is called after operator calls reset_manual."""
+        """After reset_manual(), on_circuit_breaker_reset can be called with market_id kwarg."""
         cb_us.check(current_equity=LIQUIDATE_EQUITY, baseline_equity=BASELINE_EQUITY)
+        assert cb_us.level == CircuitLevel.LIQUIDATE
         cb_us.reset_manual()
-
-        with patch.object(alerter_with_token, "on_circuit_breaker_reset") as spy:
-            alerter_with_token.on_circuit_breaker_reset("us")
-
-        spy.assert_called_once_with("us")
+        assert cb_us.level == CircuitLevel.NORMAL
+        # Verify the alerter method signature accepts market_id as keyword arg
+        # (called by operator workflow after reset) -- must not raise
+        alerter_with_token.on_circuit_breaker_reset(market_id="us")
 
     def test_trading_resumes_after_manual_reset(
         self,
@@ -469,6 +478,12 @@ class TestCircuitBreakerTripAndRecovery:
 
         # Level must still be NORMAL (not re-tripped)
         assert circuit_breakers["us"].level == CircuitLevel.NORMAL
+
+        # Trading must have resumed: at least one new BUY order submitted after reset
+        assert us_broker_liquidate.submit_order.call_count >= MIN_SUBMIT_CALLS_AFTER_RESET, (
+            f"Expected at least {MIN_SUBMIT_CALLS_AFTER_RESET} order(s) after reset, "
+            f"got {us_broker_liquidate.submit_order.call_count}"
+        )
 
     def test_caution_level_does_not_liquidate(
         self,
