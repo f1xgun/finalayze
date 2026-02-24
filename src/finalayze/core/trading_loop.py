@@ -157,9 +157,11 @@ class TradingLoop:
                 _log.exception("_news_cycle: error processing article %s", article.id)
 
     async def _analyze_article(self, article: NewsArticle) -> tuple[SentimentResult, EventType]:
-        """Run both async analysis calls concurrently."""
-        sentiment = await self._news_analyzer.analyze(article)
-        event = await self._event_classifier.classify(article)
+        """Run sentiment analysis and event classification concurrently."""
+        sentiment, event = await asyncio.gather(
+            self._news_analyzer.analyze(article),
+            self._event_classifier.classify(article),
+        )
         return sentiment, event
 
     def _process_news_article(self, article: NewsArticle) -> None:
