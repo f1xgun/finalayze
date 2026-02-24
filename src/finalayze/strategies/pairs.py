@@ -156,7 +156,7 @@ class PairsStrategy(BaseStrategy):
         # Spread and z-score
         spread = log_a - beta * log_b
         spread_mean = float(spread.mean())
-        spread_std = float(spread.std())
+        spread_std = float(spread.std(ddof=1))
 
         if spread_std == 0.0:
             return None
