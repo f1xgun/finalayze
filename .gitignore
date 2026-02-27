@@ -68,5 +68,8 @@ docker/data/
 *.key
 credentials.json
 
+# Streamlit secrets (never commit real credentials)
+.streamlit/secrets.toml
+
 # Worktrees
 .worktrees/

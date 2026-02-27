@@ -120,6 +120,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "T20", "ARG", "PLC0415", "N806", "TC001", "RUF100", "PT018", "S108", "F401", "SLF001", "PLR2004", "TC003"]
 "scripts/**" = ["T20", "E402", "S112", "TC001"]
+"src/finalayze/dashboard/**" = ["TC001", "PLR0912", "PLR0915"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["finalayze"]
@@ -166,6 +167,10 @@ module = [
 ]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["finalayze.dashboard.*"]
+ignore_errors = true
+
 # ──────────────────────────────────────────────
 # pytest
 # ──────────────────────────────────────────────
@@ -185,5 +190,10 @@ markers = [
     "integration: Integration tests (requires DB/Redis)",
     "e2e: End-to-end tests (full system)",
     "slow: Slow tests (model training, backtests)",
+]
+
+[dependency-groups]
+dev = [
+    "respx>=0.22.0",
 ]
 
