@@ -204,7 +204,16 @@ def _make_trading_loop(
     event_classifier = MagicMock(spec=EventClassifier)
     impact_estimator = MagicMock(spec=ImpactEstimator)
 
-    strategy = StrategyCombiner([MomentumStrategy()])
+    momentum = MomentumStrategy()
+    _base_get_params = momentum.get_parameters
+
+    def _get_params_no_filters(segment_id: str) -> dict[str, object]:
+        params = dict(_base_get_params(segment_id))
+        params.update(trend_filter=False, adx_filter=False, volume_filter=False)
+        return params
+
+    momentum.get_parameters = _get_params_no_filters  # type: ignore[assignment]
+    strategy = StrategyCombiner([momentum])
 
     return TradingLoop(
         settings=settings,

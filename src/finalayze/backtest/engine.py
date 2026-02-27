@@ -22,6 +22,8 @@ from finalayze.risk.pre_trade_check import PreTradeChecker
 from finalayze.risk.stop_loss import compute_atr_stop_loss
 
 if TYPE_CHECKING:
+    from finalayze.backtest.costs import TransactionCosts
+    from finalayze.risk.circuit_breaker import CircuitBreaker
     from finalayze.strategies.base import BaseStrategy
 
 # Default Half-Kelly parameters
@@ -40,6 +42,10 @@ class BacktestEngine:
         max_positions: int = 10,
         kelly_fraction: Decimal = Decimal("0.5"),
         atr_multiplier: Decimal = Decimal("2.0"),
+        transaction_costs: TransactionCosts | None = None,
+        trail_activation_atr: Decimal = Decimal("1.0"),
+        trail_distance_atr: Decimal = Decimal("1.5"),
+        circuit_breaker: CircuitBreaker | None = None,
     ) -> None:
         self._strategy = strategy
         self._initial_cash = initial_cash
@@ -47,8 +53,12 @@ class BacktestEngine:
         self._max_positions = max_positions
         self._kelly_fraction = kelly_fraction
         self._atr_multiplier = atr_multiplier
+        self._transaction_costs = transaction_costs
+        self._trail_activation_atr = trail_activation_atr
+        self._trail_distance_atr = trail_distance_atr
+        self._circuit_breaker = circuit_breaker
 
-    def run(
+    def run(  # noqa: PLR0912, PLR0915
         self,
         symbol: str,
         segment_id: str,
@@ -74,6 +84,10 @@ class BacktestEngine:
         snapshots: list[PortfolioState] = []
         entry_prices: dict[str, Decimal] = {}
 
+        # Set initial baseline for circuit breaker
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.reset_daily(self._initial_cash)
+
         for i in range(len(candles)):
             candle = candles[i]
 
@@ -89,6 +103,9 @@ class BacktestEngine:
                 if sr.filled and sr.fill_price is not None:
                     entry = entry_prices.pop(sr.symbol, sr.fill_price)
                     pnl = (sr.fill_price - entry) * sr.quantity
+                    # Deduct exit transaction costs
+                    if self._transaction_costs is not None:
+                        pnl -= self._transaction_costs.total_cost(sr.fill_price, sr.quantity)
                     pnl_pct = (sr.fill_price - entry) / entry if entry != 0 else Decimal(0)
                     trades.append(
                         TradeResult(
@@ -102,6 +119,52 @@ class BacktestEngine:
                             pnl_pct=pnl_pct,
                         )
                     )
+
+            # (c2) Check circuit breaker level
+            if self._circuit_breaker is not None:
+                portfolio = broker.get_portfolio()
+                cb_level = self._circuit_breaker.check(
+                    current_equity=portfolio.equity,
+                    baseline_equity=self._circuit_breaker.baseline,
+                )
+
+                # L3: liquidate all positions
+                if cb_level == "liquidate" and i + 1 < len(candles):
+                    fill_candle = candles[i + 1]
+                    for open_sym, qty in broker.get_positions().items():
+                        order = OrderRequest(symbol=open_sym, side="SELL", quantity=qty)
+                        order_result = broker.submit_order(order, fill_candle)
+                        if order_result.filled and order_result.fill_price is not None:
+                            entry = entry_prices.pop(open_sym, order_result.fill_price)
+                            pnl = (order_result.fill_price - entry) * order_result.quantity
+                            if self._transaction_costs is not None:
+                                pnl -= self._transaction_costs.total_cost(
+                                    order_result.fill_price, order_result.quantity
+                                )
+                            pnl_pct = (
+                                (order_result.fill_price - entry) / entry
+                                if entry != 0
+                                else Decimal(0)
+                            )
+                            trades.append(
+                                TradeResult(
+                                    signal_id=uuid4(),
+                                    symbol=open_sym,
+                                    side="SELL",
+                                    quantity=order_result.quantity,
+                                    entry_price=entry,
+                                    exit_price=order_result.fill_price,
+                                    pnl=pnl,
+                                    pnl_pct=pnl_pct,
+                                )
+                            )
+                    snapshots.append(broker.get_portfolio())
+                    continue
+
+                # L2+: suppress new entries
+                if cb_level in ("halted", "liquidate"):
+                    snapshots.append(broker.get_portfolio())
+                    continue
 
             # (d) Generate signal from strategy
             history = candles[: i + 1]
@@ -126,6 +189,8 @@ class BacktestEngine:
                 close_price = last_candle.close
                 entry = entry_prices.pop(open_symbol, close_price)
                 pnl = (close_price - entry) * qty
+                if self._transaction_costs is not None:
+                    pnl -= self._transaction_costs.total_cost(close_price, qty)
                 pnl_pct = (close_price - entry) / entry if entry != 0 else Decimal(0)
                 trades.append(
                     TradeResult(
@@ -194,14 +259,34 @@ class BacktestEngine:
         if order_result.filled and order_result.fill_price is not None:
             entry_prices[symbol] = order_result.fill_price
 
-            # Set ATR stop-loss
+            # Deduct entry transaction costs from cash
+            if self._transaction_costs is not None:
+                cost = self._transaction_costs.total_cost(
+                    order_result.fill_price, order_result.quantity
+                )
+                broker._cash -= cost
+
+            # Set ATR stop-loss (trailing or fixed)
             stop_price = compute_atr_stop_loss(
                 entry_price=order_result.fill_price,
                 candles=history,
                 atr_multiplier=self._atr_multiplier,
             )
             if stop_price is not None:
-                broker.set_stop_loss(symbol, stop_price)
+                # Compute ATR value for trailing stop
+                atr_value = (
+                    (order_result.fill_price - stop_price) / self._atr_multiplier
+                    if self._atr_multiplier > 0
+                    else Decimal(0)
+                )
+                broker.set_trailing_stop(
+                    symbol=symbol,
+                    entry_price=order_result.fill_price,
+                    initial_stop=stop_price,
+                    atr_value=atr_value,
+                    activation_atr=self._trail_activation_atr,
+                    trail_atr=self._trail_distance_atr,
+                )
 
     def _handle_sell(
         self,
@@ -223,6 +308,10 @@ class BacktestEngine:
         if order_result.filled and order_result.fill_price is not None:
             entry = entry_prices.pop(symbol, order_result.fill_price)
             pnl = (order_result.fill_price - entry) * order_result.quantity
+            if self._transaction_costs is not None:
+                pnl -= self._transaction_costs.total_cost(
+                    order_result.fill_price, order_result.quantity
+                )
             pnl_pct = (order_result.fill_price - entry) / entry if entry != 0 else Decimal(0)
             trades.append(
                 TradeResult(

@@ -1,15 +1,20 @@
 """Performance analyzer for backtest results.
 
 Computes aggregate metrics (Sharpe ratio, max drawdown, win rate, profit factor,
-total return) from a list of trades and portfolio snapshots.
+total return) from a list of trades and portfolio snapshots.  Optionally computes
+benchmark-relative metrics (alpha, beta, information ratio, max relative drawdown).
 """
 
 from __future__ import annotations
 
 import statistics
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from finalayze.core.schemas import BacktestResult, PortfolioState, TradeResult
+
+if TYPE_CHECKING:
+    from finalayze.core.schemas import Candle
 
 # Annualisation factor for daily returns.
 _TRADING_DAYS_PER_YEAR = 252
@@ -28,8 +33,15 @@ class PerformanceAnalyzer:
         self,
         trades: list[TradeResult],
         snapshots: list[PortfolioState],
+        benchmark_candles: list[Candle] | None = None,
     ) -> BacktestResult:
-        """Return a :class:`BacktestResult` summarising the backtest run."""
+        """Return a :class:`BacktestResult` summarising the backtest run.
+
+        Args:
+            trades: List of completed trades.
+            snapshots: Equity-curve portfolio snapshots (one per bar).
+            benchmark_candles: Optional benchmark candles for relative metrics.
+        """
         total_trades = len(trades)
 
         if total_trades == 0:
@@ -42,6 +54,9 @@ class PerformanceAnalyzer:
                 total_return = (final - initial) / initial if initial > 0 else Decimal(0)
             else:
                 total_return = Decimal(0)
+
+            benchmark_metrics = self._compute_benchmark_metrics(snapshots, benchmark_candles)
+
             return BacktestResult(
                 sharpe=sharpe,
                 max_drawdown=max_drawdown,
@@ -51,6 +66,7 @@ class PerformanceAnalyzer:
                     total_return.quantize(_QUANTIZE_4DP) if total_return != 0 else Decimal(0)
                 ),
                 total_trades=0,
+                **benchmark_metrics,
             )
 
         wins = [t for t in trades if t.pnl > 0]
@@ -70,6 +86,7 @@ class PerformanceAnalyzer:
 
         max_drawdown = self._compute_max_drawdown(snapshots)
         sharpe = self._compute_sharpe(snapshots)
+        benchmark_metrics = self._compute_benchmark_metrics(snapshots, benchmark_candles)
 
         return BacktestResult(
             sharpe=sharpe,
@@ -78,9 +95,10 @@ class PerformanceAnalyzer:
             profit_factor=profit_factor.quantize(_QUANTIZE_4DP),
             total_return=total_return.quantize(_QUANTIZE_4DP),
             total_trades=total_trades,
+            **benchmark_metrics,
         )
 
-    # ── Private helpers ──────────────────────────────────────────────────
+    # -- Private helpers -------------------------------------------------------
 
     @staticmethod
     def _compute_max_drawdown(snapshots: list[PortfolioState]) -> Decimal:
@@ -125,3 +143,102 @@ class PerformanceAnalyzer:
 
         sharpe = (mean_return / std_return) * (_TRADING_DAYS_PER_YEAR**0.5)
         return Decimal(str(round(sharpe, 4)))
+
+    @staticmethod
+    def _compute_benchmark_metrics(
+        snapshots: list[PortfolioState],
+        benchmark_candles: list[Candle] | None,
+    ) -> dict[str, Decimal | None]:
+        """Compute benchmark-relative metrics when benchmark data is provided.
+
+        Returns a dict suitable for unpacking into BacktestResult kwargs.
+        """
+        empty: dict[str, Decimal | None] = {
+            "alpha": None,
+            "beta": None,
+            "information_ratio": None,
+            "max_relative_drawdown": None,
+            "benchmark_return": None,
+        }
+
+        min_points = 3
+        if benchmark_candles is None or len(snapshots) < min_points:
+            return empty
+
+        if len(benchmark_candles) < min_points:
+            return empty
+
+        # Align lengths: use min of both series
+        n = min(len(snapshots), len(benchmark_candles))
+        if n < min_points:
+            return empty
+
+        # Compute daily returns for strategy
+        equities = [float(s.equity) for s in snapshots[:n]]
+        strat_returns = [
+            (equities[i] - equities[i - 1]) / equities[i - 1]
+            for i in range(1, len(equities))
+            if equities[i - 1] > 0
+        ]
+
+        # Compute daily returns for benchmark (using close prices)
+        bench_prices = [float(c.close) for c in benchmark_candles[:n]]
+        bench_returns = [
+            (bench_prices[i] - bench_prices[i - 1]) / bench_prices[i - 1]
+            for i in range(1, len(bench_prices))
+            if bench_prices[i - 1] > 0
+        ]
+
+        # Align return series length
+        m = min(len(strat_returns), len(bench_returns))
+        if m < 2:  # noqa: PLR2004
+            return empty
+
+        sr = strat_returns[:m]
+        br = bench_returns[:m]
+
+        # Benchmark total return
+        bench_total = (bench_prices[n - 1] - bench_prices[0]) / bench_prices[0]
+        strat_total = (equities[n - 1] - equities[0]) / equities[0]
+
+        # Alpha = strategy return - benchmark return
+        alpha = strat_total - bench_total
+
+        # Beta = cov(strategy, benchmark) / var(benchmark)
+        mean_sr = statistics.mean(sr)
+        mean_br = statistics.mean(br)
+        cov = statistics.mean([(s - mean_sr) * (b - mean_br) for s, b in zip(sr, br, strict=True)])
+        var_bench = statistics.variance(br) if len(br) > 1 else 0.0
+
+        beta = cov / var_bench if var_bench > 0 else Decimal(0)
+
+        # Tracking error = stdev of excess returns
+        excess = [s - b for s, b in zip(sr, br, strict=True)]
+        tracking_error = statistics.stdev(excess) if len(excess) > 1 else 0.0
+
+        # Information ratio = alpha / tracking error (annualised)
+        if tracking_error > 0:
+            ir = (statistics.mean(excess) / tracking_error) * (_TRADING_DAYS_PER_YEAR**0.5)
+        else:
+            ir = 0.0
+
+        # Max relative drawdown: worst underperformance vs benchmark
+        # Cumulative relative performance
+        cumulative_relative = [0.0]
+        for s, b in zip(sr, br, strict=True):
+            cumulative_relative.append(cumulative_relative[-1] + (s - b))
+
+        peak_relative = cumulative_relative[0]
+        max_rel_dd = 0.0
+        for val in cumulative_relative[1:]:
+            peak_relative = max(peak_relative, val)
+            rel_dd = peak_relative - val
+            max_rel_dd = max(max_rel_dd, rel_dd)
+
+        return {
+            "alpha": Decimal(str(round(alpha, 4))),
+            "beta": Decimal(str(round(float(beta), 4))),
+            "information_ratio": Decimal(str(round(ir, 4))),
+            "max_relative_drawdown": Decimal(str(round(max_rel_dd, 4))),
+            "benchmark_return": Decimal(str(round(bench_total, 4))),
+        }

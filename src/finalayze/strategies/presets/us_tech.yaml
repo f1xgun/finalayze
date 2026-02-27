@@ -11,6 +11,19 @@ strategies:
       macd_slow: 26
       min_confidence: 0.6
       lookback_bars: 5
+      stop_atr_multiplier: 2.5
+      trail_activation_atr: 1.0
+      trail_distance_atr: 1.5
+      trend_filter: false
+      trend_sma_period: 50
+      trend_sma_buffer_pct: 2.0
+      adx_filter: false
+      adx_period: 14
+      adx_threshold: 25
+      volume_filter: false
+      volume_sma_period: 20
+      volume_min_ratio: 1.0
+      neutral_reset_bars: 20
   mean_reversion:
     enabled: true
     weight: 0.2

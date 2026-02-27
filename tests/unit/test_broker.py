@@ -270,7 +270,7 @@ class TestSimulatedBrokerEquity:
         broker.submit_order(OrderRequest("AAPL", "SELL", ORDER_QTY), sell_candle)
 
         # Stop-loss entry must be cleared after position is fully closed
-        assert "AAPL" not in broker._stop_losses
+        assert "AAPL" not in broker._stop_states
 
 
 class TestSimulatedBrokerFillCandleOptional:

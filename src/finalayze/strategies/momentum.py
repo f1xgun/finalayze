@@ -15,6 +15,7 @@ from finalayze.strategies.base import BaseStrategy
 _PRESETS_DIR = Path(__file__).parent / "presets"
 _MIN_CANDLES = 30
 _DEFAULT_LOOKBACK_BARS = 5
+_DEFAULT_NEUTRAL_RESET_BARS = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +26,35 @@ class _Indicators:
     prev_hist: float
     current_close: float
     min_confidence: float
+    current_sma: float | None
+    current_adx: float | None
+    volume_ratio: float | None
+
+
+class _SignalState:
+    """Tracks signal state per symbol to prevent duplicate signals."""
+
+    def __init__(self, neutral_reset_bars: int = _DEFAULT_NEUTRAL_RESET_BARS) -> None:
+        self._last_direction: dict[str, SignalDirection] = {}
+        self._bars_since_signal: dict[str, int] = {}
+        self._neutral_reset_bars = neutral_reset_bars
+
+    def tick(self, symbol: str) -> None:
+        """Call once per bar to track time since last signal."""
+        if symbol in self._bars_since_signal:
+            self._bars_since_signal[symbol] += 1
+            if self._bars_since_signal[symbol] >= self._neutral_reset_bars:
+                self._last_direction.pop(symbol, None)
+                self._bars_since_signal.pop(symbol, None)
+
+    def should_emit(self, symbol: str, direction: SignalDirection) -> bool:
+        """Return True if this signal should be emitted (not a duplicate)."""
+        last = self._last_direction.get(symbol)
+        if last == direction:
+            return False
+        self._last_direction[symbol] = direction
+        self._bars_since_signal[symbol] = 0
+        return True
 
 
 class MomentumStrategy(BaseStrategy):
@@ -34,6 +64,9 @@ class MomentumStrategy(BaseStrategy):
     and MACD histogram is rising, and SELL signals when RSI was recently overbought
     and MACD histogram is falling.
     """
+
+    def __init__(self) -> None:
+        self._signal_state = _SignalState()
 
     @property
     def name(self) -> str:
@@ -69,6 +102,14 @@ class MomentumStrategy(BaseStrategy):
         sentiment_score: float = 0.0,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a momentum signal from RSI and MACD indicators."""
+        params = self.get_parameters(segment_id)
+        neutral_reset_bars = int(
+            params.get("neutral_reset_bars", _DEFAULT_NEUTRAL_RESET_BARS)  # type: ignore[call-overload]
+        )
+        self._signal_state._neutral_reset_bars = neutral_reset_bars
+
+        self._signal_state.tick(symbol)
+
         if len(candles) < _MIN_CANDLES:
             return None
 
@@ -81,6 +122,10 @@ class MomentumStrategy(BaseStrategy):
             return None
 
         direction, confidence = result
+
+        if not self._signal_state.should_emit(symbol, direction):
+            return None
+
         is_buy = direction == SignalDirection.BUY
         market_id = candles[0].market_id
         rsi_label = "oversold" if is_buy else "overbought"
@@ -137,6 +182,40 @@ class MomentumStrategy(BaseStrategy):
         rsi_window = [float(v) for v in rsi_series.iloc[-lookback_bars:] if not pd.isna(v)]
         current_close = float(candles[-1].close)
 
+        # SMA for trend filter
+        current_sma: float | None = None
+        trend_sma_period = int(params.get("trend_sma_period", 50))  # type: ignore[call-overload]
+        if len(closes) >= trend_sma_period:
+            sma_series = closes.rolling(trend_sma_period).mean()
+            sma_val = sma_series.iloc[-1]
+            if not pd.isna(sma_val):
+                current_sma = float(sma_val)
+
+        # ADX for regime filter
+        current_adx: float | None = None
+        adx_filter = bool(params.get("adx_filter", False))
+        if adx_filter:
+            adx_period = int(params.get("adx_period", 14))  # type: ignore[call-overload]
+            high_series = pd.Series([float(c.high) for c in candles])
+            low_series = pd.Series([float(c.low) for c in candles])
+            adx_df = ta.adx(high_series, low_series, closes, length=adx_period)
+            if adx_df is not None:
+                adx_col = f"ADX_{adx_period}"
+                if adx_col in adx_df.columns:
+                    adx_val = adx_df[adx_col].iloc[-1]
+                    if not pd.isna(adx_val):
+                        current_adx = float(adx_val)
+
+        # Volume ratio for volume confirmation
+        volume_ratio: float | None = None
+        volume_filter = bool(params.get("volume_filter", False))
+        if volume_filter:
+            volume_sma_period = int(params.get("volume_sma_period", 20))  # type: ignore[call-overload]
+            volumes = pd.Series([c.volume for c in candles])
+            vol_sma = volumes.rolling(volume_sma_period).mean().iloc[-1]
+            if not pd.isna(vol_sma) and float(vol_sma) > 0:
+                volume_ratio = float(candles[-1].volume) / float(vol_sma)
+
         return _Indicators(
             current_rsi=float(current_rsi),
             rsi_window=rsi_window,
@@ -144,9 +223,12 @@ class MomentumStrategy(BaseStrategy):
             prev_hist=float(prev_hist),
             current_close=current_close,
             min_confidence=min_confidence,
+            current_sma=current_sma,
+            current_adx=current_adx,
+            volume_ratio=volume_ratio,
         )
 
-    def _evaluate_signal(
+    def _evaluate_signal(  # noqa: PLR0911
         self,
         indicators: _Indicators,
         segment_id: str,
@@ -169,6 +251,36 @@ class MomentumStrategy(BaseStrategy):
             rsi_distance = (max(indicators.rsi_window) - rsi_overbought) / (100.0 - rsi_overbought)
         else:
             return None
+
+        # ADX regime filter: suppress in range-bound markets
+        adx_filter = bool(params.get("adx_filter", False))
+        if adx_filter and indicators.current_adx is not None:
+            adx_threshold = float(params.get("adx_threshold", 25))  # type: ignore[arg-type]
+            if indicators.current_adx < adx_threshold:
+                return None
+
+        # Volume confirmation filter
+        volume_filter = bool(params.get("volume_filter", False))
+        if volume_filter and indicators.volume_ratio is not None:
+            volume_min_ratio = float(params.get("volume_min_ratio", 1.0))  # type: ignore[arg-type]
+            if indicators.volume_ratio < volume_min_ratio:
+                return None
+
+        # Trend filter (SMA gate): suppress counter-trend signals
+        trend_filter = bool(params.get("trend_filter", False))
+        if trend_filter and indicators.current_sma is not None:
+            trend_sma_buffer_pct = float(params.get("trend_sma_buffer_pct", 2.0))  # type: ignore[arg-type]
+            buffer = indicators.current_sma * trend_sma_buffer_pct / 100.0
+            if (
+                indicators.current_close > indicators.current_sma + buffer
+                and direction == SignalDirection.SELL
+            ):
+                return None
+            if (
+                indicators.current_close < indicators.current_sma - buffer
+                and direction == SignalDirection.BUY
+            ):
+                return None
 
         confidence = min(
             1.0,
