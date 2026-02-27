@@ -7,8 +7,8 @@
 | 0 | Code Quality Foundation | 2-3 days | COMPLETE |
 | 1 | Foundation, US Market & Sandbox | Weeks 1-5 | COMPLETE |
 | 2 | MOEX + Tinkoff, Intelligence & Test Mode | Weeks 6-10 | COMPLETE |
-| 3 | Hardening & Advanced | Weeks 11-14 | NOT STARTED |
-| 4 | Real Trading & Optimization | Weeks 15-18 | NOT STARTED |
+| 3 | Hardening & Advanced | Weeks 11-14 | COMPLETE |
+| 4 | Real Trading & Optimization | Weeks 15-18 | IN PROGRESS |
 
 ## Phase 0: Code Quality Foundation (COMPLETE)
 
@@ -24,7 +24,7 @@
 - [x] .gitignore
 - [x] Git initialized
 
-## Phase 1: Foundation, US Market & Sandbox -- COMPLETE
+## Phase 1: Foundation, US Market & Sandbox -- COMPLETE (2026-02-22)
 
 See [PHASE_1.md](PHASE_1.md) for detailed execution plan.
 
@@ -36,9 +36,6 @@ See [PHASE_1.md](PHASE_1.md) for detailed execution plan.
 - [x] Backtest engine + simulated broker
 - [x] Risk management (position sizing, stop-loss, pre-trade checks)
 - [x] FastAPI skeleton (health + mode endpoints)
-- [ ] Instrument registry (IN PROGRESS)
-- [ ] Currency conversion stub (IN PROGRESS)
-- [ ] docker-compose integration test
 
 ### Phase 1 Backtest Vertical Slice -- COMPLETE (2026-02-22)
 
@@ -72,20 +69,24 @@ PRs: #90 (Track A — Intelligence), #91 (Track B — MOEX). 489 tests, 93% cove
 - [x] TinkoffBroker (sandbox/live via t-tech-investments, lot-size aware)
 - [x] BrokerRouter (dispatches orders by market_id)
 - [x] Alembic migration 002 (news_articles + sentiment_scores tables)
-- [ ] MOEX historical data seeding (deferred to Phase 3)
-- [ ] Test mode controller (deferred to Phase 3)
-- [ ] Streamlit dashboard (deferred to Phase 3)
 
-## Phase 3: Hardening & Advanced
+## Phase 3: Hardening & Advanced -- COMPLETE (2026-02-25)
 
-- [ ] Per-market circuit breakers
-- [ ] Cross-market risk management
-- [ ] LSTM per segment
-- [ ] Pairs trading
-- [ ] Alerting (Slack/Discord/Telegram)
-- [ ] Integration + E2E tests
+PRs: #105 (Track A — TradingLoop/CircuitBreakers/TelegramAlerter),
+     #106 (Track B — LSTM/PairsStrategy/EnsembleModel/train_models),
+     #121 (Track C — E2E tests). 619 tests, 92% coverage.
 
-## Phase 4: Real Trading & Optimization
+- [x] Per-market circuit breakers (3-level: Caution / Halt / Liquidate)
+- [x] Cross-market circuit breaker (-10% combined portfolio → halt all)
+- [x] TradingLoop (APScheduler, thread-safe sentiment cache, baseline equity tracking)
+- [x] LSTM per segment (LSTMModel with threading.Lock)
+- [x] EnsembleModel graceful degradation (XGBoost + LightGBM + LSTM)
+- [x] Pairs trading (PairsStrategy: cointegration gate, OLS beta)
+- [x] Alerting — TelegramAlerter (httpx async)
+- [x] train_models.py CLI script
+- [x] Integration + E2E tests (15 E2E: paper trading cycle + circuit breaker trip/recovery)
+
+## Phase 4: Real Trading & Optimization -- IN PROGRESS
 
 ### Track A: Strategy & Backtest Hardening
 
@@ -94,19 +95,21 @@ See [2026-02-27-phase4-track-a-design.md](2026-02-27-phase4-track-a-design.md).
 Driven by expert consensus (quant trader, swing trader, risk officer) after
 backtest validation of the MomentumStrategy regime lookback fix.
 
-- [ ] PR A-1: Backtest infrastructure (trailing stops, transaction costs, benchmark, circuit breakers, batch runner)
-- [ ] PR A-2: Signal quality (trend filter, signal state machine, ADX filter, volume filter)
+- [x] PR A-1 (#124): MomentumStrategy regime lookback fix + Phase 4 plan
+- [x] PR A-2 (#127): Backtest infra (trailing stops, transaction costs, benchmark, circuit breakers, batch runner) + Signal quality (trend filter, signal state machine, ADX filter, volume filter)
 - [ ] PR A-3: Risk calibration (rolling Kelly, daily/weekly loss limits, confidence calibration)
 - [ ] PR A-4: Statistical validation (walk-forward, 50-symbol universe, Monte Carlo, OOS pipeline)
 
-### Track B: Observability & Dashboard
+### Track B: Observability & Dashboard -- COMPLETE (2026-02-27)
 
 See [2026-02-27-phase4-track-b-design.md](2026-02-27-phase4-track-b-design.md)
 and [2026-02-27-phase4-track-b-plan.md](2026-02-27-phase4-track-b-plan.md).
 
-- [ ] PR B-1: Core API (all endpoints + X-API-Key auth + Alembic migration 003)
-- [ ] PR B-2: Streamlit dashboard (5 pages, calls B-1 API)
-- [ ] PR B-3: Prometheus metrics + Alertmanager rules
+- [x] PR B-1 (#123): Core REST API (all endpoints + X-API-Key auth + Alembic migration 003)
+- [x] PR B-2 (#126): Streamlit dashboard (5 pages: system, portfolio, trades, signals, risk)
+- [x] PR B-3 (#125): Prometheus metrics + Alertmanager rules + docker-compose.monitoring.yml
+
+730 tests, 85% coverage.
 
 ### Track C: Production Go-Live
 
