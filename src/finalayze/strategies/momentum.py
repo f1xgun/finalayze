@@ -1,7 +1,8 @@
-"""Momentum trading strategy using RSI + MACD (Layer 4)."""
+"""Momentum trading strategy using RSI + MACD with regime lookback (Layer 4)."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
@@ -13,14 +14,25 @@ from finalayze.strategies.base import BaseStrategy
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
 _MIN_CANDLES = 30
+_DEFAULT_LOOKBACK_BARS = 5
+
+
+@dataclass(frozen=True, slots=True)
+class _Indicators:
+    current_rsi: float
+    rsi_window: list[float]
+    current_hist: float
+    prev_hist: float
+    current_close: float
+    min_confidence: float
 
 
 class MomentumStrategy(BaseStrategy):
-    """RSI + MACD momentum strategy.
+    """RSI + MACD momentum strategy with regime lookback.
 
-    Generates BUY signals when RSI is oversold and MACD histogram crosses
-    above zero, and SELL signals when RSI is overbought and MACD histogram
-    crosses below zero.
+    Generates BUY signals when RSI was recently oversold (within lookback window)
+    and MACD histogram is rising, and SELL signals when RSI was recently overbought
+    and MACD histogram is falling.
     """
 
     @property
@@ -64,14 +76,7 @@ class MomentumStrategy(BaseStrategy):
         if indicators is None:
             return None
 
-        current_rsi, current_hist, prev_hist, min_confidence = indicators
-        result = self._evaluate_signal(
-            current_rsi,
-            current_hist,
-            prev_hist,
-            min_confidence,
-            segment_id,
-        )
+        result = self._evaluate_signal(indicators, segment_id)
         if result is None:
             return None
 
@@ -79,7 +84,7 @@ class MomentumStrategy(BaseStrategy):
         is_buy = direction == SignalDirection.BUY
         market_id = candles[0].market_id
         rsi_label = "oversold" if is_buy else "overbought"
-        cross_label = "above" if is_buy else "below"
+        hist_label = "rising" if is_buy else "falling"
 
         return Signal(
             strategy_name=self.name,
@@ -89,23 +94,23 @@ class MomentumStrategy(BaseStrategy):
             direction=direction,
             confidence=confidence,
             features={
-                "rsi": round(current_rsi, 2),
-                "macd_hist": round(current_hist, 4),
+                "rsi": round(indicators.current_rsi, 2),
+                "macd_hist": round(indicators.current_hist, 4),
             },
             reasoning=(
-                f"RSI={current_rsi:.1f} ({rsi_label}), MACD histogram crossed {cross_label} zero"
+                f"RSI={indicators.current_rsi:.1f} (recently {rsi_label}), "
+                f"MACD histogram {hist_label}"
             ),
         )
 
-    def _compute_indicators(
-        self, candles: list[Candle], segment_id: str
-    ) -> tuple[float, float, float, float] | None:
+    def _compute_indicators(self, candles: list[Candle], segment_id: str) -> _Indicators | None:
         """Compute RSI and MACD indicators, returning None if data is invalid."""
         params = self.get_parameters(segment_id)
         rsi_period = int(params["rsi_period"])  # type: ignore[call-overload]
         macd_fast = int(params["macd_fast"])  # type: ignore[call-overload]
         macd_slow = int(params["macd_slow"])  # type: ignore[call-overload]
         min_confidence = float(params["min_confidence"])  # type: ignore[arg-type]
+        lookback_bars = int(params.get("lookback_bars", _DEFAULT_LOOKBACK_BARS))  # type: ignore[call-overload]
 
         closes = pd.Series([float(c.close) for c in candles])
 
@@ -129,40 +134,49 @@ class MomentumStrategy(BaseStrategy):
         if pd.isna(current_rsi) or pd.isna(current_hist) or pd.isna(prev_hist):
             return None
 
-        return (
-            float(current_rsi),
-            float(current_hist),
-            float(prev_hist),
-            min_confidence,
+        rsi_window = [float(v) for v in rsi_series.iloc[-lookback_bars:] if not pd.isna(v)]
+        current_close = float(candles[-1].close)
+
+        return _Indicators(
+            current_rsi=float(current_rsi),
+            rsi_window=rsi_window,
+            current_hist=float(current_hist),
+            prev_hist=float(prev_hist),
+            current_close=current_close,
+            min_confidence=min_confidence,
         )
 
     def _evaluate_signal(
         self,
-        current_rsi: float,
-        current_hist: float,
-        prev_hist: float,
-        min_confidence: float,
+        indicators: _Indicators,
         segment_id: str,
     ) -> tuple[SignalDirection, float] | None:
-        """Evaluate RSI + MACD crossover and return direction + confidence."""
+        """Evaluate RSI regime + MACD histogram trend and return direction + confidence."""
         params = self.get_parameters(segment_id)
         rsi_oversold = float(params["rsi_oversold"])  # type: ignore[arg-type]
         rsi_overbought = float(params["rsi_overbought"])  # type: ignore[arg-type]
 
-        if current_rsi < rsi_oversold and prev_hist < 0 and current_hist > 0:
+        recently_oversold = any(v < rsi_oversold for v in indicators.rsi_window)
+        recently_overbought = any(v > rsi_overbought for v in indicators.rsi_window)
+        hist_rising = indicators.current_hist > indicators.prev_hist
+        hist_falling = indicators.current_hist < indicators.prev_hist
+
+        if recently_oversold and hist_rising and indicators.current_rsi < rsi_overbought:
             direction = SignalDirection.BUY
-            rsi_distance = (rsi_oversold - current_rsi) / rsi_oversold
-        elif current_rsi > rsi_overbought and prev_hist > 0 and current_hist < 0:
+            rsi_distance = (rsi_oversold - min(indicators.rsi_window)) / rsi_oversold
+        elif recently_overbought and hist_falling and indicators.current_rsi > rsi_oversold:
             direction = SignalDirection.SELL
-            rsi_distance = (current_rsi - rsi_overbought) / (100.0 - rsi_overbought)
+            rsi_distance = (max(indicators.rsi_window) - rsi_overbought) / (100.0 - rsi_overbought)
         else:
             return None
 
         confidence = min(
             1.0,
-            0.5 + rsi_distance * 0.3 + abs(current_hist) * 0.1,
+            0.5
+            + rsi_distance * 0.3
+            + (abs(indicators.current_hist) / indicators.current_close * 100) * 0.1,
         )
-        if confidence < min_confidence:
+        if confidence < indicators.min_confidence:
             return None
 
         return direction, confidence

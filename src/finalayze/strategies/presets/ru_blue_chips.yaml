@@ -10,6 +10,7 @@ strategies:
       macd_fast: 12
       macd_slow: 26
       min_confidence: 0.65
+      lookback_bars: 5
   event_driven:
     enabled: true
     weight: 0.5
