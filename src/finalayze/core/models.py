@@ -244,3 +244,17 @@ class SentimentScoreModel(Base):
     social_sentiment: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
     composite_sentiment: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+
+
+class PortfolioSnapshot(Base):
+    """Portfolio equity snapshot written after each strategy cycle."""
+
+    __tablename__ = "portfolio_snapshots"
+
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    market_id: Mapped[str] = mapped_column(String(10), primary_key=True)
+    equity: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    cash: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    daily_pnl: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    drawdown_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
+    mode: Mapped[str | None] = mapped_column(String(10))

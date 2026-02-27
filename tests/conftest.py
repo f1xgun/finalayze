@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import os
+
 # torch must be imported before lightgbm to prevent OpenMP thread-pool conflicts
 # that cause segmentation faults when both libraries are used together.
 import torch  # noqa: F401  # isort: skip
 import pytest
 from config.modes import WorkMode
 from config.settings import Settings
+
+# Set a non-empty API key for all tests so auth endpoints work correctly.
+# This must be set before any Settings() instance is created.
+os.environ.setdefault("FINALAYZE_API_KEY", "test-api-key")
 
 
 @pytest.fixture
