@@ -5,6 +5,7 @@ Layer 6 -- API layer. Depends on Layer 0 (exceptions, modes).
 
 from __future__ import annotations
 
+from collections import deque
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -25,9 +26,8 @@ _default_mode_manager = ModeManager()
 APP_VERSION = "0.1.0"
 _start_time = datetime.now(UTC)
 
-# In-memory ring buffer for recent errors (max 100)
-_recent_errors: list[dict[str, Any]] = []
-_MAX_ERRORS = 100
+# In-memory ring buffer for recent errors (max 100); deque(maxlen=100) handles eviction
+_recent_errors: deque[dict[str, Any]] = deque(maxlen=100)
 
 
 def get_mode_manager() -> ModeManager:
@@ -45,14 +45,14 @@ def record_error(component: str, message: str, traceback_excerpt: str = "") -> N
             "traceback_excerpt": traceback_excerpt,
         }
     )
-    if len(_recent_errors) > _MAX_ERRORS:
-        _recent_errors.pop(0)
 
 
 # ── Response models ────────────────────────────────────────────────────────────
 
 
 class ComponentStatus(BaseModel):
+    """Component health status. Values are stubs until real health checks are wired."""
+
     model_config = ConfigDict(frozen=True)
     db: str = "ok"
     redis: str = "ok"
@@ -199,8 +199,8 @@ async def set_mode(
             confirm_token does not match.
     """
     if request.mode == WorkMode.REAL:
-        settings = Settings()
-        if not settings.real_token or request.confirm_token != settings.real_token:
+        _real_settings = Settings()
+        if not _real_settings.real_token or request.confirm_token != _real_settings.real_token:
             raise HTTPException(
                 status_code=403,
                 detail="Transitioning to REAL mode requires a valid confirm_token",

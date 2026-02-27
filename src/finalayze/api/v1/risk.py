@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Annotated, Any
+
 from config.settings import Settings
-from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
 
 from finalayze.api.v1.auth import require_api_key
 from finalayze.risk.circuit_breaker import CircuitLevel
@@ -61,7 +63,7 @@ class ExposureResponse(BaseModel):
 
 class OverrideRequest(BaseModel):
     market_id: str
-    level: int
+    level: Annotated[int, Field(ge=0, lt=4)]
 
 
 class OverrideResponse(BaseModel):
@@ -106,10 +108,11 @@ async def risk_exposure() -> ExposureResponse:
 
 @router.post("/override", response_model=OverrideResponse)
 async def risk_override(req: OverrideRequest, request: Request) -> OverrideResponse:
-    circuit_breakers = getattr(request.app.state, "circuit_breakers", {})
-    cb = circuit_breakers.get(req.market_id)
+    cbs: dict[str, Any] = getattr(request.app.state, "circuit_breakers", {}) or {}
+    cb = cbs.get(req.market_id)
     if cb is None:
-        return OverrideResponse(market_id=req.market_id, level=req.level, applied=False)
-    if 0 <= req.level < len(_LEVEL_LIST):
-        cb._level = _LEVEL_LIST[req.level]
+        raise HTTPException(
+            status_code=404, detail=f"No circuit breaker for market {req.market_id!r}"
+        )
+    cb.override_level(_LEVEL_LIST[req.level])
     return OverrideResponse(market_id=req.market_id, level=req.level, applied=True)

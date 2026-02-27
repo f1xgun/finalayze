@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 from fastapi.testclient import TestClient
 
 from finalayze.main import create_app
@@ -40,7 +42,7 @@ def test_risk_override_requires_auth() -> None:
         "/api/v1/risk/override",
         json={"market_id": "us", "level": 1},
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 401
 
 
 def test_ml_status_200() -> None:
@@ -53,3 +55,29 @@ def test_news_list_200() -> None:
     resp = TestClient(create_app()).get("/api/v1/news", headers=_h())
     assert resp.status_code == 200
     assert "articles" in resp.json()
+
+
+def test_risk_override_valid_applies() -> None:
+    app = create_app()
+    mock_cb = MagicMock()
+    app.state.circuit_breakers = {"us": mock_cb}
+    client = TestClient(app)
+    resp = client.post("/api/v1/risk/override", json={"market_id": "us", "level": 0}, headers=_h())
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["applied"] is True
+    mock_cb.override_level.assert_called_once()
+
+
+def test_risk_override_out_of_range_level_returns_422() -> None:
+    resp = TestClient(create_app()).post(
+        "/api/v1/risk/override", json={"market_id": "us", "level": 99}, headers=_h()
+    )
+    assert resp.status_code == 422
+
+
+def test_risk_override_unknown_market_returns_404() -> None:
+    resp = TestClient(create_app()).post(
+        "/api/v1/risk/override", json={"market_id": "unknown", "level": 1}, headers=_h()
+    )
+    assert resp.status_code == 404

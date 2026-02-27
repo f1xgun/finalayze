@@ -6,7 +6,7 @@ Uses TestClient (synchronous) for simplicity since new endpoints are simple.
 from __future__ import annotations
 
 HTTP_200 = 200
-HTTP_422 = 422
+HTTP_401 = 401
 
 
 def test_health_includes_components() -> None:
@@ -42,7 +42,7 @@ def test_system_status_requires_api_key() -> None:
     from finalayze.main import create_app
 
     resp = TestClient(create_app()).get("/api/v1/system/status")
-    assert resp.status_code == HTTP_422
+    assert resp.status_code == HTTP_401
 
 
 def test_system_errors_returns_list() -> None:
@@ -70,5 +70,4 @@ def test_set_mode_real_requires_confirm_token() -> None:
         json={"mode": "real"},
         headers={"X-API-Key": key},
     )
-    # 403 from token check (real_token not configured), or 400 from ModeError
-    assert resp.status_code in (400, 403)
+    assert resp.status_code == 403

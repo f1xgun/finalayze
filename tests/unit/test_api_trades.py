@@ -21,7 +21,7 @@ def test_trades_list_returns_200() -> None:
 
 def test_trades_list_requires_auth() -> None:
     resp = TestClient(create_app()).get("/api/v1/trades")
-    assert resp.status_code == 422
+    assert resp.status_code == 401
 
 
 def test_trades_analytics_returns_200() -> None:

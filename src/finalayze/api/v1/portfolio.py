@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
+from typing import Any
 
 from config.settings import Settings
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from finalayze.api.v1.auth import require_api_key
@@ -160,18 +161,13 @@ async def get_positions(request: Request) -> PositionsResponse:
 
 
 @router.get("/positions/{symbol}", response_model=PositionDetail)
-async def get_position(symbol: str) -> PositionDetail:
-    """Single position detail."""
-    return PositionDetail(
-        symbol=symbol,
-        market_id="",
-        segment_id="",
-        quantity=0.0,
-        market_value_usd=0.0,
-        unrealized_pnl_usd=0.0,
-        unrealized_pnl_pct=0.0,
-        stop_distance_atr=None,
-    )
+async def get_position(symbol: str, request: Request) -> PositionDetail:
+    """Return detail for a single open position. Returns 404 if not found."""
+    broker_router: Any = getattr(request.app.state, "broker_router", None)
+    if broker_router is None:
+        raise HTTPException(status_code=404, detail=f"Position {symbol!r} not found")
+    # TODO: wire to real broker_router
+    raise HTTPException(status_code=404, detail=f"Position {symbol!r} not found")
 
 
 @router.get("/history", response_model=HistoryResponse)

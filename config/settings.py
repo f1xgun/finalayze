@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     real_confirmed: bool = False
 
     # API auth
-    api_key: str = "change-me-in-production"  # FINALAYZE_API_KEY
+    api_key: str = ""  # FINALAYZE_API_KEY — set in production
     real_token: str = ""  # FINALAYZE_REAL_TOKEN — required to switch to REAL mode via API
 
     model_config = {"env_prefix": "FINALAYZE_", "env_file": ".env"}

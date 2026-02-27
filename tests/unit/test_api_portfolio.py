@@ -17,7 +17,7 @@ def _auth() -> dict[str, str]:
 
 def test_portfolio_unified_requires_auth() -> None:
     resp = _client().get("/api/v1/portfolio")
-    assert resp.status_code == 422
+    assert resp.status_code == 401
 
 
 def test_portfolio_unified_with_valid_key() -> None:
@@ -47,3 +47,10 @@ def test_portfolio_performance_with_valid_key() -> None:
     body = resp.json()
     assert "sharpe_30d" in body
     assert "max_drawdown_pct" in body
+
+
+def test_get_single_position_returns_404() -> None:
+    app = create_app()
+    client = TestClient(app)
+    resp = client.get("/api/v1/portfolio/positions/AAPL", headers=_auth())
+    assert resp.status_code == 404

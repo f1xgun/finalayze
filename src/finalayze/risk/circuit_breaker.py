@@ -115,6 +115,10 @@ class CircuitBreaker:
         """Operator-initiated reset: clears LIQUIDATE -> NORMAL."""
         self._level = CircuitLevel.NORMAL
 
+    def override_level(self, level: CircuitLevel) -> None:
+        """Manually override the circuit breaker level (operator use only)."""
+        self._level = level
+
 
 class CrossMarketCircuitBreaker:
     """Monitors combined drawdown across all markets.

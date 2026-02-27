@@ -13,7 +13,6 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
-    Float,
     ForeignKey,
     Integer,
     Numeric,
@@ -257,5 +256,5 @@ class PortfolioSnapshot(Base):
     equity: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     cash: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     daily_pnl: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
-    drawdown_pct: Mapped[float | None] = mapped_column(Float)
+    drawdown_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
     mode: Mapped[str | None] = mapped_column(String(10))

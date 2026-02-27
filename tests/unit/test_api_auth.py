@@ -36,10 +36,16 @@ def test_wrong_key_returns_401() -> None:
     assert resp.status_code == 401
 
 
-def test_missing_key_returns_422() -> None:
+def test_missing_key_returns_401() -> None:
     client = TestClient(_make_app("test-key"))
     resp = client.get("/secret")
-    assert resp.status_code == 422
+    assert resp.status_code == 401
+
+
+def test_unconfigured_api_key_returns_503() -> None:
+    client = TestClient(_make_app(""))
+    resp = client.get("/secret", headers={"X-API-Key": "anything"})
+    assert resp.status_code == 503
 
 
 def test_key_not_logged(caplog: pytest.LogCaptureFixture) -> None:

@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("equity", sa.Numeric(14, 4), nullable=True),
         sa.Column("cash", sa.Numeric(14, 4), nullable=True),
         sa.Column("daily_pnl", sa.Numeric(14, 4), nullable=True),
-        sa.Column("drawdown_pct", sa.Float(), nullable=True),
+        sa.Column("drawdown_pct", sa.Numeric(precision=7, scale=4), nullable=True),
         sa.Column("mode", sa.String(10), nullable=True),
         sa.PrimaryKeyConstraint("timestamp", "market_id"),
     )

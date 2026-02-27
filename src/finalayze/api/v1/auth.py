@@ -21,8 +21,10 @@ def require_api_key(expected_key: str) -> Callable[..., Any]:
     """Return a FastAPI dependency that validates the X-API-Key header."""
 
     async def _verify(key: str | None = Security(_header_scheme)) -> None:
+        if not expected_key:
+            raise HTTPException(status_code=503, detail="API key not configured on server")
         if key is None:
-            raise HTTPException(status_code=422, detail="X-API-Key header is required")
+            raise HTTPException(status_code=401, detail="X-API-Key header is required")
         if key != expected_key:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
