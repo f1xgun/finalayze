@@ -87,8 +87,33 @@ PRs: #90 (Track A — Intelligence), #91 (Track B — MOEX). 489 tests, 93% cove
 
 ## Phase 4: Real Trading & Optimization
 
-- [ ] Live broker integrations
+### Track A: Strategy & Backtest Hardening
+
+See [2026-02-27-phase4-track-a-design.md](2026-02-27-phase4-track-a-design.md).
+
+Driven by expert consensus (quant trader, swing trader, risk officer) after
+backtest validation of the MomentumStrategy regime lookback fix.
+
+- [ ] PR A-1: Backtest infrastructure (trailing stops, transaction costs, benchmark, circuit breakers, batch runner)
+- [ ] PR A-2: Signal quality (trend filter, signal state machine, ADX filter, volume filter)
+- [ ] PR A-3: Risk calibration (rolling Kelly, daily/weekly loss limits, confidence calibration)
+- [ ] PR A-4: Statistical validation (walk-forward, 50-symbol universe, Monte Carlo, OOS pipeline)
+
+### Track B: Observability & Dashboard
+
+See [2026-02-27-phase4-track-b-design.md](2026-02-27-phase4-track-b-design.md)
+and [2026-02-27-phase4-track-b-plan.md](2026-02-27-phase4-track-b-plan.md).
+
+- [ ] PR B-1: Core API (all endpoints + X-API-Key auth + Alembic migration 003)
+- [ ] PR B-2: Streamlit dashboard (5 pages, calls B-1 API)
+- [ ] PR B-3: Prometheus metrics + Alertmanager rules
+
+### Track C: Production Go-Live
+
+Depends on Track A (validation pass) + Track B (monitoring ready).
+
+- [ ] Live broker integration testing (Alpaca paper → live, Tinkoff sandbox → live)
 - [ ] Performance optimization (Polars, caching)
-- [ ] Prometheus + Grafana monitoring
-- [ ] Walk-forward optimization
-- [ ] Production deployment
+- [ ] 6-month paper trading validation period
+- [ ] Production Docker deployment
+- [ ] Go/No-Go decision based on Track A acceptance criteria

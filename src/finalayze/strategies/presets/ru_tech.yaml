@@ -10,6 +10,7 @@ strategies:
       macd_fast: 12
       macd_slow: 26
       min_confidence: 0.6
+      lookback_bars: 5
   mean_reversion:
     enabled: true
     weight: 0.35
