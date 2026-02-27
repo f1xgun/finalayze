@@ -123,6 +123,12 @@ class BacktestResult(BaseModel):
     profit_factor: Decimal
     total_return: Decimal
     total_trades: int
+    # Benchmark comparison fields (populated when benchmark_candles are provided)
+    alpha: Decimal | None = None
+    beta: Decimal | None = None
+    information_ratio: Decimal | None = None
+    max_relative_drawdown: Decimal | None = None
+    benchmark_return: Decimal | None = None
 
 
 class NewsArticle(BaseModel):

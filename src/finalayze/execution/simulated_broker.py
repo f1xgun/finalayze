@@ -1,18 +1,39 @@
 """Simulated broker for backtesting (Layer 5).
 
 Fills orders at candle open prices with no slippage or commission.
-Supports stop-loss orders that trigger when candle low breaches the stop price.
+Supports stop-loss orders (fixed and trailing) that trigger when candle low
+breaches the stop price.
 
 See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
 from finalayze.core.schemas import Candle, PortfolioState
 from finalayze.execution.broker_base import BrokerBase, OrderRequest, OrderResult
+
+
+@dataclass
+class StopLossState:
+    """Holds trailing stop-loss state for a position.
+
+    When ``trail_activated`` is False, the stop fires only at ``initial_stop``.
+    Once the price reaches ``entry_price + activation_atr * atr_value``, trailing
+    begins and ``current_stop`` ratchets upward as new highs are made.
+    """
+
+    initial_stop: Decimal  # entry - N * ATR
+    current_stop: Decimal  # may trail upward
+    highest_price: Decimal  # high-water mark since entry
+    trail_activated: bool  # True once price reaches activation threshold
+    activation_atr: Decimal  # ATR multiplier to activate trailing (default 1.0)
+    trail_atr: Decimal  # ATR multiplier for trailing distance (default 1.5)
+    entry_price: Decimal  # entry price (to compute activation threshold)
+    atr_value: Decimal  # ATR at time of entry
 
 
 class SimulatedBroker(BrokerBase):
@@ -21,7 +42,7 @@ class SimulatedBroker(BrokerBase):
     def __init__(self, initial_cash: Decimal) -> None:
         self._cash: Decimal = initial_cash
         self._positions: dict[str, Decimal] = {}
-        self._stop_losses: dict[str, Decimal] = {}
+        self._stop_states: dict[str, StopLossState] = {}
         self._last_prices: dict[str, Decimal] = {}
         self._current_timestamp: datetime | None = None
 
@@ -53,35 +74,98 @@ class SimulatedBroker(BrokerBase):
         self._current_timestamp = ts
 
     def set_stop_loss(self, symbol: str, price: Decimal) -> None:
-        """Set a stop-loss price for a symbol."""
-        self._stop_losses[symbol] = price
+        """Set a fixed (non-trailing) stop-loss price for a symbol.
+
+        Backward-compatible: creates a StopLossState that never activates trailing.
+        """
+        self._stop_states[symbol] = StopLossState(
+            initial_stop=price,
+            current_stop=price,
+            highest_price=price,
+            trail_activated=False,
+            activation_atr=Decimal(999999),  # effectively never activates
+            trail_atr=Decimal(0),
+            entry_price=price,
+            atr_value=Decimal(1),  # non-zero so threshold = price + 999999 ≈ ∞
+        )
+
+    def set_trailing_stop(
+        self,
+        symbol: str,
+        entry_price: Decimal,
+        initial_stop: Decimal,
+        atr_value: Decimal,
+        activation_atr: Decimal = Decimal("1.0"),
+        trail_atr: Decimal = Decimal("1.5"),
+    ) -> None:
+        """Set a trailing stop-loss for a symbol.
+
+        Args:
+            symbol: Ticker symbol.
+            entry_price: Price at which the position was entered.
+            initial_stop: Initial stop price (entry - N * ATR).
+            atr_value: ATR value at time of entry.
+            activation_atr: ATR multiplier for trail activation threshold.
+            trail_atr: ATR multiplier for trailing distance.
+        """
+        self._stop_states[symbol] = StopLossState(
+            initial_stop=initial_stop,
+            current_stop=initial_stop,
+            highest_price=entry_price,
+            trail_activated=False,
+            activation_atr=activation_atr,
+            trail_atr=trail_atr,
+            entry_price=entry_price,
+            atr_value=atr_value,
+        )
 
     def check_stop_losses(self, candle: Candle) -> list[OrderResult]:
         """Check if any stop losses triggered on this candle.
 
-        A stop loss triggers when candle.low <= stop_price.
-        Fills at the stop price and closes the full position.
+        For trailing stops:
+          1. Update highest_price = max(highest_price, candle.high)
+          2. Activate trailing when highest_price >= entry_price + activation_atr * atr_value
+          3. Once activated: trail_stop = highest_price - trail_atr * atr_value
+          4. current_stop = max(current_stop, trail_stop) -- stop only moves up
+          5. Trigger if candle.low <= current_stop
+
+        For fixed stops (set via set_stop_loss), triggers at current_stop.
         """
         results: list[OrderResult] = []
         symbol = candle.symbol
 
-        if symbol not in self._stop_losses:
+        if symbol not in self._stop_states:
             return results
 
-        stop_price = self._stop_losses[symbol]
+        state = self._stop_states[symbol]
 
-        if candle.low <= stop_price and symbol in self._positions:
+        # Step 1: Update high-water mark
+        state.highest_price = max(state.highest_price, candle.high)
+
+        # Step 2: Check activation
+        if not state.trail_activated:
+            activation_threshold = state.entry_price + state.activation_atr * state.atr_value
+            if state.highest_price >= activation_threshold:
+                state.trail_activated = True
+
+        # Step 3 & 4: Compute and ratchet trail stop
+        if state.trail_activated:
+            trail_stop = state.highest_price - state.trail_atr * state.atr_value
+            state.current_stop = max(state.current_stop, trail_stop)
+
+        # Step 5: Check trigger
+        if candle.low <= state.current_stop and symbol in self._positions:
             qty = self._positions[symbol]
-            proceeds = stop_price * qty
+            proceeds = state.current_stop * qty
             self._cash += proceeds
             del self._positions[symbol]
-            del self._stop_losses[symbol]
+            del self._stop_states[symbol]
             self._last_prices[symbol] = candle.close
 
             results.append(
                 OrderResult(
                     filled=True,
-                    fill_price=stop_price,
+                    fill_price=state.current_stop,
                     symbol=symbol,
                     side="SELL",
                     quantity=qty,
@@ -103,8 +187,8 @@ class SimulatedBroker(BrokerBase):
         return dict(self._positions)
 
     def cancel_order(self, order_id: str) -> None:
-        """No-op for simulated broker — stop-loss keyed by symbol, not order ID."""
-        self._stop_losses.pop(order_id, None)
+        """No-op for simulated broker -- stop-loss keyed by symbol, not order ID."""
+        self._stop_states.pop(order_id, None)
 
     def get_portfolio(self) -> PortfolioState:
         """Return current portfolio state with computed equity."""
@@ -176,7 +260,7 @@ class SimulatedBroker(BrokerBase):
             self._positions[order.symbol] = remaining
         else:
             self._positions.pop(order.symbol, None)
-            self._stop_losses.pop(order.symbol, None)
+            self._stop_states.pop(order.symbol, None)
 
         self._last_prices[order.symbol] = fill_candle.close
 

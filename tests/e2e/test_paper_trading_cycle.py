@@ -189,7 +189,18 @@ def instrument_registry() -> InstrumentRegistry:
 
 @pytest.fixture
 def strategy_combiner() -> StrategyCombiner:
-    return StrategyCombiner([MomentumStrategy()])
+    strategy = MomentumStrategy()
+    # Disable filters for E2E tests — test candle patterns are synthetic and
+    # don't produce valid SMA/ADX/volume signals.
+    _base_get_params = strategy.get_parameters
+
+    def _get_params_no_filters(segment_id: str) -> dict[str, object]:
+        params = dict(_base_get_params(segment_id))
+        params.update(trend_filter=False, adx_filter=False, volume_filter=False)
+        return params
+
+    strategy.get_parameters = _get_params_no_filters  # type: ignore[assignment]
+    return StrategyCombiner([strategy])
 
 
 @pytest.fixture

@@ -11,13 +11,14 @@ import yaml
 
 from finalayze.core.schemas import Candle, SignalDirection
 from finalayze.strategies.base import BaseStrategy
-from finalayze.strategies.momentum import MomentumStrategy
+from finalayze.strategies.momentum import MomentumStrategy, _SignalState
 
 MIN_CANDLES_FOR_INDICATORS = 35
 RSI_PERIOD = 14
 MIN_SUPPORTED_SEGMENTS = 2
 LOOKBACK_BARS = 5
 CONFIDENCE_TOLERANCE = 0.01
+NEUTRAL_RESET_BARS = 20
 
 _MOMENTUM_PARAMS: dict[str, object] = {
     "rsi_period": 14,
@@ -33,12 +34,36 @@ _MOMENTUM_PARAMS_V2: dict[str, object] = {
     "lookback_bars": 5,
 }
 
+_MOMENTUM_PARAMS_V3: dict[str, object] = {
+    **_MOMENTUM_PARAMS_V2,
+    "trend_filter": False,
+    "trend_sma_period": 50,
+    "trend_sma_buffer_pct": 2.0,
+    "adx_filter": False,
+    "adx_period": 14,
+    "adx_threshold": 25,
+    "volume_filter": False,
+    "volume_sma_period": 20,
+    "volume_min_ratio": 1.0,
+    "neutral_reset_bars": 20,
+}
 
-def _make_candles(prices: list[float], start_year: int = 2024) -> list[Candle]:
+
+def _make_candles(
+    prices: list[float],
+    start_year: int = 2024,
+    *,
+    volumes: list[int] | None = None,
+    highs: list[float] | None = None,
+    lows: list[float] | None = None,
+) -> list[Candle]:
     candles = []
     base = datetime(start_year, 1, 1, 14, 30, tzinfo=UTC)
     for i, price in enumerate(prices):
         p = Decimal(str(price))
+        h = Decimal(str(highs[i])) if highs else p + Decimal(1)
+        lo = Decimal(str(lows[i])) if lows else p - Decimal(1)
+        vol = volumes[i] if volumes else 1_000_000
         candles.append(
             Candle(
                 symbol="AAPL",
@@ -46,10 +71,10 @@ def _make_candles(prices: list[float], start_year: int = 2024) -> list[Candle]:
                 timeframe="1d",
                 timestamp=base + timedelta(days=i),
                 open=p,
-                high=p + Decimal(1),
-                low=p - Decimal(1),
+                high=h,
+                low=lo,
                 close=p,
-                volume=1_000_000,
+                volume=vol,
             )
         )
     return candles
@@ -336,14 +361,16 @@ class TestMomentumStrategy:
             [crash_bottom_high + recovery_step_high * (i + 1) for i in range(recovery_count)]
         )
 
-        strategy = MomentumStrategy()
-        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: _MOMENTUM_PARAMS_V2)
+        strategy_low = MomentumStrategy()
+        strategy_high = MomentumStrategy()
+        monkeypatch.setattr(strategy_low, "get_parameters", lambda _seg: _MOMENTUM_PARAMS_V2)
+        monkeypatch.setattr(strategy_high, "get_parameters", lambda _seg: _MOMENTUM_PARAMS_V2)
 
         candles_low = _make_candles(prices_low)
         candles_high = _make_candles(prices_high)
 
-        signal_low = strategy.generate_signal("AAPL", candles_low, "us_tech")
-        signal_high = strategy.generate_signal("AAPL", candles_high, "us_tech")
+        signal_low = strategy_low.generate_signal("AAPL", candles_low, "us_tech")
+        signal_high = strategy_high.generate_signal("AAPL", candles_high, "us_tech")
 
         assert signal_low is not None, "Expected BUY signal for low-price sequence"
         assert signal_high is not None, "Expected BUY signal for high-price sequence"
@@ -352,3 +379,274 @@ class TestMomentumStrategy:
             f"Confidence should be similar regardless of price scale: "
             f"low={signal_low.confidence:.4f}, high={signal_high.confidence:.4f}"
         )
+
+
+class TestMomentumSignalFilters:
+    """Tests for trend filter, signal state machine, ADX filter, and volume filter."""
+
+    # ---------- helper: BUY-producing price series ----------
+    @staticmethod
+    def _buy_prices() -> list[float]:
+        """Return price series that triggers a BUY signal (crash + recovery)."""
+        stable_price = 200.0
+        prices: list[float] = [stable_price] * 40
+        crash_bottom = stable_price - 4.0 * 16
+        prices.extend([stable_price - 4.0 * (i + 1) for i in range(16)])
+        prices.extend([crash_bottom] * 3)
+        prices.extend([crash_bottom + 2.0 * (i + 1) for i in range(4)])
+        return prices
+
+    # ---------- helper: SELL-producing price series ----------
+    @staticmethod
+    def _sell_prices() -> list[float]:
+        """Return price series that triggers a SELL signal (rally + decline)."""
+        stable_price = 100.0
+        rally_top = stable_price + 4.0 * 16
+        prices: list[float] = [stable_price] * 40
+        prices.extend([stable_price + 4.0 * (i + 1) for i in range(16)])
+        prices.extend([rally_top] * 3)
+        prices.extend([rally_top - 2.0 * (i + 1) for i in range(7)])
+        return prices
+
+    # ---------- 1. Trend filter: suppress sell in uptrend ----------
+    def test_trend_filter_suppresses_sell_in_uptrend(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Price well above 50 SMA, overbought RSI -> SELL suppressed."""
+        params = {
+            **_MOMENTUM_PARAMS_V3,
+            "trend_filter": True,
+            "trend_sma_period": 50,
+            "trend_sma_buffer_pct": 2.0,
+        }
+        # Use the sell-signal price series. The last close should be well above
+        # the SMA of the whole series because the rally pushed it high.
+        prices = self._sell_prices()
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices)
+
+        # Without trend filter, this produces a SELL
+        params_no_filter = {**params, "trend_filter": False}
+        strategy_no_filter = MomentumStrategy()
+        monkeypatch.setattr(strategy_no_filter, "get_parameters", lambda _seg: params_no_filter)
+        sell_signal = strategy_no_filter.generate_signal("AAPL", candles, "us_tech")
+        assert sell_signal is not None, "Baseline: expected SELL without trend filter"
+        assert sell_signal.direction == SignalDirection.SELL
+
+        # With trend filter enabled, SELL should be suppressed (price above SMA)
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is None, "Expected SELL suppressed: price above SMA in uptrend"
+
+    # ---------- 2. Trend filter: suppress buy in downtrend ----------
+    def test_trend_filter_suppresses_buy_in_downtrend(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Price well below 50 SMA, oversold RSI -> BUY suppressed."""
+        params = {
+            **_MOMENTUM_PARAMS_V3,
+            "trend_filter": True,
+            "trend_sma_period": 50,
+            "trend_sma_buffer_pct": 2.0,
+        }
+        prices = self._buy_prices()
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices)
+
+        # Baseline: confirm BUY without filter
+        params_no_filter = {**params, "trend_filter": False}
+        strategy_no_filter = MomentumStrategy()
+        monkeypatch.setattr(strategy_no_filter, "get_parameters", lambda _seg: params_no_filter)
+        buy_signal = strategy_no_filter.generate_signal("AAPL", candles, "us_tech")
+        assert buy_signal is not None, "Baseline: expected BUY without trend filter"
+        assert buy_signal.direction == SignalDirection.BUY
+
+        # With trend filter, BUY suppressed (price well below SMA)
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is None, "Expected BUY suppressed: price below SMA in downtrend"
+
+    # ---------- 3. Trend filter: allows signal in buffer zone ----------
+    def test_trend_filter_allows_signal_in_buffer_zone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Price near SMA (within buffer) -> signal passes through."""
+        # Use a very large buffer (100%) so close is always within buffer
+        params = {
+            **_MOMENTUM_PARAMS_V3,
+            "trend_filter": True,
+            "trend_sma_period": 50,
+            "trend_sma_buffer_pct": 100.0,
+        }
+        prices = self._buy_prices()
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices)
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is not None, "Expected signal to pass through with large buffer"
+
+    # ---------- 4. Signal state machine: suppress duplicate ----------
+    def test_signal_state_machine_suppresses_duplicate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two consecutive BUY signals -> only first emitted."""
+        params = {**_MOMENTUM_PARAMS_V3, "neutral_reset_bars": 20}
+        prices = self._buy_prices()
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices)
+
+        sig1 = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert sig1 is not None, "First BUY should be emitted"
+        assert sig1.direction == SignalDirection.BUY
+
+        sig2 = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert sig2 is None, "Duplicate BUY should be suppressed"
+
+    # ---------- 5. Signal state machine: allows direction change ----------
+    def test_signal_state_machine_allows_direction_change(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """BUY then SELL -> both emitted."""
+        params = {**_MOMENTUM_PARAMS_V3, "neutral_reset_bars": 20}
+        buy_prices = self._buy_prices()
+        sell_prices = self._sell_prices()
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+
+        buy_candles = _make_candles(buy_prices)
+        sig_buy = strategy.generate_signal("AAPL", buy_candles, "us_tech")
+        assert sig_buy is not None and sig_buy.direction == SignalDirection.BUY
+
+        sell_candles = _make_candles(sell_prices)
+        sig_sell = strategy.generate_signal("AAPL", sell_candles, "us_tech")
+        assert sig_sell is not None, "SELL after BUY should be emitted (direction change)"
+        assert sig_sell.direction == SignalDirection.SELL
+
+    # ---------- 6. Signal state machine: resets after neutral bars ----------
+    def test_signal_state_machine_resets_after_neutral_bars(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """After 20 neutral bars, same direction re-emitted."""
+        params = {**_MOMENTUM_PARAMS_V3, "neutral_reset_bars": 20}
+        prices = self._buy_prices()
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices)
+
+        sig1 = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert sig1 is not None and sig1.direction == SignalDirection.BUY
+
+        # Simulate 20 ticks with flat prices (no signal) -> state resets
+        flat_prices: list[float] = [150.0] * (MIN_CANDLES_FOR_INDICATORS + 5)
+        flat_candles = _make_candles(flat_prices)
+        for _ in range(NEUTRAL_RESET_BARS):
+            strategy.generate_signal("AAPL", flat_candles, "us_tech")
+
+        # Now same direction should be re-emitted
+        sig2 = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert sig2 is not None, "BUY should re-emit after neutral_reset_bars ticks"
+        assert sig2.direction == SignalDirection.BUY
+
+    # ---------- 7. ADX filter: suppresses low ADX ----------
+    def test_adx_filter_suppresses_low_adx(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ADX < 25 -> signal suppressed."""
+        from finalayze.strategies.momentum import _Indicators
+
+        params = {
+            **_MOMENTUM_PARAMS_V3,
+            "adx_filter": True,
+            "adx_period": 14,
+            "adx_threshold": 25,
+        }
+        prices = self._buy_prices()
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices)
+
+        # First verify a BUY signal would fire without ADX filter
+        params_no_adx = {**params, "adx_filter": False}
+        strategy_no_adx = MomentumStrategy()
+        monkeypatch.setattr(strategy_no_adx, "get_parameters", lambda _seg: params_no_adx)
+        baseline = strategy_no_adx.generate_signal("AAPL", candles, "us_tech")
+        assert baseline is not None, "Baseline: expected BUY without ADX filter"
+
+        # Now monkeypatch _compute_indicators to force low ADX
+        original_compute = strategy._compute_indicators
+
+        def _compute_with_low_adx(candles: list[Candle], segment_id: str) -> _Indicators | None:
+            ind = original_compute(candles, segment_id)
+            if ind is None:
+                return None
+            return _Indicators(
+                current_rsi=ind.current_rsi,
+                rsi_window=ind.rsi_window,
+                current_hist=ind.current_hist,
+                prev_hist=ind.prev_hist,
+                current_close=ind.current_close,
+                min_confidence=ind.min_confidence,
+                current_sma=ind.current_sma,
+                current_adx=10.0,  # Force low ADX
+                volume_ratio=ind.volume_ratio,
+            )
+
+        monkeypatch.setattr(strategy, "_compute_indicators", _compute_with_low_adx)
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is None, "Expected signal suppressed: ADX too low (range-bound)"
+
+    # ---------- 8. ADX filter: allows high ADX ----------
+    def test_adx_filter_allows_high_adx(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ADX > 25 -> signal passes."""
+        params = {
+            **_MOMENTUM_PARAMS_V3,
+            "adx_filter": True,
+            "adx_period": 14,
+            "adx_threshold": 25,
+        }
+        # Use buy prices with wide high-low spread -> high ADX
+        prices = self._buy_prices()
+        highs = [p + 10.0 for p in prices]
+        lows = [p - 10.0 for p in prices]
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices, highs=highs, lows=lows)
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is not None, "Expected signal to pass: ADX should be high"
+        assert signal.direction == SignalDirection.BUY
+
+    # ---------- 9. Volume filter: suppresses low volume ----------
+    def test_volume_filter_suppresses_low_volume(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Volume < 1x SMA -> suppressed."""
+        params = {
+            **_MOMENTUM_PARAMS_V3,
+            "volume_filter": True,
+            "volume_sma_period": 20,
+            "volume_min_ratio": 1.0,
+        }
+        prices = self._buy_prices()
+        n = len(prices)
+        # High volume for first candles, then low volume at the end
+        volumes = [1_000_000] * (n - 1) + [100]
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices, volumes=volumes)
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is None, "Expected signal suppressed: volume too low"
+
+    # ---------- 10. Volume filter: allows high volume ----------
+    def test_volume_filter_allows_high_volume(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Volume >= 1x SMA -> passes."""
+        params = {
+            **_MOMENTUM_PARAMS_V3,
+            "volume_filter": True,
+            "volume_sma_period": 20,
+            "volume_min_ratio": 1.0,
+        }
+        prices = self._buy_prices()
+        n = len(prices)
+        # All candles have same volume -> ratio = 1.0 exactly
+        volumes = [1_000_000] * n
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices, volumes=volumes)
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is not None, "Expected signal to pass: volume ratio >= 1.0"
+        assert signal.direction == SignalDirection.BUY
