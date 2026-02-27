@@ -234,3 +234,10 @@ class TestNewsModels:
 
     def test_sentiment_score_model_has_tablename(self) -> None:
         assert SentimentScoreModel.__tablename__ == "sentiment_scores"
+
+
+def test_portfolio_snapshot_model_has_expected_columns() -> None:
+    from finalayze.core.models import PortfolioSnapshot
+
+    cols = {c.name for c in PortfolioSnapshot.__table__.columns}
+    assert {"timestamp", "market_id", "equity", "cash", "daily_pnl", "drawdown_pct", "mode"} <= cols
