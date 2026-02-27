@@ -1,0 +1,33 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: finalayze_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    networks:
+      - finalayze_net
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: finalayze_alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks:
+      - finalayze_net
+
+volumes:
+  prometheus_data:
+
+networks:
+  finalayze_net:
+    external: true
+    name: finalayze_finalayze_net

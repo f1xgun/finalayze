@@ -1,0 +1,41 @@
+groups:
+  - name: finalayze_trading
+    rules:
+      - alert: CircuitBreakerHalted
+        expr: finalayze_circuit_breaker_level >= 2
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit breaker {{ $labels.market }} level {{ $value }}"
+          description: "Trading halted or liquidating on {{ $labels.market }}"
+
+      - alert: HighDrawdown
+        expr: finalayze_drawdown_pct > 0.08
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High drawdown on {{ $labels.market }}: {{ $value | humanizePercentage }}"
+
+      - alert: NewsFeedSilent
+        expr: time() - finalayze_news_feed_last_article_timestamp > 1800
+        labels:
+          severity: warning
+        annotations:
+          summary: "No news articles for 30+ minutes (scope={{ $labels.scope }})"
+
+      - alert: MLModelStale
+        expr: time() - finalayze_ml_model_last_retrain_timestamp > 259200
+        labels:
+          severity: warning
+        annotations:
+          summary: "ML model {{ $labels.model }} not retrained in 3+ days"
+
+      - alert: NoTradesDeadMan
+        expr: increase(finalayze_trades_total[2h]) == 0
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No trades processed in 2 hours — system may be stuck"

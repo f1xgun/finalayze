@@ -14,6 +14,7 @@ from config.logging import setup_logging
 from config.settings import Settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from finalayze.api.v1.router import api_router
 
@@ -43,6 +44,10 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "Authorization"],
     )
     application.include_router(api_router, prefix="/api/v1")
+    # Prometheus HTTP metrics — no auth (internal network only)
+    Instrumentator().instrument(application).expose(
+        application, endpoint="/metrics", include_in_schema=False
+    )
     return application
 
 

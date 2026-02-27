@@ -43,6 +43,9 @@ dependencies = [
     "finnhub-python>=2.4.20",
     # Dashboard
     "streamlit>=1.41.0",
+    # Monitoring
+    "prometheus-client>=0.20",
+    "prometheus-fastapi-instrumentator>=7.0",
     # Utilities
     "python-dotenv>=1.0.1",
     "structlog>=24.4.0",
@@ -163,6 +166,8 @@ module = [
     "t_tech.*",
     "statsmodels.*",
     "joblib.*",
+    "prometheus_client.*",
+    "prometheus_fastapi_instrumentator.*",
 ]
 ignore_missing_imports = true
 
