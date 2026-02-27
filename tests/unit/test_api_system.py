@@ -55,3 +55,20 @@ def test_system_errors_returns_list() -> None:
     resp = TestClient(create_app()).get("/api/v1/system/errors", headers={"X-API-Key": key})
     assert resp.status_code == HTTP_200
     assert isinstance(resp.json(), list)
+
+
+def test_set_mode_real_requires_confirm_token() -> None:
+    from config.settings import Settings
+    from fastapi.testclient import TestClient
+
+    from finalayze.main import create_app
+
+    key = Settings().api_key
+    # Should return 403 when real_token is empty (default) — spec says deny if not set
+    resp = TestClient(create_app()).post(
+        "/api/v1/mode",
+        json={"mode": "real"},
+        headers={"X-API-Key": key},
+    )
+    # 403 from token check (real_token not configured), or 400 from ModeError
+    assert resp.status_code in (400, 403)

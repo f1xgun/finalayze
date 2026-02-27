@@ -165,20 +165,28 @@ async def system_errors() -> list[ErrorEntry]:
     return [ErrorEntry(**e) for e in _recent_errors]
 
 
-@router.get("/mode", response_model=ModeResponse)
+@router.get(
+    "/mode",
+    response_model=ModeResponse,
+    dependencies=[Depends(require_api_key(_settings.api_key))],
+)
 async def get_mode(
     mgr: Annotated[ModeManager, Depends(get_mode_manager)],
 ) -> ModeResponse:
-    """Return the current work mode."""
+    """Return the current work mode. Auth required."""
     return ModeResponse(mode=str(mgr.current_mode))
 
 
-@router.post("/mode", response_model=ModeResponse)
+@router.post(
+    "/mode",
+    response_model=ModeResponse,
+    dependencies=[Depends(require_api_key(_settings.api_key))],
+)
 async def set_mode(
     request: ModeRequest,
     mgr: Annotated[ModeManager, Depends(get_mode_manager)],
 ) -> ModeResponse:
-    """Change the work mode.
+    """Change the work mode. Auth required.
 
     Transitioning to REAL mode requires either:
     - ``FINALAYZE_REAL_CONFIRMED=true`` env var (legacy / deployment guard), or
@@ -187,12 +195,12 @@ async def set_mode(
     Raises:
         HTTPException(400): When the ModeManager rejects the transition
             (e.g. REAL without env var confirmation).
-        HTTPException(403): When a real_token is configured but the request
+        HTTPException(403): When real_token is not configured or the request
             confirm_token does not match.
     """
     if request.mode == WorkMode.REAL:
         settings = Settings()
-        if settings.real_token and request.confirm_token != settings.real_token:
+        if not settings.real_token or request.confirm_token != settings.real_token:
             raise HTTPException(
                 status_code=403,
                 detail="Transitioning to REAL mode requires a valid confirm_token",
