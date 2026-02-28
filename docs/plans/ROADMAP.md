@@ -88,7 +88,7 @@ PRs: #105 (Track A — TradingLoop/CircuitBreakers/TelegramAlerter),
 
 ## Phase 4: Real Trading & Optimization -- IN PROGRESS
 
-### Track A: Strategy & Backtest Hardening
+### Track A: Strategy & Backtest Hardening -- COMPLETE (2026-02-28)
 
 See [2026-02-27-phase4-track-a-design.md](2026-02-27-phase4-track-a-design.md).
 
@@ -97,8 +97,9 @@ backtest validation of the MomentumStrategy regime lookback fix.
 
 - [x] PR A-1 (#124): MomentumStrategy regime lookback fix + Phase 4 plan
 - [x] PR A-2 (#127): Backtest infra (trailing stops, transaction costs, benchmark, circuit breakers, batch runner) + Signal quality (trend filter, signal state machine, ADX filter, volume filter)
-- [ ] PR A-3: Risk calibration (rolling Kelly, daily/weekly loss limits, confidence calibration)
-- [ ] PR A-4: Statistical validation (walk-forward, 50-symbol universe, Monte Carlo, OOS pipeline)
+- [x] PR A-3+A-4 (#128): Risk calibration (rolling Kelly, daily/weekly loss limits, confidence calibration) + Statistical validation (walk-forward, 50-symbol universe, Monte Carlo, OOS pipeline)
+
+772 tests, 85% coverage.
 
 ### Track B: Observability & Dashboard -- COMPLETE (2026-02-27)
 
