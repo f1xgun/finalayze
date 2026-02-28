@@ -2,7 +2,7 @@ segment_id: ru_energy
 strategies:
   momentum:
     enabled: true
-    weight: 0.3
+    weight: 0.25
     params:
       rsi_period: 14
       rsi_oversold: 25
@@ -26,14 +26,20 @@ strategies:
       neutral_reset_bars: 20
   event_driven:
     enabled: true
-    weight: 0.5
+    weight: 0.45
     params:
       min_sentiment: 0.6
       event_types: [opec, oil_price, sanctions, commodity_price, geopolitical]
   mean_reversion:
     enabled: true
-    weight: 0.2
+    weight: 0.20
     params:
       bb_period: 20
       bb_std_dev: 3.0
       min_confidence: 0.7
+  ml_ensemble:
+    enabled: true
+    weight: 0.10
+    params:
+      threshold: 0.20
+      min_confidence: 0.6

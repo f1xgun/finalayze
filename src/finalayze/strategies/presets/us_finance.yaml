@@ -2,14 +2,14 @@ segment_id: us_finance
 strategies:
   mean_reversion:
     enabled: true
-    weight: 0.4
+    weight: 0.30
     params:
       bb_period: 20
       bb_std_dev: 2.0
       min_confidence: 0.6
   momentum:
     enabled: true
-    weight: 0.3
+    weight: 0.25
     params:
       rsi_period: 14
       rsi_oversold: 30
@@ -33,7 +33,13 @@ strategies:
       neutral_reset_bars: 20
   event_driven:
     enabled: true
-    weight: 0.3
+    weight: 0.30
     params:
       min_sentiment: 0.65
       event_types: [interest_rate, earnings, regulatory, macro]
+  ml_ensemble:
+    enabled: true
+    weight: 0.15
+    params:
+      threshold: 0.15
+      min_confidence: 0.5

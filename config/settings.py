@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""  # FINALAYZE_TELEGRAM_BOT_TOKEN
     telegram_chat_id: str = ""  # FINALAYZE_TELEGRAM_CHAT_ID
 
+    # ML
+    ml_enabled: bool = False  # opt-in
+    ml_retrain_interval_hours: int = 168  # weekly
+    ml_model_dir: str = "models/"
+    ml_min_train_samples: int = 252  # ~1 year of daily bars
+
     # Safety
     real_confirmed: bool = False
 

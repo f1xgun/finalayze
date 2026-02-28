@@ -1,4 +1,4 @@
-"""APScheduler-based live trading loop (Layer 0 -- core orchestration).
+"""APScheduler-based live trading loop (Layer 6 -- top-level orchestrator).
 
 Orchestrates three scheduled cycles:
   - _news_cycle: fetch news, analyze sentiment, update _sentiment_cache
@@ -7,6 +7,11 @@ Orchestrates three scheduled cycles:
   - _daily_reset: reset circuit breakers, send daily P&L summary
 
 Thread safety: _sentiment_cache is protected by _sentiment_lock (threading.Lock).
+
+Note: This module lives in ``core/`` for import convenience but it is
+architecturally Layer 6 — it imports from L3 (analysis), L4 (risk/strategies),
+and L5 (execution).  All higher-layer imports are deferred to avoid polluting
+the ``core`` namespace at import time.
 
 See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 """
@@ -18,13 +23,12 @@ import logging
 import threading
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from finalayze.core.schemas import NewsArticle, SignalDirection
-from finalayze.execution.broker_base import OrderRequest
-from finalayze.risk.circuit_breaker import CircuitLevel
 
 if TYPE_CHECKING:
     from config.settings import Settings
@@ -36,10 +40,15 @@ if TYPE_CHECKING:
     from finalayze.core.schemas import Candle, SentimentResult, Signal
     from finalayze.data.cache import RedisCache
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
-    from finalayze.execution.broker_base import BrokerBase
+    from finalayze.execution.broker_base import BrokerBase, OrderRequest
     from finalayze.execution.broker_router import BrokerRouter
     from finalayze.markets.instruments import Instrument, InstrumentRegistry
-    from finalayze.risk.circuit_breaker import CircuitBreaker, CrossMarketCircuitBreaker
+    from finalayze.ml.registry import MLModelRegistry
+    from finalayze.risk.circuit_breaker import (
+        CircuitBreaker,
+        CircuitLevel,
+        CrossMarketCircuitBreaker,
+    )
     from finalayze.strategies.combiner import StrategyCombiner
 
 # ── Constants ──────────────────────────────────────────────────────────────
@@ -83,12 +92,17 @@ class TradingLoop:
         alerter: TelegramAlerter,
         instrument_registry: InstrumentRegistry,
         cache: RedisCache | None = None,
+        ml_registry: MLModelRegistry | None = None,
     ) -> None:
-        from finalayze.risk.kelly import (  # noqa: PLC0415
-            RollingKelly,
-        )
+        from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
+        from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
+        from finalayze.risk.kelly import RollingKelly  # noqa: PLC0415
         from finalayze.risk.loss_limits import LossLimitTracker  # noqa: PLC0415
         from finalayze.risk.pre_trade_check import PreTradeChecker  # noqa: PLC0415
+
+        # Store class references for runtime use without module-level imports
+        self._OrderRequest = OrderRequest
+        self._CircuitLevel = CircuitLevel
 
         self._settings = settings
         self._fetchers = fetchers
@@ -127,6 +141,7 @@ class TradingLoop:
             fraction=getattr(settings, "kelly_fraction", 0.5),
         )
 
+        self._ml_registry = ml_registry
         self._scheduler: BackgroundScheduler | None = None
         self._stop_event = threading.Event()
 
@@ -134,7 +149,15 @@ class TradingLoop:
 
     def start(self) -> None:
         """Start the APScheduler and block until stop() is called."""
-        self._scheduler = BackgroundScheduler(timezone="UTC")
+        from apscheduler.executors.pool import (  # noqa: PLC0415
+            ThreadPoolExecutor as APSThreadPoolExecutor,
+        )
+
+        executors: dict[str, APSThreadPoolExecutor] = {
+            "default": APSThreadPoolExecutor(max_workers=4),
+            "retrain": APSThreadPoolExecutor(max_workers=1),
+        }
+        self._scheduler = BackgroundScheduler(timezone="UTC", executors=executors)
         self._scheduler.add_job(
             self._news_cycle,
             "interval",
@@ -151,6 +174,13 @@ class TradingLoop:
             hour=self._settings.daily_reset_hour_utc,
             minute=0,
         )
+        if self._ml_registry is not None and getattr(self._settings, "ml_enabled", False):
+            self._scheduler.add_job(
+                self._retrain_cycle,
+                "interval",
+                hours=getattr(self._settings, "ml_retrain_interval_hours", 168),
+                executor="retrain",
+            )
         self._scheduler.start()
         _log.info(
             "TradingLoop started: news=%dm, strategy=%dm, daily_reset=UTC %02d:00",
@@ -270,7 +300,7 @@ class TradingLoop:
             level = cb.check(current_equity=equity, baseline_equity=baseline)
             market_cb_levels[market_id] = level
 
-            if level == CircuitLevel.LIQUIDATE:
+            if level == self._CircuitLevel.LIQUIDATE:
                 liquidate_markets.append(market_id)
 
         # Always liquidate markets at L3 (regardless of other gate checks)
@@ -284,7 +314,7 @@ class TradingLoop:
         # #144: CrossMarketCircuitBreaker trip halts ALL market processing.
         if self._cross_market_breaker.check(market_equities, baseline_equities):
             _log.warning("CrossMarketCircuitBreaker tripped -- all markets halted")
-            self._alerter.on_circuit_breaker_trip("all", CircuitLevel.HALTED, 0.0)
+            self._alerter.on_circuit_breaker_trip("all", self._CircuitLevel.HALTED, 0.0)
             return  # halt all instrument processing
 
         # #146: Check daily loss limit before proceeding
@@ -296,8 +326,8 @@ class TradingLoop:
 
         # Phase 3: Process instruments for markets that are NORMAL or CAUTION
         for market_id, level in market_cb_levels.items():
-            if level in (CircuitLevel.LIQUIDATE, CircuitLevel.HALTED):
-                if level == CircuitLevel.HALTED:
+            if level in (self._CircuitLevel.LIQUIDATE, self._CircuitLevel.HALTED):
+                if level == self._CircuitLevel.HALTED:
                     _log.warning("Circuit breaker HALTED for %s -- skipping cycle", market_id)
                 continue  # already liquidated or halted
 
@@ -402,12 +432,18 @@ class TradingLoop:
         order_value = order.quantity * (candles[-1].close if candles else _ZERO)
         open_position_count = len([q for q in portfolio.positions.values() if q > _ZERO])
 
-        # #154: Compute cross-market exposure
+        # #154: Compute cross-market exposure as invested value / total equity.
+        # portfolio.positions maps symbol -> share quantity, so we must convert
+        # to monetary values.  Use (equity - cash) as invested value since the
+        # broker already tracks mark-to-market equity.
         market_equities = [(self._get_market_equity(m) or _ZERO) for m in self._circuit_breakers]
         total_equity: Decimal = sum(market_equities, _ZERO)
-        positive_positions = [v for v in portfolio.positions.values() if v > _ZERO]
-        position_value: Decimal = sum(positive_positions, _ZERO)
-        cross_exposure: Decimal = position_value / total_equity if total_equity > _ZERO else _ZERO
+        invested_value = max(portfolio.equity - portfolio.cash, _ZERO)
+        # Prospective exposure includes the proposed order value
+        prospective_invested = invested_value + order_value
+        cross_exposure: Decimal = (
+            prospective_invested / total_equity if total_equity > _ZERO else _ZERO
+        )
         try:
             _raw_max_exp = getattr(self._settings, "max_cross_market_exposure_pct", 0.80)
             max_exposure = Decimal(str(float(_raw_max_exp)))
@@ -448,14 +484,14 @@ class TradingLoop:
         kelly_fraction: Decimal,
     ) -> OrderRequest | None:
         """Build an order from signal, using Kelly sizing and respecting CAUTION reduction."""
-        if level == CircuitLevel.CAUTION:
+        if level == self._CircuitLevel.CAUTION:
             min_conf = 0.5 * _MIN_CONFIDENCE_BOOST
             if signal.confidence < min_conf:
                 return None
 
         # #162: Use kelly_fraction for position sizing (not raw signal.confidence)
         order_value = kelly_fraction * available_cash
-        if level == CircuitLevel.CAUTION:
+        if level == self._CircuitLevel.CAUTION:
             order_value = order_value * _CAUTION_SIZE_FACTOR
 
         qty = (order_value / Decimal(str(candles[-1].close))) if candles else _ZERO
@@ -464,7 +500,7 @@ class TradingLoop:
             return None
 
         side: Literal["BUY", "SELL"] = "BUY" if signal.direction == SignalDirection.BUY else "SELL"
-        return OrderRequest(symbol=symbol, side=side, quantity=qty)
+        return self._OrderRequest(symbol=symbol, side=side, quantity=qty)
 
     def _submit_order(self, order: OrderRequest, market_id: str) -> None:
         """Submit order and fire the appropriate alert."""
@@ -503,7 +539,7 @@ class TradingLoop:
             positions = broker.get_positions()
             qty = positions.get(symbol, _ZERO)
             if qty > _ZERO:
-                order = OrderRequest(symbol=symbol, side="SELL", quantity=qty)
+                order = self._OrderRequest(symbol=symbol, side="SELL", quantity=qty)
                 try:
                     broker.submit_order(order)
                 except Exception:
@@ -511,6 +547,137 @@ class TradingLoop:
                     return
             # Clear stop-loss after trigger
             del self._stop_loss_prices[symbol]
+
+    def _retrain_cycle(self) -> None:
+        """Periodically retrain ML ensemble models for all active segments.
+
+        For each segment: fetch candles, build training windows, train an
+        ensemble, validate accuracy > 52%, and hot-swap into the registry.
+        Runs in a dedicated APScheduler executor to avoid starving other jobs.
+        """
+        from finalayze.ml.loader import save_ensemble  # noqa: PLC0415
+        from finalayze.ml.training import DEFAULT_WINDOW_SIZE, build_windows  # noqa: PLC0415
+
+        if self._ml_registry is None:
+            return
+
+        min_samples = getattr(self._settings, "ml_min_train_samples", 252)
+        model_dir = Path(getattr(self._settings, "ml_model_dir", "models/"))
+        segments = self._collect_active_segments()
+
+        for segment_id in segments:
+            try:
+                self._retrain_segment(
+                    segment_id,
+                    model_dir,
+                    min_samples,
+                    DEFAULT_WINDOW_SIZE,
+                    build_windows,
+                    save_ensemble,
+                )
+            except Exception:
+                _log.exception("_retrain_cycle: failed for segment %s", segment_id)
+                self._alerter.on_error("MLRetrain", f"Retrain failed for {segment_id}")
+
+    def _retrain_segment(
+        self,
+        segment_id: str,
+        model_dir: Path,
+        min_samples: int,
+        window_size: int,
+        build_windows_fn: object,
+        save_ensemble_fn: object,
+    ) -> None:
+        """Retrain a single segment's ML ensemble with validation gating."""
+        from sklearn.metrics import accuracy_score  # noqa: PLC0415
+
+        # Fetch candles for each instrument in this segment
+        market_id = segment_id.split("_", maxsplit=1)[0]
+        instruments = [
+            instr
+            for instr in self._registry.list_by_market(market_id)
+            if getattr(instr, "segment_id", "") == segment_id
+        ]
+
+        all_features: list[dict[str, float]] = []
+        all_labels: list[int] = []
+        fetcher = self._fetchers.get(market_id)
+        if fetcher is None:
+            return
+
+        for instrument in instruments:
+            try:
+                candles = fetcher.fetch_candles(  # type: ignore[attr-defined]
+                    symbol=instrument.symbol,
+                    market_id=market_id,
+                    limit=500,  # fetch more data for training
+                )
+            except Exception:
+                _log.warning("_retrain: failed to fetch candles for %s", instrument.symbol)
+                continue
+
+            if len(candles) < window_size + 1:
+                continue
+
+            # Type-safe call to build_windows
+            x_sym, y_sym = build_windows_fn(candles, window_size)  # type: ignore[operator]
+            all_features.extend(x_sym)
+            all_labels.extend(y_sym)
+
+        if len(all_features) < min_samples:
+            _log.info(
+                "_retrain: only %d samples for %s (need %d) — skipping",
+                len(all_features),
+                segment_id,
+                min_samples,
+            )
+            return
+
+        # Temporal split: 70% train, gap of window_size, then validation
+        n_train = int(len(all_features) * 0.7)
+        gap_end = min(n_train + window_size, len(all_features))
+
+        train_features = all_features[:n_train]
+        train_labels = all_labels[:n_train]
+        val_features = all_features[gap_end:]
+        val_labels = all_labels[gap_end:]
+
+        if not val_features:
+            _log.info("_retrain: no validation data after gap for %s — skipping", segment_id)
+            return
+
+        # Train new ensemble
+        assert self._ml_registry is not None
+        ensemble = self._ml_registry.create_ensemble(segment_id)
+        ensemble.fit(train_features, train_labels)
+
+        # Validation gate: accuracy must exceed 52%
+        val_preds = [round(ensemble.predict_proba(f)) for f in val_features]
+        val_accuracy = float(accuracy_score(val_labels, val_preds))
+
+        _min_accuracy = 0.52
+        if val_accuracy < _min_accuracy:
+            _log.warning(
+                "_retrain: validation accuracy %.3f < %.2f for %s — rejecting",
+                val_accuracy,
+                _min_accuracy,
+                segment_id,
+            )
+            return
+
+        # Hot-swap into registry (thread-safe via lock)
+        self._ml_registry.register(segment_id, ensemble)
+        _log.info(
+            "_retrain: registered new ensemble for %s (val_accuracy=%.3f)",
+            segment_id,
+            val_accuracy,
+        )
+
+        # Persist to disk
+        try:
+            save_ensemble_fn(model_dir, segment_id, ensemble)  # type: ignore[operator]
+        except Exception:
+            _log.exception("_retrain: failed to save ensemble for %s", segment_id)
 
     def _daily_reset(self) -> None:
         """Reset circuit breakers and send daily P&L summary."""
@@ -554,7 +721,7 @@ class TradingLoop:
             # #129: No look-ahead bias — submit market orders without fill_candle
             self._close_positions(broker, positions)
 
-            self._alerter.on_circuit_breaker_trip(market_id, CircuitLevel.LIQUIDATE, drawdown)
+            self._alerter.on_circuit_breaker_trip(market_id, self._CircuitLevel.LIQUIDATE, drawdown)
         except Exception:
             _log.exception("_liquidate_market: failed for market %s", market_id)
             self._alerter.on_error("TradingLoop", f"liquidation failed for {market_id}")
@@ -568,7 +735,7 @@ class TradingLoop:
             if qty <= _ZERO:
                 continue
             # #129: Do NOT pass fill_candle — live market orders have no look-ahead
-            order = OrderRequest(symbol=symbol, side="SELL", quantity=qty)
+            order = self._OrderRequest(symbol=symbol, side="SELL", quantity=qty)
             try:
                 broker.submit_order(order)
             except Exception as exc:

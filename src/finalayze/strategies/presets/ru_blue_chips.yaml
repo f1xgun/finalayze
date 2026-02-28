@@ -2,7 +2,7 @@ segment_id: ru_blue_chips
 strategies:
   momentum:
     enabled: true
-    weight: 0.3
+    weight: 0.25
     params:
       rsi_period: 14
       rsi_oversold: 25
@@ -26,7 +26,7 @@ strategies:
       neutral_reset_bars: 20
   event_driven:
     enabled: true
-    weight: 0.5
+    weight: 0.45
     params:
       min_sentiment: 0.6
       event_types: [geopolitical, sanctions, cbr_rate, commodity_price, earnings]
@@ -39,9 +39,15 @@ strategies:
       min_confidence: 0.7
   pairs:
     enabled: true
-    weight: 0.2
+    weight: 0.10
     params:
       pairs: [[SBER, VTBR], [GAZP, LKOH]]
       z_entry: 2.0
       z_exit: 0.5
+      min_confidence: 0.6
+  ml_ensemble:
+    enabled: true
+    weight: 0.10
+    params:
+      threshold: 0.20
       min_confidence: 0.6

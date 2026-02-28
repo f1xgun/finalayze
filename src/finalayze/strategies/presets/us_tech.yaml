@@ -2,7 +2,7 @@ segment_id: us_tech
 strategies:
   momentum:
     enabled: true
-    weight: 0.4
+    weight: 0.35
     params:
       rsi_period: 14
       rsi_oversold: 35
@@ -27,22 +27,28 @@ strategies:
       neutral_reset_bars: 10
   mean_reversion:
     enabled: true
-    weight: 0.2
+    weight: 0.15
     params:
       bb_period: 20
       bb_std_dev: 2.0
       min_confidence: 0.65
   event_driven:
     enabled: true
-    weight: 0.4
+    weight: 0.35
     params:
       min_sentiment: 0.7
       event_types: [earnings, fda, product_launch]
   pairs:
     enabled: true
-    weight: 0.15
+    weight: 0.10
     params:
       pairs: [[AAPL, MSFT]]
       z_entry: 2.0
       z_exit: 0.5
       min_confidence: 0.6
+  ml_ensemble:
+    enabled: true
+    weight: 0.15
+    params:
+      threshold: 0.15
+      min_confidence: 0.5
