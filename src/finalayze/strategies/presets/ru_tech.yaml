@@ -2,7 +2,7 @@ segment_id: ru_tech
 strategies:
   momentum:
     enabled: true
-    weight: 0.4
+    weight: 0.35
     params:
       rsi_period: 14
       rsi_oversold: 28
@@ -26,7 +26,7 @@ strategies:
       neutral_reset_bars: 20
   mean_reversion:
     enabled: true
-    weight: 0.35
+    weight: 0.30
     params:
       bb_period: 20
       bb_std_dev: 2.2
@@ -37,3 +37,9 @@ strategies:
     params:
       min_sentiment: 0.65
       event_types: [regulatory, earnings, product_launch]
+  ml_ensemble:
+    enabled: true
+    weight: 0.10
+    params:
+      threshold: 0.20
+      min_confidence: 0.6

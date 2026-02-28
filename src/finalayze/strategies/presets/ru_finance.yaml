@@ -2,14 +2,14 @@ segment_id: ru_finance
 strategies:
   mean_reversion:
     enabled: true
-    weight: 0.4
+    weight: 0.35
     params:
       bb_period: 20
       bb_std_dev: 2.2
       min_confidence: 0.65
   event_driven:
     enabled: true
-    weight: 0.35
+    weight: 0.30
     params:
       min_sentiment: 0.6
       event_types: [cbr_rate, regulatory, sanctions, earnings, macro]
@@ -37,3 +37,9 @@ strategies:
       volume_sma_period: 20
       volume_min_ratio: 0.8
       neutral_reset_bars: 20
+  ml_ensemble:
+    enabled: true
+    weight: 0.10
+    params:
+      threshold: 0.20
+      min_confidence: 0.6

@@ -29,12 +29,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from finalayze.core.models import CandleModel
 from finalayze.core.schemas import Candle
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
-from finalayze.ml.features.technical import compute_features
+from finalayze.ml.features.technical import compute_features  # noqa: F401
 from finalayze.ml.models.lightgbm_model import LightGBMModel
 from finalayze.ml.models.lstm_model import LSTMModel
 from finalayze.ml.models.xgboost_model import XGBoostModel
+from finalayze.ml.training import DEFAULT_WINDOW_SIZE, build_windows
 
-_WINDOW_SIZE = 60
+_WINDOW_SIZE = DEFAULT_WINDOW_SIZE
 _TRAIN_RATIO = 0.8
 _LOOKBACK_DAYS = 730  # 2 years of history
 _DEFAULT_OUTPUT_DIR = "models/"
@@ -116,22 +117,11 @@ def _fetch_candles(
 
 
 def _build_windows(candles: list[Candle]) -> tuple[list[dict[str, float]], list[int]]:
-    """Build (features, labels) from a single contiguous candle series."""
-    features_list: list[dict[str, float]] = []
-    label_list: list[int] = []
-    sorted_candles = sorted(candles, key=lambda c: c.timestamp)
-    for i in range(len(sorted_candles) - _WINDOW_SIZE):
-        window = sorted_candles[i : i + _WINDOW_SIZE]
-        try:
-            row_features = compute_features(window)
-        except Exception:
-            continue
-        next_close = float(sorted_candles[i + _WINDOW_SIZE].close)
-        cur_close = float(sorted_candles[i + _WINDOW_SIZE - 1].close)
-        label = 1 if next_close > cur_close else 0
-        features_list.append(row_features)
-        label_list.append(label)
-    return features_list, label_list
+    """Build (features, labels) from a single contiguous candle series.
+
+    Delegates to the shared ``build_windows`` utility in ``finalayze.ml.training``.
+    """
+    return build_windows(candles, _WINDOW_SIZE)
 
 
 def _build_dataset(
