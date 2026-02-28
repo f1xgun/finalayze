@@ -98,13 +98,13 @@ class MeanReversionStrategy(BaseStrategy):
         bb_std = Decimal(str(params.get("bb_std_dev", _DEFAULT_BB_STD)))
         min_confidence = Decimal(str(params.get("min_confidence", _DEFAULT_MIN_CONFIDENCE)))
 
-        squeeze_threshold = float(params.get("squeeze_threshold", _DEFAULT_SQUEEZE_THRESHOLD))
+        squeeze_threshold = float(params.get("squeeze_threshold", _DEFAULT_SQUEEZE_THRESHOLD))  # type: ignore[arg-type]
         min_band_distance_pct = float(
-            params.get("min_band_distance_pct", _DEFAULT_MIN_BAND_DISTANCE_PCT)
+            params.get("min_band_distance_pct", _DEFAULT_MIN_BAND_DISTANCE_PCT)  # type: ignore[arg-type]
         )
-        rsi_oversold_mr = float(params.get("rsi_oversold_mr", _DEFAULT_RSI_OVERSOLD_MR))
-        rsi_overbought_mr = float(params.get("rsi_overbought_mr", _DEFAULT_RSI_OVERBOUGHT_MR))
-        rsi_period = int(params.get("rsi_period", _DEFAULT_RSI_PERIOD))
+        rsi_oversold_mr = float(params.get("rsi_oversold_mr", _DEFAULT_RSI_OVERSOLD_MR))  # type: ignore[arg-type]
+        rsi_overbought_mr = float(params.get("rsi_overbought_mr", _DEFAULT_RSI_OVERBOUGHT_MR))  # type: ignore[arg-type]
+        rsi_period = int(params.get("rsi_period", _DEFAULT_RSI_PERIOD))  # type: ignore[call-overload]
 
         bb_values = _compute_bb_values(candles, bb_period, float(bb_std))
         if bb_values is None:
