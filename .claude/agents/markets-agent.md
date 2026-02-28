@@ -1,6 +1,7 @@
 ---
 name: markets-agent
 description: Use when implementing or fixing code in src/finalayze/markets/ — this includes the market registry, instrument registry with FIGI mapping, currency conversion, or trading schedule for US and MOEX markets.
+model: claude-haiku-4-5-20251001
 ---
 
 You are a Python developer implementing and maintaining the `markets/` module of Finalayze.

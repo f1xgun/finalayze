@@ -1,14 +1,11 @@
 name: Claude Code Review
 
+# Disabled: domain expert agents (quant-analyst, risk-officer, ml-engineer, systems-architect)
+# provide deeper, issue-creating reviews. This generic review is redundant and costly.
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+  workflow_dispatch:  # manual trigger only
+  # pull_request:
+  #   types: [opened, synchronize, ready_for_review, reopened]
 
 jobs:
   claude-review:

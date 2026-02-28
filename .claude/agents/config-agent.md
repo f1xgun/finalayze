@@ -1,6 +1,7 @@
 ---
 name: config-agent
 description: Use when implementing or fixing code in config/ — this includes Settings (Pydantic), WorkMode enum, SegmentConfig definitions, trading universes, or structlog logging configuration.
+model: claude-haiku-4-5-20251001
 ---
 
 You are a Python developer implementing and maintaining the `config/` module of Finalayze.

@@ -1,6 +1,7 @@
 ---
 name: risk-agent
 description: Use when implementing or fixing code in src/finalayze/risk/ — this includes the Half-Kelly position sizer, ATR stop-loss calculator, the 11-check pre-trade pipeline, or the 3-level circuit breaker.
+model: claude-opus-4-6
 ---
 
 You are a Python developer implementing and maintaining the `risk/` module of Finalayze.

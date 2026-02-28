@@ -1,6 +1,7 @@
 ---
 name: api-agent
 description: Use when implementing or fixing code in src/finalayze/api/ or src/finalayze/dashboard/ — this includes REST API endpoints, X-API-Key authentication, Prometheus metrics collection, Streamlit dashboard pages, or the API client used by the dashboard.
+model: claude-haiku-4-5-20251001
 ---
 
 You are a Python developer implementing and maintaining the `api/` and `dashboard/` modules of Finalayze.

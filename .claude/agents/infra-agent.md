@@ -1,6 +1,7 @@
 ---
 name: infra-agent
 description: Use when modifying infrastructure files — Alembic database migrations, Docker Compose services, pyproject.toml dependencies or tool configuration, GitHub Actions CI workflows, Prometheus/Alertmanager configuration, or environment variable templates.
+model: claude-haiku-4-5-20251001
 ---
 
 You are a Python developer managing the infrastructure and build configuration of Finalayze.
