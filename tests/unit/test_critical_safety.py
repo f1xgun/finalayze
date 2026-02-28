@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -656,9 +657,8 @@ class TestLayerViolation:
 
         Local imports inside __init__ or methods are acceptable (dependency injection).
         """
-        module_path = (
-            "/Users/f1xgun/finalayze/.worktrees/fix-critical-safety"
-            "/src/finalayze/core/trading_loop.py"
+        module_path = str(
+            Path(__file__).parent.parent.parent / "src/finalayze/core/trading_loop.py"
         )
         runtime_imports, type_checking_imports = self._get_module_level_imports(module_path)
 
@@ -680,9 +680,7 @@ class TestLayerViolation:
 
     def test_alerts_no_module_level_import_from_execution(self) -> None:
         """alerts.py must not import from L5 execution at module level (only TYPE_CHECKING)."""
-        module_path = (
-            "/Users/f1xgun/finalayze/.worktrees/fix-critical-safety/src/finalayze/core/alerts.py"
-        )
+        module_path = str(Path(__file__).parent.parent.parent / "src/finalayze/core/alerts.py")
         runtime_imports, type_checking_imports = self._get_module_level_imports(module_path)
 
         for imp in runtime_imports:
