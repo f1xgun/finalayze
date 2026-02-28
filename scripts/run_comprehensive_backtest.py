@@ -43,7 +43,7 @@ def _load_universe(name: str) -> list[str]:
         return json.load(f)
 
 
-def main() -> None:
+def main() -> None:  # noqa: PLR0915
     parser = argparse.ArgumentParser(description="Comprehensive multi-strategy backtest")
     parser.add_argument("--universe", required=True)
     parser.add_argument("--segment", required=True)
@@ -143,14 +143,15 @@ def main() -> None:
         net_pnl = sum(float(t.pnl) for t in all_trades)
         avg_return = sum(all_returns) / len(all_returns)
 
-        print(f"\n  AGGREGATE:")
+        print("\n  AGGREGATE:")
         print(f"    Total trades:  {total_trades} ({wins}W / {losses}L)")
         print(f"    Win rate:      {wins/total_trades:.1%}")
         print(f"    Net PnL:       ${net_pnl:+,.0f}")
         print(f"    Avg trade ret: {avg_return:+.2f}%")
 
         # Monte Carlo bootstrap
-        if len(all_returns) >= 30:
+        _min_bootstrap_samples = 30
+        if len(all_returns) >= _min_bootstrap_samples:
             print(f"\n  MONTE CARLO BOOTSTRAP ({args.bootstrap} simulations, 95% CI)")
             bootstrap = bootstrap_metrics(all_returns, n_simulations=args.bootstrap, seed=42)
             print(f"    Total Return:  {bootstrap.total_return.point_estimate:+.2f}% "
