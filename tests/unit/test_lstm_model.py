@@ -112,9 +112,9 @@ class TestLSTMModelFit:
         features_reversed = dict(reversed(list(features.items())))
 
         # Flush buffer so both calls start from the same state
-        model._feature_buffer.clear()  # noqa: SLF001
+        model._feature_buffers.clear()  # noqa: SLF001
         r1 = model.predict_proba(features)
-        model._feature_buffer.clear()  # noqa: SLF001
+        model._feature_buffers.clear()  # noqa: SLF001
         r2 = model.predict_proba(features_reversed)
         assert r1 == pytest.approx(r2)
 
@@ -143,8 +143,8 @@ class TestLSTMModelSaveLoad:
         assert model2._trained is True  # noqa: SLF001
 
         features = _make_feature_dict()
-        model._feature_buffer.clear()  # noqa: SLF001
-        model2._feature_buffer.clear()  # noqa: SLF001
+        model._feature_buffers.clear()  # noqa: SLF001
+        model2._feature_buffers.clear()  # noqa: SLF001
         r1 = model.predict_proba(features)
         r2 = model2.predict_proba(features)
         assert r1 == pytest.approx(r2, abs=1e-5)
@@ -260,8 +260,8 @@ class TestLSTMModelSmallData:
         model2 = LSTMModel(segment_id="seg", sequence_length=SMALL_SEQ_LEN)
         model2.load(save_path)
 
-        model._feature_buffer.clear()  # noqa: SLF001
-        model2._feature_buffer.clear()  # noqa: SLF001
+        model._feature_buffers.clear()  # noqa: SLF001
+        model2._feature_buffers.clear()  # noqa: SLF001
 
         r1 = model.predict_proba(X[0])
         r2 = model2.predict_proba(X[0])
@@ -336,7 +336,7 @@ class TestLSTMBufferCopyUnderLock:
         assert all(0.0 <= r <= 1.0 for r in results)
 
     def test_buffer_size_never_exceeds_sequence_length_under_concurrent_access(self) -> None:
-        """The shared _feature_buffer must never grow beyond sequence_length (#138)."""
+        """Per-symbol buffers must never grow beyond sequence_length (#138)."""
         from finalayze.ml.models.lstm_model import LSTMModel
 
         seq_len = SMALL_SEQ_LEN
@@ -354,5 +354,6 @@ class TestLSTMBufferCopyUnderLock:
         for t in threads:
             t.join()
 
-        # Buffer is a deque with maxlen — its size must never exceed seq_len
-        assert len(model._feature_buffer) <= seq_len  # noqa: SLF001
+        # Each per-symbol buffer is a deque with maxlen — size must never exceed seq_len
+        for buf in model._feature_buffers.values():  # noqa: SLF001
+            assert len(buf) <= seq_len

@@ -43,7 +43,7 @@ def _load_universe(name: str) -> list[str]:
         return json.load(f)
 
 
-def main() -> None:
+def main() -> None:  # noqa: PLR0915
     parser = argparse.ArgumentParser(description="Comprehensive multi-strategy backtest")
     parser.add_argument("--universe", required=True)
     parser.add_argument("--segment", required=True)
@@ -113,24 +113,30 @@ def main() -> None:
                 result = analyzer.analyze(trades, snapshots, benchmark_candles=benchmark_candles)
                 all_trades.extend(trades)
                 all_returns.extend(float(t.pnl_pct) * _PERCENT for t in trades)
-                strat_rows.append({
-                    "symbol": sym,
-                    "trades": result.total_trades,
-                    "return": float(result.total_return),
-                    "sharpe": float(result.sharpe),
-                    "max_dd": float(result.max_drawdown),
-                    "win_rate": float(result.win_rate),
-                    "pnl": float(sum(t.pnl for t in trades)),
-                })
+                strat_rows.append(
+                    {
+                        "symbol": sym,
+                        "trades": result.total_trades,
+                        "return": float(result.total_return),
+                        "sharpe": float(result.sharpe),
+                        "max_dd": float(result.max_drawdown),
+                        "win_rate": float(result.win_rate),
+                        "pnl": float(sum(t.pnl for t in trades)),
+                    }
+                )
 
         # Per-symbol table
-        print(f"\n  {'Symbol':<8} {'Trades':>7} {'Return':>9} {'Sharpe':>8} {'MaxDD':>8} "
-              f"{'WinRate':>8} {'PnL':>12}")
-        print(f"  {'-'*62}")
+        print(
+            f"\n  {'Symbol':<8} {'Trades':>7} {'Return':>9} {'Sharpe':>8} {'MaxDD':>8} "
+            f"{'WinRate':>8} {'PnL':>12}"
+        )
+        print(f"  {'-' * 62}")
         for r in sorted(strat_rows, key=lambda x: x["return"], reverse=True):
-            print(f"  {r['symbol']:<8} {r['trades']:>7} {r['return']:>+8.2%} "
-                  f"{r['sharpe']:>+7.3f} {r['max_dd']:>7.2%} "
-                  f"{r['win_rate']:>7.1%} ${r['pnl']:>+10,.0f}")
+            print(
+                f"  {r['symbol']:<8} {r['trades']:>7} {r['return']:>+8.2%} "
+                f"{r['sharpe']:>+7.3f} {r['max_dd']:>7.2%} "
+                f"{r['win_rate']:>7.1%} ${r['pnl']:>+10,.0f}"
+            )
 
         # Aggregate
         total_trades = len(all_trades)
@@ -143,26 +149,37 @@ def main() -> None:
         net_pnl = sum(float(t.pnl) for t in all_trades)
         avg_return = sum(all_returns) / len(all_returns)
 
-        print(f"\n  AGGREGATE:")
+        print("\n  AGGREGATE:")
         print(f"    Total trades:  {total_trades} ({wins}W / {losses}L)")
-        print(f"    Win rate:      {wins/total_trades:.1%}")
+        print(f"    Win rate:      {wins / total_trades:.1%}")
         print(f"    Net PnL:       ${net_pnl:+,.0f}")
         print(f"    Avg trade ret: {avg_return:+.2f}%")
 
         # Monte Carlo bootstrap
-        if len(all_returns) >= 30:
+        _min_bootstrap_samples = 30
+        if len(all_returns) >= _min_bootstrap_samples:
             print(f"\n  MONTE CARLO BOOTSTRAP ({args.bootstrap} simulations, 95% CI)")
             bootstrap = bootstrap_metrics(all_returns, n_simulations=args.bootstrap, seed=42)
-            print(f"    Total Return:  {bootstrap.total_return.point_estimate:+.2f}% "
-                  f"[{bootstrap.total_return.lower:+.2f}%, {bootstrap.total_return.upper:+.2f}%]")
-            print(f"    Sharpe Ratio:  {bootstrap.sharpe_ratio.point_estimate:+.4f} "
-                  f"[{bootstrap.sharpe_ratio.lower:+.4f}, {bootstrap.sharpe_ratio.upper:+.4f}]")
-            print(f"    Max Drawdown:  {bootstrap.max_drawdown.point_estimate:.2f}% "
-                  f"[{bootstrap.max_drawdown.lower:.2f}%, {bootstrap.max_drawdown.upper:.2f}%]")
-            print(f"    Win Rate:      {bootstrap.win_rate.point_estimate:.1f}% "
-                  f"[{bootstrap.win_rate.lower:.1f}%, {bootstrap.win_rate.upper:.1f}%]")
-            print(f"    Profit Factor: {bootstrap.profit_factor.point_estimate:.3f} "
-                  f"[{bootstrap.profit_factor.lower:.3f}, {bootstrap.profit_factor.upper:.3f}]")
+            print(
+                f"    Total Return:  {bootstrap.total_return.point_estimate:+.2f}% "
+                f"[{bootstrap.total_return.lower:+.2f}%, {bootstrap.total_return.upper:+.2f}%]"
+            )
+            print(
+                f"    Sharpe Ratio:  {bootstrap.sharpe_ratio.point_estimate:+.4f} "
+                f"[{bootstrap.sharpe_ratio.lower:+.4f}, {bootstrap.sharpe_ratio.upper:+.4f}]"
+            )
+            print(
+                f"    Max Drawdown:  {bootstrap.max_drawdown.point_estimate:.2f}% "
+                f"[{bootstrap.max_drawdown.lower:.2f}%, {bootstrap.max_drawdown.upper:.2f}%]"
+            )
+            print(
+                f"    Win Rate:      {bootstrap.win_rate.point_estimate:.1f}% "
+                f"[{bootstrap.win_rate.lower:.1f}%, {bootstrap.win_rate.upper:.1f}%]"
+            )
+            print(
+                f"    Profit Factor: {bootstrap.profit_factor.point_estimate:.3f} "
+                f"[{bootstrap.profit_factor.lower:.3f}, {bootstrap.profit_factor.upper:.3f}]"
+            )
 
             # Verdict
             sharpe_ok = bootstrap.sharpe_ratio.lower > 0

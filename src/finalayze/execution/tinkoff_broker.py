@@ -157,12 +157,16 @@ class TinkoffBroker(BrokerBase):
 
         total = self._quotation_to_decimal(portfolio.total_amount_portfolio)  # type: ignore[attr-defined]
         pos_map: dict[str, Decimal] = {}
+        cash_sum = Decimal(0)
         for pos in portfolio.positions:  # type: ignore[attr-defined]
             qty = self._quotation_to_decimal(pos.quantity)
-            pos_map[pos.figi] = qty  # Tinkoff positions are FIGI-keyed
+            if getattr(pos, "instrument_type", "") == "currency":
+                cash_sum += qty
+            else:
+                pos_map[pos.figi] = qty  # Tinkoff positions are FIGI-keyed
 
         return PortfolioState(
-            cash=total,  # Tinkoff total_amount_portfolio ~= equity
+            cash=cash_sum,
             positions=pos_map,
             equity=total,
             timestamp=datetime.now(tz=UTC),

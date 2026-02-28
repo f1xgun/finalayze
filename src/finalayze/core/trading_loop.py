@@ -24,11 +24,12 @@ import threading
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from finalayze.core.schemas import NewsArticle, SignalDirection
+from finalayze.markets.currency import CurrencyConverter
 
 if TYPE_CHECKING:
     from config.settings import Settings
@@ -60,6 +61,9 @@ _MIN_CONFIDENCE_BOOST = 1.2  # raise required confidence 20% at CAUTION
 _DEFAULT_SENTIMENT = 0.0
 _ZERO = Decimal(0)
 _WEEKEND_WEEKDAY = 5  # Saturday=5, Sunday=6
+_ATR_MULTIPLIER_US = Decimal("2.0")
+_ATR_MULTIPLIER_MOEX = Decimal("2.5")
+_MARKET_CURRENCY: dict[str, str] = {"us": "USD", "moex": "RUB"}
 
 # US market hours in UTC: 9:30-16:00 ET = 14:30-21:00 UTC
 _US_OPEN_UTC = (14, 30)
@@ -118,6 +122,8 @@ class TradingLoop:
         self._registry = instrument_registry
         self._cache = cache
 
+        self._fx = CurrencyConverter(base_currency="USD")
+
         # Thread-safe sentiment cache: segment_id -> weighted sentiment score
         self._sentiment_cache: dict[str, float] = {}
         self._sentiment_lock = threading.Lock()
@@ -144,6 +150,29 @@ class TradingLoop:
         self._ml_registry = ml_registry
         self._scheduler: BackgroundScheduler | None = None
         self._stop_event = threading.Event()
+
+        # Persistent background event loop for async calls (5.4)
+        self._async_loop: asyncio.AbstractEventLoop | None = None
+        self._async_thread: threading.Thread | None = None
+
+    # ── Async helper ────────────────────────────────────────────────────────
+
+    def _run_async(self, coro: Any) -> Any:
+        """Run an async coroutine on a persistent background event loop.
+
+        Lazily creates a daemon thread with its own event loop on first call.
+        Uses ``run_coroutine_threadsafe`` with a 30-second timeout so the
+        caller is never blocked indefinitely.
+        """
+        _async_timeout = 30
+        if self._async_loop is None or self._async_loop.is_closed():
+            loop = asyncio.new_event_loop()
+            self._async_loop = loop
+            thread = threading.Thread(target=loop.run_forever, daemon=True)
+            thread.start()
+            self._async_thread = thread
+        future = asyncio.run_coroutine_threadsafe(coro, self._async_loop)
+        return future.result(timeout=_async_timeout)
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -191,9 +220,13 @@ class TradingLoop:
         self._stop_event.wait()
 
     def stop(self) -> None:
-        """Gracefully shut down the scheduler and unblock start()."""
+        """Gracefully shut down the scheduler, async loop, and unblock start()."""
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=True)
+        if self._async_loop is not None and not self._async_loop.is_closed():
+            self._async_loop.call_soon_threadsafe(self._async_loop.stop)
+            if self._async_thread is not None:
+                self._async_thread.join(timeout=5)
         self._stop_event.set()
 
     # ── Cycles ───────────────────────────────────────────────────────────────
@@ -229,7 +262,7 @@ class TradingLoop:
 
     def _process_news_article(self, article: NewsArticle) -> None:
         """Analyze a single article and update sentiment cache."""
-        sentiment, event = asyncio.run(self._analyze_article(article))
+        sentiment, event = self._run_async(self._analyze_article(article))
         active_segments = self._collect_active_segments()
         impacts = self._impact_estimator.estimate(
             article,
@@ -244,7 +277,7 @@ class TradingLoop:
                 self._sentiment_cache[impact.segment_id] = new_score
                 if self._cache is not None:
                     try:
-                        asyncio.run(self._cache.set_sentiment(impact.segment_id, new_score))
+                        self._run_async(self._cache.set_sentiment(impact.segment_id, new_score))
                     except Exception:
                         _log.debug("Failed to write sentiment to Redis cache")
 
@@ -264,7 +297,7 @@ class TradingLoop:
         """Read sentiment from Redis cache (if available) or in-memory fallback."""
         if self._cache is not None:
             try:
-                cached = asyncio.run(self._cache.get_sentiment(seg_id))
+                cached: float | None = self._run_async(self._cache.get_sentiment(seg_id))
                 if cached is not None:
                     return cached
             except Exception:
@@ -356,6 +389,17 @@ class TradingLoop:
             _log.exception("_strategy_cycle: failed to get portfolio for %s", market_id)
             return None
 
+    def _compute_total_equity_base(self) -> Decimal:
+        """Sum equities across all markets, converting to base currency (USD)."""
+        total = _ZERO
+        for m in self._circuit_breakers:
+            equity = self._get_market_equity(m)
+            if equity is None:
+                continue
+            currency = _MARKET_CURRENCY.get(m, "USD")
+            total += self._fx.to_base(equity, currency)
+        return total
+
     def _is_market_open(self, market_id: str, dt: datetime) -> bool:
         """Return True if the market is open at the given UTC datetime."""
         # Weekends: Saturday=5, Sunday=6
@@ -436,8 +480,7 @@ class TradingLoop:
         # portfolio.positions maps symbol -> share quantity, so we must convert
         # to monetary values.  Use (equity - cash) as invested value since the
         # broker already tracks mark-to-market equity.
-        market_equities = [(self._get_market_equity(m) or _ZERO) for m in self._circuit_breakers]
-        total_equity: Decimal = sum(market_equities, _ZERO)
+        total_equity: Decimal = self._compute_total_equity_base()
         invested_value = max(portfolio.equity - portfolio.cash, _ZERO)
         # Prospective exposure includes the proposed order value
         prospective_invested = invested_value + order_value
@@ -472,7 +515,7 @@ class TradingLoop:
             )
             return
 
-        self._submit_order(order, market_id)
+        self._submit_order(order, market_id, candles=candles)
 
     def _build_order(
         self,
@@ -502,12 +545,30 @@ class TradingLoop:
         side: Literal["BUY", "SELL"] = "BUY" if signal.direction == SignalDirection.BUY else "SELL"
         return self._OrderRequest(symbol=symbol, side=side, quantity=qty)
 
-    def _submit_order(self, order: OrderRequest, market_id: str) -> None:
-        """Submit order and fire the appropriate alert."""
+    def _submit_order(
+        self,
+        order: OrderRequest,
+        market_id: str,
+        candles: list[Candle] | None = None,
+    ) -> None:
+        """Submit order, set stop-loss on BUY fill, clear on SELL fill."""
+        from finalayze.risk.stop_loss import compute_atr_stop_loss  # noqa: PLC0415
+
         try:
             result = self._broker_router.submit(order, market_id=market_id)
             if result.filled:
                 self._alerter.on_trade_filled(result, market_id, broker=market_id)
+                # Wire stop-loss on BUY fill
+                if order.side == "BUY" and candles and result.fill_price is not None:
+                    multiplier = _ATR_MULTIPLIER_MOEX if market_id == "moex" else _ATR_MULTIPLIER_US
+                    stop = compute_atr_stop_loss(
+                        result.fill_price, candles, atr_multiplier=multiplier
+                    )
+                    if stop is not None:
+                        self._stop_loss_prices[order.symbol] = stop
+                # Clear stop-loss on SELL fill
+                elif order.side == "SELL":
+                    self._stop_loss_prices.pop(order.symbol, None)
             else:
                 self._alerter.on_trade_rejected(order, result.reason)
         except Exception:
@@ -620,7 +681,7 @@ class TradingLoop:
                 continue
 
             # Type-safe call to build_windows
-            x_sym, y_sym = build_windows_fn(candles, window_size)  # type: ignore[operator]
+            x_sym, y_sym, _ts = build_windows_fn(candles, window_size)  # type: ignore[operator]
             all_features.extend(x_sym)
             all_labels.extend(y_sym)
 
