@@ -50,6 +50,24 @@ class TinkoffBroker(BrokerBase):
         self._token = token
         self._registry = registry
         self._sandbox = sandbox
+        self._account_id: str = ""  # populated lazily on first API call
+
+    def _ensure_account_id(self) -> None:
+        """Fetch and cache the account ID from the API if not already set."""
+        if self._account_id:
+            return
+        response = asyncio.run(self._get_accounts_async())
+        accounts = getattr(response, "accounts", [])
+        if not accounts:
+            msg = "Tinkoff: no accounts found for the provided token"
+            raise BrokerError(msg)
+        self._account_id = accounts[0].id
+
+    async def _get_accounts_async(self) -> object:
+        """Async call to fetch accounts list."""
+        client_cls = AsyncSandboxClient if self._sandbox else AsyncClient
+        async with client_cls(self._token) as client:
+            return await client.users.get_accounts()
 
     def submit_order(
         self,
@@ -82,6 +100,7 @@ class TinkoffBroker(BrokerBase):
         )
 
         try:
+            self._ensure_account_id()
             result = asyncio.run(self._post_order_async(instrument.figi, actual_qty, direction))
         except InstrumentNotFoundError:
             raise
@@ -112,12 +131,13 @@ class TinkoffBroker(BrokerBase):
                 quantity=quantity,
                 direction=direction,
                 order_type=OrderType.ORDER_TYPE_MARKET,
-                account_id="",  # Uses default account
+                account_id=self._account_id,
             )
 
     def get_portfolio(self) -> PortfolioState:
         """Return current MOEX portfolio state from Tinkoff."""
         try:
+            self._ensure_account_id()
             portfolio = asyncio.run(self._get_portfolio_async())
         except Exception as exc:
             msg = f"Tinkoff portfolio fetch failed: {exc}"
@@ -140,7 +160,7 @@ class TinkoffBroker(BrokerBase):
         """Async call to Tinkoff SDK get_portfolio."""
         client_cls = AsyncSandboxClient if self._sandbox else AsyncClient
         async with client_cls(self._token) as client:
-            return await client.operations.get_portfolio(account_id="")
+            return await client.operations.get_portfolio(account_id=self._account_id)
 
     def has_position(self, symbol: str) -> bool:
         """Return True if Tinkoff account holds a non-zero position in symbol."""
@@ -160,6 +180,7 @@ class TinkoffBroker(BrokerBase):
     def cancel_order(self, order_id: str) -> None:
         """Cancel a pending Tinkoff order by ID."""
         try:
+            self._ensure_account_id()
             asyncio.run(self._cancel_order_async(order_id))
         except Exception as exc:
             msg = f"Tinkoff cancel_order failed for {order_id}: {exc}"
@@ -169,7 +190,7 @@ class TinkoffBroker(BrokerBase):
         """Async call to Tinkoff SDK cancel_order."""
         client_cls = AsyncSandboxClient if self._sandbox else AsyncClient
         async with client_cls(self._token) as client:
-            await client.orders.cancel_order(account_id="", order_id=order_id)
+            await client.orders.cancel_order(account_id=self._account_id, order_id=order_id)
 
     @staticmethod
     def _quotation_to_decimal(q: object) -> Decimal:

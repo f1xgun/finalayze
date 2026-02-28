@@ -75,7 +75,8 @@ def _make_candle(dt: date) -> Candle:
         symbol=CANDLE_SYMBOL,
         market_id=CANDLE_MARKET,
         timeframe=CANDLE_TIMEFRAME,
-        timestamp=datetime(dt.year, dt.month, dt.day, tzinfo=UTC),
+        # 14:30 UTC = 10:30 ET (within US market hours 14:30-21:00 UTC)
+        timestamp=datetime(dt.year, dt.month, dt.day, 14, 30, tzinfo=UTC),
         open=CANDLE_OPEN,
         high=CANDLE_HIGH,
         low=CANDLE_LOW,

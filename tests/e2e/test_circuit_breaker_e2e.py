@@ -38,6 +38,9 @@ from finalayze.strategies.momentum import MomentumStrategy
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+# A Monday during market hours (14:30 UTC = 10:30 ET)
+MARKET_OPEN_DT = datetime(2026, 2, 23, 15, 0, tzinfo=UTC)
+
 BASELINE_EQUITY = Decimal(100_000)
 # -17% drawdown triggers LIQUIDATE (threshold is 15%)
 LIQUIDATE_DRAWDOWN_PCT = Decimal("0.17")
@@ -215,7 +218,7 @@ def _make_trading_loop(
     momentum.get_parameters = _get_params_no_filters  # type: ignore[assignment]
     strategy = StrategyCombiner([momentum])
 
-    return TradingLoop(
+    loop = TradingLoop(
         settings=settings,
         fetchers={"us": us_fetcher, "moex": moex_fetcher},  # type: ignore[arg-type]
         news_fetcher=news_fetcher,  # type: ignore[arg-type]
@@ -229,6 +232,9 @@ def _make_trading_loop(
         alerter=alerter,
         instrument_registry=instrument_registry,
     )
+    # Freeze time to a market-open weekday so market hours check passes
+    loop._now = MagicMock(return_value=MARKET_OPEN_DT)  # type: ignore[method-assign]
+    return loop
 
 
 # ---------------------------------------------------------------------------

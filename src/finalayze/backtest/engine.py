@@ -285,12 +285,13 @@ class BacktestEngine:
         if position_value <= 0:
             return
 
-        # Pre-trade check
+        # Pre-trade check (pass candle timestamp so market hours check uses historical date)
         result = checker.check(
             order_value=position_value,
             portfolio_equity=portfolio.equity,
             available_cash=portfolio.cash,
             open_position_count=len(portfolio.positions),
+            dt=fill_candle.timestamp,
         )
         if not result.passed:
             return
