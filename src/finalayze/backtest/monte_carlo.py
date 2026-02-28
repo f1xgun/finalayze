@@ -6,9 +6,10 @@ key performance metrics (total return, Sharpe, drawdown, win rate, profit factor
 
 from __future__ import annotations
 
-import random
 import statistics
 from dataclasses import dataclass
+
+import numpy as np
 
 # Annualisation factor for daily returns.
 _TRADING_DAYS_PER_YEAR = 252
@@ -111,8 +112,8 @@ def bootstrap_metrics(
         BootstrapResult with CIs for total return, Sharpe, max DD, win rate,
         profit factor.
     """
-    if seed is not None:
-        random.seed(seed)
+    # Use numpy's default_rng for reproducibility and independence from global RNG state
+    rng = np.random.default_rng(seed=seed)
 
     n = len(trade_returns)
     if n == 0:
@@ -127,14 +128,18 @@ def bootstrap_metrics(
             n_trades=0,
         )
 
+    pnl_array = np.array(trade_returns, dtype=np.float64)
+    # Draw all bootstrap samples at once for efficiency
+    indices = rng.choice(n, size=(n_simulations, n), replace=True)
+
     total_returns: list[float] = []
     sharpes: list[float] = []
     max_drawdowns: list[float] = []
     win_rates: list[float] = []
     profit_factors: list[float] = []
 
-    for _ in range(n_simulations):
-        sample = random.choices(trade_returns, k=n)  # noqa: S311
+    for sim_indices in indices:
+        sample = pnl_array[sim_indices].tolist()
         total_ret, sharpe, max_dd, win_rate, pf = _compute_sample_metrics(sample)
         total_returns.append(total_ret)
         sharpes.append(sharpe)

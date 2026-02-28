@@ -18,6 +18,10 @@ from finalayze.execution.broker_base import OrderResult
 from finalayze.markets.instruments import Instrument, InstrumentRegistry
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
 
+# ── Module-level constants ──────────────────────────────────────────────────
+# A Monday during US market hours (14:30 UTC = 10:30 ET)
+_MARKET_OPEN_DT = datetime(2026, 2, 23, 15, 0, tzinfo=UTC)
+
 # ── Constants ──────────────────────────────────────────────────────────────
 MARKET_US = "us"
 SEGMENT_US_TECH = "us_tech"
@@ -80,6 +84,8 @@ def _make_settings(
     s.max_position_pct = 0.20
     s.kelly_fraction = 0.5
     s.max_positions_per_market = 10
+    s.daily_loss_limit_pct = 0.03
+    s.max_cross_market_exposure_pct = 0.80
     return s
 
 
@@ -230,44 +236,60 @@ class TestTradingLoopStrategyCycle:
     def test_strategy_cycle_submits_order_on_buy_signal(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal)
-        loop._strategy_cycle()  # type: ignore[attr-defined]
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
 
     def test_strategy_cycle_alerts_on_fill(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, fill=True)
-        loop._strategy_cycle()  # type: ignore[attr-defined]
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._alerter.on_trade_filled.assert_called()  # type: ignore[attr-defined]
 
     def test_strategy_cycle_alerts_on_rejection(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, fill=False)
-        loop._strategy_cycle()  # type: ignore[attr-defined]
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._alerter.on_trade_rejected.assert_called()  # type: ignore[attr-defined]
 
     def test_strategy_cycle_skips_order_when_halted(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, circuit_level=CircuitLevel.HALTED)
-        loop._strategy_cycle()  # type: ignore[attr-defined]
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
 
     def test_strategy_cycle_liquidates_when_l3(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, circuit_level=CircuitLevel.LIQUIDATE)
-        with patch.object(loop, "_liquidate_market") as mock_liq:  # type: ignore[arg-type]
+        with (
+            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            patch.object(loop, "_liquidate_market") as mock_liq,  # type: ignore[arg-type]
+        ):
+            mock_dt.now.return_value = _MARKET_OPEN_DT
             loop._strategy_cycle()  # type: ignore[attr-defined]
             mock_liq.assert_called_with(MARKET_US)
 
     def test_strategy_cycle_no_signal_no_submit(self) -> None:
         loop = _make_trading_loop(signal=None)
-        loop._strategy_cycle()  # type: ignore[attr-defined]
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
 
     def test_strategy_cycle_caution_does_not_block_order(self) -> None:
         """CAUTION level should still allow orders (just with halved size)."""
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, circuit_level=CircuitLevel.CAUTION)
-        loop._strategy_cycle()  # type: ignore[attr-defined]
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
 
 

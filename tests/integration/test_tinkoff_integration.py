@@ -34,19 +34,23 @@ def registry() -> MagicMock:
 @pytest.fixture
 def broker(registry: MagicMock) -> TinkoffBroker:
     """Create TinkoffBroker with mock registry."""
-    return TinkoffBroker(token="test-token", registry=registry, sandbox=True)  # noqa: S106
+    b = TinkoffBroker(token="test-token", registry=registry, sandbox=True)  # noqa: S106
+    b._account_id = "test-account"  # skip lazy account fetch in tests
+    return b
 
 
 @pytest.fixture
 def broker_with_retry(registry: MagicMock) -> TinkoffBroker:
     """Create TinkoffBroker with retry policy."""
     policy = RetryPolicy(max_retries=2, base_delay=0.001)
-    return TinkoffBroker(
+    b = TinkoffBroker(
         token="test-token",  # noqa: S106
         registry=registry,
         sandbox=True,
         retry_policy=policy,
     )
+    b._account_id = "test-account"  # skip lazy account fetch in tests
+    return b
 
 
 class TestOrderLifecycle:

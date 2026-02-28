@@ -12,18 +12,18 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import redis.asyncio
-import sqlalchemy
-from config.settings import Settings
+from config.settings import get_settings
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text
 
-from finalayze.api.v1.auth import require_api_key
+from finalayze.api.v1.auth import api_key_auth
+from finalayze.core.db import get_async_session_factory
 from finalayze.core.exceptions import ModeError
 from finalayze.core.modes import ModeManager, WorkMode
 
 _log = logging.getLogger(__name__)
-_settings = Settings()
+
 router = APIRouter(tags=["system"])
 
 # Application-scoped singleton (overridden in tests via dependency overrides)
@@ -58,68 +58,18 @@ def record_error(component: str, message: str, traceback_excerpt: str = "") -> N
     )
 
 
-async def _check_db() -> str:
-    """Probe database with SELECT 1."""
-    try:
-        engine = create_async_engine(_settings.database_url, pool_pre_ping=True)
-        async with engine.connect() as conn:
-            await conn.execute(sqlalchemy.text("SELECT 1"))
-        await engine.dispose()
-        return "ok"
-    except Exception as exc:
-        _log.warning("Health check: db probe failed: %s", exc)
-        return "error"
-
-
-async def _check_redis() -> str:
-    """Probe Redis with PING."""
-    try:
-        r: redis.asyncio.Redis[str] = redis.asyncio.from_url(
-            _settings.redis_url, decode_responses=True
-        )
-        await r.ping()
-        await r.aclose()  # type: ignore[attr-defined]
-        return "ok"
-    except Exception as exc:
-        _log.warning("Health check: redis probe failed: %s", exc)
-        return "error"
-
-
-async def _get_component_status() -> ComponentStatus:
-    """Run real health checks with 30s caching."""
-    global _health_cache, _health_cache_ts  # noqa: PLW0603
-
-    now = time.monotonic()
-    if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
-        return ComponentStatus(**_health_cache)
-
-    db_status = await _check_db()
-    redis_status = await _check_redis()
-
-    result = {
-        "db": db_status,
-        "redis": redis_status,
-        "alpaca": "ok",
-        "tinkoff": "ok",
-        "llm": "ok",
-    }
-    _health_cache = result
-    _health_cache_ts = now
-    return ComponentStatus(**result)
-
-
 # ── Response models ────────────────────────────────────────────────────────────
 
 
 class ComponentStatus(BaseModel):
-    """Component health status with real DB and Redis probes."""
+    """Real-time component health status from liveness probes."""
 
     model_config = ConfigDict(frozen=True)
-    db: str = "ok"
-    redis: str = "ok"
-    alpaca: str = "ok"
-    tinkoff: str = "ok"
-    llm: str = "ok"
+    db: str
+    redis: str
+    alpaca: str = "unknown"
+    tinkoff: str = "unknown"
+    llm: str = "unknown"
 
 
 class HealthResponse(BaseModel):
@@ -168,6 +118,59 @@ class ModeRequest(BaseModel):
     confirm_token: str | None = None
 
 
+# ── Liveness helpers ─────────────────────────────────────────────────────────
+
+
+async def _check_db() -> str:
+    """Return 'ok' if the database responds to SELECT 1, else 'error'."""
+    try:
+        factory = get_async_session_factory()
+        async with factory() as session:
+            await session.execute(text("SELECT 1"))
+        return "ok"
+    except Exception:
+        _log.debug("DB health check failed", exc_info=True)
+        return "error"
+
+
+async def _check_redis() -> str:
+    """Return 'ok' if Redis responds to PING, else 'error'."""
+    try:
+        settings = get_settings()
+        client: redis.asyncio.Redis[str] = redis.asyncio.from_url(
+            settings.redis_url, decode_responses=True
+        )
+        await client.ping()
+        await client.aclose()  # type: ignore[attr-defined]
+        return "ok"
+    except Exception:
+        _log.debug("Redis health check failed", exc_info=True)
+        return "error"
+
+
+async def _get_component_status() -> ComponentStatus:
+    """Run real health checks with 30s caching."""
+    global _health_cache, _health_cache_ts  # noqa: PLW0603
+
+    now = time.monotonic()
+    if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
+        return ComponentStatus(**_health_cache)
+
+    db_status = await _check_db()
+    redis_status = await _check_redis()
+
+    result = {
+        "db": db_status,
+        "redis": redis_status,
+        "alpaca": "ok",
+        "tinkoff": "ok",
+        "llm": "ok",
+    }
+    _health_cache = result
+    _health_cache_ts = now
+    return ComponentStatus(**result)
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
@@ -175,9 +178,12 @@ class ModeRequest(BaseModel):
 async def health(
     mgr: Annotated[ModeManager, Depends(get_mode_manager)],
 ) -> HealthResponse:
-    """Liveness check. No auth required."""
+    """Liveness check — performs real DB and Redis probes. No auth required."""
     components = await _get_component_status()
-    overall = "ok" if all(v == "ok" for v in components.model_dump().values()) else "degraded"
+    # Only mandatory components (db, redis) determine overall status.
+    # Optional components default to "unknown" and do not degrade overall status.
+    _mandatory = {"db": components.db, "redis": components.redis}
+    overall = "ok" if all(v == "ok" for v in _mandatory.values()) else "degraded"
     return HealthResponse(
         status=overall,
         mode=str(mgr.current_mode),
@@ -201,7 +207,7 @@ async def health_feeds() -> FeedsResponse:
 @router.get(
     "/system/status",
     response_model=SystemStatusResponse,
-    dependencies=[Depends(require_api_key(_settings.api_key))],
+    dependencies=[Depends(api_key_auth)],
 )
 async def system_status(
     mgr: Annotated[ModeManager, Depends(get_mode_manager)],
@@ -220,7 +226,7 @@ async def system_status(
 @router.get(
     "/system/errors",
     response_model=list[ErrorEntry],
-    dependencies=[Depends(require_api_key(_settings.api_key))],
+    dependencies=[Depends(api_key_auth)],
 )
 async def system_errors() -> list[ErrorEntry]:
     """Last 100 recorded exceptions. Auth required."""
@@ -230,7 +236,7 @@ async def system_errors() -> list[ErrorEntry]:
 @router.get(
     "/mode",
     response_model=ModeResponse,
-    dependencies=[Depends(require_api_key(_settings.api_key))],
+    dependencies=[Depends(api_key_auth)],
 )
 async def get_mode(
     mgr: Annotated[ModeManager, Depends(get_mode_manager)],
@@ -242,7 +248,7 @@ async def get_mode(
 @router.post(
     "/mode",
     response_model=ModeResponse,
-    dependencies=[Depends(require_api_key(_settings.api_key))],
+    dependencies=[Depends(api_key_auth)],
 )
 async def set_mode(
     request: ModeRequest,
@@ -261,7 +267,7 @@ async def set_mode(
             confirm_token does not match.
     """
     if request.mode == WorkMode.REAL:
-        _real_settings = Settings()
+        _real_settings = get_settings()
         if not _real_settings.real_token or request.confirm_token != _real_settings.real_token:
             raise HTTPException(
                 status_code=403,

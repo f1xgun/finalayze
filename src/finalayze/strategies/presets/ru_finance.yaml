@@ -20,8 +20,8 @@ strategies:
       rsi_period: 14
       rsi_oversold: 28
       rsi_overbought: 72
-      macd_fast: 12
-      macd_slow: 26
+      macd_fast: 15
+      macd_slow: 30
       min_confidence: 0.65
       lookback_bars: 5
       stop_atr_multiplier: 2.5

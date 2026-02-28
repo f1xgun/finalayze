@@ -26,6 +26,9 @@ from finalayze.markets.instruments import Instrument, InstrumentRegistry
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
 
 # ── Constants ──────────────────────────────────────────────────────────────
+# A Monday during US market hours (14:30-21:00 UTC)
+MARKET_OPEN_DT = datetime(2026, 2, 23, 15, 0, tzinfo=UTC)
+
 MARKET_US = "us"
 SEGMENT_US_TECH = "us_tech"
 SYMBOL_AAPL = "AAPL"
@@ -148,7 +151,7 @@ class TestStrategyIntegration:
 
         alerter = MagicMock(spec=TelegramAlerter)
 
-        return TradingLoop(
+        loop = TradingLoop(
             settings=settings,
             fetchers={MARKET_US: fetcher},
             news_fetcher=news_fetcher,
@@ -162,6 +165,9 @@ class TestStrategyIntegration:
             alerter=alerter,
             instrument_registry=registry,
         )
+        # Freeze time to a market-open weekday so market hours check passes
+        loop._now = MagicMock(return_value=MARKET_OPEN_DT)  # type: ignore[method-assign]
+        return loop
 
     def test_signal_flows_through_to_order_submit(self) -> None:
         loop = self._build_system(circuit_level=CircuitLevel.NORMAL, fill=True)

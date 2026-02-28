@@ -253,22 +253,31 @@ class TestTinkoffBrokerGetPositions:
 
 
 class TestTinkoffBrokerCancelOrder:
+    def _mock_accounts(self) -> MagicMock:
+        mock_accounts_response = MagicMock()
+        mock_account = MagicMock()
+        mock_account.id = "test-account-id"
+        mock_accounts_response.accounts = [mock_account]
+        return mock_accounts_response
+
     def test_cancel_order_success(self) -> None:
         """cancel_order completes without error when SDK call succeeds."""
         with patch(
             "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=None,
+            side_effect=[self._mock_accounts(), None],
         ) as mock_run:
             broker = _make_broker()
             broker.cancel_order("order-abc-123")
 
-        mock_run.assert_called_once()
+        # First call: get_accounts, second call: cancel_order
+        assert mock_run.call_count == 2
 
     def test_cancel_order_api_error_raises(self) -> None:
         """cancel_order raises BrokerError when SDK call fails."""
+        accounts_response = self._mock_accounts()
         with patch(
             "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=RuntimeError("gRPC cancel failed"),
+            side_effect=[accounts_response, RuntimeError("gRPC cancel failed")],
         ):
             broker = _make_broker()
             with pytest.raises(BrokerError, match="gRPC cancel failed"):

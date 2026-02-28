@@ -55,6 +55,94 @@ class TestComputeFeatures:
             compute_features(candles)
 
 
+class TestComputeFeaturesNaNHandling:
+    """#160 — NaN values in compute_features output must be handled."""
+
+    def test_no_nan_in_output_with_minimum_candles(self) -> None:
+        """compute_features must return no NaN values even at the minimum candle count."""
+        import math
+
+        rng = np.random.default_rng(7)
+        prices = 100.0 + rng.standard_normal(30).cumsum()
+        base_date = datetime(2024, 1, 1, tzinfo=UTC)
+        candles = [
+            Candle(
+                symbol="AAPL",
+                market_id="us",
+                timeframe="1d",
+                timestamp=base_date + timedelta(days=i),
+                open=Decimal(str(round(float(prices[i]) * 0.999, 2))),
+                high=Decimal(str(round(float(prices[i]) * 1.005, 2))),
+                low=Decimal(str(round(float(prices[i]) * 0.995, 2))),
+                close=Decimal(str(round(float(prices[i]), 2))),
+                volume=int(1000 + rng.integers(0, 500)),
+            )
+            for i in range(30)  # exactly 30 — minimum — many indicators still have NaN
+        ]
+        features = compute_features(candles)
+        assert all(not math.isnan(v) for v in features.values()), (
+            f"NaN found in features: {features}"
+        )
+
+    def test_volume_ratio_no_nan_at_boundary(self) -> None:
+        """volume_ratio_20d must not be NaN when there are fewer than 21 prior bars."""
+        import math
+
+        rng = np.random.default_rng(99)
+        prices = 100.0 + rng.standard_normal(30).cumsum()
+        base_date = datetime(2024, 1, 1, tzinfo=UTC)
+        candles = [
+            Candle(
+                symbol="AAPL",
+                market_id="us",
+                timeframe="1d",
+                timestamp=base_date + timedelta(days=i),
+                open=Decimal(str(round(float(prices[i]) * 0.999, 2))),
+                high=Decimal(str(round(float(prices[i]) * 1.005, 2))),
+                low=Decimal(str(round(float(prices[i]) * 0.995, 2))),
+                close=Decimal(str(round(float(prices[i]), 2))),
+                volume=int(1000 + rng.integers(0, 500)),
+            )
+            for i in range(30)
+        ]
+        features = compute_features(candles)
+        assert not math.isnan(features["volume_ratio_20d"])
+
+
+class TestVolumeRatioNoLookAhead:
+    """#132 — volume_ratio_20d must exclude the current bar from the denominator."""
+
+    def test_volume_ratio_uses_shifted_mean(self) -> None:
+        """volume_ratio_20d denominator must use the rolling mean of PRIOR bars only.
+
+        We create candles where all volumes are identical except the last bar.
+        If there is no look-ahead, the ratio for the last bar should be
+        last_volume / mean_of_prior_20_volumes.
+        """
+        base_date = datetime(2024, 1, 1, tzinfo=UTC)
+        STANDARD_VOLUME = 1000
+        LAST_VOLUME = 3000  # 3x the standard
+
+        candles = [
+            Candle(
+                symbol="AAPL",
+                market_id="us",
+                timeframe="1d",
+                timestamp=base_date + timedelta(days=i),
+                open=Decimal("100.00"),
+                high=Decimal("105.00"),
+                low=Decimal("95.00"),
+                close=Decimal("102.00"),
+                volume=STANDARD_VOLUME if i < 39 else LAST_VOLUME,
+            )
+            for i in range(40)
+        ]
+        features = compute_features(candles)
+        # With no look-ahead: ratio = LAST_VOLUME / STANDARD_VOLUME = 3.0
+        # With look-ahead (bug): ratio = LAST_VOLUME / mean([...LAST_VOLUME...]) ≠ 3.0
+        assert features["volume_ratio_20d"] == pytest.approx(3.0, abs=0.01)
+
+
 class TestXGBoostModel:
     def test_predict_proba_before_fit_returns_half(self) -> None:
         model = XGBoostModel(segment_id="us_tech")

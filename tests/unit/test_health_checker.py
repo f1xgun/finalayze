@@ -20,27 +20,20 @@ class TestCheckDb:
 
     @pytest.mark.asyncio
     async def test_db_healthy(self) -> None:
-        mock_conn = AsyncMock()
+        mock_session = AsyncMock()
 
-        class _FakeCtx:
-            async def __aenter__(self) -> AsyncMock:
-                return mock_conn
+        mock_factory = MagicMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            async def __aexit__(self, *args: object) -> None:
-                pass
-
-        mock_engine = MagicMock()
-        mock_engine.connect.return_value = _FakeCtx()
-        mock_engine.dispose = AsyncMock()
-
-        with patch("finalayze.api.v1.system.create_async_engine", return_value=mock_engine):
+        with patch("finalayze.api.v1.system.get_async_session_factory", return_value=mock_factory):
             result = await _check_db()
         assert result == "ok"
 
     @pytest.mark.asyncio
     async def test_db_down(self) -> None:
         with patch(
-            "finalayze.api.v1.system.create_async_engine",
+            "finalayze.api.v1.system.get_async_session_factory",
             side_effect=Exception("connection refused"),
         ):
             result = await _check_db()
@@ -56,7 +49,13 @@ class TestCheckRedis:
         mock_redis.ping = AsyncMock(return_value=True)
         mock_redis.aclose = AsyncMock()
 
-        with patch("finalayze.api.v1.system.redis.asyncio.from_url", return_value=mock_redis):
+        mock_settings = MagicMock()
+        mock_settings.redis_url = "redis://localhost:6379/0"
+
+        with (
+            patch("finalayze.api.v1.system.get_settings", return_value=mock_settings),
+            patch("finalayze.api.v1.system.redis.asyncio.from_url", return_value=mock_redis),
+        ):
             result = await _check_redis()
         assert result == "ok"
 

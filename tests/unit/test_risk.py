@@ -180,6 +180,9 @@ class TestComputeAtrStopLoss:
 
 
 class TestPreTradeChecker:
+    # A Monday during US market hours: 14:30-21:00 UTC
+    _MARKET_OPEN_DT = datetime(2026, 2, 23, 15, 0, tzinfo=UTC)  # Monday 15:00 UTC
+
     def test_passes_valid_order(self) -> None:
         checker = PreTradeChecker(
             max_position_pct=MAX_POSITION_PCT,
@@ -190,6 +193,7 @@ class TestPreTradeChecker:
             portfolio_equity=PORTFOLIO_EQUITY,
             available_cash=AVAILABLE_CASH,
             open_position_count=POSITION_COUNT_OK,
+            dt=self._MARKET_OPEN_DT,
         )
         assert result.passed is True
         assert result.violations == []
@@ -204,6 +208,7 @@ class TestPreTradeChecker:
             portfolio_equity=PORTFOLIO_EQUITY,
             available_cash=AVAILABLE_CASH,
             open_position_count=POSITION_COUNT_OK,
+            dt=self._MARKET_OPEN_DT,
         )
         assert result.passed is False
         assert len(result.violations) == 1
@@ -219,6 +224,7 @@ class TestPreTradeChecker:
             portfolio_equity=PORTFOLIO_EQUITY,
             available_cash=AVAILABLE_CASH,
             open_position_count=POSITION_COUNT_OK,
+            dt=self._MARKET_OPEN_DT,
         )
         # HUGE_ORDER (60000) > AVAILABLE_CASH (50000) -> insufficient cash
         # HUGE_ORDER (60000) is 60% of equity -> exceeds max 20%
@@ -237,6 +243,7 @@ class TestPreTradeChecker:
             portfolio_equity=PORTFOLIO_EQUITY,
             available_cash=AVAILABLE_CASH,
             open_position_count=POSITION_COUNT_AT_MAX,
+            dt=self._MARKET_OPEN_DT,
         )
         assert result.passed is False
         assert len(result.violations) == 1
@@ -252,6 +259,7 @@ class TestPreTradeChecker:
             portfolio_equity=PORTFOLIO_EQUITY,
             available_cash=AVAILABLE_CASH,
             open_position_count=POSITION_COUNT_AT_MAX,
+            dt=self._MARKET_OPEN_DT,
         )
         # Should fail on position size, cash, and position count
         expected_violation_count = 3

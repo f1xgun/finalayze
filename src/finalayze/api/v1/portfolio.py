@@ -6,19 +6,18 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from config.settings import Settings
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from finalayze.api.v1.auth import require_api_key
+from finalayze.api.v1.auth import api_key_auth
+from finalayze.markets.registry import default_registry
 
-_settings = Settings()
 _log = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/portfolio",
     tags=["portfolio"],
-    dependencies=[Depends(require_api_key(_settings.api_key))],
+    dependencies=[Depends(api_key_auth)],
 )
 
 
@@ -98,8 +97,10 @@ async def get_portfolio(request: Request) -> PortfolioResponse:
     if broker_router is None:
         return _empty_portfolio()
 
+    registry = default_registry()
     markets: list[MarketPortfolio] = []
-    for market_id in ["us", "moex"]:
+    for market_def in registry.list_markets():
+        market_id = market_def.id
         try:
             broker = broker_router.route(market_id)
             p = broker.get_portfolio()
@@ -135,8 +136,10 @@ async def get_positions(request: Request) -> PositionsResponse:
     if broker_router is None:
         return PositionsResponse(positions=[])
 
+    registry = default_registry()
     positions: list[PositionDetail] = []
-    for market_id in ["us", "moex"]:
+    for market_def in registry.list_markets():
+        market_id = market_def.id
         try:
             broker = broker_router.route(market_id)
             raw = broker.get_positions()

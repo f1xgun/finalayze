@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 from config.logging import setup_logging
-from config.settings import Settings
+from config.settings import get_settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -21,7 +21,7 @@ from finalayze.api.v1.router import api_router
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-_settings = Settings()
+_settings = get_settings()
 setup_logging(_settings.mode)
 log = structlog.get_logger()
 
@@ -41,7 +41,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "Authorization"],
+        allow_headers=["Content-Type", "Authorization", "X-API-Key"],
     )
     application.include_router(api_router, prefix="/api/v1")
     # Prometheus HTTP metrics — no auth (internal network only)

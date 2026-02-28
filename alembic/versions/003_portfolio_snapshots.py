@@ -10,10 +10,10 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "003"
-down_revision = "002"
-branch_labels = None
-depends_on = None
+revision: str = "003"
+down_revision: str | None = "002"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def upgrade() -> None:

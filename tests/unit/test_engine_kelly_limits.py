@@ -22,7 +22,8 @@ MARKET_ID = "us"
 TIMEFRAME = "1d"
 SOURCE = "test"
 
-BASE_DATE = datetime(2024, 1, 2, tzinfo=UTC)
+# 14:30 UTC = 10:30 ET (within US market hours 14:30-21:00 UTC)
+BASE_DATE = datetime(2024, 1, 2, 14, 30, tzinfo=UTC)
 CANDLE_VOLUME = 1_000_000
 
 

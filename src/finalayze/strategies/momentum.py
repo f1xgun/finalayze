@@ -63,10 +63,14 @@ class MomentumStrategy(BaseStrategy):
     Generates BUY signals when RSI was recently oversold (within lookback window)
     and MACD histogram is rising, and SELL signals when RSI was recently overbought
     and MACD histogram is falling.
+
+    YAML presets are loaded once per segment_id and cached to avoid per-bar I/O.
     """
 
     def __init__(self) -> None:
         self._signal_state = _SignalState()
+        # Cache YAML params per segment to avoid reloading on every bar
+        self._params_cache: dict[str, dict[str, object]] = {}
 
     @property
     def name(self) -> str:
@@ -85,14 +89,21 @@ class MomentumStrategy(BaseStrategy):
         return segments
 
     def get_parameters(self, segment_id: str) -> dict[str, object]:
-        """Load momentum parameters from the YAML preset for the given segment."""
+        """Load momentum parameters from the YAML preset for the given segment.
+
+        Results are cached per segment_id to avoid reloading the YAML file on every bar.
+        """
+        if segment_id in self._params_cache:
+            return self._params_cache[segment_id]
         try:
             preset_path = _PRESETS_DIR / f"{segment_id}.yaml"
             with preset_path.open() as f:
                 data = yaml.safe_load(f)
-            return dict(data["strategies"]["momentum"]["params"])
-        except FileNotFoundError:
-            return {}
+            params = dict(data["strategies"]["momentum"]["params"])
+        except (FileNotFoundError, KeyError, TypeError):
+            params = {}
+        self._params_cache[segment_id] = params
+        return params
 
     def generate_signal(
         self,

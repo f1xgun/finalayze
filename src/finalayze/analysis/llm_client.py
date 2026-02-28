@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 import anthropic
@@ -22,6 +23,9 @@ if TYPE_CHECKING:
 # ── Retry configuration ─────────────────────────────────────────────────────
 _MAX_RETRIES = 3
 _RETRY_BASE_SECONDS = 2
+# Maximum number of responses held in the in-memory LRU cache (#147).
+# Older entries are evicted when the limit is reached.
+_CACHE_MAX_SIZE = 1000
 
 
 class LLMClient(ABC):
@@ -46,24 +50,35 @@ class LLMClient(ABC):
 
 
 class _CachingLLMClient(LLMClient, ABC):
-    """Mixin that adds SHA-256 in-memory caching and exponential backoff retry."""
+    """Mixin that adds SHA-256 bounded LRU in-memory caching and exponential backoff retry.
+
+    The cache is an ``OrderedDict``-based LRU store capped at ``_CACHE_MAX_SIZE``
+    entries so that the process memory does not grow without bound in long-running
+    deployments (#147).
+    """
 
     def __init__(self) -> None:
-        self._cache: dict[str, str] = {}
+        # OrderedDict used as a bounded LRU cache: oldest entry evicted when full.
+        self._cache: OrderedDict[str, str] = OrderedDict()
 
     def _cache_key(self, prompt: str, system: str) -> str:
         payload = f"{system}\n{prompt}"
         return hashlib.sha256(payload.encode()).hexdigest()
 
     async def complete(self, prompt: str, system: str) -> str:
-        """Complete with caching and retry."""
+        """Complete with bounded LRU caching and retry."""
         key = self._cache_key(prompt, system)
         if key in self._cache:
+            # Move to end to mark as most-recently used
+            self._cache.move_to_end(key)
             return self._cache[key]
 
         for attempt in range(_MAX_RETRIES):
             try:
                 result = await self._complete_once(prompt, system)
+                # Evict oldest entry when cache is full (#147)
+                if len(self._cache) >= _CACHE_MAX_SIZE:
+                    self._cache.popitem(last=False)
                 self._cache[key] = result
                 return result
             except LLMRateLimitError:
