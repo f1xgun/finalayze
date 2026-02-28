@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import httpx
 from pydantic import ValidationError
@@ -11,6 +12,9 @@ from pydantic import ValidationError
 from finalayze.core.exceptions import DataFetchError, RateLimitError
 from finalayze.core.schemas import Candle
 from finalayze.data.fetchers.base import BaseFetcher
+
+if TYPE_CHECKING:
+    from finalayze.data.rate_limiter import RateLimiter
 
 # ── Timeframe mapping ───────────────────────────────────────────────────────
 _TIMEFRAME_MAP: dict[str, str] = {
@@ -43,9 +47,15 @@ class FinnhubFetcher(BaseFetcher):
     _BASE_URL = "https://finnhub.io/api/v1"
     _TIMEFRAME_MAP: dict[str, str] = _TIMEFRAME_MAP
 
-    def __init__(self, api_key: str, market_id: str = "us") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        market_id: str = "us",
+        rate_limiter: RateLimiter | None = None,
+    ) -> None:
         self._api_key = api_key
         self._market_id = market_id
+        self._rate_limiter = rate_limiter
 
     def fetch_candles(
         self,
@@ -81,6 +91,9 @@ class FinnhubFetcher(BaseFetcher):
             "to": to_ts,
             "token": self._api_key,
         }
+
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
 
         with httpx.Client() as client:
             try:

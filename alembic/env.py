@@ -10,6 +10,7 @@ This module converts it to ``postgresql+psycopg2://`` automatically.
 
 from __future__ import annotations
 
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -21,6 +22,13 @@ config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Override sqlalchemy.url from environment if set (required for Docker deployments)
+_env_url = os.environ.get("FINALAYZE_DATABASE_URL")
+if _env_url:
+    # Alembic uses synchronous engine — replace asyncpg with psycopg2
+    _sync_url = _env_url.replace("+asyncpg", "")
+    config.set_main_option("sqlalchemy.url", _sync_url)
 
 target_metadata = Base.metadata
 

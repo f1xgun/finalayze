@@ -22,6 +22,7 @@ from finalayze.core.schemas import Candle
 from finalayze.data.fetchers.base import BaseFetcher
 
 if TYPE_CHECKING:
+    from finalayze.data.rate_limiter import RateLimiter
     from finalayze.markets.instruments import InstrumentRegistry
 
 _TIMEFRAME_MAP: dict[str, CandleInterval] = {
@@ -49,10 +50,12 @@ class TinkoffFetcher(BaseFetcher):
         registry: InstrumentRegistry,
         *,
         sandbox: bool = True,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         self._token = token
         self._registry = registry
         self._sandbox = sandbox
+        self._rate_limiter = rate_limiter
 
     def fetch_candles(
         self,
@@ -69,6 +72,9 @@ class TinkoffFetcher(BaseFetcher):
 
         figi = self._symbol_to_figi(symbol)
         interval = _TIMEFRAME_MAP[timeframe]
+
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
 
         try:
             raw_candles = asyncio.run(self._fetch_async(figi, start, end, interval))

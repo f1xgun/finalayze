@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import httpx
@@ -10,6 +11,9 @@ from pydantic import ValidationError
 
 from finalayze.core.exceptions import DataFetchError, RateLimitError
 from finalayze.core.schemas import NewsArticle
+
+if TYPE_CHECKING:
+    from finalayze.data.rate_limiter import RateLimiter
 
 _BASE_URL = "https://newsapi.org/v2/everything"
 _HTTP_OK = 200
@@ -24,9 +28,15 @@ class NewsApiFetcher:
     Returns a list of :class:`~finalayze.core.schemas.NewsArticle` objects.
     """
 
-    def __init__(self, api_key: str, language: str = "en") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        language: str = "en",
+        rate_limiter: RateLimiter | None = None,
+    ) -> None:
         self._api_key = api_key
         self._language = language
+        self._rate_limiter = rate_limiter
 
     def fetch_news(
         self,
@@ -59,6 +69,9 @@ class NewsApiFetcher:
             "pageSize": page_size,
             "apiKey": self._api_key,
         }
+
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
 
         with httpx.Client() as client:
             try:

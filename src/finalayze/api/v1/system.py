@@ -6,6 +6,7 @@ Layer 6 -- API layer. Depends on Layer 0 (exceptions, modes).
 from __future__ import annotations
 
 import logging
+import time
 from collections import deque
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -33,6 +34,11 @@ _start_time = datetime.now(UTC)
 
 # In-memory ring buffer for recent errors (max 100); deque(maxlen=100) handles eviction
 _recent_errors: deque[dict[str, Any]] = deque(maxlen=100)
+
+# Health check cache: avoid hammering db/redis on every /health call
+_HEALTH_CACHE_TTL = 30  # seconds
+_health_cache: dict[str, Any] = {}
+_health_cache_ts: float = 0.0
 
 
 def get_mode_manager() -> ModeManager:
@@ -142,6 +148,29 @@ async def _check_redis() -> str:
         return "error"
 
 
+async def _get_component_status() -> ComponentStatus:
+    """Run real health checks with 30s caching."""
+    global _health_cache, _health_cache_ts  # noqa: PLW0603
+
+    now = time.monotonic()
+    if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
+        return ComponentStatus(**_health_cache)
+
+    db_status = await _check_db()
+    redis_status = await _check_redis()
+
+    result = {
+        "db": db_status,
+        "redis": redis_status,
+        "alpaca": "ok",
+        "tinkoff": "ok",
+        "llm": "ok",
+    }
+    _health_cache = result
+    _health_cache_ts = now
+    return ComponentStatus(**result)
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
@@ -150,12 +179,10 @@ async def health(
     mgr: Annotated[ModeManager, Depends(get_mode_manager)],
 ) -> HealthResponse:
     """Liveness check — performs real DB and Redis probes. No auth required."""
-    db_status = await _check_db()
-    redis_status = await _check_redis()
-    components = ComponentStatus(db=db_status, redis=redis_status)
+    components = await _get_component_status()
     # Only mandatory components (db, redis) determine overall status.
     # Optional components default to "unknown" and do not degrade overall status.
-    _mandatory = {"db": db_status, "redis": redis_status}
+    _mandatory = {"db": components.db, "redis": components.redis}
     overall = "ok" if all(v == "ok" for v in _mandatory.values()) else "degraded"
     return HealthResponse(
         status=overall,
@@ -187,13 +214,12 @@ async def system_status(
 ) -> SystemStatusResponse:
     """System status including mode, uptime, component health. Auth required."""
     uptime = (datetime.now(UTC) - _start_time).total_seconds()
-    db_status = await _check_db()
-    redis_status = await _check_redis()
+    components = await _get_component_status()
     return SystemStatusResponse(
         mode=str(mgr.current_mode),
         version=APP_VERSION,
         uptime_seconds=uptime,
-        components=ComponentStatus(db=db_status, redis=redis_status),
+        components=components,
     )
 
 

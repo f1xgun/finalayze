@@ -1,0 +1,87 @@
+name: finalayze
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: finalayze-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-finalayze}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-finalayze}
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-finalayze}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - finalayze_net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: finalayze-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - finalayze_net
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    container_name: finalayze-app
+    environment:
+      FINALAYZE_MODE: ${FINALAYZE_MODE:-sandbox}
+      FINALAYZE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finalayze}:${POSTGRES_PASSWORD:-secret}@postgres:5432/${POSTGRES_DB:-finalayze}
+      FINALAYZE_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      FINALAYZE_API_KEY: ${FINALAYZE_API_KEY}
+      FINALAYZE_REAL_TOKEN: ${FINALAYZE_REAL_TOKEN:-}
+      FINALAYZE_FINNHUB_API_KEY: ${FINALAYZE_FINNHUB_API_KEY:-}
+      FINALAYZE_NEWSAPI_API_KEY: ${FINALAYZE_NEWSAPI_API_KEY:-}
+      FINALAYZE_ANTHROPIC_API_KEY: ${FINALAYZE_ANTHROPIC_API_KEY:-}
+      FINALAYZE_ALPACA_API_KEY: ${FINALAYZE_ALPACA_API_KEY:-}
+      FINALAYZE_ALPACA_SECRET_KEY: ${FINALAYZE_ALPACA_SECRET_KEY:-}
+      FINALAYZE_ALPACA_PAPER: ${FINALAYZE_ALPACA_PAPER:-true}
+      FINALAYZE_TINKOFF_TOKEN: ${FINALAYZE_TINKOFF_TOKEN:-}
+      FINALAYZE_TINKOFF_SANDBOX: ${FINALAYZE_TINKOFF_SANDBOX:-true}
+      FINALAYZE_TELEGRAM_BOT_TOKEN: ${FINALAYZE_TELEGRAM_BOT_TOKEN:-}
+      FINALAYZE_TELEGRAM_CHAT_ID: ${FINALAYZE_TELEGRAM_CHAT_ID:-}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - finalayze_net
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: finalayze-nginx
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+    networks:
+      - finalayze_net
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  finalayze_net:
+    name: finalayze_finalayze_net

@@ -14,8 +14,23 @@ import pytest
 from config.settings import Settings, get_settings
 from httpx import ASGITransport, AsyncClient
 
-from finalayze.api.v1.system import ModeManager, get_mode_manager
+from finalayze.api.v1.system import ComponentStatus, ModeManager, get_mode_manager
 from finalayze.main import create_app
+
+# Patch _get_component_status for all tests so no real DB/Redis probes run
+_mock_components = ComponentStatus(db="ok", redis="ok", alpaca="ok", tinkoff="ok", llm="ok")
+
+
+@pytest.fixture(autouse=True)
+def _mock_health_probes() -> object:
+    """Mock out real health probes so tests don't need live DB/Redis."""
+    with patch(
+        "finalayze.api.v1.system._get_component_status",
+        new_callable=AsyncMock,
+        return_value=_mock_components,
+    ):
+        yield
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -89,13 +104,11 @@ class TestHealthEndpoint:
     @pytest.mark.asyncio
     async def test_health_status_is_degraded_when_db_down(self) -> None:
         app, _ = build_test_app()
-        with (
-            patch(
-                "finalayze.api.v1.system._check_db", new_callable=AsyncMock, return_value="error"
-            ),
-            patch(
-                "finalayze.api.v1.system._check_redis", new_callable=AsyncMock, return_value="ok"
-            ),
+        degraded = ComponentStatus(db="error", redis="ok", alpaca="ok", tinkoff="ok", llm="ok")
+        with patch(
+            "finalayze.api.v1.system._get_component_status",
+            new_callable=AsyncMock,
+            return_value=degraded,
         ):
             async with make_client(app) as client:
                 response = await client.get("/api/v1/health")

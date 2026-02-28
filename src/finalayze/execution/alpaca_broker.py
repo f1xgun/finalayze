@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -21,8 +21,12 @@ from finalayze.core.schemas import PortfolioState
 from finalayze.execution.broker_base import BrokerBase, OrderRequest, OrderResult
 
 if TYPE_CHECKING:
-    from finalayze.core.schemas import Candle
+    from collections.abc import Callable
 
+    from finalayze.core.schemas import Candle
+    from finalayze.execution.retry import RetryPolicy
+
+_T = TypeVar("_T")
 _INSUFFICIENT_FUNDS_KEYWORDS = ("insufficient", "buying power", "not enough")
 
 
@@ -40,12 +44,20 @@ class AlpacaBroker(BrokerBase):
         secret_key: str,
         *,
         paper: bool = True,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         self._client = TradingClient(
             api_key=api_key,
             secret_key=secret_key,
             paper=paper,
         )
+        self._retry = retry_policy
+
+    def _call(self, fn: Callable[[], _T]) -> _T:
+        """Execute fn with retry if a RetryPolicy is configured."""
+        if self._retry is not None:
+            return self._retry.execute(fn)
+        return fn()
 
     def submit_order(
         self,
@@ -64,7 +76,9 @@ class AlpacaBroker(BrokerBase):
             time_in_force=tif,
         )
         try:
-            result = self._client.submit_order(order_data=request)
+            result = self._call(lambda: self._client.submit_order(order_data=request))
+        except InsufficientFundsError:
+            raise
         except Exception as exc:
             exc_str = str(exc).lower()
             if any(kw in exc_str for kw in _INSUFFICIENT_FUNDS_KEYWORDS):
@@ -89,8 +103,8 @@ class AlpacaBroker(BrokerBase):
     def get_portfolio(self) -> PortfolioState:
         """Return current portfolio state from Alpaca."""
         try:
-            account = self._client.get_account()
-            positions = self._client.get_all_positions()
+            account = self._call(self._client.get_account)
+            positions = self._call(self._client.get_all_positions)
         except Exception as exc:
             msg = f"Alpaca portfolio fetch failed: {exc}"
             raise BrokerError(msg) from exc
@@ -113,7 +127,7 @@ class AlpacaBroker(BrokerBase):
     def has_position(self, symbol: str) -> bool:
         """Return True if Alpaca account holds a non-zero position in symbol."""
         try:
-            positions = self._client.get_all_positions()
+            positions = self._call(self._client.get_all_positions)
         except Exception as exc:
             msg = f"Alpaca positions fetch failed: {exc}"
             raise BrokerError(msg) from exc
@@ -122,7 +136,7 @@ class AlpacaBroker(BrokerBase):
     def get_positions(self) -> dict[str, Decimal]:
         """Return a copy of current Alpaca positions keyed by symbol."""
         try:
-            positions = self._client.get_all_positions()
+            positions = self._call(self._client.get_all_positions)
         except Exception as exc:
             msg = f"Alpaca positions fetch failed: {exc}"
             raise BrokerError(msg) from exc
@@ -131,7 +145,7 @@ class AlpacaBroker(BrokerBase):
     def cancel_order(self, order_id: str) -> None:
         """Cancel a pending Alpaca order by ID."""
         try:
-            self._client.cancel_order_by_id(order_id)
+            self._call(lambda: self._client.cancel_order_by_id(order_id))
         except Exception as exc:
             msg = f"Alpaca cancel_order failed for {order_id}: {exc}"
             raise BrokerError(msg) from exc
