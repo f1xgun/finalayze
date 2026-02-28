@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 _MIN_TRADES_FOR_KELLY = 20
 _DEFAULT_WINDOW = 50
 _DEFAULT_FRACTION = 0.25  # quarter-Kelly
 _MIN_KELLY_FRACTION = Decimal("0.005")  # 0.5% minimum
 _FIXED_FRACTIONAL = Decimal("0.01")  # 1% before enough data
+_FOUR_DP = Decimal("0.0001")
 
 
 @dataclass
@@ -26,7 +27,7 @@ class RollingKelly:
 
     def __init__(self, window: int = _DEFAULT_WINDOW, fraction: float = _DEFAULT_FRACTION) -> None:
         self._window = window
-        self._fraction = fraction
+        self._fraction = Decimal(str(fraction))
         self._trades: deque[TradeRecord] = deque(maxlen=window)
 
     def update(self, trade: TradeRecord) -> None:
@@ -49,18 +50,19 @@ class RollingKelly:
         if not wins or not losses:
             return _FIXED_FRACTIONAL
 
-        total_decisive = len(wins) + len(losses)
-        win_rate = len(wins) / total_decisive
-        avg_win = sum(float(t.pnl_pct) for t in wins) / len(wins)
-        avg_loss = abs(sum(float(t.pnl_pct) for t in losses) / len(losses))
+        total_decisive = Decimal(len(wins) + len(losses))
+        win_rate = Decimal(len(wins)) / total_decisive
+        avg_win = sum(t.pnl_pct for t in wins) / Decimal(len(wins))
+        avg_loss = abs(sum(t.pnl_pct for t in losses) / Decimal(len(losses)))
 
         if avg_loss == 0:
             return _FIXED_FRACTIONAL
 
         ratio = avg_win / avg_loss
-        kelly = (win_rate * ratio - (1 - win_rate)) / ratio
+        one = Decimal(1)
+        kelly = (win_rate * ratio - (one - win_rate)) / ratio
 
         if kelly <= 0:
             return _MIN_KELLY_FRACTION
 
-        return Decimal(str(round(kelly * self._fraction, 4)))
+        return (kelly * self._fraction).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)

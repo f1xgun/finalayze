@@ -142,7 +142,7 @@ def _collect_oos_trade_returns(
             # Run backtest on OOS (test) candles only
             trades, _snapshots = engine.run(sym, segment, test)
             all_oos_returns.extend(
-                _SymbolReturn(symbol=sym, return_pct=float(t.pnl_pct * _PERCENT)) for t in trades
+                _SymbolReturn(symbol=sym, return_pct=float(t.pnl_pct) * _PERCENT) for t in trades
             )
 
     return all_oos_returns

@@ -5,8 +5,9 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,11 @@ _HALTING_LEVELS = frozenset({"halted", "liquidate"})
 # Weekend weekday threshold (Saturday=5, Sunday=6)
 _WEEKEND_WEEKDAY = 5
 
+# PDT rule constants
+_PDT_MAX_DAY_TRADES = 3
+_PDT_ROLLING_DAYS = 5
+_PDT_EQUITY_THRESHOLD = Decimal(25000)
+
 
 @dataclass(frozen=True)
 class PreTradeResult:
@@ -38,6 +44,54 @@ class PreTradeResult:
 
     passed: bool
     violations: list[str] = field(default_factory=list)
+
+
+class PDTTracker:
+    """Track day-trade count over a 5-business-day rolling window.
+
+    FINRA Pattern Day Trader rule: accounts with equity < $25,000 are
+    limited to 3 day trades per 5 rolling business days.
+
+    A "day trade" is defined as opening and closing the same position
+    on the same trading day.
+    """
+
+    def __init__(self) -> None:
+        # Store dates of day trades (most recent last)
+        self._day_trade_dates: deque[date] = deque()
+
+    def record_day_trade(self, trade_date: date) -> None:
+        """Record that a day trade occurred on the given date."""
+        self._day_trade_dates.append(trade_date)
+
+    def _count_recent_day_trades(self, as_of: date) -> int:
+        """Count day trades in the 5-business-day window ending on *as_of*.
+
+        Business days are approximated by counting calendar days back to
+        cover 5 weekdays (typically 7 calendar days).  We use a conservative
+        7-calendar-day window to avoid missing trades near weekends.
+        """
+        cutoff = as_of - timedelta(days=7)
+        # Purge stale entries older than the window
+        while self._day_trade_dates and self._day_trade_dates[0] < cutoff:
+            self._day_trade_dates.popleft()
+        return sum(1 for d in self._day_trade_dates if d >= cutoff)
+
+    def would_violate(self, as_of: date, account_equity: Decimal) -> bool:
+        """Return True if executing another day trade would violate PDT.
+
+        Accounts with equity >= $25,000 are exempt from the PDT rule.
+        Non-US markets are never subject to PDT.
+        """
+        if account_equity >= _PDT_EQUITY_THRESHOLD:
+            return False
+        recent = self._count_recent_day_trades(as_of)
+        return recent >= _PDT_MAX_DAY_TRADES
+
+    @property
+    def recent_day_trades(self) -> int:
+        """Number of day trades currently tracked (informational)."""
+        return len(self._day_trade_dates)
 
 
 class PreTradeChecker:
@@ -48,7 +102,7 @@ class PreTradeChecker:
         2. Symbol validity (symbol exists in market) — caller responsibility
         3. Mode allows order — caller responsibility
         4. Circuit breaker status (per market)
-        5. PDT compliance — future work (US only)
+        5. PDT compliance (US only, accounts < $25K)
         6. Position size (Kelly + max cap)
         7. Portfolio rules (max positions, sector concentration)
         8. Cash sufficient (per market/currency)
@@ -61,9 +115,11 @@ class PreTradeChecker:
         self,
         max_position_pct: Decimal = Decimal("0.20"),
         max_positions_per_market: int = 10,
+        pdt_tracker: PDTTracker | None = None,
     ) -> None:
         self._max_position_pct = max_position_pct
         self._max_positions = max_positions_per_market
+        self._pdt_tracker = pdt_tracker
 
     def check(
         self,
@@ -80,6 +136,7 @@ class PreTradeChecker:
         symbol: str = "",
         cross_market_exposure_pct: Decimal | None = None,
         max_cross_market_exposure_pct: Decimal | None = None,
+        is_day_trade: bool = False,
     ) -> PreTradeResult:
         """Run all pre-trade risk checks.
 
@@ -97,6 +154,7 @@ class PreTradeChecker:
             symbol: The symbol being ordered (for duplicate check).
             cross_market_exposure_pct: Current cross-market exposure fraction.
             max_cross_market_exposure_pct: Maximum allowed cross-market exposure.
+            is_day_trade: Whether this order would constitute a day trade.
 
         Returns:
             A :class:`PreTradeResult` indicating pass/fail and any violations.
@@ -117,6 +175,20 @@ class PreTradeChecker:
                 violations.append(
                     f"Circuit breaker is {level_str} for market '{market_id}' — trading halted"
                 )
+
+        # 5. PDT compliance (US only)
+        if (
+            market_id == "us"
+            and is_day_trade
+            and self._pdt_tracker is not None
+            and self._pdt_tracker.would_violate(check_dt.date(), portfolio_equity)
+        ):
+            recent = self._pdt_tracker.recent_day_trades
+            violations.append(
+                f"PDT violation: {recent} day trades in last 5 business days "
+                f"(max {_PDT_MAX_DAY_TRADES}), equity ${float(portfolio_equity):,.0f} "
+                f"< ${float(_PDT_EQUITY_THRESHOLD):,.0f}"
+            )
 
         # 6. Position size check
         if portfolio_equity == 0:

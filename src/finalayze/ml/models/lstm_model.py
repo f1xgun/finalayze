@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from torch import nn
 
@@ -21,6 +22,8 @@ from finalayze.ml.models.base import BaseMLModel
 _UNTRAINED_PROB = 0.5
 _TRAIN_EPOCHS = 50
 _LEARNING_RATE = 0.001
+_CALIBRATION_HOLDOUT_FRACTION = 0.2
+_MIN_CALIBRATION_SAMPLES = 10
 
 
 class _LSTMNet(nn.Module):
@@ -69,6 +72,8 @@ class LSTMModel(BaseMLModel):
         self._lock = threading.Lock()
         # Scaler fitted on training data; applied during inference (#152)
         self._scaler: StandardScaler | None = None
+        # Platt scaling: logistic regression mapping raw sigmoid → calibrated probability
+        self._platt_scaler: LogisticRegression | None = None
 
     def predict_proba(self, features: dict[str, float]) -> float:
         """Return BUY probability in [0.0, 1.0]. Returns 0.5 when untrained."""
@@ -99,7 +104,15 @@ class LSTMModel(BaseMLModel):
         self._model.eval()
         with torch.no_grad():
             output: torch.Tensor = self._model(tensor)
-        return float(output.squeeze())
+        raw_prob = float(output.squeeze())
+
+        # Apply Platt scaling calibration if available
+        if self._platt_scaler is not None:
+            calibrated: float = float(
+                self._platt_scaler.predict_proba(np.array([[raw_prob]]))[0][1]
+            )
+            return calibrated
+        return raw_prob
 
     def fit(self, X: list[dict[str, float]], y: list[int]) -> None:  # noqa: N803
         """Train the LSTM on feature dicts and binary labels.
@@ -142,13 +155,37 @@ class LSTMModel(BaseMLModel):
         optimizer = torch.optim.Adam(self._model.parameters(), lr=_LEARNING_RATE)
         criterion = nn.BCELoss()
 
+        # Split sequences into train and calibration holdout
+        n_sequences = len(sequences)
+        n_cal = max(int(n_sequences * _CALIBRATION_HOLDOUT_FRACTION), 1)
+        n_train = n_sequences - n_cal
+
+        x_train = x_tensor[:n_train]
+        y_train = y_tensor[:n_train]
+        x_cal = x_tensor[n_train:]
+        y_cal_labels = np.array(labels[n_train:], dtype=int)
+
         self._model.train()
         for _ in range(_TRAIN_EPOCHS):
             optimizer.zero_grad()
-            output = self._model(x_tensor)
-            loss = criterion(output, y_tensor)
+            output = self._model(x_train)
+            loss = criterion(output, y_train)
             loss.backward()
             optimizer.step()
+
+        # Fit Platt scaler (logistic regression) on calibration holdout
+        # Requires both classes present and sufficient samples
+        self._model.eval()
+        if len(np.unique(y_cal_labels)) > 1 and len(y_cal_labels) >= _MIN_CALIBRATION_SAMPLES:
+            with torch.no_grad():
+                cal_raw: torch.Tensor = self._model(x_cal)
+            cal_raw_np = cal_raw.squeeze().numpy()
+            if cal_raw_np.ndim == 0:
+                cal_raw_np = cal_raw_np.reshape(1)
+            self._platt_scaler = LogisticRegression(solver="lbfgs", max_iter=1000)
+            self._platt_scaler.fit(cal_raw_np.reshape(-1, 1), y_cal_labels)
+        else:
+            self._platt_scaler = None
 
         self._trained = True
         self._feature_buffer.clear()
@@ -179,6 +216,9 @@ class LSTMModel(BaseMLModel):
         scaler_path = path.parent / (path.name + ".scaler.pkl")
         with scaler_path.open("wb") as fh:
             pickle.dump(self._scaler, fh)
+        platt_path = path.parent / (path.name + ".platt.pkl")
+        with platt_path.open("wb") as fh:
+            pickle.dump(self._platt_scaler, fh)
 
     def load(self, path: Path) -> None:
         """Load model state dict and config from path.
@@ -206,3 +246,9 @@ class LSTMModel(BaseMLModel):
                 self._scaler = pickle.load(fh)  # noqa: S301
         else:
             self._scaler = None
+        platt_path = path.parent / (path.name + ".platt.pkl")
+        if platt_path.exists():
+            with platt_path.open("rb") as fh:
+                self._platt_scaler = pickle.load(fh)  # noqa: S301
+        else:
+            self._platt_scaler = None
