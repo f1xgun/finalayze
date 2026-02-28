@@ -35,11 +35,12 @@ class TestBuildWindows:
     def test_label_outside_feature_window(self) -> None:
         """Label is derived from bar *after* the feature window (no overlap)."""
         candles = _make_candles(DEFAULT_WINDOW_SIZE + 2)
-        features, labels = build_windows(candles, DEFAULT_WINDOW_SIZE)
+        features, labels, timestamps = build_windows(candles, DEFAULT_WINDOW_SIZE)
 
         # With WINDOW_SIZE + 2 candles, we get 2 samples
         assert len(features) == 2
         assert len(labels) == 2
+        assert len(timestamps) == 2
 
         # Label for first sample: sign(candles[60].close - candles[59].close)
         # Since price increases monotonically, label should be 1 (BUY)
@@ -48,20 +49,23 @@ class TestBuildWindows:
     def test_insufficient_candles_returns_empty(self) -> None:
         """When fewer than window_size + 1 candles, return empty lists."""
         candles = _make_candles(DEFAULT_WINDOW_SIZE)  # exactly window_size, need +1
-        features, labels = build_windows(candles, DEFAULT_WINDOW_SIZE)
+        features, labels, timestamps = build_windows(candles, DEFAULT_WINDOW_SIZE)
         assert features == []
         assert labels == []
+        assert timestamps == []
 
     def test_empty_candles(self) -> None:
         """Empty candle list should return empty results."""
-        features, labels = build_windows([], DEFAULT_WINDOW_SIZE)
+        features, labels, timestamps = build_windows([], DEFAULT_WINDOW_SIZE)
         assert features == []
         assert labels == []
+        assert timestamps == []
 
     def test_custom_window_size(self) -> None:
         """build_windows should respect custom window_size parameter."""
         small_window = 30
         candles = _make_candles(small_window + 5)
-        features, labels = build_windows(candles, small_window)
+        features, labels, timestamps = build_windows(candles, small_window)
         assert len(features) == 5
         assert len(labels) == 5
+        assert len(timestamps) == 5

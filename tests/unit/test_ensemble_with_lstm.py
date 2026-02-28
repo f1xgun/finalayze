@@ -61,7 +61,7 @@ class TestEnsembleWithLSTM:
         # Verify it is a proper average of the three
         p_xgb = xgb.predict_proba(features)
         p_lgbm = lgbm.predict_proba(features)
-        lstm._feature_buffer.clear()  # noqa: SLF001
+        lstm._feature_buffers.clear()  # noqa: SLF001
         p_lstm = lstm.predict_proba(features)
         expected = (p_xgb + p_lgbm + p_lstm) / 3.0
         assert result == pytest.approx(expected, abs=TOLERANCE)

@@ -98,7 +98,7 @@ class MLStrategy(BaseStrategy):
             return None
 
         try:
-            prob = ensemble.predict_proba(features)
+            prob = ensemble.predict_proba(features, symbol=symbol)
         except Exception:
             _log.exception("MLStrategy: predict_proba failed for %s/%s", segment_id, symbol)
             return None

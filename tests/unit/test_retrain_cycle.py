@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 from finalayze.core.schemas import Candle
 from finalayze.ml.registry import MLModelRegistry
 
+_BASE_DT = datetime.datetime(2025, 6, 1, tzinfo=datetime.UTC)
+
 
 def _make_candles(n: int, symbol: str = "AAPL", base_price: float = 100.0) -> list[Candle]:
     """Create n synthetic candles."""
@@ -143,7 +145,8 @@ class TestRetrainCycle:
         with patch(_SAVE_PATCH), patch(_BW_PATCH) as mock_bw:
             features = [{"a": float(i)} for i in range(100)]
             labels = [1] * 100
-            mock_bw.return_value = (features, labels)
+            timestamps = [_BASE_DT + datetime.timedelta(days=i) for i in range(100)]
+            mock_bw.return_value = (features, labels, timestamps)
             loop._retrain_cycle()
 
         assert registry.get("us_tech") is None
@@ -164,7 +167,8 @@ class TestRetrainCycle:
             # 200 samples: train=140, gap=60, gap_end=200 → no val data
             features = [{"a": float(i)} for i in range(200)]
             labels = [1] * 200
-            mock_bw.return_value = (features, labels)
+            timestamps = [_BASE_DT + datetime.timedelta(days=i) for i in range(200)]
+            mock_bw.return_value = (features, labels, timestamps)
             loop._retrain_cycle()
 
         # No validation data after gap → model not registered

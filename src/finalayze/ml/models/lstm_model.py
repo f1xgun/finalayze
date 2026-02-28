@@ -68,14 +68,14 @@ class LSTMModel(BaseMLModel):
         self._feature_names: list[str] | None = None
         self._model: _LSTMNet | None = None
         self._trained: bool = False
-        self._feature_buffer: deque[list[float]] = deque(maxlen=sequence_length)
+        self._feature_buffers: dict[str, deque[list[float]]] = {}
         self._lock = threading.Lock()
         # Scaler fitted on training data; applied during inference (#152)
         self._scaler: StandardScaler | None = None
         # Platt scaling: logistic regression mapping raw sigmoid → calibrated probability
         self._platt_scaler: LogisticRegression | None = None
 
-    def predict_proba(self, features: dict[str, float]) -> float:
+    def predict_proba(self, features: dict[str, float], *, symbol: str = "__default__") -> float:
         """Return BUY probability in [0.0, 1.0]. Returns 0.5 when untrained."""
         if not self._trained or self._model is None:
             return _UNTRAINED_PROB
@@ -90,10 +90,11 @@ class LSTMModel(BaseMLModel):
         if self._scaler is not None:
             sorted_vals = self._scaler.transform([sorted_vals])[0].tolist()
 
-        # --- Fix #138: copy buffer under lock, mutate only the copy outside lock ---
+        # --- Per-symbol buffer: avoids cross-contamination (issue 5.6) ---
         with self._lock:
-            self._feature_buffer.append(sorted_vals)
-            buffer_copy = list(self._feature_buffer)  # snapshot under lock
+            buf = self._feature_buffers.setdefault(symbol, deque(maxlen=self._sequence_length))
+            buf.append(sorted_vals)
+            buffer_copy = list(buf)  # snapshot under lock
 
         # Pad the *copy* — the shared buffer is never touched again outside the lock
         if len(buffer_copy) < self._sequence_length:
@@ -188,7 +189,7 @@ class LSTMModel(BaseMLModel):
             self._platt_scaler = None
 
         self._trained = True
-        self._feature_buffer.clear()
+        self._feature_buffers.clear()
 
     def save(self, path: Path) -> None:
         """Save model state dict and config to *path*, scaler to *path*.scaler.pkl.
@@ -237,7 +238,7 @@ class LSTMModel(BaseMLModel):
         self._model.load_state_dict(payload["state_dict"])
         self._model.eval()
         self._trained = True
-        self._feature_buffer = deque(maxlen=self._sequence_length)
+        self._feature_buffers = {}
         feature_names = cfg.get("feature_names")
         self._feature_names = list(feature_names) if feature_names is not None else None
         scaler_path = path.parent / (path.name + ".scaler.pkl")

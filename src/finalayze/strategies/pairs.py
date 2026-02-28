@@ -14,6 +14,7 @@ from finalayze.strategies.base import BaseStrategy
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
 _MIN_CANDLES = 60
+_MIN_CANDLES_FOR_HIST = 3  # need at least 2 historical bars after slicing
 _COINT_P_THRESHOLD = 0.05
 _PAIR_LENGTH = 2
 
@@ -127,7 +128,7 @@ class PairsStrategy(BaseStrategy):
 
         return None
 
-    def _compute_signal(
+    def _compute_signal(  # noqa: PLR0911
         self,
         symbol: str,
         candles_a: list[Candle],
@@ -138,30 +139,39 @@ class PairsStrategy(BaseStrategy):
     ) -> Signal | None:
         """Compute spread z-score and return signal or None."""
         n = min(len(candles_a), len(candles_b))
+        if n < _MIN_CANDLES_FOR_HIST:
+            return None
+
         sorted_a = sorted(candles_a, key=lambda c: c.timestamp)[-n:]
         sorted_b = sorted(candles_b, key=lambda c: c.timestamp)[-n:]
 
         log_a = np.log([float(c.close) for c in sorted_a])
         log_b = np.log([float(c.close) for c in sorted_b])
 
-        # Cointegration gate
-        _, p_value, _ = coint(log_a, log_b)
+        # Slice out historical data (exclude current bar to avoid look-ahead bias)
+        log_a_hist = log_a[:-1]
+        log_b_hist = log_b[:-1]
+
+        # Cointegration gate — historical data only
+        _, p_value, _ = coint(log_a_hist, log_b_hist)
         if float(p_value) > _COINT_P_THRESHOLD:
             return None
 
-        # OLS beta — use np.cov for both terms to ensure consistent N-1 denominator
-        cov_matrix = np.cov(log_a, log_b)
+        # OLS beta — historical data only
+        cov_matrix = np.cov(log_a_hist, log_b_hist)
         beta = float(cov_matrix[0, 1] / cov_matrix[1, 1])
 
-        # Spread and z-score
-        spread = log_a - beta * log_b
-        spread_mean = float(spread.mean())
-        spread_std = float(spread.std(ddof=1))
+        # Spread statistics from historical data only
+        spread_hist = log_a_hist - beta * log_b_hist
+        spread_mean = float(spread_hist.mean())
+        spread_std = float(spread_hist.std(ddof=1))
 
         if spread_std == 0.0:
             return None
 
-        z = float((spread[-1] - spread_mean) / spread_std)
+        # Current spread uses latest bar with historically-fitted beta
+        current_spread = float(log_a[-1]) - beta * float(log_b[-1])
+        z = float((current_spread - spread_mean) / spread_std)
 
         # Entry/exit logic
         if abs(z) < z_exit:

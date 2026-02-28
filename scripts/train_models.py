@@ -116,12 +116,16 @@ def _fetch_candles(
     return candles
 
 
-def _build_windows(candles: list[Candle]) -> tuple[list[dict[str, float]], list[int]]:
+def _build_windows(
+    candles: list[Candle],
+) -> tuple[list[dict[str, float]], list[int]]:
     """Build (features, labels) from a single contiguous candle series.
 
     Delegates to the shared ``build_windows`` utility in ``finalayze.ml.training``.
+    Discards timestamps (used only for multi-symbol temporal ordering).
     """
-    return build_windows(candles, _WINDOW_SIZE)
+    features, labels, _ts = build_windows(candles, _WINDOW_SIZE)
+    return features, labels
 
 
 def _build_dataset(
@@ -166,10 +170,11 @@ def train_one_segment(
         return
 
     split = int(len(features_list) * _TRAIN_RATIO)
+    gap_end = min(split + _WINDOW_SIZE, len(features_list))
     train_features = features_list[:split]
-    test_features = features_list[split:]
+    test_features = features_list[gap_end:]
     train_labels = label_list[:split]
-    test_labels = label_list[split:]
+    test_labels = label_list[gap_end:]
 
     if len(train_features) < _SEQUENCE_LENGTH:
         print(f"[{segment_id}] Train split too small for LSTM — skipping.")

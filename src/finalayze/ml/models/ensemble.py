@@ -30,7 +30,7 @@ class EnsembleModel:
         self._models = models
         self._lstm_model = lstm_model
 
-    def predict_proba(self, features: dict[str, float]) -> float:
+    def predict_proba(self, features: dict[str, float], *, symbol: str = "__default__") -> float:
         """Return mean BUY probability across all *trained* models.
 
         Falls back to 0.5 when no models are trained.
@@ -43,7 +43,7 @@ class EnsembleModel:
         ]
 
         if self._lstm_model is not None and getattr(self._lstm_model, "_trained", False):
-            probs.append(self._lstm_model.predict_proba(features))
+            probs.append(self._lstm_model.predict_proba(features, symbol=symbol))
 
         if not probs:
             return _DEFAULT_PROB
