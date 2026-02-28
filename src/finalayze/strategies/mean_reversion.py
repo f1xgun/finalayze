@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pandas_ta as ta
 import yaml
@@ -16,6 +17,11 @@ _PRESETS_DIR = Path(__file__).parent / "presets"
 _DEFAULT_BB_PERIOD = 20
 _DEFAULT_BB_STD = Decimal("2.0")
 _DEFAULT_MIN_CONFIDENCE = Decimal("0.55")
+_DEFAULT_SQUEEZE_THRESHOLD = 0.02
+_DEFAULT_MIN_BAND_DISTANCE_PCT = 0.005
+_DEFAULT_RSI_OVERSOLD_MR = 40
+_DEFAULT_RSI_OVERBOUGHT_MR = 60
+_DEFAULT_RSI_PERIOD = 14
 _CONFIDENCE_BASE = 0.5
 _CONFIDENCE_DISTANCE_MULTIPLIER = 2.0
 
@@ -75,7 +81,7 @@ class MeanReversionStrategy(BaseStrategy):
         except (FileNotFoundError, OSError, yaml.YAMLError):
             return {}
 
-    def generate_signal(
+    def generate_signal(  # noqa: PLR0911, PLR0912
         self,
         symbol: str,
         candles: list[Candle],
@@ -92,20 +98,43 @@ class MeanReversionStrategy(BaseStrategy):
         bb_std = Decimal(str(params.get("bb_std_dev", _DEFAULT_BB_STD)))
         min_confidence = Decimal(str(params.get("min_confidence", _DEFAULT_MIN_CONFIDENCE)))
 
+        squeeze_threshold = float(params.get("squeeze_threshold", _DEFAULT_SQUEEZE_THRESHOLD))
+        min_band_distance_pct = float(
+            params.get("min_band_distance_pct", _DEFAULT_MIN_BAND_DISTANCE_PCT)
+        )
+        rsi_oversold_mr = float(params.get("rsi_oversold_mr", _DEFAULT_RSI_OVERSOLD_MR))
+        rsi_overbought_mr = float(params.get("rsi_overbought_mr", _DEFAULT_RSI_OVERBOUGHT_MR))
+        rsi_period = int(params.get("rsi_period", _DEFAULT_RSI_PERIOD))
+
         bb_values = _compute_bb_values(candles, bb_period, float(bb_std))
         if bb_values is None:
             return None
         lower, upper, mid, last_close = bb_values
+
+        # Squeeze filter: skip signals when bands are too narrow (low volatility)
+        band_width_pct = (upper - lower) / mid if mid > 0 else 0.0
+        if band_width_pct < squeeze_threshold:
+            return None
 
         band_width = upper - lower
         direction: SignalDirection | None = None
         confidence: float = 0.0
 
         if last_close < lower:
+            # Minimum band distance filter
+            distance_pct = (lower - last_close) / lower if lower > 0 else 0.0
+            if distance_pct < min_band_distance_pct:
+                self._active_signal.pop(symbol, None)
+                return None
             direction = SignalDirection.BUY
             distance = (lower - last_close) / band_width
             confidence = min(1.0, _CONFIDENCE_BASE + distance * _CONFIDENCE_DISTANCE_MULTIPLIER)
         elif last_close > upper:
+            # Minimum band distance filter
+            distance_pct = (last_close - upper) / upper if upper > 0 else 0.0
+            if distance_pct < min_band_distance_pct:
+                self._active_signal.pop(symbol, None)
+                return None
             direction = SignalDirection.SELL
             distance = (last_close - upper) / band_width
             confidence = min(1.0, _CONFIDENCE_BASE + distance * _CONFIDENCE_DISTANCE_MULTIPLIER)
@@ -115,6 +144,14 @@ class MeanReversionStrategy(BaseStrategy):
 
         if direction is None or Decimal(str(confidence)) < min_confidence:
             return None
+
+        # RSI confirmation filter
+        rsi_value = _compute_rsi(candles, rsi_period)
+        if rsi_value is not None:
+            if direction == SignalDirection.BUY and rsi_value > rsi_oversold_mr:
+                return None
+            if direction == SignalDirection.SELL and rsi_value < rsi_overbought_mr:
+                return None
 
         # Suppress repeated signals in the same direction while price stays outside band
         if self._active_signal.get(symbol) == direction:
@@ -178,3 +215,17 @@ def _find_bb_column(bb: pd.DataFrame, prefix: str) -> str | None:
         if str(col).startswith(prefix):
             return str(col)
     return None
+
+
+def _compute_rsi(candles: list[Candle], period: int) -> float | None:
+    """Compute current RSI value from candles. Returns None if not enough data."""
+    if len(candles) < period + 1:
+        return None
+    closes = pd.Series([float(c.close) for c in candles])
+    rsi_series = ta.rsi(closes, length=period)
+    if rsi_series is None or rsi_series.isna().all():
+        return None
+    val = rsi_series.iloc[-1]
+    if np.isnan(val):
+        return None
+    return float(val)
