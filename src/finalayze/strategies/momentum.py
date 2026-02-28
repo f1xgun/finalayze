@@ -282,12 +282,7 @@ class MomentumStrategy(BaseStrategy):
             ):
                 return None
 
-        confidence = min(
-            1.0,
-            0.5
-            + rsi_distance * 0.3
-            + (abs(indicators.current_hist) / indicators.current_close * 100) * 0.1,
-        )
+        confidence = min(1.0, 0.5 + rsi_distance * 0.5)
         if confidence < indicators.min_confidence:
             return None
 

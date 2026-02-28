@@ -17,6 +17,7 @@ from finalayze.core.schemas import (
 )
 from finalayze.execution.broker_base import OrderRequest
 from finalayze.execution.simulated_broker import SimulatedBroker
+from finalayze.risk.kelly import TradeRecord
 from finalayze.risk.position_sizer import compute_position_size
 from finalayze.risk.pre_trade_check import PreTradeChecker
 from finalayze.risk.stop_loss import compute_atr_stop_loss
@@ -24,9 +25,11 @@ from finalayze.risk.stop_loss import compute_atr_stop_loss
 if TYPE_CHECKING:
     from finalayze.backtest.costs import TransactionCosts
     from finalayze.risk.circuit_breaker import CircuitBreaker
+    from finalayze.risk.kelly import RollingKelly
+    from finalayze.risk.loss_limits import LossLimitTracker
     from finalayze.strategies.base import BaseStrategy
 
-# Default Half-Kelly parameters
+# Default Half-Kelly parameters (used when no RollingKelly is provided)
 _DEFAULT_WIN_RATE = Decimal("0.5")
 _DEFAULT_AVG_WIN_RATIO = Decimal("1.5")
 
@@ -46,6 +49,8 @@ class BacktestEngine:
         trail_activation_atr: Decimal = Decimal("1.0"),
         trail_distance_atr: Decimal = Decimal("1.5"),
         circuit_breaker: CircuitBreaker | None = None,
+        rolling_kelly: RollingKelly | None = None,
+        loss_limits: LossLimitTracker | None = None,
     ) -> None:
         self._strategy = strategy
         self._initial_cash = initial_cash
@@ -57,6 +62,8 @@ class BacktestEngine:
         self._trail_activation_atr = trail_activation_atr
         self._trail_distance_atr = trail_distance_atr
         self._circuit_breaker = circuit_breaker
+        self._rolling_kelly = rolling_kelly
+        self._loss_limits = loss_limits
 
     def run(  # noqa: PLR0912, PLR0915
         self,
@@ -88,11 +95,35 @@ class BacktestEngine:
         if self._circuit_breaker is not None:
             self._circuit_breaker.reset_daily(self._initial_cash)
 
+        # Loss limit tracking
+        current_day = None
+        current_week = None
+        if self._loss_limits is not None and candles:
+            first_ts = candles[0].timestamp
+            self._loss_limits.reset_day(first_ts, self._initial_cash)
+            self._loss_limits.reset_week(first_ts, self._initial_cash)
+            current_day = first_ts.date()
+            iso = first_ts.date().isocalendar()
+            current_week = (iso[0], iso[1])
+
         for i in range(len(candles)):
             candle = candles[i]
 
             # (a) Update simulation timestamp
             broker.set_timestamp(candle.timestamp)
+
+            # (a2) Reset loss limits on day/week boundary
+            if self._loss_limits is not None:
+                candle_date = candle.timestamp.date()
+                iso = candle_date.isocalendar()
+                candle_week = (iso[0], iso[1])
+                portfolio_eq = broker.get_portfolio().equity
+                if candle_date != current_day:
+                    current_day = candle_date
+                    self._loss_limits.reset_day(candle.timestamp, portfolio_eq)
+                if candle_week != current_week:
+                    current_week = candle_week
+                    self._loss_limits.reset_week(candle.timestamp, portfolio_eq)
 
             # (b) Update broker prices first (before stop-loss check)
             broker.update_prices(candle)
@@ -107,18 +138,18 @@ class BacktestEngine:
                     if self._transaction_costs is not None:
                         pnl -= self._transaction_costs.total_cost(sr.fill_price, sr.quantity)
                     pnl_pct = (sr.fill_price - entry) / entry if entry != 0 else Decimal(0)
-                    trades.append(
-                        TradeResult(
-                            signal_id=uuid4(),
-                            symbol=sr.symbol,
-                            side="SELL",
-                            quantity=sr.quantity,
-                            entry_price=entry,
-                            exit_price=sr.fill_price,
-                            pnl=pnl,
-                            pnl_pct=pnl_pct,
-                        )
+                    trade = TradeResult(
+                        signal_id=uuid4(),
+                        symbol=sr.symbol,
+                        side="SELL",
+                        quantity=sr.quantity,
+                        entry_price=entry,
+                        exit_price=sr.fill_price,
+                        pnl=pnl,
+                        pnl_pct=pnl_pct,
                     )
+                    trades.append(trade)
+                    self._record_trade(trade)
 
             # (c2) Check circuit breaker level
             if self._circuit_breaker is not None:
@@ -146,23 +177,30 @@ class BacktestEngine:
                                 if entry != 0
                                 else Decimal(0)
                             )
-                            trades.append(
-                                TradeResult(
-                                    signal_id=uuid4(),
-                                    symbol=open_sym,
-                                    side="SELL",
-                                    quantity=order_result.quantity,
-                                    entry_price=entry,
-                                    exit_price=order_result.fill_price,
-                                    pnl=pnl,
-                                    pnl_pct=pnl_pct,
-                                )
+                            trade = TradeResult(
+                                signal_id=uuid4(),
+                                symbol=open_sym,
+                                side="SELL",
+                                quantity=order_result.quantity,
+                                entry_price=entry,
+                                exit_price=order_result.fill_price,
+                                pnl=pnl,
+                                pnl_pct=pnl_pct,
                             )
+                            trades.append(trade)
+                            self._record_trade(trade)
                     snapshots.append(broker.get_portfolio())
                     continue
 
                 # L2+: suppress new entries
                 if cb_level in ("halted", "liquidate"):
+                    snapshots.append(broker.get_portfolio())
+                    continue
+
+            # (c3) Check loss limits
+            if self._loss_limits is not None:
+                portfolio = broker.get_portfolio()
+                if self._loss_limits.is_halted(candle.timestamp, portfolio.equity):
                     snapshots.append(broker.get_portfolio())
                     continue
 
@@ -192,20 +230,25 @@ class BacktestEngine:
                 if self._transaction_costs is not None:
                     pnl -= self._transaction_costs.total_cost(close_price, qty)
                 pnl_pct = (close_price - entry) / entry if entry != 0 else Decimal(0)
-                trades.append(
-                    TradeResult(
-                        signal_id=uuid4(),
-                        symbol=open_symbol,
-                        side="SELL",
-                        quantity=qty,
-                        entry_price=entry,
-                        exit_price=close_price,
-                        pnl=pnl,
-                        pnl_pct=pnl_pct,
-                    )
+                trade = TradeResult(
+                    signal_id=uuid4(),
+                    symbol=open_symbol,
+                    side="SELL",
+                    quantity=qty,
+                    entry_price=entry,
+                    exit_price=close_price,
+                    pnl=pnl,
+                    pnl_pct=pnl_pct,
                 )
+                trades.append(trade)
+                self._record_trade(trade)
 
         return trades, snapshots
+
+    def _record_trade(self, trade: TradeResult) -> None:
+        """Record a completed trade in the Rolling Kelly estimator."""
+        if self._rolling_kelly is not None:
+            self._rolling_kelly.update(TradeRecord(pnl=trade.pnl, pnl_pct=trade.pnl_pct))
 
     def _handle_buy(
         self,
@@ -223,14 +266,21 @@ class BacktestEngine:
 
         portfolio = broker.get_portfolio()
 
-        # Compute position size via Half-Kelly
-        position_value = compute_position_size(
-            win_rate=_DEFAULT_WIN_RATE,
-            avg_win_ratio=_DEFAULT_AVG_WIN_RATIO,
-            equity=portfolio.equity,
-            kelly_fraction=self._kelly_fraction,
-            max_position_pct=self._max_position_pct,
-        )
+        # Compute position size: Rolling Kelly if available, else default Half-Kelly
+        if self._rolling_kelly is not None:
+            kelly_frac = self._rolling_kelly.optimal_fraction()
+            position_value = min(
+                portfolio.equity * kelly_frac,
+                portfolio.equity * self._max_position_pct,
+            )
+        else:
+            position_value = compute_position_size(
+                win_rate=_DEFAULT_WIN_RATE,
+                avg_win_ratio=_DEFAULT_AVG_WIN_RATIO,
+                equity=portfolio.equity,
+                kelly_fraction=self._kelly_fraction,
+                max_position_pct=self._max_position_pct,
+            )
 
         if position_value <= 0:
             return
@@ -313,15 +363,15 @@ class BacktestEngine:
                     order_result.fill_price, order_result.quantity
                 )
             pnl_pct = (order_result.fill_price - entry) / entry if entry != 0 else Decimal(0)
-            trades.append(
-                TradeResult(
-                    signal_id=uuid4(),
-                    symbol=symbol,
-                    side="SELL",
-                    quantity=order_result.quantity,
-                    entry_price=entry,
-                    exit_price=order_result.fill_price,
-                    pnl=pnl,
-                    pnl_pct=pnl_pct,
-                )
+            trade = TradeResult(
+                signal_id=uuid4(),
+                symbol=symbol,
+                side="SELL",
+                quantity=order_result.quantity,
+                entry_price=entry,
+                exit_price=order_result.fill_price,
+                pnl=pnl,
+                pnl_pct=pnl_pct,
             )
+            trades.append(trade)
+            self._record_trade(trade)
