@@ -208,3 +208,56 @@ uv run pytest
 uv run ruff check .
 uv run mypy src/
 ```
+
+## §8 Agent Dispatch Rules
+
+The project uses 16 Claude Code sub-agents defined in `.claude/agents/`. Two tiers:
+
+### Tier 1: Domain Expert Agents
+
+Invoke these for high-level analysis, audits, and design review.
+They cross-cut the entire codebase and produce structured reports + GitHub issues.
+
+| Invoke when... | Agent |
+|---|---|
+| Reviewing strategy math, signal quality, or backtest methodology | `quant-analyst` |
+| Auditing risk thresholds, circuit breakers, or pre-trade checks | `risk-officer` |
+| Reviewing ML pipeline, feature engineering, or model calibration | `ml-engineer` |
+| Checking layer violations, async correctness, or data flow | `systems-architect` |
+
+**Brainstorm gate:** Before finalising any design that touches strategies, risk, ML, or architecture, invoke the relevant domain expert(s):
+
+```
+Task("quant-analyst: review the proposed momentum strategy changes")
+Task("risk-officer: audit new position sizing formula")
+```
+
+**Quarterly audit:** Dispatch all 4 experts in parallel to audit the full system:
+
+```
+Task("quant-analyst: full strategy and backtest audit — create GitHub issues for every gap")
+Task("risk-officer: full risk management audit — create GitHub issues for every gap")
+Task("ml-engineer: full ML pipeline audit — create GitHub issues for every gap")
+Task("systems-architect: full architecture audit — create GitHub issues for every gap")
+```
+
+### Tier 2: Module Agents
+
+Use as the **implementer** in `subagent-driven-development`. The controller identifies which module a task touches and dispatches the appropriate agent.
+
+| Module path | Agent to dispatch |
+|---|---|
+| `src/finalayze/core/` | `core-agent` |
+| `config/` | `config-agent` |
+| `src/finalayze/data/` | `data-agent` |
+| `src/finalayze/markets/` | `markets-agent` |
+| `src/finalayze/analysis/` | `analysis-agent` |
+| `src/finalayze/ml/` | `ml-agent` |
+| `src/finalayze/strategies/` | `strategies-agent` |
+| `src/finalayze/risk/` | `risk-agent` |
+| `src/finalayze/execution/` | `execution-agent` |
+| `src/finalayze/backtest/` | `backtest-agent` |
+| `src/finalayze/api/`, `src/finalayze/dashboard/` | `api-agent` |
+| `docker/`, `alembic/`, `pyproject.toml`, CI | `infra-agent` |
+
+**Task touches multiple modules?** Dispatch one agent per module sequentially (not parallel — they may edit overlapping files).

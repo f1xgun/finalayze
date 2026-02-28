@@ -31,6 +31,7 @@ Follow this sequence for ALL work. Skills trigger automatically -- invoke them.
 | [docs/plans/ROADMAP.md](docs/plans/ROADMAP.md) | Phase overview with status |
 | [docs/plans/PHASE_1.md](docs/plans/PHASE_1.md) | Phase 1 execution plan |
 | [WORKFLOW.md](WORKFLOW.md) | Development process conventions |
+| [.claude/agents/](/.claude/agents/) | 16 sub-agent definitions (4 domain experts + 12 module agents) |
 
 ## Dependency Layering Rules
 
@@ -55,6 +56,14 @@ Layer 6: API / Dashboard        api/, dashboard/
 - Pydantic v2 for all schemas and settings
 - TDD mandatory: write failing test FIRST, then implement
 - 4 work modes: debug, sandbox, test, real
+
+## Agent System
+
+16 Claude Code sub-agents in `.claude/agents/`. See §8 in [WORKFLOW.md](WORKFLOW.md) for dispatch rules.
+
+**Domain experts (audit + design review):** `quant-analyst`, `risk-officer`, `ml-engineer`, `systems-architect`
+
+**Module agents (implementers):** `core-agent`, `config-agent`, `data-agent`, `markets-agent`, `analysis-agent`, `ml-agent`, `strategies-agent`, `risk-agent`, `execution-agent`, `backtest-agent`, `api-agent`, `infra-agent`
 
 ## Current Phase
 
