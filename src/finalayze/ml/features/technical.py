@@ -62,19 +62,29 @@ def compute_features(candles: list[Candle], sentiment_score: float = 0.0) -> dic
         if pct_cols:
             bb_pct_b = float(bb[pct_cols[0]].iloc[-1])
 
-    # Volume ratio (current vs 20-day average)
-    vol_mean = volume_s.tail(20).mean()
-    volume_ratio = float(volume_s.iloc[-1] / vol_mean) if vol_mean > 0 else 1.0
+    # Volume ratio (current vs 20-day average excluding current bar — no look-ahead).
+    # shift(1) ensures the rolling mean only includes bars prior to the current bar.
+    prior_vol_mean = volume_s.shift(1).rolling(20).mean()
+    last_prior_mean = float(prior_vol_mean.iloc[-1])
+    volume_ratio = float(volume_s.iloc[-1] / last_prior_mean) if last_prior_mean > 0 else 1.0
 
     # ATR-14
     atr = ta.atr(high_s, low_s, close_s, length=14)
     atr_val = float(atr.iloc[-1]) if atr is not None and not atr.empty else 0.0
 
-    return {
-        "rsi_14": rsi_val,
-        "macd_hist": macd_hist,
-        "bb_pct_b": bb_pct_b,
-        "volume_ratio_20d": volume_ratio,
-        "atr_14": atr_val,
-        "sentiment": sentiment_score,
-    }
+    # Collect scalar values into a DataFrame for unified NaN handling.
+    # pandas-ta indicators return NaN for early bars; forward-fill then
+    # backward-fill, and finally replace any remaining NaN with 0.
+    feature_df = pd.DataFrame(
+        {
+            "rsi_14": [rsi_val],
+            "macd_hist": [macd_hist],
+            "bb_pct_b": [bb_pct_b],
+            "volume_ratio_20d": [volume_ratio],
+            "atr_14": [atr_val],
+            "sentiment": [sentiment_score],
+        }
+    )
+    feature_df = feature_df.ffill().bfill().fillna(0)
+
+    return {col: float(feature_df[col].iloc[0]) for col in feature_df.columns}
