@@ -27,6 +27,7 @@ _MOMENTUM_PARAMS: dict[str, object] = {
     "macd_fast": 12,
     "macd_slow": 26,
     "min_confidence": 0.6,
+    "macd_hist_lookback": 3,
 }
 
 _MOMENTUM_PARAMS_V2: dict[str, object] = {
@@ -282,49 +283,53 @@ class TestMomentumStrategy:
         signal = strategy.generate_signal("AAPL", candles, "us_tech")
         assert signal is None, "Expected no signal: overbought condition expired outside lookback"
 
-    def test_no_buy_when_hist_not_rising(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """RSI window has oversold but current_hist <= prev_hist. No BUY signal."""
+    def test_no_buy_when_hist_not_rising_and_no_crossover(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RSI window has oversold, histogram declining, no MACD crossover. No BUY signal."""
         # Phase 1: 40 stable candles at 200
-        # Phase 2: 14 crash candles at -4 each -> RSI oversold
-        # Phase 3: 2 candles slight recovery then steeper crash -> histogram drops
+        # Phase 2: 16 continuous crash candles at -4 each -> RSI oversold
+        # Phase 3: 2 more accelerating crash candles -> histogram keeps falling, no crossover
         stable_price = 200.0
         stable_count = 40
         crash_drop = 4.0
-        crash_count = 14
+        crash_count = 16
         prices: list[float] = [stable_price] * stable_count
         crash_bottom = stable_price - crash_drop * crash_count
         prices.extend([stable_price - crash_drop * (i + 1) for i in range(crash_count)])
-        # Small bounce then sharp drop -> histogram falls on last bar
-        prices.append(crash_bottom + 2.0)
-        prices.append(crash_bottom - 8.0)
+        # Accelerating crash -> histogram keeps getting more negative, no crossover
+        prices.append(crash_bottom - 6.0)
+        prices.append(crash_bottom - 14.0)
 
         strategy = MomentumStrategy()
         monkeypatch.setattr(strategy, "get_parameters", lambda _seg: _MOMENTUM_PARAMS_V2)
         candles = _make_candles(prices)
         signal = strategy.generate_signal("AAPL", candles, "us_tech")
-        assert signal is None, "Expected no BUY: histogram is not rising"
+        assert signal is None, "Expected no BUY: histogram not rising and no MACD crossover"
 
-    def test_no_sell_when_hist_not_falling(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """RSI window has overbought but current_hist >= prev_hist. No SELL signal."""
+    def test_no_sell_when_hist_not_falling_and_no_crossover(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RSI window has overbought, histogram rising, no MACD crossover. No SELL signal."""
         # Phase 1: 40 stable candles at 100
-        # Phase 2: 14 rally candles -> RSI overbought
-        # Phase 3: small dip then sharp rally -> histogram rises on last bar
+        # Phase 2: 16 continuous rally candles -> RSI overbought
+        # Phase 3: 2 more accelerating rally candles -> histogram keeps rising, no crossover
         stable_price = 100.0
         stable_count = 40
         rally_step = 4.0
-        rally_count = 14
+        rally_count = 16
         prices: list[float] = [stable_price] * stable_count
         rally_top = stable_price + rally_step * rally_count
         prices.extend([stable_price + rally_step * (i + 1) for i in range(rally_count)])
-        # Small dip then sharp rise -> histogram rises on last bar
-        prices.append(rally_top - 2.0)
-        prices.append(rally_top + 8.0)
+        # Accelerating rally -> histogram keeps getting more positive, no bearish crossover
+        prices.append(rally_top + 6.0)
+        prices.append(rally_top + 14.0)
 
         strategy = MomentumStrategy()
         monkeypatch.setattr(strategy, "get_parameters", lambda _seg: _MOMENTUM_PARAMS_V2)
         candles = _make_candles(prices)
         signal = strategy.generate_signal("AAPL", candles, "us_tech")
-        assert signal is None, "Expected no SELL: histogram is not falling"
+        assert signal is None, "Expected no SELL: histogram not falling and no MACD crossover"
 
     def test_confidence_normalized_by_price(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Same price pattern at 2 different scales should produce similar confidence."""
@@ -581,6 +586,12 @@ class TestMomentumSignalFilters:
                 rsi_window=ind.rsi_window,
                 current_hist=ind.current_hist,
                 prev_hist=ind.prev_hist,
+                hist_window=ind.hist_window,
+                macd_line=ind.macd_line,
+                signal_line=ind.signal_line,
+                macd_crossover_buy=ind.macd_crossover_buy,
+                macd_crossover_sell=ind.macd_crossover_sell,
+                avg_hist_range=ind.avg_hist_range,
                 current_close=ind.current_close,
                 min_confidence=ind.min_confidence,
                 current_sma=ind.current_sma,
@@ -650,3 +661,70 @@ class TestMomentumSignalFilters:
         signal = strategy.generate_signal("AAPL", candles, "us_tech")
         assert signal is not None, "Expected signal to pass: volume ratio >= 1.0"
         assert signal.direction == SignalDirection.BUY
+
+    # ---------- 11. Multi-bar MACD histogram check ----------
+    def test_multibar_hist_rising_triggers_buy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Histogram improved over last 3 bars even if prev bar was higher."""
+        params = {**_MOMENTUM_PARAMS_V3, "macd_hist_lookback": 3}
+        prices = self._buy_prices()
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices)
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is not None, "Expected BUY with multi-bar histogram check"
+        assert signal.direction == SignalDirection.BUY
+
+    # ---------- 12. MACD crossover triggers buy ----------
+    def test_macd_crossover_triggers_buy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """MACD line crossing above signal line triggers BUY even if histogram isn't rising."""
+        from finalayze.strategies.momentum import _Indicators
+
+        params = {**_MOMENTUM_PARAMS_V3}
+        prices = self._buy_prices()
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices)
+
+        # Force crossover buy flag via monkeypatching _compute_indicators
+        original_compute = strategy._compute_indicators
+
+        def _compute_with_crossover(candles: list[Candle], segment_id: str) -> _Indicators | None:
+            ind = original_compute(candles, segment_id)
+            if ind is None:
+                return None
+            return _Indicators(
+                current_rsi=ind.current_rsi,
+                rsi_window=ind.rsi_window,
+                current_hist=ind.current_hist,
+                prev_hist=ind.current_hist + 1.0,  # hist NOT rising (prev > current)
+                hist_window=[ind.current_hist + 1.0, ind.current_hist + 0.5, ind.current_hist],
+                macd_line=ind.macd_line,
+                signal_line=ind.signal_line,
+                macd_crossover_buy=True,  # Force crossover
+                macd_crossover_sell=False,
+                avg_hist_range=ind.avg_hist_range,
+                current_close=ind.current_close,
+                min_confidence=ind.min_confidence,
+                current_sma=ind.current_sma,
+                current_adx=ind.current_adx,
+                volume_ratio=ind.volume_ratio,
+            )
+
+        monkeypatch.setattr(strategy, "_compute_indicators", _compute_with_crossover)
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is not None, "Expected BUY via MACD crossover"
+        assert signal.direction == SignalDirection.BUY
+
+    # ---------- 13. Improved confidence uses histogram strength ----------
+    def test_confidence_includes_hist_strength(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Confidence should factor in histogram strength (0.5 + rsi*0.3 + hist*0.2)."""
+        params = {**_MOMENTUM_PARAMS_V3, "min_confidence": 0.0}
+        prices = self._buy_prices()
+        strategy = MomentumStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+        candles = _make_candles(prices)
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is not None
+        # With the new formula, confidence should be between 0.5 and 1.0
+        assert signal.confidence >= 0.5
+        assert signal.confidence <= 1.0

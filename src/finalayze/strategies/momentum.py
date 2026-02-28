@@ -24,6 +24,12 @@ class _Indicators:
     rsi_window: list[float]
     current_hist: float
     prev_hist: float
+    hist_window: list[float]
+    macd_line: float
+    signal_line: float
+    macd_crossover_buy: bool
+    macd_crossover_sell: bool
+    avg_hist_range: float
     current_close: float
     min_confidence: float
     current_sma: float | None
@@ -159,7 +165,9 @@ class MomentumStrategy(BaseStrategy):
             ),
         )
 
-    def _compute_indicators(self, candles: list[Candle], segment_id: str) -> _Indicators | None:
+    def _compute_indicators(  # noqa: PLR0912, PLR0915
+        self, candles: list[Candle], segment_id: str
+    ) -> _Indicators | None:
         """Compute RSI and MACD indicators, returning None if data is invalid."""
         params = self.get_parameters(segment_id)
         rsi_period = int(params["rsi_period"])  # type: ignore[call-overload]
@@ -189,6 +197,40 @@ class MomentumStrategy(BaseStrategy):
 
         if pd.isna(current_rsi) or pd.isna(current_hist) or pd.isna(prev_hist):
             return None
+
+        # Multi-bar histogram window for improved momentum detection
+        macd_hist_lookback = int(
+            params.get("macd_hist_lookback", 3)  # type: ignore[call-overload]
+        )
+        hist_window = [float(v) for v in hist.iloc[-macd_hist_lookback:] if not pd.isna(v)]
+
+        # MACD line and signal line for crossover detection
+        macd_col = _find_macd_line_column(macd_df)
+        signal_col = _find_signal_line_column(macd_df)
+        macd_line = float(macd_df[macd_col].iloc[-1]) if macd_col else 0.0
+        signal_line = float(macd_df[signal_col].iloc[-1]) if signal_col else 0.0
+
+        # Detect MACD crossover within lookback window
+        macd_crossover_buy = False
+        macd_crossover_sell = False
+        if macd_col and signal_col:
+            macd_series = macd_df[macd_col]
+            signal_series = macd_df[signal_col]
+            for j in range(max(1, len(macd_series) - lookback_bars), len(macd_series)):
+                if pd.isna(macd_series.iloc[j]) or pd.isna(signal_series.iloc[j]):
+                    continue
+                if pd.isna(macd_series.iloc[j - 1]) or pd.isna(signal_series.iloc[j - 1]):
+                    continue
+                prev_diff = float(macd_series.iloc[j - 1]) - float(signal_series.iloc[j - 1])
+                curr_diff = float(macd_series.iloc[j]) - float(signal_series.iloc[j])
+                if prev_diff <= 0 < curr_diff:
+                    macd_crossover_buy = True
+                if prev_diff >= 0 > curr_diff:
+                    macd_crossover_sell = True
+
+        # Average absolute histogram value for confidence scaling
+        valid_hist = [abs(float(v)) for v in hist.dropna()]
+        avg_hist_range = sum(valid_hist) / len(valid_hist) if valid_hist else 1.0
 
         rsi_window = [float(v) for v in rsi_series.iloc[-lookback_bars:] if not pd.isna(v)]
         current_close = float(candles[-1].close)
@@ -232,6 +274,12 @@ class MomentumStrategy(BaseStrategy):
             rsi_window=rsi_window,
             current_hist=float(current_hist),
             prev_hist=float(prev_hist),
+            hist_window=hist_window,
+            macd_line=macd_line,
+            signal_line=signal_line,
+            macd_crossover_buy=macd_crossover_buy,
+            macd_crossover_sell=macd_crossover_sell,
+            avg_hist_range=avg_hist_range,
             current_close=current_close,
             min_confidence=min_confidence,
             current_sma=current_sma,
@@ -251,13 +299,28 @@ class MomentumStrategy(BaseStrategy):
 
         recently_oversold = any(v < rsi_oversold for v in indicators.rsi_window)
         recently_overbought = any(v > rsi_overbought for v in indicators.rsi_window)
-        hist_rising = indicators.current_hist > indicators.prev_hist
-        hist_falling = indicators.current_hist < indicators.prev_hist
 
-        if recently_oversold and hist_rising and indicators.current_rsi < rsi_overbought:
+        # Multi-bar histogram check: rising if current > min of lookback window
+        hist_rising = (
+            indicators.current_hist > min(indicators.hist_window)
+            if indicators.hist_window
+            else indicators.current_hist > indicators.prev_hist
+        )
+        hist_falling = (
+            indicators.current_hist < max(indicators.hist_window)
+            if indicators.hist_window
+            else indicators.current_hist < indicators.prev_hist
+        )
+
+        # BUY: RSI recently oversold + (histogram rising OR bullish MACD crossover)
+        buy_macd_ok = hist_rising or indicators.macd_crossover_buy
+        # SELL: RSI recently overbought + (histogram falling OR bearish MACD crossover)
+        sell_macd_ok = hist_falling or indicators.macd_crossover_sell
+
+        if recently_oversold and buy_macd_ok and indicators.current_rsi < rsi_overbought:
             direction = SignalDirection.BUY
             rsi_distance = (rsi_oversold - min(indicators.rsi_window)) / rsi_oversold
-        elif recently_overbought and hist_falling and indicators.current_rsi > rsi_oversold:
+        elif recently_overbought and sell_macd_ok and indicators.current_rsi > rsi_oversold:
             direction = SignalDirection.SELL
             rsi_distance = (max(indicators.rsi_window) - rsi_overbought) / (100.0 - rsi_overbought)
         else:
@@ -293,7 +356,14 @@ class MomentumStrategy(BaseStrategy):
             ):
                 return None
 
-        confidence = min(1.0, 0.5 + rsi_distance * 0.5)
+        # Improved confidence: factor in MACD histogram strength
+        hist_strength = min(
+            1.0,
+            abs(indicators.current_hist) / indicators.avg_hist_range
+            if indicators.avg_hist_range > 0
+            else 0.0,
+        )
+        confidence = min(1.0, 0.5 + rsi_distance * 0.3 + hist_strength * 0.2)
         if confidence < indicators.min_confidence:
             return None
 
@@ -305,5 +375,28 @@ def _find_histogram_column(macd_df: pd.DataFrame) -> str | None:
     for col in macd_df.columns:
         col_lower = str(col).lower()
         if "hist" in col_lower or col_lower.startswith("macdh"):
+            return str(col)
+    return None
+
+
+def _find_macd_line_column(macd_df: pd.DataFrame) -> str | None:
+    """Find the MACD line column (not histogram, not signal)."""
+    for col in macd_df.columns:
+        col_lower = str(col).lower()
+        if col_lower.startswith("macd_") and "hist" not in col_lower and "signal" not in col_lower:
+            return str(col)
+    # Fallback: look for column starting with "MACD" that isn't hist or signal
+    for col in macd_df.columns:
+        col_lower = str(col).lower()
+        if col_lower.startswith("macd") and "h" not in col_lower and "s" not in col_lower:
+            return str(col)
+    return None
+
+
+def _find_signal_line_column(macd_df: pd.DataFrame) -> str | None:
+    """Find the MACD signal line column."""
+    for col in macd_df.columns:
+        col_lower = str(col).lower()
+        if "signal" in col_lower or col_lower.startswith("macds"):
             return str(col)
     return None

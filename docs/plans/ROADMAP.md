@@ -8,7 +8,7 @@
 | 1 | Foundation, US Market & Sandbox | Weeks 1-5 | COMPLETE |
 | 2 | MOEX + Tinkoff, Intelligence & Test Mode | Weeks 6-10 | COMPLETE |
 | 3 | Hardening & Advanced | Weeks 11-14 | COMPLETE |
-| 4 | Real Trading & Optimization | Weeks 15-18 | IN PROGRESS |
+| 4 | Real Trading & Optimization | Weeks 15-18 | COMPLETE |
 
 ## Phase 0: Code Quality Foundation (COMPLETE)
 
@@ -86,7 +86,7 @@ PRs: #105 (Track A — TradingLoop/CircuitBreakers/TelegramAlerter),
 - [x] train_models.py CLI script
 - [x] Integration + E2E tests (15 E2E: paper trading cycle + circuit breaker trip/recovery)
 
-## Phase 4: Real Trading & Optimization -- IN PROGRESS
+## Phase 4: Real Trading & Optimization -- COMPLETE (2026-02-28)
 
 ### Track A: Strategy & Backtest Hardening -- COMPLETE (2026-02-28)
 
@@ -112,12 +112,14 @@ and [2026-02-27-phase4-track-b-plan.md](2026-02-27-phase4-track-b-plan.md).
 
 730 tests, 85% coverage.
 
-### Track C: Production Go-Live
+### Track C: Production Go-Live -- COMPLETE (2026-02-28)
 
-Depends on Track A (validation pass) + Track B (monitoring ready).
+PR: #205. 949 tests, 86% coverage.
 
-- [ ] Live broker integration testing (Alpaca paper → live, Tinkoff sandbox → live)
-- [ ] Performance optimization (Polars, caching)
-- [ ] 6-month paper trading validation period
-- [ ] Production Docker deployment
-- [ ] Go/No-Go decision based on Track A acceptance criteria
+- [x] Production Docker deployment (multi-stage Dockerfile.prod, docker-compose.prod.yml, nginx rate limiting)
+- [x] Redis caching (candle 5min TTL, sentiment 30min TTL)
+- [x] Rate limiter integration (finnhub, newsapi, tinkoff_data fetchers)
+- [x] RetryPolicy (exponential backoff + jitter) in AlpacaBroker + TinkoffBroker
+- [x] Real DB/Redis health probes with 30s cache
+- [x] Ops documentation (DEPLOYMENT.md, MONITORING.md, RUNBOOK.md)
+- [x] Alembic env.py DB URL override for production

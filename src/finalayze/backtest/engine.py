@@ -5,6 +5,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, time
 from decimal import ROUND_DOWN, Decimal
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -33,6 +34,10 @@ if TYPE_CHECKING:
 _DEFAULT_WIN_RATE = Decimal("0.5")
 _DEFAULT_AVG_WIN_RATIO = Decimal("1.5")
 
+# Default market open time (US 9:30 ET = 14:30 UTC) used to adjust daily
+# candle timestamps so the pre-trade market-hours check passes during backtest.
+_US_MARKET_OPEN_UTC = time(14, 30, tzinfo=UTC)
+
 
 class BacktestEngine:
     """Iterate candles and execute a strategy with risk management."""
@@ -44,10 +49,10 @@ class BacktestEngine:
         max_position_pct: Decimal = Decimal("0.20"),
         max_positions: int = 10,
         kelly_fraction: Decimal = Decimal("0.5"),
-        atr_multiplier: Decimal = Decimal("2.0"),
+        atr_multiplier: Decimal = Decimal("2.5"),
         transaction_costs: TransactionCosts | None = None,
-        trail_activation_atr: Decimal = Decimal("1.0"),
-        trail_distance_atr: Decimal = Decimal("1.5"),
+        trail_activation_atr: Decimal = Decimal("0.5"),
+        trail_distance_atr: Decimal = Decimal("1.0"),
         circuit_breaker: CircuitBreaker | None = None,
         rolling_kelly: RollingKelly | None = None,
         loss_limits: LossLimitTracker | None = None,
@@ -285,13 +290,17 @@ class BacktestEngine:
         if position_value <= 0:
             return
 
-        # Pre-trade check (pass candle timestamp so market hours check uses historical date)
+        # Pre-trade check — adjust daily candle timestamps (midnight UTC) to
+        # market-open time so the market-hours check passes during backtest.
+        check_dt = fill_candle.timestamp
+        if check_dt.hour == 0 and check_dt.minute == 0:
+            check_dt = datetime.combine(check_dt.date(), _US_MARKET_OPEN_UTC)
         result = checker.check(
             order_value=position_value,
             portfolio_equity=portfolio.equity,
             available_cash=portfolio.cash,
             open_position_count=len(portfolio.positions),
-            dt=fill_candle.timestamp,
+            dt=check_dt,
         )
         if not result.passed:
             return

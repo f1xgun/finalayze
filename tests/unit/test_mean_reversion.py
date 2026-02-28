@@ -226,3 +226,88 @@ class TestMeanReversionYAMLErrorHandling:
         with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
             result = strategy.get_parameters("bad_params")
         assert result == {}
+
+
+class TestMeanReversionFilters:
+    """Tests for squeeze filter, RSI confirmation, and minimum band distance."""
+
+    def test_squeeze_filter_blocks_narrow_bands(self, tmp_path: Path) -> None:
+        """Very narrow bands (squeeze) should suppress signals."""
+        strategy = MeanReversionStrategy()
+        # Use params with high squeeze threshold to force block
+        preset = tmp_path / "squeeze_test.yaml"
+        yaml_content = (
+            "segment_id: squeeze_test\n"
+            "strategies:\n"
+            "  mean_reversion:\n"
+            "    enabled: true\n"
+            "    params:\n"
+            "      bb_period: 20\n"
+            "      bb_std_dev: 2.0\n"
+            "      min_confidence: 0.1\n"
+            "      squeeze_threshold: 0.99\n"  # Unreasonably high -> always blocks
+        )
+        preset.write_text(yaml_content)
+        with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
+            # Add crash to try to trigger signal
+            candles_with_crash = _make_stable_candles(STABLE_HIGH_PRICE, STABLE_COUNT)
+            candles_with_crash.append(_candle(CRASH_PRICE, STABLE_COUNT))
+            signal = strategy.generate_signal("AAPL", candles_with_crash, "squeeze_test")
+        assert signal is None, "Expected squeeze filter to block signal"
+
+    def test_squeeze_filter_allows_wide_bands(self) -> None:
+        """Wide bands (high volatility) should not block signals."""
+        strategy = MeanReversionStrategy()
+        # Stable at high price then crash -> wide bands relative to mean
+        candles = _make_stable_candles(STABLE_HIGH_PRICE, STABLE_COUNT)
+        candles.append(_candle(CRASH_PRICE, STABLE_COUNT))
+        # Default squeeze_threshold is 0.02, RSI confirmation default 40
+        # Crash gives RSI ~0 which is < 40 so RSI filter passes too
+        result = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert result is not None, "Expected signal to pass squeeze filter with wide bands"
+
+    def test_rsi_confirmation_blocks_buy_with_high_rsi(self) -> None:
+        """BUY signal blocked when RSI > rsi_oversold_mr threshold."""
+        strategy = MeanReversionStrategy()
+        candles = _make_stable_candles(STABLE_HIGH_PRICE, STABLE_COUNT)
+        candles.append(_candle(CRASH_PRICE, STABLE_COUNT))
+
+        # Mock _compute_rsi to return 45 (above default threshold of 40) → should block
+        with patch("finalayze.strategies.mean_reversion._compute_rsi", return_value=45.0):
+            signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is None, "Expected RSI confirmation to block BUY (RSI=45 > 40)"
+
+    def test_rsi_confirmation_allows_buy_with_low_rsi(self) -> None:
+        """BUY signal allowed when RSI < 40 (oversold enough)."""
+        strategy = MeanReversionStrategy()
+        # Stable high price, then extreme crash -> RSI deeply oversold
+        candles = _make_stable_candles(STABLE_HIGH_PRICE, STABLE_COUNT)
+        candles.append(_candle(CRASH_PRICE, STABLE_COUNT))
+        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert signal is not None, "Expected BUY: extreme crash should have RSI < 40"
+        assert signal.direction == SignalDirection.BUY
+
+    def test_min_band_distance_blocks_marginal_breach(self, tmp_path: Path) -> None:
+        """Price just barely touching the band should be filtered out."""
+        strategy = MeanReversionStrategy()
+        preset = tmp_path / "dist_test.yaml"
+        yaml_content = (
+            "segment_id: dist_test\n"
+            "strategies:\n"
+            "  mean_reversion:\n"
+            "    enabled: true\n"
+            "    params:\n"
+            "      bb_period: 20\n"
+            "      bb_std_dev: 2.0\n"
+            "      min_confidence: 0.1\n"
+            "      squeeze_threshold: 0.0\n"
+            "      min_band_distance_pct: 0.99\n"  # 99% distance required -> blocks everything
+            "      rsi_oversold_mr: 100\n"  # Disable RSI filter
+            "      rsi_overbought_mr: 0\n"
+        )
+        preset.write_text(yaml_content)
+        with patch("finalayze.strategies.mean_reversion._PRESETS_DIR", tmp_path):
+            candles = _make_stable_candles(STABLE_HIGH_PRICE, STABLE_COUNT)
+            candles.append(_candle(CRASH_PRICE, STABLE_COUNT))
+            signal = strategy.generate_signal("AAPL", candles, "dist_test")
+        assert signal is None, "Expected min_band_distance to block marginal breach"
