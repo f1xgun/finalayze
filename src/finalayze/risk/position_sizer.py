@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+# Maximum win rate cap to prevent Kelly = infinity when win_rate = 1.0
+_MAX_WIN_RATE = Decimal("0.99")
+
 
 def compute_position_size(
     win_rate: Decimal,
@@ -33,6 +36,9 @@ def compute_position_size(
     """
     if avg_win_ratio <= 0 or win_rate <= 0:
         return Decimal(0)
+
+    # Cap win_rate at 0.99 to prevent Kelly = infinity when win_rate = 1.0
+    win_rate = min(win_rate, _MAX_WIN_RATE)
 
     b = avg_win_ratio
     f_star = (win_rate * b - (Decimal(1) - win_rate)) / b

@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 _PRESETS_DIR = Path(__file__).parent / "presets"
 _DEFAULT_MIN_SENTIMENT = 0.5
 _DEFAULT_WEIGHT = Decimal("0.4")
+# Maximum price move (as a fraction) since last candle before signal is suppressed.
+# If news is already fully priced in, trading on it is futile.
+_DEFAULT_MAX_PRICE_MOVE = 0.05
 
 
 class EventDrivenStrategy(BaseStrategy):
@@ -102,6 +105,22 @@ class EventDrivenStrategy(BaseStrategy):
         abs_sent = abs(sentiment_score)
         if abs_sent < min_sentiment:
             return None
+
+        # Price-move guard: if price has already moved more than the threshold
+        # since the previous candle, the news is likely already priced in.
+        if len(candles) >= 2:  # noqa: PLR2004
+            raw_max_move = params.get("max_price_move", _DEFAULT_MAX_PRICE_MOVE)
+            max_price_move: float = (
+                float(raw_max_move)
+                if isinstance(raw_max_move, (int, float))
+                else _DEFAULT_MAX_PRICE_MOVE
+            )
+            prev_close = float(candles[-2].close)
+            current_close = float(candles[-1].close)
+            if prev_close > 0:
+                price_move = abs(current_close - prev_close) / prev_close
+                if price_move > max_price_move:
+                    return None
 
         direction = SignalDirection.BUY if sentiment_score > 0 else SignalDirection.SELL
         confidence = min(1.0, abs_sent * credibility)
