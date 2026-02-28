@@ -54,11 +54,14 @@ class AlpacaBroker(BrokerBase):
     ) -> OrderResult:
         """Submit a market order to Alpaca. fill_candle is not used."""
         side = OrderSide.BUY if order.side == "BUY" else OrderSide.SELL
+        # Use GTC for SELL (liquidation/stop-loss) so gaps at open won't delay fills.
+        # Use DAY for BUY orders (standard intraday entry).
+        tif = TimeInForce.DAY if order.side == "BUY" else TimeInForce.GTC
         request = MarketOrderRequest(
             symbol=order.symbol,
             qty=float(order.quantity),
             side=side,
-            time_in_force=TimeInForce.DAY,
+            time_in_force=tif,
         )
         try:
             result = self._client.submit_order(order_data=request)

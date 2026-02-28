@@ -37,6 +37,9 @@ from finalayze.strategies.momentum import MomentumStrategy
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+# A Monday during market hours (14:30 UTC = 10:30 ET)
+MARKET_OPEN_DT = datetime(2026, 2, 23, 15, 0, tzinfo=UTC)
+
 INITIAL_CASH = Decimal(100_000)
 INITIAL_EQUITY = Decimal(100_000)
 CANDLE_COUNT = 63  # 40 stable + 16 crash + 3 level + 4 recovery = 63
@@ -267,7 +270,7 @@ def trading_loop(
     event_classifier = MagicMock(spec=EventClassifier)
     impact_estimator = MagicMock(spec=ImpactEstimator)
 
-    return TradingLoop(
+    loop = TradingLoop(
         settings=test_settings,
         fetchers=fetchers,  # type: ignore[arg-type]
         news_fetcher=news_fetcher,  # type: ignore[arg-type]
@@ -281,6 +284,9 @@ def trading_loop(
         alerter=alerter,
         instrument_registry=instrument_registry,
     )
+    # Freeze time to a market-open weekday so market hours check passes
+    loop._now = MagicMock(return_value=MARKET_OPEN_DT)  # type: ignore[method-assign]
+    return loop
 
 
 # ---------------------------------------------------------------------------
