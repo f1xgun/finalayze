@@ -1,0 +1,56 @@
+# Git
+.git/
+.gitignore
+
+# Worktrees
+.worktrees/
+
+# Tests
+tests/
+
+# Documentation
+docs/
+*.md
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment files (secrets)
+.env
+.env.local
+
+# Docker
+docker/docker-compose.*.yml
+docker-compose.*.yml
+
+# Monitoring configs (mounted as volumes)
+monitoring/
+
+# Claude/Agent configs
+.claude/
+.agents/
+
+# Skills
+skills-lock.json
+
+# Dashboard
+dashboard/
+.streamlit/

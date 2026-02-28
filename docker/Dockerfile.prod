@@ -1,0 +1,50 @@
+# ── Stage 1: Builder ─────────────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy dependency files first (cache layer)
+COPY pyproject.toml uv.lock ./
+
+# Install production dependencies only
+RUN uv sync --frozen --no-dev
+
+# ── Stage 2: Runtime ─────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+# Create non-root user
+RUN groupadd -g 1000 finalayze && \
+    useradd -u 1000 -g finalayze -m -s /bin/bash finalayze
+
+WORKDIR /app
+
+# Install uv (needed for `uv run` in entrypoint)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy venv from builder
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/pyproject.toml /app/uv.lock /app/
+
+# Copy application code
+COPY src/ src/
+COPY config/ config/
+COPY alembic/ alembic/
+
+# Copy entrypoint
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Set ownership
+RUN chown -R finalayze:finalayze /app
+
+EXPOSE 8000
+
+USER finalayze
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"
+
+ENTRYPOINT ["/app/entrypoint.sh"]

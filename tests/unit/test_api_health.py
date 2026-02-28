@@ -8,12 +8,28 @@ ModeManager, ensuring full isolation between tests.
 from __future__ import annotations
 
 import os
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from finalayze.api.v1.system import ModeManager, get_mode_manager
+from finalayze.api.v1.system import ComponentStatus, ModeManager, get_mode_manager
 from finalayze.main import create_app
+
+# Patch _get_component_status for all tests so no real DB/Redis probes run
+_mock_components = ComponentStatus(db="ok", redis="ok", alpaca="ok", tinkoff="ok", llm="ok")
+
+
+@pytest.fixture(autouse=True)
+def _mock_health_probes() -> object:
+    """Mock out real health probes so tests don't need live DB/Redis."""
+    with patch(
+        "finalayze.api.v1.system._get_component_status",
+        new_callable=AsyncMock,
+        return_value=_mock_components,
+    ):
+        yield
+
 
 # ---------------------------------------------------------------------------
 # Constants

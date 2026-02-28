@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from finalayze.analysis.news_analyzer import NewsAnalyzer
     from finalayze.core.alerts import TelegramAlerter
     from finalayze.core.schemas import Candle, SentimentResult, Signal
+    from finalayze.data.cache import RedisCache
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
     from finalayze.execution.broker_base import BrokerBase
     from finalayze.execution.broker_router import BrokerRouter
@@ -73,6 +74,7 @@ class TradingLoop:
         cross_market_breaker: CrossMarketCircuitBreaker,
         alerter: TelegramAlerter,
         instrument_registry: InstrumentRegistry,
+        cache: RedisCache | None = None,
     ) -> None:
         self._settings = settings
         self._fetchers = fetchers
@@ -86,6 +88,7 @@ class TradingLoop:
         self._cross_market_breaker = cross_market_breaker
         self._alerter = alerter
         self._registry = instrument_registry
+        self._cache = cache
 
         # Thread-safe sentiment cache: segment_id -> weighted sentiment score
         self._sentiment_cache: dict[str, float] = {}
@@ -177,7 +180,13 @@ class TradingLoop:
         with self._sentiment_lock:
             for impact in impacts:
                 existing = self._sentiment_cache.get(impact.segment_id, _DEFAULT_SENTIMENT)
-                self._sentiment_cache[impact.segment_id] = existing * 0.7 + impact.sentiment * 0.3
+                new_score = existing * 0.7 + impact.sentiment * 0.3
+                self._sentiment_cache[impact.segment_id] = new_score
+                if self._cache is not None:
+                    try:
+                        asyncio.run(self._cache.set_sentiment(impact.segment_id, new_score))
+                    except Exception:
+                        _log.debug("Failed to write sentiment to Redis cache")
 
     def _collect_active_segments(self) -> list[str]:
         """Collect distinct segment IDs across all markets."""
@@ -190,6 +199,18 @@ class TradingLoop:
                 for seg in [instr.segment_id]
             }
         )
+
+    def _get_sentiment(self, seg_id: str) -> float:
+        """Read sentiment from Redis cache (if available) or in-memory fallback."""
+        if self._cache is not None:
+            try:
+                cached = asyncio.run(self._cache.get_sentiment(seg_id))
+                if cached is not None:
+                    return cached
+            except Exception:
+                _log.debug("Failed to read sentiment from Redis cache")
+        with self._sentiment_lock:
+            return self._sentiment_cache.get(seg_id, _DEFAULT_SENTIMENT)
 
     def _strategy_cycle(self) -> None:
         """For each market and instrument, generate a signal and submit orders."""
@@ -262,8 +283,7 @@ class TradingLoop:
             _log.exception("_strategy_cycle: failed to fetch candles for %s", instrument.symbol)
             return
 
-        with self._sentiment_lock:
-            sentiment_score = self._sentiment_cache.get(seg_id, _DEFAULT_SENTIMENT)
+        sentiment_score = self._get_sentiment(seg_id)
 
         signal = self._strategy.generate_signal(
             instrument.symbol, candles, seg_id, sentiment_score=sentiment_score

@@ -26,6 +26,7 @@ from finalayze.execution.broker_base import BrokerBase, OrderRequest, OrderResul
 
 if TYPE_CHECKING:
     from finalayze.core.schemas import Candle
+    from finalayze.execution.retry import RetryPolicy
     from finalayze.markets.instruments import InstrumentRegistry
 
 _MOEX_MARKET_ID = "moex"
@@ -46,10 +47,12 @@ class TinkoffBroker(BrokerBase):
         registry: InstrumentRegistry,
         *,
         sandbox: bool = True,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         self._token = token
         self._registry = registry
         self._sandbox = sandbox
+        self._retry = retry_policy
 
     def submit_order(
         self,
@@ -61,6 +64,7 @@ class TinkoffBroker(BrokerBase):
         if instrument.figi is None:
             msg = f"Instrument '{order.symbol}' has no FIGI assigned"
             raise InstrumentNotFoundError(msg)
+        figi: str = instrument.figi
 
         # Round quantity down to nearest lot multiple
         lot_size = instrument.lot_size
@@ -82,7 +86,12 @@ class TinkoffBroker(BrokerBase):
         )
 
         try:
-            result = asyncio.run(self._post_order_async(instrument.figi, actual_qty, direction))
+            if self._retry is not None:
+                result = self._retry.execute(
+                    lambda: asyncio.run(self._post_order_async(figi, actual_qty, direction))
+                )
+            else:
+                result = asyncio.run(self._post_order_async(figi, actual_qty, direction))
         except InstrumentNotFoundError:
             raise
         except Exception as exc:
@@ -118,7 +127,10 @@ class TinkoffBroker(BrokerBase):
     def get_portfolio(self) -> PortfolioState:
         """Return current MOEX portfolio state from Tinkoff."""
         try:
-            portfolio = asyncio.run(self._get_portfolio_async())
+            if self._retry is not None:
+                portfolio = self._retry.execute(lambda: asyncio.run(self._get_portfolio_async()))
+            else:
+                portfolio = asyncio.run(self._get_portfolio_async())
         except Exception as exc:
             msg = f"Tinkoff portfolio fetch failed: {exc}"
             raise BrokerError(msg) from exc
@@ -160,7 +172,10 @@ class TinkoffBroker(BrokerBase):
     def cancel_order(self, order_id: str) -> None:
         """Cancel a pending Tinkoff order by ID."""
         try:
-            asyncio.run(self._cancel_order_async(order_id))
+            if self._retry is not None:
+                self._retry.execute(lambda: asyncio.run(self._cancel_order_async(order_id)))
+            else:
+                asyncio.run(self._cancel_order_async(order_id))
         except Exception as exc:
             msg = f"Tinkoff cancel_order failed for {order_id}: {exc}"
             raise BrokerError(msg) from exc

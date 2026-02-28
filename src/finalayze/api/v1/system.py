@@ -5,18 +5,24 @@ Layer 6 -- API layer. Depends on Layer 0 (exceptions, modes).
 
 from __future__ import annotations
 
+import logging
+import time
 from collections import deque
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
+import redis.asyncio
+import sqlalchemy
 from config.settings import Settings
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from finalayze.api.v1.auth import require_api_key
 from finalayze.core.exceptions import ModeError
 from finalayze.core.modes import ModeManager, WorkMode
 
+_log = logging.getLogger(__name__)
 _settings = Settings()
 router = APIRouter(tags=["system"])
 
@@ -28,6 +34,11 @@ _start_time = datetime.now(UTC)
 
 # In-memory ring buffer for recent errors (max 100); deque(maxlen=100) handles eviction
 _recent_errors: deque[dict[str, Any]] = deque(maxlen=100)
+
+# Health check cache: avoid hammering db/redis on every /health call
+_HEALTH_CACHE_TTL = 30  # seconds
+_health_cache: dict[str, Any] = {}
+_health_cache_ts: float = 0.0
 
 
 def get_mode_manager() -> ModeManager:
@@ -47,11 +58,61 @@ def record_error(component: str, message: str, traceback_excerpt: str = "") -> N
     )
 
 
+async def _check_db() -> str:
+    """Probe database with SELECT 1."""
+    try:
+        engine = create_async_engine(_settings.database_url, pool_pre_ping=True)
+        async with engine.connect() as conn:
+            await conn.execute(sqlalchemy.text("SELECT 1"))
+        await engine.dispose()
+        return "ok"
+    except Exception as exc:
+        _log.warning("Health check: db probe failed: %s", exc)
+        return "error"
+
+
+async def _check_redis() -> str:
+    """Probe Redis with PING."""
+    try:
+        r: redis.asyncio.Redis[str] = redis.asyncio.from_url(
+            _settings.redis_url, decode_responses=True
+        )
+        await r.ping()
+        await r.aclose()  # type: ignore[attr-defined]
+        return "ok"
+    except Exception as exc:
+        _log.warning("Health check: redis probe failed: %s", exc)
+        return "error"
+
+
+async def _get_component_status() -> ComponentStatus:
+    """Run real health checks with 30s caching."""
+    global _health_cache, _health_cache_ts  # noqa: PLW0603
+
+    now = time.monotonic()
+    if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
+        return ComponentStatus(**_health_cache)
+
+    db_status = await _check_db()
+    redis_status = await _check_redis()
+
+    result = {
+        "db": db_status,
+        "redis": redis_status,
+        "alpaca": "ok",
+        "tinkoff": "ok",
+        "llm": "ok",
+    }
+    _health_cache = result
+    _health_cache_ts = now
+    return ComponentStatus(**result)
+
+
 # ── Response models ────────────────────────────────────────────────────────────
 
 
 class ComponentStatus(BaseModel):
-    """Component health status. Values are stubs until real health checks are wired."""
+    """Component health status with real DB and Redis probes."""
 
     model_config = ConfigDict(frozen=True)
     db: str = "ok"
@@ -115,7 +176,7 @@ async def health(
     mgr: Annotated[ModeManager, Depends(get_mode_manager)],
 ) -> HealthResponse:
     """Liveness check. No auth required."""
-    components = ComponentStatus()
+    components = await _get_component_status()
     overall = "ok" if all(v == "ok" for v in components.model_dump().values()) else "degraded"
     return HealthResponse(
         status=overall,
@@ -147,11 +208,12 @@ async def system_status(
 ) -> SystemStatusResponse:
     """System status including mode, uptime, component health. Auth required."""
     uptime = (datetime.now(UTC) - _start_time).total_seconds()
+    components = await _get_component_status()
     return SystemStatusResponse(
         mode=str(mgr.current_mode),
         version=APP_VERSION,
         uptime_seconds=uptime,
-        components=ComponentStatus(),
+        components=components,
     )
 
 
