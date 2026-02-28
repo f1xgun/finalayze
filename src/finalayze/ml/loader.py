@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from finalayze.ml.registry import MLModelRegistry
 
 if TYPE_CHECKING:
+    from finalayze.ml.models.base import BaseMLModel
     from finalayze.ml.models.ensemble import EnsembleModel
 
 _log = logging.getLogger(__name__)
@@ -49,7 +50,6 @@ def load_registry(model_dir: Path, segments: list[str]) -> MLModelRegistry:
 
 def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:
     """Load individual model files and assemble an EnsembleModel."""
-    from finalayze.ml.models.base import BaseMLModel  # noqa: PLC0415
     from finalayze.ml.models.ensemble import EnsembleModel  # noqa: PLC0415
     from finalayze.ml.models.lightgbm_model import LightGBMModel  # noqa: PLC0415
     from finalayze.ml.models.lstm_model import LSTMModel  # noqa: PLC0415
