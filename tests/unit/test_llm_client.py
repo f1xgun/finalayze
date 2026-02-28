@@ -150,6 +150,63 @@ class TestOpenRouterClient:
         assert mock_openai.chat.completions.create.call_count == _MAX_RETRIES
 
 
+# ── #147: Bounded LRU cache ──────────────────────────────────────────────────
+
+
+class TestBoundedLRUCache:
+    """The in-memory cache must not grow beyond _CACHE_MAX_SIZE entries (#147)."""
+
+    @pytest.mark.asyncio
+    async def test_cache_evicts_oldest_entry_when_full(self) -> None:
+        from finalayze.analysis.llm_client import _CACHE_MAX_SIZE
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            # Each unique prompt returns its index as a string
+            call_count = 0
+
+            async def _side_effect(*_args: object, **_kwargs: object) -> object:
+                nonlocal call_count
+                mock_choice = MagicMock()
+                mock_choice.message.content = str(call_count)
+                call_count += 1
+                mock_completion = MagicMock()
+                mock_completion.choices = [mock_choice]
+                return mock_completion
+
+            mock_openai = MagicMock()
+            mock_openai.chat = MagicMock()
+            mock_openai.chat.completions = MagicMock()
+            mock_openai.chat.completions.create = _side_effect
+            mock_cls.return_value = mock_openai
+
+            client = OpenRouterClient(api_key="test-key", model="llama-3")
+
+            # Fill the cache to exactly its maximum
+            for i in range(_CACHE_MAX_SIZE):
+                await client.complete(f"unique_prompt_{i}", _SYSTEM)
+
+            assert len(client._cache) == _CACHE_MAX_SIZE  # noqa: SLF001
+
+            # Adding one more entry must evict the oldest
+            await client.complete("overflow_prompt", _SYSTEM)
+            assert len(client._cache) == _CACHE_MAX_SIZE  # noqa: SLF001
+            # The very first prompt should have been evicted
+            first_key = client._cache_key("unique_prompt_0", _SYSTEM)  # noqa: SLF001
+            assert first_key not in client._cache  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_does_not_grow_cache(self) -> None:
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_cls.return_value = _make_mock_openai_client()
+            client = OpenRouterClient(api_key="test-key", model="llama-3")
+
+            await client.complete(_PROMPT, _SYSTEM)
+            size_after_first = len(client._cache)  # noqa: SLF001
+            # Same prompt — must hit cache, not add a new entry
+            await client.complete(_PROMPT, _SYSTEM)
+            assert len(client._cache) == size_after_first  # noqa: SLF001
+
+
 class TestCreateLLMClientFactory:
     def test_openrouter_provider_returns_openrouter_client(self) -> None:
         with patch("openai.AsyncOpenAI"):

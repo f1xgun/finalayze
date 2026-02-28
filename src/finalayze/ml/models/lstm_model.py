@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import pickle
 import threading
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
+from sklearn.preprocessing import StandardScaler
 from torch import nn
 
 if TYPE_CHECKING:
@@ -65,6 +67,8 @@ class LSTMModel(BaseMLModel):
         self._trained: bool = False
         self._feature_buffer: deque[list[float]] = deque(maxlen=sequence_length)
         self._lock = threading.Lock()
+        # Scaler fitted on training data; applied during inference (#152)
+        self._scaler: StandardScaler | None = None
 
     def predict_proba(self, features: dict[str, float]) -> float:
         """Return BUY probability in [0.0, 1.0]. Returns 0.5 when untrained."""
@@ -77,17 +81,21 @@ class LSTMModel(BaseMLModel):
 
         sorted_vals = [features[k] for k in sorted(features)]
 
+        # Apply the same scaler used during training (#152)
+        if self._scaler is not None:
+            sorted_vals = self._scaler.transform([sorted_vals])[0].tolist()
+
+        # --- Fix #138: copy buffer under lock, mutate only the copy outside lock ---
         with self._lock:
             self._feature_buffer.append(sorted_vals)
+            buffer_copy = list(self._feature_buffer)  # snapshot under lock
 
-            if len(self._feature_buffer) < self._sequence_length:
-                # Pad with the current observation repeated until buffer is full
-                while len(self._feature_buffer) < self._sequence_length:
-                    self._feature_buffer.appendleft(sorted_vals)
+        # Pad the *copy* — the shared buffer is never touched again outside the lock
+        if len(buffer_copy) < self._sequence_length:
+            while len(buffer_copy) < self._sequence_length:
+                buffer_copy.insert(0, sorted_vals)
 
-            seq = list(self._feature_buffer)
-
-        tensor = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)
+        tensor = torch.tensor(buffer_copy, dtype=torch.float32).unsqueeze(0)
         self._model.eval()
         with torch.no_grad():
             output: torch.Tensor = self._model(tensor)
@@ -112,11 +120,18 @@ class LSTMModel(BaseMLModel):
         self._n_features = n_features
         self._feature_names = feature_keys
 
+        # Raw feature matrix: shape (n_samples, n_features)
+        raw_matrix = np.array([[row[k] for k in feature_keys] for row in X], dtype=np.float32)
+
+        # Fit scaler on all training samples and normalise (#152)
+        self._scaler = StandardScaler()
+        scaled_matrix = self._scaler.fit_transform(raw_matrix)
+
         # Build tensor: shape (n_sequences, sequence_length, n_features)
         sequences: list[list[list[float]]] = []
         labels: list[float] = []
         for i in range(len(X) - self._sequence_length + 1):
-            seq = [[row[k] for k in feature_keys] for row in X[i : i + self._sequence_length]]
+            seq = scaled_matrix[i : i + self._sequence_length].tolist()
             sequences.append(seq)
             labels.append(float(y[i + self._sequence_length - 1]))
 
@@ -139,7 +154,13 @@ class LSTMModel(BaseMLModel):
         self._feature_buffer.clear()
 
     def save(self, path: Path) -> None:
-        """Save model state dict and config to path."""
+        """Save model state dict and config to *path*, scaler to *path*.scaler.pkl.
+
+        The PyTorch state dict is saved with ``torch.save`` (safe tensor format).
+        The sklearn scaler is saved to a companion ``<path>.scaler.pkl`` file so
+        that ``torch.load(weights_only=True)`` can be used safely for the main
+        checkpoint (#169).
+        """
         if self._model is None:
             msg = "Cannot save an untrained LSTMModel"
             raise ValueError(msg)
@@ -155,10 +176,18 @@ class LSTMModel(BaseMLModel):
             },
         }
         torch.save(payload, path)
+        scaler_path = path.parent / (path.name + ".scaler.pkl")
+        with scaler_path.open("wb") as fh:
+            pickle.dump(self._scaler, fh)
 
     def load(self, path: Path) -> None:
-        """Load model state dict and config from path."""
-        payload: dict[str, Any] = torch.load(path, weights_only=False)
+        """Load model state dict and config from path.
+
+        Uses ``weights_only=True`` to prevent arbitrary code execution when
+        loading the PyTorch checkpoint (#169).  The companion scaler file is
+        loaded separately via pickle.
+        """
+        payload: dict[str, Any] = torch.load(path, weights_only=True)
         cfg: dict[str, Any] = payload["config"]
         self._sequence_length = int(cfg["sequence_length"])
         self._hidden_size = int(cfg["hidden_size"])
@@ -171,3 +200,9 @@ class LSTMModel(BaseMLModel):
         self._feature_buffer = deque(maxlen=self._sequence_length)
         feature_names = cfg.get("feature_names")
         self._feature_names = list(feature_names) if feature_names is not None else None
+        scaler_path = path.parent / (path.name + ".scaler.pkl")
+        if scaler_path.exists():
+            with scaler_path.open("rb") as fh:
+                self._scaler = pickle.load(fh)  # noqa: S301
+        else:
+            self._scaler = None
