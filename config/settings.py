@@ -5,11 +5,13 @@ See docs/architecture/OVERVIEW.md for configuration details.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
-from config.modes import WorkMode
+from finalayze.core.modes import WorkMode
 
 
 class Settings(BaseSettings):
@@ -78,3 +80,31 @@ class Settings(BaseSettings):
     real_token: str = ""  # FINALAYZE_REAL_TOKEN — required to switch to REAL mode via API
 
     model_config = {"env_prefix": "FINALAYZE_", "env_file": ".env"}
+
+    @model_validator(mode="after")
+    def validate_mode_requirements(self) -> Settings:
+        """Ensure required keys are set for non-DEBUG/TEST modes."""
+        # DEBUG and TEST modes skip credential validation (no live services needed)
+        if self.mode in (WorkMode.DEBUG, WorkMode.TEST):
+            return self
+        # All non-DEBUG modes need a live LLM
+        if not self.llm_api_key and not self.anthropic_api_key:
+            raise ValueError("llm_api_key (or anthropic_api_key) is required for non-DEBUG mode")
+        # REAL mode additionally requires broker credentials
+        if self.mode == WorkMode.REAL:
+            if not self.alpaca_api_key or not self.alpaca_secret_key:
+                raise ValueError("alpaca_api_key and alpaca_secret_key are required for REAL mode")
+            if not self.real_confirmed:
+                raise ValueError("real_confirmed must be True for REAL mode")
+        return self
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return the application-wide Settings singleton (cached after first call).
+
+    Use this instead of instantiating ``Settings()`` directly at module import
+    time, so that environment variables injected by tests or deployment tools
+    are picked up correctly.
+    """
+    return Settings()
