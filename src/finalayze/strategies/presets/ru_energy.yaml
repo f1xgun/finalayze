@@ -7,8 +7,8 @@ strategies:
       rsi_period: 14
       rsi_oversold: 25
       rsi_overbought: 75
-      macd_fast: 12
-      macd_slow: 26
+      macd_fast: 10
+      macd_slow: 22
       min_confidence: 0.6
       lookback_bars: 5
       stop_atr_multiplier: 2.5
@@ -17,10 +17,10 @@ strategies:
       trend_filter: false
       trend_sma_period: 50
       trend_sma_buffer_pct: 2.0
-      adx_filter: false
+      adx_filter: true
       adx_period: 14
-      adx_threshold: 20
-      volume_filter: false
+      adx_threshold: 25
+      volume_filter: true
       volume_sma_period: 20
       volume_min_ratio: 0.8
       neutral_reset_bars: 20
@@ -35,5 +35,5 @@ strategies:
     weight: 0.2
     params:
       bb_period: 20
-      bb_std_dev: 2.5
+      bb_std_dev: 3.0
       min_confidence: 0.7

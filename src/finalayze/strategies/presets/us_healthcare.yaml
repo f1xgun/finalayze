@@ -18,8 +18,8 @@ strategies:
     weight: 0.2
     params:
       rsi_period: 14
-      rsi_oversold: 35
-      rsi_overbought: 65
+      rsi_oversold: 30
+      rsi_overbought: 70
       macd_fast: 12
       macd_slow: 26
       min_confidence: 0.65

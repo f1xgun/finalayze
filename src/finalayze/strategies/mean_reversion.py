@@ -21,7 +21,16 @@ _CONFIDENCE_DISTANCE_MULTIPLIER = 2.0
 
 
 class MeanReversionStrategy(BaseStrategy):
-    """Mean reversion strategy: BUY below lower BB, SELL above upper BB."""
+    """Mean reversion strategy: BUY below lower BB, SELL above upper BB.
+
+    Tracks signal state per symbol to avoid emitting repeated signals while price
+    stays outside the band.  The active signal is cleared when price returns inside
+    the Bollinger Bands (neutral zone).
+    """
+
+    def __init__(self) -> None:
+        # Maps symbol -> last emitted direction (None = no active signal)
+        self._active_signal: dict[str, SignalDirection] = {}
 
     @property
     def name(self) -> str:
@@ -83,33 +92,12 @@ class MeanReversionStrategy(BaseStrategy):
         bb_std = Decimal(str(params.get("bb_std_dev", _DEFAULT_BB_STD)))
         min_confidence = Decimal(str(params.get("min_confidence", _DEFAULT_MIN_CONFIDENCE)))
 
-        if len(candles) < bb_period + 1:
+        bb_values = _compute_bb_values(candles, bb_period, float(bb_std))
+        if bb_values is None:
             return None
+        lower, upper, mid, last_close = bb_values
 
-        closes = pd.Series([float(c.close) for c in candles])
-        bb_std_float = float(bb_std)
-        bb = ta.bbands(closes, length=bb_period, lower_std=bb_std_float, upper_std=bb_std_float)
-        if bb is None or bb.empty:
-            return None
-
-        last_close = float(candles[-1].close)
-
-        # pandas_ta bbands column names vary by version -- find by prefix
-        lower_col = _find_bb_column(bb, "BBL_")
-        upper_col = _find_bb_column(bb, "BBU_")
-        mid_col = _find_bb_column(bb, "BBM_")
-
-        if lower_col is None or upper_col is None or mid_col is None:
-            return None
-
-        lower = float(bb.iloc[-1][lower_col])
-        upper = float(bb.iloc[-1][upper_col])
-        mid = float(bb.iloc[-1][mid_col])
         band_width = upper - lower
-
-        if band_width <= 0:
-            return None
-
         direction: SignalDirection | None = None
         confidence: float = 0.0
 
@@ -121,9 +109,18 @@ class MeanReversionStrategy(BaseStrategy):
             direction = SignalDirection.SELL
             distance = (last_close - upper) / band_width
             confidence = min(1.0, _CONFIDENCE_BASE + distance * _CONFIDENCE_DISTANCE_MULTIPLIER)
+        else:
+            # Price has returned inside the bands — reset active signal state
+            self._active_signal.pop(symbol, None)
 
         if direction is None or Decimal(str(confidence)) < min_confidence:
             return None
+
+        # Suppress repeated signals in the same direction while price stays outside band
+        if self._active_signal.get(symbol) == direction:
+            return None
+
+        self._active_signal[symbol] = direction
 
         market_id = candles[0].market_id
         band_label = "lower" if direction == SignalDirection.BUY else "upper"
@@ -147,6 +144,32 @@ class MeanReversionStrategy(BaseStrategy):
                 f" BB [{lower:.2f}, {upper:.2f}] ({band_label} band breach)"
             ),
         )
+
+
+def _compute_bb_values(
+    candles: list[Candle], bb_period: int, bb_std: float
+) -> tuple[float, float, float, float] | None:
+    """Compute Bollinger Band values from candles.
+
+    Returns (lower, upper, mid, last_close) or None if computation fails.
+    """
+    if len(candles) < bb_period + 1:
+        return None
+    closes = pd.Series([float(c.close) for c in candles])
+    bb = ta.bbands(closes, length=bb_period, lower_std=bb_std, upper_std=bb_std)
+    if bb is None or bb.empty:
+        return None
+    lower_col = _find_bb_column(bb, "BBL_")
+    upper_col = _find_bb_column(bb, "BBU_")
+    mid_col = _find_bb_column(bb, "BBM_")
+    if lower_col is None or upper_col is None or mid_col is None:
+        return None
+    lower = float(bb.iloc[-1][lower_col])
+    upper = float(bb.iloc[-1][upper_col])
+    mid = float(bb.iloc[-1][mid_col])
+    if upper - lower <= 0:
+        return None
+    return lower, upper, mid, float(candles[-1].close)
 
 
 def _find_bb_column(bb: pd.DataFrame, prefix: str) -> str | None:

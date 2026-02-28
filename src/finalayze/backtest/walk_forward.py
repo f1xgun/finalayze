@@ -136,13 +136,16 @@ class WalkForwardOptimizer:
         windows = self.generate_windows(start_date, end_date)
 
         all_trades: list[TradeResult] = []
+        all_equities: list[float] = []
 
         for window in windows:
             _train, test = self.split_candles(candles, window)
             if not test:
                 continue
-            trades, _snapshots = engine.run(symbol, segment_id, test)
+            trades, snapshots = engine.run(symbol, segment_id, test)
             all_trades.extend(trades)
+            # Collect bar-level equity values for Sharpe computation (#131)
+            all_equities.extend(float(s.equity) for s in snapshots)
 
         pnl_pcts = [float(t.pnl_pct) * _PERCENT for t in all_trades]
 
@@ -150,7 +153,8 @@ class WalkForwardOptimizer:
             windows=windows,
             oos_trades=all_trades,
             total_oos_trades=len(all_trades),
-            oos_sharpe=_compute_sharpe(pnl_pcts),
+            # Use bar-level equity for Sharpe (statistically correct, fixes #131)
+            oos_sharpe=_compute_sharpe_from_snapshots(all_equities),
             oos_total_return_pct=_compute_total_return(pnl_pcts),
             oos_win_rate=_compute_win_rate(pnl_pcts),
             oos_max_drawdown_pct=_compute_max_drawdown(pnl_pcts),
@@ -160,8 +164,37 @@ class WalkForwardOptimizer:
 # ── Private metric helpers ───────────────────────────────────────────────
 
 
+def _compute_sharpe_from_snapshots(equities: list[float]) -> float:
+    """Compute annualised Sharpe ratio from bar-level equity values.
+
+    This is statistically correct — Sharpe should be computed on the
+    underlying return distribution (one return per bar) rather than on
+    per-trade P&L, which can span very different holding periods.
+    """
+    if len(equities) < 2:  # noqa: PLR2004
+        return 0.0
+    returns = [
+        (equities[i] - equities[i - 1]) / equities[i - 1]
+        for i in range(1, len(equities))
+        if equities[i - 1] > 0
+    ]
+    if len(returns) < 2:  # noqa: PLR2004
+        return 0.0
+    mean = statistics.mean(returns)
+    stdev = statistics.stdev(returns)
+    if stdev == 0.0:
+        return 0.0
+    return mean / stdev * math.sqrt(_ANNUALIZATION_FACTOR)
+
+
 def _compute_sharpe(pnl_pcts: list[float]) -> float:
-    """Annualized Sharpe ratio from per-trade pnl_pct values."""
+    """Annualized Sharpe ratio from per-trade pnl_pct values.
+
+    .. deprecated::
+        Use :func:`_compute_sharpe_from_snapshots` which operates on bar-level
+        returns for statistical correctness.  This function is retained for
+        backward compatibility with callers that only have trade P&L data.
+    """
     if len(pnl_pcts) < 2:  # noqa: PLR2004
         return 0.0
     mean = statistics.mean(pnl_pcts)

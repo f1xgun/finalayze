@@ -1,12 +1,14 @@
 """Performance analyzer for backtest results.
 
-Computes aggregate metrics (Sharpe ratio, max drawdown, win rate, profit factor,
-total return) from a list of trades and portfolio snapshots.  Optionally computes
-benchmark-relative metrics (alpha, beta, information ratio, max relative drawdown).
+Computes aggregate metrics (Sharpe ratio, Sortino ratio, Calmar ratio, max drawdown,
+win rate, profit factor, total return) from a list of trades and portfolio snapshots.
+Optionally computes benchmark-relative metrics (alpha, beta, information ratio,
+max relative drawdown).
 """
 
 from __future__ import annotations
 
+import math
 import statistics
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -19,6 +21,9 @@ if TYPE_CHECKING:
 # Annualisation factor for daily returns.
 _TRADING_DAYS_PER_YEAR = 252
 _QUANTIZE_4DP = Decimal("0.0001")
+
+# Sentinel value for Sortino/Calmar when downside deviation or drawdown is zero.
+_LARGE_RATIO_SENTINEL = Decimal(999)
 
 # Sentinel value returned for profit_factor when there are no losing trades.
 # A real profit factor is undefined (division by zero) when gross_loss == 0;
@@ -144,6 +149,82 @@ class PerformanceAnalyzer:
         sharpe = (mean_return / std_return) * (_TRADING_DAYS_PER_YEAR**0.5)
         return Decimal(str(round(sharpe, 4)))
 
+    def sortino_ratio(
+        self,
+        snapshots: list[PortfolioState],
+        risk_free_rate: float = 0.0,
+    ) -> Decimal:
+        """Compute annualised Sortino ratio from equity snapshots.
+
+        Uses only downside deviation (negative returns) in the denominator,
+        making it more sensitive to harmful volatility than Sharpe.
+        """
+        min_snapshots = 3
+        if len(snapshots) < min_snapshots:
+            return Decimal(0)
+
+        equities = [float(s.equity) for s in snapshots]
+        returns = [
+            (equities[i] - equities[i - 1]) / equities[i - 1]
+            for i in range(1, len(equities))
+            if equities[i - 1] > 0
+        ]
+        if not returns:
+            return Decimal(0)
+
+        target = risk_free_rate / _TRADING_DAYS_PER_YEAR
+        mean_excess = statistics.mean(returns) - target
+
+        if mean_excess <= 0:
+            return Decimal(0)
+
+        downside = [min(0.0, r - target) for r in returns]
+        downside_variance = statistics.mean([d**2 for d in downside])
+        downside_std = math.sqrt(downside_variance)
+
+        if downside_std == 0:
+            return _LARGE_RATIO_SENTINEL
+
+        sortino = (mean_excess / downside_std) * math.sqrt(_TRADING_DAYS_PER_YEAR)
+        return Decimal(str(round(sortino, 4)))
+
+    def calmar_ratio(
+        self,
+        snapshots: list[PortfolioState],
+    ) -> Decimal:
+        """Compute Calmar ratio: annualised return / maximum drawdown.
+
+        Calmar measures return per unit of worst-case drawdown risk.
+        Returns 0 when total return is non-positive.
+        Returns _LARGE_RATIO_SENTINEL when max drawdown is zero but return is positive.
+        """
+        if len(snapshots) < 2:  # noqa: PLR2004
+            return Decimal(0)
+
+        equities = [float(s.equity) for s in snapshots]
+        initial = equities[0]
+        final = equities[-1]
+
+        if initial <= 0:
+            return Decimal(0)
+
+        total_return = (final - initial) / initial
+        if total_return <= 0:
+            return Decimal(0)
+
+        # Annualise: assume each snapshot is one trading day
+        n_days = len(snapshots) - 1
+        if n_days <= 0:
+            return Decimal(0)
+        annualised_return = (1 + total_return) ** (_TRADING_DAYS_PER_YEAR / n_days) - 1
+
+        max_dd = float(self._compute_max_drawdown(snapshots))
+        if max_dd == 0:
+            return _LARGE_RATIO_SENTINEL
+
+        calmar = annualised_return / max_dd
+        return Decimal(str(round(calmar, 4)))
+
     @staticmethod
     def _compute_benchmark_metrics(
         snapshots: list[PortfolioState],
@@ -201,9 +282,6 @@ class PerformanceAnalyzer:
         bench_total = (bench_prices[n - 1] - bench_prices[0]) / bench_prices[0]
         strat_total = (equities[n - 1] - equities[0]) / equities[0]
 
-        # Alpha = strategy return - benchmark return
-        alpha = strat_total - bench_total
-
         # Beta = cov(strategy, benchmark) / var(benchmark)
         mean_sr = statistics.mean(sr)
         mean_br = statistics.mean(br)
@@ -211,6 +289,11 @@ class PerformanceAnalyzer:
         var_bench = statistics.variance(br) if len(br) > 1 else 0.0
 
         beta = cov / var_bench if var_bench > 0 else Decimal(0)
+
+        # Alpha (Jensen's alpha): strat_return - (risk_free_rate + beta * bench_return)
+        # We use risk_free_rate = 0 for simplicity (can be extended later)
+        risk_free_rate = 0.0
+        alpha = strat_total - (risk_free_rate + float(beta) * bench_total)
 
         # Tracking error = stdev of excess returns
         excess = [s - b for s, b in zip(sr, br, strict=True)]

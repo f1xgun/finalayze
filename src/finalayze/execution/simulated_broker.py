@@ -156,7 +156,11 @@ class SimulatedBroker(BrokerBase):
         # Step 5: Check trigger
         if candle.low <= state.current_stop and symbol in self._positions:
             qty = self._positions[symbol]
-            proceeds = state.current_stop * qty
+            # Gap fill for long positions: if the candle opens below the stop price
+            # (a gap down), fill at candle.open — the market never traded at the stop.
+            # Use min() because for a long exit (SELL), a lower open is a worse fill.
+            fill_price = min(state.current_stop, candle.open)
+            proceeds = fill_price * qty
             self._cash += proceeds
             del self._positions[symbol]
             del self._stop_states[symbol]
@@ -165,7 +169,7 @@ class SimulatedBroker(BrokerBase):
             results.append(
                 OrderResult(
                     filled=True,
-                    fill_price=state.current_stop,
+                    fill_price=fill_price,
                     symbol=symbol,
                     side="SELL",
                     quantity=qty,
