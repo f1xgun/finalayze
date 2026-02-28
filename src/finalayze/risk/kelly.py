@@ -43,12 +43,14 @@ class RollingKelly:
         if len(self._trades) < _MIN_TRADES_FOR_KELLY:
             return _FIXED_FRACTIONAL
 
+        # Exclude break-even trades (pnl == 0) from win/loss classification
         wins = [t for t in self._trades if t.pnl > 0]
-        losses = [t for t in self._trades if t.pnl <= 0]
+        losses = [t for t in self._trades if t.pnl < 0]
         if not wins or not losses:
             return _FIXED_FRACTIONAL
 
-        win_rate = len(wins) / len(self._trades)
+        total_decisive = len(wins) + len(losses)
+        win_rate = len(wins) / total_decisive
         avg_win = sum(float(t.pnl_pct) for t in wins) / len(wins)
         avg_loss = abs(sum(float(t.pnl_pct) for t in losses) / len(losses))
 

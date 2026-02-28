@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 # Annualisation factor for daily returns.
 _TRADING_DAYS_PER_YEAR = 252
+_MAX_PROFIT_FACTOR = 100.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,10 +69,12 @@ def _compute_sample_metrics(
     wins = sum(1 for r in sample if r > 0)
     win_rate = wins / n * 100
 
-    # Profit factor
+    # Profit factor (capped at 100.0 to avoid inf in CI computation)
     gross_profit = sum(r for r in sample if r > 0)
     gross_loss = abs(sum(r for r in sample if r < 0))
-    pf = gross_profit / gross_loss if gross_loss > 0 else float("inf")
+    pf = (
+        min(gross_profit / gross_loss, _MAX_PROFIT_FACTOR) if gross_loss > 0 else _MAX_PROFIT_FACTOR
+    )
 
     return total_ret, sharpe, max_dd_pct, win_rate, pf
 

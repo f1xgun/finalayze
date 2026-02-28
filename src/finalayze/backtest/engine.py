@@ -17,6 +17,7 @@ from finalayze.core.schemas import (
 )
 from finalayze.execution.broker_base import OrderRequest
 from finalayze.execution.simulated_broker import SimulatedBroker
+from finalayze.risk.kelly import TradeRecord
 from finalayze.risk.position_sizer import compute_position_size
 from finalayze.risk.pre_trade_check import PreTradeChecker
 from finalayze.risk.stop_loss import compute_atr_stop_loss
@@ -102,7 +103,8 @@ class BacktestEngine:
             self._loss_limits.reset_day(first_ts, self._initial_cash)
             self._loss_limits.reset_week(first_ts, self._initial_cash)
             current_day = first_ts.date()
-            current_week = first_ts.date().isocalendar()[1]
+            iso = first_ts.date().isocalendar()
+            current_week = (iso[0], iso[1])
 
         for i in range(len(candles)):
             candle = candles[i]
@@ -113,7 +115,8 @@ class BacktestEngine:
             # (a2) Reset loss limits on day/week boundary
             if self._loss_limits is not None:
                 candle_date = candle.timestamp.date()
-                candle_week = candle_date.isocalendar()[1]
+                iso = candle_date.isocalendar()
+                candle_week = (iso[0], iso[1])
                 portfolio_eq = broker.get_portfolio().equity
                 if candle_date != current_day:
                     current_day = candle_date
@@ -245,8 +248,6 @@ class BacktestEngine:
     def _record_trade(self, trade: TradeResult) -> None:
         """Record a completed trade in the Rolling Kelly estimator."""
         if self._rolling_kelly is not None:
-            from finalayze.risk.kelly import TradeRecord  # noqa: PLC0415
-
             self._rolling_kelly.update(TradeRecord(pnl=trade.pnl, pnl_pct=trade.pnl_pct))
 
     def _handle_buy(

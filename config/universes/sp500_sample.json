@@ -1,13 +1,28 @@
-[
-  "AAPL", "MSFT", "INTC", "IBM", "CRM", "ADBE", "CSCO", "TXN",
-  "JNJ", "PFE", "UNH", "ABBV", "MRK", "BMY",
-  "JPM", "BAC", "GS", "C", "WFC", "BRK-B",
-  "AMZN", "TSLA", "HD", "NKE", "DIS",
-  "BA", "CAT", "UPS", "HON", "GE",
-  "META", "GOOGL", "VZ", "T",
-  "XOM", "CVX", "COP", "SLB",
-  "PG", "KO", "WMT", "COST",
-  "NEE", "DUK", "SO",
-  "LIN", "APD", "NEM",
-  "AMT", "PLD"
-]
+{
+  "symbols": [
+    "AAPL", "MSFT", "INTC", "IBM", "CRM", "ADBE", "CSCO", "TXN",
+    "JNJ", "PFE", "UNH", "ABBV", "MRK", "BMY",
+    "JPM", "BAC", "GS", "C", "WFC", "BRK-B",
+    "AMZN", "TSLA", "HD", "NKE", "DIS",
+    "BA", "CAT", "UPS", "HON", "GE",
+    "META", "GOOGL", "VZ", "T",
+    "XOM", "CVX", "COP", "SLB",
+    "PG", "KO", "WMT", "COST",
+    "NEE", "DUK", "SO",
+    "LIN", "APD", "NEM",
+    "AMT", "PLD"
+  ],
+  "sectors": {
+    "Technology": ["AAPL", "MSFT", "INTC", "IBM", "CRM", "ADBE", "CSCO", "TXN"],
+    "Healthcare": ["JNJ", "PFE", "UNH", "ABBV", "MRK", "BMY"],
+    "Financials": ["JPM", "BAC", "GS", "C", "WFC", "BRK-B"],
+    "Consumer Discretionary": ["AMZN", "TSLA", "HD", "NKE", "DIS"],
+    "Industrials": ["BA", "CAT", "UPS", "HON", "GE"],
+    "Communication": ["META", "GOOGL", "VZ", "T"],
+    "Energy": ["XOM", "CVX", "COP", "SLB"],
+    "Consumer Staples": ["PG", "KO", "WMT", "COST"],
+    "Utilities": ["NEE", "DUK", "SO"],
+    "Materials": ["LIN", "APD", "NEM"],
+    "Real Estate": ["AMT", "PLD"]
+  }
+}

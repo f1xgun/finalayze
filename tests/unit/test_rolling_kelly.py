@@ -212,6 +212,38 @@ class TestTradeCountProperty:
         assert kelly.trade_count == SMALL_WINDOW
 
 
+class TestBreakEvenTradesExcluded:
+    """Break-even trades (pnl == 0) are excluded from win/loss classification."""
+
+    def test_break_even_excluded_from_losses(self) -> None:
+        """Break-even trades don't inflate the loss count."""
+        kelly = RollingKelly()
+        # 15 wins, 5 losses, 5 break-even = 25 trades
+        wins = 15
+        losses = 5
+        break_even = 5
+        for _ in range(wins):
+            kelly.update(TradeRecord(pnl=GOOD_WIN_PNL, pnl_pct=GOOD_WIN_PCT))
+        for _ in range(losses):
+            kelly.update(TradeRecord(pnl=SMALL_LOSS_PNL, pnl_pct=SMALL_LOSS_PCT))
+        for _ in range(break_even):
+            kelly.update(TradeRecord(pnl=Decimal(0), pnl_pct=Decimal(0)))
+
+        result = kelly.optimal_fraction()
+        # Win rate computed on decisive trades only: 15 / (15+5) = 75%
+        # Should be > fixed fractional
+        assert result > EXPECTED_FIXED_FRACTIONAL
+
+    def test_all_break_even_returns_fixed(self) -> None:
+        """If all trades are break-even, returns fixed fractional."""
+        kelly = RollingKelly()
+        for _ in range(TRADE_COUNT_ENOUGH):
+            kelly.update(TradeRecord(pnl=Decimal(0), pnl_pct=Decimal(0)))
+
+        # No wins and no losses → returns fixed fractional
+        assert kelly.optimal_fraction() == EXPECTED_FIXED_FRACTIONAL
+
+
 class TestQuarterKellyDampening:
     """Full Kelly is dampened by the fraction parameter."""
 

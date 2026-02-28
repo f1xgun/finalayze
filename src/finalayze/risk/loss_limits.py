@@ -9,7 +9,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 _DEFAULT_DAILY_LIMIT_PCT = 3.0
@@ -63,12 +63,14 @@ class LossLimitTracker:
         if self._day_start_equity > 0:
             daily_loss = (self._day_start_equity - current_equity) / self._day_start_equity
             if daily_loss >= self._daily_limit:
+                self._halted_until = dt + timedelta(days=self._cooldown_days)
                 return True
 
         # Check weekly loss
         if self._week_start_equity > 0:
             weekly_loss = (self._week_start_equity - current_equity) / self._week_start_equity
             if weekly_loss >= self._weekly_limit:
+                self._halted_until = dt + timedelta(days=self._cooldown_days)
                 return True
 
         return False

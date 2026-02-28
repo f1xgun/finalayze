@@ -24,11 +24,18 @@ EQUITY_AFTER_5PCT_LOSS = Decimal(95_000)
 EQUITY_AFTER_6PCT_LOSS = Decimal(94_000)
 
 MONDAY = datetime(2025, 1, 6, tzinfo=UTC)  # A Monday
+MONDAY_NOON = datetime(2025, 1, 6, 12, 0, tzinfo=UTC)
 TUESDAY = MONDAY + timedelta(days=1)
 WEDNESDAY = MONDAY + timedelta(days=2)
 THURSDAY = MONDAY + timedelta(days=3)
 FRIDAY = MONDAY + timedelta(days=4)
 NEXT_MONDAY = MONDAY + timedelta(days=7)
+
+# For multi-day cooldown tests
+COOLDOWN_2_DAYS = 2
+MONDAY_PLUS_1 = MONDAY + timedelta(days=1)
+MONDAY_PLUS_2 = MONDAY + timedelta(days=2)
+MONDAY_PLUS_3 = MONDAY + timedelta(days=3)
 
 
 class TestLossLimitTracker:
@@ -70,8 +77,8 @@ class TestLossLimitTracker:
         # Exactly 3% loss triggers halt
         assert tracker.is_halted(MONDAY, EQUITY_AFTER_3PCT_LOSS)
 
-    def test_cooldown_resumes_next_day(self) -> None:
-        """After daily halt, trading resumes after cooldown period."""
+    def test_cooldown_persists_within_period(self) -> None:
+        """Halt persists during cooldown even if equity recovers."""
         tracker = LossLimitTracker(
             daily_loss_limit_pct=DAILY_LIMIT_PCT,
             weekly_loss_limit_pct=WEEKLY_LIMIT_PCT,
@@ -79,12 +86,49 @@ class TestLossLimitTracker:
         )
         tracker.reset_day(MONDAY, INITIAL_EQUITY)
 
-        # Trigger daily halt
+        # Trigger halt at noon on Monday
+        assert tracker.is_halted(MONDAY_NOON, EQUITY_AFTER_4PCT_LOSS)
+
+        # Later on Monday, equity recovers — still halted due to cooldown
+        # (cooldown_days=1 means halted_until = MONDAY_NOON + 1 day = TUESDAY noon)
+        assert tracker.is_halted(MONDAY_NOON, INITIAL_EQUITY)
+
+    def test_cooldown_expires_after_period(self) -> None:
+        """Halt clears after cooldown period expires via reset_day."""
+        tracker = LossLimitTracker(
+            daily_loss_limit_pct=DAILY_LIMIT_PCT,
+            weekly_loss_limit_pct=WEEKLY_LIMIT_PCT,
+            cooldown_days=COOLDOWN_DAYS,
+        )
+        tracker.reset_day(MONDAY, INITIAL_EQUITY)
+
+        # Trigger halt
         assert tracker.is_halted(MONDAY, EQUITY_AFTER_4PCT_LOSS)
 
-        # Next day with reset equity, no longer halted
+        # Next day: reset_day clears cooldown (Tuesday >= Monday + 1 day)
         tracker.reset_day(TUESDAY, EQUITY_AFTER_4PCT_LOSS)
+        # No new breach (equity == baseline), so not halted
         assert not tracker.is_halted(TUESDAY, EQUITY_AFTER_4PCT_LOSS)
+
+    def test_multi_day_cooldown(self) -> None:
+        """With 2-day cooldown, halt persists for 2 days."""
+        tracker = LossLimitTracker(
+            daily_loss_limit_pct=DAILY_LIMIT_PCT,
+            weekly_loss_limit_pct=WEEKLY_LIMIT_PCT,
+            cooldown_days=COOLDOWN_2_DAYS,
+        )
+        tracker.reset_day(MONDAY, INITIAL_EQUITY)
+
+        # Trigger halt on Monday
+        assert tracker.is_halted(MONDAY, EQUITY_AFTER_4PCT_LOSS)
+
+        # Tuesday: still within 2-day cooldown (halted_until = Monday + 2 = Wednesday)
+        tracker.reset_day(MONDAY_PLUS_1, INITIAL_EQUITY)
+        assert tracker.is_halted(MONDAY_PLUS_1, INITIAL_EQUITY)
+
+        # Wednesday: cooldown expired
+        tracker.reset_day(MONDAY_PLUS_2, INITIAL_EQUITY)
+        assert not tracker.is_halted(MONDAY_PLUS_2, INITIAL_EQUITY)
 
     def test_weekly_limit_triggers_halt(self) -> None:
         """Trading halts when cumulative weekly loss exceeds limit."""
@@ -118,7 +162,7 @@ class TestLossLimitTracker:
         # 5% weekly loss triggers halt
         assert tracker.is_halted(MONDAY, EQUITY_AFTER_5PCT_LOSS)
 
-        # New week resets
+        # New week resets (cooldown also expired: NEXT_MONDAY >= MONDAY + 1 day)
         tracker.reset_week(NEXT_MONDAY, EQUITY_AFTER_5PCT_LOSS)
         tracker.reset_day(NEXT_MONDAY, EQUITY_AFTER_5PCT_LOSS)
 

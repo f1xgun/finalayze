@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
+from finalayze.backtest.engine import BacktestEngine
 from finalayze.backtest.walk_forward import (
     WalkForwardConfig,
     WalkForwardOptimizer,
+    WalkForwardResult,
     WalkForwardWindow,
 )
-from finalayze.core.schemas import Candle
+from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.strategies.base import BaseStrategy
 
 # ── Constants (no magic numbers) ─────────────────────────────────────────
 
@@ -51,6 +54,17 @@ CANDLE_LOW = Decimal("148.00")
 CANDLE_CLOSE = Decimal("153.00")
 CANDLE_VOLUME = 1000
 
+RUN_SEGMENT = "us_tech"
+RUN_INITIAL_CASH = Decimal(100000)
+RUN_TRAIN_YEARS = 2
+RUN_TEST_YEARS = 1
+RUN_STEP_MONTHS = 12
+# With 7 years of data (2018-2025), 2yr train + 1yr test + 12mo step -> 5 windows
+RUN_EXPECTED_WINDOWS = 5
+# Weekly candles over 7 years ~ 365 candles
+RUN_CANDLE_DAYS = 7  # Generate one candle per week
+RUN_BUY_CONFIDENCE = 0.8
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -69,6 +83,16 @@ def _make_candle(dt: date) -> Candle:
         volume=CANDLE_VOLUME,
         source=CANDLE_SOURCE,
     )
+
+
+def _make_candles_range(start: date, end: date, step_days: int = RUN_CANDLE_DAYS) -> list[Candle]:
+    """Create candles at regular intervals between start and end."""
+    candles: list[Candle] = []
+    current = start
+    while current < end:
+        candles.append(_make_candle(current))
+        current += timedelta(days=step_days)
+    return candles
 
 
 # ── Tests ────────────────────────────────────────────────────────────────
@@ -163,3 +187,77 @@ class TestSplitCandles:
         all_split = train + test
         total_expected = expected_train_count + expected_test_count
         assert len(all_split) == total_expected
+
+
+class _AlternatingStrategy(BaseStrategy):
+    """Strategy that alternates BUY/SELL for testing walk-forward run()."""
+
+    def __init__(self) -> None:
+        self._call_count = 0
+
+    @property
+    def name(self) -> str:
+        return "alternating"
+
+    def supported_segments(self) -> list[str]:
+        return [RUN_SEGMENT]
+
+    def get_parameters(self, segment_id: str) -> dict[str, object]:
+        return {}
+
+    def generate_signal(
+        self,
+        symbol: str,
+        candles: list[Candle],
+        segment_id: str,
+        sentiment_score: float = 0.0,
+    ) -> Signal | None:
+        self._call_count += 1
+        direction = SignalDirection.BUY if self._call_count % 2 == 1 else SignalDirection.SELL
+        return Signal(
+            strategy_name=self.name,
+            symbol=symbol,
+            market_id=CANDLE_MARKET,
+            segment_id=segment_id,
+            direction=direction,
+            confidence=RUN_BUY_CONFIDENCE,
+            features={},
+            reasoning="test",
+        )
+
+
+class TestWalkForwardRun:
+    """Tests for WalkForwardOptimizer.run()."""
+
+    def test_run_populates_result(self) -> None:
+        """run() produces a WalkForwardResult with windows and metrics."""
+        config = WalkForwardConfig(
+            train_years=RUN_TRAIN_YEARS,
+            test_years=RUN_TEST_YEARS,
+            step_months=RUN_STEP_MONTHS,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+
+        # Create weekly candles spanning 2018-2025
+        candles = _make_candles_range(DEFAULT_START, DEFAULT_END)
+
+        strategy = _AlternatingStrategy()
+        engine = BacktestEngine(strategy=strategy, initial_cash=RUN_INITIAL_CASH)
+
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
+
+        assert isinstance(result, WalkForwardResult)
+        assert len(result.windows) > 0
+        assert result.total_oos_trades > 0
+        assert len(result.oos_trades) == result.total_oos_trades
+
+    def test_run_empty_candles(self) -> None:
+        """run() with empty candles returns empty result."""
+        optimizer = WalkForwardOptimizer()
+        strategy = _AlternatingStrategy()
+        engine = BacktestEngine(strategy=strategy, initial_cash=RUN_INITIAL_CASH)
+
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, [], engine)
+
+        assert result.total_oos_trades == 0
+        assert len(result.windows) == 0
