@@ -4,18 +4,17 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from config.settings import Settings
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from finalayze.api.v1.auth import require_api_key
+from finalayze.api.v1.auth import api_key_auth
+from finalayze.markets.registry import default_registry
 from finalayze.risk.circuit_breaker import CircuitLevel
 
-_settings = Settings()
 router = APIRouter(
     prefix="/risk",
     tags=["risk"],
-    dependencies=[Depends(require_api_key(_settings.api_key))],
+    dependencies=[Depends(api_key_auth)],
 )
 
 _LEVEL_MAP: dict[CircuitLevel, tuple[int, str]] = {
@@ -76,8 +75,10 @@ class OverrideResponse(BaseModel):
 @router.get("/status", response_model=RiskStatusResponse)
 async def risk_status(request: Request) -> RiskStatusResponse:
     circuit_breakers = getattr(request.app.state, "circuit_breakers", {})
+    registry = default_registry()
     markets: list[MarketRiskStatus] = []
-    for market_id in ["us", "moex"]:
+    for market_def in registry.list_markets():
+        market_id = market_def.id
         cb = circuit_breakers.get(market_id)
         if cb is not None:
             lvl_int, lvl_label = _LEVEL_MAP.get(cb.current_level, (0, "NORMAL"))

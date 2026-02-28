@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from config.settings import Settings
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
 
-from finalayze.api.v1.auth import require_api_key
+from finalayze.api.v1.auth import api_key_auth
 
-_settings = Settings()
 router = APIRouter(
     prefix="/news",
     tags=["news"],
-    dependencies=[Depends(require_api_key(_settings.api_key))],
+    dependencies=[Depends(api_key_auth)],
 )
 
 

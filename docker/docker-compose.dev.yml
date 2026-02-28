@@ -1,10 +1,14 @@
+# WARNING: This is a development-only compose file.
+# DO NOT use these defaults in production.
+# Set POSTGRES_PASSWORD env var before starting: export POSTGRES_PASSWORD=<secure-value>
 services:
   postgres:
     image: timescale/timescaledb:latest-pg16
     container_name: finalayze-db
     environment:
       POSTGRES_USER: finalayze
-      POSTGRES_PASSWORD: secret
+      # Default 'secret' is for local dev only — override via POSTGRES_PASSWORD env var
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
       POSTGRES_DB: finalayze
     ports:
       - "5432:5432"
@@ -37,7 +41,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      FINALAYZE_DATABASE_URL: "postgresql+asyncpg://finalayze:secret@postgres:5432/finalayze"
+      FINALAYZE_DATABASE_URL: "postgresql+asyncpg://finalayze:${POSTGRES_PASSWORD:-secret}@postgres:5432/finalayze"
       FINALAYZE_REDIS_URL: "redis://redis:6379/0"
       FINALAYZE_MODE: "debug"
     depends_on:

@@ -5,6 +5,8 @@ See docs/architecture/DATA_FLOW.md for event flow details.
 
 from __future__ import annotations
 
+import contextlib
+
 import redis.asyncio
 from pydantic import BaseModel
 
@@ -89,3 +91,68 @@ class EventBus:
     async def close(self) -> None:
         """Close the underlying Redis connection."""
         await self._redis.aclose()  # type: ignore[attr-defined]
+
+    # ── Consumer group API (at-least-once delivery) ───────────────────────────
+
+    async def create_group(self, stream: str, group: str, start_id: str = "0") -> None:
+        """Create a Redis consumer group on *stream*, starting from *start_id*.
+
+        If the stream does not yet exist it is created automatically (mkstream).
+        If the group already exists the call is silently ignored.
+
+        Args:
+            stream: Stream name (use class-level constants).
+            group: Consumer group name (unique per logical consumer process).
+            start_id: Message ID at which the group starts consuming.
+                      Use ``"0"`` to replay all existing messages, or ``"$"``
+                      to consume only new messages written after group creation.
+        """
+        # ResponseError is raised when the group already exists; suppress it.
+        with contextlib.suppress(Exception):
+            await self._redis.xgroup_create(stream, group, id=start_id, mkstream=True)
+
+    async def read_group(
+        self,
+        stream: str,
+        group: str,
+        consumer: str,
+        count: int = 10,
+    ) -> list[tuple[str, dict[str, str]]]:
+        """Read *count* unacknowledged messages for *consumer* in *group*.
+
+        Uses ``XREADGROUP`` with ``>`` so each message is delivered to at most
+        one consumer in the group.  The caller must call ``ack()`` after
+        successful processing to remove the message from the PEL.
+
+        Args:
+            stream: Stream name.
+            group: Consumer group name.
+            consumer: Unique name for this consumer instance.
+            count: Maximum number of messages to return.
+
+        Returns:
+            A flat list of ``(message_id, fields)`` tuples.
+        """
+        raw = await self._redis.xreadgroup(group, consumer, {stream: ">"}, count=count)
+        if not raw:
+            return []
+
+        messages: list[tuple[str, dict[str, str]]] = []
+        for _stream_name, entries in raw:
+            for msg_id, fields in entries:
+                messages.append((msg_id, fields))
+        return messages
+
+    async def ack(self, stream: str, group: str, *message_ids: str) -> int:
+        """Acknowledge one or more messages, removing them from the PEL.
+
+        Args:
+            stream: Stream name.
+            group: Consumer group name.
+            *message_ids: One or more message IDs returned by ``read_group``.
+
+        Returns:
+            Number of messages successfully acknowledged.
+        """
+        result: int = await self._redis.xack(stream, group, *message_ids)  # type: ignore[no-untyped-call]
+        return result

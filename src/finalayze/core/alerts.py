@@ -9,6 +9,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -49,7 +50,7 @@ class TelegramAlerter:
             f"\U0001f7e2 {result.side} {result.symbol} \xd7{result.quantity} "
             f"@ ${price:.2f} ({broker} {market_id})"
         )
-        self._send(text)
+        self.send_alert(text)
 
     def on_trade_rejected(self, order: OrderRequest, reason: str) -> None:
         """Alert on an order rejection.
@@ -57,7 +58,7 @@ class TelegramAlerter:
         Example: ``AAPL BUY rejected: insufficient funds``
         """
         text = f"\u26a0\ufe0f {order.symbol} {order.side} rejected: {reason}"
-        self._send(text)
+        self.send_alert(text)
 
     def on_circuit_breaker_trip(
         self, market_id: str, level: CircuitLevel, drawdown_pct: float
@@ -70,7 +71,7 @@ class TelegramAlerter:
             f"\U0001f534 [{market_id.upper()}] Circuit breaker {level.upper()} "
             f"-- trading {level} ({drawdown_pct * 100:.1f}% daily drawdown)"
         )
-        self._send(text)
+        self.send_alert(text)
 
     def on_circuit_breaker_reset(self, market_id: str) -> None:
         """Alert on circuit breaker reset.
@@ -78,7 +79,7 @@ class TelegramAlerter:
         Example: ``[US] Circuit breaker reset -- trading resumed``
         """
         text = f"\u2705 [{market_id.upper()}] Circuit breaker reset \u2014 trading resumed"
-        self._send(text)
+        self.send_alert(text)
 
     def on_daily_summary(
         self,
@@ -95,7 +96,7 @@ class TelegramAlerter:
             parts.append(f"{market_id.upper()} {sign}{pnl}")
         summary = " | ".join(parts)
         text = f"\U0001f4ca Daily: {summary} | Equity ${total_equity_usd:,.0f}"
-        self._send(text)
+        self.send_alert(text)
 
     def on_error(self, component: str, message: str) -> None:
         """Alert on system errors.
@@ -103,12 +104,12 @@ class TelegramAlerter:
         Example: ``TinkoffFetcher error: gRPC timeout``
         """
         text = f"\U0001f6a8 {component} error: {message}"
-        self._send(text)
+        self.send_alert(text)
 
     # ── Internal ─────────────────────────────────────────────────────────────
 
-    def _send(self, text: str) -> None:
-        """POST a message to the Telegram Bot API.
+    async def _send(self, text: str) -> None:
+        """Async POST a message to the Telegram Bot API.
 
         Silently returns if token is empty or if any error occurs.
         """
@@ -118,6 +119,27 @@ class TelegramAlerter:
         url = f"{_TELEGRAM_API_BASE}{self._token}{_SEND_MESSAGE_PATH}"
         payload = {"chat_id": self._chat_id, "text": text}
         try:
-            httpx.post(url, json=payload)
+            async with httpx.AsyncClient() as client:
+                await client.post(url, json=payload, timeout=10)
         except Exception:
             _log.exception("TelegramAlerter failed to send message")
+
+    def send_alert(self, message: str) -> None:
+        """Schedule or run ``_send`` safely from any thread context.
+
+        If an asyncio event loop is running (e.g. inside the trading loop coroutine),
+        a fire-and-forget task is created.  Otherwise ``asyncio.run()`` is used to
+        send the message synchronously from the calling thread.
+
+        Exceptions are always suppressed -- alerts must never crash the caller.
+        """
+        if not self._token:
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                _task = loop.create_task(self._send(message))  # noqa: RUF006 -- fire-and-forget
+            else:
+                asyncio.run(self._send(message))
+        except Exception:
+            _log.exception("TelegramAlerter send_alert failed")

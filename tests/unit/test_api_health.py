@@ -8,8 +8,10 @@ ModeManager, ensuring full isolation between tests.
 from __future__ import annotations
 
 import os
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from config.settings import Settings, get_settings
 from httpx import ASGITransport, AsyncClient
 
 from finalayze.api.v1.system import ModeManager, get_mode_manager
@@ -46,14 +48,21 @@ def build_test_app() -> tuple[object, ModeManager]:
     return application, fresh_manager
 
 
+def _patch_liveness_ok() -> tuple[object, object]:
+    """Return context managers that patch DB and Redis health checks to return 'ok'."""
+    db_patch = patch("finalayze.api.v1.system._check_db", new_callable=AsyncMock, return_value="ok")
+    redis_patch = patch(
+        "finalayze.api.v1.system._check_redis", new_callable=AsyncMock, return_value="ok"
+    )
+    return db_patch, redis_patch
+
+
 def make_client(application: object) -> AsyncClient:
     """Create an async test client for the given ASGI app."""
     return AsyncClient(transport=ASGITransport(app=application), base_url="http://test")  # type: ignore[arg-type]
 
 
 def get_api_key() -> str:
-    from config.settings import Settings
-
     return Settings().api_key
 
 
@@ -71,9 +80,38 @@ class TestHealthEndpoint:
     @pytest.mark.asyncio
     async def test_health_status_is_ok(self) -> None:
         app, _ = build_test_app()
-        async with make_client(app) as client:
-            response = await client.get("/api/v1/health")
+        db_patch, redis_patch = _patch_liveness_ok()
+        with db_patch, redis_patch:
+            async with make_client(app) as client:
+                response = await client.get("/api/v1/health")
         assert response.json()["status"] == STATUS_OK
+
+    @pytest.mark.asyncio
+    async def test_health_status_is_degraded_when_db_down(self) -> None:
+        app, _ = build_test_app()
+        with (
+            patch(
+                "finalayze.api.v1.system._check_db", new_callable=AsyncMock, return_value="error"
+            ),
+            patch(
+                "finalayze.api.v1.system._check_redis", new_callable=AsyncMock, return_value="ok"
+            ),
+        ):
+            async with make_client(app) as client:
+                response = await client.get("/api/v1/health")
+        assert response.json()["status"] == "degraded"
+        assert response.json()["components"]["db"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_health_components_structure(self) -> None:
+        app, _ = build_test_app()
+        db_patch, redis_patch = _patch_liveness_ok()
+        with db_patch, redis_patch:
+            async with make_client(app) as client:
+                response = await client.get("/api/v1/health")
+        components = response.json()["components"]
+        assert "db" in components
+        assert "redis" in components
 
     @pytest.mark.asyncio
     async def test_health_mode_is_debug_by_default(self) -> None:
@@ -165,6 +203,7 @@ class TestSetModeEndpoint:
         secret = "my-secret-token"  # noqa: S105
         os.environ[ENV_VAR_REAL_TOKEN] = secret
         os.environ[ENV_VAR_REAL_CONFIRMED] = "true"
+        get_settings.cache_clear()
         try:
             app, _ = build_test_app()
             key = get_api_key()
@@ -178,6 +217,7 @@ class TestSetModeEndpoint:
         finally:
             os.environ.pop(ENV_VAR_REAL_TOKEN, None)
             os.environ.pop(ENV_VAR_REAL_CONFIRMED, None)
+            get_settings.cache_clear()
 
     @pytest.mark.asyncio
     async def test_set_mode_to_real_error_detail_present(self) -> None:
