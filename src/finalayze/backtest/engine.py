@@ -19,7 +19,11 @@ from finalayze.core.schemas import (
 from finalayze.execution.broker_base import OrderRequest
 from finalayze.execution.simulated_broker import SimulatedBroker
 from finalayze.risk.kelly import TradeRecord
-from finalayze.risk.position_sizer import compute_position_size
+from finalayze.risk.position_sizer import (
+    compute_position_size,
+    compute_realized_vol,
+    compute_vol_adjusted_position_size,
+)
 from finalayze.risk.pre_trade_check import PreTradeChecker
 from finalayze.risk.stop_loss import compute_atr_stop_loss
 
@@ -56,6 +60,7 @@ class BacktestEngine:
         circuit_breaker: CircuitBreaker | None = None,
         rolling_kelly: RollingKelly | None = None,
         loss_limits: LossLimitTracker | None = None,
+        target_vol: Decimal | None = None,
     ) -> None:
         self._strategy = strategy
         self._initial_cash = initial_cash
@@ -69,6 +74,7 @@ class BacktestEngine:
         self._circuit_breaker = circuit_breaker
         self._rolling_kelly = rolling_kelly
         self._loss_limits = loss_limits
+        self._target_vol = target_vol
 
     def run(  # noqa: PLR0912, PLR0915
         self,
@@ -286,6 +292,16 @@ class BacktestEngine:
                 kelly_fraction=self._kelly_fraction,
                 max_position_pct=self._max_position_pct,
             )
+
+        # Apply volatility-adjusted sizing if target_vol is configured
+        if self._target_vol is not None:
+            asset_vol = compute_realized_vol(history)
+            if asset_vol is not None and asset_vol > 0:
+                position_value = compute_vol_adjusted_position_size(
+                    base_position=position_value,
+                    target_vol=self._target_vol,
+                    asset_vol=asset_vol,
+                )
 
         if position_value <= 0:
             return

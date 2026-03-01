@@ -48,3 +48,60 @@ def compute_position_size(
         return Decimal(0)
 
     return min(equity * half_kelly, equity * max_position_pct)
+
+
+def compute_vol_adjusted_position_size(
+    base_position: Decimal,
+    target_vol: Decimal,
+    asset_vol: Decimal,
+    min_scale: Decimal = Decimal("0.25"),
+    max_scale: Decimal = Decimal("2.0"),
+) -> Decimal:
+    """Scale position size by target_vol / asset_vol.
+
+    Args:
+        base_position: Position size from Kelly or other sizer (currency units).
+        target_vol: Target annualized portfolio volatility (e.g., 0.15 for 15%).
+        asset_vol: Realized annualized volatility of the asset.
+        min_scale: Minimum scaling factor (floor).
+        max_scale: Maximum scaling factor (cap).
+
+    Returns:
+        Adjusted position size.
+    """
+    if asset_vol <= 0:
+        return base_position
+    scale = target_vol / asset_vol
+    scale = max(min_scale, min(max_scale, scale))
+    return base_position * scale
+
+
+def compute_realized_vol(candles: list, lookback: int = 20) -> Decimal | None:
+    """Compute annualized realized volatility from daily log returns.
+
+    Uses the last ``lookback`` candles. Returns None if insufficient data.
+
+    Args:
+        candles: List of Candle objects with a ``close`` attribute.
+        lookback: Number of periods for volatility calculation.
+
+    Returns:
+        Annualized volatility as Decimal, or None if not enough data.
+    """
+    min_candles = lookback + 1
+    if len(candles) < min_candles:
+        return None
+    import math
+    import statistics as stats
+
+    closes = [float(c.close) for c in candles[-(lookback + 1) :]]
+    log_returns = [
+        math.log(closes[i] / closes[i - 1])
+        for i in range(1, len(closes))
+        if closes[i - 1] > 0
+    ]
+    if len(log_returns) < 2:  # noqa: PLR2004
+        return None
+    daily_vol = stats.stdev(log_returns)
+    annualized = daily_vol * math.sqrt(252)
+    return Decimal(str(annualized))
