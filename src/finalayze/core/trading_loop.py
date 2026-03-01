@@ -485,14 +485,22 @@ class TradingLoop:
         order_value = order.quantity * (candles[-1].close if candles else _ZERO)
         open_position_count = len([q for q in portfolio.positions.values() if q > _ZERO])
 
-        # #154: Compute cross-market exposure as invested value / total equity.
-        # portfolio.positions maps symbol -> share quantity, so we must convert
-        # to monetary values.  Use (equity - cash) as invested value since the
-        # broker already tracks mark-to-market equity.
+        # 6A.4: Aggregate invested value across ALL markets for cross-market exposure
         total_equity: Decimal = self._compute_total_equity_base()
-        invested_value = max(portfolio.equity - portfolio.cash, _ZERO)
-        # Prospective exposure includes the proposed order value
-        prospective_invested = invested_value + order_value
+        total_invested = _ZERO
+        for m_id in self._circuit_breakers:
+            m_equity = self._get_market_equity(m_id)
+            if m_equity is None:
+                continue
+            m_broker = self._broker_router.route(m_id)
+            m_portfolio = m_broker.get_portfolio()
+            m_invested = max(m_equity - m_portfolio.cash, _ZERO)
+            currency = _MARKET_CURRENCY.get(m_id, "USD")
+            total_invested += self._fx.to_base(m_invested, currency)
+
+        order_currency = _MARKET_CURRENCY.get(market_id, "USD")
+        order_value_base = self._fx.to_base(order_value, order_currency)
+        prospective_invested = total_invested + order_value_base
         cross_exposure: Decimal = (
             prospective_invested / total_equity if total_equity > _ZERO else _ZERO
         )
@@ -774,6 +782,11 @@ class TradingLoop:
 
         # Reset loss limit tracker daily baseline
         self._loss_limit_tracker.reset_day(now, total_equity)
+
+        # 6A.10: Reset weekly baseline on Monday (weekday 0)
+        _MONDAY = 0
+        if now.weekday() == _MONDAY:
+            self._loss_limit_tracker.reset_week(now, total_equity)
 
         self._alerter.on_daily_summary(market_pnl, total_equity)
         _log.info("Daily reset complete. Total equity: %s", total_equity)
