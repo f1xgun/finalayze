@@ -52,12 +52,17 @@ class TestCircuitBreakerEscalation:
         cb.reset_daily(new_baseline=EQUITY_AT_6PCT)
         assert cb.level == CircuitLevel.NORMAL
 
-    def test_auto_daily_reset_clears_halted(self) -> None:
+    def test_auto_daily_reset_clears_halted_after_two_profitable_days(self) -> None:
         cb = self._make_cb()
         cb.check(EQUITY_AT_11PCT, BASELINE)
         assert cb.level == CircuitLevel.HALTED
-        cb.reset_daily(new_baseline=EQUITY_AT_11PCT)
-        assert cb.level == CircuitLevel.NORMAL
+        # 6A.5: HALTED requires 2 consecutive profitable days to clear
+        # Day 1: profitable (new baseline > prev baseline of 100000)
+        cb.reset_daily(new_baseline=BASELINE + Decimal(1000))
+        assert cb.level == CircuitLevel.HALTED  # still halted after 1 day
+        # Day 2: profitable again
+        cb.reset_daily(new_baseline=BASELINE + Decimal(2000))
+        assert cb.level == CircuitLevel.NORMAL  # cleared after 2 profitable days
 
     def test_liquidate_not_cleared_by_daily_reset(self) -> None:
         cb = self._make_cb()
@@ -96,14 +101,14 @@ class TestCircuitBreakerEscalation:
         cb.reset_manual()
         assert cb.level == CircuitLevel.NORMAL
 
-    def test_recovery_same_day_still_reports_current_level(self) -> None:
-        """If equity recovers within the day, check still reflects current status."""
+    def test_recovery_same_day_level_is_sticky(self) -> None:
+        """6A.6: If equity recovers within the day, level stays at highest reached."""
         cb = self._make_cb()
         cb.check(EQUITY_AT_11PCT, BASELINE)
         assert cb.level == CircuitLevel.HALTED
-        # Equity recovers to only 3% down
+        # Equity recovers to only 3% down -- but level is sticky (no de-escalation)
         cb.check(EQUITY_AT_3PCT, BASELINE)
-        assert cb.level == CircuitLevel.NORMAL
+        assert cb.level == CircuitLevel.HALTED
 
 
 @pytest.mark.integration

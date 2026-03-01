@@ -513,18 +513,21 @@ class TestCircuitBreakerTripAndRecovery:
         assert level != CircuitLevel.LIQUIDATE
         assert level != CircuitLevel.HALTED
 
-    def test_halted_level_does_not_auto_resume(
+    def test_halted_level_requires_two_profitable_days(
         self,
         cb_us: CircuitBreaker,
     ) -> None:
-        """A -11% drawdown triggers HALTED; reset_daily restores NORMAL."""
+        """6A.5: HALTED requires 2 consecutive profitable days to clear."""
         level = cb_us.check(
             current_equity=HALTED_EQUITY,
             baseline_equity=BASELINE_EQUITY,
         )
         assert level == CircuitLevel.HALTED
 
-        # Daily reset (not manual) clears HALTED -> NORMAL
-        cb_us.reset_daily(new_baseline=BASELINE_EQUITY)
+        # Day 1: profitable (new baseline > prev baseline)
+        cb_us.reset_daily(new_baseline=BASELINE_EQUITY + Decimal(1000))
+        assert cb_us.level == CircuitLevel.HALTED  # still halted
 
-        assert cb_us.level == CircuitLevel.NORMAL
+        # Day 2: profitable again
+        cb_us.reset_daily(new_baseline=BASELINE_EQUITY + Decimal(2000))
+        assert cb_us.level == CircuitLevel.NORMAL  # cleared

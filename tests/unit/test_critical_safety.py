@@ -96,6 +96,8 @@ def _make_registry() -> InstrumentRegistry:
 def _make_settings(**overrides: object) -> MagicMock:
     from config.settings import Settings
 
+    from finalayze.core.modes import WorkMode
+
     s = MagicMock(spec=Settings)
     s.news_cycle_minutes = 30
     s.strategy_cycle_minutes = 60
@@ -105,6 +107,7 @@ def _make_settings(**overrides: object) -> MagicMock:
     s.max_positions_per_market = 10
     s.daily_loss_limit_pct = 0.03
     s.max_cross_market_exposure_pct = 0.80
+    s.mode = WorkMode.SANDBOX
     for k, v in overrides.items():
         setattr(s, k, v)
     return s

@@ -231,7 +231,7 @@ class TestPreTradeChecker:
         assert result.passed is False
         assert len(result.violations) >= 1
         cash_violations = [v for v in result.violations if "cash" in v.lower()]
-        assert len(cash_violations) == 1
+        assert len(cash_violations) >= 1  # includes cash reserve check (6A.3)
 
     def test_rejects_too_many_positions(self) -> None:
         checker = PreTradeChecker(
@@ -261,7 +261,7 @@ class TestPreTradeChecker:
             open_position_count=POSITION_COUNT_AT_MAX,
             dt=self._MARKET_OPEN_DT,
         )
-        # Should fail on position size, cash, and position count
-        expected_violation_count = 3
+        # Should fail on position size, cash, position count, and cash reserve (6A.3)
+        expected_violation_count = 4
         assert result.passed is False
         assert len(result.violations) == expected_violation_count
