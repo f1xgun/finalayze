@@ -167,21 +167,16 @@ class TestTinkoffFetchCandles:
 class TestTinkoffFetcherSandboxClientSelection:
     """Verify that sandbox flag controls which AsyncClient class is used."""
 
-    def _make_async_client_mock(self, fake_candle: MagicMock) -> MagicMock:
-        """Build a properly-async context manager mock for the Tinkoff client."""
+    def _make_client_mock(self, fake_candle: MagicMock) -> MagicMock:
+        """Build a mock client that returns candles directly (persistent client pattern)."""
         mock_response = MagicMock()
         mock_response.candles = [fake_candle]
-        mock_inner_client = MagicMock()
-        mock_inner_client.market_data.get_candles = AsyncMock(return_value=mock_response)
-
-        mock_context = MagicMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_inner_client)
-        mock_context.__aexit__ = AsyncMock(return_value=False)
-
-        return MagicMock(return_value=mock_context)
+        mock_client = MagicMock()
+        mock_client.market_data.get_candles = AsyncMock(return_value=mock_response)
+        return mock_client
 
     def test_sandbox_true_uses_sandbox_client(self) -> None:
-        """When sandbox=True, _fetch_async must use AsyncSandboxClient."""
+        """When sandbox=True, _get_client must use AsyncSandboxClient."""
         fake_candle = _make_fake_candle(
             open_u=OPEN_PRICE,
             open_n=0,
@@ -195,7 +190,8 @@ class TestTinkoffFetcherSandboxClientSelection:
             time_seconds=FAKE_TIMESTAMP,
         )
 
-        mock_sandbox_cls = self._make_async_client_mock(fake_candle)
+        mock_client = self._make_client_mock(fake_candle)
+        mock_sandbox_cls = MagicMock(return_value=mock_client)
         mock_prod_cls = MagicMock()
 
         with (
@@ -217,7 +213,7 @@ class TestTinkoffFetcherSandboxClientSelection:
         mock_prod_cls.assert_not_called()
 
     def test_sandbox_false_uses_production_client(self) -> None:
-        """When sandbox=False, _fetch_async must use AsyncClient (production)."""
+        """When sandbox=False, _get_client must use AsyncClient (production)."""
         fake_candle = _make_fake_candle(
             open_u=OPEN_PRICE,
             open_n=0,
@@ -231,7 +227,8 @@ class TestTinkoffFetcherSandboxClientSelection:
             time_seconds=FAKE_TIMESTAMP,
         )
 
-        mock_prod_cls = self._make_async_client_mock(fake_candle)
+        mock_client = self._make_client_mock(fake_candle)
+        mock_prod_cls = MagicMock(return_value=mock_client)
         mock_sandbox_cls = MagicMock()
 
         with (

@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
 
+    # DB pool
+    db_pool_size: int = 10
+    db_max_overflow: int = 5
+    db_pool_timeout: int = 30
+    db_pool_recycle: int = 1800
+
     # API Keys
     finnhub_api_key: str = ""
     newsapi_api_key: str = ""

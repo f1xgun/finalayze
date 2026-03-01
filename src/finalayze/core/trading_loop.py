@@ -38,11 +38,13 @@ if TYPE_CHECKING:
     from finalayze.analysis.impact_estimator import ImpactEstimator
     from finalayze.analysis.news_analyzer import NewsAnalyzer
     from finalayze.core.alerts import TelegramAlerter
-    from finalayze.core.schemas import Candle, SentimentResult, Signal
+    from finalayze.core.events import EventBus
+    from finalayze.core.schemas import Candle, PortfolioState, SentimentResult, Signal
     from finalayze.data.cache import RedisCache
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
     from finalayze.execution.broker_base import BrokerBase, OrderRequest
     from finalayze.execution.broker_router import BrokerRouter
+    from finalayze.markets.fx_service import FXRateService
     from finalayze.markets.instruments import Instrument, InstrumentRegistry
     from finalayze.ml.registry import MLModelRegistry
     from finalayze.risk.circuit_breaker import (
@@ -97,6 +99,8 @@ class TradingLoop:
         instrument_registry: InstrumentRegistry,
         cache: RedisCache | None = None,
         ml_registry: MLModelRegistry | None = None,
+        event_bus: EventBus | None = None,
+        fx_service: FXRateService | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
@@ -121,6 +125,8 @@ class TradingLoop:
         self._alerter = alerter
         self._registry = instrument_registry
         self._cache = cache
+        self._event_bus = event_bus
+        self._fx_service = fx_service
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -131,8 +137,9 @@ class TradingLoop:
         # Daily baseline equities: market_id -> equity at start of trading day
         self._baseline_equities: dict[str, Decimal] = {}
 
-        # Stop-loss tracking: symbol -> stop_loss_price
+        # Stop-loss tracking: symbol -> stop_loss_price (thread-safe via lock)
         self._stop_loss_prices: dict[str, Decimal] = {}
+        self._stop_loss_lock = threading.Lock()
 
         # Risk management components
         # 6A.7: Wire PDTTracker into PreTradeChecker
@@ -223,10 +230,32 @@ class TradingLoop:
         self._stop_event.wait()
 
     def stop(self) -> None:
-        """Gracefully shut down the scheduler, async loop, and unblock start()."""
+        """Gracefully shut down scheduler, async loop, and connections."""
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=True)
         if self._async_loop is not None and not self._async_loop.is_closed():
+            # Close Redis connections on the async loop before stopping it
+            if self._cache is not None:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self._cache.close(), self._async_loop
+                    ).result(timeout=5)
+                except Exception:
+                    _log.debug("Failed to close RedisCache on shutdown")
+            if self._event_bus is not None:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self._event_bus.close(), self._async_loop
+                    ).result(timeout=5)
+                except Exception:
+                    _log.debug("Failed to close EventBus on shutdown")
+            if self._fx_service is not None:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self._fx_service.close(), self._async_loop
+                    ).result(timeout=5)
+                except Exception:
+                    _log.debug("Failed to close FXRateService on shutdown")
             self._async_loop.call_soon_threadsafe(self._async_loop.stop)
             if self._async_thread is not None:
                 self._async_thread.join(timeout=5)
@@ -273,16 +302,22 @@ class TradingLoop:
             sentiment,
             active_segments,
         )
+        # Collect updates under lock
+        redis_updates: list[tuple[str, float]] = []
         with self._sentiment_lock:
             for impact in impacts:
                 existing = self._sentiment_cache.get(impact.segment_id, _DEFAULT_SENTIMENT)
                 new_score = existing * 0.7 + impact.sentiment * 0.3
                 self._sentiment_cache[impact.segment_id] = new_score
-                if self._cache is not None:
-                    try:
-                        self._run_async(self._cache.set_sentiment(impact.segment_id, new_score))
-                    except Exception:
-                        _log.debug("Failed to write sentiment to Redis cache")
+                redis_updates.append((impact.segment_id, new_score))
+
+        # Write to Redis outside the lock
+        if self._cache is not None:
+            for segment_id, score in redis_updates:
+                try:
+                    self._run_async(self._cache.set_sentiment(segment_id, score))
+                except Exception:
+                    _log.debug("Failed to write sentiment to Redis cache")
 
     def _collect_active_segments(self) -> list[str]:
         """Collect distinct segment IDs across all markets."""
@@ -623,10 +658,12 @@ class TradingLoop:
                         result.fill_price, candles, atr_multiplier=multiplier
                     )
                     if stop is not None:
-                        self._stop_loss_prices[order.symbol] = stop
+                        with self._stop_loss_lock:
+                            self._stop_loss_prices[order.symbol] = stop
                 # Clear stop-loss on SELL fill
                 elif order.side == "SELL":
-                    self._stop_loss_prices.pop(order.symbol, None)
+                    with self._stop_loss_lock:
+                        self._stop_loss_prices.pop(order.symbol, None)
             else:
                 self._alerter.on_trade_rejected(order, result.reason)
         except Exception:
@@ -643,7 +680,8 @@ class TradingLoop:
         If price <= stop_loss_price, submit a SELL market order immediately.
         Clears the stop-loss entry after triggering to avoid duplicate orders.
         """
-        stop_price = self._stop_loss_prices.get(symbol)
+        with self._stop_loss_lock:
+            stop_price = self._stop_loss_prices.get(symbol)
         if stop_price is None:
             return
 
@@ -665,7 +703,8 @@ class TradingLoop:
                     _log.exception("_check_stop_losses: failed to submit stop-loss for %s", symbol)
                     return
             # Clear stop-loss after trigger
-            del self._stop_loss_prices[symbol]
+            with self._stop_loss_lock:
+                self._stop_loss_prices.pop(symbol, None)
 
     def _retrain_cycle(self) -> None:
         """Periodically retrain ML ensemble models for all active segments.

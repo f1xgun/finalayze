@@ -45,8 +45,11 @@ def _make_trading_loop() -> MagicMock:
     settings.daily_loss_limit_pct = 0.05
     settings.kelly_fraction = 0.5
 
+    import threading
+
     loop = MagicMock(spec=TradingLoop)
     loop._stop_loss_prices = {}
+    loop._stop_loss_lock = threading.Lock()
     loop._broker_router = MagicMock()
     loop._alerter = MagicMock()
     loop._submit_order = TradingLoop._submit_order.__get__(loop)

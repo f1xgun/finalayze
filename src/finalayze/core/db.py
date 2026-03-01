@@ -52,7 +52,15 @@ def get_async_session_factory() -> async_sessionmaker[AsyncSession]:
     url = settings.database_url
 
     if url not in _factory_cache:
-        engine = create_async_engine(url, echo=False, pool_pre_ping=True)
+        engine = create_async_engine(
+            url,
+            echo=False,
+            pool_pre_ping=True,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
+            pool_timeout=settings.db_pool_timeout,
+            pool_recycle=settings.db_pool_recycle,
+        )
         _engine_cache[url] = engine
         _factory_cache[url] = async_sessionmaker(
             engine, class_=AsyncSession, expire_on_commit=False
