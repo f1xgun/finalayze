@@ -183,46 +183,57 @@ def train_one_segment(
     segment_dir = output_dir / segment_id
     segment_dir.mkdir(parents=True, exist_ok=True)
 
+    results = _train_and_evaluate_models(
+        segment_id, segment_dir, train_features, train_labels, test_features, test_labels
+    )
+    summary = " | ".join(f"{k}: {v}" for k, v in results.items())
+    print(f"[{segment_id}] {summary}")
+
+
+def _evaluate_model(
+    model: XGBoostModel | LightGBMModel | LSTMModel,
+    test_features: list[dict[str, float]],
+    test_labels: list[int],
+) -> str:
+    """Evaluate a model and return a formatted summary string."""
+    probas = [model.predict_proba(f) for f in test_features]
+    preds = [round(p) for p in probas]
+    acc = float(accuracy_score(test_labels, preds))
+    brier = float(brier_score_loss(test_labels, probas))
+    ll = float(log_loss(test_labels, probas, labels=[0, 1]))
+    return f"acc={acc:.3f} brier={brier:.3f} logloss={ll:.3f}"
+
+
+def _train_and_evaluate_models(
+    segment_id: str,
+    segment_dir: Path,
+    train_features: list[dict[str, float]],
+    train_labels: list[int],
+    test_features: list[dict[str, float]],
+    test_labels: list[int],
+) -> dict[str, str]:
+    """Train XGBoost, LightGBM, and LSTM; return evaluation results."""
     results: dict[str, str] = {}
 
-    # XGBoost
     xgb = XGBoostModel(segment_id=segment_id)
     xgb.fit(train_features, train_labels)
     xgb.save(segment_dir / "xgb.pkl")
     if test_features:
-        probas_xgb = [xgb.predict_proba(f) for f in test_features]
-        pred_xgb = [round(p) for p in probas_xgb]
-        acc = float(accuracy_score(test_labels, pred_xgb))
-        brier = float(brier_score_loss(test_labels, probas_xgb))
-        ll = float(log_loss(test_labels, probas_xgb, labels=[0, 1]))
-        results["XGB"] = f"acc={acc:.3f} brier={brier:.3f} logloss={ll:.3f}"
+        results["XGB"] = _evaluate_model(xgb, test_features, test_labels)
 
-    # LightGBM
     lgbm = LightGBMModel(segment_id=segment_id)
     lgbm.fit(train_features, train_labels)
     lgbm.save(segment_dir / "lgbm.pkl")
     if test_features:
-        probas_lgbm = [lgbm.predict_proba(f) for f in test_features]
-        pred_lgbm = [round(p) for p in probas_lgbm]
-        acc = float(accuracy_score(test_labels, pred_lgbm))
-        brier = float(brier_score_loss(test_labels, probas_lgbm))
-        ll = float(log_loss(test_labels, probas_lgbm, labels=[0, 1]))
-        results["LGBM"] = f"acc={acc:.3f} brier={brier:.3f} logloss={ll:.3f}"
+        results["LGBM"] = _evaluate_model(lgbm, test_features, test_labels)
 
-    # LSTM
     lstm = LSTMModel(segment_id=segment_id, sequence_length=_SEQUENCE_LENGTH)
     lstm.fit(train_features, train_labels)
     lstm.save(segment_dir / "lstm.pkl")
     if test_features:
-        probas_lstm = [lstm.predict_proba(f) for f in test_features]
-        pred_lstm = [round(p) for p in probas_lstm]
-        acc = float(accuracy_score(test_labels, pred_lstm))
-        brier = float(brier_score_loss(test_labels, probas_lstm))
-        ll = float(log_loss(test_labels, probas_lstm, labels=[0, 1]))
-        results["LSTM"] = f"acc={acc:.3f} brier={brier:.3f} logloss={ll:.3f}"
+        results["LSTM"] = _evaluate_model(lstm, test_features, test_labels)
 
-    summary = " | ".join(f"{k}: {v}" for k, v in results.items())
-    print(f"[{segment_id}] {summary}")
+    return results
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

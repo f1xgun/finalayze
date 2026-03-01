@@ -17,7 +17,24 @@ from finalayze.ml.models.xgboost_model import XGBoostModel
 from finalayze.ml.registry import MLModelRegistry
 
 # ── Feature computation ──────────────────────────────────────────────────────
-_FEATURE_NAMES = {"rsi_14", "macd_hist", "bb_pct_b", "volume_ratio_20d", "atr_14", "sentiment"}
+_FEATURE_NAMES = {
+    "rsi_14",
+    "macd_hist_pct",
+    "bb_pct_b",
+    "volume_ratio_20d",
+    "atr_14_pct",
+    "sentiment",
+    "roc_10",
+    "willr_14",
+    "adx_14",
+    "ma_slope_20",
+    "hist_vol_20",
+    "gk_vol_20",
+    "dow_sin",
+    "dow_cos",
+    "obv_slope_10",
+    "rsi_divergence",
+}
 _N_FEATURES = len(_FEATURE_NAMES)
 
 

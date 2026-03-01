@@ -119,9 +119,14 @@ class TestLSTMAtomicSave:
         model.fit(X, y)
 
         save_path = tmp_path / "lstm.pkl"
-        with patch("finalayze.ml.models.lstm_model.torch.save", side_effect=OSError("disk full")):
-            with pytest.raises(OSError, match="disk full"):
-                model.save(save_path)
+        with (
+            patch(
+                "finalayze.ml.models.lstm_model.torch.save",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            model.save(save_path)
 
         assert not save_path.exists()
 
@@ -146,9 +151,14 @@ class TestLSTMAtomicSave:
                 raise OSError("disk full")
             return original_dump(*args, **kwargs)  # type: ignore[arg-type]
 
-        with patch("finalayze.ml.models.lstm_model.pickle.dump", side_effect=failing_dump):
-            with pytest.raises(OSError, match="disk full"):
-                model.save(save_path)
+        with (
+            patch(
+                "finalayze.ml.models.lstm_model.pickle.dump",
+                side_effect=failing_dump,
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            model.save(save_path)
 
         # Weights file should have been written atomically before scaler failed
         assert save_path.exists()

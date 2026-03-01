@@ -93,13 +93,10 @@ class TestBuildWindowsSkipSplit:
         # Create 70 normal candles + split at candle 35
         candles = [_make_candle(i, 100.0 + i * 0.5) for i in range(35)]
         # Split at index 35
-        candles.append(
-            _make_candle(35, 60.0, high=61.0, low=59.0)
-        )
+        candles.append(_make_candle(35, 60.0, high=61.0, low=59.0))
         # Continue post-split
-        for i in range(36, 100):
-            candles.append(_make_candle(i, 60.0 + (i - 35) * 0.5))
+        candles.extend(_make_candle(i, 60.0 + (i - 35) * 0.5) for i in range(36, 100))
 
-        features, labels, _ = build_windows(candles, window_size=30)
+        features, _labels, _ = build_windows(candles, window_size=30)
         # Should have some results, but not an error
         assert len(features) > 0

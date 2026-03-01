@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from finalayze.ml.models.lstm_model import LSTMModel, _DROPOUT, _WEIGHT_DECAY
+import torch
+
+from finalayze.ml.models.lstm_model import _DROPOUT, _WEIGHT_DECAY, LSTMModel
 
 _N_SAMPLES = 50
 _FEATURES = {"a": 1.0, "b": 2.0, "c": 3.0}
+_EXPECTED_DROPOUT = 0.2
+_EXPECTED_WEIGHT_DECAY = 1e-4
 
 
 def _make_training_data(
@@ -25,7 +29,8 @@ class TestLSTMEarlyStopping:
         """Verify clip_grad_norm_ is called during training."""
         model = LSTMModel(segment_id="test", sequence_length=5)
         X, y = _make_training_data(30)
-        with patch("torch.nn.utils.clip_grad_norm_", wraps=__import__("torch").nn.utils.clip_grad_norm_) as mock_clip:
+        clip_fn = torch.nn.utils.clip_grad_norm_
+        with patch("torch.nn.utils.clip_grad_norm_", wraps=clip_fn) as mock_clip:
             model.fit(X, y)
             assert mock_clip.call_count > 0
 
@@ -69,5 +74,5 @@ class TestLSTMDropoutWeightDecay:
 
     def test_lstm_constants(self) -> None:
         """Verify dropout and weight decay constants."""
-        assert _DROPOUT == 0.2
-        assert _WEIGHT_DECAY == 1e-4
+        assert _DROPOUT == _EXPECTED_DROPOUT
+        assert _WEIGHT_DECAY == _EXPECTED_WEIGHT_DECAY

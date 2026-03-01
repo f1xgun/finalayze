@@ -728,8 +728,7 @@ class TradingLoop:
         # Hot-swap into registry (thread-safe via lock)
         self._ml_registry.register(segment_id, ensemble)
         _log.info(
-            "_retrain: registered new ensemble for %s "
-            "(acc=%.3f brier=%.3f logloss=%.3f)",
+            "_retrain: registered new ensemble for %s (acc=%.3f brier=%.3f logloss=%.3f)",
             segment_id,
             result.accuracy,
             result.brier_score,

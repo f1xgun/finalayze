@@ -49,9 +49,7 @@ class EnsembleModel:
             try:
                 probs.append(m.predict_proba(features))
             except Exception:
-                _log.warning(
-                    "Ensemble: %s failed, skipping", type(m).__name__, exc_info=True
-                )
+                _log.warning("Ensemble: %s failed, skipping", type(m).__name__, exc_info=True)
 
         if self._lstm_model is not None and getattr(self._lstm_model, "_trained", False):
             any_trained = True
@@ -62,9 +60,7 @@ class EnsembleModel:
 
         if not probs:
             if any_trained:
-                raise PredictionError(
-                    "All ensemble sub-models failed to produce a prediction"
-                )
+                raise PredictionError("All ensemble sub-models failed to produce a prediction")
             return _DEFAULT_PROB
         return sum(probs) / len(probs)
 

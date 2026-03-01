@@ -22,9 +22,7 @@ def _make_model(*, trained: bool = True, proba: float = 0.7, raises: bool = Fals
     return model
 
 
-def _make_lstm(
-    *, trained: bool = True, proba: float = 0.6, raises: bool = False
-) -> MagicMock:
+def _make_lstm(*, trained: bool = True, proba: float = 0.6, raises: bool = False) -> MagicMock:
     """Create a mock LSTMModel."""
     lstm = MagicMock()
     lstm._trained = trained

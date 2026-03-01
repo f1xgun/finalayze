@@ -18,6 +18,14 @@ if TYPE_CHECKING:
 _MIN_CANDLES = 30
 _SPLIT_WARNING_THRESHOLD = 0.40
 
+# Lookback lengths for new indicators
+_ROC_LENGTH = 10
+_OBV_SLOPE_LENGTH = 10
+_RSI_LOOKBACK = 14
+_DOW_DIVISOR = 5
+_MIN_SMA_POINTS = 2
+_RSI_SCALE = 100.0
+
 _log = logging.getLogger(__name__)
 
 
@@ -52,7 +60,21 @@ def compute_features(candles: list[Candle], sentiment_score: float = 0.0) -> dic
 
     last_close = closes[-1]
 
-    # 6C.8: Corporate action sanity check
+    _warn_if_split_suspected(close_s)
+
+    core = _compute_core_features(close_s, high_s, low_s, volume_s, last_close)
+    extra = _compute_extra_features(close_s, high_s, low_s, open_s, volume_s, candles, last_close)
+
+    all_features = {**core, **extra, "sentiment": sentiment_score}
+
+    feature_df = pd.DataFrame({k: [v] for k, v in all_features.items()})
+    feature_df = feature_df.ffill().bfill().fillna(0)
+
+    return {col: float(feature_df[col].iloc[0]) for col in feature_df.columns}
+
+
+def _warn_if_split_suspected(close_s: pd.Series) -> None:
+    """Log a warning if a single-bar return exceeds the split threshold (6C.8)."""
     pct_changes = close_s.pct_change().abs()
     max_pct_change = float(pct_changes.max()) if not pct_changes.empty else 0.0
     if max_pct_change > _SPLIT_WARNING_THRESHOLD:
@@ -62,6 +84,15 @@ def compute_features(candles: list[Candle], sentiment_score: float = 0.0) -> dic
             max_pct_change * 100,
         )
 
+
+def _compute_core_features(
+    close_s: pd.Series,
+    high_s: pd.Series,
+    low_s: pd.Series,
+    volume_s: pd.Series,
+    last_close: float,
+) -> dict[str, float]:
+    """Compute the original 5 core features (RSI, MACD, BB, vol ratio, ATR)."""
     # RSI-14
     rsi = ta.rsi(close_s, length=14)
     rsi_val = float(rsi.iloc[-1]) if rsi is not None and not rsi.empty else 50.0
@@ -93,10 +124,29 @@ def compute_features(candles: list[Candle], sentiment_score: float = 0.0) -> dic
     atr_val = float(atr.iloc[-1]) if atr is not None and not atr.empty else 0.0
     atr_pct = atr_val / last_close if last_close > 0 else 0.0
 
-    # --- 6C.1: New features ---
+    return {
+        "rsi_14": rsi_val,
+        "macd_hist_pct": macd_hist_pct,
+        "bb_pct_b": bb_pct_b,
+        "volume_ratio_20d": volume_ratio,
+        "atr_14_pct": atr_pct,
+    }
 
-    # ROC(10) -- rate of change
-    roc = ta.roc(close_s, length=10)
+
+def _compute_extra_features(
+    close_s: pd.Series,
+    high_s: pd.Series,
+    low_s: pd.Series,
+    open_s: pd.Series,
+    volume_s: pd.Series,
+    candles: list[Candle],
+    last_close: float,
+) -> dict[str, float]:
+    """Compute the 10 new features added in 6C.1."""
+    closes = [float(c.close) for c in candles]
+
+    # ROC(10)
+    roc = ta.roc(close_s, length=_ROC_LENGTH)
     roc_val = float(roc.iloc[-1]) if roc is not None and not roc.empty else 0.0
 
     # Williams %R(14)
@@ -114,7 +164,7 @@ def compute_features(candles: list[Candle], sentiment_score: float = 0.0) -> dic
     # MA slope (20-bar SMA), normalized by price
     sma_20 = ta.sma(close_s, length=20)
     ma_slope = 0.0
-    if sma_20 is not None and len(sma_20) >= 2:
+    if sma_20 is not None and len(sma_20) >= _MIN_SMA_POINTS:
         sma_curr = float(sma_20.iloc[-1])
         sma_prev = float(sma_20.iloc[-2])
         ma_slope = (sma_curr - sma_prev) / last_close if last_close > 0 else 0.0
@@ -130,56 +180,46 @@ def compute_features(candles: list[Candle], sentiment_score: float = 0.0) -> dic
     # Day-of-week cyclical encoding
     last_ts = candles[-1].timestamp
     dow = last_ts.weekday()  # 0=Monday, 4=Friday
-    dow_sin = math.sin(2 * math.pi * dow / 5)
-    dow_cos = math.cos(2 * math.pi * dow / 5)
+    dow_sin = math.sin(2 * math.pi * dow / _DOW_DIVISOR)
+    dow_cos = math.cos(2 * math.pi * dow / _DOW_DIVISOR)
 
     # OBV slope (10), normalized by volume mean
     obv = ta.obv(close_s, volume_s)
     obv_slope_val = 0.0
-    if obv is not None and len(obv) >= 10:
-        obv_recent = obv.iloc[-10:]
+    if obv is not None and len(obv) >= _OBV_SLOPE_LENGTH:
+        obv_recent = obv.iloc[-_OBV_SLOPE_LENGTH:]
         slope = float(obv_recent.iloc[-1] - obv_recent.iloc[0])
         vol_mean = float(volume_s.mean())
         obv_slope_val = slope / vol_mean if vol_mean > 0 else 0.0
 
     # RSI divergence: difference between price ROC and RSI ROC over 14 bars
+    rsi = ta.rsi(close_s, length=14)
     rsi_divergence = 0.0
-    if rsi is not None and len(rsi) >= 14:
-        price_roc_14 = (closes[-1] - closes[-14]) / closes[-14] if closes[-14] != 0 else 0.0
-        rsi_roc_14 = (float(rsi.iloc[-1]) - float(rsi.iloc[-14])) / 100.0
+    if rsi is not None and len(rsi) >= _RSI_LOOKBACK:
+        prev_close = closes[-_RSI_LOOKBACK]
+        price_roc_14 = (closes[-1] - prev_close) / prev_close if prev_close != 0 else 0.0
+        rsi_roc_14 = (float(rsi.iloc[-1]) - float(rsi.iloc[-_RSI_LOOKBACK])) / _RSI_SCALE
         rsi_divergence = price_roc_14 - rsi_roc_14
 
-    # Collect all features into a DataFrame for unified NaN handling.
-    feature_df = pd.DataFrame(
-        {
-            "rsi_14": [rsi_val],
-            "macd_hist_pct": [macd_hist_pct],
-            "bb_pct_b": [bb_pct_b],
-            "volume_ratio_20d": [volume_ratio],
-            "atr_14_pct": [atr_pct],
-            "sentiment": [sentiment_score],
-            "roc_10": [roc_val],
-            "willr_14": [willr_val],
-            "adx_14": [adx_val],
-            "ma_slope_20": [ma_slope],
-            "hist_vol_20": [hist_vol_val],
-            "gk_vol_20": [gk_vol_val],
-            "dow_sin": [dow_sin],
-            "dow_cos": [dow_cos],
-            "obv_slope_10": [obv_slope_val],
-            "rsi_divergence": [rsi_divergence],
-        }
-    )
-    feature_df = feature_df.ffill().bfill().fillna(0)
-
-    return {col: float(feature_df[col].iloc[0]) for col in feature_df.columns}
+    return {
+        "roc_10": roc_val,
+        "willr_14": willr_val,
+        "adx_14": adx_val,
+        "ma_slope_20": ma_slope,
+        "hist_vol_20": hist_vol_val,
+        "gk_vol_20": gk_vol_val,
+        "dow_sin": dow_sin,
+        "dow_cos": dow_cos,
+        "obv_slope_10": obv_slope_val,
+        "rsi_divergence": rsi_divergence,
+    }
 
 
 def _garman_klass_vol(
-    open_s: pd.Series,  # type: ignore[type-arg]
-    high_s: pd.Series,  # type: ignore[type-arg]
-    low_s: pd.Series,  # type: ignore[type-arg]
-    close_s: pd.Series,  # type: ignore[type-arg]
+    open_s: pd.Series,
+    high_s: pd.Series,
+    low_s: pd.Series,
+    close_s: pd.Series,
     length: int = 20,
 ) -> float:
     """Compute Garman-Klass volatility over *length* bars.
@@ -194,8 +234,8 @@ def _garman_klass_vol(
     hl_ratio = hl_ratio.clip(lower=1e-10)
     co_ratio = co_ratio.clip(lower=1e-10)
 
-    hl_log2 = np.log(hl_ratio) ** 2
-    co_log2 = np.log(co_ratio) ** 2
+    hl_log2 = pd.Series(np.log(hl_ratio) ** 2, dtype=float)
+    co_log2 = pd.Series(np.log(co_ratio) ** 2, dtype=float)
 
     gk_per_bar = 0.5 * hl_log2 - (2 * math.log(2) - 1) * co_log2
     gk_rolling = gk_per_bar.rolling(length).mean()

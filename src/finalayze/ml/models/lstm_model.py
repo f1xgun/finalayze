@@ -100,10 +100,7 @@ class LSTMModel(BaseMLModel):
             return _UNTRAINED_PROB
 
         if self._feature_names is not None and sorted(features.keys()) != self._feature_names:
-            msg = (
-                f"Feature mismatch: expected {self._feature_names}, "
-                f"got {sorted(features.keys())}"
-            )
+            msg = f"Feature mismatch: expected {self._feature_names}, got {sorted(features.keys())}"
             raise InsufficientDataError(msg)
 
         sorted_vals = [features[k] for k in sorted(features)]
@@ -114,9 +111,7 @@ class LSTMModel(BaseMLModel):
 
         # --- Per-symbol buffer: avoids cross-contamination (issue 5.6) ---
         with self._lock:
-            buf = self._feature_buffers.setdefault(
-                symbol, deque(maxlen=self._sequence_length)
-            )
+            buf = self._feature_buffers.setdefault(symbol, deque(maxlen=self._sequence_length))
             buf.append(sorted_vals)
             buffer_copy = list(buf)  # snapshot under lock
 
@@ -153,109 +148,113 @@ class LSTMModel(BaseMLModel):
             InsufficientDataError: When len(X) < sequence_length.
         """
         if len(X) < self._sequence_length:
-            msg = (
-                f"Need at least {self._sequence_length} samples for LSTM training, "
-                f"got {len(X)}"
-            )
+            msg = f"Need at least {self._sequence_length} samples for LSTM training, got {len(X)}"
             raise InsufficientDataError(msg)
 
         feature_keys = sorted(X[0])
-        n_features = len(feature_keys)
-        self._n_features = n_features
+        self._n_features = len(feature_keys)
         self._feature_names = feature_keys
 
-        # Raw feature matrix: shape (n_samples, n_features)
-        raw_matrix = np.array(
-            [[row[k] for k in feature_keys] for row in X], dtype=np.float32
-        )
-
-        # Fit scaler on all training samples and normalise (#152)
+        raw_matrix = np.array([[row[k] for k in feature_keys] for row in X], dtype=np.float32)
         self._scaler = StandardScaler()
         scaled_matrix = self._scaler.fit_transform(raw_matrix)
 
-        # Build tensor: shape (n_sequences, sequence_length, n_features)
+        x_tensor, y_tensor, labels = self._build_sequences(scaled_matrix, y)
+
+        self._model = _LSTMNet(
+            self._n_features, self._hidden_size, self._num_layers, dropout=_DROPOUT
+        )
+        optimizer = torch.optim.Adam(
+            self._model.parameters(), lr=_LEARNING_RATE, weight_decay=_WEIGHT_DECAY
+        )
+
+        n_sequences = len(labels)
+        n_cal = max(int(n_sequences * _CALIBRATION_HOLDOUT_FRACTION), 1)
+        n_train = n_sequences - n_cal
+
+        x_train, x_cal = x_tensor[:n_train], x_tensor[n_train:]
+        y_train = y_tensor[:n_train]
+        y_cal_labels = np.array(labels[n_train:], dtype=int)
+
+        self._run_training_loop(self._model, optimizer, x_train, y_train)
+        self._fit_platt_scaler(x_cal, y_cal_labels)
+
+        self._trained = True
+        self._feature_buffers.clear()
+
+    def _build_sequences(
+        self,
+        scaled_matrix: np.ndarray,  # type: ignore[type-arg]
+        y: list[int],
+    ) -> tuple[torch.Tensor, torch.Tensor, list[float]]:
+        """Build (x_tensor, y_tensor, labels) from the scaled feature matrix."""
         sequences: list[list[list[float]]] = []
         labels: list[float] = []
-        for i in range(len(X) - self._sequence_length + 1):
+        n_samples = scaled_matrix.shape[0]
+        for i in range(n_samples - self._sequence_length + 1):
             seq = scaled_matrix[i : i + self._sequence_length].tolist()
             sequences.append(seq)
             labels.append(float(y[i + self._sequence_length - 1]))
 
         x_tensor = torch.tensor(np.array(sequences), dtype=torch.float32)
         y_tensor = torch.tensor(labels, dtype=torch.float32).unsqueeze(1)
+        return x_tensor, y_tensor, labels
 
-        # 6C.6: Pass dropout to _LSTMNet
-        self._model = _LSTMNet(
-            n_features, self._hidden_size, self._num_layers, dropout=_DROPOUT
-        )
-        # 6C.6: Add weight_decay to optimizer
-        optimizer = torch.optim.Adam(
-            self._model.parameters(), lr=_LEARNING_RATE, weight_decay=_WEIGHT_DECAY
-        )
+    @staticmethod
+    def _run_training_loop(
+        model: _LSTMNet,
+        optimizer: torch.optim.Optimizer,
+        x_train: torch.Tensor,
+        y_train: torch.Tensor,
+    ) -> None:
+        """Run training with early stopping and gradient clipping (6C.5)."""
         criterion = nn.BCELoss()
-
-        # Split sequences into train and calibration holdout
-        n_sequences = len(sequences)
-        n_cal = max(int(n_sequences * _CALIBRATION_HOLDOUT_FRACTION), 1)
-        n_train = n_sequences - n_cal
-
-        x_train = x_tensor[:n_train]
-        y_train = y_tensor[:n_train]
-        x_cal = x_tensor[n_train:]
-        y_cal_labels = np.array(labels[n_train:], dtype=int)
-
-        # 6C.5: Further split train into train_inner + val_inner for early stopping
+        n_train = x_train.shape[0]
         n_inner_val = max(int(n_train * 0.1), 1)
         n_inner_train = n_train - n_inner_val
 
-        x_inner_train = x_train[:n_inner_train]
-        y_inner_train = y_train[:n_inner_train]
-        x_inner_val = x_train[n_inner_train:]
-        y_inner_val = y_train[n_inner_train:]
+        x_it, y_it = x_train[:n_inner_train], y_train[:n_inner_train]
+        x_iv, y_iv = x_train[n_inner_train:], y_train[n_inner_train:]
 
         best_val_loss = float("inf")
         best_state: dict[str, Any] | None = None
         patience_counter = 0
 
-        self._model.train()
+        model.train()
         for _ in range(_TRAIN_EPOCHS):
             optimizer.zero_grad()
-            output = self._model(x_inner_train)
-            loss = criterion(output, y_inner_train)
+            output = model(x_it)
+            loss = criterion(output, y_it)
             loss.backward()
-            # 6C.5: Gradient clipping
-            torch.nn.utils.clip_grad_norm_(self._model.parameters(), _MAX_GRAD_NORM)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
             optimizer.step()
 
-            # Validation loss for early stopping
-            self._model.eval()
+            model.eval()
             with torch.no_grad():
-                val_output = self._model(x_inner_val)
-                val_loss = float(criterion(val_output, y_inner_val))
-            self._model.train()
+                val_loss = float(criterion(model(x_iv), y_iv))
+            model.train()
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                best_state = {
-                    k: v.clone() for k, v in self._model.state_dict().items()
-                }
+                best_state = {k: v.clone() for k, v in model.state_dict().items()}
                 patience_counter = 0
             else:
                 patience_counter += 1
                 if patience_counter >= _PATIENCE:
                     break
 
-        # Restore best weights
         if best_state is not None:
-            self._model.load_state_dict(best_state)
+            model.load_state_dict(best_state)
 
-        # Fit Platt scaler (logistic regression) on calibration holdout
-        # Requires both classes present and sufficient samples
+    def _fit_platt_scaler(
+        self,
+        x_cal: torch.Tensor,
+        y_cal_labels: np.ndarray,  # type: ignore[type-arg]
+    ) -> None:
+        """Fit Platt scaling calibrator on calibration holdout."""
+        assert self._model is not None
         self._model.eval()
-        if (
-            len(np.unique(y_cal_labels)) > 1
-            and len(y_cal_labels) >= _MIN_CALIBRATION_SAMPLES
-        ):
+        if len(np.unique(y_cal_labels)) > 1 and len(y_cal_labels) >= _MIN_CALIBRATION_SAMPLES:
             with torch.no_grad():
                 cal_raw: torch.Tensor = self._model(x_cal)
             cal_raw_np = cal_raw.squeeze().numpy()
@@ -265,9 +264,6 @@ class LSTMModel(BaseMLModel):
             self._platt_scaler.fit(cal_raw_np.reshape(-1, 1), y_cal_labels)
         else:
             self._platt_scaler = None
-
-        self._trained = True
-        self._feature_buffers.clear()
 
     def save(self, path: Path) -> None:
         """Save model state dict and config to *path* atomically.
@@ -341,9 +337,7 @@ def _atomic_write_torch(payload: dict[str, Any], target: Path) -> None:
     """Write a torch checkpoint atomically via temp + rename."""
     from pathlib import Path as _Path  # noqa: PLC0415
 
-    fd, tmp_str = tempfile.mkstemp(
-        dir=target.parent, suffix=".tmp", prefix=target.stem
-    )
+    fd, tmp_str = tempfile.mkstemp(dir=target.parent, suffix=".tmp", prefix=target.stem)
     tmp_path = _Path(tmp_str)
     try:
         os.close(fd)
@@ -358,9 +352,7 @@ def _atomic_write_pickle(obj: object, target: Path) -> None:
     """Write a pickle file atomically via temp + rename."""
     from pathlib import Path as _Path  # noqa: PLC0415
 
-    fd, tmp_str = tempfile.mkstemp(
-        dir=target.parent, suffix=".tmp", prefix=target.stem
-    )
+    fd, tmp_str = tempfile.mkstemp(dir=target.parent, suffix=".tmp", prefix=target.stem)
     tmp_path = _Path(tmp_str)
     try:
         os.close(fd)
