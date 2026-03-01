@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     ml_min_train_samples: int = 252  # ~1 year of daily bars
     ml_model_hmac_key: str = ""  # FINALAYZE_ML_MODEL_HMAC_KEY — for model integrity
 
+    # FX
+    fx_update_interval_minutes: int = 60  # FINALAYZE_FX_UPDATE_INTERVAL_MINUTES
+
     # Safety
     real_confirmed: bool = False
 

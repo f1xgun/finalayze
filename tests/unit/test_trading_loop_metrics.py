@@ -82,17 +82,19 @@ class TestProcessInstrumentMetrics:
         pre_result.passed = True
         loop._pre_trade_checker.check.return_value = pre_result
 
-        # Mock broker
+        # Mock portfolio via cache — bind the real _get_cached_portfolio method
         portfolio = MagicMock()
-        portfolio.cash = Decimal("10000")
-        portfolio.equity = Decimal("10000")
+        portfolio.cash = Decimal(10000)
+        portfolio.equity = Decimal(10000)
         portfolio.positions = {}
+        loop._cycle_portfolio_cache = {"us": portfolio}
+        loop._get_cached_portfolio = TradingLoop._get_cached_portfolio.__get__(loop)
+
         broker = MagicMock()
-        broker.get_portfolio.return_value = portfolio
         loop._broker_router.route.return_value = broker
 
         # Mock _compute_total_equity_base
-        loop._compute_total_equity_base = MagicMock(return_value=Decimal("10000"))
+        loop._compute_total_equity_base = MagicMock(return_value=Decimal(10000))
 
         # Mock submit result
         submit_result = MagicMock()
@@ -118,7 +120,7 @@ class TestMarketCycleMetrics:
         loop = _make_loop_stub()
         loop._registry.list_by_market.return_value = []  # no instruments
 
-        market_equities = {"us": Decimal("50000")}
+        market_equities = {"us": Decimal(50000)}
 
         with patch("finalayze.api.metrics.MetricsCollector") as mc:
             TradingLoop._process_market_cycle(
@@ -170,4 +172,5 @@ def _make_loop_stub() -> MagicMock:
     loop._kelly_sizer.optimal_fraction.return_value = Decimal("0.1")
     loop._circuit_breakers = {}
     loop._fx = MagicMock()
+    loop._cycle_portfolio_cache = {}
     return loop

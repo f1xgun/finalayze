@@ -161,6 +161,10 @@ class TradingLoop:
         self._scheduler: BackgroundScheduler | None = None
         self._stop_event = threading.Event()
 
+        # Per-cycle portfolio cache: market_id -> PortfolioState
+        # Populated at the start of each strategy cycle, cleared at the end.
+        self._cycle_portfolio_cache: dict[str, Any] = {}
+
         # Persistent background event loop for async calls (5.4)
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._async_thread: threading.Thread | None = None
@@ -220,6 +224,12 @@ class TradingLoop:
                 hours=getattr(self._settings, "ml_retrain_interval_hours", 168),
                 executor="retrain",
             )
+        if self._fx_service is not None:
+            self._scheduler.add_job(
+                self._fx_update_cycle,
+                "interval",
+                minutes=getattr(self._settings, "fx_update_interval_minutes", 60),
+            )
         self._scheduler.start()
         _log.info(
             "trading_loop_started",
@@ -262,6 +272,11 @@ class TradingLoop:
         self._stop_event.set()
 
     # ── Cycles ───────────────────────────────────────────────────────────────
+
+    def _fx_update_cycle(self) -> None:
+        """Fetch latest FX rates from CBR."""
+        if self._fx_service is not None:
+            self._run_async(self._fx_service.update_usdrub())
 
     def _news_cycle(self) -> None:
         """Fetch latest news, analyze sentiment, update _sentiment_cache."""
@@ -357,6 +372,14 @@ class TradingLoop:
             )
             return
 
+        self._cycle_portfolio_cache.clear()
+        try:
+            self._strategy_cycle_impl()
+        finally:
+            self._cycle_portfolio_cache.clear()
+
+    def _strategy_cycle_impl(self) -> None:
+        """Inner implementation of _strategy_cycle with portfolio caching."""
         now = self._now()
         market_equities: dict[str, Decimal] = {}
         baseline_equities: dict[str, Decimal] = {}
@@ -440,21 +463,30 @@ class TradingLoop:
             from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
 
             MetricsCollector.set_portfolio_equity(market_id, float(equity))
-            _CB_LEVEL_NUMERIC = {"normal": 0, "caution": 1, "halted": 2, "liquidate": 3}
+            cb_level_numeric = {"normal": 0, "caution": 1, "halted": 2, "liquidate": 3}
             MetricsCollector.set_circuit_breaker_level(
-                market_id, _CB_LEVEL_NUMERIC.get(level.value, 0)
+                market_id, cb_level_numeric.get(level.value, 0)
             )
 
-    def _get_market_equity(self, market_id: str) -> Decimal | None:
-        """Return current portfolio equity for market, or None on failure."""
+    def _get_cached_portfolio(self, market_id: str) -> Any | None:
+        """Return cached portfolio for this cycle, fetching once per market."""
+        if market_id in self._cycle_portfolio_cache:
+            return self._cycle_portfolio_cache[market_id]
         try:
             broker = self._broker_router.route(market_id)
             portfolio = broker.get_portfolio()
-            equity: Decimal = portfolio.equity
-            return equity
+            self._cycle_portfolio_cache[market_id] = portfolio
+            return portfolio
         except Exception:
             _log.exception("_strategy_cycle: failed to get portfolio for %s", market_id)
             return None
+
+    def _get_market_equity(self, market_id: str) -> Decimal | None:
+        """Return current portfolio equity for market, or None on failure."""
+        portfolio = self._get_cached_portfolio(market_id)
+        if portfolio is not None:
+            return portfolio.equity
+        return None
 
     def _compute_total_equity_base(self) -> Decimal:
         """Sum equities across all markets, converting to base currency (USD)."""
@@ -548,8 +580,9 @@ class TradingLoop:
             instrument.symbol,
         )
 
-        broker = self._broker_router.route(market_id)
-        portfolio = broker.get_portfolio()
+        portfolio = self._get_cached_portfolio(market_id)
+        if portfolio is None:
+            return
 
         # #162: Use RollingKelly for position sizing
         kelly_fraction = self._kelly_sizer.optimal_fraction()
