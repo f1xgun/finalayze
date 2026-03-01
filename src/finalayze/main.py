@@ -36,7 +36,7 @@ def create_app() -> FastAPI:
     """Construct and configure the FastAPI application."""
     application = FastAPI(title="Finalayze", version="0.1.0", lifespan=lifespan)
     settings = get_settings()
-    allowed_origins = settings.cors_origins if settings.cors_origins else []
+    allowed_origins = settings.cors_origins or []
     application.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,

@@ -12,6 +12,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
 import threading
 from datetime import UTC, datetime
@@ -70,10 +71,8 @@ class TinkoffBroker(BrokerBase):
     def close(self) -> None:
         """Close the persistent gRPC channel."""
         if self._client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 asyncio.run(self._client.__aexit__(None, None, None))
-            except Exception:  # noqa: BLE001
-                pass
             self._client = None
 
     def _call(self, fn: object) -> object:

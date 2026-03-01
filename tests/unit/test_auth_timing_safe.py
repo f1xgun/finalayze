@@ -13,7 +13,7 @@ from finalayze.api.v1.auth import api_key_auth, require_api_key
 _TEST_KEY = "test-secret-key-12345"
 
 
-@pytest.fixture()
+@pytest.fixture
 def app_with_require() -> FastAPI:
     """App using require_api_key factory."""
     app = FastAPI()
@@ -25,7 +25,7 @@ def app_with_require() -> FastAPI:
     return app
 
 
-@pytest.fixture()
+@pytest.fixture
 def app_with_runtime_auth() -> FastAPI:
     """App using api_key_auth (settings-based)."""
     app = FastAPI()

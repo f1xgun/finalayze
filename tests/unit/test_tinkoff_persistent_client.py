@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
 from finalayze.execution.tinkoff_broker import TinkoffBroker
 
+_TEST_TOKEN = "test-token"  # noqa: S105
+
 
 def _make_registry() -> MagicMock:
     registry = MagicMock()
@@ -23,12 +25,8 @@ class TestTinkoffBrokerPersistentClient:
 
     def test_get_client_returns_same_instance(self) -> None:
         """Two calls to _get_client should return the same object."""
-        broker = TinkoffBroker(
-            token="test-token", registry=_make_registry(), sandbox=True
-        )
-        with patch(
-            "finalayze.execution.tinkoff_broker.AsyncSandboxClient"
-        ) as mock_cls:
+        broker = TinkoffBroker(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
+        with patch("finalayze.execution.tinkoff_broker.AsyncSandboxClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
@@ -36,16 +34,12 @@ class TestTinkoffBrokerPersistentClient:
             client2 = broker._get_client()
 
             assert client1 is client2
-            mock_cls.assert_called_once_with("test-token")
+            mock_cls.assert_called_once_with(_TEST_TOKEN)
 
     def test_close_clears_client(self) -> None:
         """close() should set _client to None."""
-        broker = TinkoffBroker(
-            token="test-token", registry=_make_registry(), sandbox=True
-        )
-        with patch(
-            "finalayze.execution.tinkoff_broker.AsyncSandboxClient"
-        ) as mock_cls:
+        broker = TinkoffBroker(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
+        with patch("finalayze.execution.tinkoff_broker.AsyncSandboxClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
@@ -61,12 +55,8 @@ class TestTinkoffFetcherPersistentClient:
 
     def test_get_client_returns_same_instance(self) -> None:
         """Two calls to _get_client should return the same object."""
-        fetcher = TinkoffFetcher(
-            token="test-token", registry=_make_registry(), sandbox=True
-        )
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.AsyncSandboxClient"
-        ) as mock_cls:
+        fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
+        with patch("finalayze.data.fetchers.tinkoff_data.AsyncSandboxClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
@@ -74,16 +64,12 @@ class TestTinkoffFetcherPersistentClient:
             client2 = fetcher._get_client()
 
             assert client1 is client2
-            mock_cls.assert_called_once_with("test-token")
+            mock_cls.assert_called_once_with(_TEST_TOKEN)
 
     def test_close_clears_client(self) -> None:
         """close() should set _client to None."""
-        fetcher = TinkoffFetcher(
-            token="test-token", registry=_make_registry(), sandbox=True
-        )
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.AsyncSandboxClient"
-        ) as mock_cls:
+        fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
+        with patch("finalayze.data.fetchers.tinkoff_data.AsyncSandboxClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
@@ -95,15 +81,11 @@ class TestTinkoffFetcherPersistentClient:
 
     def test_live_mode_uses_async_client(self) -> None:
         """sandbox=False should use AsyncClient, not AsyncSandboxClient."""
-        fetcher = TinkoffFetcher(
-            token="test-token", registry=_make_registry(), sandbox=False
-        )
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.AsyncClient"
-        ) as mock_cls:
+        fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=False)
+        with patch("finalayze.data.fetchers.tinkoff_data.AsyncClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
             client = fetcher._get_client()
             assert client is mock_client
-            mock_cls.assert_called_once_with("test-token")
+            mock_cls.assert_called_once_with(_TEST_TOKEN)

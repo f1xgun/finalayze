@@ -6,9 +6,9 @@ import os
 from unittest.mock import patch
 
 import pytest
+from config.settings import Settings
 from pydantic import ValidationError
 
-from config.settings import Settings
 from finalayze.core.modes import WorkMode
 
 
@@ -19,13 +19,15 @@ def test_sandbox_mode_requires_database_url() -> None:
         "FINALAYZE_DATABASE_URL": "",
         "FINALAYZE_LLM_API_KEY": "fake-key",
     }
-    with patch.dict(os.environ, env, clear=False):
-        with pytest.raises(ValidationError, match="FINALAYZE_DATABASE_URL is required"):
-            Settings(
-                mode=WorkMode.SANDBOX,
-                database_url="",
-                llm_api_key="fake-key",
-            )
+    with (
+        patch.dict(os.environ, env, clear=False),
+        pytest.raises(ValidationError, match="FINALAYZE_DATABASE_URL is required"),
+    ):
+        Settings(
+            mode=WorkMode.SANDBOX,
+            database_url="",
+            llm_api_key="fake-key",  # noqa: S106
+        )
 
 
 def test_debug_mode_fallback_database_url() -> None:
