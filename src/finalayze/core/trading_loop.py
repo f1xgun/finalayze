@@ -102,7 +102,7 @@ class TradingLoop:
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
         from finalayze.risk.kelly import RollingKelly  # noqa: PLC0415
         from finalayze.risk.loss_limits import LossLimitTracker  # noqa: PLC0415
-        from finalayze.risk.pre_trade_check import PreTradeChecker  # noqa: PLC0415
+        from finalayze.risk.pre_trade_check import PDTTracker, PreTradeChecker  # noqa: PLC0415
 
         # Store class references for runtime use without module-level imports
         self._OrderRequest = OrderRequest
@@ -135,9 +135,12 @@ class TradingLoop:
         self._stop_loss_prices: dict[str, Decimal] = {}
 
         # Risk management components
+        # 6A.7: Wire PDTTracker into PreTradeChecker
+        self._pdt_tracker = PDTTracker()
         self._pre_trade_checker = PreTradeChecker(
             max_position_pct=Decimal(str(settings.max_position_pct)),
             max_positions_per_market=settings.max_positions_per_market,
+            pdt_tracker=self._pdt_tracker,
         )
         _raw_loss_limit = getattr(settings, "daily_loss_limit_pct", 0.05)
         self._loss_limit_tracker = LossLimitTracker(
@@ -309,8 +312,16 @@ class TradingLoop:
         """Return current UTC datetime. Extracted for testability."""
         return datetime.now(UTC)
 
-    def _strategy_cycle(self) -> None:
+    def _strategy_cycle(self) -> None:  # noqa: PLR0912
         """For each market and instrument, generate a signal and submit orders."""
+        # 6A.1: Mode gate -- DEBUG mode must not send real orders
+        if not self._settings.mode.can_submit_orders():
+            _log.info(
+                "_strategy_cycle: mode=%s does not allow orders -- skipping",
+                self._settings.mode,
+            )
+            return
+
         now = self._now()
         market_equities: dict[str, Decimal] = {}
         baseline_equities: dict[str, Decimal] = {}
@@ -421,6 +432,18 @@ class TradingLoop:
         current_minutes = dt.hour * 60 + dt.minute
         return open_minutes <= current_minutes < close_minutes
 
+    def _is_day_trade(self, symbol: str, side: str, market_id: str) -> bool:
+        """Return True if this order would open+close a position same day.
+
+        A SELL of a position opened today constitutes a day trade.
+        Simplified heuristic: a SELL order for a symbol with an existing
+        position is flagged as a potential day trade. PDT is US-only.
+        """
+        if market_id != "us":
+            return False
+        broker = self._broker_router.route(market_id)
+        return side == "SELL" and broker.has_position(symbol)
+
     def _process_instrument(
         self,
         instrument: Instrument,
@@ -467,7 +490,13 @@ class TradingLoop:
         # #162: Use RollingKelly for position sizing
         kelly_fraction = self._kelly_sizer.optimal_fraction()
         order = self._build_order(
-            signal, level, portfolio.cash, candles, instrument.symbol, kelly_fraction
+            signal,
+            level,
+            portfolio.equity,
+            portfolio.cash,
+            candles,
+            instrument.symbol,
+            kelly_fraction,
         )
         if order is None:
             return
@@ -476,14 +505,22 @@ class TradingLoop:
         order_value = order.quantity * (candles[-1].close if candles else _ZERO)
         open_position_count = len([q for q in portfolio.positions.values() if q > _ZERO])
 
-        # #154: Compute cross-market exposure as invested value / total equity.
-        # portfolio.positions maps symbol -> share quantity, so we must convert
-        # to monetary values.  Use (equity - cash) as invested value since the
-        # broker already tracks mark-to-market equity.
+        # 6A.4: Aggregate invested value across ALL markets for cross-market exposure
         total_equity: Decimal = self._compute_total_equity_base()
-        invested_value = max(portfolio.equity - portfolio.cash, _ZERO)
-        # Prospective exposure includes the proposed order value
-        prospective_invested = invested_value + order_value
+        total_invested = _ZERO
+        for m_id in self._circuit_breakers:
+            m_equity = self._get_market_equity(m_id)
+            if m_equity is None:
+                continue
+            m_broker = self._broker_router.route(m_id)
+            m_portfolio = m_broker.get_portfolio()
+            m_invested = max(m_equity - m_portfolio.cash, _ZERO)
+            currency = _MARKET_CURRENCY.get(m_id, "USD")
+            total_invested += self._fx.to_base(m_invested, currency)
+
+        order_currency = _MARKET_CURRENCY.get(market_id, "USD")
+        order_value_base = self._fx.to_base(order_value, order_currency)
+        prospective_invested = total_invested + order_value_base
         cross_exposure: Decimal = (
             prospective_invested / total_equity if total_equity > _ZERO else _ZERO
         )
@@ -492,6 +529,18 @@ class TradingLoop:
             max_exposure = Decimal(str(float(_raw_max_exp)))
         except (TypeError, ValueError):
             max_exposure = Decimal("0.80")
+
+        # 6A.7: Detect day trades for PDT compliance
+        is_day_trade = self._is_day_trade(order.symbol, order.side, market_id)
+
+        # 6A.2: Compute sector exposure for concentration check
+        sector_exposure = _ZERO
+        for qty in portfolio.positions.values():
+            if qty > _ZERO:
+                # Use last candle price as proxy for all positions in segment
+                sector_exposure += qty * (candles[-1].close if candles else _ZERO)
+        # Only pass if we have segment context
+        seg_exposure: Decimal | None = sector_exposure if seg_id else None
 
         pre_result = self._pre_trade_checker.check(
             order_value=order_value,
@@ -505,6 +554,9 @@ class TradingLoop:
             else None,
             cross_market_exposure_pct=cross_exposure,
             max_cross_market_exposure_pct=max_exposure,
+            is_day_trade=is_day_trade,
+            sector_exposure_value=seg_exposure,
+            sector_id=seg_id,
         )
 
         if not pre_result.passed:
@@ -517,10 +569,15 @@ class TradingLoop:
 
         self._submit_order(order, market_id, candles=candles)
 
+        # 6A.7: Record day trade after successful order submission
+        if is_day_trade:
+            self._pdt_tracker.record_day_trade(now.date())
+
     def _build_order(
         self,
         signal: Signal,
         level: CircuitLevel,
+        portfolio_equity: Decimal,
         available_cash: Decimal,
         candles: list[Candle],
         symbol: str,
@@ -532,8 +589,9 @@ class TradingLoop:
             if signal.confidence < min_conf:
                 return None
 
-        # #162: Use kelly_fraction for position sizing (not raw signal.confidence)
-        order_value = kelly_fraction * available_cash
+        # 6A.11: Kelly sizes against portfolio equity, capped by available cash
+        order_value = kelly_fraction * portfolio_equity
+        order_value = min(order_value, available_cash)
         if level == self._CircuitLevel.CAUTION:
             order_value = order_value * _CAUTION_SIZE_FACTOR
 
@@ -764,6 +822,11 @@ class TradingLoop:
 
         # Reset loss limit tracker daily baseline
         self._loss_limit_tracker.reset_day(now, total_equity)
+
+        # 6A.10: Reset weekly baseline on Monday (weekday 0)
+        monday = 0
+        if now.weekday() == monday:
+            self._loss_limit_tracker.reset_week(now, total_equity)
 
         self._alerter.on_daily_summary(market_pnl, total_equity)
         _log.info("Daily reset complete. Total equity: %s", total_equity)

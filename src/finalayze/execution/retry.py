@@ -12,6 +12,21 @@ import httpx
 
 from finalayze.core.exceptions import InstrumentNotFoundError, InsufficientFundsError
 
+try:
+    import grpc  # type: ignore[import-untyped]
+
+    _GRPC_RETRYABLE: tuple[type[Exception], ...] = (grpc.RpcError,)
+except ImportError:
+    _GRPC_RETRYABLE: tuple[type[Exception], ...] = ()  # type: ignore[no-redef]
+
+_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
+    ConnectionError,
+    TimeoutError,
+    httpx.ConnectError,
+    httpx.TimeoutException,
+    *_GRPC_RETRYABLE,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -58,12 +73,7 @@ class RetryPolicy:
                 return fn()
             except self._non_retryable:
                 raise
-            except (
-                ConnectionError,
-                TimeoutError,
-                httpx.ConnectError,
-                httpx.TimeoutException,
-            ) as exc:
+            except _RETRYABLE_EXCEPTIONS as exc:
                 last_exc = exc
                 if attempt < self._max_retries:
                     delay = self._compute_delay(attempt)
@@ -90,12 +100,7 @@ class RetryPolicy:
                 return fn()
             except self._non_retryable:
                 raise
-            except (
-                ConnectionError,
-                TimeoutError,
-                httpx.ConnectError,
-                httpx.TimeoutException,
-            ) as exc:
+            except _RETRYABLE_EXCEPTIONS as exc:
                 last_exc = exc
                 if attempt < self._max_retries:
                     delay = self._compute_delay(attempt)

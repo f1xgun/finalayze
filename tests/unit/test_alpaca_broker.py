@@ -122,6 +122,53 @@ class TestAlpacaBrokerSubmitOrder:
         assert result.filled is True
 
 
+class TestAlpacaBrokerFillReporting:
+    """6A.9: Partial fill and None fill_qty reporting."""
+
+    def test_partial_fill_reports_actual_quantity(self) -> None:
+        mock_client = _mock_trading_client()
+        mock_order = MagicMock()
+        mock_order.filled_avg_price = FILL_PRICE_BUY
+        mock_order.filled_qty = "5"
+        mock_client.submit_order.return_value = mock_order
+
+        with patch("finalayze.execution.alpaca_broker.TradingClient", return_value=mock_client):
+            broker = _make_broker()
+            order = OrderRequest(symbol="AAPL", side="BUY", quantity=Decimal(10))
+            result = broker.submit_order(order)
+
+        expected_qty = Decimal(5)
+        assert result.quantity == expected_qty
+
+    def test_none_fill_qty_reports_zero(self) -> None:
+        mock_client = _mock_trading_client()
+        mock_order = MagicMock()
+        mock_order.filled_avg_price = None
+        mock_order.filled_qty = None
+        mock_client.submit_order.return_value = mock_order
+
+        with patch("finalayze.execution.alpaca_broker.TradingClient", return_value=mock_client):
+            broker = _make_broker()
+            order = OrderRequest(symbol="AAPL", side="BUY", quantity=Decimal(10))
+            result = broker.submit_order(order)
+
+        assert result.quantity == Decimal(0)
+
+    def test_zero_fill_qty_reports_zero(self) -> None:
+        mock_client = _mock_trading_client()
+        mock_order = MagicMock()
+        mock_order.filled_avg_price = None
+        mock_order.filled_qty = 0
+        mock_client.submit_order.return_value = mock_order
+
+        with patch("finalayze.execution.alpaca_broker.TradingClient", return_value=mock_client):
+            broker = _make_broker()
+            order = OrderRequest(symbol="AAPL", side="BUY", quantity=Decimal(10))
+            result = broker.submit_order(order)
+
+        assert result.quantity == Decimal(0)
+
+
 class TestAlpacaBrokerGetPortfolio:
     def test_portfolio_returns_state(self) -> None:
         mock_client = _mock_trading_client()

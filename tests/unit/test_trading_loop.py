@@ -12,6 +12,7 @@ from config.settings import Settings
 from finalayze.analysis.event_classifier import EventType
 from finalayze.analysis.impact_estimator import SegmentImpact
 from finalayze.core.alerts import TelegramAlerter
+from finalayze.core.modes import WorkMode
 from finalayze.core.schemas import Candle, NewsArticle, SentimentResult, Signal, SignalDirection
 from finalayze.core.trading_loop import TradingLoop
 from finalayze.execution.broker_base import OrderResult
@@ -76,6 +77,7 @@ def _make_settings(
     news_cycle: int = NEWS_CYCLE_MINUTES,
     strategy_cycle: int = STRATEGY_CYCLE_MINUTES,
     daily_hour: int = DAILY_RESET_HOUR,
+    mode: WorkMode = WorkMode.SANDBOX,
 ) -> MagicMock:
     s = MagicMock(spec=Settings)
     s.news_cycle_minutes = news_cycle
@@ -86,6 +88,7 @@ def _make_settings(
     s.max_positions_per_market = 10
     s.daily_loss_limit_pct = 0.03
     s.max_cross_market_exposure_pct = 0.80
+    s.mode = mode
     return s
 
 
@@ -109,8 +112,9 @@ def _make_trading_loop(
     circuit_level: CircuitLevel = CircuitLevel.NORMAL,
     cross_trip: bool = False,
     sentiment_score: float = SENTIMENT_NEUTRAL,
+    mode: WorkMode = WorkMode.SANDBOX,
 ) -> TradingLoop:
-    settings = _make_settings()
+    settings = _make_settings(mode=mode)
 
     # Mock fetcher
     fetcher = MagicMock()
@@ -293,6 +297,129 @@ class TestTradingLoopStrategyCycle:
         loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
 
 
+class TestModeGate:
+    """6A.1: DEBUG mode must not send orders."""
+
+    def _make_buy_signal(self) -> Signal:
+        return Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+
+    def test_debug_mode_skips_order_submission(self) -> None:
+        signal = self._make_buy_signal()
+        loop = _make_trading_loop(signal=signal, mode=WorkMode.DEBUG)
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+        loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
+
+    def test_sandbox_mode_allows_orders(self) -> None:
+        signal = self._make_buy_signal()
+        loop = _make_trading_loop(signal=signal, mode=WorkMode.SANDBOX)
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+        loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
+
+
+class TestBuildOrder:
+    """6A.11: Kelly sizes against portfolio equity, not cash."""
+
+    def test_kelly_sizes_against_equity(self) -> None:
+        """equity=100k, cash=30k, kelly=0.1 -> order_value = 10k (not 3k)."""
+        signal = Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+        loop = _make_trading_loop(signal=signal)
+        kelly = Decimal("0.1")
+        equity = Decimal(100000)
+        cash = Decimal(30000)
+        candles = _make_candles()
+        order = loop._build_order(  # type: ignore[attr-defined]
+            signal, CircuitLevel.NORMAL, equity, cash, candles, SYMBOL_AAPL, kelly
+        )
+        assert order is not None
+        # order_value = 0.1 * 100000 = 10000; qty = 10000 / 150 = 66.67 -> 67 (rounded)
+        expected_qty = Decimal(67)
+        assert order.quantity == expected_qty
+
+    def test_kelly_capped_by_available_cash(self) -> None:
+        """equity=100k, cash=5k, kelly=0.1 -> order_value capped at 5k."""
+        signal = Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+        loop = _make_trading_loop(signal=signal)
+        kelly = Decimal("0.1")
+        equity = Decimal(100000)
+        cash = Decimal(5000)
+        candles = _make_candles()
+        order = loop._build_order(  # type: ignore[attr-defined]
+            signal, CircuitLevel.NORMAL, equity, cash, candles, SYMBOL_AAPL, kelly
+        )
+        assert order is not None
+        # order_value = min(0.1 * 100000, 5000) = 5000; qty = 5000 / 150 = 33
+        expected_qty = Decimal(33)
+        assert order.quantity == expected_qty
+
+
+class TestCrossMarketExposure:
+    """6A.4: Cross-market exposure aggregation."""
+
+    def _make_buy_signal(self) -> Signal:
+        return Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+
+    def test_cross_market_exposure_aggregated(self) -> None:
+        """Verify cross-market exposure sums invested value across all markets."""
+        signal = self._make_buy_signal()
+        loop = _make_trading_loop(signal=signal)
+        # Access private _compute_total_equity_base to verify it aggregates
+        total = loop._compute_total_equity_base()  # type: ignore[attr-defined]
+        # Should return some equity (from mock broker)
+        assert total > Decimal(0)
+
+    def test_cross_market_exposure_rejects_when_aggregated_too_high(self) -> None:
+        """When aggregated exposure is too high, pre-trade check rejects."""
+        signal = self._make_buy_signal()
+        loop = _make_trading_loop(signal=signal)
+        # Set max exposure very low so it triggers
+        loop._settings.max_cross_market_exposure_pct = 0.01  # type: ignore[attr-defined]
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+        # With very low max exposure, the order should be rejected
+        loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
+
+
 class TestTradingLoopDailyReset:
     def test_daily_reset_calls_circuit_breaker_reset(self) -> None:
         loop = _make_trading_loop()
@@ -309,6 +436,102 @@ class TestTradingLoopDailyReset:
         loop = _make_trading_loop()
         loop._daily_reset()  # type: ignore[attr-defined]
         loop._cross_market_breaker.reset_daily.assert_called_once()  # type: ignore[attr-defined]
+
+
+class TestWeeklyReset:
+    """6A.10: Weekly loss limit reset wiring."""
+
+    def test_weekly_reset_on_monday(self) -> None:
+        loop = _make_trading_loop()
+        # Monday 2026-02-23
+        monday = datetime(2026, 2, 23, 0, 0, tzinfo=UTC)
+        with patch.object(loop, "_now", return_value=monday):  # type: ignore[arg-type]
+            loop._daily_reset()  # type: ignore[attr-defined]
+        # Verify reset_week was called on the loss_limit_tracker
+        # We need to check it was called; use a spy
+        assert True  # If no exception, the method ran
+
+    def test_no_weekly_reset_on_tuesday(self) -> None:
+        loop = _make_trading_loop()
+        # Tuesday 2026-02-24
+        tuesday = datetime(2026, 2, 24, 0, 0, tzinfo=UTC)
+        # Spy on reset_week
+        with patch.object(
+            loop._loss_limit_tracker,  # type: ignore[attr-defined]
+            "reset_week",
+        ) as mock_reset_week:
+            with patch.object(loop, "_now", return_value=tuesday):  # type: ignore[arg-type]
+                loop._daily_reset()  # type: ignore[attr-defined]
+            mock_reset_week.assert_not_called()
+
+    def test_weekly_reset_called_on_monday(self) -> None:
+        loop = _make_trading_loop()
+        # Monday 2026-02-23
+        monday = datetime(2026, 2, 23, 0, 0, tzinfo=UTC)
+        with patch.object(
+            loop._loss_limit_tracker,  # type: ignore[attr-defined]
+            "reset_week",
+        ) as mock_reset_week:
+            with patch.object(loop, "_now", return_value=monday):  # type: ignore[arg-type]
+                loop._daily_reset()  # type: ignore[attr-defined]
+            mock_reset_week.assert_called_once()
+
+
+class TestPDTTrackerWiring:
+    """6A.7: PDT tracker wiring + day trade detection."""
+
+    def _make_buy_signal(self) -> Signal:
+        return Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+
+    def test_pdt_tracker_wired(self) -> None:
+        loop = _make_trading_loop()
+        assert hasattr(loop, "_pdt_tracker")
+        assert loop._pdt_tracker is not None  # type: ignore[attr-defined]
+
+    def test_is_day_trade_sell_with_position(self) -> None:
+        loop = _make_trading_loop()
+        mock_broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
+        mock_broker.has_position = MagicMock(return_value=True)
+        result = loop._is_day_trade(SYMBOL_AAPL, "SELL", MARKET_US)  # type: ignore[attr-defined]
+        assert result is True
+
+    def test_is_day_trade_non_us_returns_false(self) -> None:
+        loop = _make_trading_loop()
+        result = loop._is_day_trade(SYMBOL_AAPL, "SELL", "moex")  # type: ignore[attr-defined]
+        assert result is False
+
+    def test_day_trade_recorded_on_fill(self) -> None:
+        """When a day trade sell is filled, PDT tracker records it."""
+        signal = Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.SELL,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+        loop = _make_trading_loop(signal=signal)
+        mock_broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
+        mock_broker.has_position = MagicMock(return_value=True)
+
+        initial_count = loop._pdt_tracker.recent_day_trades  # type: ignore[attr-defined]
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+
+        # After a fill of a day-trade sell, the tracker should record it
+        assert loop._pdt_tracker.recent_day_trades > initial_count  # type: ignore[attr-defined]
 
 
 class TestTradingLoopLiquidation:

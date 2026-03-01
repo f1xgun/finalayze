@@ -116,12 +116,16 @@ class PreTradeChecker:
         max_position_pct: Decimal = Decimal("0.20"),
         max_positions_per_market: int = 10,
         pdt_tracker: PDTTracker | None = None,
+        max_sector_concentration_pct: Decimal = Decimal("0.40"),
+        min_cash_reserve_pct: Decimal = Decimal("0.20"),
     ) -> None:
         self._max_position_pct = max_position_pct
         self._max_positions = max_positions_per_market
         self._pdt_tracker = pdt_tracker
+        self._max_sector_pct = max_sector_concentration_pct
+        self._min_cash_reserve_pct = min_cash_reserve_pct
 
-    def check(
+    def check(  # noqa: PLR0912
         self,
         order_value: Decimal,
         portfolio_equity: Decimal,
@@ -137,6 +141,8 @@ class PreTradeChecker:
         cross_market_exposure_pct: Decimal | None = None,
         max_cross_market_exposure_pct: Decimal | None = None,
         is_day_trade: bool = False,
+        sector_exposure_value: Decimal | None = None,
+        sector_id: str = "",
     ) -> PreTradeResult:
         """Run all pre-trade risk checks.
 
@@ -205,9 +211,29 @@ class PreTradeChecker:
                 f"Open positions ({open_position_count}) >= max ({self._max_positions})"
             )
 
+        # 7b. Sector/segment concentration
+        if sector_exposure_value is not None and portfolio_equity > 0 and sector_id:
+            prospective = sector_exposure_value + order_value
+            concentration = prospective / portfolio_equity
+            if concentration > self._max_sector_pct:
+                violations.append(
+                    f"Sector '{sector_id}' concentration {float(concentration):.1%} "
+                    f"exceeds max {float(self._max_sector_pct):.1%}"
+                )
+
         # 8. Cash sufficient
         if order_value > available_cash:
             violations.append(f"Insufficient cash: need {order_value}, have {available_cash}")
+
+        # 8b. Cash reserve check
+        if portfolio_equity > 0:
+            post_trade_cash = available_cash - order_value
+            reserve_ratio = post_trade_cash / portfolio_equity
+            if reserve_ratio < self._min_cash_reserve_pct:
+                violations.append(
+                    f"Post-trade cash reserve {float(reserve_ratio):.1%} "
+                    f"below min {float(self._min_cash_reserve_pct):.1%}"
+                )
 
         # 9. Stop-loss must be set
         if require_stop_loss and stop_loss_price is None:

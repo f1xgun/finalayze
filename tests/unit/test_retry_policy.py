@@ -109,6 +109,45 @@ class TestBackoffTiming:
         assert delay <= 5.0
 
 
+class TestGrpcRetry:
+    """Test gRPC error retry behavior."""
+
+    def test_retries_on_grpc_rpc_error(self) -> None:
+        """Verify that grpc.RpcError is retried."""
+        # Create a mock grpc.RpcError
+        grpc_error = type("RpcError", (Exception,), {})()
+
+        policy = RetryPolicy(max_retries=1, base_delay=0.001)
+        fn = MagicMock(side_effect=[type(grpc_error)("unavailable"), "recovered"])
+
+        # Patch the _RETRYABLE_EXCEPTIONS to include our mock RpcError
+        with (
+            patch("finalayze.execution.retry.time.sleep"),
+            patch(
+                "finalayze.execution.retry._RETRYABLE_EXCEPTIONS",
+                (
+                    ConnectionError,
+                    TimeoutError,
+                    type(grpc_error),
+                ),
+            ),
+        ):
+            result = policy.execute(fn)
+        assert result == "recovered"
+        expected_calls = 2
+        assert fn.call_count == expected_calls
+
+    def test_grpc_import_missing_still_works(self) -> None:
+        """When grpc is not installed, ConnectionError is still retried."""
+        policy = RetryPolicy(max_retries=1, base_delay=0.001)
+        fn = MagicMock(side_effect=[ConnectionError("down"), "recovered"])
+        with patch("finalayze.execution.retry.time.sleep"):
+            result = policy.execute(fn)
+        assert result == "recovered"
+        expected_calls = 2
+        assert fn.call_count == expected_calls
+
+
 class TestAsyncRetry:
     """Test async retry variant."""
 

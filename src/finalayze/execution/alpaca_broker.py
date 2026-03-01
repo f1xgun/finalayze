@@ -97,7 +97,7 @@ class AlpacaBroker(BrokerBase):
             fill_price=fill_price,
             symbol=order.symbol,
             side=order.side,
-            quantity=Decimal(str(result.filled_qty or order.quantity)),  # type: ignore[union-attr]
+            quantity=Decimal(str(result.filled_qty)) if result.filled_qty else Decimal(0),  # type: ignore[union-attr]
         )
 
     def get_portfolio(self) -> PortfolioState:
