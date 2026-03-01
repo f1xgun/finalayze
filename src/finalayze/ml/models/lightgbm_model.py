@@ -72,7 +72,14 @@ class LightGBMModel(BaseMLModel):
         y_train, y_cal = y_arr[:n_train], y_arr[n_train:]
 
         self._model = lgb.LGBMClassifier(
-            n_estimators=100, max_depth=4, learning_rate=0.1, verbosity=-1
+            n_estimators=100,
+            max_depth=4,
+            learning_rate=0.1,
+            reg_alpha=0.1,
+            reg_lambda=1.0,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            verbosity=-1,
         )
         self._model.fit(x_train, y_train)
 
