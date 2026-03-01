@@ -99,7 +99,18 @@ class LightGBMModel(BaseMLModel):
 
     @classmethod
     def load_from(cls, path: Path) -> LightGBMModel:
-        """Load a previously saved LightGBMModel."""
+        """Load a previously saved LightGBMModel.
+
+        If an HMAC key is configured, verifies file integrity before loading.
+        """
         import joblib  # noqa: PLC0415, import-untyped
+
+        from finalayze.ml.loader import _get_hmac_key  # noqa: PLC0415
+
+        key = _get_hmac_key()
+        if key:
+            from finalayze.ml.integrity import verify_model  # noqa: PLC0415
+
+            verify_model(path, key.encode())
 
         return joblib.load(path)  # type: ignore[no-any-return]

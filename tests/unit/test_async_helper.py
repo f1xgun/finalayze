@@ -89,6 +89,9 @@ class TestRunAsync:
         loop = _make_loop()
         loop._stop_event = threading.Event()
         loop._scheduler = None
+        loop._cache = None
+        loop._event_bus = None
+        loop._fx_service = None
         loop.stop = TradingLoop.stop.__get__(loop)
 
         async def simple() -> int:

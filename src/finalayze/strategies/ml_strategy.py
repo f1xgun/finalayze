@@ -7,10 +7,10 @@ alongside rule-based strategies.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import structlog
 import yaml
 
 from finalayze.core.exceptions import InsufficientDataError
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from finalayze.ml.registry import MLModelRegistry
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
-_log = logging.getLogger(__name__)
+_log = structlog.get_logger()
 
 _DEFAULT_THRESHOLD = 0.15
 _DEFAULT_MIN_CONFIDENCE = 0.5

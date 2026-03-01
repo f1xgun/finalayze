@@ -10,6 +10,8 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import threading
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -56,6 +58,24 @@ class TinkoffFetcher(BaseFetcher):
         self._registry = registry
         self._sandbox = sandbox
         self._rate_limiter = rate_limiter
+        self._client: AsyncClient | AsyncSandboxClient | None = None
+        self._client_lock = threading.Lock()
+
+    def _get_client(self) -> AsyncClient | AsyncSandboxClient:
+        """Return the persistent async client, creating it lazily."""
+        if self._client is None:
+            with self._client_lock:
+                if self._client is None:  # double-check
+                    cls = AsyncSandboxClient if self._sandbox else AsyncClient
+                    self._client = cls(self._token)
+        return self._client
+
+    def close(self) -> None:
+        """Close the persistent gRPC channel."""
+        if self._client is not None:
+            with contextlib.suppress(Exception):
+                asyncio.run(self._client.__aexit__(None, None, None))  # type: ignore[no-untyped-call]
+            self._client = None
 
     def fetch_candles(
         self,
@@ -94,15 +114,14 @@ class TinkoffFetcher(BaseFetcher):
         interval: CandleInterval,
     ) -> list[Any]:
         """Async call to Tinkoff SDK get_all_candles."""
-        client_cls = AsyncSandboxClient if self._sandbox else AsyncClient
-        async with client_cls(self._token) as client:
-            response = await client.market_data.get_candles(
-                figi=figi,
-                from_=start,
-                to=end,
-                interval=interval,
-            )
-            return list(response.candles)
+        client = self._get_client()
+        response = await client.market_data.get_candles(  # type: ignore[attr-defined]
+            figi=figi,
+            from_=start,
+            to=end,
+            interval=interval,
+        )
+        return list(response.candles)
 
     def _symbol_to_figi(self, symbol: str) -> str:
         """Look up FIGI for a MOEX symbol via the instrument registry."""

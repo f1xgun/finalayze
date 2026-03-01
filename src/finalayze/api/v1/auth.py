@@ -9,6 +9,7 @@ or the lower-level factory for cases where the key is known at module import tim
 
 from __future__ import annotations
 
+import hmac
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Security
@@ -32,7 +33,7 @@ def require_api_key(expected_key: str) -> Callable[..., Any]:
             raise HTTPException(status_code=503, detail="API key not configured on server")
         if key is None:
             raise HTTPException(status_code=401, detail="X-API-Key header is required")
-        if key != expected_key:
+        if not hmac.compare_digest(key, expected_key):
             raise HTTPException(status_code=401, detail="Invalid API key")
 
     return _verify
@@ -53,5 +54,5 @@ async def api_key_auth(key: str | None = Security(_header_scheme)) -> None:
         raise HTTPException(status_code=503, detail="API key not configured on server")
     if key is None:
         raise HTTPException(status_code=401, detail="X-API-Key header is required")
-    if key != expected:
+    if not hmac.compare_digest(key, expected):
         raise HTTPException(status_code=401, detail="Invalid API key")

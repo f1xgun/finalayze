@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 import time
 from typing import TYPE_CHECKING, TypeVar
 
 import httpx
+import structlog
 
 from finalayze.core.exceptions import InstrumentNotFoundError, InsufficientFundsError
 
@@ -30,7 +30,7 @@ _RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-_log = logging.getLogger(__name__)
+_log = structlog.get_logger()
 
 _T = TypeVar("_T")
 

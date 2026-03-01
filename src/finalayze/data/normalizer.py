@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
+
+import structlog
 
 from finalayze.core.exceptions import DataFetchError
 
 if TYPE_CHECKING:
     from finalayze.core.schemas import Candle
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 _ZERO = Decimal(0)
 

@@ -12,7 +12,9 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
+import threading
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -54,6 +56,24 @@ class TinkoffBroker(BrokerBase):
         self._sandbox = sandbox
         self._retry = retry_policy
         self._account_id: str = ""  # populated lazily on first API call
+        self._client: AsyncClient | AsyncSandboxClient | None = None
+        self._client_lock = threading.Lock()
+
+    def _get_client(self) -> AsyncClient | AsyncSandboxClient:
+        """Return the persistent async client, creating it lazily."""
+        if self._client is None:
+            with self._client_lock:
+                if self._client is None:  # double-check
+                    cls = AsyncSandboxClient if self._sandbox else AsyncClient
+                    self._client = cls(self._token)
+        return self._client
+
+    def close(self) -> None:
+        """Close the persistent gRPC channel."""
+        if self._client is not None:
+            with contextlib.suppress(Exception):
+                asyncio.run(self._client.__aexit__(None, None, None))  # type: ignore[no-untyped-call]
+            self._client = None
 
     def _call(self, fn: object) -> object:
         """Execute fn with retry if a RetryPolicy is configured."""
@@ -74,9 +94,8 @@ class TinkoffBroker(BrokerBase):
 
     async def _get_accounts_async(self) -> object:
         """Async call to fetch accounts list."""
-        client_cls = AsyncSandboxClient if self._sandbox else AsyncClient
-        async with client_cls(self._token) as client:
-            return await client.users.get_accounts()
+        client = self._get_client()
+        return await client.users.get_accounts()  # type: ignore[attr-defined]
 
     def submit_order(
         self,
@@ -136,15 +155,14 @@ class TinkoffBroker(BrokerBase):
         direction: OrderDirection,
     ) -> object:
         """Async call to Tinkoff SDK post_order."""
-        client_cls = AsyncSandboxClient if self._sandbox else AsyncClient
-        async with client_cls(self._token) as client:
-            return await client.orders.post_order(
-                figi=figi,
-                quantity=quantity,
-                direction=direction,
-                order_type=OrderType.ORDER_TYPE_MARKET,
-                account_id=self._account_id,
-            )
+        client = self._get_client()
+        return await client.orders.post_order(  # type: ignore[attr-defined]
+            figi=figi,
+            quantity=quantity,
+            direction=direction,
+            order_type=OrderType.ORDER_TYPE_MARKET,
+            account_id=self._account_id,
+        )
 
     def get_portfolio(self) -> PortfolioState:
         """Return current MOEX portfolio state from Tinkoff."""
@@ -174,9 +192,8 @@ class TinkoffBroker(BrokerBase):
 
     async def _get_portfolio_async(self) -> object:
         """Async call to Tinkoff SDK get_portfolio."""
-        client_cls = AsyncSandboxClient if self._sandbox else AsyncClient
-        async with client_cls(self._token) as client:
-            return await client.operations.get_portfolio(account_id=self._account_id)
+        client = self._get_client()
+        return await client.operations.get_portfolio(account_id=self._account_id)  # type: ignore[attr-defined]
 
     def has_position(self, symbol: str) -> bool:
         """Return True if Tinkoff account holds a non-zero position in symbol."""
@@ -204,9 +221,8 @@ class TinkoffBroker(BrokerBase):
 
     async def _cancel_order_async(self, order_id: str) -> None:
         """Async call to Tinkoff SDK cancel_order."""
-        client_cls = AsyncSandboxClient if self._sandbox else AsyncClient
-        async with client_cls(self._token) as client:
-            await client.orders.cancel_order(account_id=self._account_id, order_id=order_id)
+        client = self._get_client()
+        await client.orders.cancel_order(account_id=self._account_id, order_id=order_id)  # type: ignore[attr-defined]
 
     @staticmethod
     def _quotation_to_decimal(q: object) -> Decimal:

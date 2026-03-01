@@ -24,8 +24,14 @@ class Settings(BaseSettings):
     # Core
     mode: WorkMode = WorkMode.DEBUG
     base_currency: str = "USD"
-    database_url: str = "postgresql+asyncpg://finalayze:secret@localhost:5432/finalayze"
+    database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
+
+    # DB pool
+    db_pool_size: int = 10
+    db_max_overflow: int = 5
+    db_pool_timeout: int = 30
+    db_pool_recycle: int = 1800
 
     # API Keys
     finnhub_api_key: str = ""
@@ -77,9 +83,16 @@ class Settings(BaseSettings):
     ml_retrain_interval_hours: int = 168  # weekly
     ml_model_dir: str = "models/"
     ml_min_train_samples: int = 252  # ~1 year of daily bars
+    ml_model_hmac_key: str = ""  # FINALAYZE_ML_MODEL_HMAC_KEY — for model integrity
+
+    # FX
+    fx_update_interval_minutes: int = 60  # FINALAYZE_FX_UPDATE_INTERVAL_MINUTES
 
     # Safety
     real_confirmed: bool = False
+
+    # CORS
+    cors_origins: list[str] = []  # FINALAYZE_CORS_ORIGINS (comma-separated)
 
     # API auth
     api_key: str = ""  # FINALAYZE_API_KEY — set in production
@@ -92,7 +105,12 @@ class Settings(BaseSettings):
         """Ensure required keys are set for non-DEBUG/TEST modes."""
         # DEBUG and TEST modes skip credential validation (no live services needed)
         if self.mode in (WorkMode.DEBUG, WorkMode.TEST):
+            if not self.database_url:
+                self.database_url = "postgresql+asyncpg://finalayze:secret@localhost:5432/finalayze"
             return self
+        # Non-DEBUG/TEST modes require an explicit database URL
+        if not self.database_url:
+            raise ValueError("FINALAYZE_DATABASE_URL is required for non-DEBUG/TEST modes")
         # All non-DEBUG modes need a live LLM
         if not self.llm_api_key and not self.anthropic_api_key:
             raise ValueError("llm_api_key (or anthropic_api_key) is required for non-DEBUG mode")
