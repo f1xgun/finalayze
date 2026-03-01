@@ -650,7 +650,6 @@ class TradingLoop:
         save_ensemble_fn: object,
     ) -> None:
         """Retrain a single segment's ML ensemble with validation gating."""
-        from sklearn.metrics import accuracy_score  # noqa: PLC0415
 
         # Fetch candles for each instrument in this segment
         market_id = segment_id.split("_", maxsplit=1)[0]
@@ -712,26 +711,29 @@ class TradingLoop:
         ensemble = self._ml_registry.create_ensemble(segment_id)
         ensemble.fit(train_features, train_labels)
 
-        # Validation gate: accuracy must exceed 52%
-        val_preds = [round(ensemble.predict_proba(f)) for f in val_features]
-        val_accuracy = float(accuracy_score(val_labels, val_preds))
+        # Validation gate: accuracy, Brier score, and log-loss (6C.7)
+        from finalayze.ml.training import validate_ensemble  # noqa: PLC0415
 
-        _min_accuracy = 0.52
-        if val_accuracy < _min_accuracy:
+        result = validate_ensemble(ensemble, val_features, val_labels)
+        if not result.passed:
             _log.warning(
-                "_retrain: validation accuracy %.3f < %.2f for %s — rejecting",
-                val_accuracy,
-                _min_accuracy,
+                "_retrain: validation failed for %s — acc=%.3f brier=%.3f logloss=%.3f",
                 segment_id,
+                result.accuracy,
+                result.brier_score,
+                result.log_loss_val,
             )
             return
 
         # Hot-swap into registry (thread-safe via lock)
         self._ml_registry.register(segment_id, ensemble)
         _log.info(
-            "_retrain: registered new ensemble for %s (val_accuracy=%.3f)",
+            "_retrain: registered new ensemble for %s "
+            "(acc=%.3f brier=%.3f logloss=%.3f)",
             segment_id,
-            val_accuracy,
+            result.accuracy,
+            result.brier_score,
+            result.log_loss_val,
         )
 
         # Persist to disk

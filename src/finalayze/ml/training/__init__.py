@@ -7,7 +7,10 @@ logic.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
 
 from finalayze.ml.features.technical import compute_features
 
@@ -15,8 +18,46 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from finalayze.core.schemas import Candle
+    from finalayze.ml.models.ensemble import EnsembleModel
 
 DEFAULT_WINDOW_SIZE = 60
+
+# Validation gate thresholds (6C.7)
+_MIN_ACCURACY = 0.52
+_MAX_BRIER_SCORE = 0.25  # perfect = 0.0, coin flip = 0.25
+_MAX_LOG_LOSS = 0.69  # coin flip = ln(2) ~ 0.693
+
+
+@dataclass
+class ValidationResult:
+    """Result of ensemble validation with multiple metrics."""
+
+    accuracy: float
+    brier_score: float
+    log_loss_val: float
+    n_samples: int
+    passed: bool
+
+
+def validate_ensemble(
+    ensemble: EnsembleModel,
+    val_features: list[dict[str, float]],
+    val_labels: list[int],
+) -> ValidationResult:
+    """Evaluate an ensemble on validation data and return metrics + pass/fail."""
+    probas = [ensemble.predict_proba(f) for f in val_features]
+    preds = [round(p) for p in probas]
+    acc = float(accuracy_score(val_labels, preds))
+    brier = float(brier_score_loss(val_labels, probas))
+    ll = float(log_loss(val_labels, probas, labels=[0, 1]))
+    passed = acc >= _MIN_ACCURACY and brier <= _MAX_BRIER_SCORE and ll <= _MAX_LOG_LOSS
+    return ValidationResult(
+        accuracy=acc,
+        brier_score=brier,
+        log_loss_val=ll,
+        n_samples=len(val_labels),
+        passed=passed,
+    )
 
 
 def build_windows(

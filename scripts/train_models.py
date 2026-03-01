@@ -22,7 +22,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))  # for config.settings
 # torch must be imported before lightgbm to prevent OpenMP thread-pool conflicts
 import torch  # noqa: F401
 from config.settings import Settings
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -183,33 +183,45 @@ def train_one_segment(
     segment_dir = output_dir / segment_id
     segment_dir.mkdir(parents=True, exist_ok=True)
 
-    results: dict[str, float] = {}
+    results: dict[str, str] = {}
 
     # XGBoost
     xgb = XGBoostModel(segment_id=segment_id)
     xgb.fit(train_features, train_labels)
     xgb.save(segment_dir / "xgb.pkl")
     if test_features:
-        pred_xgb = [round(xgb.predict_proba(f)) for f in test_features]
-        results["XGB"] = float(accuracy_score(test_labels, pred_xgb))
+        probas_xgb = [xgb.predict_proba(f) for f in test_features]
+        pred_xgb = [round(p) for p in probas_xgb]
+        acc = float(accuracy_score(test_labels, pred_xgb))
+        brier = float(brier_score_loss(test_labels, probas_xgb))
+        ll = float(log_loss(test_labels, probas_xgb, labels=[0, 1]))
+        results["XGB"] = f"acc={acc:.3f} brier={brier:.3f} logloss={ll:.3f}"
 
     # LightGBM
     lgbm = LightGBMModel(segment_id=segment_id)
     lgbm.fit(train_features, train_labels)
     lgbm.save(segment_dir / "lgbm.pkl")
     if test_features:
-        pred_lgbm = [round(lgbm.predict_proba(f)) for f in test_features]
-        results["LGBM"] = float(accuracy_score(test_labels, pred_lgbm))
+        probas_lgbm = [lgbm.predict_proba(f) for f in test_features]
+        pred_lgbm = [round(p) for p in probas_lgbm]
+        acc = float(accuracy_score(test_labels, pred_lgbm))
+        brier = float(brier_score_loss(test_labels, probas_lgbm))
+        ll = float(log_loss(test_labels, probas_lgbm, labels=[0, 1]))
+        results["LGBM"] = f"acc={acc:.3f} brier={brier:.3f} logloss={ll:.3f}"
 
     # LSTM
     lstm = LSTMModel(segment_id=segment_id, sequence_length=_SEQUENCE_LENGTH)
     lstm.fit(train_features, train_labels)
     lstm.save(segment_dir / "lstm.pkl")
     if test_features:
-        pred_lstm = [round(lstm.predict_proba(f)) for f in test_features]
-        results["LSTM"] = float(accuracy_score(test_labels, pred_lstm))
+        probas_lstm = [lstm.predict_proba(f) for f in test_features]
+        pred_lstm = [round(p) for p in probas_lstm]
+        acc = float(accuracy_score(test_labels, pred_lstm))
+        brier = float(brier_score_loss(test_labels, probas_lstm))
+        ll = float(log_loss(test_labels, probas_lstm, labels=[0, 1]))
+        results["LSTM"] = f"acc={acc:.3f} brier={brier:.3f} logloss={ll:.3f}"
 
-    summary = " | ".join(f"{k}: {v:.2f}" for k, v in results.items())
+    summary = " | ".join(f"{k}: {v}" for k, v in results.items())
     print(f"[{segment_id}] {summary}")
 
 
