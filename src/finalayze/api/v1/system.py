@@ -5,13 +5,13 @@ Layer 6 -- API layer. Depends on Layer 0 (exceptions, modes).
 
 from __future__ import annotations
 
-import logging
 import time
 from collections import deque
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import redis.asyncio
+import structlog
 from config.settings import get_settings
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
@@ -22,7 +22,7 @@ from finalayze.core.db import get_async_session_factory
 from finalayze.core.exceptions import ModeError
 from finalayze.core.modes import ModeManager, WorkMode
 
-_log = logging.getLogger(__name__)
+_log = structlog.get_logger()
 
 router = APIRouter(tags=["system"])
 

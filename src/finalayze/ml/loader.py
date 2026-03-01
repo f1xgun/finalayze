@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import structlog
 
 from finalayze.ml.registry import MLModelRegistry
 
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
     from finalayze.ml.models.base import BaseMLModel
     from finalayze.ml.models.ensemble import EnsembleModel
 
-_log = logging.getLogger(__name__)
+_log = structlog.get_logger()
 
 
 def load_registry(model_dir: Path, segments: list[str]) -> MLModelRegistry:
@@ -98,6 +99,16 @@ def save_ensemble(model_dir: Path, segment_id: str, ensemble: EnsembleModel) -> 
         ensemble._lstm_model.save(segment_dir / "lstm.pkl")
 
 
+def _get_hmac_key() -> str:
+    """Return the ML model HMAC key from settings, or empty string."""
+    try:
+        from config.settings import get_settings  # noqa: PLC0415
+
+        return getattr(get_settings(), "ml_model_hmac_key", "")
+    except Exception:
+        return ""
+
+
 def _atomic_save(model: object, target: Path) -> None:
     """Save a model to *target* atomically via temp + rename."""
     import joblib  # noqa: PLC0415
@@ -111,3 +122,10 @@ def _atomic_save(model: object, target: Path) -> None:
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
+
+    # Sign model after successful save
+    key = _get_hmac_key()
+    if key:
+        from finalayze.ml.integrity import sign_model  # noqa: PLC0415
+
+        sign_model(target, key.encode())

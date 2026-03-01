@@ -19,13 +19,13 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
-import logging
 import threading
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from finalayze.core.schemas import NewsArticle, SignalDirection
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from finalayze.analysis.news_analyzer import NewsAnalyzer
     from finalayze.core.alerts import TelegramAlerter
     from finalayze.core.events import EventBus
-    from finalayze.core.schemas import Candle, PortfolioState, SentimentResult, Signal
+    from finalayze.core.schemas import Candle, PortfolioState, SentimentResult, Signal  # noqa: F401
     from finalayze.data.cache import RedisCache
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
     from finalayze.execution.broker_base import BrokerBase, OrderRequest
@@ -74,7 +74,7 @@ _US_CLOSE_UTC = (21, 0)
 _MOEX_OPEN_UTC = (7, 0)
 _MOEX_CLOSE_UTC = (15, 45)
 
-_log = logging.getLogger(__name__)
+_log = structlog.get_logger()
 
 
 class TradingLoop:
@@ -222,10 +222,10 @@ class TradingLoop:
             )
         self._scheduler.start()
         _log.info(
-            "TradingLoop started: news=%dm, strategy=%dm, daily_reset=UTC %02d:00",
-            self._settings.news_cycle_minutes,
-            self._settings.strategy_cycle_minutes,
-            self._settings.daily_reset_hour_utc,
+            "trading_loop_started",
+            news_cycle_minutes=self._settings.news_cycle_minutes,
+            strategy_cycle_minutes=self._settings.strategy_cycle_minutes,
+            daily_reset_hour_utc=self._settings.daily_reset_hour_utc,
         )
         self._stop_event.wait()
 
@@ -237,9 +237,9 @@ class TradingLoop:
             # Close Redis connections on the async loop before stopping it
             if self._cache is not None:
                 try:
-                    asyncio.run_coroutine_threadsafe(
-                        self._cache.close(), self._async_loop
-                    ).result(timeout=5)
+                    asyncio.run_coroutine_threadsafe(self._cache.close(), self._async_loop).result(
+                        timeout=5
+                    )
                 except Exception:
                     _log.debug("Failed to close RedisCache on shutdown")
             if self._event_bus is not None:
@@ -405,24 +405,45 @@ class TradingLoop:
 
         # Phase 3: Process instruments for markets that are NORMAL or CAUTION
         for market_id, level in market_cb_levels.items():
-            if level in (self._CircuitLevel.LIQUIDATE, self._CircuitLevel.HALTED):
-                if level == self._CircuitLevel.HALTED:
-                    _log.warning("Circuit breaker HALTED for %s -- skipping cycle", market_id)
-                continue  # already liquidated or halted
+            self._process_market_cycle(market_id, level, market_equities, now)
 
-            # #159: Market hours check before processing instruments
-            if not self._is_market_open(market_id, now):
-                _log.debug("Market %s is closed at %s -- skipping cycle", market_id, now)
-                continue
+    def _process_market_cycle(
+        self,
+        market_id: str,
+        level: CircuitLevel,
+        market_equities: dict[str, Decimal],
+        now: datetime,
+    ) -> None:
+        """Process a single market's instruments within a strategy cycle."""
+        if level in (self._CircuitLevel.LIQUIDATE, self._CircuitLevel.HALTED):
+            if level == self._CircuitLevel.HALTED:
+                _log.warning("Circuit breaker HALTED for %s -- skipping cycle", market_id)
+            return  # already liquidated or halted
 
-            fetcher = self._fetchers.get(market_id)
-            if fetcher is None:
-                _log.warning("No fetcher for market %s", market_id)
-                continue
+        # #159: Market hours check before processing instruments
+        if not self._is_market_open(market_id, now):
+            _log.debug("Market %s is closed at %s -- skipping cycle", market_id, now)
+            return
 
-            instruments = self._registry.list_by_market(market_id)
-            for instrument in instruments:
-                self._process_instrument(instrument, market_id, level, fetcher, now)
+        fetcher = self._fetchers.get(market_id)
+        if fetcher is None:
+            _log.warning("No fetcher for market %s", market_id)
+            return
+
+        instruments = self._registry.list_by_market(market_id)
+        for instrument in instruments:
+            self._process_instrument(instrument, market_id, level, fetcher, now)
+
+        # Update Prometheus metrics after processing all instruments
+        equity = market_equities.get(market_id)
+        if equity is not None:
+            from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
+            MetricsCollector.set_portfolio_equity(market_id, float(equity))
+            _CB_LEVEL_NUMERIC = {"normal": 0, "caution": 1, "halted": 2, "liquidate": 3}
+            MetricsCollector.set_circuit_breaker_level(
+                market_id, _CB_LEVEL_NUMERIC.get(level.value, 0)
+            )
 
     def _get_market_equity(self, market_id: str) -> Decimal | None:
         """Return current portfolio equity for market, or None on failure."""
@@ -511,6 +532,14 @@ class TradingLoop:
         )
         if signal is None:
             return
+
+        from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
+        MetricsCollector.record_signal(
+            market=market_id,
+            strategy=signal.strategy_name,
+            direction=signal.direction.value,
+        )
 
         _log.debug(
             "_process_instrument: signal=%s sentiment_score=%.3f symbol=%s",
@@ -651,6 +680,14 @@ class TradingLoop:
             result = self._broker_router.submit(order, market_id=market_id)
             if result.filled:
                 self._alerter.on_trade_filled(result, market_id, broker=market_id)
+                from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
+                MetricsCollector.record_trade(
+                    market=market_id,
+                    side=order.side.lower(),
+                    slippage_bps=0.0,
+                    fill_latency_seconds=0.0,
+                )
                 # Wire stop-loss on BUY fill
                 if order.side == "BUY" and candles and result.fill_price is not None:
                     multiplier = _ATR_MULTIPLIER_MOEX if market_id == "moex" else _ATR_MULTIPLIER_US
@@ -666,6 +703,11 @@ class TradingLoop:
                         self._stop_loss_prices.pop(order.symbol, None)
             else:
                 self._alerter.on_trade_rejected(order, result.reason)
+                from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
+                MetricsCollector.record_rejection(
+                    market=market_id, reason=result.reason or "unknown"
+                )
         except Exception:
             _log.exception("_strategy_cycle: order submission failed for %s", order.symbol)
 
@@ -867,6 +909,13 @@ class TradingLoop:
         if now.weekday() == monday:
             self._loss_limit_tracker.reset_week(now, total_equity)
 
+        # Update Prometheus metrics
+        from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
+        for market_id, equity in new_baselines.items():
+            MetricsCollector.set_daily_pnl(market_id, 0.0)
+            MetricsCollector.set_portfolio_equity(market_id, float(equity))
+
         self._alerter.on_daily_summary(market_pnl, total_equity)
         _log.info("Daily reset complete. Total equity: %s", total_equity)
 
@@ -903,5 +952,5 @@ class TradingLoop:
             try:
                 broker.submit_order(order)
             except Exception as exc:
-                _log.error("liquidation_order_failed", extra={"symbol": symbol, "error": str(exc)})
+                _log.error("liquidation_order_failed", symbol=symbol, error=str(exc))
                 self._alerter.on_error("TradingLoop", f"Liquidation failed for {symbol}: {exc}")

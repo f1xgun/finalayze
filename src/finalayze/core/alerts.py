@@ -10,11 +10,11 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
-import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import httpx
+import structlog
 
 if TYPE_CHECKING:
     from finalayze.execution.broker_base import OrderRequest, OrderResult
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 _TELEGRAM_API_BASE = "https://api.telegram.org/bot"
 _SEND_MESSAGE_PATH = "/sendMessage"
 
-_log = logging.getLogger(__name__)
+_log = structlog.get_logger()
 
 
 class TelegramAlerter:

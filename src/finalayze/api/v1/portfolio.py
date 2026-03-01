@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import logging
 from decimal import Decimal
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from finalayze.api.v1.auth import api_key_auth
 from finalayze.markets.registry import default_registry
 
-_log = logging.getLogger(__name__)
+_log = structlog.get_logger()
 
 router = APIRouter(
     prefix="/portfolio",

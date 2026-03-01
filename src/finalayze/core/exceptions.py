@@ -121,3 +121,10 @@ class MarketClosedError(FinalayzeError):
 # ---------------------------------------------------------------------------
 class PredictionError(FinalayzeError):
     """All ensemble sub-models failed to produce a prediction."""
+
+
+# ---------------------------------------------------------------------------
+# ML model integrity
+# ---------------------------------------------------------------------------
+class ModelIntegrityError(FinalayzeError):
+    """HMAC verification failed for a serialized ML model file."""

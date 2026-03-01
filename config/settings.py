@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     ml_retrain_interval_hours: int = 168  # weekly
     ml_model_dir: str = "models/"
     ml_min_train_samples: int = 252  # ~1 year of daily bars
+    ml_model_hmac_key: str = ""  # FINALAYZE_ML_MODEL_HMAC_KEY — for model integrity
 
     # Safety
     real_confirmed: bool = False
@@ -102,15 +103,11 @@ class Settings(BaseSettings):
         # DEBUG and TEST modes skip credential validation (no live services needed)
         if self.mode in (WorkMode.DEBUG, WorkMode.TEST):
             if not self.database_url:
-                self.database_url = (
-                    "postgresql+asyncpg://finalayze:secret@localhost:5432/finalayze"
-                )
+                self.database_url = "postgresql+asyncpg://finalayze:secret@localhost:5432/finalayze"
             return self
         # Non-DEBUG/TEST modes require an explicit database URL
         if not self.database_url:
-            raise ValueError(
-                "FINALAYZE_DATABASE_URL is required for non-DEBUG/TEST modes"
-            )
+            raise ValueError("FINALAYZE_DATABASE_URL is required for non-DEBUG/TEST modes")
         # All non-DEBUG modes need a live LLM
         if not self.llm_api_key and not self.anthropic_api_key:
             raise ValueError("llm_api_key (or anthropic_api_key) is required for non-DEBUG mode")
