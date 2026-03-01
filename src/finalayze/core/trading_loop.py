@@ -362,7 +362,7 @@ class TradingLoop:
         """Return current UTC datetime. Extracted for testability."""
         return datetime.now(UTC)
 
-    def _strategy_cycle(self) -> None:  # noqa: PLR0912
+    def _strategy_cycle(self) -> None:
         """For each market and instrument, generate a signal and submit orders."""
         # 6A.1: Mode gate -- DEBUG mode must not send real orders
         if not self._settings.mode.can_submit_orders():
@@ -532,7 +532,7 @@ class TradingLoop:
         broker = self._broker_router.route(market_id)
         return side == "SELL" and broker.has_position(symbol)
 
-    def _process_instrument(
+    def _process_instrument(  # noqa: PLR0915
         self,
         instrument: Instrument,
         market_id: str,
