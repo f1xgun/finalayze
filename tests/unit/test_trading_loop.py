@@ -13,6 +13,7 @@ from finalayze.analysis.event_classifier import EventType
 from finalayze.analysis.impact_estimator import SegmentImpact
 from finalayze.core.alerts import TelegramAlerter
 from finalayze.core.schemas import Candle, NewsArticle, SentimentResult, Signal, SignalDirection
+from finalayze.core.modes import WorkMode
 from finalayze.core.trading_loop import TradingLoop
 from finalayze.execution.broker_base import OrderResult
 from finalayze.markets.instruments import Instrument, InstrumentRegistry
@@ -76,6 +77,7 @@ def _make_settings(
     news_cycle: int = NEWS_CYCLE_MINUTES,
     strategy_cycle: int = STRATEGY_CYCLE_MINUTES,
     daily_hour: int = DAILY_RESET_HOUR,
+    mode: WorkMode = WorkMode.SANDBOX,
 ) -> MagicMock:
     s = MagicMock(spec=Settings)
     s.news_cycle_minutes = news_cycle
@@ -86,6 +88,7 @@ def _make_settings(
     s.max_positions_per_market = 10
     s.daily_loss_limit_pct = 0.03
     s.max_cross_market_exposure_pct = 0.80
+    s.mode = mode
     return s
 
 
@@ -109,8 +112,9 @@ def _make_trading_loop(
     circuit_level: CircuitLevel = CircuitLevel.NORMAL,
     cross_trip: bool = False,
     sentiment_score: float = SENTIMENT_NEUTRAL,
+    mode: WorkMode = WorkMode.SANDBOX,
 ) -> TradingLoop:
-    settings = _make_settings()
+    settings = _make_settings(mode=mode)
 
     # Mock fetcher
     fetcher = MagicMock()
@@ -291,6 +295,96 @@ class TestTradingLoopStrategyCycle:
             mock_dt.now.return_value = _MARKET_OPEN_DT
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
+
+
+class TestModeGate:
+    """6A.1: DEBUG mode must not send orders."""
+
+    def _make_buy_signal(self) -> Signal:
+        return Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+
+    def test_debug_mode_skips_order_submission(self) -> None:
+        signal = self._make_buy_signal()
+        loop = _make_trading_loop(signal=signal, mode=WorkMode.DEBUG)
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+        loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
+
+    def test_sandbox_mode_allows_orders(self) -> None:
+        signal = self._make_buy_signal()
+        loop = _make_trading_loop(signal=signal, mode=WorkMode.SANDBOX)
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+        loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
+
+
+class TestBuildOrder:
+    """6A.11: Kelly sizes against portfolio equity, not cash."""
+
+    def test_kelly_sizes_against_equity(self) -> None:
+        """equity=100k, cash=30k, kelly=0.1 -> order_value = 10k (not 3k)."""
+        signal = Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+        loop = _make_trading_loop(signal=signal)
+        from finalayze.risk.circuit_breaker import CircuitLevel as CL  # noqa: N811
+
+        kelly = Decimal("0.1")
+        equity = Decimal(100000)
+        cash = Decimal(30000)
+        candles = _make_candles()
+        order = loop._build_order(  # type: ignore[attr-defined]
+            signal, CL.NORMAL, equity, cash, candles, SYMBOL_AAPL, kelly
+        )
+        assert order is not None
+        # order_value = 0.1 * 100000 = 10000; qty = 10000 / 150 = 66.67 -> 67 (rounded)
+        expected_qty = Decimal(67)
+        assert order.quantity == expected_qty
+
+    def test_kelly_capped_by_available_cash(self) -> None:
+        """equity=100k, cash=5k, kelly=0.1 -> order_value capped at 5k."""
+        signal = Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+        loop = _make_trading_loop(signal=signal)
+        from finalayze.risk.circuit_breaker import CircuitLevel as CL  # noqa: N811
+
+        kelly = Decimal("0.1")
+        equity = Decimal(100000)
+        cash = Decimal(5000)
+        candles = _make_candles()
+        order = loop._build_order(  # type: ignore[attr-defined]
+            signal, CL.NORMAL, equity, cash, candles, SYMBOL_AAPL, kelly
+        )
+        assert order is not None
+        # order_value = min(0.1 * 100000, 5000) = 5000; qty = 5000 / 150 = 33
+        expected_qty = Decimal(33)
+        assert order.quantity == expected_qty
 
 
 class TestTradingLoopDailyReset:

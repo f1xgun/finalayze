@@ -311,6 +311,14 @@ class TradingLoop:
 
     def _strategy_cycle(self) -> None:
         """For each market and instrument, generate a signal and submit orders."""
+        # 6A.1: Mode gate -- DEBUG mode must not send real orders
+        if not self._settings.mode.can_submit_orders():
+            _log.info(
+                "_strategy_cycle: mode=%s does not allow orders -- skipping",
+                self._settings.mode,
+            )
+            return
+
         now = self._now()
         market_equities: dict[str, Decimal] = {}
         baseline_equities: dict[str, Decimal] = {}
@@ -467,7 +475,8 @@ class TradingLoop:
         # #162: Use RollingKelly for position sizing
         kelly_fraction = self._kelly_sizer.optimal_fraction()
         order = self._build_order(
-            signal, level, portfolio.cash, candles, instrument.symbol, kelly_fraction
+            signal, level, portfolio.equity, portfolio.cash, candles,
+            instrument.symbol, kelly_fraction,
         )
         if order is None:
             return
@@ -521,6 +530,7 @@ class TradingLoop:
         self,
         signal: Signal,
         level: CircuitLevel,
+        portfolio_equity: Decimal,
         available_cash: Decimal,
         candles: list[Candle],
         symbol: str,
@@ -532,8 +542,9 @@ class TradingLoop:
             if signal.confidence < min_conf:
                 return None
 
-        # #162: Use kelly_fraction for position sizing (not raw signal.confidence)
-        order_value = kelly_fraction * available_cash
+        # 6A.11: Kelly sizes against portfolio equity, capped by available cash
+        order_value = kelly_fraction * portfolio_equity
+        order_value = min(order_value, available_cash)
         if level == self._CircuitLevel.CAUTION:
             order_value = order_value * _CAUTION_SIZE_FACTOR
 
