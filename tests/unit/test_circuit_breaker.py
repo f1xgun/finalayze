@@ -121,12 +121,14 @@ class TestCircuitBreaker:
         cb.reset_daily(new_baseline=EQUITY_CAUTION)
         assert cb.level == CircuitLevel.NORMAL
 
-    def test_reset_daily_clears_halted(self) -> None:
+    def test_reset_daily_halted_requires_two_profitable_days(self) -> None:
+        """HALTED is NOT cleared by a single reset_daily -- requires 2 profitable days."""
         cb = self._make_breaker()
         cb.check(current_equity=EQUITY_HALTED, baseline_equity=BASELINE)
         assert cb.level == CircuitLevel.HALTED
-        cb.reset_daily(new_baseline=EQUITY_HALTED)
-        assert cb.level == CircuitLevel.NORMAL
+        # Single profitable day (new baseline > prev baseline of 100000): not enough
+        cb.reset_daily(new_baseline=BASELINE + Decimal(1000))
+        assert cb.level == CircuitLevel.HALTED
 
     def test_reset_daily_does_not_clear_liquidate(self) -> None:
         cb = self._make_breaker()
@@ -167,6 +169,88 @@ class TestCircuitBreaker:
         equity_above_baseline = Decimal(110000)
         level = cb.check(current_equity=equity_above_baseline, baseline_equity=BASELINE)
         assert level == CircuitLevel.NORMAL
+
+    # ── 6A.5: L2 sticky reset (profitable-days requirement) ────────────
+    def test_halted_not_cleared_by_single_profitable_day(self) -> None:
+        cb = self._make_breaker()
+        cb.check(current_equity=EQUITY_HALTED, baseline_equity=BASELINE)
+        assert cb.level == CircuitLevel.HALTED
+        # Day 1: profitable (new baseline > prev baseline of 100000)
+        cb.reset_daily(new_baseline=BASELINE + Decimal(1000))
+        assert cb.level == CircuitLevel.HALTED
+
+    def test_halted_cleared_after_two_profitable_days(self) -> None:
+        cb = self._make_breaker()
+        cb.check(current_equity=EQUITY_HALTED, baseline_equity=BASELINE)
+        assert cb.level == CircuitLevel.HALTED
+        # Day 1: profitable (new baseline > prev baseline of 100000)
+        first_equity = BASELINE + Decimal(1000)
+        cb.reset_daily(new_baseline=first_equity)
+        assert cb.level == CircuitLevel.HALTED
+        # Day 2: profitable again
+        second_equity = first_equity + Decimal(1000)
+        cb.reset_daily(new_baseline=second_equity)
+        assert cb.level == CircuitLevel.NORMAL
+
+    def test_halted_resets_counter_on_loss_day(self) -> None:
+        cb = self._make_breaker()
+        cb.check(current_equity=EQUITY_HALTED, baseline_equity=BASELINE)
+        assert cb.level == CircuitLevel.HALTED
+        # Day 1: profitable (new baseline > prev baseline of 100000)
+        first_equity = BASELINE + Decimal(1000)
+        cb.reset_daily(new_baseline=first_equity)
+        assert cb.level == CircuitLevel.HALTED
+        # Day 2: loss (equity drops below first_equity)
+        loss_equity = first_equity - Decimal(500)
+        cb.reset_daily(new_baseline=loss_equity)
+        assert cb.level == CircuitLevel.HALTED
+        assert cb.consecutive_profitable_days == 0
+
+    def test_caution_still_clears_immediately(self) -> None:
+        cb = self._make_breaker()
+        cb.check(current_equity=EQUITY_CAUTION, baseline_equity=BASELINE)
+        assert cb.level == CircuitLevel.CAUTION
+        cb.reset_daily(new_baseline=EQUITY_CAUTION)
+        assert cb.level == CircuitLevel.NORMAL
+
+    def test_profitable_days_property(self) -> None:
+        cb = self._make_breaker()
+        assert cb.consecutive_profitable_days == 0
+        cb.check(current_equity=EQUITY_HALTED, baseline_equity=BASELINE)
+        # New baseline must exceed previous (100000)
+        first = BASELINE + Decimal(1000)
+        cb.reset_daily(new_baseline=first)
+        assert cb.consecutive_profitable_days == 1
+
+    # ── 6A.6: No intraday de-escalation ────────────────────────────────
+    def test_level_does_not_deescalate_intraday(self) -> None:
+        cb = self._make_breaker()
+        # Hit CAUTION
+        cb.check(current_equity=EQUITY_CAUTION, baseline_equity=BASELINE)
+        assert cb.level == CircuitLevel.CAUTION
+        # Equity recovers above baseline -- should stay CAUTION (sticky)
+        cb.check(current_equity=Decimal(110000), baseline_equity=BASELINE)
+        assert cb.level == CircuitLevel.CAUTION
+
+    def test_level_escalates_from_caution_to_halted(self) -> None:
+        cb = self._make_breaker()
+        cb.check(current_equity=EQUITY_CAUTION, baseline_equity=BASELINE)
+        assert cb.level == CircuitLevel.CAUTION
+        cb.check(current_equity=EQUITY_HALTED, baseline_equity=BASELINE)
+        assert cb.level == CircuitLevel.HALTED
+
+    def test_reset_daily_allows_fresh_level(self) -> None:
+        cb = self._make_breaker()
+        # Hit CAUTION
+        cb.check(current_equity=EQUITY_CAUTION, baseline_equity=BASELINE)
+        assert cb.level == CircuitLevel.CAUTION
+        # Daily reset clears CAUTION
+        new_base = EQUITY_CAUTION
+        cb.reset_daily(new_baseline=new_base)
+        assert cb.level == CircuitLevel.NORMAL
+        # Now check with equity above new baseline -- stays NORMAL
+        cb.check(current_equity=new_base + Decimal(1000), baseline_equity=new_base)
+        assert cb.level == CircuitLevel.NORMAL
 
 
 class TestCrossMarketCircuitBreaker:

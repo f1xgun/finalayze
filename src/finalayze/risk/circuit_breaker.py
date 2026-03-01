@@ -20,6 +20,17 @@ _DEFAULT_L3 = 0.15
 _DEFAULT_CROSS_HALT = 0.10
 _ZERO = Decimal(0)
 
+# Level ordering for sticky escalation (6A.6: no intraday de-escalation)
+_LEVEL_ORDER: dict[str, int] = {
+    "normal": 0,
+    "caution": 1,
+    "halted": 2,
+    "liquidate": 3,
+}
+
+# Required consecutive profitable days to clear L2 (HALTED)
+_L2_PROFITABLE_DAYS_REQUIRED = 2
+
 
 class CircuitLevel(StrEnum):
     """Escalating circuit breaker states."""
@@ -55,6 +66,8 @@ class CircuitBreaker:
         self._l3 = Decimal(str(l3_threshold))
         self._level: CircuitLevel = CircuitLevel.NORMAL
         self._baseline: Decimal = baseline
+        self._consecutive_profitable_days: int = 0
+        self._prev_equity: Decimal = baseline
 
     @property
     def level(self) -> CircuitLevel:
@@ -70,6 +83,11 @@ class CircuitBreaker:
     def baseline(self) -> Decimal:
         """Return the stored baseline equity for the current trading day."""
         return self._baseline
+
+    @property
+    def consecutive_profitable_days(self) -> int:
+        """Return the number of consecutive profitable days tracked."""
+        return self._consecutive_profitable_days
 
     def check(self, current_equity: Decimal, baseline_equity: Decimal) -> CircuitLevel:
         """Compute drawdown, update level, and return the new level.
@@ -88,18 +106,26 @@ class CircuitBreaker:
         drawdown = (baseline_equity - current_equity) / baseline_equity
 
         if drawdown >= self._l3:
-            self._level = CircuitLevel.LIQUIDATE
+            new_level = CircuitLevel.LIQUIDATE
         elif drawdown >= self._l2:
-            self._level = CircuitLevel.HALTED
+            new_level = CircuitLevel.HALTED
         elif drawdown >= self._l1:
-            self._level = CircuitLevel.CAUTION
+            new_level = CircuitLevel.CAUTION
         else:
-            self._level = CircuitLevel.NORMAL
+            new_level = CircuitLevel.NORMAL
+
+        # 6A.6: Sticky -- only escalate, never de-escalate within a day
+        if _LEVEL_ORDER[new_level] > _LEVEL_ORDER[self._level]:
+            self._level = new_level
+
+        # Track baseline for profitable-day comparison in reset_daily
+        if self._prev_equity == _ZERO:
+            self._prev_equity = baseline_equity
 
         return self._level
 
     def reset_daily(self, new_baseline: Decimal) -> None:
-        """Daily auto-reset: clears CAUTION and HALTED; updates baseline.
+        """Daily auto-reset: clears CAUTION immediately; HALTED requires 2 profitable days.
 
         LIQUIDATE is intentionally preserved -- it requires ``reset_manual``.
 
@@ -107,9 +133,23 @@ class CircuitBreaker:
             new_baseline: New baseline equity (typically today's opening equity).
                 Stored so ``_strategy_cycle`` can retrieve the day-start snapshot.
         """
+        # Track consecutive profitable days
+        if new_baseline > self._prev_equity and self._prev_equity > _ZERO:
+            self._consecutive_profitable_days += 1
+        else:
+            self._consecutive_profitable_days = 0
+        self._prev_equity = new_baseline
         self._baseline = new_baseline
-        if self._level in (CircuitLevel.CAUTION, CircuitLevel.HALTED):
+
+        if self._level == CircuitLevel.CAUTION:
             self._level = CircuitLevel.NORMAL
+            self._consecutive_profitable_days = 0
+        elif self._level == CircuitLevel.HALTED:
+            if self._consecutive_profitable_days >= _L2_PROFITABLE_DAYS_REQUIRED:
+                self._level = CircuitLevel.NORMAL
+                self._consecutive_profitable_days = 0
+            # else: stay HALTED
+        # LIQUIDATE: never auto-cleared
 
     def reset_manual(self) -> None:
         """Operator-initiated reset: clears LIQUIDATE -> NORMAL."""
