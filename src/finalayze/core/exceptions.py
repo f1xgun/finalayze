@@ -114,3 +114,10 @@ class InsufficientDataError(FinalayzeError):
 
 class MarketClosedError(FinalayzeError):
     """Attempted operation outside market hours (legacy alias)."""
+
+
+# ---------------------------------------------------------------------------
+# ML / Prediction
+# ---------------------------------------------------------------------------
+class PredictionError(FinalayzeError):
+    """All ensemble sub-models failed to produce a prediction."""

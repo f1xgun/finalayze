@@ -75,6 +75,10 @@ class XGBoostModel(BaseMLModel):
             n_estimators=100,
             max_depth=4,
             learning_rate=0.1,
+            reg_alpha=0.1,
+            reg_lambda=1.0,
+            subsample=0.8,
+            colsample_bytree=0.8,
             eval_metric="logloss",
             verbosity=0,
         )

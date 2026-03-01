@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pickle
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -87,3 +88,80 @@ class TestSaveEnsemble:
 
         # File should exist after save
         assert (tmp_path / "us_tech" / "xgb.pkl").exists()
+
+
+class TestLSTMAtomicSave:
+    """6C.9: LSTM atomic save tests."""
+
+    def test_lstm_save_creates_all_three_files(self, tmp_path: Path) -> None:
+        """After save, all 3 files (weights, scaler, platt) exist."""
+        from finalayze.ml.models.lstm_model import LSTMModel
+
+        model = LSTMModel(segment_id="test", sequence_length=5)
+        X = [{"a": float(i), "b": float(i * 2)} for i in range(30)]
+        y = [i % 2 for i in range(30)]
+        model.fit(X, y)
+
+        save_path = tmp_path / "lstm.pkl"
+        model.save(save_path)
+
+        assert save_path.exists()
+        assert (tmp_path / "lstm.pkl.scaler.pkl").exists()
+        assert (tmp_path / "lstm.pkl.platt.pkl").exists()
+
+    def test_lstm_save_atomic_no_corrupt_on_interrupt(self, tmp_path: Path) -> None:
+        """If torch.save raises, no partial file at the target path."""
+        from finalayze.ml.models.lstm_model import LSTMModel
+
+        model = LSTMModel(segment_id="test", sequence_length=5)
+        X = [{"a": float(i), "b": float(i * 2)} for i in range(30)]
+        y = [i % 2 for i in range(30)]
+        model.fit(X, y)
+
+        save_path = tmp_path / "lstm.pkl"
+        with (
+            patch(
+                "finalayze.ml.models.lstm_model.torch.save",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            model.save(save_path)
+
+        assert not save_path.exists()
+
+    def test_lstm_save_scaler_atomic(self, tmp_path: Path) -> None:
+        """If pickle.dump raises for scaler, no partial scaler file."""
+        from finalayze.ml.models.lstm_model import LSTMModel
+
+        model = LSTMModel(segment_id="test", sequence_length=5)
+        X = [{"a": float(i), "b": float(i * 2)} for i in range(30)]
+        y = [i % 2 for i in range(30)]
+        model.fit(X, y)
+
+        save_path = tmp_path / "lstm.pkl"
+
+        original_dump = pickle.dump
+        call_count = 0
+
+        def failing_dump(*args: object, **kwargs: object) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise OSError("disk full")
+            return original_dump(*args, **kwargs)  # type: ignore[arg-type]
+
+        with (
+            patch(
+                "finalayze.ml.models.lstm_model.pickle.dump",
+                side_effect=failing_dump,
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            model.save(save_path)
+
+        # Weights file should have been written atomically before scaler failed
+        assert save_path.exists()
+        # Scaler file should NOT exist (atomic save cleaned up)
+        scaler_path = tmp_path / "lstm.pkl.scaler.pkl"
+        assert not scaler_path.exists()

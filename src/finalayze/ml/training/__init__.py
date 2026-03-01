@@ -7,7 +7,10 @@ logic.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
 
 from finalayze.ml.features.technical import compute_features
 
@@ -15,13 +18,53 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from finalayze.core.schemas import Candle
+    from finalayze.ml.models.ensemble import EnsembleModel
 
 DEFAULT_WINDOW_SIZE = 60
+
+# Validation gate thresholds (6C.7)
+_MIN_ACCURACY = 0.52
+_MAX_BRIER_SCORE = 0.25  # perfect = 0.0, coin flip = 0.25
+_MAX_LOG_LOSS = 0.69  # coin flip = ln(2) ~ 0.693
+
+
+@dataclass
+class ValidationResult:
+    """Result of ensemble validation with multiple metrics."""
+
+    accuracy: float
+    brier_score: float
+    log_loss_val: float
+    n_samples: int
+    passed: bool
+
+
+def validate_ensemble(
+    ensemble: EnsembleModel,
+    val_features: list[dict[str, float]],
+    val_labels: list[int],
+) -> ValidationResult:
+    """Evaluate an ensemble on validation data and return metrics + pass/fail."""
+    probas = [ensemble.predict_proba(f) for f in val_features]
+    preds = [round(p) for p in probas]
+    acc = float(accuracy_score(val_labels, preds))
+    brier = float(brier_score_loss(val_labels, probas))
+    ll = float(log_loss(val_labels, probas, labels=[0, 1]))
+    passed = acc >= _MIN_ACCURACY and brier <= _MAX_BRIER_SCORE and ll <= _MAX_LOG_LOSS
+    return ValidationResult(
+        accuracy=acc,
+        brier_score=brier,
+        log_loss_val=ll,
+        n_samples=len(val_labels),
+        passed=passed,
+    )
 
 
 def build_windows(
     candles: list[Candle],
     window_size: int = DEFAULT_WINDOW_SIZE,
+    *,
+    skip_split_windows: bool = True,
 ) -> tuple[list[dict[str, float]], list[int], list[datetime]]:
     """Build (features, labels, timestamps) from a single contiguous candle series.
 
@@ -29,17 +72,33 @@ def build_windows(
     and the label is ``sign(candles[i+window_size].close - candles[i+window_size-1].close)``.
     The label bar is **strictly outside** the feature window (no look-ahead).
 
+    When ``skip_split_windows`` is True, windows spanning a detected stock
+    split are excluded to avoid poisoning indicators (6C.8).
+
     Returns:
         Tuple of (feature_dicts, binary_labels, timestamps).  Empty lists when
         there are fewer than ``window_size + 1`` candles.  The timestamp for
         each sample is the timestamp of the label bar (candles[i+window_size]).
     """
+    from finalayze.ml.features.corporate_actions import detect_splits  # noqa: PLC0415
+
     features_list: list[dict[str, float]] = []
     label_list: list[int] = []
     ts_list: list[datetime] = []
     sorted_candles = sorted(candles, key=lambda c: c.timestamp)
 
+    # Detect split indices for filtering (6C.8)
+    split_indices: set[int] = set()
+    if skip_split_windows:
+        split_indices = set(detect_splits(sorted_candles))
+
     for i in range(len(sorted_candles) - window_size):
+        # Skip windows that contain a split index (6C.8)
+        if skip_split_windows and split_indices:
+            window_range = range(i, i + window_size + 1)
+            if any(si in window_range for si in split_indices):
+                continue
+
         window = sorted_candles[i : i + window_size]
         try:
             row_features = compute_features(window)
