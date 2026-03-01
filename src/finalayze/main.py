@@ -5,7 +5,6 @@ Layer 6 -- API / Dashboard layer.
 
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -36,7 +35,8 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     """Construct and configure the FastAPI application."""
     application = FastAPI(title="Finalayze", version="0.1.0", lifespan=lifespan)
-    allowed_origins = os.getenv("FINALAYZE_CORS_ORIGINS", "*").split(",")
+    settings = get_settings()
+    allowed_origins = settings.cors_origins if settings.cors_origins else []
     application.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,

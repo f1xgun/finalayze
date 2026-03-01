@@ -6,7 +6,7 @@ services:
     container_name: finalayze-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-finalayze}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: ${POSTGRES_DB:-finalayze}
     volumes:
       - pgdata:/home/postgres/pgdata/data
@@ -41,7 +41,7 @@ services:
     container_name: finalayze-app
     environment:
       FINALAYZE_MODE: ${FINALAYZE_MODE:-sandbox}
-      FINALAYZE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finalayze}:${POSTGRES_PASSWORD:-secret}@postgres:5432/${POSTGRES_DB:-finalayze}
+      FINALAYZE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finalayze}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-finalayze}
       FINALAYZE_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       FINALAYZE_API_KEY: ${FINALAYZE_API_KEY}
       FINALAYZE_REAL_TOKEN: ${FINALAYZE_REAL_TOKEN:-}
