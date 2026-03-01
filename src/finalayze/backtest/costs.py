@@ -28,6 +28,7 @@ class TransactionCosts:
     min_commission: Decimal = Decimal("1.00")
     spread_bps: Decimal = Decimal(5)
     slippage_bps: Decimal = Decimal(3)
+    commission_rate: Decimal = Decimal(0)
 
     def total_cost(self, price: Decimal, quantity: Decimal) -> Decimal:
         """Compute total transaction cost for a single trade.
@@ -39,7 +40,10 @@ class TransactionCosts:
         Returns:
             Total cost = commission + (spread + slippage) * quantity.
         """
-        commission = max(self.min_commission, self.commission_per_share * quantity)
+        if self.commission_rate > 0:
+            commission = max(self.min_commission, price * quantity * self.commission_rate)
+        else:
+            commission = max(self.min_commission, self.commission_per_share * quantity)
         spread = price * self.spread_bps / _BPS_DIVISOR
         slippage = price * self.slippage_bps / _BPS_DIVISOR
         return commission + (spread + slippage) * quantity
@@ -62,7 +66,8 @@ US_COSTS = TransactionCosts(
 # We use a per-share commission that is a small fixed amount and rely on spread/slippage
 # to capture the percentage-based MOEX fee structure.
 MOEX_COSTS = TransactionCosts(
-    commission_per_share=Decimal("0.003"),  # 0.3% approximation as per-unit fee
+    commission_per_share=Decimal(0),  # Not used for MOEX
+    commission_rate=Decimal("0.0003"),  # 0.03% of trade value (Tinkoff Invest standard)
     min_commission=Decimal("0.10"),  # Very low min (ruble markets have small ticks)
     spread_bps=Decimal(10),  # Wider spreads on MOEX
     slippage_bps=Decimal(7),  # Higher slippage on less liquid MOEX
