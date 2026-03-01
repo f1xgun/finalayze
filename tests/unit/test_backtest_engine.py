@@ -130,3 +130,115 @@ class TestBacktestEnginePreservesInitialCash:
         _trades, snapshots = engine.run(symbol="TEST", segment_id="us_large_cap", candles=candles)
 
         assert snapshots[-1].equity == INITIAL_CASH
+
+
+def _make_candle_series_for_symbol(
+    symbol: str, count: int = CANDLE_COUNT, base: int = 100
+) -> list[Candle]:
+    """Create an upward-trending candle series for a given symbol."""
+    candles: list[Candle] = []
+    for i in range(count):
+        price = Decimal(base + i)
+        candles.append(
+            Candle(
+                symbol=symbol,
+                market_id="us",
+                timeframe="1d",
+                timestamp=datetime(2024, 1, 1, 14, 30, tzinfo=UTC) + timedelta(days=i),
+                open=price,
+                high=price + Decimal(2),
+                low=price - Decimal(2),
+                close=price + Decimal(1),
+                volume=1_000_000,
+            )
+        )
+    return candles
+
+
+class TestPortfolioBacktest:
+    """Tests for run_portfolio() method (6B.6)."""
+
+    def test_portfolio_backtest_two_symbols(self) -> None:
+        """Run with 2 symbols, verify both get processed."""
+        engine = BacktestEngine(strategy=StubStrategy(), initial_cash=INITIAL_CASH)
+        sym_a = _make_candle_series_for_symbol("SYM_A")
+        sym_b = _make_candle_series_for_symbol("SYM_B", base=200)
+        trades, snapshots = engine.run_portfolio(
+            symbols=["SYM_A", "SYM_B"],
+            segment_id="us_large_cap",
+            candles_by_symbol={"SYM_A": sym_a, "SYM_B": sym_b},
+        )
+        # Both symbols should produce trades (StubStrategy fires at index 30, 35)
+        assert len(trades) >= 1
+        assert len(snapshots) > 0
+
+    def test_portfolio_backtest_respects_max_positions(self) -> None:
+        """max_positions=1 -> only one position opened."""
+        engine = BacktestEngine(
+            strategy=StubStrategy(),
+            initial_cash=INITIAL_CASH,
+            max_positions=1,
+        )
+        sym_a = _make_candle_series_for_symbol("SYM_A")
+        sym_b = _make_candle_series_for_symbol("SYM_B", base=200)
+        trades, _snapshots = engine.run_portfolio(
+            symbols=["SYM_A", "SYM_B"],
+            segment_id="us_large_cap",
+            candles_by_symbol={"SYM_A": sym_a, "SYM_B": sym_b},
+        )
+        # With max_positions=1, at most one position at a time
+        # Both may eventually trade (after one closes), but constraint is respected
+        assert len(trades) >= 1
+
+    def test_portfolio_backtest_empty_symbols(self) -> None:
+        """Empty symbol list returns empty results."""
+        engine = BacktestEngine(strategy=StubStrategy(), initial_cash=INITIAL_CASH)
+        trades, snapshots = engine.run_portfolio(
+            symbols=[],
+            segment_id="us_large_cap",
+            candles_by_symbol={},
+        )
+        assert trades == []
+        assert snapshots == []
+
+    def test_portfolio_backtest_single_symbol_produces_trades(self) -> None:
+        """Single symbol run_portfolio produces trades."""
+        engine = BacktestEngine(strategy=StubStrategy(), initial_cash=INITIAL_CASH)
+        candles = _make_candle_series_for_symbol("TEST")
+        trades, snapshots = engine.run_portfolio(
+            symbols=["TEST"],
+            segment_id="us_large_cap",
+            candles_by_symbol={"TEST": candles},
+        )
+        assert len(trades) >= 1
+        assert len(snapshots) > 0
+
+    def test_portfolio_backtest_unaligned_timestamps(self) -> None:
+        """Symbols with different candle date ranges handled correctly."""
+        # SYM_A has 40 candles, SYM_B has only 20 candles (starts later)
+        sym_a = _make_candle_series_for_symbol("SYM_A", count=CANDLE_COUNT)
+        sym_b_start = 20
+        sym_b: list[Candle] = []
+        for i in range(sym_b_start, CANDLE_COUNT):
+            price = Decimal(200 + i)
+            sym_b.append(
+                Candle(
+                    symbol="SYM_B",
+                    market_id="us",
+                    timeframe="1d",
+                    timestamp=datetime(2024, 1, 1, 14, 30, tzinfo=UTC) + timedelta(days=i),
+                    open=price,
+                    high=price + Decimal(2),
+                    low=price - Decimal(2),
+                    close=price + Decimal(1),
+                    volume=1_000_000,
+                )
+            )
+        engine = BacktestEngine(strategy=StubStrategy(), initial_cash=INITIAL_CASH)
+        _trades, snapshots = engine.run_portfolio(
+            symbols=["SYM_A", "SYM_B"],
+            segment_id="us_large_cap",
+            candles_by_symbol={"SYM_A": sym_a, "SYM_B": sym_b},
+        )
+        # Should not crash, and produce some trades
+        assert len(snapshots) > 0

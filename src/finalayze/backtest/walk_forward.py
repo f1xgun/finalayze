@@ -6,6 +6,7 @@ performance can be evaluated on truly unseen data.
 
 from __future__ import annotations
 
+import itertools
 import math
 import statistics
 from dataclasses import dataclass, field
@@ -15,8 +16,12 @@ from typing import TYPE_CHECKING
 from dateutil.relativedelta import relativedelta
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from finalayze.backtest.engine import BacktestEngine
     from finalayze.core.schemas import Candle, TradeResult
+
+ParameterGrid = dict[str, list[object]]
 
 # ── Constants ────────────────────────────────────────────────────────────
 _ANNUALIZATION_FACTOR = 252  # Trading days per year
@@ -53,13 +58,21 @@ class WalkForwardResult:
     oos_total_return_pct: float = 0.0
     oos_win_rate: float = 0.0
     oos_max_drawdown_pct: float = 0.0
+    per_window_params: list[dict[str, object]] = field(default_factory=list)
 
 
 class WalkForwardOptimizer:
     """Split data into rolling train/test windows for out-of-sample validation."""
 
-    def __init__(self, config: WalkForwardConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: WalkForwardConfig | None = None,
+        param_grid: ParameterGrid | None = None,
+        engine_factory: Callable[[dict[str, object]], BacktestEngine] | None = None,
+    ) -> None:
         self._config = config or WalkForwardConfig()
+        self._param_grid = param_grid
+        self._engine_factory = engine_factory
 
     def generate_windows(self, start_date: date, end_date: date) -> list[WalkForwardWindow]:
         """Generate rolling train/test windows.
@@ -139,10 +152,11 @@ class WalkForwardOptimizer:
         all_equities: list[float] = []
 
         for window in windows:
-            _train, test = self.split_candles(candles, window)
+            train, test = self.split_candles(candles, window)
             if not test:
                 continue
-            trades, snapshots = engine.run(symbol, segment_id, test)
+            optimized_engine = self._optimize_on_train(symbol, segment_id, train, engine)
+            trades, snapshots = optimized_engine.run(symbol, segment_id, test)
             all_trades.extend(trades)
             # Collect bar-level equity values for Sharpe computation (#131)
             all_equities.extend(float(s.equity) for s in snapshots)
@@ -159,6 +173,42 @@ class WalkForwardOptimizer:
             oos_win_rate=_compute_win_rate(pnl_pcts),
             oos_max_drawdown_pct=_compute_max_drawdown(pnl_pcts),
         )
+
+    def _optimize_on_train(
+        self,
+        symbol: str,
+        segment_id: str,
+        train_candles: list[Candle],
+        default_engine: BacktestEngine,
+    ) -> BacktestEngine:
+        """Find best parameters on training data via grid search.
+
+        Returns the engine with the best-performing parameter set,
+        or the default engine if no param_grid/engine_factory is configured.
+        """
+        if not self._param_grid or not self._engine_factory:
+            return default_engine
+
+        best_sharpe = float("-inf")
+        best_engine = default_engine
+
+        for combo in _iter_param_combinations(self._param_grid):
+            engine = self._engine_factory(combo)
+            _trades, snapshots = engine.run(symbol, segment_id, train_candles)
+            equities = [float(s.equity) for s in snapshots]
+            sharpe = _compute_sharpe_from_snapshots(equities)
+            if sharpe > best_sharpe:
+                best_sharpe = sharpe
+                best_engine = engine
+
+        return best_engine
+
+
+def _iter_param_combinations(grid: ParameterGrid) -> list[dict[str, object]]:
+    """Generate all combinations from a parameter grid."""
+    keys = list(grid.keys())
+    values = list(grid.values())
+    return [dict(zip(keys, combo, strict=False)) for combo in itertools.product(*values)]
 
 
 # ── Private metric helpers ───────────────────────────────────────────────

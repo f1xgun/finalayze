@@ -19,7 +19,11 @@ from finalayze.core.schemas import (
 from finalayze.execution.broker_base import OrderRequest
 from finalayze.execution.simulated_broker import SimulatedBroker
 from finalayze.risk.kelly import TradeRecord
-from finalayze.risk.position_sizer import compute_position_size
+from finalayze.risk.position_sizer import (
+    compute_position_size,
+    compute_realized_vol,
+    compute_vol_adjusted_position_size,
+)
 from finalayze.risk.pre_trade_check import PreTradeChecker
 from finalayze.risk.stop_loss import compute_atr_stop_loss
 
@@ -56,6 +60,7 @@ class BacktestEngine:
         circuit_breaker: CircuitBreaker | None = None,
         rolling_kelly: RollingKelly | None = None,
         loss_limits: LossLimitTracker | None = None,
+        target_vol: Decimal | None = None,
     ) -> None:
         self._strategy = strategy
         self._initial_cash = initial_cash
@@ -69,6 +74,7 @@ class BacktestEngine:
         self._circuit_breaker = circuit_breaker
         self._rolling_kelly = rolling_kelly
         self._loss_limits = loss_limits
+        self._target_vol = target_vol
 
     def run(  # noqa: PLR0912, PLR0915
         self,
@@ -250,12 +256,144 @@ class BacktestEngine:
 
         return trades, snapshots
 
+    def run_portfolio(  # noqa: PLR0912, PLR0915
+        self,
+        symbols: list[str],
+        segment_id: str,
+        candles_by_symbol: dict[str, list[Candle]],
+    ) -> tuple[list[TradeResult], list[PortfolioState]]:
+        """Run a portfolio-level backtest over multiple symbols.
+
+        Iterates through a unified timeline, generating signals for each symbol
+        on each bar, managing shared capital across all positions.
+
+        Args:
+            symbols: List of ticker symbols to trade.
+            segment_id: Market segment identifier.
+            candles_by_symbol: Candle data keyed by symbol.
+
+        Returns:
+            A tuple of (trades, portfolio_snapshots).
+        """
+        if not symbols or not candles_by_symbol:
+            return [], []
+
+        checker = PreTradeChecker(
+            max_position_pct=self._max_position_pct,
+            max_positions_per_market=self._max_positions,
+        )
+        broker = SimulatedBroker(initial_cash=self._initial_cash)
+
+        trades: list[TradeResult] = []
+        snapshots: list[PortfolioState] = []
+        entry_prices: dict[str, Decimal] = {}
+
+        # Build per-symbol candle index keyed by timestamp
+        candle_index: dict[str, dict[datetime, int]] = {}
+        for sym in symbols:
+            candle_index[sym] = {}
+            for i, c in enumerate(candles_by_symbol.get(sym, [])):
+                candle_index[sym][c.timestamp] = i
+
+        # Build unified timeline
+        all_timestamps = sorted(
+            {c.timestamp for candles in candles_by_symbol.values() for c in candles}
+        )
+
+        for ts in all_timestamps:
+            broker.set_timestamp(ts)
+
+            # Update prices for all symbols that have data at this timestamp
+            for sym in symbols:
+                sym_candles = candles_by_symbol.get(sym, [])
+                if sym in candle_index and ts in candle_index[sym]:
+                    idx = candle_index[sym][ts]
+                    broker.update_prices(sym_candles[idx])
+
+            # Check stop-losses for all symbols
+            for sym in symbols:
+                if sym in candle_index and ts in candle_index[sym]:
+                    sym_candles = candles_by_symbol.get(sym, [])
+                    idx = candle_index[sym][ts]
+                    stop_results = broker.check_stop_losses(sym_candles[idx])
+                    for sr in stop_results:
+                        if sr.filled and sr.fill_price is not None:
+                            entry = entry_prices.pop(sr.symbol, sr.fill_price)
+                            pnl = (sr.fill_price - entry) * sr.quantity
+                            if self._transaction_costs is not None:
+                                pnl -= self._transaction_costs.total_cost(
+                                    sr.fill_price, sr.quantity
+                                )
+                            pnl_pct = (sr.fill_price - entry) / entry if entry != 0 else Decimal(0)
+                            trade = TradeResult(
+                                signal_id=uuid4(),
+                                symbol=sr.symbol,
+                                side="SELL",
+                                quantity=sr.quantity,
+                                entry_price=entry,
+                                exit_price=sr.fill_price,
+                                pnl=pnl,
+                                pnl_pct=pnl_pct,
+                            )
+                            trades.append(trade)
+                            self._record_trade(trade)
+
+            # Generate signals for each symbol
+            for sym in symbols:
+                sym_candles = candles_by_symbol.get(sym, [])
+                if sym not in candle_index or ts not in candle_index[sym]:
+                    continue
+                idx = candle_index[sym][ts]
+
+                history = sym_candles[: idx + 1]
+                signal = self._strategy.generate_signal(sym, history, segment_id)
+
+                if signal is not None and idx + 1 < len(sym_candles):
+                    fill_candle = sym_candles[idx + 1]
+
+                    if signal.direction == SignalDirection.BUY:
+                        self._handle_buy(broker, checker, fill_candle, sym, history, entry_prices)
+                    elif signal.direction == SignalDirection.SELL:
+                        self._handle_sell(broker, fill_candle, sym, entry_prices, trades)
+
+            snapshots.append(broker.get_portfolio())
+
+        # Close remaining open positions
+        if candles_by_symbol:
+            for sym in symbols:
+                sym_candles = candles_by_symbol.get(sym, [])
+                if not sym_candles:
+                    continue
+                qty = broker.get_positions().get(sym, Decimal(0))
+                if qty <= 0:
+                    continue
+                close_price = sym_candles[-1].close
+                entry = entry_prices.pop(sym, close_price)
+                pnl = (close_price - entry) * qty
+                if self._transaction_costs is not None:
+                    pnl -= self._transaction_costs.total_cost(close_price, qty)
+                pnl_pct = (close_price - entry) / entry if entry != 0 else Decimal(0)
+                trade = TradeResult(
+                    signal_id=uuid4(),
+                    symbol=sym,
+                    side="SELL",
+                    quantity=qty,
+                    entry_price=entry,
+                    exit_price=close_price,
+                    pnl=pnl,
+                    pnl_pct=pnl_pct,
+                )
+                trades.append(trade)
+                self._record_trade(trade)
+
+        return trades, snapshots
+
     def _record_trade(self, trade: TradeResult) -> None:
         """Record a completed trade in the Rolling Kelly estimator."""
         if self._rolling_kelly is not None:
             self._rolling_kelly.update(TradeRecord(pnl=trade.pnl, pnl_pct=trade.pnl_pct))
 
-    def _handle_buy(
+    def _handle_buy(  # noqa: PLR0912
         self,
         broker: SimulatedBroker,
         checker: PreTradeChecker,
@@ -286,6 +424,16 @@ class BacktestEngine:
                 kelly_fraction=self._kelly_fraction,
                 max_position_pct=self._max_position_pct,
             )
+
+        # Apply volatility-adjusted sizing if target_vol is configured
+        if self._target_vol is not None:
+            asset_vol = compute_realized_vol(history)
+            if asset_vol is not None and asset_vol > 0:
+                position_value = compute_vol_adjusted_position_size(
+                    base_position=position_value,
+                    target_vol=self._target_vol,
+                    asset_vol=asset_vol,
+                )
 
         if position_value <= 0:
             return
@@ -324,7 +472,7 @@ class BacktestEngine:
                 cost = self._transaction_costs.total_cost(
                     order_result.fill_price, order_result.quantity
                 )
-                broker._cash -= cost
+                broker.deduct_fees(cost)
 
             # Set ATR stop-loss (trailing or fixed)
             stop_price = compute_atr_stop_loss(

@@ -74,9 +74,15 @@ class MomentumStrategy(BaseStrategy):
     """
 
     def __init__(self) -> None:
-        self._signal_state = _SignalState()
+        self._signal_states: dict[str, _SignalState] = {}
         # Cache YAML params per segment to avoid reloading on every bar
         self._params_cache: dict[str, dict[str, object]] = {}
+
+    def _get_signal_state(self, segment_id: str, neutral_reset_bars: int) -> _SignalState:
+        """Get or create a per-segment signal state."""
+        if segment_id not in self._signal_states:
+            self._signal_states[segment_id] = _SignalState(neutral_reset_bars)
+        return self._signal_states[segment_id]
 
     @property
     def name(self) -> str:
@@ -123,9 +129,9 @@ class MomentumStrategy(BaseStrategy):
         neutral_reset_bars = int(
             params.get("neutral_reset_bars", _DEFAULT_NEUTRAL_RESET_BARS)  # type: ignore[call-overload]
         )
-        self._signal_state._neutral_reset_bars = neutral_reset_bars
+        signal_state = self._get_signal_state(segment_id, neutral_reset_bars)
 
-        self._signal_state.tick(symbol)
+        signal_state.tick(symbol)
 
         if len(candles) < _MIN_CANDLES:
             return None
@@ -140,7 +146,7 @@ class MomentumStrategy(BaseStrategy):
 
         direction, confidence = result
 
-        if not self._signal_state.should_emit(symbol, direction):
+        if not signal_state.should_emit(symbol, direction):
             return None
 
         is_buy = direction == SignalDirection.BUY

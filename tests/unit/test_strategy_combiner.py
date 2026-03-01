@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from unittest.mock import mock_open, patch
 
+import pytest
 import yaml
 
 if TYPE_CHECKING:
@@ -365,3 +366,85 @@ class TestStrategyCombinerYAMLErrorHandling:
         # Fallback weight=1.0 applied -> should still generate a BUY signal
         assert signal is not None
         assert signal.direction == SignalDirection.BUY
+
+
+class TestCombinerNormalizationMode:
+    """Tests for normalize_mode parameter (6B.2)."""
+
+    def test_normalize_firing_mode_default(self) -> None:
+        """Default mode normalizes by firing weight only (backward compat)."""
+        config: dict[str, Any] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 0.5},
+                "mean_reversion": {"enabled": True, "weight": 0.5},
+            }
+        }
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        momentum = MockStrategy("momentum", buy_signal)
+        mean_rev = MockStrategy("mean_reversion", None)  # does not fire
+        combiner = StrategyCombiner([momentum, mean_rev])
+        candles = _make_candles()
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        # Only momentum fires: net = 0.9 * 0.5 / 0.5 = 0.9 -> BUY
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY
+        assert signal.confidence == pytest.approx(HIGH_CONFIDENCE, abs=0.01)
+
+    def test_normalize_total_mode_reduces_score(self) -> None:
+        """In total mode, single strategy firing produces lower score."""
+        config: dict[str, Any] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 0.5},
+                "mean_reversion": {"enabled": True, "weight": 0.5},
+            }
+        }
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        momentum = MockStrategy("momentum", buy_signal)
+        mean_rev = MockStrategy("mean_reversion", None)  # does not fire
+        combiner = StrategyCombiner([momentum, mean_rev], normalize_mode="total")
+        candles = _make_candles()
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        # total mode: net = 0.9 * 0.5 / 1.0 = 0.45 -> below 0.5 threshold -> None
+        assert signal is None
+
+    def test_normalize_total_mode_strong_consensus(self) -> None:
+        """In total mode, two strategies both firing BUY passes."""
+        config: dict[str, Any] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 0.5},
+                "mean_reversion": {"enabled": True, "weight": 0.5},
+            }
+        }
+        buy_sig1 = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        buy_sig2 = _make_signal(SignalDirection.BUY, 0.8, "mean_reversion")
+        momentum = MockStrategy("momentum", buy_sig1)
+        mean_rev = MockStrategy("mean_reversion", buy_sig2)
+        combiner = StrategyCombiner([momentum, mean_rev], normalize_mode="total")
+        candles = _make_candles()
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        # total mode: net = (0.9*0.5 + 0.8*0.5) / 1.0 = 0.85 -> BUY
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY
+
+    def test_normalize_total_accounts_for_enabled_only(self) -> None:
+        """Total weight uses only enabled strategies' weights."""
+        config: dict[str, Any] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 0.5},
+                "mean_reversion": {"enabled": True, "weight": 0.5},
+                "pairs": {"enabled": False, "weight": 0.5},
+            }
+        }
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        momentum = MockStrategy("momentum", buy_signal)
+        mean_rev = MockStrategy("mean_reversion", None)
+        combiner = StrategyCombiner([momentum, mean_rev], normalize_mode="total")
+        candles = _make_candles()
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        # total enabled weight = 0.5 + 0.5 = 1.0 (pairs disabled, not counted)
+        # net = 0.9 * 0.5 / 1.0 = 0.45 -> below threshold -> None
+        assert signal is None

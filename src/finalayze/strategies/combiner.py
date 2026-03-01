@@ -24,9 +24,14 @@ _ZERO = Decimal(0)
 class StrategyCombiner:
     """Combines multiple strategy signals using per-segment YAML weights."""
 
-    def __init__(self, strategies: list[BaseStrategy]) -> None:
+    def __init__(
+        self,
+        strategies: list[BaseStrategy],
+        normalize_mode: str = "firing",
+    ) -> None:
         self._strategies: dict[str, BaseStrategy] = {s.name: s for s in strategies}
         self._presets_dir = _PRESETS_DIR
+        self._normalize_mode = normalize_mode
 
     def generate_signal(
         self,
@@ -44,6 +49,7 @@ class StrategyCombiner:
 
         weighted_score = _ZERO
         total_weight = _ZERO
+        total_enabled_weight = _ZERO
         feature_contributions: dict[str, float] = {}
 
         for strategy_name, strategy_cfg in strategies_cfg.items():
@@ -51,14 +57,17 @@ class StrategyCombiner:
                 continue
             if not strategy_cfg.get("enabled", True):
                 continue
-            strategy = self._strategies.get(strategy_name)
-            if strategy is None:
-                continue
 
             try:
                 weight = Decimal(str(strategy_cfg.get("weight", "1.0")))
             except InvalidOperation:
                 weight = Decimal("1.0")
+            total_enabled_weight += weight
+
+            strategy = self._strategies.get(strategy_name)
+            if strategy is None:
+                continue
+
             signal = strategy.generate_signal(
                 symbol, candles, segment_id, sentiment_score=sentiment_score
             )
@@ -77,7 +86,10 @@ class StrategyCombiner:
         if total_weight == _ZERO:
             return None
 
-        net = weighted_score / total_weight
+        denominator = total_enabled_weight if self._normalize_mode == "total" else total_weight
+        if denominator == _ZERO:
+            return None
+        net = weighted_score / denominator
         abs_net = abs(net)
 
         if abs_net < _MIN_COMBINED_CONFIDENCE:

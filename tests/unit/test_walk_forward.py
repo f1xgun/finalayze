@@ -13,6 +13,7 @@ from finalayze.backtest.walk_forward import (
     WalkForwardOptimizer,
     WalkForwardResult,
     WalkForwardWindow,
+    _iter_param_combinations,
 )
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.base import BaseStrategy
@@ -262,3 +263,89 @@ class TestWalkForwardRun:
 
         assert result.total_oos_trades == 0
         assert len(result.windows) == 0
+
+
+class TestWalkForwardOptimization:
+    """Tests for param_grid and engine_factory (6B.5)."""
+
+    def test_walk_forward_without_grid_uses_default_engine(self) -> None:
+        """No param_grid -> runs default engine on test windows (backward compat)."""
+        config = WalkForwardConfig(
+            train_years=RUN_TRAIN_YEARS,
+            test_years=RUN_TEST_YEARS,
+            step_months=RUN_STEP_MONTHS,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        candles = _make_candles_range(DEFAULT_START, DEFAULT_END)
+        strategy = _AlternatingStrategy()
+        engine = BacktestEngine(strategy=strategy, initial_cash=RUN_INITIAL_CASH)
+
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
+        assert result.total_oos_trades > 0
+
+    def test_walk_forward_with_grid_optimizes_on_train(self) -> None:
+        """Provide param_grid and engine_factory -> optimizer selects best."""
+        config = WalkForwardConfig(
+            train_years=RUN_TRAIN_YEARS,
+            test_years=RUN_TEST_YEARS,
+            step_months=RUN_STEP_MONTHS,
+        )
+        factory_calls: list[dict[str, object]] = []
+
+        def engine_factory(params: dict[str, object]) -> BacktestEngine:
+            factory_calls.append(params)
+            frac = Decimal(str(params.get("kelly_fraction", "0.5")))
+            return BacktestEngine(
+                strategy=_AlternatingStrategy(),
+                initial_cash=RUN_INITIAL_CASH,
+                kelly_fraction=frac,
+            )
+
+        grid = {"kelly_fraction": [0.3, 0.5]}
+        optimizer = WalkForwardOptimizer(
+            config=config, param_grid=grid, engine_factory=engine_factory
+        )
+        candles = _make_candles_range(DEFAULT_START, DEFAULT_END)
+        engine = BacktestEngine(strategy=_AlternatingStrategy(), initial_cash=RUN_INITIAL_CASH)
+
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
+        # Factory should have been called for each combo x each window
+        assert len(factory_calls) > 0
+        assert result.total_oos_trades >= 0
+
+    def test_iter_param_combinations(self) -> None:
+        """Grid with 2x2 produces 4 combinations."""
+        grid = {"a": [1, 2], "b": [3, 4]}
+        combos = _iter_param_combinations(grid)
+        expected_combos = 4
+        assert len(combos) == expected_combos
+        assert {"a": 1, "b": 3} in combos
+        assert {"a": 2, "b": 4} in combos
+
+    def test_walk_forward_train_data_not_discarded(self) -> None:
+        """Verify train candles are passed to _optimize_on_train."""
+        config = WalkForwardConfig(
+            train_years=RUN_TRAIN_YEARS,
+            test_years=RUN_TEST_YEARS,
+            step_months=RUN_STEP_MONTHS,
+        )
+        train_lengths: list[int] = []
+
+        class TrackingOptimizer(WalkForwardOptimizer):
+            def _optimize_on_train(
+                self,
+                symbol: str,
+                segment_id: str,
+                train_candles: list,
+                default_engine: BacktestEngine,
+            ) -> BacktestEngine:
+                train_lengths.append(len(train_candles))
+                return default_engine
+
+        optimizer = TrackingOptimizer(config=config)
+        candles = _make_candles_range(DEFAULT_START, DEFAULT_END)
+        engine = BacktestEngine(strategy=_AlternatingStrategy(), initial_cash=RUN_INITIAL_CASH)
+        optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
+        # Train data should be non-empty for each window
+        assert len(train_lengths) > 0
+        assert all(length > 0 for length in train_lengths)

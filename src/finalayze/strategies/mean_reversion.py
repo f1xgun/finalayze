@@ -81,7 +81,7 @@ class MeanReversionStrategy(BaseStrategy):
         except (FileNotFoundError, OSError, yaml.YAMLError):
             return {}
 
-    def generate_signal(  # noqa: PLR0911, PLR0912
+    def generate_signal(  # noqa: PLR0911, PLR0912, PLR0915
         self,
         symbol: str,
         candles: list[Candle],
@@ -116,6 +116,8 @@ class MeanReversionStrategy(BaseStrategy):
         if band_width_pct < squeeze_threshold:
             return None
 
+        exit_at_mean = bool(params.get("exit_at_mean", False))
+
         band_width = upper - lower
         direction: SignalDirection | None = None
         confidence: float = 0.0
@@ -139,8 +141,35 @@ class MeanReversionStrategy(BaseStrategy):
             distance = (last_close - upper) / band_width
             confidence = min(1.0, _CONFIDENCE_BASE + distance * _CONFIDENCE_DISTANCE_MULTIPLIER)
         else:
-            # Price has returned inside the bands — reset active signal state
-            self._active_signal.pop(symbol, None)
+            # Price has returned inside the bands
+            active = self._active_signal.pop(symbol, None)
+            if exit_at_mean and active is not None:
+                # Emit exit signal: reverse direction to close position
+                exit_direction = (
+                    SignalDirection.SELL if active == SignalDirection.BUY else SignalDirection.BUY
+                )
+                mid_distance = abs(last_close - mid) / band_width if band_width > 0 else 0.0
+                exit_confidence = min(1.0, 0.6 + (1.0 - mid_distance) * 0.3)
+                if Decimal(str(exit_confidence)) >= min_confidence:
+                    return Signal(
+                        strategy_name=self.name,
+                        symbol=symbol,
+                        market_id=candles[0].market_id,
+                        segment_id=segment_id,
+                        direction=exit_direction,
+                        confidence=exit_confidence,
+                        features={
+                            "bb_lower": lower,
+                            "bb_upper": upper,
+                            "bb_mid": mid,
+                            "close": last_close,
+                            "exit_at_mean": 1.0,
+                        },
+                        reasoning=(
+                            f"Price {last_close:.2f} returned to mean region "
+                            f"BB [{lower:.2f}, {upper:.2f}] (exit at mean)"
+                        ),
+                    )
 
         if direction is None or Decimal(str(confidence)) < min_confidence:
             return None
