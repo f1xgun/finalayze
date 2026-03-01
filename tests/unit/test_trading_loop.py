@@ -481,6 +481,63 @@ class TestWeeklyReset:
             mock_reset_week.assert_called_once()
 
 
+class TestPDTTrackerWiring:
+    """6A.7: PDT tracker wiring + day trade detection."""
+
+    def _make_buy_signal(self) -> Signal:
+        return Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+
+    def test_pdt_tracker_wired(self) -> None:
+        loop = _make_trading_loop()
+        assert hasattr(loop, "_pdt_tracker")
+        assert loop._pdt_tracker is not None  # type: ignore[attr-defined]
+
+    def test_is_day_trade_sell_with_position(self) -> None:
+        loop = _make_trading_loop()
+        mock_broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
+        mock_broker.has_position = MagicMock(return_value=True)
+        result = loop._is_day_trade(SYMBOL_AAPL, "SELL", MARKET_US)  # type: ignore[attr-defined]
+        assert result is True
+
+    def test_is_day_trade_non_us_returns_false(self) -> None:
+        loop = _make_trading_loop()
+        result = loop._is_day_trade(SYMBOL_AAPL, "SELL", "moex")  # type: ignore[attr-defined]
+        assert result is False
+
+    def test_day_trade_recorded_on_fill(self) -> None:
+        """When a day trade sell is filled, PDT tracker records it."""
+        signal = Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.SELL,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+        loop = _make_trading_loop(signal=signal)
+        mock_broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
+        mock_broker.has_position = MagicMock(return_value=True)
+
+        initial_count = loop._pdt_tracker.recent_day_trades  # type: ignore[attr-defined]
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+
+        # After a fill of a day-trade sell, the tracker should record it
+        assert loop._pdt_tracker.recent_day_trades > initial_count  # type: ignore[attr-defined]
+
+
 class TestTradingLoopLiquidation:
     def test_liquidate_market_submits_sell_for_each_position(self) -> None:
         loop = _make_trading_loop()

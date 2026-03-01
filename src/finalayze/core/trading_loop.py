@@ -102,7 +102,7 @@ class TradingLoop:
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
         from finalayze.risk.kelly import RollingKelly  # noqa: PLC0415
         from finalayze.risk.loss_limits import LossLimitTracker  # noqa: PLC0415
-        from finalayze.risk.pre_trade_check import PreTradeChecker  # noqa: PLC0415
+        from finalayze.risk.pre_trade_check import PDTTracker, PreTradeChecker  # noqa: PLC0415
 
         # Store class references for runtime use without module-level imports
         self._OrderRequest = OrderRequest
@@ -135,9 +135,12 @@ class TradingLoop:
         self._stop_loss_prices: dict[str, Decimal] = {}
 
         # Risk management components
+        # 6A.7: Wire PDTTracker into PreTradeChecker
+        self._pdt_tracker = PDTTracker()
         self._pre_trade_checker = PreTradeChecker(
             max_position_pct=Decimal(str(settings.max_position_pct)),
             max_positions_per_market=settings.max_positions_per_market,
+            pdt_tracker=self._pdt_tracker,
         )
         _raw_loss_limit = getattr(settings, "daily_loss_limit_pct", 0.05)
         self._loss_limit_tracker = LossLimitTracker(
@@ -429,6 +432,20 @@ class TradingLoop:
         current_minutes = dt.hour * 60 + dt.minute
         return open_minutes <= current_minutes < close_minutes
 
+    def _is_day_trade(self, symbol: str, side: str, market_id: str) -> bool:
+        """Return True if this order would open+close a position same day.
+
+        A SELL of a position opened today constitutes a day trade.
+        Simplified heuristic: a SELL order for a symbol with an existing
+        position is flagged as a potential day trade. PDT is US-only.
+        """
+        if market_id != "us":
+            return False
+        broker = self._broker_router.route(market_id)
+        if side == "SELL" and broker.has_position(symbol):
+            return True
+        return False
+
     def _process_instrument(
         self,
         instrument: Instrument,
@@ -510,6 +527,18 @@ class TradingLoop:
         except (TypeError, ValueError):
             max_exposure = Decimal("0.80")
 
+        # 6A.7: Detect day trades for PDT compliance
+        is_day_trade = self._is_day_trade(order.symbol, order.side, market_id)
+
+        # 6A.2: Compute sector exposure for concentration check
+        sector_exposure = _ZERO
+        for sym, qty in portfolio.positions.items():
+            if qty > _ZERO:
+                # Use last candle price as proxy for all positions in segment
+                sector_exposure += qty * (candles[-1].close if candles else _ZERO)
+        # Only pass if we have segment context
+        seg_exposure: Decimal | None = sector_exposure if seg_id else None
+
         pre_result = self._pre_trade_checker.check(
             order_value=order_value,
             portfolio_equity=portfolio.equity,
@@ -522,6 +551,9 @@ class TradingLoop:
             else None,
             cross_market_exposure_pct=cross_exposure,
             max_cross_market_exposure_pct=max_exposure,
+            is_day_trade=is_day_trade,
+            sector_exposure_value=seg_exposure,
+            sector_id=seg_id,
         )
 
         if not pre_result.passed:
@@ -533,6 +565,10 @@ class TradingLoop:
             return
 
         self._submit_order(order, market_id, candles=candles)
+
+        # 6A.7: Record day trade after successful order submission
+        if is_day_trade:
+            self._pdt_tracker.record_day_trade(now.date())
 
     def _build_order(
         self,
