@@ -178,6 +178,20 @@ class SimulatedBroker(BrokerBase):
 
         return results
 
+    def deduct_fees(self, amount: Decimal) -> None:
+        """Deduct transaction fees from available cash.
+
+        Args:
+            amount: Fee amount to deduct (must be non-negative).
+
+        Raises:
+            ValueError: If amount is negative.
+        """
+        if amount < 0:
+            msg = f"Fee amount must be non-negative, got {amount}"
+            raise ValueError(msg)
+        self._cash -= amount
+
     def update_prices(self, candle: Candle) -> None:
         """Update last known price for a symbol from a candle's close."""
         self._last_prices[candle.symbol] = candle.close

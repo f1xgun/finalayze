@@ -324,7 +324,7 @@ class BacktestEngine:
                 cost = self._transaction_costs.total_cost(
                     order_result.fill_price, order_result.quantity
                 )
-                broker._cash -= cost
+                broker.deduct_fees(cost)
 
             # Set ATR stop-loss (trailing or fixed)
             stop_price = compute_atr_stop_loss(
