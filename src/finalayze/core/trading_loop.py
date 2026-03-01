@@ -312,7 +312,7 @@ class TradingLoop:
         """Return current UTC datetime. Extracted for testability."""
         return datetime.now(UTC)
 
-    def _strategy_cycle(self) -> None:
+    def _strategy_cycle(self) -> None:  # noqa: PLR0912
         """For each market and instrument, generate a signal and submit orders."""
         # 6A.1: Mode gate -- DEBUG mode must not send real orders
         if not self._settings.mode.can_submit_orders():
@@ -442,9 +442,7 @@ class TradingLoop:
         if market_id != "us":
             return False
         broker = self._broker_router.route(market_id)
-        if side == "SELL" and broker.has_position(symbol):
-            return True
-        return False
+        return side == "SELL" and broker.has_position(symbol)
 
     def _process_instrument(
         self,
@@ -492,8 +490,13 @@ class TradingLoop:
         # #162: Use RollingKelly for position sizing
         kelly_fraction = self._kelly_sizer.optimal_fraction()
         order = self._build_order(
-            signal, level, portfolio.equity, portfolio.cash, candles,
-            instrument.symbol, kelly_fraction,
+            signal,
+            level,
+            portfolio.equity,
+            portfolio.cash,
+            candles,
+            instrument.symbol,
+            kelly_fraction,
         )
         if order is None:
             return
@@ -532,7 +535,7 @@ class TradingLoop:
 
         # 6A.2: Compute sector exposure for concentration check
         sector_exposure = _ZERO
-        for sym, qty in portfolio.positions.items():
+        for qty in portfolio.positions.values():
             if qty > _ZERO:
                 # Use last candle price as proxy for all positions in segment
                 sector_exposure += qty * (candles[-1].close if candles else _ZERO)
@@ -820,8 +823,8 @@ class TradingLoop:
         self._loss_limit_tracker.reset_day(now, total_equity)
 
         # 6A.10: Reset weekly baseline on Monday (weekday 0)
-        _MONDAY = 0
-        if now.weekday() == _MONDAY:
+        monday = 0
+        if now.weekday() == monday:
             self._loss_limit_tracker.reset_week(now, total_equity)
 
         self._alerter.on_daily_summary(market_pnl, total_equity)

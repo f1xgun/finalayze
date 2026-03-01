@@ -13,7 +13,7 @@ import httpx
 from finalayze.core.exceptions import InstrumentNotFoundError, InsufficientFundsError
 
 try:
-    import grpc
+    import grpc  # type: ignore[import-untyped]
 
     _GRPC_RETRYABLE: tuple[type[Exception], ...] = (grpc.RpcError,)
 except ImportError:

@@ -12,8 +12,8 @@ from config.settings import Settings
 from finalayze.analysis.event_classifier import EventType
 from finalayze.analysis.impact_estimator import SegmentImpact
 from finalayze.core.alerts import TelegramAlerter
-from finalayze.core.schemas import Candle, NewsArticle, SentimentResult, Signal, SignalDirection
 from finalayze.core.modes import WorkMode
+from finalayze.core.schemas import Candle, NewsArticle, SentimentResult, Signal, SignalDirection
 from finalayze.core.trading_loop import TradingLoop
 from finalayze.execution.broker_base import OrderResult
 from finalayze.markets.instruments import Instrument, InstrumentRegistry
@@ -345,14 +345,12 @@ class TestBuildOrder:
             reasoning="test signal",
         )
         loop = _make_trading_loop(signal=signal)
-        from finalayze.risk.circuit_breaker import CircuitLevel as CL  # noqa: N811
-
         kelly = Decimal("0.1")
         equity = Decimal(100000)
         cash = Decimal(30000)
         candles = _make_candles()
         order = loop._build_order(  # type: ignore[attr-defined]
-            signal, CL.NORMAL, equity, cash, candles, SYMBOL_AAPL, kelly
+            signal, CircuitLevel.NORMAL, equity, cash, candles, SYMBOL_AAPL, kelly
         )
         assert order is not None
         # order_value = 0.1 * 100000 = 10000; qty = 10000 / 150 = 66.67 -> 67 (rounded)
@@ -372,14 +370,12 @@ class TestBuildOrder:
             reasoning="test signal",
         )
         loop = _make_trading_loop(signal=signal)
-        from finalayze.risk.circuit_breaker import CircuitLevel as CL  # noqa: N811
-
         kelly = Decimal("0.1")
         equity = Decimal(100000)
         cash = Decimal(5000)
         candles = _make_candles()
         order = loop._build_order(  # type: ignore[attr-defined]
-            signal, CL.NORMAL, equity, cash, candles, SYMBOL_AAPL, kelly
+            signal, CircuitLevel.NORMAL, equity, cash, candles, SYMBOL_AAPL, kelly
         )
         assert order is not None
         # order_value = min(0.1 * 100000, 5000) = 5000; qty = 5000 / 150 = 33

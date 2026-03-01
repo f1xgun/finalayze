@@ -125,7 +125,7 @@ class PreTradeChecker:
         self._max_sector_pct = max_sector_concentration_pct
         self._min_cash_reserve_pct = min_cash_reserve_pct
 
-    def check(
+    def check(  # noqa: PLR0912
         self,
         order_value: Decimal,
         portfolio_equity: Decimal,
@@ -212,11 +212,7 @@ class PreTradeChecker:
             )
 
         # 7b. Sector/segment concentration
-        if (
-            sector_exposure_value is not None
-            and portfolio_equity > 0
-            and sector_id
-        ):
+        if sector_exposure_value is not None and portfolio_equity > 0 and sector_id:
             prospective = sector_exposure_value + order_value
             concentration = prospective / portfolio_equity
             if concentration > self._max_sector_pct:
