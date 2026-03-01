@@ -11,6 +11,7 @@ import yaml
 
 from finalayze.core.schemas import Candle, SignalDirection
 from finalayze.strategies.base import BaseStrategy
+from finalayze.strategies.mean_reversion import MeanReversionStrategy
 from finalayze.strategies.momentum import MomentumStrategy, _SignalState
 
 MIN_CANDLES_FOR_INDICATORS = 35
@@ -830,3 +831,134 @@ class TestMomentumPerSegmentState:
         assert state_b._neutral_reset_bars == 50, (
             "seg_b neutral_reset_bars should not be mutated by seg_a call"
         )
+
+
+_MR_PARAMS: dict[str, object] = {
+    "bb_period": 20,
+    "bb_std_dev": 2.0,
+    "min_confidence": 0.0,
+    "squeeze_threshold": 0.0,
+    "min_band_distance_pct": 0.0,
+    "rsi_oversold_mr": 100,
+    "rsi_overbought_mr": 0,
+    "rsi_period": 14,
+    "exit_at_mean": False,
+}
+
+
+def _make_mr_candles(
+    prices: list[float],
+    symbol: str = "AAPL",
+) -> list[Candle]:
+    """Build candles for mean reversion tests."""
+    candles = []
+    base = datetime(2024, 1, 1, 14, 30, tzinfo=UTC)
+    for i, price in enumerate(prices):
+        p = Decimal(str(price))
+        candles.append(
+            Candle(
+                symbol=symbol,
+                market_id="us",
+                timeframe="1d",
+                timestamp=base + timedelta(days=i),
+                open=p,
+                high=p + Decimal(1),
+                low=p - Decimal(1),
+                close=p,
+                volume=1_000_000,
+            )
+        )
+    return candles
+
+
+class TestMeanReversionExitAtMean:
+    """Tests for exit-at-mean signal (6B.3)."""
+
+    @staticmethod
+    def _prices_below_lower_then_mean() -> list[float]:
+        """Prices: stable at 100, drop below lower BB, then return to mean."""
+        # 21 stable candles for BB(20) computation, then crash, then recover
+        prices: list[float] = [100.0] * 21
+        # Drop below lower band (std dev of flat data is 0, so add some noise first)
+        # Use small oscillation to create non-zero std dev
+        prices = [100.0 + (i % 3 - 1) * 0.5 for i in range(21)]
+        # Sharp drop below lower band
+        prices.append(90.0)
+        # Return to mean
+        prices.append(100.0)
+        return prices
+
+    def test_exit_at_mean_generates_sell_after_buy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Price below lower BB (BUY), then returns to mean -> exit SELL."""
+        params = {**_MR_PARAMS, "exit_at_mean": True}
+        strategy = MeanReversionStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+
+        prices = self._prices_below_lower_then_mean()
+        # First call: price at 90 (below lower) -> BUY
+        candles_drop = _make_mr_candles(prices[:-1])
+        sig1 = strategy.generate_signal("AAPL", candles_drop, "us_tech")
+        assert sig1 is not None, "Expected BUY signal when price below lower BB"
+        assert sig1.direction == SignalDirection.BUY
+
+        # Second call: price at 100 (back to mean) -> exit SELL
+        candles_mean = _make_mr_candles(prices)
+        sig2 = strategy.generate_signal("AAPL", candles_mean, "us_tech")
+        assert sig2 is not None, "Expected SELL exit signal when price returns to mean"
+        assert sig2.direction == SignalDirection.SELL
+        assert sig2.features.get("exit_at_mean") == 1.0
+
+    def test_exit_at_mean_generates_buy_after_sell(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Price above upper BB (SELL), then returns to mean -> exit BUY."""
+        params = {**_MR_PARAMS, "exit_at_mean": True}
+        strategy = MeanReversionStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+
+        # Stable prices with small oscillation, then spike up, then return
+        prices = [100.0 + (i % 3 - 1) * 0.5 for i in range(21)]
+        prices.append(110.0)  # above upper BB -> SELL
+        prices.append(100.0)  # back to mean -> exit BUY
+
+        candles_spike = _make_mr_candles(prices[:-1])
+        sig1 = strategy.generate_signal("AAPL", candles_spike, "us_tech")
+        assert sig1 is not None, "Expected SELL signal when price above upper BB"
+        assert sig1.direction == SignalDirection.SELL
+
+        candles_mean = _make_mr_candles(prices)
+        sig2 = strategy.generate_signal("AAPL", candles_mean, "us_tech")
+        assert sig2 is not None, "Expected BUY exit signal when price returns to mean"
+        assert sig2.direction == SignalDirection.BUY
+
+    def test_exit_at_mean_disabled_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without exit_at_mean, no exit signal on mean return."""
+        params = {**_MR_PARAMS, "exit_at_mean": False}
+        strategy = MeanReversionStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+
+        prices = self._prices_below_lower_then_mean()
+        candles_drop = _make_mr_candles(prices[:-1])
+        sig1 = strategy.generate_signal("AAPL", candles_drop, "us_tech")
+        assert sig1 is not None and sig1.direction == SignalDirection.BUY
+
+        candles_mean = _make_mr_candles(prices)
+        sig2 = strategy.generate_signal("AAPL", candles_mean, "us_tech")
+        assert sig2 is None, "No exit signal when exit_at_mean is False"
+
+    def test_exit_at_mean_no_signal_without_active_position(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Price inside bands with no prior active signal -> no exit signal."""
+        params = {**_MR_PARAMS, "exit_at_mean": True}
+        strategy = MeanReversionStrategy()
+        monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
+
+        prices = [100.0 + (i % 3 - 1) * 0.5 for i in range(22)]
+        candles = _make_mr_candles(prices)
+        sig = strategy.generate_signal("AAPL", candles, "us_tech")
+        assert sig is None, "No signal when price is inside bands and no prior active"
