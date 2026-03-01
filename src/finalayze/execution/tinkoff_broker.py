@@ -72,7 +72,7 @@ class TinkoffBroker(BrokerBase):
         """Close the persistent gRPC channel."""
         if self._client is not None:
             with contextlib.suppress(Exception):
-                asyncio.run(self._client.__aexit__(None, None, None))
+                asyncio.run(self._client.__aexit__(None, None, None))  # type: ignore[no-untyped-call]
             self._client = None
 
     def _call(self, fn: object) -> object:
@@ -95,7 +95,7 @@ class TinkoffBroker(BrokerBase):
     async def _get_accounts_async(self) -> object:
         """Async call to fetch accounts list."""
         client = self._get_client()
-        return await client.users.get_accounts()
+        return await client.users.get_accounts()  # type: ignore[attr-defined]
 
     def submit_order(
         self,
@@ -156,7 +156,7 @@ class TinkoffBroker(BrokerBase):
     ) -> object:
         """Async call to Tinkoff SDK post_order."""
         client = self._get_client()
-        return await client.orders.post_order(
+        return await client.orders.post_order(  # type: ignore[attr-defined]
             figi=figi,
             quantity=quantity,
             direction=direction,
@@ -193,7 +193,7 @@ class TinkoffBroker(BrokerBase):
     async def _get_portfolio_async(self) -> object:
         """Async call to Tinkoff SDK get_portfolio."""
         client = self._get_client()
-        return await client.operations.get_portfolio(account_id=self._account_id)
+        return await client.operations.get_portfolio(account_id=self._account_id)  # type: ignore[attr-defined]
 
     def has_position(self, symbol: str) -> bool:
         """Return True if Tinkoff account holds a non-zero position in symbol."""
@@ -222,7 +222,7 @@ class TinkoffBroker(BrokerBase):
     async def _cancel_order_async(self, order_id: str) -> None:
         """Async call to Tinkoff SDK cancel_order."""
         client = self._get_client()
-        await client.orders.cancel_order(account_id=self._account_id, order_id=order_id)
+        await client.orders.cancel_order(account_id=self._account_id, order_id=order_id)  # type: ignore[attr-defined]
 
     @staticmethod
     def _quotation_to_decimal(q: object) -> Decimal:

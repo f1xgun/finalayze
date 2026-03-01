@@ -485,7 +485,7 @@ class TradingLoop:
         """Return current portfolio equity for market, or None on failure."""
         portfolio = self._get_cached_portfolio(market_id)
         if portfolio is not None:
-            return portfolio.equity
+            return Decimal(str(portfolio.equity))
         return None
 
     def _compute_total_equity_base(self) -> Decimal:

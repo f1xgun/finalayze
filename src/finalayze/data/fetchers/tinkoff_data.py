@@ -74,7 +74,7 @@ class TinkoffFetcher(BaseFetcher):
         """Close the persistent gRPC channel."""
         if self._client is not None:
             with contextlib.suppress(Exception):
-                asyncio.run(self._client.__aexit__(None, None, None))
+                asyncio.run(self._client.__aexit__(None, None, None))  # type: ignore[no-untyped-call]
             self._client = None
 
     def fetch_candles(
@@ -115,7 +115,7 @@ class TinkoffFetcher(BaseFetcher):
     ) -> list[Any]:
         """Async call to Tinkoff SDK get_all_candles."""
         client = self._get_client()
-        response = await client.market_data.get_candles(
+        response = await client.market_data.get_candles(  # type: ignore[attr-defined]
             figi=figi,
             from_=start,
             to=end,
