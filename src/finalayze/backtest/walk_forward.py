@@ -11,11 +11,13 @@ import math
 import statistics
 from dataclasses import dataclass, field
 from datetime import date  # noqa: TC003
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from dateutil.relativedelta import relativedelta
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from finalayze.backtest.engine import BacktestEngine
     from finalayze.core.schemas import Candle, TradeResult
 
@@ -206,10 +208,7 @@ def _iter_param_combinations(grid: ParameterGrid) -> list[dict[str, object]]:
     """Generate all combinations from a parameter grid."""
     keys = list(grid.keys())
     values = list(grid.values())
-    combos = []
-    for combo in itertools.product(*values):
-        combos.append(dict(zip(keys, combo, strict=False)))
-    return combos
+    return [dict(zip(keys, combo, strict=False)) for combo in itertools.product(*values)]
 
 
 # ── Private metric helpers ───────────────────────────────────────────────

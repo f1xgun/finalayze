@@ -55,6 +55,6 @@ class TestVolAdjustedPositionSize:
         result = compute_vol_adjusted_position_size(
             base_position=BASE_POSITION,
             target_vol=Decimal("0.15"),
-            asset_vol=Decimal("0"),
+            asset_vol=Decimal(0),
         )
         assert result == BASE_POSITION

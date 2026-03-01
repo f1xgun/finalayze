@@ -81,7 +81,7 @@ class MeanReversionStrategy(BaseStrategy):
         except (FileNotFoundError, OSError, yaml.YAMLError):
             return {}
 
-    def generate_signal(  # noqa: PLR0911, PLR0912
+    def generate_signal(  # noqa: PLR0911, PLR0912, PLR0915
         self,
         symbol: str,
         candles: list[Candle],
@@ -146,9 +146,7 @@ class MeanReversionStrategy(BaseStrategy):
             if exit_at_mean and active is not None:
                 # Emit exit signal: reverse direction to close position
                 exit_direction = (
-                    SignalDirection.SELL
-                    if active == SignalDirection.BUY
-                    else SignalDirection.BUY
+                    SignalDirection.SELL if active == SignalDirection.BUY else SignalDirection.BUY
                 )
                 mid_distance = abs(last_close - mid) / band_width if band_width > 0 else 0.0
                 exit_confidence = min(1.0, 0.6 + (1.0 - mid_distance) * 0.3)

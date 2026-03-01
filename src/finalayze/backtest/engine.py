@@ -300,7 +300,7 @@ class BacktestEngine:
             {c.timestamp for candles in candles_by_symbol.values() for c in candles}
         )
 
-        for ts_idx, ts in enumerate(all_timestamps):
+        for ts in all_timestamps:
             broker.set_timestamp(ts)
 
             # Update prices for all symbols that have data at this timestamp
@@ -324,11 +324,7 @@ class BacktestEngine:
                                 pnl -= self._transaction_costs.total_cost(
                                     sr.fill_price, sr.quantity
                                 )
-                            pnl_pct = (
-                                (sr.fill_price - entry) / entry
-                                if entry != 0
-                                else Decimal(0)
-                            )
+                            pnl_pct = (sr.fill_price - entry) / entry if entry != 0 else Decimal(0)
                             trade = TradeResult(
                                 signal_id=uuid4(),
                                 symbol=sr.symbol,
@@ -356,13 +352,9 @@ class BacktestEngine:
                     fill_candle = sym_candles[idx + 1]
 
                     if signal.direction == SignalDirection.BUY:
-                        self._handle_buy(
-                            broker, checker, fill_candle, sym, history, entry_prices
-                        )
+                        self._handle_buy(broker, checker, fill_candle, sym, history, entry_prices)
                     elif signal.direction == SignalDirection.SELL:
-                        self._handle_sell(
-                            broker, fill_candle, sym, entry_prices, trades
-                        )
+                        self._handle_sell(broker, fill_candle, sym, entry_prices, trades)
 
             snapshots.append(broker.get_portfolio())
 
@@ -401,7 +393,7 @@ class BacktestEngine:
         if self._rolling_kelly is not None:
             self._rolling_kelly.update(TradeRecord(pnl=trade.pnl, pnl_pct=trade.pnl_pct))
 
-    def _handle_buy(
+    def _handle_buy(  # noqa: PLR0912
         self,
         broker: SimulatedBroker,
         checker: PreTradeChecker,

@@ -5,7 +5,13 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+import math
+import statistics as stats
 from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from finalayze.core.schemas import Candle
 
 # Maximum win rate cap to prevent Kelly = infinity when win_rate = 1.0
 _MAX_WIN_RATE = Decimal("0.99")
@@ -76,7 +82,7 @@ def compute_vol_adjusted_position_size(
     return base_position * scale
 
 
-def compute_realized_vol(candles: list, lookback: int = 20) -> Decimal | None:
+def compute_realized_vol(candles: list[Candle], lookback: int = 20) -> Decimal | None:
     """Compute annualized realized volatility from daily log returns.
 
     Uses the last ``lookback`` candles. Returns None if insufficient data.
@@ -91,14 +97,10 @@ def compute_realized_vol(candles: list, lookback: int = 20) -> Decimal | None:
     min_candles = lookback + 1
     if len(candles) < min_candles:
         return None
-    import math
-    import statistics as stats
 
     closes = [float(c.close) for c in candles[-(lookback + 1) :]]
     log_returns = [
-        math.log(closes[i] / closes[i - 1])
-        for i in range(1, len(closes))
-        if closes[i - 1] > 0
+        math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes)) if closes[i - 1] > 0
     ]
     if len(log_returns) < 2:  # noqa: PLR2004
         return None

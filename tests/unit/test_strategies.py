@@ -888,9 +888,7 @@ class TestMeanReversionExitAtMean:
         prices.append(100.0)
         return prices
 
-    def test_exit_at_mean_generates_sell_after_buy(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_exit_at_mean_generates_sell_after_buy(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Price below lower BB (BUY), then returns to mean -> exit SELL."""
         params = {**_MR_PARAMS, "exit_at_mean": True}
         strategy = MeanReversionStrategy()
@@ -910,9 +908,7 @@ class TestMeanReversionExitAtMean:
         assert sig2.direction == SignalDirection.SELL
         assert sig2.features.get("exit_at_mean") == 1.0
 
-    def test_exit_at_mean_generates_buy_after_sell(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_exit_at_mean_generates_buy_after_sell(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Price above upper BB (SELL), then returns to mean -> exit BUY."""
         params = {**_MR_PARAMS, "exit_at_mean": True}
         strategy = MeanReversionStrategy()
@@ -933,9 +929,7 @@ class TestMeanReversionExitAtMean:
         assert sig2 is not None, "Expected BUY exit signal when price returns to mean"
         assert sig2.direction == SignalDirection.BUY
 
-    def test_exit_at_mean_disabled_by_default(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_exit_at_mean_disabled_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Without exit_at_mean, no exit signal on mean return."""
         params = {**_MR_PARAMS, "exit_at_mean": False}
         strategy = MeanReversionStrategy()

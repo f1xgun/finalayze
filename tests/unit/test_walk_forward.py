@@ -306,9 +306,7 @@ class TestWalkForwardOptimization:
             config=config, param_grid=grid, engine_factory=engine_factory
         )
         candles = _make_candles_range(DEFAULT_START, DEFAULT_END)
-        engine = BacktestEngine(
-            strategy=_AlternatingStrategy(), initial_cash=RUN_INITIAL_CASH
-        )
+        engine = BacktestEngine(strategy=_AlternatingStrategy(), initial_cash=RUN_INITIAL_CASH)
 
         result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
         # Factory should have been called for each combo x each window
@@ -346,9 +344,7 @@ class TestWalkForwardOptimization:
 
         optimizer = TrackingOptimizer(config=config)
         candles = _make_candles_range(DEFAULT_START, DEFAULT_END)
-        engine = BacktestEngine(
-            strategy=_AlternatingStrategy(), initial_cash=RUN_INITIAL_CASH
-        )
+        engine = BacktestEngine(strategy=_AlternatingStrategy(), initial_cash=RUN_INITIAL_CASH)
         optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
         # Train data should be non-empty for each window
         assert len(train_lengths) > 0

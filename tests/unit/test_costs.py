@@ -33,9 +33,7 @@ class TestTransactionCosts:
         """MOEX_COSTS uses commission_rate (percentage of trade value)."""
         cost = MOEX_COSTS.total_cost(MOEX_PRICE, MOEX_QTY)
         # commission = max(0.10, 100 * 100 * 0.0003) = max(0.10, 3.0) = 3.0
-        expected_commission = max(
-            Decimal("0.10"), MOEX_PRICE * MOEX_QTY * Decimal("0.0003")
-        )
+        expected_commission = max(Decimal("0.10"), MOEX_PRICE * MOEX_QTY * Decimal("0.0003"))
         spread = MOEX_PRICE * Decimal(10) / Decimal(10000)
         slippage = MOEX_PRICE * Decimal(7) / Decimal(10000)
         expected = expected_commission + (spread + slippage) * MOEX_QTY

@@ -235,7 +235,7 @@ class TestPortfolioBacktest:
                 )
             )
         engine = BacktestEngine(strategy=StubStrategy(), initial_cash=INITIAL_CASH)
-        trades, snapshots = engine.run_portfolio(
+        _trades, snapshots = engine.run_portfolio(
             symbols=["SYM_A", "SYM_B"],
             segment_id="us_large_cap",
             candles_by_symbol={"SYM_A": sym_a, "SYM_B": sym_b},
