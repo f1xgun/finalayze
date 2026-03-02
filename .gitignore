@@ -71,5 +71,8 @@ credentials.json
 # Streamlit secrets (never commit real credentials)
 .streamlit/secrets.toml
 
+# Candle cache
+.cache/
+
 # Worktrees
 .worktrees/

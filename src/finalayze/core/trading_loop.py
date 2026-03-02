@@ -157,6 +157,9 @@ class TradingLoop:
             fraction=getattr(settings, "kelly_fraction", 0.5),
         )
 
+        # Entry price tracking for Kelly P&L computation
+        self._entry_prices: dict[str, Decimal] = {}
+
         self._ml_registry = ml_registry
         self._scheduler: BackgroundScheduler | None = None
         self._stop_event = threading.Event()
@@ -721,8 +724,9 @@ class TradingLoop:
                     slippage_bps=0.0,
                     fill_latency_seconds=0.0,
                 )
-                # Wire stop-loss on BUY fill
+                # Wire stop-loss on BUY fill + track entry price for Kelly
                 if order.side == "BUY" and candles and result.fill_price is not None:
+                    self._entry_prices[order.symbol] = result.fill_price
                     multiplier = _ATR_MULTIPLIER_MOEX if market_id == "moex" else _ATR_MULTIPLIER_US
                     stop = compute_atr_stop_loss(
                         result.fill_price, candles, atr_multiplier=multiplier
@@ -730,8 +734,10 @@ class TradingLoop:
                     if stop is not None:
                         with self._stop_loss_lock:
                             self._stop_loss_prices[order.symbol] = stop
-                # Clear stop-loss on SELL fill
+                # Update Kelly on SELL fill + clear stop-loss
                 elif order.side == "SELL":
+                    if result.fill_price is not None:
+                        self._update_kelly(order.symbol, result.fill_price)
                     with self._stop_loss_lock:
                         self._stop_loss_prices.pop(order.symbol, None)
             else:
@@ -777,9 +783,22 @@ class TradingLoop:
                 except Exception:
                     _log.exception("_check_stop_losses: failed to submit stop-loss for %s", symbol)
                     return
+                # Update Kelly with stop-loss exit
+                self._update_kelly(symbol, current_price)
             # Clear stop-loss after trigger
             with self._stop_loss_lock:
                 self._stop_loss_prices.pop(symbol, None)
+
+    def _update_kelly(self, symbol: str, fill_price: Decimal) -> None:
+        """Compute P&L from entry price and feed a TradeRecord to RollingKelly."""
+        from finalayze.risk.kelly import TradeRecord  # noqa: PLC0415
+
+        entry = self._entry_prices.pop(symbol, None)
+        if entry is None or entry <= _ZERO:
+            return
+        pnl = fill_price - entry
+        pnl_pct = pnl / entry
+        self._kelly_sizer.update(TradeRecord(pnl=pnl, pnl_pct=pnl_pct))
 
     def _retrain_cycle(self) -> None:
         """Periodically retrain ML ensemble models for all active segments.

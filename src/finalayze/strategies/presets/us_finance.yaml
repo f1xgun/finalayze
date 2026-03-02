@@ -37,10 +37,10 @@ strategies:
       volume_min_ratio: 1.0
       neutral_reset_bars: 8
   event_driven:
-    enabled: false
+    enabled: true
     weight: 0.30
     params:
-      min_sentiment: 0.65
+      min_sentiment: 0.5
       event_types: [interest_rate, earnings, regulatory, macro]
   ml_ensemble:
     enabled: true

@@ -3,10 +3,10 @@ normalize_mode: "firing"
 min_combined_confidence: 0.35
 strategies:
   event_driven:
-    enabled: false
+    enabled: true
     weight: 0.40
     params:
-      min_sentiment: 0.65
+      min_sentiment: 0.5
       event_types: [fda, clinical_trial, earnings, regulatory]
   mean_reversion:
     enabled: true

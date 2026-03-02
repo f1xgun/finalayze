@@ -41,10 +41,10 @@ strategies:
       rsi_oversold_mr: 35
       rsi_overbought_mr: 65
   event_driven:
-    enabled: false
+    enabled: true
     weight: 0.32
     params:
-      min_sentiment: 0.7
+      min_sentiment: 0.5
       event_types: [earnings, fda, product_launch]
   pairs:
     enabled: true

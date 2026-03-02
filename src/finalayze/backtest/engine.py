@@ -32,8 +32,8 @@ from finalayze.risk.kelly import TradeRecord
 from finalayze.risk.position_sizer import (
     compute_position_size,
     compute_realized_vol,
-    compute_vol_adjusted_position_size,
 )
+from finalayze.risk.position_sizing_pipeline import PositionSizingPipeline, SizingContext
 from finalayze.risk.pre_trade_check import PreTradeChecker
 from finalayze.risk.stop_loss import compute_atr_stop_loss
 
@@ -115,6 +115,7 @@ class BacktestEngine:
         self._max_hold_bars = cfg.max_hold_bars
         self._stop_loss_mode = cfg.stop_loss_mode
         self._regime_provider = regime_provider
+        self._sizing_pipeline = PositionSizingPipeline()
 
     def run(  # noqa: PLR0912, PLR0915
         self,
@@ -984,15 +985,12 @@ class BacktestEngine:
 
         portfolio = broker.get_portfolio()
 
-        # Compute position size: Rolling Kelly if available, else default Half-Kelly
+        # Compute position size via the unified sizing pipeline
         if self._rolling_kelly is not None:
             kelly_frac = self._rolling_kelly.optimal_fraction()
-            position_value = min(
-                portfolio.equity * kelly_frac,
-                portfolio.equity * self._max_position_pct,
-            )
+            base_position = portfolio.equity * kelly_frac
         else:
-            position_value = compute_position_size(
+            base_position = compute_position_size(
                 win_rate=_DEFAULT_WIN_RATE,
                 avg_win_ratio=_DEFAULT_AVG_WIN_RATIO,
                 equity=portfolio.equity,
@@ -1000,28 +998,23 @@ class BacktestEngine:
                 max_position_pct=self._max_position_pct,
             )
 
-        # Apply volatility-adjusted sizing if target_vol is configured
-        if self._target_vol is not None:
-            asset_vol = compute_realized_vol(history)
-            if asset_vol is not None and asset_vol > 0:
-                position_value = compute_vol_adjusted_position_size(
-                    base_position=position_value,
-                    target_vol=self._target_vol,
-                    asset_vol=asset_vol,
-                )
+        asset_vol = compute_realized_vol(history) or Decimal("0.20")
+        context = SizingContext(
+            equity=portfolio.equity,
+            base_position=base_position,
+            max_position_pct=self._max_position_pct,
+            min_position_size=Decimal(500),
+            asset_vol=asset_vol,
+            target_vol=self._target_vol or Decimal("0.15"),
+            regime_scale=Decimal(str(regime_position_scale or 1.0)),
+            correlation_scale=Decimal("1.0"),
+        )
+        position_value = self._sizing_pipeline.compute(context)
 
-        # Apply confidence scaling from signal
+        # Apply confidence scaling from signal (post-pipeline multiplier)
         if signal is not None:
             confidence_scale = Decimal(str(0.5 + signal.confidence * 0.5))  # [0.5x, 1.0x]
             position_value = position_value * confidence_scale
-
-        # Apply regime-based position scaling
-        if regime_position_scale is not None:
-            position_value = position_value * Decimal(str(regime_position_scale))
-
-        # Hard cap at max_position_pct
-        max_allowed = portfolio.equity * self._max_position_pct
-        position_value = min(position_value, max_allowed)
 
         if position_value <= 0:
             self._journal_skip(

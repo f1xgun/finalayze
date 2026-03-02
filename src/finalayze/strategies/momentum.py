@@ -16,6 +16,8 @@ _PRESETS_DIR = Path(__file__).parent / "presets"
 _MIN_CANDLES = 30
 _DEFAULT_LOOKBACK_BARS = 5
 _DEFAULT_NEUTRAL_RESET_BARS = 20
+_DEFAULT_SENTIMENT_BOOST = 0.10
+_DEFAULT_SENTIMENT_PENALTY = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +125,7 @@ class MomentumStrategy(BaseStrategy):
         symbol: str,
         candles: list[Candle],
         segment_id: str,
-        sentiment_score: float = 0.0,  # noqa: ARG002
+        sentiment_score: float = 0.0,
         has_open_position: bool = False,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a momentum signal from RSI and MACD indicators."""
@@ -151,13 +153,23 @@ class MomentumStrategy(BaseStrategy):
 
         direction, confidence = result
 
+        # Sentiment modifier: boost confidence when sentiment aligns with direction,
+        # penalize when opposed.
+        sentiment_boost = float(params.get("sentiment_boost", _DEFAULT_SENTIMENT_BOOST))  # type: ignore[arg-type]
+        sentiment_penalty = float(params.get("sentiment_penalty", _DEFAULT_SENTIMENT_PENALTY))  # type: ignore[arg-type]
+        is_buy = direction == SignalDirection.BUY
+        sentiment_alignment = sentiment_score if is_buy else -sentiment_score
+        if sentiment_alignment > 0:
+            confidence = min(1.0, confidence + sentiment_alignment * sentiment_boost)
+        elif sentiment_alignment < 0:
+            confidence = max(0.0, confidence + sentiment_alignment * sentiment_penalty)
+
         if not signal_state.should_emit(symbol, direction):
             self.last_skip_reason = "duplicate_suppressed"
             return None
 
         self.last_skip_reason = None
 
-        is_buy = direction == SignalDirection.BUY
         market_id = candles[0].market_id
         rsi_label = "oversold" if is_buy else "overbought"
         hist_label = "rising" if is_buy else "falling"
@@ -185,6 +197,7 @@ class MomentumStrategy(BaseStrategy):
                 "volume_ratio": round(indicators.volume_ratio, 4)
                 if indicators.volume_ratio is not None
                 else 0.0,
+                "sentiment_score": round(sentiment_score, 4),
             },
             reasoning=(
                 f"RSI={indicators.current_rsi:.1f} (recently {rsi_label}), "

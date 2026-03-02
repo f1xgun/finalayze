@@ -49,6 +49,8 @@ from finalayze.core.schemas import (
     PortfolioState,
     TradeResult,
 )
+from finalayze.data.fetchers.base import BaseFetcher
+from finalayze.data.fetchers.caching import CachingFetcher
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
 from finalayze.risk.kelly import RollingKelly
 from finalayze.strategies.base import BaseStrategy
@@ -97,7 +99,7 @@ def _load_preset(segment: str) -> dict[str, Any]:
 
 def _setup_pairs_strategy(
     segment: str,
-    fetcher: YFinanceFetcher,
+    fetcher: BaseFetcher,
     start: datetime,
     end: datetime,
 ) -> PairsStrategy | None:
@@ -167,7 +169,7 @@ def _setup_ml_strategy(segment: str, models_dir: Path) -> MLStrategy | None:
 
 def _build_strategies(
     segment: str,
-    fetcher: YFinanceFetcher,
+    fetcher: BaseFetcher,
     start: datetime,
     end: datetime,
     models_dir: Path | None,
@@ -486,7 +488,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         bench_symbol = "EWZ" if segment.startswith("ru_") else "SPY"
         if bench_symbol not in benchmark_cache:
             try:
-                bench_fetcher = YFinanceFetcher(market_id="us")
+                bench_fetcher = CachingFetcher(YFinanceFetcher(market_id="us"))
                 benchmark_cache[bench_symbol] = bench_fetcher.fetch_candles(
                     bench_symbol, start, end
                 )
@@ -498,7 +500,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         bench_candles = benchmark_cache[bench_symbol]
 
         # Build strategies once per segment
-        seg_fetcher = YFinanceFetcher(market_id=market_id)
+        seg_fetcher = CachingFetcher(YFinanceFetcher(market_id=market_id))
         strategies = _build_strategies(segment, seg_fetcher, start, end, models_dir)
         strat_names = [s.name for s in strategies]
         print(f"  Strategies: {', '.join(strat_names)}")
@@ -509,7 +511,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         for symbol in symbols:
             # Fetch candles
             try:
-                fetcher = YFinanceFetcher(market_id=market_id)
+                fetcher = CachingFetcher(YFinanceFetcher(market_id=market_id))
                 candles = fetcher.fetch_candles(symbol, start, end)
                 if not candles:
                     print(f"    {symbol:12s} | no data")

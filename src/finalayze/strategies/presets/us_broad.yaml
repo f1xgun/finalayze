@@ -37,6 +37,12 @@ strategies:
       exit_at_mean: true
       rsi_oversold_mr: 35
       rsi_overbought_mr: 65
+  event_driven:
+    enabled: true
+    weight: 0.25
+    params:
+      min_sentiment: 0.5
+      event_types: [macro, earnings, regulatory]
   ml_ensemble:
     enabled: true
     weight: 0.25

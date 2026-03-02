@@ -50,6 +50,7 @@ def _make_trading_loop() -> MagicMock:
     loop = MagicMock(spec=TradingLoop)
     loop._stop_loss_prices = {}
     loop._stop_loss_lock = threading.Lock()
+    loop._entry_prices = {}
     loop._broker_router = MagicMock()
     loop._alerter = MagicMock()
     loop._submit_order = TradingLoop._submit_order.__get__(loop)

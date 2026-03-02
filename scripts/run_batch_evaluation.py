@@ -26,6 +26,8 @@ from finalayze.backtest.engine import BacktestEngine
 from finalayze.backtest.journaling_combiner import JournalingStrategyCombiner
 from finalayze.backtest.performance import PerformanceAnalyzer
 from finalayze.core.schemas import BacktestResult
+from finalayze.data.fetchers.base import BaseFetcher
+from finalayze.data.fetchers.caching import CachingFetcher
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
 from finalayze.ml.registry import MLModelRegistry
 from finalayze.risk.kelly import RollingKelly
@@ -124,7 +126,7 @@ def _load_preset(segment: str) -> dict[str, Any]:
 
 def _setup_pairs_strategy(
     segment: str,
-    fetcher: YFinanceFetcher,
+    fetcher: BaseFetcher,
     start: datetime,
     end: datetime,
 ) -> PairsStrategy | None:
@@ -197,7 +199,7 @@ def _setup_ml_strategy(segment: str, models_dir: Path) -> MLStrategy | None:
 
 def _build_strategies(
     segment: str,
-    fetcher: YFinanceFetcher,
+    fetcher: BaseFetcher,
     start: datetime,
     end: datetime,
     models_dir: Path | None,
@@ -237,7 +239,7 @@ def _run_single(
     sym_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        fetcher = YFinanceFetcher(market_id=market_id)
+        fetcher = CachingFetcher(YFinanceFetcher(market_id=market_id))
         candles = fetcher.fetch_candles(symbol, start, end)
         if not candles:
             print(f"  {symbol}: no data")
@@ -356,7 +358,7 @@ def main() -> None:
         bench_symbol = "EWZ" if segment.startswith("ru_") else "SPY"
         if bench_symbol not in benchmark_cache:
             try:
-                bench_fetcher = YFinanceFetcher(market_id="us")
+                bench_fetcher = CachingFetcher(YFinanceFetcher(market_id="us"))
                 benchmark_cache[bench_symbol] = bench_fetcher.fetch_candles(
                     bench_symbol, start, end
                 )
@@ -368,7 +370,7 @@ def main() -> None:
         bench_candles = benchmark_cache[bench_symbol]
 
         # Build strategies once per segment (Pairs needs peer candle fetching)
-        seg_fetcher = YFinanceFetcher(market_id=market_id)
+        seg_fetcher = CachingFetcher(YFinanceFetcher(market_id=market_id))
         strategies = _build_strategies(segment, seg_fetcher, start, end, models_dir)
         strat_names = [s.name for s in strategies]
         print(f"  Strategies: {', '.join(strat_names)}")
