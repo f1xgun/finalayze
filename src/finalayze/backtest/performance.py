@@ -53,6 +53,8 @@ class PerformanceAnalyzer:
             # Still compute equity-curve metrics from snapshots if available
             max_drawdown = self._compute_max_drawdown(snapshots)
             sharpe = self._compute_sharpe(snapshots)
+            sortino = self.sortino_ratio(snapshots)
+            calmar = self.calmar_ratio(snapshots)
             if len(snapshots) >= 2:  # noqa: PLR2004
                 initial = snapshots[0].equity
                 final = snapshots[-1].equity
@@ -71,6 +73,9 @@ class PerformanceAnalyzer:
                     total_return.quantize(_QUANTIZE_4DP) if total_return != 0 else Decimal(0)
                 ),
                 total_trades=0,
+                sortino_ratio=sortino,
+                calmar_ratio=calmar,
+                turnover_ratio=Decimal(0),
                 **benchmark_metrics,
             )
 
@@ -91,6 +96,9 @@ class PerformanceAnalyzer:
 
         max_drawdown = self._compute_max_drawdown(snapshots)
         sharpe = self._compute_sharpe(snapshots)
+        sortino = self.sortino_ratio(snapshots)
+        calmar = self.calmar_ratio(snapshots)
+        turnover = self._compute_turnover_ratio(trades, snapshots)
         benchmark_metrics = self._compute_benchmark_metrics(snapshots, benchmark_candles)
 
         return BacktestResult(
@@ -100,6 +108,9 @@ class PerformanceAnalyzer:
             profit_factor=profit_factor.quantize(_QUANTIZE_4DP),
             total_return=total_return.quantize(_QUANTIZE_4DP),
             total_trades=total_trades,
+            sortino_ratio=sortino,
+            calmar_ratio=calmar,
+            turnover_ratio=turnover,
             **benchmark_metrics,
         )
 
@@ -224,6 +235,27 @@ class PerformanceAnalyzer:
 
         calmar = annualised_return / max_dd
         return Decimal(str(round(calmar, 4)))
+
+    @staticmethod
+    def _compute_turnover_ratio(
+        trades: list[TradeResult],
+        snapshots: list[PortfolioState],
+    ) -> Decimal:
+        """Compute turnover ratio: total traded notional / average equity.
+
+        Higher values indicate more frequent trading relative to portfolio size.
+        """
+        if not trades or not snapshots:
+            return Decimal(0)
+
+        total_notional = sum((abs(t.quantity * t.entry_price) for t in trades), start=Decimal(0))
+        avg_equity = sum((s.equity for s in snapshots), start=Decimal(0)) / Decimal(len(snapshots))
+
+        if avg_equity <= 0:
+            return Decimal(0)
+
+        ratio = total_notional / avg_equity
+        return ratio.quantize(_QUANTIZE_4DP)
 
     @staticmethod
     def _compute_benchmark_metrics(

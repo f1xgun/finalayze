@@ -266,6 +266,118 @@ class TestWalkForwardRun:
         assert len(result.windows) == 0
 
 
+class TestWalkForwardSnapshots:
+    """Tests for oos_snapshots in WalkForwardResult."""
+
+    def test_wf_result_includes_oos_snapshots(self) -> None:
+        """run() populates oos_snapshots with PortfolioState objects."""
+        from finalayze.core.schemas import PortfolioState
+
+        config = WalkForwardConfig(
+            train_years=RUN_TRAIN_YEARS,
+            test_years=RUN_TEST_YEARS,
+            step_months=RUN_STEP_MONTHS,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        candles = _make_candles_range(DEFAULT_START, DEFAULT_END)
+        strategy = _AlternatingStrategy()
+        engine = BacktestEngine(strategy=strategy, initial_cash=RUN_INITIAL_CASH)
+
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
+
+        assert len(result.oos_snapshots) > 0
+        assert all(isinstance(s, PortfolioState) for s in result.oos_snapshots)
+
+    def test_wf_max_drawdown_from_snapshots(self) -> None:
+        """oos_max_drawdown_pct is computed from bar-level snapshots, not per-trade PnL."""
+        config = WalkForwardConfig(
+            train_years=RUN_TRAIN_YEARS,
+            test_years=RUN_TEST_YEARS,
+            step_months=RUN_STEP_MONTHS,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        candles = _make_candles_range(DEFAULT_START, DEFAULT_END)
+        strategy = _AlternatingStrategy()
+        engine = BacktestEngine(strategy=strategy, initial_cash=RUN_INITIAL_CASH)
+
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
+
+        # Max drawdown should be non-negative
+        assert result.oos_max_drawdown_pct >= 0.0
+        # With an alternating strategy, there should be some drawdown
+        assert result.oos_max_drawdown_pct > 0.0
+
+    def test_wf_empty_candles_no_snapshots(self) -> None:
+        """run() with empty candles returns empty oos_snapshots."""
+        optimizer = WalkForwardOptimizer()
+        strategy = _AlternatingStrategy()
+        engine = BacktestEngine(strategy=strategy, initial_cash=RUN_INITIAL_CASH)
+
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, [], engine)
+
+        assert result.oos_snapshots == []
+
+
+class TestWalkForwardPerFoldSharpe:
+    """Tests for per-fold Sharpe aggregation (no splice bias)."""
+
+    def test_wf_sharpe_per_fold_no_splicing(self) -> None:
+        """Fold boundary discontinuity must NOT inflate the aggregated Sharpe.
+
+        Fold 1 ends at equity $120k, fold 2 starts at $100k (engine resets).
+        If equity series are naively spliced, the $20k drop at the boundary
+        creates a phantom negative return that distorts the Sharpe.
+        Per-fold aggregation avoids this.
+        """
+        config = WalkForwardConfig(
+            train_years=RUN_TRAIN_YEARS,
+            test_years=RUN_TEST_YEARS,
+            step_months=RUN_STEP_MONTHS,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        candles = _make_candles_range(DEFAULT_START, DEFAULT_END)
+        strategy = _AlternatingStrategy()
+        engine = BacktestEngine(strategy=strategy, initial_cash=RUN_INITIAL_CASH)
+
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
+
+        # Result should have per-fold data
+        assert hasattr(result, "per_fold_sharpes")
+        assert hasattr(result, "per_fold_trade_counts")
+        assert len(result.per_fold_sharpes) == len(result.windows)
+        assert len(result.per_fold_trade_counts) == len(result.windows)
+
+        # Aggregated Sharpe should equal trade-count-weighted mean of per-fold Sharpes
+        total_trades = sum(result.per_fold_trade_counts)
+        if total_trades > 0:
+            expected_sharpe = (
+                sum(
+                    s * n
+                    for s, n in zip(
+                        result.per_fold_sharpes, result.per_fold_trade_counts, strict=True
+                    )
+                )
+                / total_trades
+            )
+            assert abs(result.oos_sharpe - expected_sharpe) < 1e-10
+
+    def test_wf_per_fold_trade_counts_sum(self) -> None:
+        """Sum of per-fold trade counts equals total_oos_trades."""
+        config = WalkForwardConfig(
+            train_years=RUN_TRAIN_YEARS,
+            test_years=RUN_TEST_YEARS,
+            step_months=RUN_STEP_MONTHS,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        candles = _make_candles_range(DEFAULT_START, DEFAULT_END)
+        strategy = _AlternatingStrategy()
+        engine = BacktestEngine(strategy=strategy, initial_cash=RUN_INITIAL_CASH)
+
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
+
+        assert sum(result.per_fold_trade_counts) == result.total_oos_trades
+
+
 class TestWalkForwardOptimization:
     """Tests for param_grid and engine_factory (6B.5)."""
 

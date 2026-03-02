@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from finalayze.core.schemas import PortfolioState
 
 # Annualisation factor for daily returns.
 _TRADING_DAYS_PER_YEAR = 252
@@ -160,4 +164,65 @@ def bootstrap_metrics(
         profit_factor=_make_ci(profit_factors, actual_pf, confidence_level),
         n_simulations=n_simulations,
         n_trades=n,
+    )
+
+
+def bootstrap_from_snapshots(
+    snapshots: list[PortfolioState],
+    n_simulations: int = 10_000,
+    confidence_level: float = 0.95,
+    seed: int | None = None,
+) -> BootstrapResult:
+    """Bootstrap confidence intervals from bar-level equity snapshots.
+
+    Extracts daily returns from the equity curve and resamples those
+    (not per-trade PnL), making ``sqrt(252)`` annualisation correct.
+
+    Args:
+        snapshots: Bar-level PortfolioState snapshots with equity values.
+        n_simulations: Number of bootstrap samples.
+        confidence_level: CI level (default 0.95).
+        seed: Random seed for reproducibility.
+
+    Returns:
+        BootstrapResult with CIs computed from daily return distribution.
+    """
+    if len(snapshots) < 2:  # noqa: PLR2004
+        zero_ci = BootstrapCI(0.0, 0.0, 0.0, confidence_level)
+        return BootstrapResult(
+            total_return=zero_ci,
+            sharpe_ratio=zero_ci,
+            max_drawdown=zero_ci,
+            win_rate=zero_ci,
+            profit_factor=zero_ci,
+            n_simulations=n_simulations,
+            n_trades=0,
+        )
+
+    # Extract daily percentage returns from equity curve
+    equities = [float(s.equity) for s in snapshots]
+    daily_returns = [
+        (equities[i] - equities[i - 1]) / equities[i - 1] * 100
+        for i in range(1, len(equities))
+        if equities[i - 1] > 0
+    ]
+
+    if not daily_returns:
+        zero_ci = BootstrapCI(0.0, 0.0, 0.0, confidence_level)
+        return BootstrapResult(
+            total_return=zero_ci,
+            sharpe_ratio=zero_ci,
+            max_drawdown=zero_ci,
+            win_rate=zero_ci,
+            profit_factor=zero_ci,
+            n_simulations=n_simulations,
+            n_trades=0,
+        )
+
+    # Delegate to bootstrap_metrics which handles the resampling
+    return bootstrap_metrics(
+        daily_returns,
+        n_simulations=n_simulations,
+        confidence_level=confidence_level,
+        seed=seed,
     )
