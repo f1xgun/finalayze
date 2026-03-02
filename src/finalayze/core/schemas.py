@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
 from enum import StrEnum
+from typing import Any
 from uuid import UUID  # noqa: TC003
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -198,3 +199,81 @@ class SentimentResult(BaseModel):
             msg = f"confidence must be in [0.0, 1.0], got {v}"
             raise ValueError(msg)
         return v
+
+
+# ── Iteration Tracking Schemas ──────────────────────────────────────────────
+
+
+class GateResult(BaseModel):
+    """Result of a single acceptance gate."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    gate_type: str  # "safety" | "calibration"
+    passed: bool
+    value: float
+    threshold: float
+    message: str
+
+
+class IterationMetrics(BaseModel):
+    """All tracked metrics for one iteration."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # Primary (6)
+    wf_sharpe: float
+    wf_max_drawdown: float
+    profit_factor: float
+    calmar_ratio: float
+    trade_count: int
+    avg_hold_bars: float
+    segment_pnl_share: dict[str, float]
+
+    # Secondary (6)
+    sortino_ratio: float
+    win_rate_by_segment: dict[str, float]
+    information_ratio: float | None
+    mc_5th_pct_sharpe: float
+    model_disagreement: float
+    turnover_adjusted_return: float
+
+    # Diagnostic
+    gross_sharpe: float
+    net_sharpe: float
+    param_stability_cv: float
+    per_model_proba_mean: dict[str, float]
+
+
+class IterationMetadata(BaseModel):
+    """Complete snapshot of one iteration."""
+
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: int = 1
+    name: str
+    description: str
+    created_at: datetime
+    git_describe: str
+    git_sha: str
+    git_dirty: bool
+    config_hash: str
+    strategy_configs: dict[str, Any]
+    backtest_config: dict[str, Any]
+    metrics: IterationMetrics
+    gate_results: list[GateResult]
+    verdict: str  # "PASS" | "WARN" | "REJECT"
+    tags: list[str] = []
+
+
+class IterationComparison(BaseModel):
+    """Delta between two iterations."""
+
+    model_config = ConfigDict(frozen=True)
+
+    current: str
+    baseline: str
+    metric_deltas: dict[str, float]
+    gate_results: list[GateResult]
+    verdict: str
