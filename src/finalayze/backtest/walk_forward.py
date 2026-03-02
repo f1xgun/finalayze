@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from finalayze.backtest.engine import BacktestEngine
-    from finalayze.core.schemas import Candle, TradeResult
+    from finalayze.core.schemas import Candle, PortfolioState, TradeResult
 
 ParameterGrid = dict[str, list[object]]
 
@@ -53,12 +53,15 @@ class WalkForwardResult:
 
     windows: list[WalkForwardWindow] = field(default_factory=list)
     oos_trades: list[TradeResult] = field(default_factory=list)
+    oos_snapshots: list[PortfolioState] = field(default_factory=list)
     total_oos_trades: int = 0
     oos_sharpe: float = 0.0
     oos_total_return_pct: float = 0.0
     oos_win_rate: float = 0.0
     oos_max_drawdown_pct: float = 0.0
     per_window_params: list[dict[str, object]] = field(default_factory=list)
+    per_fold_sharpes: list[float] = field(default_factory=list)
+    per_fold_trade_counts: list[int] = field(default_factory=list)
 
 
 class WalkForwardOptimizer:
@@ -149,29 +152,52 @@ class WalkForwardOptimizer:
         windows = self.generate_windows(start_date, end_date)
 
         all_trades: list[TradeResult] = []
-        all_equities: list[float] = []
+        all_snapshots: list[PortfolioState] = []
+        per_fold_sharpes: list[float] = []
+        per_fold_trade_counts: list[int] = []
 
         for window in windows:
             train, test = self.split_candles(candles, window)
             if not test:
+                per_fold_sharpes.append(0.0)
+                per_fold_trade_counts.append(0)
                 continue
             optimized_engine = self._optimize_on_train(symbol, segment_id, train, engine)
             trades, snapshots = optimized_engine.run(symbol, segment_id, test)
             all_trades.extend(trades)
-            # Collect bar-level equity values for Sharpe computation (#131)
-            all_equities.extend(float(s.equity) for s in snapshots)
+            all_snapshots.extend(snapshots)
+
+            # Compute Sharpe per fold independently to avoid splice bias
+            fold_equities = [float(s.equity) for s in snapshots]
+            per_fold_sharpes.append(_compute_sharpe_from_snapshots(fold_equities))
+            per_fold_trade_counts.append(len(trades))
 
         pnl_pcts = [float(t.pnl_pct) * _PERCENT for t in all_trades]
+
+        # Aggregate Sharpe via trade-count-weighted mean of per-fold Sharpes
+        total_trade_count = sum(per_fold_trade_counts)
+        if total_trade_count > 0:
+            oos_sharpe = (
+                sum(s * n for s, n in zip(per_fold_sharpes, per_fold_trade_counts, strict=True))
+                / total_trade_count
+            )
+        else:
+            oos_sharpe = 0.0
+
+        # Compute max drawdown from bar-level snapshots instead of per-trade PnL
+        oos_max_dd = _compute_max_drawdown_from_snapshots(all_snapshots)
 
         return WalkForwardResult(
             windows=windows,
             oos_trades=all_trades,
+            oos_snapshots=all_snapshots,
             total_oos_trades=len(all_trades),
-            # Use bar-level equity for Sharpe (statistically correct, fixes #131)
-            oos_sharpe=_compute_sharpe_from_snapshots(all_equities),
+            oos_sharpe=oos_sharpe,
             oos_total_return_pct=_compute_total_return(pnl_pcts),
             oos_win_rate=_compute_win_rate(pnl_pcts),
-            oos_max_drawdown_pct=_compute_max_drawdown(pnl_pcts),
+            oos_max_drawdown_pct=oos_max_dd,
+            per_fold_sharpes=per_fold_sharpes,
+            per_fold_trade_counts=per_fold_trade_counts,
         )
 
     def _optimize_on_train(
@@ -212,6 +238,25 @@ def _iter_param_combinations(grid: ParameterGrid) -> list[dict[str, object]]:
 
 
 # ── Private metric helpers ───────────────────────────────────────────────
+
+
+def _compute_max_drawdown_from_snapshots(snapshots: list[PortfolioState]) -> float:
+    """Compute maximum peak-to-trough drawdown (%) from bar-level equity snapshots.
+
+    This is more accurate than computing drawdown from per-trade PnL because it
+    captures intra-trade equity fluctuations.
+    """
+    if len(snapshots) < 2:  # noqa: PLR2004
+        return 0.0
+    peak = float(snapshots[0].equity)
+    max_dd = 0.0
+    for snap in snapshots[1:]:
+        eq = float(snap.equity)
+        peak = max(peak, eq)
+        if peak > 0:
+            dd = (peak - eq) / peak * _PERCENT
+            max_dd = max(max_dd, dd)
+    return max_dd
 
 
 def _compute_sharpe_from_snapshots(equities: list[float]) -> float:

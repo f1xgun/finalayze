@@ -6,7 +6,12 @@ import math
 
 import pytest
 
-from finalayze.backtest.monte_carlo import BootstrapCI, BootstrapResult, bootstrap_metrics
+from finalayze.backtest.monte_carlo import (
+    BootstrapCI,
+    BootstrapResult,
+    bootstrap_from_snapshots,
+    bootstrap_metrics,
+)
 
 # ── Constants (no magic numbers) ─────────────────────────────────────────
 
@@ -100,6 +105,62 @@ class TestBootstrapMetrics:
 
         # Total return should be negative
         assert result.total_return.point_estimate < 0.0
+
+    def test_bootstrap_accepts_bar_returns(self) -> None:
+        """bootstrap_from_snapshots accepts PortfolioState list and returns valid result."""
+        from datetime import UTC, datetime, timedelta
+        from decimal import Decimal
+
+        from finalayze.core.schemas import PortfolioState
+
+        # Create synthetic equity curve: 100k -> 100.1k -> 100.05k -> ... (20 bars)
+        base_time = datetime(2024, 1, 1, 14, 30, tzinfo=UTC)
+        equities = [Decimal(100_000)]
+        for i in range(1, 20):
+            # Small random-ish fluctuation
+            delta = Decimal(50) * (1 if i % 3 != 0 else -1)
+            equities.append(equities[-1] + delta)
+
+        snapshots = [
+            PortfolioState(
+                cash=eq,
+                positions={},
+                equity=eq,
+                timestamp=base_time + timedelta(days=i),
+            )
+            for i, eq in enumerate(equities)
+        ]
+
+        result = bootstrap_from_snapshots(snapshots, n_simulations=N_SIMULATIONS_SMALL, seed=SEED)
+
+        assert isinstance(result, BootstrapResult)
+        assert result.n_trades == len(snapshots) - 1  # daily returns count
+        assert result.sharpe_ratio.point_estimate != 0.0
+        # CI lower bound should be below upper bound
+        assert result.sharpe_ratio.lower <= result.sharpe_ratio.upper
+
+    def test_bootstrap_from_snapshots_empty(self) -> None:
+        """bootstrap_from_snapshots with empty list returns zero CIs."""
+        result = bootstrap_from_snapshots([], n_simulations=N_SIMULATIONS_SMALL, seed=SEED)
+        assert result.n_trades == 0
+        assert result.sharpe_ratio.point_estimate == 0.0
+
+    def test_bootstrap_from_snapshots_single(self) -> None:
+        """bootstrap_from_snapshots with 1 snapshot returns zero CIs (no returns)."""
+        from datetime import UTC, datetime
+        from decimal import Decimal
+
+        from finalayze.core.schemas import PortfolioState
+
+        snap = PortfolioState(
+            cash=Decimal(100_000),
+            positions={},
+            equity=Decimal(100_000),
+            timestamp=datetime(2024, 1, 1, 14, 30, tzinfo=UTC),
+        )
+        result = bootstrap_from_snapshots([snap], n_simulations=N_SIMULATIONS_SMALL, seed=SEED)
+        assert result.n_trades == 0
+        assert result.sharpe_ratio.point_estimate == 0.0
 
     def test_confidence_level_affects_width(self) -> None:
         """99% CI is wider than 95% CI."""

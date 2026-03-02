@@ -149,6 +149,43 @@ class TestPerformanceAnalyzerResultType:
         assert isinstance(result, BacktestResult)
 
 
+class TestPerformanceAnalyzerSortinoCalmar:
+    """sortino_ratio and calmar_ratio should be computed by analyze()."""
+
+    def test_analyze_includes_sortino_calmar(self) -> None:
+        """analyze() populates sortino_ratio and calmar_ratio fields."""
+        analyzer = PerformanceAnalyzer()
+        result = analyzer.analyze(_make_trades(), _make_snapshots())
+        # Both should be set (not None)
+        assert result.sortino_ratio is not None
+        assert result.calmar_ratio is not None
+        # With positive equity growth, both should be positive
+        assert result.sortino_ratio > ZERO
+        assert result.calmar_ratio > ZERO
+
+    def test_analyze_includes_turnover_ratio(self) -> None:
+        """analyze() populates turnover_ratio field."""
+        analyzer = PerformanceAnalyzer()
+        result = analyzer.analyze(_make_trades(), _make_snapshots())
+        assert result.turnover_ratio is not None
+        assert result.turnover_ratio >= ZERO
+
+    def test_analyze_empty_trades_sortino_calmar(self) -> None:
+        """analyze() with no trades still sets sortino/calmar from snapshots."""
+        analyzer = PerformanceAnalyzer()
+        result = analyzer.analyze([], _make_snapshots())
+        # Should be set (may be zero if return is low or no downside)
+        assert result.sortino_ratio is not None
+        assert result.calmar_ratio is not None
+
+    def test_analyze_empty_snapshots_sortino_calmar(self) -> None:
+        """analyze() with no snapshots sets sortino/calmar to zero."""
+        analyzer = PerformanceAnalyzer()
+        result = analyzer.analyze([], [])
+        assert result.sortino_ratio == ZERO
+        assert result.calmar_ratio == ZERO
+
+
 class TestPerformanceAnalyzerEmptyTrades:
     """Empty trades list should return zero trade metrics but still compute equity curve metrics."""
 

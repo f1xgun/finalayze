@@ -123,6 +123,10 @@ class BacktestResult(BaseModel):
     profit_factor: Decimal
     total_return: Decimal
     total_trades: int
+    # Risk-adjusted ratios (computed from equity snapshots)
+    sortino_ratio: Decimal | None = None
+    calmar_ratio: Decimal | None = None
+    turnover_ratio: Decimal | None = None
     # Benchmark comparison fields (populated when benchmark_candles are provided)
     alpha: Decimal | None = None
     beta: Decimal | None = None
