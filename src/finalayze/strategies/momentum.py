@@ -123,6 +123,7 @@ class MomentumStrategy(BaseStrategy):
         candles: list[Candle],
         segment_id: str,
         sentiment_score: float = 0.0,  # noqa: ARG002
+        has_open_position: bool = False,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a momentum signal from RSI and MACD indicators."""
         params = self.get_parameters(segment_id)
@@ -293,7 +294,7 @@ class MomentumStrategy(BaseStrategy):
             volume_ratio=volume_ratio,
         )
 
-    def _evaluate_signal(  # noqa: PLR0911
+    def _evaluate_signal(  # noqa: PLR0911, PLR0912
         self,
         indicators: _Indicators,
         segment_id: str,
@@ -306,17 +307,10 @@ class MomentumStrategy(BaseStrategy):
         recently_oversold = any(v < rsi_oversold for v in indicators.rsi_window)
         recently_overbought = any(v > rsi_overbought for v in indicators.rsi_window)
 
-        # Multi-bar histogram check: rising if current > min of lookback window
-        hist_rising = (
-            indicators.current_hist > min(indicators.hist_window)
-            if indicators.hist_window
-            else indicators.current_hist > indicators.prev_hist
-        )
-        hist_falling = (
-            indicators.current_hist < max(indicators.hist_window)
-            if indicators.hist_window
-            else indicators.current_hist < indicators.prev_hist
-        )
+        # Histogram rising: improving bar-over-bar (momentum building)
+        hist_rising = indicators.current_hist > indicators.prev_hist
+        # Histogram falling: declining bar-over-bar (momentum fading)
+        hist_falling = indicators.current_hist < indicators.prev_hist
 
         # BUY: RSI recently oversold + (histogram rising OR bullish MACD crossover)
         buy_macd_ok = hist_rising or indicators.macd_crossover_buy
@@ -332,44 +326,60 @@ class MomentumStrategy(BaseStrategy):
         else:
             return None
 
+        # Exit (SELL) signals bypass ADX, volume, and trend filters to avoid
+        # suppressing legitimate exit opportunities.  Entry (BUY) signals
+        # remain fully filtered.
+        is_exit_signal = direction == SignalDirection.SELL
+
         # ADX regime filter: suppress in range-bound markets
-        adx_filter = bool(params.get("adx_filter", False))
-        if adx_filter and indicators.current_adx is not None:
-            adx_threshold = float(params.get("adx_threshold", 25))  # type: ignore[arg-type]
-            if indicators.current_adx < adx_threshold:
-                return None
+        if not is_exit_signal:
+            adx_filter = bool(params.get("adx_filter", False))
+            if adx_filter and indicators.current_adx is not None:
+                adx_threshold = float(params.get("adx_threshold", 25))  # type: ignore[arg-type]
+                if indicators.current_adx < adx_threshold:
+                    return None
 
         # Volume confirmation filter
-        volume_filter = bool(params.get("volume_filter", False))
-        if volume_filter and indicators.volume_ratio is not None:
-            volume_min_ratio = float(params.get("volume_min_ratio", 1.0))  # type: ignore[arg-type]
-            if indicators.volume_ratio < volume_min_ratio:
-                return None
+        if not is_exit_signal:
+            volume_filter = bool(params.get("volume_filter", False))
+            if volume_filter and indicators.volume_ratio is not None:
+                volume_min_ratio = float(params.get("volume_min_ratio", 1.0))  # type: ignore[arg-type]
+                if indicators.volume_ratio < volume_min_ratio:
+                    return None
 
         # Trend filter (SMA gate): suppress counter-trend signals
-        trend_filter = bool(params.get("trend_filter", False))
-        if trend_filter and indicators.current_sma is not None:
-            trend_sma_buffer_pct = float(params.get("trend_sma_buffer_pct", 2.0))  # type: ignore[arg-type]
-            buffer = indicators.current_sma * trend_sma_buffer_pct / 100.0
-            if (
-                indicators.current_close > indicators.current_sma + buffer
-                and direction == SignalDirection.SELL
-            ):
-                return None
-            if (
-                indicators.current_close < indicators.current_sma - buffer
-                and direction == SignalDirection.BUY
-            ):
-                return None
+        if not is_exit_signal:
+            trend_filter = bool(params.get("trend_filter", False))
+            if trend_filter and indicators.current_sma is not None:
+                trend_sma_buffer_pct = float(params.get("trend_sma_buffer_pct", 2.0))  # type: ignore[arg-type]
+                buffer = indicators.current_sma * trend_sma_buffer_pct / 100.0
+                if (
+                    indicators.current_close > indicators.current_sma + buffer
+                    and direction == SignalDirection.SELL
+                ):
+                    return None
+                if (
+                    indicators.current_close < indicators.current_sma - buffer
+                    and direction == SignalDirection.BUY
+                ):
+                    return None
 
-        # Improved confidence: factor in MACD histogram strength
+        # Improved confidence: factor in MACD histogram strength and crossover
         hist_strength = min(
             1.0,
             abs(indicators.current_hist) / indicators.avg_hist_range
             if indicators.avg_hist_range > 0
             else 0.0,
         )
-        confidence = min(1.0, 0.5 + rsi_distance * 0.3 + hist_strength * 0.2)
+        rsi_component = min(1.0, rsi_distance * 1.5)
+        hist_component = hist_strength
+        macd_crossover = (
+            indicators.macd_crossover_buy
+            if direction == SignalDirection.BUY
+            else indicators.macd_crossover_sell
+        )
+        crossover_bonus = 0.15 if macd_crossover else 0.0
+        confidence = min(1.0, 0.4 + rsi_component * 0.3 + hist_component * 0.2 + crossover_bonus)
         if confidence < indicators.min_confidence:
             return None
 

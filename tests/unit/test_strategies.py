@@ -414,33 +414,30 @@ class TestMomentumSignalFilters:
         prices.extend([rally_top - 2.0 * (i + 1) for i in range(7)])
         return prices
 
-    # ---------- 1. Trend filter: suppress sell in uptrend ----------
-    def test_trend_filter_suppresses_sell_in_uptrend(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Price well above 50 SMA, overbought RSI -> SELL suppressed."""
+    # ---------- 1. Trend filter: SELL passes in uptrend (exit relaxation) ----------
+    def test_trend_filter_does_not_suppress_sell_in_uptrend(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Price well above 50 SMA, overbought RSI -> SELL passes (exit relaxation).
+
+        Phase 8 Fix 4: SELL (exit) signals bypass ADX, volume, and trend filters
+        to avoid suppressing legitimate exit opportunities.
+        """
         params = {
             **_MOMENTUM_PARAMS_V3,
             "trend_filter": True,
             "trend_sma_period": 50,
             "trend_sma_buffer_pct": 2.0,
         }
-        # Use the sell-signal price series. The last close should be well above
-        # the SMA of the whole series because the rally pushed it high.
         prices = self._sell_prices()
         strategy = MomentumStrategy()
         monkeypatch.setattr(strategy, "get_parameters", lambda _seg: params)
         candles = _make_candles(prices)
 
-        # Without trend filter, this produces a SELL
-        params_no_filter = {**params, "trend_filter": False}
-        strategy_no_filter = MomentumStrategy()
-        monkeypatch.setattr(strategy_no_filter, "get_parameters", lambda _seg: params_no_filter)
-        sell_signal = strategy_no_filter.generate_signal("AAPL", candles, "us_tech")
-        assert sell_signal is not None, "Baseline: expected SELL without trend filter"
-        assert sell_signal.direction == SignalDirection.SELL
-
-        # With trend filter enabled, SELL should be suppressed (price above SMA)
+        # With trend filter enabled, SELL should still pass (exit relaxation)
         signal = strategy.generate_signal("AAPL", candles, "us_tech")
-        assert signal is None, "Expected SELL suppressed: price above SMA in uptrend"
+        assert signal is not None, "SELL should pass despite trend filter (exit relaxation)"
+        assert signal.direction == SignalDirection.SELL
 
     # ---------- 2. Trend filter: suppress buy in downtrend ----------
     def test_trend_filter_suppresses_buy_in_downtrend(
@@ -718,7 +715,7 @@ class TestMomentumSignalFilters:
 
     # ---------- 13. Improved confidence uses histogram strength ----------
     def test_confidence_includes_hist_strength(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Confidence should factor in histogram strength (0.5 + rsi*0.3 + hist*0.2)."""
+        """Confidence should factor in RSI component, histogram strength, and crossover bonus."""
         params = {**_MOMENTUM_PARAMS_V3, "min_confidence": 0.0}
         prices = self._buy_prices()
         strategy = MomentumStrategy()
@@ -726,8 +723,8 @@ class TestMomentumSignalFilters:
         candles = _make_candles(prices)
         signal = strategy.generate_signal("AAPL", candles, "us_tech")
         assert signal is not None
-        # With the new formula, confidence should be between 0.5 and 1.0
-        assert signal.confidence >= 0.5
+        # With the new formula (no 0.5 base), confidence should be between 0.0 and 1.0
+        assert signal.confidence >= 0.0
         assert signal.confidence <= 1.0
 
 

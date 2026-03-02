@@ -1,33 +1,42 @@
 segment_id: us_healthcare
+normalize_mode: "firing"
+min_combined_confidence: 0.35
 strategies:
   event_driven:
-    enabled: true
+    enabled: false
     weight: 0.40
     params:
       min_sentiment: 0.65
       event_types: [fda, clinical_trial, earnings, regulatory]
   mean_reversion:
     enabled: true
-    weight: 0.25
+    weight: 0.35
     params:
       bb_period: 20
       bb_std_dev: 2.0
-      min_confidence: 0.7
+      min_confidence: 0.35
+      exit_at_mean: true
+      trend_filter: true
+      trend_sma_period: 50
+      trend_sma_buffer_pct: 2.0
+      trend_indicator_type: ema
+      rsi_oversold_mr: 35
+      rsi_overbought_mr: 65
   momentum:
     enabled: true
-    weight: 0.20
+    weight: 0.25
     params:
       rsi_period: 14
       rsi_oversold: 30
       rsi_overbought: 70
       macd_fast: 12
       macd_slow: 26
-      min_confidence: 0.65
+      min_confidence: 0.35
       lookback_bars: 5
-      stop_atr_multiplier: 2.5
+      stop_atr_multiplier: 3.0
       trail_activation_atr: 1.0
       trail_distance_atr: 1.5
-      trend_filter: false
+      trend_filter: true
       trend_sma_period: 50
       trend_sma_buffer_pct: 2.0
       adx_filter: false
@@ -36,10 +45,10 @@ strategies:
       volume_filter: false
       volume_sma_period: 20
       volume_min_ratio: 1.0
-      neutral_reset_bars: 20
+      neutral_reset_bars: 8
   ml_ensemble:
     enabled: true
-    weight: 0.15
+    weight: 0.40
     params:
-      threshold: 0.15
-      min_confidence: 0.5
+      threshold: 0.10
+      min_confidence: 0.30

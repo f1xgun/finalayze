@@ -82,6 +82,7 @@ class EventDrivenStrategy(BaseStrategy):
         candles: list[Candle],
         segment_id: str,
         sentiment_score: float = 0.0,
+        has_open_position: bool = False,  # noqa: ARG002
         credibility: float = 1.0,
     ) -> Signal | None:
         """Generate a trading signal based on news sentiment score.

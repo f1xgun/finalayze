@@ -69,6 +69,12 @@ infra: docker/, alembic/, pyproject.toml, CI      <- not Python code
 4. For each issue: `gh issue create --title "arch: ..." --body "file:line — exact description" --label "bug"` or `"enhancement"`.
 5. Fix critical bugs directly. Leave refactoring suggestions as issues.
 
+## ML System Integration Patterns
+
+- **Model serving latency**: batch prediction preferred for daily/hourly signals (<200ms target). Real-time inference only needed for intraday strategies. Cache predictions per bar.
+- **Cache strategy for ML models**: load model once per segment at startup, hold in memory. Invalidate and reload only on retrain (check model file timestamp). Use a model registry to track versions.
+- **Graceful degradation**: if ML model fails to load or predict, fall back to rule-based strategies only. Log warning, do not halt trading. Strategy combiner should handle missing strategy signals gracefully.
+
 ## Coding conventions
 
 - All async functions use `httpx.AsyncClient` (not `requests`)

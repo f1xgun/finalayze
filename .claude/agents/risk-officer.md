@@ -52,6 +52,14 @@ You are a risk officer with deep expertise in systematic trading risk management
 4. For each issue: `gh issue create --title "risk: ..." --body "file:line — exact description" --label "bug"` (for safety issues) or `"enhancement"`.
 5. Fix safety-critical bugs directly. Leave calibration improvements as issues.
 
+## Advanced Risk Management Knowledge
+
+- **Dynamic Kelly**: confidence intervals on win_rate estimates shrink with more trades. Use blended Kelly (mix with fixed-fractional) when < 50 trades. Recursive Bayesian updates for online win_rate estimation.
+- **Volatility-adjusted sizing**: scale position size inversely with realized volatility (e.g., 20-day realized vol). Higher vol -> smaller positions. Combined with ATR stops, this creates consistent risk per trade.
+- **Confidence-overfit risk**: high-confidence signals from regime-specific overfit may be worst performers OOS. Scale confidence impact on sizing conservatively: [0.5x, 1.0x] range, not [0.0x, 1.0x].
+- **Circuit breaker tuning at high frequency**: if trade frequency increases 5-10x, L3 threshold may need tightening (-15% -> -12%) since more trades = more compounding losses possible in a single day.
+- **Bootstrap phase risk budget**: FIXED_FRACTIONAL x max_positions = total bootstrap exposure. Must stay below L2 circuit breaker threshold. With 0.01 x 10 positions = 10% max exposure, well under L2 (-10%).
+
 ## Coding conventions
 
 - Python 3.12, `from __future__ import annotations` in every file

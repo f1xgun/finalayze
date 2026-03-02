@@ -169,11 +169,9 @@ class TestGenerateSignal:
 
 class TestSupportedSegments:
     def test_supported_segments_from_yaml(self) -> None:
-        """Segments with ml_ensemble.enabled: true should be returned."""
+        """Phase 9: ml_ensemble enabled in all 8 presets."""
         registry = MLModelRegistry()
         strategy = MLStrategy(registry=registry)
         segments = strategy.supported_segments()
-        # All 8 presets have ml_ensemble.enabled: true
-        assert len(segments) >= 8
-        assert "us_tech" in segments
-        assert "ru_blue_chips" in segments
+        # All 8 presets have ml_ensemble.enabled: true after Phase 9
+        assert len(segments) == 8

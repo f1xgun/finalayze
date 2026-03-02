@@ -19,11 +19,16 @@ _DEFAULT_BB_STD = Decimal("2.0")
 _DEFAULT_MIN_CONFIDENCE = Decimal("0.55")
 _DEFAULT_SQUEEZE_THRESHOLD = 0.02
 _DEFAULT_MIN_BAND_DISTANCE_PCT = 0.005
-_DEFAULT_RSI_OVERSOLD_MR = 40
-_DEFAULT_RSI_OVERBOUGHT_MR = 60
+_DEFAULT_RSI_OVERSOLD_MR = 35
+_DEFAULT_RSI_OVERBOUGHT_MR = 65
 _DEFAULT_RSI_PERIOD = 14
-_CONFIDENCE_BASE = 0.5
-_CONFIDENCE_DISTANCE_MULTIPLIER = 2.0
+_CONFIDENCE_BASE = 0.45
+_CONFIDENCE_DISTANCE_MULTIPLIER = 2.5
+_MAX_MR_CONFIDENCE = 0.95
+_DEFAULT_TREND_FILTER = False
+_DEFAULT_TREND_SMA_PERIOD = 50
+_DEFAULT_TREND_SMA_BUFFER_PCT = 2.0
+_DEFAULT_TREND_INDICATOR_TYPE = "sma"
 
 
 class MeanReversionStrategy(BaseStrategy):
@@ -37,6 +42,7 @@ class MeanReversionStrategy(BaseStrategy):
     def __init__(self) -> None:
         # Maps symbol -> last emitted direction (None = no active signal)
         self._active_signal: dict[str, SignalDirection] = {}
+        self._params_cache: dict[str, dict[str, object]] = {}
 
     @property
     def name(self) -> str:
@@ -63,7 +69,9 @@ class MeanReversionStrategy(BaseStrategy):
         return segments
 
     def get_parameters(self, segment_id: str) -> dict[str, object]:
-        """Load mean_reversion parameters from the YAML preset for the given segment."""
+        """Load mean_reversion parameters from the YAML preset (cached per segment)."""
+        if segment_id in self._params_cache:
+            return self._params_cache[segment_id]
         try:
             preset_path = _PRESETS_DIR / f"{segment_id}.yaml"
             with preset_path.open() as f:
@@ -77,7 +85,9 @@ class MeanReversionStrategy(BaseStrategy):
             if not isinstance(mr_cfg, dict):
                 return {}
             params = mr_cfg.get("params", {})
-            return dict(params) if isinstance(params, dict) else {}
+            result = dict(params) if isinstance(params, dict) else {}
+            self._params_cache[segment_id] = result
+            return result
         except (FileNotFoundError, OSError, yaml.YAMLError):
             return {}
 
@@ -87,6 +97,7 @@ class MeanReversionStrategy(BaseStrategy):
         candles: list[Candle],
         segment_id: str,
         sentiment_score: float = 0.0,  # noqa: ARG002
+        has_open_position: bool = False,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a mean reversion signal using Bollinger Bands."""
         params = self.get_parameters(segment_id)
@@ -105,6 +116,14 @@ class MeanReversionStrategy(BaseStrategy):
         rsi_oversold_mr = float(params.get("rsi_oversold_mr", _DEFAULT_RSI_OVERSOLD_MR))  # type: ignore[arg-type]
         rsi_overbought_mr = float(params.get("rsi_overbought_mr", _DEFAULT_RSI_OVERBOUGHT_MR))  # type: ignore[arg-type]
         rsi_period = int(params.get("rsi_period", _DEFAULT_RSI_PERIOD))  # type: ignore[call-overload]
+        trend_filter = bool(params.get("trend_filter", _DEFAULT_TREND_FILTER))
+        trend_sma_period = int(params.get("trend_sma_period", _DEFAULT_TREND_SMA_PERIOD))  # type: ignore[call-overload]
+        trend_sma_buffer_pct = float(
+            params.get("trend_sma_buffer_pct", _DEFAULT_TREND_SMA_BUFFER_PCT)  # type: ignore[arg-type]
+        )
+        trend_indicator_type = str(
+            params.get("trend_indicator_type", _DEFAULT_TREND_INDICATOR_TYPE)
+        )
 
         bb_values = _compute_bb_values(candles, bb_period, float(bb_std))
         if bb_values is None:
@@ -130,7 +149,10 @@ class MeanReversionStrategy(BaseStrategy):
                 return None
             direction = SignalDirection.BUY
             distance = (lower - last_close) / band_width
-            confidence = min(1.0, _CONFIDENCE_BASE + distance * _CONFIDENCE_DISTANCE_MULTIPLIER)
+            confidence = min(
+                _MAX_MR_CONFIDENCE,
+                _CONFIDENCE_BASE + distance * _CONFIDENCE_DISTANCE_MULTIPLIER,
+            )
         elif last_close > upper:
             # Minimum band distance filter
             distance_pct = (last_close - upper) / upper if upper > 0 else 0.0
@@ -139,7 +161,10 @@ class MeanReversionStrategy(BaseStrategy):
                 return None
             direction = SignalDirection.SELL
             distance = (last_close - upper) / band_width
-            confidence = min(1.0, _CONFIDENCE_BASE + distance * _CONFIDENCE_DISTANCE_MULTIPLIER)
+            confidence = min(
+                _MAX_MR_CONFIDENCE,
+                _CONFIDENCE_BASE + distance * _CONFIDENCE_DISTANCE_MULTIPLIER,
+            )
         else:
             # Price has returned inside the bands
             active = self._active_signal.pop(symbol, None)
@@ -181,6 +206,16 @@ class MeanReversionStrategy(BaseStrategy):
                 return None
             if direction == SignalDirection.SELL and rsi_value < rsi_overbought_mr:
                 return None
+
+        # Trend filter: suppress entries in strong downtrends (falling knife protection)
+        if trend_filter:
+            trend_value = _compute_trend_indicator(candles, trend_sma_period, trend_indicator_type)
+            if trend_value is not None:
+                buffer = trend_value * trend_sma_buffer_pct / 100.0
+                if direction == SignalDirection.BUY and last_close < trend_value - buffer:
+                    return None
+                if direction == SignalDirection.SELL and last_close > trend_value + buffer:
+                    return None
 
         # Suppress repeated signals in the same direction while price stays outside band
         if self._active_signal.get(symbol) == direction:
@@ -244,6 +279,25 @@ def _find_bb_column(bb: pd.DataFrame, prefix: str) -> str | None:
         if str(col).startswith(prefix):
             return str(col)
     return None
+
+
+def _compute_trend_indicator(
+    candles: list[Candle], period: int, indicator_type: str = "sma"
+) -> float | None:
+    """Compute a trend indicator (SMA or EMA) from candles. Returns None if not enough data."""
+    if len(candles) < period + 1:
+        return None
+    closes = pd.Series([float(c.close) for c in candles])
+    if indicator_type == "ema":
+        series = ta.ema(closes, length=period)
+    else:
+        series = ta.sma(closes, length=period)
+    if series is None or series.isna().all():
+        return None
+    val = series.iloc[-1]
+    if np.isnan(val):
+        return None
+    return float(val)
 
 
 def _compute_rsi(candles: list[Candle], period: int) -> float | None:

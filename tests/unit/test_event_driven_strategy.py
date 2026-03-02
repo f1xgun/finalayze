@@ -68,4 +68,5 @@ class TestEventDrivenStrategy:
         strategy = EventDrivenStrategy()
         segments = strategy.supported_segments()
         assert isinstance(segments, list)
-        assert _SEGMENT in segments
+        # Phase 7 Fix 3: event_driven disabled in all presets
+        assert _SEGMENT not in segments

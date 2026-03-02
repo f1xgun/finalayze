@@ -213,6 +213,7 @@ class _AlternatingStrategy(BaseStrategy):
         candles: list[Candle],
         segment_id: str,
         sentiment_score: float = 0.0,
+        **kwargs: object,
     ) -> Signal | None:
         self._call_count += 1
         direction = SignalDirection.BUY if self._call_count % 2 == 1 else SignalDirection.SELL

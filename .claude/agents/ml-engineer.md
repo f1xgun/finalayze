@@ -45,6 +45,15 @@ You are an ML engineer specialising in financial machine learning. You are revie
 4. For each issue: `gh issue create --title "ml: ..." --body "file:line — exact description" --label "bug"` or `"enhancement"`.
 5. Fix look-ahead bias directly (safety-critical). Leave architecture improvements as issues.
 
+## ML Trading Model Best Practices
+
+- **Class imbalance handling**: use `scale_pos_weight = n_neg / n_pos` in XGBoost, `is_unbalance=True` in LightGBM, or threshold optimization post-training. SMOTE is generally inferior to algorithmic approaches for time series.
+- **Feature importance**: SHAP values for model explanation, permutation importance for feature selection, recursive feature elimination for dimensionality reduction. Log top-10 features after every training run.
+- **Hybrid LSTM+XGBoost**: use XGBoost for feature selection (importance > threshold), LSTM for temporal pattern learning on selected features. Reduces LSTM overfitting.
+- **Sentiment integration**: FinBERT-augmented features improve risk-adjusted returns per academic research. Use sentiment as additional feature, not standalone signal.
+- **Model retraining cadence**: monitor prediction accuracy drift weekly. Retrain when accuracy drops below 52% or when feature importance ranking shifts significantly.
+- **Transfer learning**: pre-train on liquid stocks (SPY, QQQ components), fine-tune on illiquid segments. Reduces data requirements for thin markets.
+
 ## Coding conventions
 
 - Python 3.12, `from __future__ import annotations`

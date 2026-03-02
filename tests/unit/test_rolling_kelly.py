@@ -8,6 +8,7 @@ from finalayze.risk.kelly import (
     _DEFAULT_FRACTION,
     _DEFAULT_WINDOW,
     _FIXED_FRACTIONAL,
+    _MIN_KELLY_BLEND_TRADES,
     _MIN_KELLY_FRACTION,
     _MIN_TRADES_FOR_KELLY,
     RollingKelly,
@@ -28,16 +29,17 @@ LARGE_LOSS_PCT = Decimal("-0.05")
 
 EXPECTED_DEFAULT_WINDOW = 50
 EXPECTED_DEFAULT_FRACTION = 0.25
-EXPECTED_MIN_TRADES = 20
+EXPECTED_MIN_TRADES = 10
 EXPECTED_FIXED_FRACTIONAL = Decimal("0.01")
-EXPECTED_MIN_KELLY = Decimal("0.005")
+EXPECTED_MIN_KELLY = Decimal("0.01")
 
 CUSTOM_WINDOW = 30
 CUSTOM_FRACTION = 0.5
 SMALL_WINDOW = 5
 
-TRADE_COUNT_FEW = 10
+TRADE_COUNT_FEW = 5
 TRADE_COUNT_ENOUGH = 25
+TRADE_COUNT_PURE_KELLY = 55
 
 
 class TestRollingKellyConstants:
@@ -139,8 +141,8 @@ class TestKellyWithPoorWinRate:
         assert result < half_kelly_cap
 
 
-class TestKellyNegativeEdgeReturnsMinimum:
-    """When edge is negative, returns _MIN_KELLY_FRACTION."""
+class TestKellyNegativeEdgeReturnsReducedFixed:
+    """When edge is negative, returns half of FIXED_FRACTIONAL to allow recovery."""
 
     def test_negative_edge(self) -> None:
         kelly = RollingKelly()
@@ -153,7 +155,7 @@ class TestKellyNegativeEdgeReturnsMinimum:
             kelly.update(TradeRecord(pnl=LARGE_LOSS_PNL, pnl_pct=LARGE_LOSS_PCT))
 
         result = kelly.optimal_fraction()
-        assert result == EXPECTED_MIN_KELLY
+        assert result == Decimal("0.005")  # Half of FIXED_FRACTIONAL for recovery
 
 
 class TestRollingWindowEvictsOldTrades:
@@ -249,11 +251,11 @@ class TestQuarterKellyDampening:
 
     def test_half_kelly_vs_quarter_kelly(self) -> None:
         """Half-Kelly should produce a larger fraction than quarter-Kelly."""
-        # Need wins and losses for Kelly to work
+        # Use >50 trades to bypass blend zone and test pure Kelly
         half_fresh = RollingKelly(fraction=CUSTOM_FRACTION)  # 0.5
         quarter_fresh = RollingKelly()  # default 0.25
-        wins = 18
-        losses = TRADE_COUNT_ENOUGH - wins
+        wins = 40
+        losses = TRADE_COUNT_PURE_KELLY - wins
         for _ in range(wins):
             trade = TradeRecord(pnl=GOOD_WIN_PNL, pnl_pct=GOOD_WIN_PCT)
             half_fresh.update(trade)
@@ -268,12 +270,12 @@ class TestQuarterKellyDampening:
         assert half_result > quarter_result
 
     def test_fraction_one_returns_full_kelly(self) -> None:
-        """fraction=1.0 gives full Kelly (undampened)."""
+        """fraction=1.0 gives full Kelly (undampened) with >50 trades."""
         full_kelly = RollingKelly(fraction=1.0)
         quarter_kelly = RollingKelly()  # 0.25
 
-        wins = 18
-        losses = TRADE_COUNT_ENOUGH - wins
+        wins = 40
+        losses = TRADE_COUNT_PURE_KELLY - wins
         for _ in range(wins):
             trade = TradeRecord(pnl=GOOD_WIN_PNL, pnl_pct=GOOD_WIN_PCT)
             full_kelly.update(trade)

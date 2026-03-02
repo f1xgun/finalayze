@@ -419,6 +419,7 @@ class _FixedSignalStrategy(BaseStrategy):
         candles: list[Candle],
         segment_id: str,
         sentiment_score: float = 0.0,
+        **kwargs: object,
     ) -> Signal | None:
         return Signal(
             strategy_name=self._name,
@@ -656,6 +657,7 @@ class TestBacktestStopLossCosts:
                 candles: list[Candle],
                 segment_id: str,
                 sentiment_score: float = 0.0,
+                **kwargs: object,
             ) -> Signal | None:
                 if len(candles) == 1:
                     return Signal(
@@ -895,7 +897,7 @@ class TestATRMultiplierPerMarket:
 
 
 class TestBBStdDevDifferentiation:
-    """ru_energy must have bb_std_dev=3.0, different from ru_blue_chips=2.5."""
+    """MOEX presets use wider BB bands for higher volatility (Phase 0.10 recalibration)."""
 
     def _get_bb_std(self, segment: str) -> float:
         from finalayze.strategies.mean_reversion import MeanReversionStrategy
@@ -904,7 +906,7 @@ class TestBBStdDevDifferentiation:
         params = strategy.get_parameters(segment)
         return float(params.get("bb_std_dev", 2.0))  # type: ignore[arg-type]
 
-    def test_ru_energy_bb_std_dev_is_3(self) -> None:
+    def test_ru_energy_bb_std_dev_is_3_0(self) -> None:
         std = self._get_bb_std("ru_energy")
         assert std == 3.0, f"Expected bb_std_dev=3.0 for ru_energy, got {std}"
 
@@ -912,10 +914,10 @@ class TestBBStdDevDifferentiation:
         std = self._get_bb_std("ru_blue_chips")
         assert std == 2.5, f"Expected bb_std_dev=2.5 for ru_blue_chips, got {std}"
 
-    def test_ru_energy_and_ru_blue_chips_differ(self) -> None:
+    def test_ru_energy_wider_than_ru_blue_chips(self) -> None:
         energy_std = self._get_bb_std("ru_energy")
         blue_std = self._get_bb_std("ru_blue_chips")
-        assert energy_std != blue_std, "ru_energy and ru_blue_chips must have different bb_std_dev"
+        assert energy_std > blue_std, "ru_energy should have wider BB bands than ru_blue_chips"
 
 
 # ── #131 — Sharpe per-trade not per-bar ──────────────────────────────────────

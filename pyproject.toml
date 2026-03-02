@@ -51,6 +51,7 @@ dependencies = [
     "structlog>=24.4.0",
     "pyyaml>=6.0.2",
     "python-dateutil>=2.9.0",
+    "hmmlearn>=0.3.3",
 ]
 
 [project.optional-dependencies]
@@ -171,6 +172,7 @@ module = [
     "joblib.*",
     "prometheus_client.*",
     "prometheus_fastapi_instrumentator.*",
+    "hmmlearn.*",
 ]
 ignore_missing_imports = true
 

@@ -1,30 +1,35 @@
 segment_id: ru_finance
+normalize_mode: "total"
+min_combined_confidence: 0.40
 strategies:
   mean_reversion:
     enabled: true
     weight: 0.35
     params:
       bb_period: 20
-      bb_std_dev: 2.2
-      min_confidence: 0.65
+      bb_std_dev: 2.5
+      min_confidence: 0.40
+      exit_at_mean: true
+      rsi_oversold_mr: 30
+      rsi_overbought_mr: 70
   event_driven:
-    enabled: true
-    weight: 0.30
+    enabled: false
+    weight: 0.10
     params:
       min_sentiment: 0.6
       event_types: [cbr_rate, regulatory, sanctions, earnings, macro]
   momentum:
     enabled: true
-    weight: 0.25
+    weight: 0.20
     params:
       rsi_period: 14
       rsi_oversold: 28
       rsi_overbought: 72
       macd_fast: 15
       macd_slow: 30
-      min_confidence: 0.65
+      min_confidence: 0.40
       lookback_bars: 5
-      stop_atr_multiplier: 2.5
+      stop_atr_multiplier: 3.0
       trail_activation_atr: 1.0
       trail_distance_atr: 1.5
       trend_filter: false
@@ -36,10 +41,10 @@ strategies:
       volume_filter: false
       volume_sma_period: 20
       volume_min_ratio: 0.8
-      neutral_reset_bars: 20
+      neutral_reset_bars: 8
   ml_ensemble:
     enabled: true
-    weight: 0.10
+    weight: 0.25
     params:
-      threshold: 0.20
-      min_confidence: 0.6
+      threshold: 0.10
+      min_confidence: 0.30

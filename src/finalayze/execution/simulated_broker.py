@@ -178,6 +178,16 @@ class SimulatedBroker(BrokerBase):
 
         return results
 
+    def get_entry_atr(self, symbol: str) -> Decimal | None:
+        """Return the ATR value at entry for a symbol, or None if no stop state."""
+        state = self._stop_states.get(symbol)
+        return state.atr_value if state is not None else None
+
+    def get_entry_price(self, symbol: str) -> Decimal | None:
+        """Return the entry price for a symbol's stop state."""
+        state = self._stop_states.get(symbol)
+        return state.entry_price if state is not None else None
+
     def deduct_fees(self, amount: Decimal) -> None:
         """Deduct transaction fees from available cash.
 

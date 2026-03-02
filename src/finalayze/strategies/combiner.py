@@ -15,10 +15,12 @@ if TYPE_CHECKING:
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
 _MIN_COMBINED_CONFIDENCE = Decimal("0.50")
+_MIN_EXIT_CONFIDENCE = Decimal("0.10")
 _BUY_SCORE = Decimal(1)
 _SELL_SCORE = Decimal(-1)
 _MAX_CONFIDENCE = Decimal("1.0")
 _ZERO = Decimal(0)
+_DEFAULT_WEIGHT = Decimal("1.0")
 
 
 class StrategyCombiner:
@@ -33,19 +35,74 @@ class StrategyCombiner:
         self._presets_dir = _PRESETS_DIR
         self._normalize_mode = normalize_mode
 
+    @staticmethod
+    def _resolve_weight(
+        strategy_name: str,
+        strategy_cfg: dict[str, object],
+        weight_overrides: dict[str, Decimal] | None,
+    ) -> Decimal:
+        """Return the effective weight for a strategy."""
+        if weight_overrides and strategy_name in weight_overrides:
+            return weight_overrides[strategy_name]
+        try:
+            return Decimal(str(strategy_cfg.get("weight", "1.0")))
+        except InvalidOperation:
+            return _DEFAULT_WEIGHT
+
+    def _build_result(
+        self,
+        net: Decimal,
+        feature_contributions: dict[str, float],
+        symbol: str,
+        market_id: str,
+        segment_id: str,
+    ) -> Signal:
+        """Create the combined Signal from net score and features."""
+        direction = SignalDirection.BUY if net > _ZERO else SignalDirection.SELL
+        confidence = float(min(abs(net), _MAX_CONFIDENCE))
+        strategy_count = len(feature_contributions) // 2
+        return Signal(
+            strategy_name="combined",
+            symbol=symbol,
+            market_id=market_id,
+            segment_id=segment_id,
+            direction=direction,
+            confidence=confidence,
+            features=feature_contributions,
+            reasoning=(
+                f"Combined signal: net_score={float(net):.3f} from {strategy_count} strategies"
+            ),
+        )
+
     def generate_signal(
         self,
         symbol: str,
         candles: list[Candle],
         segment_id: str,
         sentiment_score: float = 0.0,
+        has_open_position: bool = False,
+        weight_overrides: dict[str, Decimal] | None = None,
     ) -> Signal | None:
-        """Generate a combined signal by weighting enabled strategy signals."""
+        """Generate a combined signal by weighting enabled strategy signals.
+
+        Args:
+            weight_overrides: When provided, these weights are used instead of
+                the YAML-configured weights for each named strategy.
+        """
         config = self._load_config(segment_id)
         strategies_cfg_raw = config.get("strategies", {})
         strategies_cfg: dict[str, object] = (
             strategies_cfg_raw if isinstance(strategies_cfg_raw, dict) else {}
         )
+
+        # Per-segment overrides for normalize_mode and min_combined_confidence
+        effective_normalize = str(config.get("normalize_mode", self._normalize_mode))
+        try:
+            effective_min_confidence = Decimal(
+                str(config.get("min_combined_confidence", _MIN_COMBINED_CONFIDENCE))
+            )
+        except InvalidOperation:
+            effective_min_confidence = _MIN_COMBINED_CONFIDENCE
 
         weighted_score = _ZERO
         total_weight = _ZERO
@@ -58,15 +115,11 @@ class StrategyCombiner:
             if not strategy_cfg.get("enabled", True):
                 continue
 
-            try:
-                weight = Decimal(str(strategy_cfg.get("weight", "1.0")))
-            except InvalidOperation:
-                weight = Decimal("1.0")
-            total_enabled_weight += weight
-
+            weight = self._resolve_weight(strategy_name, strategy_cfg, weight_overrides)
             strategy = self._strategies.get(strategy_name)
             if strategy is None:
                 continue
+            total_enabled_weight += weight
 
             signal = strategy.generate_signal(
                 symbol, candles, segment_id, sentiment_score=sentiment_score
@@ -86,32 +139,23 @@ class StrategyCombiner:
         if total_weight == _ZERO:
             return None
 
-        denominator = total_enabled_weight if self._normalize_mode == "total" else total_weight
+        denominator = total_enabled_weight if effective_normalize == "total" else total_weight
         if denominator == _ZERO:
             return None
         net = weighted_score / denominator
         abs_net = abs(net)
 
-        if abs_net < _MIN_COMBINED_CONFIDENCE:
+        # Lower threshold for SELL signals when holding an open position
+        effective_threshold = effective_min_confidence
+        if has_open_position and net < _ZERO:
+            exit_conf = Decimal(str(config.get("min_exit_confidence", _MIN_EXIT_CONFIDENCE)))
+            effective_threshold = min(effective_min_confidence, exit_conf)
+
+        if abs_net < effective_threshold:
             return None
 
-        direction = SignalDirection.BUY if net > _ZERO else SignalDirection.SELL
-        confidence = float(min(abs_net, _MAX_CONFIDENCE))
-        strategy_count = len(feature_contributions) // 2
-
-        market_id = candles[0].market_id
-
-        return Signal(
-            strategy_name="combined",
-            symbol=symbol,
-            market_id=market_id,
-            segment_id=segment_id,
-            direction=direction,
-            confidence=confidence,
-            features=feature_contributions,
-            reasoning=(
-                f"Combined signal: net_score={float(net):.3f} from {strategy_count} strategies"
-            ),
+        return self._build_result(
+            net, feature_contributions, symbol, candles[0].market_id, segment_id
         )
 
     def _load_config(self, segment_id: str) -> dict[str, object]:

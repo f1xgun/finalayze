@@ -1,8 +1,10 @@
 segment_id: us_broad
+normalize_mode: "firing"
+min_combined_confidence: 0.35
 strategies:
   momentum:
     enabled: true
-    weight: 0.40
+    weight: 0.30
     params:
       rsi_period: 14
       rsi_oversold: 35
@@ -10,11 +12,11 @@ strategies:
       macd_fast: 12
       macd_slow: 26
       macd_hist_lookback: 3
-      min_confidence: 0.50
+      min_confidence: 0.35
       lookback_bars: 8
-      stop_atr_multiplier: 2.5
-      trail_activation_atr: 0.5
-      trail_distance_atr: 1.0
+      stop_atr_multiplier: 3.0
+      trail_activation_atr: 1.0
+      trail_distance_atr: 1.5
       trend_filter: true
       trend_sma_period: 200
       trend_sma_buffer_pct: 2.0
@@ -24,17 +26,30 @@ strategies:
       volume_filter: false
       volume_sma_period: 20
       volume_min_ratio: 0.8
-      neutral_reset_bars: 10
+      neutral_reset_bars: 8
   mean_reversion:
     enabled: true
-    weight: 0.45
+    weight: 0.30
     params:
       bb_period: 20
       bb_std_dev: 1.8
-      min_confidence: 0.50
+      min_confidence: 0.35
+      exit_at_mean: true
+      rsi_oversold_mr: 35
+      rsi_overbought_mr: 65
   ml_ensemble:
+    enabled: true
+    weight: 0.25
+    params:
+      threshold: 0.10
+      min_confidence: 0.30
+  rsi2_connors:
     enabled: true
     weight: 0.15
     params:
-      threshold: 0.15
-      min_confidence: 0.5
+      rsi_period: 2
+      rsi_buy_threshold: 10.0
+      rsi_sell_threshold: 90.0
+      sma_trend_period: 200
+      sma_exit_period: 5
+      min_confidence: 0.35

@@ -70,6 +70,7 @@ class _AlwaysBuyStrategy(BaseStrategy):
         candles: list[Candle],
         segment_id: str,
         sentiment_score: float = 0.0,
+        **kwargs: object,
     ):
         from finalayze.core.schemas import Signal
 
@@ -107,6 +108,7 @@ class _AlternatingStrategy(BaseStrategy):
         candles: list[Candle],
         segment_id: str,
         sentiment_score: float = 0.0,
+        **kwargs: object,
     ):
         from finalayze.core.schemas import Signal
 
@@ -158,7 +160,8 @@ class TestBacktestEngineWithRollingKelly:
         """RollingKelly is updated after each completed trade."""
         kelly = RollingKelly()
         strategy = _AlternatingStrategy()
-        candles = _make_stable_candles(10)
+        # Need 16+ candles for ATR stop-loss (atr_period=14 + 1 = 15 minimum)
+        candles = _make_stable_candles(20)
         engine = BacktestEngine(
             strategy=strategy,
             initial_cash=INITIAL_CASH,

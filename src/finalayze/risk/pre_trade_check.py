@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from finalayze.risk.circuit_breaker import CircuitLevel
+    from finalayze.risk.regime import RegimeState
 
 # US market hours in UTC: 9:30 ET = 14:30 UTC, 16:00 ET = 21:00 UTC
 _US_MARKET_OPEN_UTC_HOUR = 14
@@ -28,6 +29,14 @@ _MOEX_MARKET_CLOSE_UTC_MINUTE = 45
 
 # Halted circuit breaker levels
 _HALTING_LEVELS = frozenset({"halted", "liquidate"})
+
+# Check 13: strategies requiring fresh parameters
+_PARAM_FRESHNESS_STRATEGIES = frozenset({"ou_mean_reversion", "pairs"})
+_MAX_PARAM_AGE_BARS = 5
+
+# Check 14: max correlated positions
+_MAX_CORRELATED_POSITIONS = 3
+_CORRELATION_THRESHOLD = 0.7
 
 # Weekend weekday threshold (Saturday=5, Sunday=6)
 _WEEKEND_WEEKDAY = 5
@@ -97,7 +106,7 @@ class PDTTracker:
 class PreTradeChecker:
     """Validates orders against risk limits before execution.
 
-    Implements all 11 required pre-trade checks:
+    Implements 14 pre-trade checks:
         1. Market hours check (per market)
         2. Symbol validity (symbol exists in market) — caller responsibility
         3. Mode allows order — caller responsibility
@@ -109,6 +118,9 @@ class PreTradeChecker:
         9. Stop-loss must be set (when require_stop_loss=True)
         10. No duplicate pending order
         11. Cross-market exposure limit
+        12. Regime gate — block new longs when regime blocks
+        13. Parameter freshness — for OU/pairs strategies
+        14. Correlation position limit — max 3 positions with r > 0.7
     """
 
     def __init__(
@@ -125,7 +137,7 @@ class PreTradeChecker:
         self._max_sector_pct = max_sector_concentration_pct
         self._min_cash_reserve_pct = min_cash_reserve_pct
 
-    def check(  # noqa: PLR0912
+    def check(  # noqa: PLR0912, PLR0915
         self,
         order_value: Decimal,
         portfolio_equity: Decimal,
@@ -143,6 +155,12 @@ class PreTradeChecker:
         is_day_trade: bool = False,
         sector_exposure_value: Decimal | None = None,
         sector_id: str = "",
+        markets_active: list[str] | None = None,
+        regime_state: RegimeState | None = None,
+        strategy_name: str | None = None,
+        param_age_bars: int | None = None,
+        open_positions: list[str] | None = None,
+        correlations: dict[tuple[str, str], float] | None = None,
     ) -> PreTradeResult:
         """Run all pre-trade risk checks.
 
@@ -161,6 +179,12 @@ class PreTradeChecker:
             cross_market_exposure_pct: Current cross-market exposure fraction.
             max_cross_market_exposure_pct: Maximum allowed cross-market exposure.
             is_day_trade: Whether this order would constitute a day trade.
+            markets_active: List of active market IDs (e.g. ["us", "moex"]).
+            regime_state: Current market regime state (check 12).
+            strategy_name: Name of the strategy generating this order (check 13).
+            param_age_bars: Age of strategy parameters in bars (check 13).
+            open_positions: List of symbols with open positions (check 14).
+            correlations: Pairwise correlation dict (check 14).
 
         Returns:
             A :class:`PreTradeResult` indicating pass/fail and any violations.
@@ -244,7 +268,14 @@ class PreTradeChecker:
             violations.append(f"Duplicate pending order for {symbol}")
 
         # 11. Cross-market exposure limit
-        if (
+        _markets = markets_active or []
+        _multi_market = len(_markets) > 1
+        if _multi_market and cross_market_exposure_pct is None:
+            violations.append(
+                "Cross-market exposure unknown: multiple markets active "
+                f"({', '.join(_markets)}) but cross_market_exposure_pct not provided"
+            )
+        elif (
             cross_market_exposure_pct is not None
             and max_cross_market_exposure_pct is not None
             and cross_market_exposure_pct > max_cross_market_exposure_pct
@@ -253,6 +284,37 @@ class PreTradeChecker:
                 f"Cross-market exposure {float(cross_market_exposure_pct):.1%} "
                 f"exceeds max {float(max_cross_market_exposure_pct):.1%}"
             )
+
+        # 12. Regime gate — block new longs when regime blocks
+        if regime_state is not None and not regime_state.allow_new_longs:
+            violations.append(f"Check 12 FAIL: regime '{regime_state.regime}' blocks new longs")
+
+        # 13. Parameter freshness — for OU/pairs strategies
+        if (
+            strategy_name is not None
+            and strategy_name in _PARAM_FRESHNESS_STRATEGIES
+            and param_age_bars is not None
+            and param_age_bars > _MAX_PARAM_AGE_BARS
+        ):
+            violations.append(
+                f"Check 13 FAIL: {strategy_name} params stale "
+                f"({param_age_bars} bars > max {_MAX_PARAM_AGE_BARS})"
+            )
+
+        # 14. Correlation position limit — max 3 positions with r > 0.7
+        if open_positions is not None and correlations is not None and symbol:
+            from finalayze.risk.correlation import (  # noqa: PLC0415
+                count_correlated_positions,
+            )
+
+            correlated_count = count_correlated_positions(
+                symbol, open_positions, correlations, threshold=_CORRELATION_THRESHOLD
+            )
+            if correlated_count >= _MAX_CORRELATED_POSITIONS:
+                violations.append(
+                    f"Check 14 FAIL: {correlated_count} correlated positions "
+                    f"(max {_MAX_CORRELATED_POSITIONS})"
+                )
 
         return PreTradeResult(passed=len(violations) == 0, violations=violations)
 

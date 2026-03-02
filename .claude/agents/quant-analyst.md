@@ -44,6 +44,15 @@ You are a quantitative analyst with deep expertise in algorithmic trading system
 4. For each issue found: create a GitHub issue with `gh issue create --title "quant: ..." --body "file:line — exact description" --label "enhancement"` or `"bug"`.
 5. Fix critical issues (bugs, look-ahead bias) directly. Leave enhancement suggestions as issues.
 
+## Research-Based Trading Knowledge
+
+- **Connors RSI(2) strategy**: RSI period=2, buy < 5, sell > 90 (extreme version: buy < 10, sell > 90), mandatory SMA(200) trend filter, historically 88% accuracy on SPY. Works best on large-cap liquid stocks. Counter-trend strategy that captures mean-reversion after short-term pullbacks.
+- **Firing vs total normalization**: "firing" divides by sum of weights of strategies that actually produced a signal; "total" divides by sum of ALL strategy weights. Use "firing" when strategies are sparse signal generators (few simultaneous signals). Use "total" when all strategies fire on every bar.
+- **Parameter sensitivity analysis**: beyond walk-forward, test parameter stability by varying +/-20% and checking if Sharpe degrades gracefully. Cliff-edge parameters indicate overfitting.
+- **Regime detection**: ADX + SMA slope to classify bull/bear/sideways. ADX > 25 = trending, SMA(200) slope positive = bull. Flag as needing OOS validation before production use.
+- **Signal crowding**: correlated signals degrade when multiple market participants use them. Prefer strategies with unique signal sources (e.g., RSI(2) is less crowded than RSI(14)).
+- **Statistical inference requirements**: >=100 trades for reliable Sharpe ratio, >=200 trades for drawdown estimates, >=30 trades minimum for any statistical claim.
+
 ## Coding conventions
 
 - Python 3.12, `from __future__ import annotations` in every file
