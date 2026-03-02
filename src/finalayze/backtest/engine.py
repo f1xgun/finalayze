@@ -884,6 +884,15 @@ class BacktestEngine:
                     )
             net_score = self._strategy.last_net_score
 
+        # Capture enriched features and model probas from combiner
+        strategy_features: dict[str, float] | None = None
+        model_probas: dict[str, float] | None = None
+        if isinstance(self._strategy, JournalingStrategyCombiner):
+            feats = self._strategy.last_features
+            if feats:
+                strategy_features = feats
+            model_probas = self._strategy.last_model_probas
+
         # Identify the strategy with the highest absolute contribution
         dominant: str | None = None
         if strategy_signals:
@@ -914,6 +923,8 @@ class BacktestEngine:
                 portfolio_cash=portfolio.cash,
                 open_position_count=len(portfolio.positions),
                 recent_candles=recent,
+                strategy_features=strategy_features,
+                model_probas=model_probas,
             )
         )
 

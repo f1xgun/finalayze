@@ -42,6 +42,8 @@ class JournalingStrategyCombiner(StrategyCombiner):
         self._last_signals: dict[str, Signal | None] = {}
         self._last_weights: dict[str, Decimal] = {}
         self._last_net_score: float | None = None
+        self._last_features: dict[str, float] = {}
+        self._last_model_probas: dict[str, float] | None = None
 
     @property
     def last_signals(self) -> dict[str, Signal | None]:
@@ -58,7 +60,17 @@ class JournalingStrategyCombiner(StrategyCombiner):
         """Net weighted score from the most recent generate_signal() call."""
         return self._last_net_score
 
-    def generate_signal(  # noqa: PLR0915
+    @property
+    def last_features(self) -> dict[str, float]:
+        """Aggregated features from all strategy signals, prefixed by strategy name."""
+        return dict(self._last_features)
+
+    @property
+    def last_model_probas(self) -> dict[str, float] | None:
+        """Per-model probabilities from MLStrategy's EnsembleModel, if present."""
+        return dict(self._last_model_probas) if self._last_model_probas is not None else None
+
+    def generate_signal(  # noqa: PLR0912, PLR0915
         self,
         symbol: str,
         candles: list[Candle],
@@ -71,6 +83,8 @@ class JournalingStrategyCombiner(StrategyCombiner):
         self._last_signals = {}
         self._last_weights = {}
         self._last_net_score = None
+        self._last_features = {}
+        self._last_model_probas = None
 
         config = self._load_config(segment_id)
         strategies_cfg_raw = config.get("strategies", {})
@@ -117,6 +131,18 @@ class JournalingStrategyCombiner(StrategyCombiner):
 
             if signal is None:
                 continue
+
+            # Aggregate per-strategy features prefixed by strategy name
+            for feat_key, feat_val in signal.features.items():
+                self._last_features[f"{strategy_name}.{feat_key}"] = feat_val
+
+            # Capture per-model probas from MLStrategy's EnsembleModel
+            if hasattr(strategy, "_registry"):
+                ensemble = getattr(strategy._registry, "get", lambda _s: None)(segment_id)
+                if ensemble is not None and hasattr(ensemble, "last_model_probas"):
+                    probas = ensemble.last_model_probas
+                    if probas:
+                        self._last_model_probas = dict(probas)
 
             score = _BUY_SCORE if signal.direction == SignalDirection.BUY else _SELL_SCORE
             contribution = score * Decimal(str(signal.confidence)) * weight
