@@ -77,6 +77,7 @@ class MomentumStrategy(BaseStrategy):
         self._signal_states: dict[str, _SignalState] = {}
         # Cache YAML params per segment to avoid reloading on every bar
         self._params_cache: dict[str, dict[str, object]] = {}
+        self.last_skip_reason: str | None = None
 
     def _get_signal_state(self, segment_id: str, neutral_reset_bars: int) -> _SignalState:
         """Get or create a per-segment signal state."""
@@ -135,25 +136,36 @@ class MomentumStrategy(BaseStrategy):
         signal_state.tick(symbol)
 
         if len(candles) < _MIN_CANDLES:
+            self.last_skip_reason = "insufficient_data"
             return None
 
         indicators = self._compute_indicators(candles, segment_id)
         if indicators is None:
+            self.last_skip_reason = "indicator_computation_failed"
             return None
 
         result = self._evaluate_signal(indicators, segment_id)
         if result is None:
+            self.last_skip_reason = "no_signal_condition"
             return None
 
         direction, confidence = result
 
         if not signal_state.should_emit(symbol, direction):
+            self.last_skip_reason = "duplicate_suppressed"
             return None
+
+        self.last_skip_reason = None
 
         is_buy = direction == SignalDirection.BUY
         market_id = candles[0].market_id
         rsi_label = "oversold" if is_buy else "overbought"
         hist_label = "rising" if is_buy else "falling"
+
+        # Compute SMA trend value (1.0 = above SMA, -1.0 = below, 0.0 = no SMA)
+        sma_trend = 0.0
+        if indicators.current_sma is not None:
+            sma_trend = 1.0 if indicators.current_close > indicators.current_sma else -1.0
 
         return Signal(
             strategy_name=self.name,
@@ -164,7 +176,15 @@ class MomentumStrategy(BaseStrategy):
             confidence=confidence,
             features={
                 "rsi": round(indicators.current_rsi, 2),
+                "rsi_value": round(indicators.current_rsi, 4),
                 "macd_hist": round(indicators.current_hist, 4),
+                "sma_trend": sma_trend,
+                "adx_value": round(indicators.current_adx, 4)
+                if indicators.current_adx is not None
+                else 0.0,
+                "volume_ratio": round(indicators.volume_ratio, 4)
+                if indicators.volume_ratio is not None
+                else 0.0,
             },
             reasoning=(
                 f"RSI={indicators.current_rsi:.1f} (recently {rsi_label}), "

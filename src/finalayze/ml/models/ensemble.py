@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import contextlib
-import logging
 from typing import TYPE_CHECKING
+
+import structlog
 
 from finalayze.core.exceptions import InsufficientDataError, PredictionError
 
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
     from finalayze.ml.models.lstm_model import LSTMModel
 
 _DEFAULT_PROB = 0.5
-_log = logging.getLogger(__name__)
+_log = structlog.get_logger()
 
 
 class EnsembleModel:
@@ -32,14 +33,19 @@ class EnsembleModel:
     ) -> None:
         self._models = models
         self._lstm_model = lstm_model
+        self.last_model_probas: dict[str, float] = {}
 
     def predict_proba(self, features: dict[str, float], *, symbol: str = "__default__") -> float:
         """Return mean BUY probability across all *trained* models.
 
         Falls back to 0.5 when no models are trained.
         Raises PredictionError when all trained models fail.
+
+        After calling, ``last_model_probas`` contains per-model outputs
+        keyed by class name (e.g. ``{"XGBoostModel": 0.8, "LSTMModel": 0.6}``).
         """
         probs: list[float] = []
+        model_probas: dict[str, float] = {}
         any_trained = False
 
         for m in self._models:
@@ -47,16 +53,26 @@ class EnsembleModel:
                 continue
             any_trained = True
             try:
-                probs.append(m.predict_proba(features))
+                p = m.predict_proba(features)
+                probs.append(p)
+                model_probas[type(m).__name__] = p
             except Exception:
-                _log.warning("Ensemble: %s failed, skipping", type(m).__name__, exc_info=True)
+                _log.warning(
+                    "ensemble_model_failed",
+                    model=type(m).__name__,
+                    exc_info=True,
+                )
 
         if self._lstm_model is not None and getattr(self._lstm_model, "_trained", False):
             any_trained = True
             try:
-                probs.append(self._lstm_model.predict_proba(features, symbol=symbol))
+                p = self._lstm_model.predict_proba(features, symbol=symbol)
+                probs.append(p)
+                model_probas["LSTMModel"] = p
             except Exception:
-                _log.warning("Ensemble: LSTM failed, skipping", exc_info=True)
+                _log.warning("ensemble_lstm_failed", exc_info=True)
+
+        self.last_model_probas = model_probas
 
         if not probs:
             if any_trained:

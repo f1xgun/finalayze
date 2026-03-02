@@ -93,6 +93,10 @@ class DecisionRecord(BaseModel):
     # Last N candles OHLCV
     recent_candles: list[CandleSnapshot] = []
 
+    # Decision logging enrichment (PR-2)
+    strategy_features: dict[str, float] | None = None
+    model_probas: dict[str, float] | None = None
+
 
 class DecisionJournal:
     """Collects DecisionRecord entries and optionally flushes to JSONL."""

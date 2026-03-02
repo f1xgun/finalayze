@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 from unittest.mock import MagicMock
 
 import pytest
+import structlog
 
 from finalayze.core.exceptions import PredictionError
 from finalayze.ml.models.ensemble import EnsembleModel
@@ -59,14 +59,14 @@ class TestEnsembleExceptionHandling:
         result = ensemble.predict_proba({"a": 1.0})
         assert result == pytest.approx(0.5)
 
-    def test_ensemble_partial_failure_logged(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Failing model generates a warning log."""
+    def test_ensemble_partial_failure_logged(self) -> None:
+        """Failing model generates a warning log via structlog."""
         good = _make_model(proba=0.7)
         bad = _make_model(raises=True)
         ensemble = EnsembleModel(models=[good, bad], lstm_model=None)
-        with caplog.at_level(logging.WARNING):
+        with structlog.testing.capture_logs() as captured:
             ensemble.predict_proba({"a": 1.0})
-        assert any("failed, skipping" in record.message for record in caplog.records)
+        assert any("ensemble_model_failed" in entry.get("event", "") for entry in captured)
 
     def test_ensemble_lstm_failure_skipped(self) -> None:
         """LSTM raises but tree models succeed; returns tree average."""

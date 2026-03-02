@@ -132,12 +132,15 @@ class MeanReversionStrategy(BaseStrategy):
 
         # Squeeze filter: skip signals when bands are too narrow (low volatility)
         band_width_pct = (upper - lower) / mid if mid > 0 else 0.0
-        if band_width_pct < squeeze_threshold:
+        squeeze_active = band_width_pct < squeeze_threshold
+        if squeeze_active:
             return None
 
         exit_at_mean = bool(params.get("exit_at_mean", False))
 
         band_width = upper - lower
+        # Percent B: (close - lower) / (upper - lower); <0 below lower, >1 above upper
+        bb_pct_b = (last_close - lower) / band_width if band_width > 0 else 0.5
         direction: SignalDirection | None = None
         confidence: float = 0.0
 
@@ -226,6 +229,11 @@ class MeanReversionStrategy(BaseStrategy):
         market_id = candles[0].market_id
         band_label = "lower" if direction == SignalDirection.BUY else "upper"
 
+        # Compute enriched features for decision logging
+        rsi_feat = rsi_value if rsi_value is not None else 0.0
+        ref_band = lower if direction == SignalDirection.BUY else upper
+        band_distance_feat = abs(last_close - ref_band)
+
         return Signal(
             strategy_name=self.name,
             symbol=symbol,
@@ -238,6 +246,10 @@ class MeanReversionStrategy(BaseStrategy):
                 "bb_upper": upper,
                 "bb_mid": mid,
                 "close": last_close,
+                "bb_pct_b": round(bb_pct_b, 4),
+                "rsi_value": round(rsi_feat, 4),
+                "squeeze_active": 1.0 if squeeze_active else 0.0,
+                "band_distance": round(band_distance_feat, 4),
             },
             reasoning=(
                 f"Price {last_close:.2f} "
