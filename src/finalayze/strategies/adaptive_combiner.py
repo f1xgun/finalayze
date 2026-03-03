@@ -2,11 +2,14 @@
 
 Extends :class:`StrategyCombiner` to dynamically adjust per-strategy weights
 based on recent performance (rolling Sharpe ratio).
+
+Supports optional Thompson sampling exploration to avoid local optima.
 """
 
 from __future__ import annotations
 
 import math
+import random
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -18,6 +21,8 @@ if TYPE_CHECKING:
 
 _ZERO = Decimal(0)
 _ANNUALIZATION_FACTOR = math.sqrt(252)
+_DEFAULT_EPSILON = 0.1
+_BAYESIAN_PRIOR = 1  # Beta(1, 1) uniform prior
 
 
 class AdaptiveStrategyCombiner(StrategyCombiner):
@@ -38,12 +43,18 @@ class AdaptiveStrategyCombiner(StrategyCombiner):
         strategies: list[BaseStrategy],
         segment_id: str | None = None,
         normalize_mode: str = "firing",
+        exploration_mode: str = "deterministic",
+        epsilon: float = _DEFAULT_EPSILON,
     ) -> None:
         super().__init__(strategies, normalize_mode=normalize_mode)
         self._segment_id = segment_id
         self._dynamic_weights: dict[str, Decimal] = {}
         self._strategy_returns: dict[str, list[float]] = {}
         self._bars_since_rebalance: int = 0
+        self._exploration_mode = exploration_mode
+        self._epsilon = epsilon
+        # Thompson sampling: (alpha, beta) per strategy for Beta distribution
+        self._outcome_counts: dict[str, tuple[int, int]] = {}
 
     def record_trade_result(self, strategy_name: str, pnl_pct: float) -> None:
         """Record a trade result for weight computation.
@@ -123,6 +134,67 @@ class AdaptiveStrategyCombiner(StrategyCombiner):
 
         return floored
 
+    def record_outcome(self, strategy_name: str, *, profitable: bool) -> None:
+        """Record a trade outcome for Thompson sampling exploration.
+
+        Args:
+            strategy_name: Name of the strategy that produced the trade.
+            profitable: True if the trade was profitable, False otherwise.
+        """
+        alpha, beta = self._outcome_counts.get(strategy_name, (_BAYESIAN_PRIOR, _BAYESIAN_PRIOR))
+        if profitable:
+            alpha += 1
+        else:
+            beta += 1
+        self._outcome_counts[strategy_name] = (alpha, beta)
+
+    def _compute_thompson_weights(self) -> dict[str, float]:
+        """Sample from Beta distributions to compute exploration weights.
+
+        Each strategy is modeled as Beta(alpha, beta) where alpha = successes + 1
+        and beta = failures + 1 (uniform Bayesian prior).  A sample is drawn from
+        each distribution and the results are normalized to sum to 1.
+        """
+        samples: dict[str, float] = {}
+        for name in self._strategies:
+            alpha, beta = self._outcome_counts.get(name, (_BAYESIAN_PRIOR, _BAYESIAN_PRIOR))
+            samples[name] = random.betavariate(alpha, beta)
+
+        total = sum(samples.values())
+        if total <= 0:
+            n = len(samples)
+            return dict.fromkeys(samples, 1.0 / n)
+        return {name: s / total for name, s in samples.items()}
+
+    def _blend_weights(
+        self,
+        exploit_weights: dict[str, Decimal],
+    ) -> dict[str, Decimal]:
+        """Blend exploitation weights with Thompson exploration weights.
+
+        Returns exploit_weights unchanged when exploration_mode is deterministic.
+        Otherwise: final = (1 - epsilon) * exploit + epsilon * explore.
+        """
+        if self._exploration_mode != "thompson":
+            return exploit_weights
+
+        epsilon = Decimal(str(self._epsilon))
+        one_minus_eps = Decimal(1) - epsilon
+
+        thompson = self._compute_thompson_weights()
+        blended: dict[str, Decimal] = {}
+        for name, exploit_w in exploit_weights.items():
+            exploit_part = one_minus_eps * exploit_w
+            explore_part = epsilon * Decimal(str(thompson.get(name, 0.0)))
+            blended[name] = exploit_part + explore_part
+
+        # Re-normalize to ensure weights sum to exactly 1
+        total = sum(blended.values())
+        if total > _ZERO:
+            blended = {k: v / total for k, v in blended.items()}
+
+        return blended
+
     def generate_signal(
         self,
         symbol: str,
@@ -141,6 +213,10 @@ class AdaptiveStrategyCombiner(StrategyCombiner):
         effective_overrides = weight_overrides
         if self._dynamic_weights and effective_overrides is None:
             effective_overrides = self._dynamic_weights
+
+        # Apply Thompson sampling blending when in exploration mode
+        if effective_overrides is not None:
+            effective_overrides = self._blend_weights(effective_overrides)
 
         return super().generate_signal(
             symbol,

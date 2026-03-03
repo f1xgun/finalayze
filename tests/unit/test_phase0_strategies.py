@@ -53,6 +53,9 @@ def _make_indicators(
         current_sma=None,
         current_adx=None,
         volume_ratio=None,
+        ichimoku_bullish=None,
+        ichimoku_bearish=None,
+        ichimoku_cloud_thickness=None,
     )
 
 

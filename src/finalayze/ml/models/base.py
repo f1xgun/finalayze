@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 class BaseMLModel(ABC):
@@ -16,6 +20,18 @@ class BaseMLModel(ABC):
         ...
 
     @abstractmethod
-    def fit(self, X: list[dict[str, float]], y: list[int]) -> None:  # noqa: N803
-        """Train on feature dicts (X) and binary labels (y: 1=BUY, 0=SELL/HOLD)."""
+    def fit(
+        self,
+        X: list[dict[str, float]],  # noqa: N803
+        y: list[int],
+        *,
+        sample_weight: np.ndarray | None = None,  # type: ignore[type-arg]
+    ) -> None:
+        """Train on feature dicts (X) and binary labels (y: 1=BUY, 0=SELL/HOLD).
+
+        Args:
+            X: Feature dictionaries.
+            y: Binary labels.
+            sample_weight: Optional per-sample weights for importance weighting.
+        """
         ...

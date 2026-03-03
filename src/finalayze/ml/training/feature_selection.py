@@ -3,13 +3,19 @@
 Drops low-importance features and deduplicates highly correlated ones
 to reduce overfitting and improve model generalization.
 
+Provides two approaches:
+- Pearson correlation-based (original): ``select_features``
+- Mutual Information-based: ``select_features_mi``, ``compute_feature_mi``
+
 See docs/plans/2026-03-02-enhanced-improvement-plan.md, task B.7.
 """
 
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import xgboost as xgb
+from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
 
 
 def _deduplicate_correlated(
@@ -112,6 +118,132 @@ def select_features(
     # Build filtered feature dicts
     filtered = [{k: row[k] for k in selected} for row in features]
     return filtered, selected
+
+
+# ---------------------------------------------------------------------------
+# Mutual Information-based feature selection
+# ---------------------------------------------------------------------------
+
+_MI_RANDOM_STATE = 42
+_MI_N_NEIGHBORS = 3
+
+
+def compute_feature_mi(x: pd.DataFrame, y: pd.Series) -> pd.Series:
+    """Compute Mutual Information between each feature and the target.
+
+    Args:
+        x: Feature matrix (n_samples, n_features).
+        y: Binary target labels.
+
+    Returns:
+        pd.Series indexed by feature names with MI scores (non-negative).
+    """
+    if x.empty:
+        return pd.Series(dtype=float)
+
+    mi_values = mutual_info_classif(
+        x.values,
+        y.values,
+        discrete_features=False,
+        random_state=_MI_RANDOM_STATE,
+        n_neighbors=_MI_N_NEIGHBORS,
+    )
+    return pd.Series(mi_values, index=x.columns)
+
+
+def _pairwise_mi_matrix(x: pd.DataFrame) -> np.ndarray:  # type: ignore[type-arg]
+    """Compute pairwise MI between features using discretised target trick.
+
+    Approximates MI(feature_i, feature_j) by treating feature_j as a
+    continuous regression target and computing MI via k-NN estimation.
+    """
+    n_features = x.shape[1]
+    mi_matrix = np.zeros((n_features, n_features))
+
+    for j in range(n_features):
+        mi_row = mutual_info_regression(
+            x.values,
+            x.iloc[:, j].values,
+            discrete_features=False,
+            random_state=_MI_RANDOM_STATE,
+            n_neighbors=_MI_N_NEIGHBORS,
+        )
+        mi_matrix[:, j] = mi_row
+
+    # Symmetrise: MI(i,j) = (MI_ij + MI_ji) / 2
+    return (mi_matrix + mi_matrix.T) / 2.0
+
+
+def select_features_mi(
+    x: pd.DataFrame,
+    y: pd.Series,
+    max_features: int = 15,
+    mi_threshold: float = 0.05,
+) -> list[str]:
+    """Select features using Mutual Information with greedy deduplication.
+
+    Steps:
+        1. Compute MI between each feature and the target.
+        2. Remove features with MI < mi_threshold (uninformative).
+        3. Among remaining, greedily deduplicate: starting from the highest
+           target-MI feature, add features one-by-one; skip a feature if its
+           pairwise MI with any already-selected feature exceeds the median
+           pairwise MI (i.e. it is redundant).
+        4. Return up to max_features by target MI.
+
+    Args:
+        x: Feature matrix (n_samples, n_features).
+        y: Binary target labels.
+        max_features: Maximum number of features to return.
+        mi_threshold: Minimum MI with target to keep a feature.
+
+    Returns:
+        List of selected feature names, ordered by descending target MI.
+    """
+    if x.empty or x.shape[1] == 0:
+        return []
+
+    # Step 1: compute MI with target
+    mi_scores = compute_feature_mi(x, y)
+
+    # Step 2: filter uninformative features
+    informative = mi_scores[mi_scores >= mi_threshold]
+    if informative.empty:
+        return []
+
+    # Sort by MI descending
+    informative = informative.sort_values(ascending=False)
+    candidates = list(informative.index)
+
+    if len(candidates) <= 1:
+        return candidates[:max_features]
+
+    # Step 3: greedy deduplication via pairwise MI
+    x_candidates = x[candidates]
+    pairwise_mi = _pairwise_mi_matrix(x_candidates)
+
+    # Use median of off-diagonal pairwise MI as redundancy threshold
+    n_cand = len(candidates)
+    off_diag = [pairwise_mi[i, j] for i in range(n_cand) for j in range(i + 1, n_cand)]
+    redundancy_threshold = float(np.median(off_diag)) if off_diag else 0.0
+
+    selected: list[str] = [candidates[0]]  # best feature always selected
+    selected_indices: list[int] = [0]
+
+    for idx in range(1, n_cand):
+        if len(selected) >= max_features:
+            break
+        # Check if this candidate is redundant with any already-selected feature
+        is_redundant = False
+        for sel_idx in selected_indices:
+            if pairwise_mi[idx, sel_idx] > redundancy_threshold:
+                is_redundant = True
+                break
+        if not is_redundant:
+            selected.append(candidates[idx])
+            selected_indices.append(idx)
+
+    return selected[:max_features]
 
 
 def _build_importance_map(model: xgb.XGBClassifier, feature_names: list[str]) -> dict[str, float]:

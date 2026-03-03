@@ -118,7 +118,9 @@ class BacktestEngine:
         self._sizing_pipeline = PositionSizingPipeline()
 
     def _build_broker(
-        self, symbol: str, candles: list[Candle],
+        self,
+        symbol: str,
+        candles: list[Candle],
     ) -> SimulatedBroker:
         """Build a SimulatedBroker, optionally with market impact model."""
         adv_dict: dict[str, float] = {}
@@ -136,9 +138,7 @@ class BacktestEngine:
                     if closes[j - 1] > 0
                 ]
                 dvol_dict[symbol] = (
-                    (sum(r**2 for r in log_rets) / len(log_rets)) ** 0.5
-                    if log_rets
-                    else 0.02
+                    (sum(r**2 for r in log_rets) / len(log_rets)) ** 0.5 if log_rets else 0.02
                 )
             else:
                 dvol_dict[symbol] = 0.02

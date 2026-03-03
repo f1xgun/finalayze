@@ -134,15 +134,25 @@ class LSTMModel(BaseMLModel):
             return calibrated
         return raw_prob
 
-    def fit(self, X: list[dict[str, float]], y: list[int]) -> None:  # noqa: N803
+    def fit(
+        self,
+        X: list[dict[str, float]],  # noqa: N803
+        y: list[int],
+        *,
+        sample_weight: np.ndarray | None = None,  # type: ignore[type-arg]  # noqa: ARG002
+    ) -> None:
         """Train the LSTM on feature dicts and binary labels.
 
         Includes early stopping with patience, gradient clipping, dropout,
         and weight decay for regularization (6C.5 + 6C.6).
 
+        Note: ``sample_weight`` is accepted for API compatibility with
+        :class:`BaseMLModel` but is **not used** by the LSTM training loop.
+
         Args:
             X: List of feature dicts (all dicts must have identical keys).
             y: Binary labels (1=BUY, 0=SELL/HOLD), same length as X.
+            sample_weight: Unused.  Present for interface compatibility.
 
         Raises:
             InsufficientDataError: When len(X) < sequence_length.

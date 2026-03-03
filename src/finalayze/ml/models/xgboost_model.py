@@ -56,7 +56,13 @@ class XGBoostModel(BaseMLModel):
             return max(0.0, min(1.0, calibrated))
         return raw_proba
 
-    def fit(self, X: list[dict[str, float]], y: list[int]) -> None:  # noqa: N803
+    def fit(
+        self,
+        X: list[dict[str, float]],  # noqa: N803
+        y: list[int],
+        *,
+        sample_weight: np.ndarray | None = None,  # type: ignore[type-arg]
+    ) -> None:
         """Train the model on feature dicts and binary labels.
 
         Splits the last 20% of data as a calibration holdout, fits XGBoost on
@@ -64,6 +70,13 @@ class XGBoostModel(BaseMLModel):
         probabilities.  Uses isotonic regression when there are at least
         ``_MIN_CALIBRATION_SAMPLES`` calibration samples, otherwise falls
         back to Platt scaling (logistic regression).
+
+        Args:
+            X: Feature dictionaries.
+            y: Binary labels (1=BUY, 0=SELL/HOLD).
+            sample_weight: Optional per-sample weights (e.g. from uniqueness
+                weighting).  When provided, the training portion is sliced and
+                passed to XGBoost's ``fit(sample_weight=...)``.
         """
         if X:
             self._feature_names = sorted(X[0])
@@ -77,6 +90,7 @@ class XGBoostModel(BaseMLModel):
 
         x_train, x_cal = x_arr[:n_train], x_arr[n_train:]
         y_train, y_cal = y_arr[:n_train], y_arr[n_train:]
+        w_train = sample_weight[:n_train] if sample_weight is not None else None
 
         # Handle class imbalance: scale_pos_weight = n_negative / n_positive
         n_pos = int(np.sum(y_train == 1))
@@ -95,7 +109,7 @@ class XGBoostModel(BaseMLModel):
             eval_metric="logloss",
             verbosity=0,
         )
-        self._model.fit(x_train, y_train)
+        self._model.fit(x_train, y_train, sample_weight=w_train)
 
         # Fit calibrator on holdout if both classes are present
         n_cal_actual = len(x_cal)

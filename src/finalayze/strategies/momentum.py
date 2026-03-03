@@ -11,6 +11,7 @@ import yaml
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.base import BaseStrategy
+from finalayze.strategies.ichimoku import compute_ichimoku
 from finalayze.strategies.vol_targeting import compute_vol_scale
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
@@ -38,6 +39,9 @@ class _Indicators:
     current_sma: float | None
     current_adx: float | None
     volume_ratio: float | None
+    ichimoku_bullish: bool | None
+    ichimoku_bearish: bool | None
+    ichimoku_cloud_thickness: float | None
 
 
 class _SignalState:
@@ -188,6 +192,40 @@ class MomentumStrategy(BaseStrategy):
         if indicators.current_sma is not None:
             sma_trend = 1.0 if indicators.current_close > indicators.current_sma else -1.0
 
+        # Ichimoku cloud thickness confidence modifier
+        if indicators.ichimoku_cloud_thickness is not None and indicators.current_close > 0:
+            # Normalize cloud thickness relative to price level
+            normalized_thickness = indicators.ichimoku_cloud_thickness / indicators.current_close
+            # Thicker cloud in direction of trade = more confidence (up to +0.10)
+            ichimoku_conf_max_boost = 0.10
+            if (is_buy and indicators.ichimoku_bullish) or (
+                not is_buy and indicators.ichimoku_bearish
+            ):
+                confidence = min(1.0, confidence + normalized_thickness * ichimoku_conf_max_boost)
+
+        # Build features dict
+        features: dict[str, float] = {
+            "rsi": round(indicators.current_rsi, 2),
+            "rsi_value": round(indicators.current_rsi, 4),
+            "macd_hist": round(indicators.current_hist, 4),
+            "sma_trend": sma_trend,
+            "adx_value": round(indicators.current_adx, 4)
+            if indicators.current_adx is not None
+            else 0.0,
+            "volume_ratio": round(indicators.volume_ratio, 4)
+            if indicators.volume_ratio is not None
+            else 0.0,
+            "sentiment_score": round(sentiment_score, 4),
+        }
+
+        # Add Ichimoku features when filter is active
+        if indicators.ichimoku_bullish is not None:
+            features["ichimoku_bullish"] = 1.0 if indicators.ichimoku_bullish else 0.0
+            features["ichimoku_bearish"] = 1.0 if indicators.ichimoku_bearish else 0.0
+            features["ichimoku_cloud_thickness"] = round(
+                indicators.ichimoku_cloud_thickness or 0.0, 4
+            )
+
         return Signal(
             strategy_name=self.name,
             symbol=symbol,
@@ -195,19 +233,7 @@ class MomentumStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={
-                "rsi": round(indicators.current_rsi, 2),
-                "rsi_value": round(indicators.current_rsi, 4),
-                "macd_hist": round(indicators.current_hist, 4),
-                "sma_trend": sma_trend,
-                "adx_value": round(indicators.current_adx, 4)
-                if indicators.current_adx is not None
-                else 0.0,
-                "volume_ratio": round(indicators.volume_ratio, 4)
-                if indicators.volume_ratio is not None
-                else 0.0,
-                "sentiment_score": round(sentiment_score, 4),
-            },
+            features=features,
             reasoning=(
                 f"RSI={indicators.current_rsi:.1f} (recently {rsi_label}), "
                 f"MACD histogram {hist_label}"
@@ -318,6 +344,21 @@ class MomentumStrategy(BaseStrategy):
             if not pd.isna(vol_sma) and float(vol_sma) > 0:
                 volume_ratio = float(candles[-1].volume) / float(vol_sma)
 
+        # Ichimoku Cloud trend filter
+        ichimoku_bullish: bool | None = None
+        ichimoku_bearish: bool | None = None
+        ichimoku_cloud_thickness: float | None = None
+        ichimoku_filter = bool(params.get("ichimoku_filter", False))
+        if ichimoku_filter:
+            high_list = [float(c.high) for c in candles]
+            low_list = [float(c.low) for c in candles]
+            close_list = [float(c.close) for c in candles]
+            ichi = compute_ichimoku(high_list, low_list, close_list)
+            if ichi is not None:
+                ichimoku_bullish = ichi.is_bullish
+                ichimoku_bearish = ichi.is_bearish
+                ichimoku_cloud_thickness = ichi.cloud_thickness
+
         return _Indicators(
             current_rsi=float(current_rsi),
             rsi_window=rsi_window,
@@ -334,6 +375,9 @@ class MomentumStrategy(BaseStrategy):
             current_sma=current_sma,
             current_adx=current_adx,
             volume_ratio=volume_ratio,
+            ichimoku_bullish=ichimoku_bullish,
+            ichimoku_bearish=ichimoku_bearish,
+            ichimoku_cloud_thickness=ichimoku_cloud_thickness,
         )
 
     def _evaluate_signal(  # noqa: PLR0911, PLR0912
@@ -404,6 +448,15 @@ class MomentumStrategy(BaseStrategy):
                     indicators.current_close < indicators.current_sma - buffer
                     and direction == SignalDirection.BUY
                 ):
+                    return None
+
+        # Ichimoku Cloud filter: suppress counter-trend entries
+        if not is_exit_signal:
+            ichimoku_filter = bool(params.get("ichimoku_filter", False))
+            if ichimoku_filter and indicators.ichimoku_bullish is not None:
+                if direction == SignalDirection.BUY and indicators.ichimoku_bearish:
+                    return None
+                if direction == SignalDirection.SELL and indicators.ichimoku_bullish:
                     return None
 
         # Improved confidence: factor in MACD histogram strength and crossover

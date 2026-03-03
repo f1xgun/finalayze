@@ -595,6 +595,9 @@ class TestMomentumSignalFilters:
                 current_sma=ind.current_sma,
                 current_adx=10.0,  # Force low ADX
                 volume_ratio=ind.volume_ratio,
+                ichimoku_bullish=ind.ichimoku_bullish,
+                ichimoku_bearish=ind.ichimoku_bearish,
+                ichimoku_cloud_thickness=ind.ichimoku_cloud_thickness,
             )
 
         monkeypatch.setattr(strategy, "_compute_indicators", _compute_with_low_adx)
@@ -706,6 +709,9 @@ class TestMomentumSignalFilters:
                 current_sma=ind.current_sma,
                 current_adx=ind.current_adx,
                 volume_ratio=ind.volume_ratio,
+                ichimoku_bullish=ind.ichimoku_bullish,
+                ichimoku_bearish=ind.ichimoku_bearish,
+                ichimoku_cloud_thickness=ind.ichimoku_cloud_thickness,
             )
 
         monkeypatch.setattr(strategy, "_compute_indicators", _compute_with_crossover)

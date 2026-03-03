@@ -10,6 +10,8 @@ import structlog
 from finalayze.core.exceptions import InsufficientDataError, PredictionError
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from finalayze.ml.models.base import BaseMLModel
     from finalayze.ml.models.lstm_model import LSTMModel
     from finalayze.ml.models.stacking import StackingEnsemble
@@ -87,16 +89,28 @@ class EnsembleModel:
             return self._stacking.predict_proba(probs)
         return sum(probs) / len(probs)
 
-    def fit(self, X: list[dict[str, float]], y: list[int]) -> None:  # noqa: N803
+    def fit(
+        self,
+        X: list[dict[str, float]],  # noqa: N803
+        y: list[int],
+        *,
+        sample_weight: np.ndarray | None = None,  # type: ignore[type-arg]
+    ) -> None:
         """Train all constituent models (including LSTM if present).
 
         Each model is trained independently. If a model raises InsufficientDataError
         (e.g. LSTM when len(X) < sequence_length), it is left untrained and will
         return 0.5 in predict_proba -- graceful degradation.
+
+        Args:
+            X: Feature dictionaries.
+            y: Binary labels.
+            sample_weight: Optional per-sample weights passed through to each
+                constituent model's ``fit`` method.
         """
         for model in self._models:
             with contextlib.suppress(InsufficientDataError):
-                model.fit(X, y)
+                model.fit(X, y, sample_weight=sample_weight)
         if self._lstm_model is not None:
             with contextlib.suppress(InsufficientDataError):
-                self._lstm_model.fit(X, y)
+                self._lstm_model.fit(X, y, sample_weight=sample_weight)
