@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from datetime import UTC, datetime, timedelta
@@ -38,6 +39,18 @@ from finalayze.ml.training import DEFAULT_WINDOW_SIZE, build_windows
 
 _WINDOW_SIZE = DEFAULT_WINDOW_SIZE
 _TRAIN_RATIO = 0.8
+_TUNED_PARAMS_DIR = Path(__file__).parent.parent / "results" / "tuned_params"
+
+
+def _load_tuned_params(segment_id: str, model_type: str) -> dict | None:
+    """Load Optuna-tuned params if available, else return None."""
+    path = _TUNED_PARAMS_DIR / segment_id / f"{model_type}.json"
+    if path.exists():
+        with path.open() as f:
+            return json.loads(f.read())
+    return None
+
+
 _LOOKBACK_DAYS = 1825  # 5 years of history for US segments
 _MOEX_LOOKBACK_DAYS = 730  # 2 years for MOEX (post-sanctions structural break)
 _DEFAULT_OUTPUT_DIR = "models/"
@@ -307,7 +320,16 @@ def _train_and_evaluate_models(
     """Train XGBoost, LightGBM, and LSTM; return evaluation results."""
     results: dict[str, str] = {}
 
-    max_depth = _get_xgboost_max_depth(segment_id)
+    # Check for Optuna-tuned hyperparameters
+    xgb_tuned = _load_tuned_params(segment_id, "xgboost")
+    lgbm_tuned = _load_tuned_params(segment_id, "lightgbm")
+    if xgb_tuned:
+        print(f"[{segment_id}] Using tuned XGBoost params: {xgb_tuned}")
+    if lgbm_tuned:
+        print(f"[{segment_id}] Using tuned LightGBM params: {lgbm_tuned}")
+
+    default_depth = _get_xgboost_max_depth(segment_id)
+    max_depth = xgb_tuned.get("max_depth", default_depth) if xgb_tuned else default_depth
     xgb = XGBoostModel(segment_id=segment_id, max_depth=max_depth)
     xgb.fit(train_features, train_labels)
     xgb.save(segment_dir / "xgb.pkl")

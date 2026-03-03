@@ -55,6 +55,7 @@ dependencies = [
     "arch>=7.0",
     "PyWavelets>=1.6.0",
     "lxml>=6.0.2",
+    "optuna>=4.7.0",
 ]
 
 [project.optional-dependencies]
