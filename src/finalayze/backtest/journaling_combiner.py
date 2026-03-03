@@ -87,24 +87,16 @@ class JournalingStrategyCombiner(StrategyCombiner):
         self._last_model_probas = None
 
         config = self._load_config(segment_id)
-        strategies_cfg_raw = config.get("strategies", {})
-        strategies_cfg: dict[str, object] = (
-            strategies_cfg_raw if isinstance(strategies_cfg_raw, dict) else {}
-        )
-
-        # Per-segment overrides for normalize_mode and min_combined_confidence
-        effective_normalize = str(config.get("normalize_mode", self._normalize_mode))
-        try:
-            effective_min_confidence = Decimal(
-                str(config.get("min_combined_confidence", _MIN_COMBINED_CONFIDENCE))
-            )
-        except InvalidOperation:
-            effective_min_confidence = _MIN_COMBINED_CONFIDENCE
+        strategies_cfg, effective_normalize, effective_min_confidence = self._parse_config(config)
 
         weighted_score = _ZERO
         total_weight = _ZERO
         total_enabled_weight = _ZERO
         feature_contributions: dict[str, float] = {}
+
+        # Hurst exponent routing: compute dynamic weight multipliers
+        h, hurst_multipliers = self._compute_hurst_multipliers(candles)
+        feature_contributions["hurst_exponent"] = h
 
         for strategy_name, strategy_cfg in strategies_cfg.items():
             if not isinstance(strategy_cfg, dict):
@@ -112,10 +104,7 @@ class JournalingStrategyCombiner(StrategyCombiner):
             if not strategy_cfg.get("enabled", True):
                 continue
 
-            try:
-                weight = Decimal(str(strategy_cfg.get("weight", "1.0")))
-            except InvalidOperation:
-                weight = Decimal("1.0")
+            weight = self._resolve_weight(strategy_name, strategy_cfg, None)
             strategy = self._strategies.get(strategy_name)
             if strategy is None:
                 continue
@@ -145,7 +134,8 @@ class JournalingStrategyCombiner(StrategyCombiner):
                         self._last_model_probas = dict(probas)
 
             score = _BUY_SCORE if signal.direction == SignalDirection.BUY else _SELL_SCORE
-            contribution = score * Decimal(str(signal.confidence)) * weight
+            hurst_mult = Decimal(str(hurst_multipliers.get(strategy_name, 1.0)))
+            contribution = score * Decimal(str(signal.confidence)) * weight * hurst_mult
             weighted_score += contribution
             total_weight += weight
             feature_contributions[f"{strategy_name}_confidence"] = signal.confidence
@@ -162,6 +152,16 @@ class JournalingStrategyCombiner(StrategyCombiner):
             self._last_net_score = 0.0
             return None
         net = weighted_score / denominator
+
+        # Turn-of-month effect: boost BUY confidence during the window
+        if self._is_turn_of_month(candles[-1].timestamp) and net > _ZERO:
+            from finalayze.strategies.combiner import _TOM_BUY_BOOST  # noqa: PLC0415
+
+            net += _TOM_BUY_BOOST
+            feature_contributions["turn_of_month"] = 1.0
+        else:
+            feature_contributions["turn_of_month"] = 0.0
+
         self._last_net_score = float(net)
         abs_net = abs(net)
 
@@ -174,21 +174,6 @@ class JournalingStrategyCombiner(StrategyCombiner):
         if abs_net < effective_threshold:
             return None
 
-        direction = SignalDirection.BUY if net > _ZERO else SignalDirection.SELL
-        confidence = float(min(abs_net, _MAX_CONFIDENCE))
-        strategy_count = len(feature_contributions) // 2
-
-        market_id = candles[0].market_id
-
-        return Signal(
-            strategy_name="combined",
-            symbol=symbol,
-            market_id=market_id,
-            segment_id=segment_id,
-            direction=direction,
-            confidence=confidence,
-            features=feature_contributions,
-            reasoning=(
-                f"Combined signal: net_score={float(net):.3f} from {strategy_count} strategies"
-            ),
+        return self._build_result(
+            net, feature_contributions, symbol, candles[0].market_id, segment_id
         )
