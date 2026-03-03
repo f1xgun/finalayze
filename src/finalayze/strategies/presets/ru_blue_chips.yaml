@@ -1,6 +1,6 @@
 segment_id: ru_blue_chips
 normalize_mode: "total"
-min_combined_confidence: 0.40
+min_combined_confidence: 0.45
 strategies:
   momentum:
     enabled: true
@@ -27,7 +27,7 @@ strategies:
       volume_min_ratio: 0.8
       neutral_reset_bars: 8
       vol_target_enabled: true
-      vol_target: 0.15
+      vol_target: 0.12
   event_driven:
     enabled: false
     weight: 0.10

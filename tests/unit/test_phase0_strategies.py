@@ -161,9 +161,9 @@ class TestMOEXPresetRecalibration:
         assert data["strategies"]["mean_reversion"]["weight"] == 0.40  # noqa: PLR2004
 
     def test_ru_blue_chips_min_combined_confidence(self) -> None:
-        """ru_blue_chips: min_combined_confidence=0.40."""
+        """ru_blue_chips: min_combined_confidence=0.45."""
         data = _load_preset("ru_blue_chips")
-        assert data["min_combined_confidence"] == 0.40  # noqa: PLR2004
+        assert data["min_combined_confidence"] == 0.45  # noqa: PLR2004
 
     def test_ru_energy_min_combined_confidence(self) -> None:
         """ru_energy: min_combined_confidence=0.45."""
