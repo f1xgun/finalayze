@@ -33,6 +33,7 @@ class MetaLabeler:
 
     def __init__(self) -> None:
         self._model: xgb.XGBClassifier | None = None
+        self._feature_keys: list[str] | None = None  # training-time feature key order
         self._feature_names: list[str] | None = None
         self._strategy_vocab: list[str] | None = None
 
@@ -53,10 +54,12 @@ class MetaLabeler:
         # Build strategy vocabulary (sorted for determinism)
         self._strategy_vocab = sorted({s.strategy_name for s in samples})
 
+        # Store training-time feature key order (from first sample, sorted for determinism)
+        self._feature_keys = sorted(samples[0].features)
+
         # Build feature names: sorted feature keys + signal_direction + confidence + one-hot
-        feature_keys = sorted(samples[0].features)
         self._feature_names = (
-            feature_keys
+            self._feature_keys
             + ["_confidence", "_signal_direction"]
             + [f"_strategy_{name}" for name in self._strategy_vocab]
         )
@@ -94,9 +97,13 @@ class MetaLabeler:
         return float(self._model.predict_proba(vec)[0][1])
 
     def _sample_to_vector(self, sample: MetaSample) -> list[float]:
-        """Convert a MetaSample into a flat feature vector."""
-        feature_keys = sorted(sample.features)
-        vec: list[float] = [sample.features[k] for k in feature_keys]
+        """Convert a MetaSample into a flat feature vector.
+
+        Uses the training-time feature key order stored in ``_feature_keys``.
+        Missing keys are filled with 0.0 to keep the vector shape stable.
+        """
+        keys = self._feature_keys if self._feature_keys is not None else sorted(sample.features)
+        vec: list[float] = [sample.features.get(k, 0.0) for k in keys]
 
         # Append signal metadata
         vec.append(sample.confidence)

@@ -39,6 +39,12 @@ def compute_hrp_weights(
         return {}
     if n_strategies == 1:
         return {strategy_names[0]: 1.0}
+
+    # H-1: if rows have unequal length, truncate all to the minimum length
+    min_len = min(len(row) for row in returns_matrix)
+    if any(len(row) != min_len for row in returns_matrix):
+        returns_matrix = [row[:min_len] for row in returns_matrix]
+
     if len(returns_matrix[0]) < _MIN_HISTORY:
         equal_w = 1.0 / n_strategies
         return dict(zip(strategy_names, [equal_w] * n_strategies, strict=True))
@@ -60,10 +66,10 @@ def compute_hrp_weights(
     # Step 4: Quasi-diagonalization — leaf order from dendrogram
     sort_ix = list(leaves_list(link).astype(int))
 
-    # Step 5: Recursive bisection
-    variances = [_variance(returns_matrix[i]) for i in range(n_strategies)]
+    # Step 5: Recursive bisection using full covariance matrix
+    cov = _covariance_matrix(returns_matrix)
     weights_arr = [1.0] * n_strategies
-    _recursive_bisect(weights_arr, sort_ix, variances)
+    _recursive_bisect(weights_arr, sort_ix, cov)
 
     # Normalize to sum to 1
     total = sum(weights_arr)
@@ -116,6 +122,51 @@ def _variance(series: list[float]) -> float:
     return sum((x - mean) ** 2 for x in series) / (n - 1)
 
 
+def _covariance_matrix(returns_matrix: list[list[float]]) -> list[list[float]]:
+    """Compute sample covariance matrix (ddof=1) from return series."""
+    n = len(returns_matrix)
+    t = len(returns_matrix[0])
+    means = [sum(r) / t for r in returns_matrix]
+    cov = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i, n):
+            val = sum(
+                (returns_matrix[i][k] - means[i]) * (returns_matrix[j][k] - means[j])
+                for k in range(t)
+            ) / (t - 1)
+            cov[i][j] = val
+            cov[j][i] = val
+    return cov
+
+
+def _cluster_variance(cluster: list[int], cov: list[list[float]]) -> float:
+    """Compute Lopez de Prado cluster variance: w^T @ Cov_cluster @ w.
+
+    Weights within the cluster are inverse-variance (diagonal of cov), normalised
+    so they sum to 1.  This matches the original HRP paper's recursive bisection.
+    """
+    if len(cluster) == 1:
+        return cov[cluster[0]][cluster[0]]
+
+    # Diagonal variances for the cluster members
+    diag_vars = [cov[i][i] for i in cluster]
+
+    # Inverse-variance weights, guard against zero variance
+    inv_vars = [1.0 / v if v > 0 else 0.0 for v in diag_vars]
+    total_inv = sum(inv_vars)
+    if total_inv == 0:
+        w = [1.0 / len(cluster)] * len(cluster)
+    else:
+        w = [iv / total_inv for iv in inv_vars]
+
+    # w^T @ Cov_cluster @ w
+    result = 0.0
+    for a, i in enumerate(cluster):
+        for b, j in enumerate(cluster):
+            result += w[a] * w[b] * cov[i][j]
+    return result
+
+
 def _to_condensed(dist: list[list[float]]) -> list[float]:
     """Convert a symmetric distance matrix to condensed form for scipy."""
     n = len(dist)
@@ -128,9 +179,13 @@ def _to_condensed(dist: list[list[float]]) -> list[float]:
 def _recursive_bisect(
     weights: list[float],
     sort_ix: list[int],
-    variances: list[float],
+    cov: list[list[float]],
 ) -> None:
-    """Recursive bisection: split sorted indices and allocate inverse-variance weights."""
+    """Recursive bisection per Lopez de Prado HRP.
+
+    Cluster variance is computed as w^T @ Cov_cluster @ w with inverse-variance
+    weights inside each cluster, matching the original algorithm.
+    """
     if len(sort_ix) <= 1:
         return
 
@@ -138,12 +193,12 @@ def _recursive_bisect(
     left = sort_ix[:mid]
     right = sort_ix[mid:]
 
-    # Cluster variance = sum of individual variances (simplified)
-    var_left = sum(variances[i] for i in left)
-    var_right = sum(variances[i] for i in right)
+    # Proper cluster variance using covariance sub-matrix
+    var_left = _cluster_variance(left, cov)
+    var_right = _cluster_variance(right, cov)
     total_var = var_left + var_right
 
-    # Allocate inversely proportional to variance (higher weight to lower-variance cluster)
+    # Allocate inversely proportional to cluster variance
     alpha = 0.5 if total_var == 0 else 1.0 - var_left / total_var
 
     for i in left:
@@ -151,5 +206,5 @@ def _recursive_bisect(
     for i in right:
         weights[i] *= 1.0 - alpha
 
-    _recursive_bisect(weights, left, variances)
-    _recursive_bisect(weights, right, variances)
+    _recursive_bisect(weights, left, cov)
+    _recursive_bisect(weights, right, cov)

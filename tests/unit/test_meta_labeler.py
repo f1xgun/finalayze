@@ -84,3 +84,22 @@ class TestMetaLabeler:
         samples = _make_samples(50)
         labeler.fit(samples)
         assert labeler.is_fitted is True
+
+    def test_missing_feature_at_inference(self) -> None:
+        """Inference sample missing a feature key should fill with 0.0, not crash."""
+        labeler = MetaLabeler()
+        # Train with two features: rsi and macd
+        samples = _make_samples(50)
+        labeler.fit(samples)
+
+        # Inference sample is missing 'macd' entirely
+        inference_sample = MetaSample(
+            features={"rsi": 60.0},  # 'macd' is absent
+            signal_direction=1.0,
+            strategy_name="momentum",
+            confidence=0.65,
+            profitable=None,
+        )
+        # Must not raise; must return a valid probability
+        prob = labeler.predict_proba(inference_sample)
+        assert 0.0 <= prob <= 1.0

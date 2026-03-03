@@ -182,6 +182,19 @@ class TestComputeHRPWeights:
         weights = compute_hrp_weights(returns, names)
         assert weights["only"] == pytest.approx(SINGLE_WEIGHT)
 
+    def test_hrp_unequal_row_lengths_truncated_to_min(self) -> None:
+        """H-1: rows with different lengths are truncated to the minimum before HRP."""
+        # Row A has NUM_STEPS points; row B has NUM_STEPS + 10 extra points.
+        # The function must truncate B and still return valid weights summing to 1.
+        row_a = _make_uncorrelated_returns(NUM_STEPS, 1, LOW_VOL)[0]
+        row_b_long = _make_uncorrelated_returns(NUM_STEPS + 10, 1, LOW_VOL)[0]
+        returns = [row_a, row_b_long]
+        names = ["short", "long"]
+        # Must not raise and must return weights summing to 1
+        weights = compute_hrp_weights(returns, names)
+        assert set(weights.keys()) == {"short", "long"}
+        assert sum(weights.values()) == pytest.approx(SINGLE_WEIGHT, abs=1e-9)
+
 
 # ---------------------------------------------------------------------------
 # Tests for StrategyCombiner HRP integration

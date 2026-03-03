@@ -127,7 +127,7 @@ class GJRGarchForecaster:
 
         # Compute realized vol: std(returns) * sqrt(252)
         if len(returns) < _MIN_RETURNS_REALIZED:
-            return 0.0
+            return float("nan")
 
         arr = np.array(returns, dtype=np.float64)
         return float(np.std(arr)) * math.sqrt(_ANNUALIZATION_FACTOR)
