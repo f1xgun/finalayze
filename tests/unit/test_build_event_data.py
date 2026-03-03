@@ -20,8 +20,8 @@ EXPECTED_CBR_DECISIONS_COUNT = 16
 REQUIRED_CBR_KEYS = {"date", "rate_decision", "expected_rate", "surprise_bps"}
 EXPECTED_DATE_FORMAT = "%Y-%m-%d"
 
-# Total unique US symbols: us_tech(12) + us_broad(10) + us_finance(8) + us_healthcare(8) = 38
-EXPECTED_US_SYMBOL_COUNT = 38
+# Total unique US symbols across all us_* segments (deduplicated)
+EXPECTED_US_SYMBOL_COUNT = 84
 
 RU_SEGMENT_PREFIXES = ("ru_",)
 
