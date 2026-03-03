@@ -394,7 +394,7 @@ class MomentumStrategy(BaseStrategy):
         recently_overbought = any(v > rsi_overbought for v in indicators.rsi_window)
 
         # Histogram rising: improving bar-over-bar (momentum building)
-        hist_rising = indicators.current_hist > indicators.prev_hist
+        hist_rising = indicators.current_hist > indicators.prev_hist and indicators.current_hist > 0
         # Histogram falling: declining bar-over-bar (momentum fading)
         hist_falling = indicators.current_hist < indicators.prev_hist
 
