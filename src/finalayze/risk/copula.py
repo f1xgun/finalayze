@@ -255,7 +255,7 @@ def _frank_pdf(u: NDArray[np.float64], v: NDArray[np.float64], theta: float) -> 
     e_tv = np.exp(-theta * v)
     e_tuv = np.exp(-theta * (u + v))
 
-    numer = -theta * (1.0 - e_t) * e_tuv
+    numer = -theta * (e_t - 1.0) * e_tuv
     denom = ((1.0 - e_t) - (1.0 - e_tu) * (1.0 - e_tv)) ** 2
     denom = np.maximum(denom, 1e-300)
     result: NDArray[np.float64] = numer / denom
@@ -269,7 +269,7 @@ def _frank_log_likelihood(
 ) -> float:
     """Compute Frank copula log-likelihood."""
     pdf_vals = _frank_pdf(u, v, theta)
-    pdf_vals = np.maximum(np.abs(pdf_vals), 1e-300)
+    pdf_vals = np.maximum(pdf_vals, 1e-300)
     return float(np.sum(np.log(pdf_vals)))
 
 

@@ -161,11 +161,14 @@ class DividendGapStrategy(BaseStrategy):
 
             # Exit 2: max hold period reached
             if tracker.bars_since_entry >= self._max_hold_bars:
-                recovery_pct = (
-                    (current_close - (tracker.pre_exdiv_close * (1 - tracker.gap_pct / 100)))
-                    / (tracker.pre_exdiv_close * tracker.gap_pct / 100)
-                    * 100
-                )
+                if tracker.gap_pct <= 0:
+                    recovery_pct = 0.0
+                else:
+                    recovery_pct = (
+                        (current_close - (tracker.pre_exdiv_close * (1 - tracker.gap_pct / 100)))
+                        / (tracker.pre_exdiv_close * tracker.gap_pct / 100)
+                        * 100
+                    )
                 del self._active_gaps[symbol]
                 return Signal(
                     strategy_name=self.name,

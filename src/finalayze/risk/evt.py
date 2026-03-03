@@ -41,6 +41,7 @@ class EVTFit:
     scale: float
     threshold: float
     n_exceedances: int
+    n_total: int
 
 
 class EVTRiskEstimator:
@@ -92,6 +93,7 @@ class EVTRiskEstimator:
             scale=float(scale),
             threshold=threshold,
             n_exceedances=len(exceedances),
+            n_total=len(losses),
         )
 
     def var_evt(self, fit: EVTFit, confidence: float = 0.99) -> float:
@@ -119,31 +121,17 @@ class EVTRiskEstimator:
         sigma = fit.scale
         u = fit.threshold
 
-        # Use scipy's ppf for clean computation
-        # The GPD is fit to (loss - threshold), so VaR = threshold + GPD.ppf(q)
-        # q maps (confidence - threshold_cdf) into the exceedance distribution
-        # Simpler: use the direct POT formula
-        # For the exceedance distribution, VaR at level p in the tail:
-        # We need the tail probability: 1 - confidence
-        # Fraction of losses above threshold approximated from fit
-        # Use inverse CDF of the fitted GPD
         tail_prob = 1.0 - confidence
-        # Quantile of the GPD at 1 - tail_prob/p_exceed
-        # But since we fit on exceedances, use genpareto.ppf directly
-        # The exceedance probability for confidence level:
-        # P(Loss > VaR) = P(Loss > u) * P(Loss - u > VaR - u | Loss > u)
-        # = p_exceed * (1 - F_GPD(VaR - u))
-        # Setting this = 1 - confidence and solving:
-        # F_GPD(VaR - u) = 1 - tail_prob / p_exceed  ... but we don't have p_exceed
-        # Instead, use the quantile directly from the exceedance distribution
-        # scaled by how deep into the tail we want to go.
+        p_exceed = fit.n_exceedances / fit.n_total
 
-        # Direct formula (standard POT-VaR):
+        # Standard POT-VaR (McNeil & Frey 2000):
+        #   VaR_p = u + (sigma/xi) * [(tail_prob / p_exceed)^(-xi) - 1]
         if abs(xi) < _XI_ZERO_THRESHOLD:
-            # Exponential case (xi -> 0)
-            var = u + sigma * np.log(1.0 / tail_prob)
+            # Exponential case (xi -> 0):
+            #   VaR_p = u + sigma * ln(p_exceed / tail_prob)
+            var = u + sigma * np.log(p_exceed / tail_prob)
         else:
-            var = u + (sigma / xi) * (tail_prob ** (-xi) - 1.0)
+            var = u + (sigma / xi) * ((tail_prob / p_exceed) ** (-xi) - 1.0)
 
         return float(var)
 
