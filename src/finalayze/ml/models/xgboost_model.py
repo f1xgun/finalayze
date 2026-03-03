@@ -1,4 +1,8 @@
-"""XGBoost per-segment model (Layer 3)."""
+"""XGBoost per-segment model (Layer 3).
+
+Returns raw (uncalibrated) probabilities. Calibration is applied at the
+ensemble level by ``EnsembleCalibrator`` (see ``calibration.py``).
+"""
 
 from __future__ import annotations
 
@@ -6,8 +10,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import xgboost as xgb
-from sklearn.isotonic import IsotonicRegression
-from sklearn.linear_model import LogisticRegression
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -16,26 +18,22 @@ from finalayze.core.exceptions import InsufficientDataError
 from finalayze.ml.models.base import BaseMLModel
 
 _UNTRAINED_PROB = 0.5
-_CALIBRATION_HOLDOUT_FRACTION = 0.2
-_MIN_CALIBRATION_SAMPLES = 50
 
 
 class XGBoostModel(BaseMLModel):
     """XGBoost classifier for directional prediction per segment.
 
-    After fitting, an isotonic regression calibrator is trained on a holdout
-    set so that ``predict_proba`` returns well-calibrated probabilities.
+    Returns raw probabilities; calibration is handled at the ensemble level.
     """
 
     def __init__(self, segment_id: str, max_depth: int = 5) -> None:
         self.segment_id = segment_id
         self._max_depth = max_depth
         self._model: xgb.XGBClassifier | None = None
-        self._calibrator: IsotonicRegression | LogisticRegression | None = None
         self._feature_names: list[str] | None = None
 
     def predict_proba(self, features: dict[str, float]) -> float:
-        """Return calibrated BUY probability (0.0-1.0). Returns 0.5 when untrained."""
+        """Return raw BUY probability (0.0-1.0). Returns 0.5 when untrained."""
         if self._model is None:
             return _UNTRAINED_PROB
         if self._feature_names is not None:
@@ -47,14 +45,7 @@ class XGBoostModel(BaseMLModel):
                 )
                 raise InsufficientDataError(msg)
         features_arr = np.array([[features[k] for k in sorted(features)]], dtype=float)
-        raw_proba = float(self._model.predict_proba(features_arr)[0][1])
-        if self._calibrator is not None:
-            if isinstance(self._calibrator, LogisticRegression):
-                calibrated = float(self._calibrator.predict_proba(np.array([[raw_proba]]))[0][1])
-            else:
-                calibrated = float(self._calibrator.predict([raw_proba])[0])
-            return max(0.0, min(1.0, calibrated))
-        return raw_proba
+        return float(self._model.predict_proba(features_arr)[0][1])
 
     def fit(
         self,
@@ -65,36 +56,22 @@ class XGBoostModel(BaseMLModel):
     ) -> None:
         """Train the model on feature dicts and binary labels.
 
-        Splits the last 20% of data as a calibration holdout, fits XGBoost on
-        the training portion, then fits a calibrator on the holdout's raw
-        probabilities.  Uses isotonic regression when there are at least
-        ``_MIN_CALIBRATION_SAMPLES`` calibration samples, otherwise falls
-        back to Platt scaling (logistic regression).
+        Trains on the full dataset. Calibration is handled at the ensemble
+        level by ``EnsembleCalibrator``.
 
         Args:
             X: Feature dictionaries.
             y: Binary labels (1=BUY, 0=SELL/HOLD).
             sample_weight: Optional per-sample weights (e.g. from uniqueness
-                weighting).  When provided, the training portion is sliced and
-                passed to XGBoost's ``fit(sample_weight=...)``.
+                weighting).
         """
         if X:
             self._feature_names = sorted(X[0])
         x_arr = np.array([[row[k] for k in sorted(row)] for row in X], dtype=float)
         y_arr = np.array(y, dtype=int)
 
-        # Split: train on first 80%, calibrate on last 20%
-        n_total = len(X)
-        n_cal = max(int(n_total * _CALIBRATION_HOLDOUT_FRACTION), 1)
-        n_train = n_total - n_cal
-
-        x_train, x_cal = x_arr[:n_train], x_arr[n_train:]
-        y_train, y_cal = y_arr[:n_train], y_arr[n_train:]
-        w_train = sample_weight[:n_train] if sample_weight is not None else None
-
-        # Handle class imbalance: scale_pos_weight = n_negative / n_positive
-        n_pos = int(np.sum(y_train == 1))
-        n_neg = int(np.sum(y_train == 0))
+        n_pos = int(np.sum(y_arr == 1))
+        n_neg = int(np.sum(y_arr == 0))
         spw = n_neg / n_pos if n_pos > 0 else 1.0
 
         self._model = xgb.XGBClassifier(
@@ -109,22 +86,7 @@ class XGBoostModel(BaseMLModel):
             eval_metric="logloss",
             verbosity=0,
         )
-        self._model.fit(x_train, y_train, sample_weight=w_train)
-
-        # Fit calibrator on holdout if both classes are present
-        n_cal_actual = len(x_cal)
-        if n_cal_actual > 0 and len(np.unique(y_cal)) > 1:
-            raw_probas = self._model.predict_proba(x_cal)[:, 1]
-            if n_cal_actual >= _MIN_CALIBRATION_SAMPLES:
-                self._calibrator = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
-                self._calibrator.fit(raw_probas, y_cal)
-            else:
-                # Platt scaling fallback for small calibration sets
-                lr = LogisticRegression()
-                lr.fit(raw_probas.reshape(-1, 1), y_cal)
-                self._calibrator = lr
-        else:
-            self._calibrator = None
+        self._model.fit(x_arr, y_arr, sample_weight=sample_weight)
 
     def save(self, path: Path) -> None:
         """Persist model to disk using joblib."""

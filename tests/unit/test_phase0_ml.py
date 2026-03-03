@@ -1,25 +1,17 @@
-"""Tests for Phase 0.6 (temporal ordering) and 0.7 (calibration thresholds)."""
+"""Tests for Phase 0.6 (temporal ordering) and 0.7 (raw proba output).
+
+Per-model calibrators were removed in B.5 (ensemble calibration consolidation).
+Calibration is now applied at the ensemble level by ``EnsembleCalibrator``.
+"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
-from sklearn.isotonic import IsotonicRegression
-from sklearn.linear_model import LogisticRegression
 
-from finalayze.ml.models.lightgbm_model import (
-    _MIN_CALIBRATION_SAMPLES as LGBM_MIN_CAL,
-)
-from finalayze.ml.models.lightgbm_model import (
-    LightGBMModel,
-)
-from finalayze.ml.models.xgboost_model import (
-    _MIN_CALIBRATION_SAMPLES as XGB_MIN_CAL,
-)
-from finalayze.ml.models.xgboost_model import (
-    XGBoostModel,
-)
+from finalayze.ml.models.lightgbm_model import LightGBMModel
+from finalayze.ml.models.xgboost_model import XGBoostModel
 from finalayze.ml.training import build_dataset
 
 # ---------------------------------------------------------------------------
@@ -27,7 +19,6 @@ from finalayze.ml.training import build_dataset
 # ---------------------------------------------------------------------------
 _RNG_SEED = 42
 _N_FEATURES = 5
-_EXPECTED_MIN_CALIBRATION = 50
 
 
 # ---------------------------------------------------------------------------
@@ -149,40 +140,14 @@ class TestBuildDatasetTemporalOrdering:
 
 
 # ---------------------------------------------------------------------------
-# Phase 0.7 — Calibration thresholds
+# Phase 0.7 — Raw proba output (per-model calibrators removed in B.5)
 # ---------------------------------------------------------------------------
-class TestMinCalibrationSamples:
-    """Verify _MIN_CALIBRATION_SAMPLES is 50 in both model files."""
+class TestXGBoostRawProba:
+    """XGBoost returns raw probabilities (no per-model calibrator)."""
 
-    def test_min_calibration_samples_is_50(self) -> None:
-        assert XGB_MIN_CAL == _EXPECTED_MIN_CALIBRATION
-        assert LGBM_MIN_CAL == _EXPECTED_MIN_CALIBRATION
-
-
-class TestXGBoostCalibratorSelection:
-    """XGBoost uses isotonic for large samples, Platt for small."""
-
-    def test_calibrator_uses_isotonic_when_large_sample(self) -> None:
-        """>=50 calibration samples uses IsotonicRegression."""
-        # 300 samples => 20% holdout = 60 cal samples (>= 50)
+    def test_raw_proba_in_range(self) -> None:
+        """Raw probabilities are in [0, 1]."""
         n_samples = 300
-        model = XGBoostModel("test-seg")
-        features, labels = _make_synthetic_data(n_samples=n_samples)
-        model.fit(features, labels)
-        assert isinstance(model._calibrator, IsotonicRegression)  # noqa: SLF001
-
-    def test_calibrator_uses_platt_when_small_sample(self) -> None:
-        """<50 calibration samples uses LogisticRegression (Platt scaling)."""
-        # 60 samples => 20% holdout = 12 cal samples (< 50)
-        n_samples = 60
-        model = XGBoostModel("test-seg")
-        features, labels = _make_synthetic_data(n_samples=n_samples)
-        model.fit(features, labels)
-        assert isinstance(model._calibrator, LogisticRegression)  # noqa: SLF001
-
-    def test_platt_calibrated_proba_in_range(self) -> None:
-        """Platt-calibrated probabilities are in [0, 1]."""
-        n_samples = 60
         model = XGBoostModel("test-seg")
         features, labels = _make_synthetic_data(n_samples=n_samples)
         model.fit(features, labels)
@@ -190,32 +155,30 @@ class TestXGBoostCalibratorSelection:
             proba = model.predict_proba(sample)
             assert 0.0 <= proba <= 1.0
 
+    def test_no_calibrator_attribute(self) -> None:
+        """Per-model calibrator was removed."""
+        model = XGBoostModel("test-seg")
+        features, labels = _make_synthetic_data(n_samples=60)
+        model.fit(features, labels)
+        assert not hasattr(model, "_calibrator")
 
-class TestLightGBMCalibratorSelection:
-    """LightGBM uses isotonic for large samples, Platt for small."""
 
-    def test_calibrator_uses_isotonic_when_large_sample(self) -> None:
-        """>=50 calibration samples uses IsotonicRegression."""
+class TestLightGBMRawProba:
+    """LightGBM returns raw probabilities (no per-model calibrator)."""
+
+    def test_raw_proba_in_range(self) -> None:
+        """Raw probabilities are in [0, 1]."""
         n_samples = 300
-        model = LightGBMModel("test-seg")
-        features, labels = _make_synthetic_data(n_samples=n_samples)
-        model.fit(features, labels)
-        assert isinstance(model._calibrator, IsotonicRegression)  # noqa: SLF001
-
-    def test_calibrator_uses_platt_when_small_sample(self) -> None:
-        """<50 calibration samples uses LogisticRegression (Platt scaling)."""
-        n_samples = 60
-        model = LightGBMModel("test-seg")
-        features, labels = _make_synthetic_data(n_samples=n_samples)
-        model.fit(features, labels)
-        assert isinstance(model._calibrator, LogisticRegression)  # noqa: SLF001
-
-    def test_platt_calibrated_proba_in_range(self) -> None:
-        """Platt-calibrated probabilities are in [0, 1]."""
-        n_samples = 60
         model = LightGBMModel("test-seg")
         features, labels = _make_synthetic_data(n_samples=n_samples)
         model.fit(features, labels)
         for sample in features[:10]:
             proba = model.predict_proba(sample)
             assert 0.0 <= proba <= 1.0
+
+    def test_no_calibrator_attribute(self) -> None:
+        """Per-model calibrator was removed."""
+        model = LightGBMModel("test-seg")
+        features, labels = _make_synthetic_data(n_samples=60)
+        model.fit(features, labels)
+        assert not hasattr(model, "_calibrator")

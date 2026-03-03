@@ -93,8 +93,8 @@ class TestSaveEnsemble:
 class TestLSTMAtomicSave:
     """6C.9: LSTM atomic save tests."""
 
-    def test_lstm_save_creates_all_three_files(self, tmp_path: Path) -> None:
-        """After save, all 3 files (weights, scaler, platt) exist."""
+    def test_lstm_save_creates_weight_and_scaler_files(self, tmp_path: Path) -> None:
+        """After save, weights and scaler files exist (platt removed in B.5)."""
         from finalayze.ml.models.lstm_model import LSTMModel
 
         model = LSTMModel(segment_id="test", sequence_length=5)
@@ -107,7 +107,6 @@ class TestLSTMAtomicSave:
 
         assert save_path.exists()
         assert (tmp_path / "lstm.pkl.scaler.pkl").exists()
-        assert (tmp_path / "lstm.pkl.platt.pkl").exists()
 
     def test_lstm_save_atomic_no_corrupt_on_interrupt(self, tmp_path: Path) -> None:
         """If torch.save raises, no partial file at the target path."""

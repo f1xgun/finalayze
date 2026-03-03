@@ -12,6 +12,7 @@ from finalayze.core.exceptions import InsufficientDataError, PredictionError
 if TYPE_CHECKING:
     import numpy as np
 
+    from finalayze.ml.calibration import EnsembleCalibrator
     from finalayze.ml.models.base import BaseMLModel
     from finalayze.ml.models.lstm_model import LSTMModel
     from finalayze.ml.models.stacking import StackingEnsemble
@@ -34,10 +35,12 @@ class EnsembleModel:
         models: list[BaseMLModel],
         lstm_model: LSTMModel | None = None,
         stacking: StackingEnsemble | None = None,
+        calibrator: EnsembleCalibrator | None = None,
     ) -> None:
         self._models = models
         self._lstm_model = lstm_model
         self._stacking = stacking
+        self._calibrator = calibrator
         self.last_model_probas: dict[str, float] = {}
 
     def predict_proba(self, features: dict[str, float], *, symbol: str = "__default__") -> float:
@@ -86,8 +89,14 @@ class EnsembleModel:
 
         # Use stacking meta-learner if available and fitted; otherwise simple mean.
         if self._stacking is not None and self._stacking.is_fitted:
-            return self._stacking.predict_proba(probs)
-        return sum(probs) / len(probs)
+            raw = self._stacking.predict_proba(probs)
+        else:
+            raw = sum(probs) / len(probs)
+
+        # Apply ensemble-level calibration if available
+        if self._calibrator is not None and self._calibrator.is_fitted:
+            return self._calibrator.calibrate(raw)
+        return raw
 
     def fit(
         self,

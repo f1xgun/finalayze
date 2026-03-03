@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
-from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from torch import nn
 
@@ -24,9 +23,6 @@ from finalayze.ml.models.base import BaseMLModel
 _UNTRAINED_PROB = 0.5
 _TRAIN_EPOCHS = 50
 _LEARNING_RATE = 0.001
-_CALIBRATION_HOLDOUT_FRACTION = 0.2
-_MIN_CALIBRATION_SAMPLES = 10
-
 # 6C.5: Early stopping + gradient clipping
 _PATIENCE = 5
 _MAX_GRAD_NORM = 1.0
@@ -91,8 +87,6 @@ class LSTMModel(BaseMLModel):
         self._lock = threading.Lock()
         # Scaler fitted on training data; applied during inference (#152)
         self._scaler: StandardScaler | None = None
-        # Platt scaling: logistic regression mapping raw sigmoid -> calibrated probability
-        self._platt_scaler: LogisticRegression | None = None
 
     def predict_proba(self, features: dict[str, float], *, symbol: str = "__default__") -> float:
         """Return BUY probability in [0.0, 1.0]. Returns 0.5 when untrained."""
@@ -124,15 +118,7 @@ class LSTMModel(BaseMLModel):
         self._model.eval()
         with torch.no_grad():
             output: torch.Tensor = self._model(tensor)
-        raw_prob = float(output.squeeze())
-
-        # Apply Platt scaling calibration if available
-        if self._platt_scaler is not None:
-            calibrated: float = float(
-                self._platt_scaler.predict_proba(np.array([[raw_prob]]))[0][1]
-            )
-            return calibrated
-        return raw_prob
+        return float(output.squeeze())
 
     def fit(
         self,
@@ -169,7 +155,7 @@ class LSTMModel(BaseMLModel):
         self._scaler = StandardScaler()
         scaled_matrix = self._scaler.fit_transform(raw_matrix)
 
-        x_tensor, y_tensor, labels = self._build_sequences(scaled_matrix, y)
+        x_tensor, y_tensor, _labels = self._build_sequences(scaled_matrix, y)
 
         self._model = _LSTMNet(
             self._n_features, self._hidden_size, self._num_layers, dropout=_DROPOUT
@@ -178,16 +164,7 @@ class LSTMModel(BaseMLModel):
             self._model.parameters(), lr=_LEARNING_RATE, weight_decay=_WEIGHT_DECAY
         )
 
-        n_sequences = len(labels)
-        n_cal = max(int(n_sequences * _CALIBRATION_HOLDOUT_FRACTION), 1)
-        n_train = n_sequences - n_cal
-
-        x_train, x_cal = x_tensor[:n_train], x_tensor[n_train:]
-        y_train = y_tensor[:n_train]
-        y_cal_labels = np.array(labels[n_train:], dtype=int)
-
-        self._run_training_loop(self._model, optimizer, x_train, y_train)
-        self._fit_platt_scaler(x_cal, y_cal_labels)
+        self._run_training_loop(self._model, optimizer, x_tensor, y_tensor)
 
         self._trained = True
         self._feature_buffers.clear()
@@ -256,25 +233,6 @@ class LSTMModel(BaseMLModel):
         if best_state is not None:
             model.load_state_dict(best_state)
 
-    def _fit_platt_scaler(
-        self,
-        x_cal: torch.Tensor,
-        y_cal_labels: np.ndarray,  # type: ignore[type-arg]
-    ) -> None:
-        """Fit Platt scaling calibrator on calibration holdout."""
-        assert self._model is not None
-        self._model.eval()
-        if len(np.unique(y_cal_labels)) > 1 and len(y_cal_labels) >= _MIN_CALIBRATION_SAMPLES:
-            with torch.no_grad():
-                cal_raw: torch.Tensor = self._model(x_cal)
-            cal_raw_np = cal_raw.squeeze().numpy()
-            if cal_raw_np.ndim == 0:
-                cal_raw_np = cal_raw_np.reshape(1)
-            self._platt_scaler = LogisticRegression(solver="lbfgs", max_iter=1000)
-            self._platt_scaler.fit(cal_raw_np.reshape(-1, 1), y_cal_labels)
-        else:
-            self._platt_scaler = None
-
     def save(self, path: Path) -> None:
         """Save model state dict and config to *path* atomically.
 
@@ -302,10 +260,6 @@ class LSTMModel(BaseMLModel):
         # Atomic save: scaler
         scaler_path = path.parent / (path.name + ".scaler.pkl")
         _atomic_write_pickle(self._scaler, scaler_path)
-
-        # Atomic save: platt scaler
-        platt_path = path.parent / (path.name + ".platt.pkl")
-        _atomic_write_pickle(self._platt_scaler, platt_path)
 
     def load(self, path: Path) -> None:
         """Load model state dict and config from path.
@@ -335,12 +289,6 @@ class LSTMModel(BaseMLModel):
                 self._scaler = pickle.load(fh)  # noqa: S301
         else:
             self._scaler = None
-        platt_path = path.parent / (path.name + ".platt.pkl")
-        if platt_path.exists():
-            with platt_path.open("rb") as fh:
-                self._platt_scaler = pickle.load(fh)  # noqa: S301
-        else:
-            self._platt_scaler = None
 
 
 def _atomic_write_torch(payload: dict[str, Any], target: Path) -> None:
