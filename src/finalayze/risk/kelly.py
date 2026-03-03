@@ -16,6 +16,45 @@ _FOUR_DP = Decimal("0.0001")
 _KILL_THRESHOLD = 3
 
 
+_MIN_CONTINUOUS_RETURNS = 5
+_MAX_KELLY_CAP = Decimal("0.50")
+_VARIANCE_EPSILON = Decimal("1E-12")
+
+
+def compute_continuous_kelly(
+    returns: list[Decimal],
+    fraction: float = _DEFAULT_FRACTION,
+) -> Decimal:
+    """Compute continuous Kelly fraction: f* = fraction * mu / sigma^2.
+
+    More stable than discrete win-rate/payoff formula for small sample sizes.
+    Returns Decimal(0) for insufficient data, zero variance, or negative expectancy.
+    Result is floored at _MIN_KELLY_FRACTION and capped at 0.50.
+    """
+    if len(returns) < _MIN_CONTINUOUS_RETURNS:
+        return Decimal(0)
+
+    n = Decimal(len(returns))
+    mu = sum(returns) / n
+
+    if mu <= 0:
+        return Decimal(0)
+
+    # Population variance
+    variance = sum((r - mu) ** 2 for r in returns) / n
+
+    if variance < _VARIANCE_EPSILON:
+        return Decimal(0)
+
+    raw = Decimal(str(fraction)) * mu / variance
+
+    # Apply floor and cap
+    raw = max(raw, _MIN_KELLY_FRACTION)
+    raw = min(raw, _MAX_KELLY_CAP)
+
+    return raw.quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+
+
 @dataclass
 class TradeRecord:
     """Minimal trade record for Kelly computation."""

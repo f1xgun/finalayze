@@ -448,3 +448,215 @@ class TestCombinerNormalizationMode:
         # total enabled weight = 0.5 + 0.5 = 1.0 (pairs disabled, not counted)
         # net = 0.9 * 0.5 / 1.0 = 0.45 -> below threshold -> None
         assert signal is None
+
+
+class TestHurstRouting:
+    """Tests for Hurst exponent-based weight adjustment in the combiner."""
+
+    # Constants
+    TRENDING_STEP = 1.0
+    TRENDING_LENGTH = 300
+    MR_AMPLITUDE = 10.0
+    MR_LENGTH = 300
+    HURST_BOOST = 1.5
+    HURST_SUPPRESS = 1.0 / 1.5
+
+    @staticmethod
+    def _make_trending_candles(count: int = 300) -> list[Candle]:
+        """Create candles with a strong uptrend (H >> 0.55)."""
+        candles_list = []
+        from datetime import UTC, datetime, timedelta
+
+        base_time = datetime(2024, 1, 1, tzinfo=UTC)
+        for i in range(count):
+            price = Decimal(str(100.0 + 1.0 * i))
+            candles_list.append(
+                Candle(
+                    symbol="AAPL",
+                    market_id="us",
+                    timeframe="1d",
+                    timestamp=base_time + timedelta(days=i),
+                    open=price,
+                    high=price + Decimal(1),
+                    low=price - Decimal(1),
+                    close=price,
+                    volume=VOLUME,
+                )
+            )
+        return candles_list
+
+    @staticmethod
+    def _make_mr_candles(count: int = 300) -> list[Candle]:
+        """Create candles with mean-reverting behavior (H << 0.45)."""
+        candles_list = []
+        from datetime import UTC, datetime, timedelta
+
+        base_time = datetime(2024, 1, 1, tzinfo=UTC)
+        for i in range(count):
+            price = Decimal(str(100.0 + 10.0 * ((-1) ** i)))
+            candles_list.append(
+                Candle(
+                    symbol="AAPL",
+                    market_id="us",
+                    timeframe="1d",
+                    timestamp=base_time + timedelta(days=i),
+                    open=price,
+                    high=price + Decimal(1),
+                    low=price - Decimal(1),
+                    close=price,
+                    volume=VOLUME,
+                )
+            )
+        return candles_list
+
+    def test_hurst_routing_boosts_momentum_in_trend(self) -> None:
+        """With trending candles, momentum contribution should be scaled up by 1.5x."""
+        config: dict[str, Any] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 1.0},
+                "mean_reversion": {"enabled": True, "weight": 1.0},
+            },
+            "min_combined_confidence": 0.0,  # accept any non-zero signal
+        }
+        # Both strategies fire BUY with same confidence
+        mom_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        mr_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "mean_reversion")
+        momentum = MockStrategy("momentum", mom_signal)
+        mean_rev = MockStrategy("mean_reversion", mr_signal)
+
+        candles = self._make_trending_candles()
+
+        # With Hurst routing: momentum * 1.5, mean_reversion * (1/1.5)
+        combiner = StrategyCombiner([momentum, mean_rev])
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        assert signal is not None
+        assert "hurst_exponent" in signal.features
+        # In trending regime, hurst > 0.55
+        assert signal.features["hurst_exponent"] > 0.55  # noqa: PLR2004
+
+    def test_hurst_routing_boosts_mr_in_mean_reversion(self) -> None:
+        """With oscillating candles, MR contribution should be scaled up by 1.5x."""
+        config: dict[str, Any] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 1.0},
+                "mean_reversion": {"enabled": True, "weight": 1.0},
+            },
+            "min_combined_confidence": 0.0,
+        }
+        mom_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        mr_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "mean_reversion")
+        momentum = MockStrategy("momentum", mom_signal)
+        mean_rev = MockStrategy("mean_reversion", mr_signal)
+
+        candles = self._make_mr_candles()
+
+        combiner = StrategyCombiner([momentum, mean_rev])
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        assert signal is not None
+        assert "hurst_exponent" in signal.features
+        # In mean-reverting regime, hurst < 0.45
+        assert signal.features["hurst_exponent"] < 0.45  # noqa: PLR2004
+
+
+class TestTurnOfMonth:
+    """Tests for turn-of-month confidence overlay in the combiner."""
+
+    # Constants
+    TOM_BOOST = 0.05
+
+    @staticmethod
+    def _candle_at(dt: datetime) -> Candle:
+        """Create a single candle at a specific datetime."""
+        return Candle(
+            symbol="AAPL",
+            market_id="us",
+            timeframe="1d",
+            timestamp=dt,
+            open=BASE_PRICE,
+            high=BASE_PRICE + CANDLE_HIGH_OFFSET,
+            low=BASE_PRICE - CANDLE_LOW_OFFSET,
+            close=BASE_PRICE,
+            volume=VOLUME,
+        )
+
+    @staticmethod
+    def _make_candles_ending_at(dt: datetime, count: int = CANDLE_COUNT) -> list[Candle]:
+        """Create a list of candles where the last candle has the given timestamp."""
+        return [
+            Candle(
+                symbol="AAPL",
+                market_id="us",
+                timeframe="1d",
+                timestamp=dt - timedelta(days=count - 1 - i),
+                open=BASE_PRICE,
+                high=BASE_PRICE + CANDLE_HIGH_OFFSET,
+                low=BASE_PRICE - CANDLE_LOW_OFFSET,
+                close=BASE_PRICE,
+                volume=VOLUME,
+            )
+            for i in range(count)
+        ]
+
+    def _make_combiner_with_buy(self) -> tuple[StrategyCombiner, dict[str, Any]]:
+        """Create a combiner with a single momentum BUY strategy and config."""
+        config: dict[str, Any] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 1.0},
+            },
+            "min_combined_confidence": 0.0,  # accept any non-zero signal
+        }
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        strategy = MockStrategy("momentum", buy_signal)
+        combiner = StrategyCombiner([strategy])
+        return combiner, config
+
+    def test_tom_first_day_of_month(self) -> None:
+        """Candle on Jan 1 -> turn_of_month=1.0 in features."""
+        combiner, config = self._make_combiner_with_buy()
+        candles = self._make_candles_ending_at(datetime(2024, 1, 1, tzinfo=UTC))
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert signal is not None
+        assert signal.features["turn_of_month"] == 1.0
+
+    def test_tom_mid_month(self) -> None:
+        """Candle on Jan 15 -> turn_of_month=0.0 in features."""
+        combiner, config = self._make_combiner_with_buy()
+        candles = self._make_candles_ending_at(datetime(2024, 1, 15, tzinfo=UTC))
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert signal is not None
+        assert signal.features["turn_of_month"] == 0.0
+
+    def test_tom_last_day_of_month(self) -> None:
+        """Candle on Jan 31 -> turn_of_month=1.0 in features."""
+        combiner, config = self._make_combiner_with_buy()
+        candles = self._make_candles_ending_at(datetime(2024, 1, 31, tzinfo=UTC))
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert signal is not None
+        assert signal.features["turn_of_month"] == 1.0
+
+    def test_tom_boosts_buy_confidence(self) -> None:
+        """BUY signal on TOM day has higher confidence than same signal on non-TOM day."""
+        combiner_tom, config = self._make_combiner_with_buy()
+        combiner_mid, _ = self._make_combiner_with_buy()
+
+        candles_tom = self._make_candles_ending_at(datetime(2024, 1, 1, tzinfo=UTC))
+        candles_mid = self._make_candles_ending_at(datetime(2024, 1, 15, tzinfo=UTC))
+
+        with patch.object(combiner_tom, "_load_config", return_value=config):
+            signal_tom = combiner_tom.generate_signal("AAPL", candles_tom, "us_broad")
+        with patch.object(combiner_mid, "_load_config", return_value=config):
+            signal_mid = combiner_mid.generate_signal("AAPL", candles_mid, "us_broad")
+
+        assert signal_tom is not None
+        assert signal_mid is not None
+        assert signal_tom.confidence > signal_mid.confidence
+        assert signal_tom.confidence == pytest.approx(
+            signal_mid.confidence + self.TOM_BOOST, abs=0.01
+        )

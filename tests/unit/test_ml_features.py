@@ -11,7 +11,7 @@ import pytest
 from finalayze.core.schemas import Candle
 from finalayze.ml.features.technical import compute_features
 
-_EXPECTED_MIN_FEATURES = 16
+_EXPECTED_MIN_FEATURES = 19
 
 
 def _make_candles(
@@ -124,3 +124,46 @@ class TestATRMACDNormalization:
         assert "macd_hist" not in features
         assert "atr_14_pct" in features
         assert "macd_hist_pct" in features
+
+
+class TestNewFeatures:
+    """Tests for proximity_52wk, amihud_20d, and corwin_schultz_spread."""
+
+    def test_proximity_52wk_present_in_features(self) -> None:
+        candles = _make_candles(50)
+        features = compute_features(candles)
+        assert "proximity_52wk" in features
+
+    def test_proximity_52wk_at_high_is_one(self) -> None:
+        """When close is monotonically increasing, last close == rolling max -> 1.0."""
+        candles = _make_candles(50)
+        features = compute_features(candles)
+        # _make_candles produces monotonically increasing close prices,
+        # so the last close IS the rolling max
+        assert features["proximity_52wk"] == pytest.approx(1.0)
+
+    def test_amihud_20d_present_in_features(self) -> None:
+        candles = _make_candles(50)
+        features = compute_features(candles)
+        assert "amihud_20d" in features
+
+    def test_amihud_positive_for_liquid_stock(self) -> None:
+        candles = _make_candles(50)
+        features = compute_features(candles)
+        assert features["amihud_20d"] >= 0.0
+
+    def test_corwin_schultz_present_in_features(self) -> None:
+        candles = _make_candles(50)
+        features = compute_features(candles)
+        assert "corwin_schultz_spread" in features
+
+    def test_corwin_schultz_non_negative(self) -> None:
+        candles = _make_candles(50)
+        features = compute_features(candles)
+        assert features["corwin_schultz_spread"] >= 0.0
+
+    def test_total_feature_count_is_19(self) -> None:
+        candles = _make_candles(50)
+        features = compute_features(candles)
+        expected_count = 19
+        assert len(features) == expected_count

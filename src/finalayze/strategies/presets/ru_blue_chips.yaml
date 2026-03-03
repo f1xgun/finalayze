@@ -46,7 +46,7 @@ strategies:
     enabled: true
     weight: 0.10
     params:
-      pairs: [[SBER, VTBR], [GAZP, LKOH]]
+      pairs: [[SBER, VTBR], [GAZP, LKOH], [SBER, SBERP]]
       z_entry: 1.5
       z_exit: 0.0
       min_confidence: 0.40

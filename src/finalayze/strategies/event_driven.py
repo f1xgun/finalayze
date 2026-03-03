@@ -21,6 +21,30 @@ _DEFAULT_WEIGHT = Decimal("0.4")
 # If news is already fully priced in, trading on it is futile.
 _DEFAULT_MAX_PRICE_MOVE = 0.05
 
+# Sanctions proximity scores for Russian-listed equities.
+# Higher values indicate greater exposure to sanctions-related risk,
+# which reduces confidence on event-driven signals.
+_SANCTIONS_PROXIMITY: dict[str, float] = {
+    "GAZP": 0.8,
+    "LKOH": 0.7,
+    "ROSN": 0.7,
+    "NVTK": 0.6,
+    "SBER": 0.3,
+    "VTBR": 0.5,
+    "ALRS": 0.4,
+    "NLMK": 0.5,
+    "MGNT": 0.2,
+    "YNDX": 0.3,
+    "POLY": 0.6,
+    "PHOR": 0.4,
+    "MTSS": 0.2,
+    "OZON": 0.3,
+    "FIVE": 0.2,
+}
+
+# Event types that trigger sanctions proximity scaling.
+_SANCTIONS_EVENT_TYPES = {"sanctions", "geopolitical"}
+
 
 class EventDrivenStrategy(BaseStrategy):
     """News sentiment-driven strategy.
@@ -126,6 +150,19 @@ class EventDrivenStrategy(BaseStrategy):
         direction = SignalDirection.BUY if sentiment_score > 0 else SignalDirection.SELL
         confidence = min(1.0, abs_sent * credibility)
 
+        features: dict[str, float] = {
+            "sentiment": sentiment_score,
+            "credibility": credibility,
+        }
+
+        # Apply sanctions proximity scaling for segments with sanctions/geopolitical events.
+        event_types = params.get("event_types", [])
+        event_types_set = set(event_types) if isinstance(event_types, list) else set()
+        if event_types_set & _SANCTIONS_EVENT_TYPES:
+            proximity = _SANCTIONS_PROXIMITY.get(symbol, 0.0)
+            confidence *= 1.0 - proximity * 0.5
+            features["sanctions_proximity"] = proximity
+
         return Signal(
             strategy_name=self.name,
             symbol=symbol,
@@ -133,6 +170,6 @@ class EventDrivenStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={"sentiment": sentiment_score, "credibility": credibility},
+            features=features,
             reasoning=f"News sentiment {sentiment_score:+.2f} (credibility={credibility:.2f})",
         )

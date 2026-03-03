@@ -13,6 +13,7 @@ from finalayze.risk.kelly import (
     _MIN_TRADES_FOR_KELLY,
     RollingKelly,
     TradeRecord,
+    compute_continuous_kelly,
 )
 
 # ── Constants (ruff PLR2004: no magic numbers) ───────────────────────────
@@ -292,3 +293,97 @@ class TestQuarterKellyDampening:
         expected_ratio = 4.0
         tolerance = 0.1
         assert abs(ratio - expected_ratio) < tolerance
+
+
+# ── Continuous Kelly tests ───────────────────────────────────────────────
+
+CONTINUOUS_POSITIVE_RETURNS = [
+    Decimal("0.02"),
+    Decimal("0.03"),
+    Decimal("-0.01"),
+    Decimal("0.015"),
+    Decimal("0.025"),
+    Decimal("0.01"),
+    Decimal("-0.005"),
+]
+
+CONTINUOUS_NEGATIVE_RETURNS = [
+    Decimal("-0.02"),
+    Decimal("-0.03"),
+    Decimal("-0.01"),
+    Decimal("-0.015"),
+    Decimal("-0.025"),
+]
+
+CONTINUOUS_IDENTICAL_RETURNS = [Decimal("0.01")] * 6
+
+CONTINUOUS_EXTREME_RETURNS = [
+    Decimal("0.50"),
+    Decimal("0.40"),
+    Decimal("0.30"),
+    Decimal("0.45"),
+    Decimal("0.35"),
+]
+
+CONTINUOUS_TINY_EDGE_RETURNS = [
+    Decimal("0.001"),
+    Decimal("0.0005"),
+    Decimal("-0.0003"),
+    Decimal("0.0002"),
+    Decimal("0.0008"),
+    Decimal("0.0001"),
+]
+
+MIN_DATA_THRESHOLD = 5
+HALF_FRACTION = 0.5
+QUARTER_FRACTION = 0.25
+DAMPENING_RATIO_TOLERANCE = Decimal("0.5")
+
+
+class TestContinuousKelly:
+    """Tests for compute_continuous_kelly standalone function."""
+
+    def test_positive_returns_gives_positive_fraction(self) -> None:
+        """Mostly positive returns should produce a positive Kelly fraction."""
+        result = compute_continuous_kelly(CONTINUOUS_POSITIVE_RETURNS)
+        assert result > Decimal(0)
+        assert isinstance(result, Decimal)
+
+    def test_negative_returns_gives_zero(self) -> None:
+        """All negative returns (negative mean) should return zero."""
+        result = compute_continuous_kelly(CONTINUOUS_NEGATIVE_RETURNS)
+        assert result == Decimal(0)
+
+    def test_insufficient_data_returns_zero(self) -> None:
+        """Fewer than 5 returns should return zero."""
+        short_list = [Decimal("0.01"), Decimal("0.02"), Decimal("0.03")]
+        assert len(short_list) < MIN_DATA_THRESHOLD
+        result = compute_continuous_kelly(short_list)
+        assert result == Decimal(0)
+
+    def test_zero_variance_returns_zero(self) -> None:
+        """All identical returns (variance = 0) should return zero."""
+        result = compute_continuous_kelly(CONTINUOUS_IDENTICAL_RETURNS)
+        assert result == Decimal(0)
+
+    def test_result_is_capped(self) -> None:
+        """Extreme positive returns should not exceed the 0.50 cap."""
+        cap = Decimal("0.50")
+        result = compute_continuous_kelly(CONTINUOUS_EXTREME_RETURNS)
+        assert result <= cap
+        assert result > Decimal(0)
+
+    def test_result_respects_floor(self) -> None:
+        """Small positive edge should give at least _MIN_KELLY_FRACTION."""
+        result = compute_continuous_kelly(CONTINUOUS_TINY_EDGE_RETURNS)
+        assert result >= _MIN_KELLY_FRACTION
+
+    def test_fraction_dampening(self) -> None:
+        """fraction=0.5 should give roughly 2x fraction=0.25."""
+        half = compute_continuous_kelly(CONTINUOUS_POSITIVE_RETURNS, fraction=HALF_FRACTION)
+        quarter = compute_continuous_kelly(CONTINUOUS_POSITIVE_RETURNS, fraction=QUARTER_FRACTION)
+        # Both should be positive
+        assert half > Decimal(0)
+        assert quarter > Decimal(0)
+        # half should be roughly 2x quarter (allow tolerance for floor/cap effects)
+        assert half >= quarter

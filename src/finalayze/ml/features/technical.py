@@ -25,6 +25,9 @@ _RSI_LOOKBACK = 14
 _DOW_DIVISOR = 5
 _MIN_SMA_POINTS = 2
 _RSI_SCALE = 100.0
+_PROXIMITY_WINDOW = 252
+_AMIHUD_WINDOW = 20
+_MIN_CS_BARS = 2
 
 _log = logging.getLogger(__name__)
 
@@ -201,6 +204,8 @@ def _compute_extra_features(
         rsi_roc_14 = (float(rsi.iloc[-1]) - float(rsi.iloc[-_RSI_LOOKBACK])) / _RSI_SCALE
         rsi_divergence = price_roc_14 - rsi_roc_14
 
+    microstructure = _compute_microstructure_features(close_s, high_s, low_s, volume_s, last_close)
+
     return {
         "roc_10": roc_val,
         "willr_14": willr_val,
@@ -212,7 +217,75 @@ def _compute_extra_features(
         "dow_cos": dow_cos,
         "obv_slope_10": obv_slope_val,
         "rsi_divergence": rsi_divergence,
+        **microstructure,
     }
+
+
+def _compute_microstructure_features(
+    close_s: pd.Series,
+    high_s: pd.Series,
+    low_s: pd.Series,
+    volume_s: pd.Series,
+    last_close: float,
+) -> dict[str, float]:
+    """Compute microstructure features: 52wk proximity, Amihud, Corwin-Schultz."""
+    # 52-week high proximity: close / rolling_max(close, 252)
+    rolling_max_252 = close_s.rolling(min(_PROXIMITY_WINDOW, len(close_s)), min_periods=1).max()
+    rm_val = float(rolling_max_252.iloc[-1])
+    proximity_52wk = last_close / rm_val if rm_val > 0 and math.isfinite(rm_val) else 1.0
+
+    # Amihud illiquidity ratio (20-day rolling mean)
+    dollar_volume = close_s * volume_s
+    abs_returns = close_s.pct_change().abs()
+    illiq_per_bar = abs_returns / dollar_volume
+    illiq_per_bar = illiq_per_bar.replace([np.inf, -np.inf], np.nan)
+    amihud_rolling = illiq_per_bar.rolling(_AMIHUD_WINDOW, min_periods=1).mean()
+    amihud_val = float(amihud_rolling.iloc[-1])
+    amihud_20d = amihud_val if math.isfinite(amihud_val) else 0.0
+
+    return {
+        "proximity_52wk": proximity_52wk,
+        "amihud_20d": amihud_20d,
+        "corwin_schultz_spread": _corwin_schultz(high_s, low_s),
+    }
+
+
+def _corwin_schultz(high_s: pd.Series, low_s: pd.Series) -> float:
+    """Compute Corwin-Schultz (2012) bid-ask spread estimator from high/low prices.
+
+    Returns the last available spread estimate, clamped to [0, 1].
+    If insufficient data (< 2 bars), returns 0.0.
+    """
+    if len(high_s) < _MIN_CS_BARS:
+        return 0.0
+
+    _sqrt2 = math.sqrt(2)
+    _denom = 3 - 2 * _sqrt2
+
+    # ln(H/L)^2 for each bar
+    hl_log2 = pd.Series(np.log(high_s / low_s) ** 2, index=high_s.index)
+
+    # beta: sum of ln(H_t/L_t)^2 for consecutive pairs
+    beta = hl_log2 + hl_log2.shift(1)
+
+    # gamma: ln(max(H_t, H_{t-1}) / min(L_t, L_{t-1}))^2
+    h_max = pd.concat([high_s, high_s.shift(1)], axis=1).max(axis=1)
+    l_min = pd.concat([low_s, low_s.shift(1)], axis=1).min(axis=1)
+    gamma = np.log(h_max / l_min) ** 2
+
+    # alpha
+    alpha = (np.sqrt(2 * beta) - np.sqrt(beta)) / _denom - np.sqrt(gamma / _denom)
+
+    # spread = 2 * (exp(alpha) - 1) / (1 + exp(alpha))
+    exp_alpha = np.exp(alpha)
+    spread = 2 * (exp_alpha - 1) / (1 + exp_alpha)
+
+    # Take the last valid value
+    last_spread = float(spread.iloc[-1])
+    if not math.isfinite(last_spread):
+        return 0.0
+    # Clamp to [0, 1]
+    return max(0.0, min(1.0, last_spread))
 
 
 def _garman_klass_vol(

@@ -34,6 +34,9 @@ _FEATURE_NAMES = {
     "dow_cos",
     "obv_slope_10",
     "rsi_divergence",
+    "proximity_52wk",
+    "amihud_20d",
+    "corwin_schultz_spread",
 }
 _N_FEATURES = len(_FEATURE_NAMES)
 
