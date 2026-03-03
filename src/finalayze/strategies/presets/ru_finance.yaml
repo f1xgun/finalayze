@@ -1,6 +1,6 @@
 segment_id: ru_finance
 normalize_mode: "total"
-min_combined_confidence: 0.40
+min_combined_confidence: 0.55
 strategies:
   mean_reversion:
     enabled: true
@@ -59,7 +59,7 @@ strategies:
     params:
       min_confidence: 0.30
   pead:
-    enabled: true
+    enabled: false
     weight: 0.10
     params:
       min_confidence: 0.40
