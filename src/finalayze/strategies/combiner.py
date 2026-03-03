@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import calendar
+from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.strategies.hrp import compute_hrp_weights
 from finalayze.strategies.hurst import compute_hurst_exponent
 
 if TYPE_CHECKING:
@@ -37,6 +39,9 @@ _HURST_SUPPRESS = 1.0 / _HURST_BOOST
 # Turn-of-month effect: boost BUY confidence during last 1 + first 3 calendar days
 _TOM_BUY_BOOST = Decimal("0.05")
 
+# HRP allocation constants
+_HRP_MIN_HISTORY = 20
+
 
 class StrategyCombiner:
     """Combines multiple strategy signals using per-segment YAML weights."""
@@ -45,10 +50,45 @@ class StrategyCombiner:
         self,
         strategies: list[BaseStrategy],
         normalize_mode: str = "firing",
+        allocation_mode: str = "static",
     ) -> None:
         self._strategies: dict[str, BaseStrategy] = {s.name: s for s in strategies}
         self._presets_dir = _PRESETS_DIR
         self._normalize_mode = normalize_mode
+        self._allocation_mode = allocation_mode
+        self._strategy_returns: dict[str, list[float]] = defaultdict(list)
+        self._hrp_weights: dict[str, Decimal] | None = None
+
+    def record_strategy_return(self, strategy_name: str, ret: float) -> None:
+        """Record a strategy return observation for HRP weight computation.
+
+        Only accumulates data when allocation_mode is 'hrp'.
+        """
+        if self._allocation_mode != "hrp":
+            return
+        self._strategy_returns[strategy_name].append(ret)
+        # Invalidate cached weights so they are recomputed next time
+        self._hrp_weights = None
+
+    def _has_hrp_weights(self) -> bool:
+        """Return True if HRP weights can be computed (enough history)."""
+        if self._allocation_mode != "hrp":
+            return False
+        if len(self._strategy_returns) < 2:  # noqa: PLR2004
+            return False
+        min_len = min(len(v) for v in self._strategy_returns.values())
+        return min_len >= _HRP_MIN_HISTORY
+
+    def _compute_hrp_overrides(self) -> dict[str, Decimal]:
+        """Compute HRP weight overrides from recorded strategy returns."""
+        if self._hrp_weights is not None:
+            return self._hrp_weights
+        names = sorted(self._strategy_returns.keys())
+        min_len = min(len(self._strategy_returns[n]) for n in names)
+        returns_matrix = [self._strategy_returns[n][:min_len] for n in names]
+        raw_weights = compute_hrp_weights(returns_matrix, names)
+        self._hrp_weights = {k: Decimal(str(v)) for k, v in raw_weights.items()}
+        return self._hrp_weights
 
     @staticmethod
     def _is_turn_of_month(timestamp: datetime) -> bool:
@@ -130,6 +170,34 @@ class StrategyCombiner:
             ),
         )
 
+    def _resolve_effective_overrides(
+        self,
+        weight_overrides: dict[str, Decimal] | None,
+    ) -> tuple[dict[str, Decimal] | None, dict[str, Decimal] | None]:
+        """Resolve weight overrides, preferring explicit overrides over HRP.
+
+        Returns (effective_overrides, hrp_overrides) tuple.
+        """
+        hrp_overrides: dict[str, Decimal] | None = None
+        if self._has_hrp_weights():
+            hrp_overrides = self._compute_hrp_overrides()
+        effective = weight_overrides if weight_overrides is not None else hrp_overrides
+        return effective, hrp_overrides
+
+    @staticmethod
+    def _effective_threshold(
+        config: dict[str, object],
+        min_confidence: Decimal,
+        has_open_position: bool,
+        net: Decimal,
+    ) -> Decimal:
+        """Compute the effective confidence threshold, lowering for exit signals."""
+        threshold = min_confidence
+        if has_open_position and net < _ZERO:
+            exit_conf = Decimal(str(config.get("min_exit_confidence", _MIN_EXIT_CONFIDENCE)))
+            threshold = min(min_confidence, exit_conf)
+        return threshold
+
     def generate_signal(
         self,
         symbol: str,
@@ -147,6 +215,7 @@ class StrategyCombiner:
         """
         config = self._load_config(segment_id)
         strategies_cfg, effective_normalize, effective_min_confidence = self._parse_config(config)
+        effective_overrides, hrp_overrides = self._resolve_effective_overrides(weight_overrides)
 
         weighted_score = _ZERO
         total_weight = _ZERO
@@ -163,7 +232,7 @@ class StrategyCombiner:
             if not strategy_cfg.get("enabled", True):
                 continue
 
-            weight = self._resolve_weight(strategy_name, strategy_cfg, weight_overrides)
+            weight = self._resolve_weight(strategy_name, strategy_cfg, effective_overrides)
             strategy = self._strategies.get(strategy_name)
             if strategy is None:
                 continue
@@ -200,15 +269,14 @@ class StrategyCombiner:
         else:
             feature_contributions["turn_of_month"] = 0.0
 
-        abs_net = abs(net)
+        # Add HRP weight features when using HRP allocation
+        if hrp_overrides is not None:
+            for sname, sweight in hrp_overrides.items():
+                feature_contributions[f"hrp_weight_{sname}"] = float(sweight)
 
-        # Lower threshold for SELL signals when holding an open position
-        effective_threshold = effective_min_confidence
-        if has_open_position and net < _ZERO:
-            exit_conf = Decimal(str(config.get("min_exit_confidence", _MIN_EXIT_CONFIDENCE)))
-            effective_threshold = min(effective_min_confidence, exit_conf)
-
-        if abs_net < effective_threshold:
+        if abs(net) < self._effective_threshold(
+            config, effective_min_confidence, has_open_position, net
+        ):
             return None
 
         return self._build_result(

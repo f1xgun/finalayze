@@ -7,9 +7,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
+from scipy.optimize import minimize
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.risk.regime import MarketRegime, RegimeState
@@ -70,6 +74,98 @@ def fit_ou_mle(log_prices: list[float]) -> OUParams:
     half_life = math.log(2) / mu
 
     return OUParams(mu=mu, theta=theta, sigma=sigma, half_life=half_life)
+
+
+_MIN_POINTS_FOR_MLE = 10
+
+
+def _ou_neg_log_likelihood(
+    params: NDArray[np.float64],
+    x: NDArray[np.float64],
+    dt: float,
+) -> float:
+    """Negative log-likelihood for discrete OU transition density.
+
+    Transition: x_{t+1} | x_t ~ N(mean_t, var_t)
+      mean_t = theta + (x_t - theta) * exp(-mu * dt)
+      var_t  = sigma^2 * (1 - exp(-2*mu*dt)) / (2*mu)
+    """
+    mu, theta, sigma = float(params[0]), float(params[1]), float(params[2])
+
+    if mu <= 0 or sigma <= 0:
+        return 1e15
+
+    decay = math.exp(-mu * dt)
+    exp_2mu = math.exp(-2.0 * mu * dt)
+    var = (sigma**2) * (1.0 - exp_2mu) / (2.0 * mu)
+
+    if var <= 0:
+        return 1e15
+
+    x_prev = x[:-1]
+    x_next = x[1:]
+    means = theta + (x_prev - theta) * decay
+    residuals = x_next - means
+
+    n = len(residuals)
+    nll = 0.5 * n * math.log(2.0 * math.pi * var) + float(np.sum(residuals**2)) / (2.0 * var)
+    return float(nll)
+
+
+def fit_ou_exact_mle(log_prices: list[float], dt: float = 1.0) -> OUParams:
+    """Fit OU process via exact discrete-time MLE on log-prices.
+
+    Uses scipy.optimize.minimize to maximise the log-likelihood of the
+    exact OU transition density.  Falls back to OLS estimates if the
+    optimiser fails.
+
+    Parameters
+    ----------
+    log_prices:
+        Log-price series (at least 10 points).
+    dt:
+        Time step between observations (default 1.0 for daily).
+
+    Returns
+    -------
+    OUParams with (mu, theta, sigma, half_life).
+    """
+    n = len(log_prices)
+    if n < _MIN_POINTS_FOR_MLE:
+        msg = f"Need at least {_MIN_POINTS_FOR_MLE} log-prices to fit OU (got {n})"
+        raise ValueError(msg)
+
+    # Get OLS estimates as initial guess
+    ols_params = fit_ou_mle(log_prices)
+    x = np.array(log_prices, dtype=np.float64)
+
+    mu0 = max(ols_params.mu, 1e-6)
+    theta0 = ols_params.theta
+    sigma0 = max(ols_params.sigma, 1e-6)
+    initial = np.array([mu0, theta0, sigma0])
+
+    bounds = [(1e-10, None), (None, None), (1e-10, None)]
+
+    result = minimize(
+        _ou_neg_log_likelihood,
+        initial,
+        args=(x, dt),
+        method="L-BFGS-B",
+        bounds=bounds,
+    )
+
+    if result.success:
+        mu_fit = float(result.x[0])
+        theta_fit = float(result.x[1])
+        sigma_fit = float(result.x[2])
+    else:
+        # Fallback to OLS
+        mu_fit = ols_params.mu
+        theta_fit = ols_params.theta
+        sigma_fit = ols_params.sigma
+
+    half_life = math.log(2) / mu_fit if mu_fit > 0 else 1e10
+    return OUParams(mu=mu_fit, theta=theta_fit, sigma=sigma_fit, half_life=half_life)
 
 
 class OUMeanReversionStrategy(BaseStrategy):
@@ -136,11 +232,13 @@ class OUMeanReversionStrategy(BaseStrategy):
         entry_threshold: float | None = None,
         exit_threshold: float | None = None,
         half_life_range: tuple[int, int] | None = None,
+        use_mle: bool = False,
     ) -> None:
         self._ou_window = ou_window
         self._entry_threshold = entry_threshold
         self._exit_threshold = exit_threshold
         self._half_life_range = half_life_range
+        self._use_mle = use_mle
         self._cached_params: dict[str, OUParams] = {}
 
     @property
@@ -203,7 +301,7 @@ class OUMeanReversionStrategy(BaseStrategy):
         log_prices = [math.log(float(c.close)) for c in fitting_candles]
 
         try:
-            ou_params = fit_ou_mle(log_prices)
+            ou_params = fit_ou_exact_mle(log_prices) if self._use_mle else fit_ou_mle(log_prices)
         except ValueError:
             return None
 

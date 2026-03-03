@@ -12,6 +12,7 @@ from finalayze.core.exceptions import InsufficientDataError, PredictionError
 if TYPE_CHECKING:
     from finalayze.ml.models.base import BaseMLModel
     from finalayze.ml.models.lstm_model import LSTMModel
+    from finalayze.ml.models.stacking import StackingEnsemble
 
 _DEFAULT_PROB = 0.5
 _log = structlog.get_logger()
@@ -30,9 +31,11 @@ class EnsembleModel:
         self,
         models: list[BaseMLModel],
         lstm_model: LSTMModel | None = None,
+        stacking: StackingEnsemble | None = None,
     ) -> None:
         self._models = models
         self._lstm_model = lstm_model
+        self._stacking = stacking
         self.last_model_probas: dict[str, float] = {}
 
     def predict_proba(self, features: dict[str, float], *, symbol: str = "__default__") -> float:
@@ -78,6 +81,10 @@ class EnsembleModel:
             if any_trained:
                 raise PredictionError("All ensemble sub-models failed to produce a prediction")
             return _DEFAULT_PROB
+
+        # Use stacking meta-learner if available and fitted; otherwise simple mean.
+        if self._stacking is not None and self._stacking.is_fitted:
+            return self._stacking.predict_proba(probs)
         return sum(probs) / len(probs)
 
     def fit(self, X: list[dict[str, float]], y: list[int]) -> None:  # noqa: N803

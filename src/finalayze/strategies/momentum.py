@@ -11,6 +11,7 @@ import yaml
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.base import BaseStrategy
+from finalayze.strategies.vol_targeting import compute_vol_scale
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
 _MIN_CANDLES = 30
@@ -163,6 +164,14 @@ class MomentumStrategy(BaseStrategy):
             confidence = min(1.0, confidence + sentiment_alignment * sentiment_boost)
         elif sentiment_alignment < 0:
             confidence = max(0.0, confidence + sentiment_alignment * sentiment_penalty)
+
+        # Volatility targeting: scale confidence by target_vol / realized_vol
+        vol_target_enabled = bool(params.get("vol_target_enabled", False))
+        if vol_target_enabled:
+            vol_target = float(params.get("vol_target", 0.15))  # type: ignore[arg-type]
+            closes = [float(c.close) for c in candles]
+            vol_scale = compute_vol_scale(closes, target_vol=vol_target)
+            confidence = min(1.0, max(0.0, confidence * vol_scale))
 
         if not signal_state.should_emit(symbol, direction):
             self.last_skip_reason = "duplicate_suppressed"

@@ -37,6 +37,10 @@ _FEATURE_NAMES = {
     "proximity_52wk",
     "amihud_20d",
     "corwin_schultz_spread",
+    "wavelet_approx_energy",
+    "wavelet_detail1_energy",
+    "wavelet_detail2_energy",
+    "wavelet_detail3_energy",
 }
 _N_FEATURES = len(_FEATURE_NAMES)
 

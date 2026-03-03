@@ -162,8 +162,8 @@ class TestNewFeatures:
         features = compute_features(candles)
         assert features["corwin_schultz_spread"] >= 0.0
 
-    def test_total_feature_count_is_19(self) -> None:
+    def test_total_feature_count_is_23(self) -> None:
         candles = _make_candles(50)
         features = compute_features(candles)
-        expected_count = 19
+        expected_count = 23
         assert len(features) == expected_count

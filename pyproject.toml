@@ -52,6 +52,8 @@ dependencies = [
     "pyyaml>=6.0.2",
     "python-dateutil>=2.9.0",
     "hmmlearn>=0.3.3",
+    "arch>=7.0",
+    "PyWavelets>=1.6.0",
 ]
 
 [project.optional-dependencies]
@@ -173,6 +175,12 @@ module = [
     "prometheus_client.*",
     "prometheus_fastapi_instrumentator.*",
     "hmmlearn.*",
+    "scipy",
+    "scipy.*",
+    "pywt",
+    "pywt.*",
+    "arch",
+    "arch.*",
 ]
 ignore_missing_imports = true
 

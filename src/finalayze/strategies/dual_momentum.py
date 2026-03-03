@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.base import BaseStrategy
+from finalayze.strategies.vol_targeting import compute_vol_scale
 
 _MIN_CANDLES = 126
 _WEIGHT_1M = 0.4
@@ -37,8 +38,14 @@ class DualMomentumStrategy(BaseStrategy):
 
     _MAX_POSITIONS = 5
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        vol_target_enabled: bool = False,
+        vol_target: float = 0.15,
+    ) -> None:
         self._open_positions: int = 0
+        self._vol_target_enabled = vol_target_enabled
+        self._vol_target = vol_target
 
     @property
     def name(self) -> str:
@@ -101,6 +108,12 @@ class DualMomentumStrategy(BaseStrategy):
             return None
 
         confidence = min(_MAX_CONFIDENCE, _CONFIDENCE_BASE + abs(score) * _CONFIDENCE_SCALE)
+
+        # Volatility targeting: scale confidence by target_vol / realized_vol
+        if self._vol_target_enabled:
+            closes = [float(c.close) for c in candles]
+            vol_scale = compute_vol_scale(closes, target_vol=self._vol_target)
+            confidence = min(1.0, max(0.0, confidence * vol_scale))
 
         market_id = candles[0].market_id
 

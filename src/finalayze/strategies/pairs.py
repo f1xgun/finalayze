@@ -9,6 +9,7 @@ import numpy as np
 import yaml
 from statsmodels.tsa.stattools import coint
 
+from finalayze.core.exceptions import InsufficientDataError
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.base import BaseStrategy
 
@@ -17,6 +18,71 @@ _MIN_CANDLES = 60
 _MIN_CANDLES_FOR_HIST = 3  # need at least 2 historical bars after slicing
 _COINT_P_THRESHOLD = 0.05
 _PAIR_LENGTH = 2
+_MIN_KALMAN_POINTS = 20
+
+# Kalman filter hyperparameters
+_KALMAN_R = 0.001  # observation noise (measurement variance)
+_KALMAN_Q = 1e-5  # process noise (state transition variance)
+_KALMAN_STATE_DIM = 2
+
+
+def compute_kalman_hedge_ratio(
+    y_prices: list[float],
+    x_prices: list[float],
+) -> tuple[float, float]:
+    """Compute Kalman-filtered intercept and slope for y = alpha + beta * x.
+
+    Uses a simple linear regression Kalman filter with state [alpha, beta].
+
+    Args:
+        y_prices: Dependent variable (price series).
+        x_prices: Independent variable (price series).
+
+    Returns:
+        Tuple of (alpha, beta) -- the Kalman-filtered intercept and slope.
+
+    Raises:
+        InsufficientDataError: If fewer than 20 data points are provided.
+    """
+    n = len(y_prices)
+    if n < _MIN_KALMAN_POINTS or len(x_prices) < _MIN_KALMAN_POINTS:
+        got = min(n, len(x_prices))
+        msg = f"Kalman filter requires >= {_MIN_KALMAN_POINTS} points, got {got}"
+        raise InsufficientDataError(msg)
+
+    # State: [alpha, beta]
+    state = np.array([0.0, 1.0])
+    p_cov = np.eye(_KALMAN_STATE_DIM) * 1.0  # state covariance
+    r_noise = _KALMAN_R  # observation noise
+    q_noise = np.eye(_KALMAN_STATE_DIM) * _KALMAN_Q  # process noise
+
+    for i in range(n):
+        y_t = y_prices[i]
+        x_t = x_prices[i]
+
+        # Observation model: y_t = H @ state + noise, where H = [1, x_t]
+        h_vec = np.array([1.0, x_t])
+
+        # Predict step (random walk model: state unchanged, covariance grows)
+        p_cov = p_cov + q_noise
+
+        # Innovation
+        y_pred = h_vec @ state
+        innovation = y_t - y_pred
+
+        # Innovation covariance: S = H @ P @ H^T + R
+        s_innov = float(h_vec @ p_cov @ h_vec) + r_noise
+
+        # Kalman gain: K = P @ H^T / S
+        k_gain = (p_cov @ h_vec) / s_innov
+
+        # Update state
+        state = state + k_gain * innovation
+
+        # Update covariance: P = (I - K @ H) @ P
+        p_cov = (np.eye(_KALMAN_STATE_DIM) - np.outer(k_gain, h_vec)) @ p_cov
+
+    return float(state[0]), float(state[1])
 
 
 class PairsStrategy(BaseStrategy):
@@ -94,6 +160,7 @@ class PairsStrategy(BaseStrategy):
         configured_pairs: list[list[str]] = [[str(s) for s in p] for p in raw_pairs]
         z_entry = float(cast("float", params.get("z_entry", 2.0)))
         z_exit = float(cast("float", params.get("z_exit", 0.5)))
+        use_kalman = bool(params.get("use_kalman", False))
 
         for pair in configured_pairs:
             if len(pair) != _PAIR_LENGTH:
@@ -123,6 +190,7 @@ class PairsStrategy(BaseStrategy):
                 segment_id=segment_id,
                 z_entry=z_entry,
                 z_exit=z_exit,
+                use_kalman=use_kalman,
             )
             if signal is not None:
                 return signal
@@ -137,6 +205,8 @@ class PairsStrategy(BaseStrategy):
         segment_id: str,
         z_entry: float,
         z_exit: float,
+        *,
+        use_kalman: bool = False,
     ) -> Signal | None:
         """Compute spread z-score and return signal or None."""
         n = min(len(candles_a), len(candles_b))
@@ -158,9 +228,17 @@ class PairsStrategy(BaseStrategy):
         if float(p_value) > _COINT_P_THRESHOLD:
             return None
 
-        # OLS beta — historical data only
-        cov_matrix = np.cov(log_a_hist, log_b_hist)
-        beta = float(cov_matrix[0, 1] / cov_matrix[1, 1])
+        # Hedge ratio estimation
+        hedge_method: str
+        if use_kalman and len(log_a_hist) >= _MIN_KALMAN_POINTS:
+            alpha_k, beta = compute_kalman_hedge_ratio(log_a_hist.tolist(), log_b_hist.tolist())
+            hedge_method = "kalman"
+            _ = alpha_k  # intercept captured in spread via mean-centering below
+        else:
+            # OLS beta — historical data only
+            cov_matrix = np.cov(log_a_hist, log_b_hist)
+            beta = float(cov_matrix[0, 1] / cov_matrix[1, 1])
+            hedge_method = "ols"
 
         # Spread statistics from historical data only
         spread_hist = log_a_hist - beta * log_b_hist
@@ -202,6 +280,10 @@ class PairsStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={"z_score": round(z, 4), "beta": round(beta, 4)},
-            reasoning=f"pairs z={z:.2f} beta={beta:.3f}",
+            features={
+                "z_score": round(z, 4),
+                "beta": round(beta, 4),
+                "kalman": 1.0 if hedge_method == "kalman" else 0.0,
+            },
+            reasoning=f"pairs z={z:.2f} beta={beta:.3f} ({hedge_method})",
         )

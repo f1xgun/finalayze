@@ -1,6 +1,6 @@
 """Simulated broker for backtesting (Layer 5).
 
-Fills orders at candle open prices with no slippage or commission.
+Fills orders at candle open prices with optional market impact slippage.
 Supports stop-loss orders (fixed and trailing) that trigger when candle low
 breaches the stop price.
 
@@ -15,6 +15,7 @@ from decimal import Decimal
 
 from finalayze.core.schemas import Candle, PortfolioState
 from finalayze.execution.broker_base import BrokerBase, OrderRequest, OrderResult
+from finalayze.execution.impact import compute_market_impact, should_reject_trade
 
 
 @dataclass
@@ -39,12 +40,27 @@ class StopLossState:
 class SimulatedBroker(BrokerBase):
     """In-memory simulated broker for backtesting."""
 
-    def __init__(self, initial_cash: Decimal) -> None:
+    def __init__(
+        self,
+        initial_cash: Decimal,
+        *,
+        use_impact_model: bool = False,
+        adv: dict[str, float] | None = None,
+        daily_vol: dict[str, float] | None = None,
+        impact_coeff: float = 0.1,
+        max_impact_bps: float = 50.0,
+    ) -> None:
         self._cash: Decimal = initial_cash
         self._positions: dict[str, Decimal] = {}
         self._stop_states: dict[str, StopLossState] = {}
         self._last_prices: dict[str, Decimal] = {}
         self._current_timestamp: datetime | None = None
+        # Market impact model settings
+        self._use_impact_model: bool = use_impact_model
+        self._adv: dict[str, float] = adv if adv is not None else {}
+        self._daily_vol: dict[str, float] = daily_vol if daily_vol is not None else {}
+        self._impact_coeff: float = impact_coeff
+        self._max_impact_bps: float = max_impact_bps
 
     def submit_order(self, order: OrderRequest, fill_candle: Candle | None = None) -> OrderResult:
         """Fill an order at the candle's open price.
@@ -56,6 +72,38 @@ class SimulatedBroker(BrokerBase):
             msg = "SimulatedBroker requires fill_candle to determine the fill price"
             raise ValueError(msg)
         fill_price = fill_candle.open
+
+        # Apply market impact model when enabled
+        if self._use_impact_model:
+            symbol_adv = self._adv.get(order.symbol, 0.0)
+            symbol_vol = self._daily_vol.get(order.symbol, 0.0)
+            shares = float(order.quantity)
+
+            if should_reject_trade(
+                daily_vol=symbol_vol,
+                shares=shares,
+                adv=symbol_adv,
+                impact_coeff=self._impact_coeff,
+                max_impact_bps=self._max_impact_bps,
+            ):
+                return OrderResult(
+                    filled=False,
+                    symbol=order.symbol,
+                    side=order.side,
+                    quantity=order.quantity,
+                    reason="Order rejected: market impact exceeds threshold",
+                )
+
+            slippage = compute_market_impact(
+                daily_vol=symbol_vol,
+                shares=shares,
+                adv=symbol_adv,
+                impact_coeff=self._impact_coeff,
+            )
+            if order.side == "BUY":
+                fill_price = fill_price * (1 + Decimal(str(slippage)))
+            elif order.side == "SELL":
+                fill_price = fill_price * (1 - Decimal(str(slippage)))
 
         if order.side == "BUY":
             return self._execute_buy(order, fill_price, fill_candle)
