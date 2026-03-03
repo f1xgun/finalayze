@@ -39,7 +39,7 @@ if PROJECT_ROOT not in sys.path:
 
 import yaml
 
-from finalayze.backtest.config import BacktestConfig
+from finalayze.backtest.config import DEFAULT_STRATEGY_HOLD_BARS, BacktestConfig
 from finalayze.backtest.decision_journal import DecisionJournal
 from finalayze.backtest.engine import BacktestEngine
 from finalayze.backtest.iteration_tracker import IterationTracker
@@ -60,6 +60,7 @@ from finalayze.data.fetchers.caching import CachingFetcher
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
 from finalayze.markets.instruments import build_default_registry
 from finalayze.risk.kelly import RollingKelly
+from finalayze.risk.regime import HMMRegimeProvider, VIXRegimeProvider
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.cbr_calendar import CBRCalendar, CBRRateEvent
 from finalayze.strategies.cbr_strategy_wrapper import CBRStrategyWrapper
@@ -497,6 +498,44 @@ def _build_strategies(
     return strategies
 
 
+def _build_regime_provider(
+    regime_type: str,
+    segment: str,
+    start: datetime,
+    end: datetime,
+) -> VIXRegimeProvider | HMMRegimeProvider | None:
+    """Build a RegimeProvider based on CLI flag and segment type."""
+    if regime_type == "none":
+        return None
+
+    if regime_type == "hmm":
+        return HMMRegimeProvider()
+
+    # regime_type == "vix" — only for US segments
+    if segment.startswith("ru_"):
+        return None
+
+    vix_fetcher = CachingFetcher(YFinanceFetcher(market_id="us"))
+    try:
+        vix_candles = vix_fetcher.fetch_candles("^VIX", start, end)
+    except Exception:
+        print("    Warning: failed to fetch ^VIX data, regime provider disabled")
+        return None
+
+    if not vix_candles:
+        print("    Warning: no ^VIX data available, regime provider disabled")
+        return None
+
+    spy_candles = None
+    try:
+        spy_raw = vix_fetcher.fetch_candles("SPY", start, end)
+        spy_candles = spy_raw or None
+    except Exception:  # noqa: S110
+        pass
+
+    return VIXRegimeProvider(vix_candles=vix_candles, sma200_candles=spy_candles)
+
+
 def _run_symbol(
     symbol: str,
     segment: str,
@@ -507,6 +546,8 @@ def _run_symbol(
     benchmark_candles: list[Any] | None = None,
     use_evt_sizing: bool = False,
     use_copula_scaling: bool = False,
+    regime_provider: VIXRegimeProvider | HMMRegimeProvider | None = None,
+    stop_loss_mode: str = "chandelier",
 ) -> tuple[list[TradeResult], list[PortfolioState], dict[str, Any] | None]:
     """Run backtest for a single symbol. Returns (trades, snapshots, summary)."""
     sym_dir = output_dir / segment / symbol.replace(".", "_")
@@ -528,7 +569,10 @@ def _run_symbol(
                 use_impact_model=True,
                 use_evt_sizing=use_evt_sizing,
                 use_copula_scaling=use_copula_scaling,
+                stop_loss_mode=stop_loss_mode,
+                max_hold_bars=DEFAULT_STRATEGY_HOLD_BARS,
             ),
+            regime_provider=regime_provider,
         )
         trades, snapshots = engine.run(
             symbol=symbol,
@@ -712,6 +756,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--use-copula-scaling", action="store_true", help="Enable copula correlation scaling"
     )
+    parser.add_argument(
+        "--regime-provider",
+        choices=["none", "vix", "hmm"],
+        default="vix",
+        help="Regime provider: none, vix (default), or hmm",
+    )
+    parser.add_argument(
+        "--stop-loss-mode",
+        choices=["trailing", "chandelier"],
+        default="chandelier",
+        help="Stop-loss mode: trailing or chandelier (default)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -782,6 +838,9 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         "max_positions": config.max_positions,
         "kelly_fraction": str(config.kelly_fraction),
         "atr_multiplier": str(config.atr_multiplier),
+        "regime_provider": args.regime_provider,
+        "stop_loss_mode": args.stop_loss_mode,
+        "max_hold_bars": "per_strategy",
     }
     config_hash = tracker.compute_config_hash(backtest_config_dict, strategy_configs)
 
@@ -842,6 +901,11 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         )
         strat_names = [s.name for s in strategies]
         print(f"  Strategies: {', '.join(strat_names)}")
+
+        # Build regime provider once per segment
+        regime_provider = _build_regime_provider(args.regime_provider, segment, start, end)
+        if regime_provider is not None:
+            print(f"  Regime provider: {type(regime_provider).__name__}")
         print()
 
         segment_trades[segment] = []
@@ -869,6 +933,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                 benchmark_candles=bench_candles,
                 use_evt_sizing=use_evt_sizing,
                 use_copula_scaling=use_copula_scaling,
+                regime_provider=regime_provider,
+                stop_loss_mode=args.stop_loss_mode,
             )
 
             all_trades.extend(trades)
