@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.combiner import (
     _BUY_SCORE,
-    _MIN_EXIT_CONFIDENCE,
     _SELL_SCORE,
     _ZERO,
     StrategyCombiner,
@@ -35,8 +34,9 @@ class JournalingStrategyCombiner(StrategyCombiner):
         self,
         strategies: list[BaseStrategy],
         normalize_mode: str = "firing",
+        allocation_mode: str = "static",
     ) -> None:
-        super().__init__(strategies, normalize_mode)
+        super().__init__(strategies, normalize_mode, allocation_mode)
         self._last_signals: dict[str, Signal | None] = {}
         self._last_weights: dict[str, Decimal] = {}
         self._last_net_score: float | None = None
@@ -87,6 +87,7 @@ class JournalingStrategyCombiner(StrategyCombiner):
 
         config = self._load_config(segment_id)
         strategies_cfg, effective_normalize, effective_min_confidence = self._parse_config(config)
+        effective_overrides, hrp_overrides = self._resolve_effective_overrides(weight_overrides)
 
         weighted_score = _ZERO
         total_weight = _ZERO
@@ -103,7 +104,7 @@ class JournalingStrategyCombiner(StrategyCombiner):
             if not strategy_cfg.get("enabled", True):
                 continue
 
-            weight = self._resolve_weight(strategy_name, strategy_cfg, weight_overrides)
+            weight = self._resolve_weight(strategy_name, strategy_cfg, effective_overrides)
             strategy = self._strategies.get(strategy_name)
             if strategy is None:
                 continue
@@ -161,16 +162,16 @@ class JournalingStrategyCombiner(StrategyCombiner):
         else:
             feature_contributions["turn_of_month"] = 0.0
 
+        # Add HRP weight features when using HRP allocation
+        if hrp_overrides is not None:
+            for sname, sweight in hrp_overrides.items():
+                feature_contributions[f"hrp_weight_{sname}"] = float(sweight)
+
         self._last_net_score = float(net)
-        abs_net = abs(net)
 
-        # Lower threshold for SELL signals when holding an open position
-        effective_threshold = effective_min_confidence
-        if has_open_position and net < _ZERO:
-            exit_conf = Decimal(str(config.get("min_exit_confidence", _MIN_EXIT_CONFIDENCE)))
-            effective_threshold = min(effective_min_confidence, exit_conf)
-
-        if abs_net < effective_threshold:
+        if abs(net) < self._effective_threshold(
+            config, effective_min_confidence, has_open_position, net
+        ):
             return None
 
         return self._build_result(
