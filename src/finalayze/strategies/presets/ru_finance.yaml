@@ -48,3 +48,18 @@ strategies:
     params:
       threshold: 0.10
       min_confidence: 0.30
+  dividend_gap:
+    enabled: true
+    weight: 0.08
+    params:
+      min_confidence: 0.40
+  cbr_calendar:
+    enabled: true
+    weight: 0.05
+    params:
+      min_confidence: 0.30
+  pead:
+    enabled: true
+    weight: 0.10
+    params:
+      min_confidence: 0.40

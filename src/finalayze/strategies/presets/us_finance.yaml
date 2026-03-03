@@ -1,6 +1,6 @@
 segment_id: us_finance
 normalize_mode: "firing"
-min_combined_confidence: 0.40
+min_combined_confidence: 0.60
 strategies:
   mean_reversion:
     enabled: true
@@ -8,7 +8,7 @@ strategies:
     params:
       bb_period: 20
       bb_std_dev: 2.0
-      min_confidence: 0.35
+      min_confidence: 0.40
       exit_at_mean: true
       rsi_oversold_mr: 35
       rsi_overbought_mr: 65
@@ -17,16 +17,16 @@ strategies:
     weight: 0.30
     params:
       rsi_period: 14
-      rsi_oversold: 30
-      rsi_overbought: 70
+      rsi_oversold: 35
+      rsi_overbought: 65
       macd_fast: 12
       macd_slow: 26
-      min_confidence: 0.35
+      min_confidence: 0.40
       lookback_bars: 5
       stop_atr_multiplier: 3.0
       trail_activation_atr: 1.0
       trail_distance_atr: 1.5
-      trend_filter: false
+      trend_filter: true
       trend_sma_period: 50
       trend_sma_buffer_pct: 2.0
       adx_filter: false
@@ -64,17 +64,22 @@ strategies:
       min_confidence: 0.50
   rsi2_connors:
     enabled: true
-    weight: 0.15
+    weight: 0.10
     params:
       rsi_period: 2
-      rsi_buy_threshold: 10.0
-      rsi_sell_threshold: 90.0
+      rsi_buy_threshold: 5.0
+      rsi_sell_threshold: 95.0
       sma_trend_period: 200
       sma_exit_period: 5
-      min_confidence: 0.35
+      min_confidence: 0.45
   ml_ensemble:
     enabled: true
     weight: 0.35
     params:
       threshold: 0.10
       min_confidence: 0.30
+  pead:
+    enabled: false
+    weight: 0.06
+    params:
+      min_confidence: 0.55

@@ -54,6 +54,7 @@ dependencies = [
     "hmmlearn>=0.3.3",
     "arch>=7.0",
     "PyWavelets>=1.6.0",
+    "lxml>=6.0.2",
 ]
 
 [project.optional-dependencies]

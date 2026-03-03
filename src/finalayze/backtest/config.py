@@ -79,3 +79,7 @@ class BacktestConfig:
     use_impact_model: bool = False
     impact_coeff: float = 0.1
     max_impact_bps: float = 50.0
+
+    # EVT tail-risk sizing and copula correlation scaling (Sprint 3)
+    use_evt_sizing: bool = False
+    use_copula_scaling: bool = False

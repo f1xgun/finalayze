@@ -10,18 +10,28 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import threading
-from datetime import UTC, datetime
-from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+import os
+from pathlib import Path
 
-from t_tech.invest import AsyncClient, CandleInterval
-from t_tech.invest.sandbox.async_client import AsyncSandboxClient
+# gRPC env vars MUST be set before importing grpc (via t_tech.invest).
+# C-ares DNS resolver may fail; force native (system) resolver.
+os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
+# T-Bank uses Russian Trusted Root CA not in standard CA bundles.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
+_GRPC_ROOTS = _PROJECT_ROOT / "certs" / "grpc_roots.pem"
+if _GRPC_ROOTS.exists():
+    os.environ.setdefault("GRPC_DEFAULT_SSL_ROOTS_FILE_PATH", str(_GRPC_ROOTS))
 
-from finalayze.core.exceptions import DataFetchError, InstrumentNotFoundError
-from finalayze.core.schemas import Candle
-from finalayze.data.fetchers.base import BaseFetcher
+from datetime import UTC, datetime  # noqa: E402
+from decimal import Decimal  # noqa: E402
+from typing import TYPE_CHECKING, Any  # noqa: E402
+
+from t_tech.invest import AsyncClient, CandleInterval  # noqa: E402
+from t_tech.invest.sandbox.async_client import AsyncSandboxClient  # noqa: E402
+
+from finalayze.core.exceptions import DataFetchError, InstrumentNotFoundError  # noqa: E402
+from finalayze.core.schemas import Candle  # noqa: E402
+from finalayze.data.fetchers.base import BaseFetcher  # noqa: E402
 
 if TYPE_CHECKING:
     from finalayze.data.rate_limiter import RateLimiter
@@ -36,6 +46,11 @@ _TIMEFRAME_MAP: dict[str, CandleInterval] = {
 _MOEX_MARKET_ID = "moex"
 _TINKOFF_SOURCE = "tinkoff"
 _NANO_DIVISOR = Decimal(1_000_000_000)
+
+# T-Bank (formerly Tinkoff) gRPC endpoints — the SDK defaults use the old
+# tinkoff.ru domain which no longer resolves; override with tbank.ru.
+_TBANK_GRPC_TARGET = "invest-public-api.tbank.ru:443"
+_TBANK_GRPC_SANDBOX_TARGET = "sandbox-invest-public-api.tbank.ru:443"
 
 
 class TinkoffFetcher(BaseFetcher):
@@ -58,24 +73,16 @@ class TinkoffFetcher(BaseFetcher):
         self._registry = registry
         self._sandbox = sandbox
         self._rate_limiter = rate_limiter
-        self._client: AsyncClient | AsyncSandboxClient | None = None
-        self._client_lock = threading.Lock()
-
-    def _get_client(self) -> AsyncClient | AsyncSandboxClient:
-        """Return the persistent async client, creating it lazily."""
-        if self._client is None:
-            with self._client_lock:
-                if self._client is None:  # double-check
-                    cls = AsyncSandboxClient if self._sandbox else AsyncClient
-                    self._client = cls(self._token)
-        return self._client
+    def _make_client(self) -> AsyncClient | AsyncSandboxClient:
+        """Create a new async client instance."""
+        if self._sandbox:
+            return AsyncSandboxClient(
+                self._token, target=_TBANK_GRPC_SANDBOX_TARGET
+            )
+        return AsyncClient(self._token, target=_TBANK_GRPC_TARGET)
 
     def close(self) -> None:
-        """Close the persistent gRPC channel."""
-        if self._client is not None:
-            with contextlib.suppress(Exception):
-                asyncio.run(self._client.__aexit__(None, None, None))  # type: ignore[no-untyped-call]
-            self._client = None
+        """No-op — each fetch creates and closes its own channel."""
 
     def fetch_candles(
         self,
@@ -113,15 +120,20 @@ class TinkoffFetcher(BaseFetcher):
         end: datetime,
         interval: CandleInterval,
     ) -> list[Any]:
-        """Async call to Tinkoff SDK get_all_candles."""
-        client = self._get_client()
-        response = await client.market_data.get_candles(  # type: ignore[attr-defined]
-            figi=figi,
-            from_=start,
-            to=end,
-            interval=interval,
-        )
-        return list(response.candles)
+        """Async call to Tinkoff SDK get_candles.
+
+        Creates a fresh client per call — the SDK closes the gRPC channel
+        on context exit, so we cannot reuse across ``asyncio.run()`` calls.
+        """
+        client = self._make_client()
+        async with client as services:
+            response = await services.market_data.get_candles(
+                figi=figi,
+                from_=start,
+                to=end,
+                interval=interval,
+            )
+            return list(response.candles)
 
     def _symbol_to_figi(self, symbol: str) -> str:
         """Look up FIGI for a MOEX symbol via the instrument registry."""
@@ -142,7 +154,8 @@ class TinkoffFetcher(BaseFetcher):
     def _map_candle(self, raw: Any, symbol: str, timeframe: str = "1d") -> Candle:
         """Map a Tinkoff HistoricCandle to our Candle schema."""
         ts = raw.time
-        timestamp = datetime.fromtimestamp(ts.seconds + ts.nanos / 1e9, tz=UTC)
+        # SDK returns datetime directly (not protobuf Timestamp)
+        timestamp = ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
 
         return Candle(
             symbol=symbol,

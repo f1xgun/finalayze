@@ -11,6 +11,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+import structlog
+
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.combiner import (
     _BUY_SCORE,
@@ -21,6 +23,8 @@ from finalayze.strategies.combiner import (
 
 if TYPE_CHECKING:
     from finalayze.strategies.base import BaseStrategy
+
+logger = structlog.get_logger(__name__)
 
 
 class JournalingStrategyCombiner(StrategyCombiner):
@@ -169,9 +173,30 @@ class JournalingStrategyCombiner(StrategyCombiner):
 
         self._last_net_score = float(net)
 
-        if abs(net) < self._effective_threshold(
+        threshold = self._effective_threshold(
             config, effective_min_confidence, has_open_position, net
-        ):
+        )
+        if abs(net) < threshold:
+            firing = {
+                name: {
+                    "direction": (
+                        "BUY"
+                        if feature_contributions.get(f"{name}_direction", 0) > 0
+                        else "SELL"
+                    ),
+                    "confidence": feature_contributions.get(f"{name}_confidence", 0),
+                }
+                for name in self._strategies
+                if f"{name}_confidence" in feature_contributions
+            }
+            if firing:
+                logger.debug(
+                    "signals_below_threshold",
+                    symbol=symbol,
+                    firing_strategies=firing,
+                    net_score=float(net),
+                    threshold=float(threshold),
+                )
             return None
 
         return self._build_result(

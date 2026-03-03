@@ -1,6 +1,6 @@
 segment_id: ru_energy
-normalize_mode: "total"
-min_combined_confidence: 0.45
+normalize_mode: "active"
+min_combined_confidence: 0.55
 strategies:
   momentum:
     enabled: false
@@ -11,7 +11,7 @@ strategies:
       rsi_overbought: 75
       macd_fast: 10
       macd_slow: 22
-      min_confidence: 0.40
+      min_confidence: 0.35
       lookback_bars: 5
       stop_atr_multiplier: 3.0
       trail_activation_atr: 1.0
@@ -21,10 +21,10 @@ strategies:
       trend_sma_buffer_pct: 2.0
       adx_filter: true
       adx_period: 14
-      adx_threshold: 25
+      adx_threshold: 18
       volume_filter: true
       volume_sma_period: 20
-      volume_min_ratio: 0.8
+      volume_min_ratio: 0.5
       neutral_reset_bars: 8
   event_driven:
     enabled: false
@@ -38,13 +38,28 @@ strategies:
     params:
       bb_period: 20
       bb_std_dev: 3.0
-      min_confidence: 0.40
+      min_confidence: 0.35
       exit_at_mean: true
-      rsi_oversold_mr: 30
-      rsi_overbought_mr: 70
+      rsi_oversold_mr: 35
+      rsi_overbought_mr: 65
   ml_ensemble:
     enabled: true
     weight: 0.25
     params:
       threshold: 0.10
       min_confidence: 0.30
+  dividend_gap:
+    enabled: true
+    weight: 0.08
+    params:
+      min_confidence: 0.50
+  cbr_calendar:
+    enabled: true
+    weight: 0.03
+    params:
+      min_confidence: 0.45
+  pead:
+    enabled: false
+    weight: 0.10
+    params:
+      min_confidence: 0.55

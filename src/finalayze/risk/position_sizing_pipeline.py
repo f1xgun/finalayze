@@ -10,10 +10,16 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Protocol
 
+from finalayze.risk.evt import EVTRiskEstimator
+
 _VOL_TARGET_LOWER = Decimal("0.25")
 _VOL_TARGET_UPPER = Decimal("2.0")
 _REGIME_FLOOR = Decimal("0.10")
 _FOUR_DP = Decimal("0.0001")
+
+_EVT_SCALE_FACTOR = Decimal("0.5")
+_EVT_MIN_HISTORY = 100
+_EVT_RECENT_WINDOW = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +45,7 @@ class SizingContext:
     target_vol: Decimal
     regime_scale: Decimal
     correlation_scale: Decimal
+    returns_history: tuple[float, ...] = ()
 
 
 class PositionSizingStep(Protocol):
@@ -80,6 +87,31 @@ class HardCapsStep:
     def adjust(self, size: Decimal, context: SizingContext) -> Decimal:
         max_cap = context.equity * context.max_position_pct
         return min(size, max_cap)
+
+
+class CopulaStep:
+    """Scale position by the correlation_scale derived from copula fits."""
+
+    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:
+        return (size * context.correlation_scale).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+
+
+class EVTStep:
+    """Scale position down when EVT tail risk is elevated."""
+
+    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:
+        if len(context.returns_history) < _EVT_MIN_HISTORY:
+            return size
+        recent_returns = context.returns_history[-_EVT_RECENT_WINDOW:]
+        current_loss = abs(min(recent_returns))
+        estimator = EVTRiskEstimator()
+        if estimator.is_tail_risk_elevated(
+            list(context.returns_history),
+            current_loss=current_loss,
+            confidence=0.99,
+        ):
+            return (size * _EVT_SCALE_FACTOR).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+        return size
 
 
 class PositionSizingPipeline:

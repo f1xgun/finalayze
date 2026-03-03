@@ -20,8 +20,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import traceback
+
+from dotenv import load_dotenv
+
+load_dotenv()
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -43,6 +48,7 @@ from finalayze.backtest.monte_carlo import bootstrap_from_snapshots
 from finalayze.backtest.performance import PerformanceAnalyzer
 from finalayze.backtest.walk_forward import WalkForwardResult
 from finalayze.core.schemas import (
+    Candle,
     GateResult,
     IterationMetadata,
     IterationMetrics,
@@ -52,14 +58,19 @@ from finalayze.core.schemas import (
 from finalayze.data.fetchers.base import BaseFetcher
 from finalayze.data.fetchers.caching import CachingFetcher
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
+from finalayze.markets.instruments import build_default_registry
 from finalayze.risk.kelly import RollingKelly
 from finalayze.strategies.base import BaseStrategy
+from finalayze.strategies.cbr_calendar import CBRCalendar, CBRRateEvent
+from finalayze.strategies.cbr_strategy_wrapper import CBRStrategyWrapper
+from finalayze.strategies.dividend_gap import DividendEntry, DividendGapStrategy
 from finalayze.strategies.dual_momentum import DualMomentumStrategy
 from finalayze.strategies.mean_reversion import MeanReversionStrategy
 from finalayze.strategies.ml_strategy import MLStrategy
 from finalayze.strategies.momentum import MomentumStrategy
 from finalayze.strategies.ou_mean_reversion import OUMeanReversionStrategy
 from finalayze.strategies.pairs import PairsStrategy
+from finalayze.strategies.pead import EarningsSurprise, PEADStrategy
 from finalayze.strategies.rsi2_connors import RSI2ConnorsStrategy
 
 _PRESETS_DIR = (
@@ -69,25 +80,168 @@ _PRESETS_DIR = (
 # ── Symbol universe ────────────────────────────────────────────────────────────
 UNIVERSE: dict[str, list[str]] = {
     "us_tech": [
-        "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA",
-        "TSM", "AVGO", "ADBE", "CRM", "INTC", "AMD",
+        "AAPL",
+        "MSFT",
+        "GOOGL",
+        "AMZN",
+        "META",
+        "NVDA",
+        "TSM",
+        "AVGO",
+        "ADBE",
+        "CRM",
+        "INTC",
+        "AMD",
+        "CSCO",
+        "ORCL",
+        "QCOM",
+        "TXN",
+        "ASML",
+        "AMAT",
+        "MU",
+        "NOW",
     ],
     "us_broad": [
-        "SPY", "QQQ", "DIA", "IWM", "JNJ", "PG", "KO", "WMT", "XOM", "CVX",
+        "SPY",
+        "QQQ",
+        "DIA",
+        "IWM",
+        "JNJ",
+        "PG",
+        "KO",
+        "WMT",
+        "XOM",
+        "CVX",
+        "PEP",
+        "COST",
+        "MCD",
+        "NKE",
+        "DIS",
+        "HD",
+        "LOW",
+        "TGT",
+        "SBUX",
+        "CL",
     ],
     "us_finance": [
-        "JPM", "BAC", "GS", "MS", "V", "MA", "BRK-B", "C",
+        "JPM",
+        "BAC",
+        "GS",
+        "MS",
+        "V",
+        "MA",
+        "BRK-B",
+        "C",
+        "SCHW",
+        "AXP",
+        "USB",
+        "PNC",
+        "TFC",
+        "BLK",
+        "SPGI",
     ],
     "us_healthcare": [
-        "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "AMGN",
+        "UNH",
+        "LLY",
+        "PFE",
+        "ABBV",
+        "MRK",
+        "TMO",
+        "ABT",
+        "AMGN",
+        "JNJ",
+        "BMY",
+        "GILD",
+        "VRTX",
+        "ISRG",
+        "MDT",
+        "ZTS",
+    ],
+    "us_industrial": [
+        "CAT",
+        "DE",
+        "HON",
+        "UNP",
+        "BA",
+        "GE",
+        "RTX",
+        "LMT",
+        "MMM",
+        "ETN",
+        "ITW",
+        "EMR",
+        "PH",
+        "WM",
+        "RSG",
     ],
     "ru_blue_chips": [
-        "RSX", "ERUS", "FLRU.L", "TUR", "EWZ", "INDA",
+        "SBER",
+        "GAZP",
+        "LKOH",
+        "GMKN",
+        "YNDX",
+        "VTBR",
+        "SBERP",
+        "MGNT",
+        "POLY",
+        "ALRS",
     ],
     "ru_energy": [
-        "XLE", "BP", "SHEL", "TTE", "ENB",
+        "ROSN",
+        "LKOH",
+        "NVTK",
+        "TATN",
+        "GAZP",
+        "SNGS",
+        "TRNFP",
+        "IRAO",
     ],
 }
+
+
+class _MoexYFinanceFetcher(BaseFetcher):
+    """YFinance wrapper that appends .ME suffix for MOEX tickers."""
+
+    def __init__(self) -> None:
+        self._inner = YFinanceFetcher(market_id="moex")
+
+    def fetch_candles(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        timeframe: str = "1d",
+    ) -> list[Candle]:
+        """Fetch candles using yfinance with .ME suffix, then fix symbol back."""
+        yf_symbol = f"{symbol}.ME"
+        candles = self._inner.fetch_candles(yf_symbol, start, end, timeframe)
+        # Replace yfinance symbol (SBER.ME) with original MOEX symbol (SBER)
+        return [
+            Candle(
+                symbol=symbol,
+                market_id="moex",
+                timeframe=c.timeframe,
+                timestamp=c.timestamp,
+                open=c.open,
+                high=c.high,
+                low=c.low,
+                close=c.close,
+                volume=c.volume,
+                source=c.source,
+            )
+            for c in candles
+        ]
+
+
+def _make_moex_fetcher() -> BaseFetcher:
+    """Create a MOEX data fetcher: TinkoffFetcher if token available, else yfinance .ME."""
+    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN", "")
+    if token:
+        from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
+
+        registry = build_default_registry()
+        return TinkoffFetcher(token=token, registry=registry, sandbox=False)
+    return _MoexYFinanceFetcher()
 
 
 def _load_preset(segment: str) -> dict[str, Any]:
@@ -148,14 +302,17 @@ def _setup_ml_strategy(segment: str, models_dir: Path) -> MLStrategy | None:
 
     if xgb_path.exists():
         from finalayze.ml.models.xgboost_model import XGBoostModel  # noqa: PLC0415
+
         models.append(XGBoostModel.load_from(xgb_path))
 
     if lgbm_path.exists():
         from finalayze.ml.models.lightgbm_model import LightGBMModel  # noqa: PLC0415
+
         models.append(LightGBMModel.load_from(lgbm_path))
 
     if lstm_path.exists():
         from finalayze.ml.models.lstm_model import LSTMModel  # noqa: PLC0415
+
         lstm_model = LSTMModel(segment_id=segment)
         lstm_model.load(lstm_path)
 
@@ -163,10 +320,137 @@ def _setup_ml_strategy(segment: str, models_dir: Path) -> MLStrategy | None:
         return None
 
     from finalayze.ml.registry import MLModelRegistry  # noqa: PLC0415
+
     ensemble = EnsembleModel(models=models, lstm_model=lstm_model)
     registry = MLModelRegistry()
     registry.register(segment, ensemble)
     return MLStrategy(registry)
+
+
+def _load_event_data(event_data_dir: Path) -> dict[str, Any]:
+    """Load event data JSONs from directory."""
+    data: dict[str, Any] = {"dividends": {}, "earnings": {}, "cbr": []}
+
+    # Load dividends
+    div_dir = event_data_dir / "dividends"
+    if div_dir.is_dir():
+        for f in sorted(div_dir.glob("*.json")):
+            symbol = f.stem
+            with f.open() as fp:
+                data["dividends"][symbol] = json.load(fp)
+
+    # Load earnings
+    earn_dir = event_data_dir / "earnings"
+    if earn_dir.is_dir():
+        for f in sorted(earn_dir.glob("*.json")):
+            symbol = f.stem
+            with f.open() as fp:
+                data["earnings"][symbol] = json.load(fp)
+
+    # Load CBR decisions
+    cbr_path = event_data_dir / "cbr" / "decisions.json"
+    if cbr_path.exists():
+        with cbr_path.open() as fp:
+            data["cbr"] = json.load(fp)
+
+    return data
+
+
+def _setup_dividend_gap_strategy(
+    segment: str,  # noqa: ARG001
+    symbols: list[str],
+    event_data: dict[str, Any],
+) -> DividendGapStrategy | None:
+    """Create DividendGapStrategy with loaded dividend events.
+
+    Loads dividend data for ALL symbols present in the event data that also
+    appear in the current segment's symbol list.
+    """
+    dividends = event_data.get("dividends", {})
+    if not dividends:
+        return None
+    strategy = DividendGapStrategy()
+    # Only load dividends for symbols in this segment
+    segment_symbols = set(symbols)
+    count = 0
+    for symbol, entries in dividends.items():
+        if symbol not in segment_symbols:
+            continue
+        for entry in entries:
+            strategy.add_dividend(
+                symbol,
+                DividendEntry(
+                    ex_date=datetime.strptime(entry["ex_date"], "%Y-%m-%d").replace(tzinfo=UTC),
+                    amount=float(entry["amount"]),
+                ),
+            )
+            count += 1
+    if count == 0:
+        return None
+    return strategy
+
+
+def _setup_pead_strategy(
+    segment: str,
+    symbols: list[str],
+    event_data: dict[str, Any],
+) -> PEADStrategy | None:
+    """Create PEADStrategy with loaded earnings surprises. Only for us_* segments."""
+    if not segment.startswith("us_"):
+        return None
+    earnings = event_data.get("earnings", {})
+    if not earnings:
+        return None
+    strategy = PEADStrategy()
+    count = 0
+    for symbol in symbols:
+        entries = earnings.get(symbol, [])
+        for entry in entries:
+            if entry.get("sue_score") is None:
+                continue
+            strategy.add_earnings_surprise(
+                EarningsSurprise(
+                    symbol=symbol,
+                    announcement_date=datetime.strptime(
+                        entry["announcement_date"], "%Y-%m-%d"
+                    ).replace(tzinfo=UTC),
+                    sue_score=float(entry["sue_score"]),
+                    actual_eps=float(entry.get("actual_eps", 0)),
+                    expected_eps=float(entry.get("expected_eps", 0)),
+                ),
+            )
+            count += 1
+    if count == 0:
+        return None
+    return strategy
+
+
+def _setup_cbr_strategy(
+    segment: str,
+    symbols: list[str],
+    event_data: dict[str, Any],
+) -> CBRStrategyWrapper | None:
+    """Create CBRStrategyWrapper with loaded CBR rate decisions. Only for ru_* segments.
+
+    Uses the actual segment symbols as affected_symbols so that signals are
+    generated for the ETF proxies (RSX, ERUS, etc.) that the backtest uses.
+    """
+    if not segment.startswith("ru_"):
+        return None
+    cbr_events = event_data.get("cbr", [])
+    if not cbr_events:
+        return None
+    calendar = CBRCalendar()
+    for evt in cbr_events:
+        calendar.add_event(
+            CBRRateEvent(
+                date=datetime.strptime(evt["date"], "%Y-%m-%d").replace(tzinfo=UTC).date(),
+                rate_decision=float(evt["rate_decision"]),
+                expected_rate=float(evt["expected_rate"]),
+                surprise_bps=int(evt["surprise_bps"]),
+            ),
+        )
+    return CBRStrategyWrapper(calendar=calendar, affected_symbols=symbols)
 
 
 def _build_strategies(
@@ -175,6 +459,8 @@ def _build_strategies(
     start: datetime,
     end: datetime,
     models_dir: Path | None,
+    symbols: list[str] | None = None,
+    event_data: dict[str, Any] | None = None,
 ) -> list[BaseStrategy]:
     """Build the full strategy list for a segment."""
     strategies: list[BaseStrategy] = [
@@ -194,6 +480,20 @@ def _build_strategies(
         if ml is not None:
             strategies.append(ml)
 
+    # Event-driven strategies (require event data)
+    if event_data is not None:
+        div_gap = _setup_dividend_gap_strategy(segment, symbols or [], event_data)
+        if div_gap is not None:
+            strategies.append(div_gap)
+
+        pead = _setup_pead_strategy(segment, symbols or [], event_data)
+        if pead is not None:
+            strategies.append(pead)
+
+        cbr = _setup_cbr_strategy(segment, symbols or [], event_data)
+        if cbr is not None:
+            strategies.append(cbr)
+
     return strategies
 
 
@@ -205,6 +505,8 @@ def _run_symbol(
     cash: Decimal,
     output_dir: Path,
     benchmark_candles: list[Any] | None = None,
+    use_evt_sizing: bool = False,
+    use_copula_scaling: bool = False,
 ) -> tuple[list[TradeResult], list[PortfolioState], dict[str, Any] | None]:
     """Run backtest for a single symbol. Returns (trades, snapshots, summary)."""
     sym_dir = output_dir / segment / symbol.replace(".", "_")
@@ -224,6 +526,8 @@ def _run_symbol(
                 decision_journal=journal,
                 rolling_kelly=RollingKelly(),
                 use_impact_model=True,
+                use_evt_sizing=use_evt_sizing,
+                use_copula_scaling=use_copula_scaling,
             ),
         )
         trades, snapshots = engine.run(
@@ -256,6 +560,15 @@ def _run_symbol(
             f"WR {wr:5.1%} | "
             f"Ret {ret:+7.3%}"
         )
+
+        # Print per-strategy signal counts from engine summary
+        run_summary = engine.last_run_summary
+        sig_counts: dict[str, int] = run_summary.get("strategy_signals", {})  # type: ignore[assignment]
+        above_thresh: int = run_summary.get("combined_above_threshold", 0)  # type: ignore[assignment]
+        if sig_counts or above_thresh:
+            parts = [f"{name}={count}" for name, count in sorted(sig_counts.items())]
+            sig_str = " ".join(parts) if parts else "none"
+            print(f"      Signals: {sig_str} | combined_above_threshold={above_thresh}")
 
         return trades, snapshots, summary
 
@@ -317,9 +630,7 @@ def _format_comparison_table(
     # Segment PnL share
     if metrics.segment_pnl_share:
         lines.append("  Segment PnL Share:")
-        for seg, share in sorted(
-            metrics.segment_pnl_share.items(), key=lambda x: -abs(x[1])
-        ):
+        for seg, share in sorted(metrics.segment_pnl_share.items(), key=lambda x: -abs(x[1])):
             lines.append(f"    {seg:<20s} {share:>7.1%}")
         lines.append("")
 
@@ -379,9 +690,7 @@ def _run_dry(
         per_model_proba_mean={},
     )
     gate_results, verdict = tracker.evaluate_gates(metrics, baseline=None)
-    print(
-        _format_comparison_table(args.name, None, metrics, None, gate_results, verdict, git_info)
-    )
+    print(_format_comparison_table(args.name, None, metrics, None, gate_results, verdict, git_info))
 
 
 def _parse_args() -> argparse.Namespace:
@@ -389,22 +698,19 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a new backtest iteration")
     parser.add_argument("--name", required=True, help="Iteration name")
     parser.add_argument("--description", required=True, help="What changed")
-    parser.add_argument(
-        "--baseline", default="latest", help="Baseline name (default: latest)"
-    )
-    parser.add_argument(
-        "--output", default="results/iterations/", help="Output root"
-    )
-    parser.add_argument(
-        "--segments", default=None, help="Comma-separated segment IDs"
-    )
+    parser.add_argument("--baseline", default="latest", help="Baseline name (default: latest)")
+    parser.add_argument("--output", default="results/iterations/", help="Output root")
+    parser.add_argument("--segments", default=None, help="Comma-separated segment IDs")
     parser.add_argument("--start-date", default="2023-01-01")
     parser.add_argument("--end-date", default="2024-12-31")
+    parser.add_argument("--cash", type=int, default=100_000, help="Initial cash per symbol")
+    parser.add_argument("--models-dir", default=None, help="Directory with trained ML models")
     parser.add_argument(
-        "--cash", type=int, default=100_000, help="Initial cash per symbol"
+        "--event-data-dir", default=None, help="Directory with event data JSON files"
     )
+    parser.add_argument("--use-evt-sizing", action="store_true", help="Enable EVT tail risk sizing")
     parser.add_argument(
-        "--models-dir", default=None, help="Directory with trained ML models"
+        "--use-copula-scaling", action="store_true", help="Enable copula correlation scaling"
     )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -454,6 +760,16 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     end = datetime.strptime(args.end_date, "%Y-%m-%d").replace(tzinfo=UTC)
     cash = Decimal(args.cash)
     models_dir = Path(args.models_dir) if args.models_dir else None
+    event_data_dir = Path(args.event_data_dir) if args.event_data_dir else None
+    event_data: dict[str, Any] | None = None
+    if event_data_dir is not None:
+        event_data = _load_event_data(event_data_dir)
+        n_div = sum(len(v) for v in event_data["dividends"].values())
+        n_earn = sum(len(v) for v in event_data["earnings"].values())
+        n_cbr = len(event_data["cbr"])
+        print(f"  Event data: {n_div} dividends, {n_earn} earnings, {n_cbr} CBR decisions")
+    use_evt_sizing = args.use_evt_sizing
+    use_copula_scaling = args.use_copula_scaling
 
     # Load strategy configs from YAML presets
     strategy_configs: dict[str, Any] = {}
@@ -495,7 +811,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         print(f"{'=' * 72}")
 
         # Fetch benchmark
-        bench_symbol = "EWZ" if segment.startswith("ru_") else "SPY"
+        bench_symbol = "IMOEX.ME" if segment.startswith("ru_") else "SPY"
         if bench_symbol not in benchmark_cache:
             try:
                 bench_fetcher = CachingFetcher(YFinanceFetcher(market_id="us"))
@@ -509,9 +825,21 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                 print(f"  Benchmark: {bench_symbol} (fetch failed)")
         bench_candles = benchmark_cache[bench_symbol]
 
+        # Create appropriate fetcher for the market
+        is_moex = segment.startswith("ru_")
+        base_fetcher = _make_moex_fetcher() if is_moex else YFinanceFetcher(market_id=market_id)
+
         # Build strategies once per segment
-        seg_fetcher = CachingFetcher(YFinanceFetcher(market_id=market_id))
-        strategies = _build_strategies(segment, seg_fetcher, start, end, models_dir)
+        seg_fetcher = CachingFetcher(base_fetcher)
+        strategies = _build_strategies(
+            segment,
+            seg_fetcher,
+            start,
+            end,
+            models_dir,
+            symbols=symbols,
+            event_data=event_data,
+        )
         strat_names = [s.name for s in strategies]
         print(f"  Strategies: {', '.join(strat_names)}")
         print()
@@ -521,7 +849,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         for symbol in symbols:
             # Fetch candles
             try:
-                fetcher = CachingFetcher(YFinanceFetcher(market_id=market_id))
+                fetcher = CachingFetcher(base_fetcher)
                 candles = fetcher.fetch_candles(symbol, start, end)
                 if not candles:
                     print(f"    {symbol:12s} | no data")
@@ -539,6 +867,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                 cash=cash,
                 output_dir=iter_dir,
                 benchmark_candles=bench_candles,
+                use_evt_sizing=use_evt_sizing,
+                use_copula_scaling=use_copula_scaling,
             )
 
             all_trades.extend(trades)
@@ -566,9 +896,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     else:
         # Create a minimal MC result for zero-trade iterations
         from finalayze.backtest.monte_carlo import BootstrapCI, BootstrapResult  # noqa: PLC0415
-        zero_ci = BootstrapCI(
-            point_estimate=0.0, lower=0.0, upper=0.0, confidence_level=0.95
-        )
+
+        zero_ci = BootstrapCI(point_estimate=0.0, lower=0.0, upper=0.0, confidence_level=0.95)
         mc_result = BootstrapResult(
             total_return=zero_ci,
             sharpe_ratio=zero_ci,
@@ -579,7 +908,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
 
     # Build a synthetic WalkForwardResult from the direct backtest run
     # (full walk-forward takes much longer; this gives immediate baseline)
-    from finalayze.backtest.performance import PerformanceAnalyzer as PA  # noqa: PLC0415, N814
+    from finalayze.backtest.performance import PerformanceAnalyzer as PA  # noqa: PLC0415, N817
+
     full_result = PA().analyze(all_trades, all_snapshots) if all_trades else None
     oos_sharpe = float(full_result.sharpe) if full_result else 0.0
     oos_dd = float(full_result.max_drawdown) if full_result else 0.0

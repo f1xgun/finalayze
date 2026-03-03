@@ -8,11 +8,14 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import structlog
 import yaml
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.hrp import compute_hrp_weights
 from finalayze.strategies.hurst import compute_hurst_exponent
+
+logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -198,7 +201,7 @@ class StrategyCombiner:
             threshold = min(min_confidence, exit_conf)
         return threshold
 
-    def generate_signal(
+    def generate_signal(  # noqa: PLR0912
         self,
         symbol: str,
         candles: list[Candle],
@@ -274,9 +277,29 @@ class StrategyCombiner:
             for sname, sweight in hrp_overrides.items():
                 feature_contributions[f"hrp_weight_{sname}"] = float(sweight)
 
-        if abs(net) < self._effective_threshold(
+        threshold = self._effective_threshold(
             config, effective_min_confidence, has_open_position, net
-        ):
+        )
+        if abs(net) < threshold:
+            # Log when strategies fired but combined score was below threshold
+            firing = {
+                name: {
+                    "direction": (
+                        "BUY" if feature_contributions.get(f"{name}_direction", 0) > 0 else "SELL"
+                    ),
+                    "confidence": feature_contributions.get(f"{name}_confidence", 0),
+                }
+                for name in self._strategies
+                if f"{name}_confidence" in feature_contributions
+            }
+            if firing:
+                logger.debug(
+                    "signals_below_threshold",
+                    symbol=symbol,
+                    firing_strategies=firing,
+                    net_score=float(net),
+                    threshold=float(threshold),
+                )
             return None
 
         return self._build_result(

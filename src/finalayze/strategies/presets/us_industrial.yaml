@@ -1,4 +1,4 @@
-segment_id: us_broad
+segment_id: us_industrial
 normalize_mode: "firing"
 min_combined_confidence: 0.60
 strategies:

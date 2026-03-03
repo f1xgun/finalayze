@@ -5,10 +5,13 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import UTC, datetime, time
 from decimal import ROUND_DOWN, Decimal
 from typing import TYPE_CHECKING
 from uuid import uuid4
+
+import structlog
 
 from finalayze.backtest.config import BacktestConfig, resolve_max_hold_bars
 from finalayze.backtest.decision_journal import (
@@ -33,7 +36,16 @@ from finalayze.risk.position_sizer import (
     compute_position_size,
     compute_realized_vol,
 )
-from finalayze.risk.position_sizing_pipeline import PositionSizingPipeline, SizingContext
+from finalayze.risk.position_sizing_pipeline import (
+    CopulaStep,
+    EVTStep,
+    HardCapsStep,
+    KellyStep,
+    PositionSizingPipeline,
+    RegimeStep,
+    SizingContext,
+    VolTargetStep,
+)
 from finalayze.risk.pre_trade_check import PreTradeChecker
 from finalayze.risk.stop_loss import compute_atr_stop_loss
 
@@ -44,6 +56,8 @@ if TYPE_CHECKING:
     from finalayze.risk.loss_limits import LossLimitTracker
     from finalayze.risk.regime import RegimeProvider
     from finalayze.strategies.base import BaseStrategy
+
+logger = structlog.get_logger(__name__)
 
 # Default Half-Kelly parameters (used when no RollingKelly is provided)
 _DEFAULT_WIN_RATE = Decimal("0.5")
@@ -115,7 +129,21 @@ class BacktestEngine:
         self._max_hold_bars = cfg.max_hold_bars
         self._stop_loss_mode = cfg.stop_loss_mode
         self._regime_provider = regime_provider
-        self._sizing_pipeline = PositionSizingPipeline()
+        # Build position sizing pipeline with optional EVT/Copula steps
+        pipeline_steps = [KellyStep(), VolTargetStep(), RegimeStep()]
+        if self._config.use_copula_scaling:
+            pipeline_steps.append(CopulaStep())
+        if self._config.use_evt_sizing:
+            pipeline_steps.append(EVTStep())
+        pipeline_steps.append(HardCapsStep())
+        self._sizing_pipeline = PositionSizingPipeline(steps=pipeline_steps)
+        self._portfolio_returns: list[float] = []
+        self._last_run_summary: dict[str, object] = {}
+
+    @property
+    def last_run_summary(self) -> dict[str, object]:
+        """Per-symbol strategy activity summary from the most recent run() call."""
+        return dict(self._last_run_summary)
 
     def _build_broker(
         self,
@@ -179,6 +207,12 @@ class BacktestEngine:
         entry_bars: dict[str, int] = {}
         entry_strategies: dict[str, str] = {}
         chandelier_stops: dict[str, Decimal] = {}
+
+        # Strategy reasoning counters
+        strategy_signal_counts: dict[str, int] = defaultdict(int)
+        strategy_none_counts: dict[str, int] = defaultdict(int)
+        combined_above_threshold = 0
+        trades_opened = 0
 
         # Set initial baseline for circuit breaker
         if self._circuit_breaker is not None:
@@ -453,6 +487,16 @@ class BacktestEngine:
                 has_open_position=broker.has_position(symbol),
             )
 
+            # (e2) Track per-strategy signal counts for summary
+            if isinstance(self._strategy, JournalingStrategyCombiner):
+                for sname, ssig in self._strategy.last_signals.items():
+                    if ssig is not None:
+                        strategy_signal_counts[sname] += 1
+                    else:
+                        strategy_none_counts[sname] += 1
+            if signal is not None:
+                combined_above_threshold += 1
+
             if signal is not None and i + 1 < len(candles):
                 fill_candle = candles[i + 1]
 
@@ -470,6 +514,7 @@ class BacktestEngine:
                         snapshots.append(broker.get_portfolio())
                         continue
 
+                    trades_opened += 1
                     self._handle_buy(
                         broker,
                         checker,
@@ -515,6 +560,13 @@ class BacktestEngine:
             # (f) Record portfolio snapshot
             snapshots.append(broker.get_portfolio())
 
+            # Track portfolio returns for EVT sizing
+            if len(snapshots) >= 2:  # noqa: PLR2004
+                prev_equity = float(snapshots[-2].equity)
+                curr_equity = float(snapshots[-1].equity)
+                if prev_equity > 0:
+                    self._portfolio_returns.append((curr_equity - prev_equity) / prev_equity)
+
         # Close any remaining open positions at the last candle's close price
         if candles:
             last_candle = candles[-1]
@@ -537,6 +589,22 @@ class BacktestEngine:
                 )
                 trades.append(trade)
                 self._record_trade(trade)
+
+        # Log per-symbol strategy activity summary
+        self._last_run_summary = {
+            "bars_processed": len(candles),
+            "trades_total": len(trades),
+            "trades_opened": trades_opened,
+            "combined_above_threshold": combined_above_threshold,
+            "strategy_signals": dict(strategy_signal_counts),
+            "strategy_nones": dict(strategy_none_counts),
+        }
+        logger.info(
+            "backtest_symbol_summary",
+            symbol=symbol,
+            segment=segment_id,
+            **self._last_run_summary,
+        )
 
         return trades, snapshots
 
@@ -1045,6 +1113,7 @@ class BacktestEngine:
             target_vol=self._target_vol or Decimal("0.15"),
             regime_scale=Decimal(str(regime_position_scale or 1.0)),
             correlation_scale=Decimal("1.0"),
+            returns_history=tuple(self._portfolio_returns),
         )
         position_value = self._sizing_pipeline.compute(context)
 
