@@ -8,14 +8,12 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.combiner import (
     _BUY_SCORE,
-    _MAX_CONFIDENCE,
-    _MIN_COMBINED_CONFIDENCE,
     _MIN_EXIT_CONFIDENCE,
     _SELL_SCORE,
     _ZERO,
@@ -77,6 +75,7 @@ class JournalingStrategyCombiner(StrategyCombiner):
         segment_id: str,
         sentiment_score: float = 0.0,
         has_open_position: bool = False,
+        weight_overrides: dict[str, Decimal] | None = None,
     ) -> Signal | None:
         """Generate a combined signal, capturing per-strategy signals."""
         # Reset tracking state
@@ -104,7 +103,7 @@ class JournalingStrategyCombiner(StrategyCombiner):
             if not strategy_cfg.get("enabled", True):
                 continue
 
-            weight = self._resolve_weight(strategy_name, strategy_cfg, None)
+            weight = self._resolve_weight(strategy_name, strategy_cfg, weight_overrides)
             strategy = self._strategies.get(strategy_name)
             if strategy is None:
                 continue

@@ -111,6 +111,30 @@ class TestComputeRubOilCorrelation:
 
         assert result > 0.5
 
+    def test_zero_current_price_skipped_gracefully(self) -> None:
+        """Data points where rub_curr or oil_curr is <= 0 must be skipped, not raise."""
+        from finalayze.risk.rub_oil_regime import compute_rub_oil_correlation
+
+        # Build 70 normal candles so we satisfy window+1 requirement (window=60)
+        rub, oil = _make_correlated_candles(70, 0.8)
+
+        # Inject a zero close price into the *current* position (index 65) so the
+        # loop hits rub_curr == 0 when computing the return at i=65.
+        zero_rub = _make_candle("USDRUB", Decimal(0), 65)
+        zero_oil = _make_candle("BRN", Decimal(0), 65, market_id="ice")
+        rub[65] = zero_rub
+        oil[65] = zero_oil
+
+        # Also inject a negative price to verify the negative-price path
+        neg_rub = _make_candle("USDRUB", Decimal(-1), 67)
+        rub[67] = neg_rub
+
+        # Must not raise ValueError from math.log; must return a float in [-1, 1]
+        result = compute_rub_oil_correlation(rub, oil, window=60)
+
+        assert isinstance(result, float)
+        assert -1.0 <= result <= 1.0
+
 
 class TestRubOilRegimeSignal:
     """Tests for the RubOilRegimeSignal class."""
@@ -177,6 +201,18 @@ class TestRubOilRegimeSignal:
 
         assert state.regime == MarketRegime.NORMAL
         assert state.allow_new_longs is True
+
+    def test_get_regime_with_dummy_candles(self) -> None:
+        """Protocol conformance: get_regime accepts any candle list and bar_index."""
+        from finalayze.risk.rub_oil_regime import RubOilRegimeSignal
+
+        rub, oil = _make_correlated_candles(10, 0.5)
+        provider = RubOilRegimeSignal(rub_candles=rub, oil_candles=oil)
+
+        asset_candles = [_make_candle("GAZP", Decimal(150), i) for i in range(10)]
+        # Should not raise, even with insufficient data for a real correlation
+        state = provider.get_regime(asset_candles, bar_index=9)
+        assert state is not None
 
     def test_protocol_conformance(self) -> None:
         """RubOilRegimeSignal must satisfy the RegimeProvider protocol."""

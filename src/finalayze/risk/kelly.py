@@ -40,8 +40,8 @@ def compute_continuous_kelly(
     if mu <= 0:
         return Decimal(0)
 
-    # Population variance
-    variance = sum((r - mu) ** 2 for r in returns) / n
+    # Sample variance (n-1 denominator) — unbiased for small samples
+    variance = sum((r - mu) ** 2 for r in returns) / (n - 1)
 
     if variance < _VARIANCE_EPSILON:
         return Decimal(0)

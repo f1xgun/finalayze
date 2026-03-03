@@ -74,7 +74,7 @@ def compute_rub_oil_correlation(
         oil_prev = float(oil_recent[i - 1].close)
         oil_curr = float(oil_recent[i].close)
 
-        if rub_prev <= 0 or oil_prev <= 0:
+        if rub_prev <= 0 or rub_curr <= 0 or oil_prev <= 0 or oil_curr <= 0:
             continue
 
         rub_returns.append(math.log(rub_curr / rub_prev))
