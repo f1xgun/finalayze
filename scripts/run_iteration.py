@@ -54,9 +54,11 @@ from finalayze.data.fetchers.caching import CachingFetcher
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
 from finalayze.risk.kelly import RollingKelly
 from finalayze.strategies.base import BaseStrategy
+from finalayze.strategies.dual_momentum import DualMomentumStrategy
 from finalayze.strategies.mean_reversion import MeanReversionStrategy
 from finalayze.strategies.ml_strategy import MLStrategy
 from finalayze.strategies.momentum import MomentumStrategy
+from finalayze.strategies.ou_mean_reversion import OUMeanReversionStrategy
 from finalayze.strategies.pairs import PairsStrategy
 from finalayze.strategies.rsi2_connors import RSI2ConnorsStrategy
 
@@ -177,7 +179,9 @@ def _build_strategies(
     """Build the full strategy list for a segment."""
     strategies: list[BaseStrategy] = [
         MomentumStrategy(),
+        DualMomentumStrategy(vol_target_enabled=True),
         MeanReversionStrategy(),
+        OUMeanReversionStrategy(use_mle=True),
         RSI2ConnorsStrategy(),
     ]
 
@@ -207,14 +211,20 @@ def _run_symbol(
     sym_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        combiner = JournalingStrategyCombiner(strategies=strategies)
+        combiner = JournalingStrategyCombiner(
+            strategies=strategies,
+            allocation_mode="hrp",
+        )
         journal = DecisionJournal(output_path=sym_dir / "decision_journal.jsonl")
 
         engine = BacktestEngine(
             strategy=combiner,
-            initial_cash=cash,
-            decision_journal=journal,
-            rolling_kelly=RollingKelly(),
+            config=BacktestConfig(
+                initial_cash=cash,
+                decision_journal=journal,
+                rolling_kelly=RollingKelly(),
+                use_impact_model=True,
+            ),
         )
         trades, snapshots = engine.run(
             symbol=symbol,

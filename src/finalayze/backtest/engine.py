@@ -117,6 +117,40 @@ class BacktestEngine:
         self._regime_provider = regime_provider
         self._sizing_pipeline = PositionSizingPipeline()
 
+    def _build_broker(
+        self, symbol: str, candles: list[Candle],
+    ) -> SimulatedBroker:
+        """Build a SimulatedBroker, optionally with market impact model."""
+        adv_dict: dict[str, float] = {}
+        dvol_dict: dict[str, float] = {}
+        if self._config.use_impact_model and len(candles) >= 20:  # noqa: PLR2004
+            import math  # noqa: PLC0415
+
+            volumes = [float(c.volume) for c in candles[-252:]]
+            adv_dict[symbol] = sum(volumes) / len(volumes) if volumes else 1e6
+            closes = [float(c.close) for c in candles[-252:]]
+            if len(closes) >= 2:  # noqa: PLR2004
+                log_rets = [
+                    math.log(closes[j] / closes[j - 1])
+                    for j in range(1, len(closes))
+                    if closes[j - 1] > 0
+                ]
+                dvol_dict[symbol] = (
+                    (sum(r**2 for r in log_rets) / len(log_rets)) ** 0.5
+                    if log_rets
+                    else 0.02
+                )
+            else:
+                dvol_dict[symbol] = 0.02
+        return SimulatedBroker(
+            initial_cash=self._initial_cash,
+            use_impact_model=self._config.use_impact_model,
+            adv=adv_dict,
+            daily_vol=dvol_dict,
+            impact_coeff=self._config.impact_coeff,
+            max_impact_bps=self._config.max_impact_bps,
+        )
+
     def run(  # noqa: PLR0912, PLR0915
         self,
         symbol: str,
@@ -137,7 +171,7 @@ class BacktestEngine:
             max_position_pct=self._max_position_pct,
             max_positions_per_market=self._max_positions,
         )
-        broker = SimulatedBroker(initial_cash=self._initial_cash)
+        broker = self._build_broker(symbol, candles)
 
         trades: list[TradeResult] = []
         snapshots: list[PortfolioState] = []
@@ -532,7 +566,10 @@ class BacktestEngine:
             max_position_pct=self._max_position_pct,
             max_positions_per_market=self._max_positions,
         )
-        broker = SimulatedBroker(initial_cash=self._initial_cash)
+        # For portfolio mode, use first symbol's candles for impact estimates
+        _first_sym = symbols[0]
+        _first_candles = candles_by_symbol.get(_first_sym, [])
+        broker = self._build_broker(_first_sym, _first_candles)
 
         trades: list[TradeResult] = []
         snapshots: list[PortfolioState] = []

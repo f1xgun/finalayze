@@ -27,6 +27,8 @@ strategies:
       volume_sma_period: 20
       volume_min_ratio: 1.0
       neutral_reset_bars: 8
+      vol_target_enabled: true
+      vol_target: 0.15
   mean_reversion:
     enabled: true
     weight: 0.25
@@ -60,6 +62,24 @@ strategies:
     params:
       threshold: 0.10
       min_confidence: 0.30
+  dual_momentum:
+    enabled: true
+    weight: 0.10
+    params:
+      lookback_fast: 63
+      lookback_slow: 252
+      min_confidence: 0.35
+      vol_target_enabled: true
+      vol_target: 0.15
+  ou_mean_reversion:
+    enabled: true
+    weight: 0.10
+    params:
+      ou_window: 126
+      entry_threshold: 1.5
+      exit_threshold: 0.0
+      use_mle: true
+      min_confidence: 0.35
   rsi2_connors:
     enabled: true
     weight: 0.15

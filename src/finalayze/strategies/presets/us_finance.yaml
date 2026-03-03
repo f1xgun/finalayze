@@ -36,12 +36,42 @@ strategies:
       volume_sma_period: 20
       volume_min_ratio: 1.0
       neutral_reset_bars: 8
+      vol_target_enabled: true
+      vol_target: 0.15
   event_driven:
     enabled: true
     weight: 0.30
     params:
       min_sentiment: 0.5
       event_types: [interest_rate, earnings, regulatory, macro]
+  dual_momentum:
+    enabled: true
+    weight: 0.10
+    params:
+      lookback_fast: 63
+      lookback_slow: 252
+      min_confidence: 0.35
+      vol_target_enabled: true
+      vol_target: 0.15
+  ou_mean_reversion:
+    enabled: true
+    weight: 0.10
+    params:
+      ou_window: 126
+      entry_threshold: 1.5
+      exit_threshold: 0.0
+      use_mle: true
+      min_confidence: 0.35
+  rsi2_connors:
+    enabled: true
+    weight: 0.15
+    params:
+      rsi_period: 2
+      rsi_buy_threshold: 10.0
+      rsi_sell_threshold: 90.0
+      sma_trend_period: 200
+      sma_exit_period: 5
+      min_confidence: 0.35
   ml_ensemble:
     enabled: true
     weight: 0.35

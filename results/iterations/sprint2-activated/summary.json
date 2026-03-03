@@ -1,0 +1,1695 @@
+[
+  {
+    "symbol": "AAPL",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 24,
+    "metrics": {
+      "sharpe": "-0.307",
+      "max_drawdown": "0.0007",
+      "win_rate": "0.3750",
+      "profit_factor": "0.6535",
+      "total_return": "-0.0003",
+      "total_trades": 24,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.1076",
+      "alpha": "-0.0008",
+      "beta": "0.0008",
+      "information_ratio": "-1.8852",
+      "max_relative_drawdown": "0.5116",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 469,
+        "BUY": 24,
+        "SELL": 7
+      },
+      "top_skip_reasons": {
+        "no_signal": 191,
+        "position_value_zero": 159,
+        "position_already_open": 96,
+        "no_position_held": 23
+      }
+    }
+  },
+  {
+    "symbol": "MSFT",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 17,
+    "metrics": {
+      "sharpe": "-0.5364",
+      "max_drawdown": "0.0004",
+      "win_rate": "0.5294",
+      "profit_factor": "0.5635",
+      "total_return": "-0.0003",
+      "total_trades": 17,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0615",
+      "alpha": "-0.0006",
+      "beta": "0.0005",
+      "information_ratio": "-1.8848",
+      "max_relative_drawdown": "0.5117",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 479,
+        "BUY": 17,
+        "SELL": 4
+      },
+      "top_skip_reasons": {
+        "position_value_zero": 208,
+        "no_signal": 163,
+        "position_already_open": 85,
+        "no_position_held": 18,
+        "quantity_zero": 4,
+        "time_exit": 1
+      }
+    }
+  },
+  {
+    "symbol": "GOOGL",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 22,
+    "metrics": {
+      "sharpe": "0.3417",
+      "max_drawdown": "0.0008",
+      "win_rate": "0.5000",
+      "profit_factor": "1.3751",
+      "total_return": "0.0004",
+      "total_trades": 22,
+      "sortino_ratio": "0.467",
+      "calmar_ratio": "0.2454",
+      "turnover_ratio": "0.0987",
+      "alpha": "-0.0002",
+      "beta": "0.001",
+      "information_ratio": "-1.8828",
+      "max_relative_drawdown": "0.5111",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 470,
+        "BUY": 22,
+        "SELL": 8
+      },
+      "top_skip_reasons": {
+        "no_signal": 210,
+        "position_value_zero": 158,
+        "position_already_open": 92,
+        "no_position_held": 10
+      }
+    }
+  },
+  {
+    "symbol": "AMZN",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 25,
+    "metrics": {
+      "sharpe": "-0.3049",
+      "max_drawdown": "0.0013",
+      "win_rate": "0.4800",
+      "profit_factor": "0.7191",
+      "total_return": "-0.0005",
+      "total_trades": 25,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.1255",
+      "alpha": "-0.0013",
+      "beta": "0.0014",
+      "information_ratio": "-1.887",
+      "max_relative_drawdown": "0.5119",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 466,
+        "BUY": 25,
+        "SELL": 9
+      },
+      "top_skip_reasons": {
+        "no_signal": 195,
+        "position_already_open": 152,
+        "position_value_zero": 112,
+        "no_position_held": 7
+      }
+    }
+  },
+  {
+    "symbol": "META",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 39,
+    "metrics": {
+      "sharpe": "-0.0402",
+      "max_drawdown": "0.0023",
+      "win_rate": "0.5897",
+      "profit_factor": "0.9659",
+      "total_return": "-0.0002",
+      "total_trades": 39,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.3717",
+      "alpha": "-0.0036",
+      "beta": "0.0058",
+      "information_ratio": "-1.8939",
+      "max_relative_drawdown": "0.5103",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 449,
+        "BUY": 39,
+        "SELL": 13
+      },
+      "top_skip_reasons": {
+        "no_signal": 216,
+        "position_already_open": 178,
+        "position_value_zero": 40,
+        "no_position_held": 14,
+        "time_exit": 1
+      }
+    }
+  },
+  {
+    "symbol": "NVDA",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 4,
+    "metrics": {
+      "sharpe": "0.5982",
+      "max_drawdown": "0.0002",
+      "win_rate": "0.5000",
+      "profit_factor": "6.3121",
+      "total_return": "0.0003",
+      "total_trades": 4,
+      "sortino_ratio": "0.9283",
+      "calmar_ratio": "0.8065",
+      "turnover_ratio": "0.0143",
+      "alpha": "0.0002",
+      "beta": "0.0001",
+      "information_ratio": "-1.8815",
+      "max_relative_drawdown": "0.5111",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 497,
+        "BUY": 4
+      },
+      "top_skip_reasons": {
+        "no_signal": 322,
+        "position_value_zero": 157,
+        "no_position_held": 13,
+        "position_already_open": 5
+      }
+    }
+  },
+  {
+    "symbol": "TSM",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 23,
+    "metrics": {
+      "sharpe": "-0.0304",
+      "max_drawdown": "0.0013",
+      "win_rate": "0.5217",
+      "profit_factor": "0.9710",
+      "total_return": "-0.0000",
+      "total_trades": 23,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.1005",
+      "alpha": "-0.0008",
+      "beta": "0.0013",
+      "information_ratio": "-1.8851",
+      "max_relative_drawdown": "0.5115",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 471,
+        "BUY": 23,
+        "SELL": 7
+      },
+      "top_skip_reasons": {
+        "no_signal": 305,
+        "position_value_zero": 88,
+        "position_already_open": 72,
+        "no_position_held": 6
+      }
+    }
+  },
+  {
+    "symbol": "AVGO",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 10,
+    "metrics": {
+      "sharpe": "-0.9647",
+      "max_drawdown": "0.0006",
+      "win_rate": "0.1000",
+      "profit_factor": "0.0860",
+      "total_return": "-0.0005",
+      "total_trades": 10,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0381",
+      "alpha": "-0.0006",
+      "beta": "0.0001",
+      "information_ratio": "-1.8849",
+      "max_relative_drawdown": "0.5119",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 487,
+        "BUY": 10,
+        "SELL": 4
+      },
+      "top_skip_reasons": {
+        "no_signal": 287,
+        "position_value_zero": 173,
+        "position_already_open": 19,
+        "no_position_held": 8
+      }
+    }
+  },
+  {
+    "symbol": "ADBE",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 6,
+    "metrics": {
+      "sharpe": "1.0302",
+      "max_drawdown": "0.0001",
+      "win_rate": "0.6667",
+      "profit_factor": "11.3435",
+      "total_return": "0.0006",
+      "total_trades": 6,
+      "sortino_ratio": "2.0429",
+      "calmar_ratio": "2.9829",
+      "turnover_ratio": "0.0281",
+      "alpha": "0.0004",
+      "beta": "0.0003",
+      "information_ratio": "-1.8808",
+      "max_relative_drawdown": "0.5108",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 493,
+        "BUY": 6,
+        "SELL": 2
+      },
+      "top_skip_reasons": {
+        "no_signal": 306,
+        "quantity_zero": 90,
+        "position_value_zero": 81,
+        "no_position_held": 9,
+        "position_already_open": 7
+      }
+    }
+  },
+  {
+    "symbol": "CRM",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 22,
+    "metrics": {
+      "sharpe": "-0.301",
+      "max_drawdown": "0.0020",
+      "win_rate": "0.5000",
+      "profit_factor": "0.7535",
+      "total_return": "-0.0006",
+      "total_trades": 22,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.1048",
+      "alpha": "-0.0017",
+      "beta": "0.0018",
+      "information_ratio": "-1.8883",
+      "max_relative_drawdown": "0.512",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 471,
+        "BUY": 22,
+        "SELL": 8
+      },
+      "top_skip_reasons": {
+        "no_signal": 266,
+        "position_already_open": 140,
+        "position_value_zero": 47,
+        "no_position_held": 18
+      }
+    }
+  },
+  {
+    "symbol": "INTC",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 4,
+    "metrics": {
+      "sharpe": "0.3165",
+      "max_drawdown": "0.0003",
+      "win_rate": "0.7500",
+      "profit_factor": "4.1915",
+      "total_return": "0.0002",
+      "total_trades": 4,
+      "sortino_ratio": "0.4828",
+      "calmar_ratio": "0.331",
+      "turnover_ratio": "0.0147",
+      "alpha": "0.0001",
+      "beta": "0.0002",
+      "information_ratio": "-1.8821",
+      "max_relative_drawdown": "0.5112",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 495,
+        "BUY": 4,
+        "SELL": 2
+      },
+      "top_skip_reasons": {
+        "no_signal": 419,
+        "position_value_zero": 58,
+        "no_position_held": 15,
+        "position_already_open": 3
+      }
+    }
+  },
+  {
+    "symbol": "AMD",
+    "segment": "us_tech",
+    "total_candles": 501,
+    "total_trades": 2,
+    "metrics": {
+      "sharpe": "-0.1992",
+      "max_drawdown": "0.0003",
+      "win_rate": "0.0000",
+      "profit_factor": "0.0000",
+      "total_return": "-0.0001",
+      "total_trades": 2,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0071",
+      "alpha": "-0.0001",
+      "beta": "0.0",
+      "information_ratio": "-1.8831",
+      "max_relative_drawdown": "0.5115",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 499,
+        "BUY": 2
+      },
+      "top_skip_reasons": {
+        "no_signal": 388,
+        "position_value_zero": 96,
+        "no_position_held": 15
+      }
+    }
+  },
+  {
+    "symbol": "SPY",
+    "segment": "us_broad",
+    "total_candles": 501,
+    "total_trades": 63,
+    "metrics": {
+      "sharpe": "0.7757",
+      "max_drawdown": "0.0034",
+      "win_rate": "0.5079",
+      "profit_factor": "1.6718",
+      "total_return": "0.0063",
+      "total_trades": 63,
+      "sortino_ratio": "1.0815",
+      "calmar_ratio": "0.9378",
+      "turnover_ratio": "2.1164",
+      "alpha": "-0.0028",
+      "beta": "0.0155",
+      "information_ratio": "-1.8862",
+      "max_relative_drawdown": "0.5021",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 405,
+        "BUY": 63,
+        "SELL": 32
+      },
+      "top_skip_reasons": {
+        "position_already_open": 267,
+        "no_signal": 131,
+        "no_position_held": 7
+      }
+    }
+  },
+  {
+    "symbol": "QQQ",
+    "segment": "us_broad",
+    "total_candles": 501,
+    "total_trades": 43,
+    "metrics": {
+      "sharpe": "-0.4929",
+      "max_drawdown": "0.0010",
+      "win_rate": "0.5814",
+      "profit_factor": "0.7293",
+      "total_return": "-0.0006",
+      "total_trades": 43,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.2836",
+      "alpha": "-0.0015",
+      "beta": "0.0016",
+      "information_ratio": "-1.8877",
+      "max_relative_drawdown": "0.512",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 441,
+        "BUY": 43,
+        "SELL": 16
+      },
+      "top_skip_reasons": {
+        "position_already_open": 151,
+        "no_signal": 125,
+        "position_value_zero": 120,
+        "quantity_zero": 25,
+        "no_position_held": 20
+      }
+    }
+  },
+  {
+    "symbol": "DIA",
+    "segment": "us_broad",
+    "total_candles": 501,
+    "total_trades": 61,
+    "metrics": {
+      "sharpe": "-0.0091",
+      "max_drawdown": "0.0059",
+      "win_rate": "0.5082",
+      "profit_factor": "0.9917",
+      "total_return": "-0.0001",
+      "total_trades": 61,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "2.2123",
+      "alpha": "-0.0076",
+      "beta": "0.0127",
+      "information_ratio": "-1.9061",
+      "max_relative_drawdown": "0.5065",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 414,
+        "BUY": 61,
+        "SELL": 25
+      },
+      "top_skip_reasons": {
+        "position_already_open": 266,
+        "no_signal": 141,
+        "no_position_held": 6,
+        "profit_target": 1
+      }
+    }
+  },
+  {
+    "symbol": "IWM",
+    "segment": "us_broad",
+    "total_candles": 501,
+    "total_trades": 18,
+    "metrics": {
+      "sharpe": "-0.3959",
+      "max_drawdown": "0.0008",
+      "win_rate": "0.3333",
+      "profit_factor": "0.6893",
+      "total_return": "-0.0003",
+      "total_trades": 18,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0811",
+      "alpha": "-0.0008",
+      "beta": "0.0008",
+      "information_ratio": "-1.8854",
+      "max_relative_drawdown": "0.5116",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 477,
+        "BUY": 18,
+        "SELL": 5
+      },
+      "top_skip_reasons": {
+        "position_value_zero": 212,
+        "no_signal": 182,
+        "position_already_open": 69,
+        "no_position_held": 14
+      }
+    }
+  },
+  {
+    "symbol": "JNJ",
+    "segment": "us_broad",
+    "total_candles": 501,
+    "total_trades": 34,
+    "metrics": {
+      "sharpe": "-0.6859",
+      "max_drawdown": "0.0020",
+      "win_rate": "0.4412",
+      "profit_factor": "0.5894",
+      "total_return": "-0.0011",
+      "total_trades": 34,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.2467",
+      "alpha": "-0.0017",
+      "beta": "0.001",
+      "information_ratio": "-1.8887",
+      "max_relative_drawdown": "0.5125",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 455,
+        "BUY": 34,
+        "SELL": 12
+      },
+      "top_skip_reasons": {
+        "no_signal": 272,
+        "position_already_open": 143,
+        "position_value_zero": 30,
+        "no_position_held": 10
+      }
+    }
+  },
+  {
+    "symbol": "PG",
+    "segment": "us_broad",
+    "total_candles": 501,
+    "total_trades": 38,
+    "metrics": {
+      "sharpe": "-0.9777",
+      "max_drawdown": "0.0016",
+      "win_rate": "0.3947",
+      "profit_factor": "0.4342",
+      "total_return": "-0.0013",
+      "total_trades": 38,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.2283",
+      "alpha": "-0.0016",
+      "beta": "0.0006",
+      "information_ratio": "-1.8886",
+      "max_relative_drawdown": "0.5127",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 452,
+        "BUY": 38,
+        "SELL": 11
+      },
+      "top_skip_reasons": {
+        "position_already_open": 195,
+        "no_signal": 172,
+        "position_value_zero": 72,
+        "no_position_held": 13
+      }
+    }
+  },
+  {
+    "symbol": "KO",
+    "segment": "us_broad",
+    "total_candles": 501,
+    "total_trades": 50,
+    "metrics": {
+      "sharpe": "-0.7628",
+      "max_drawdown": "0.0021",
+      "win_rate": "0.4800",
+      "profit_factor": "0.6614",
+      "total_return": "-0.0012",
+      "total_trades": 50,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.3657",
+      "alpha": "-0.0018",
+      "beta": "0.001",
+      "information_ratio": "-1.8892",
+      "max_relative_drawdown": "0.5125",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 434,
+        "BUY": 50,
+        "SELL": 17
+      },
+      "top_skip_reasons": {
+        "no_signal": 213,
+        "position_already_open": 195,
+        "position_value_zero": 17,
+        "no_position_held": 9
+      }
+    }
+  },
+  {
+    "symbol": "WMT",
+    "segment": "us_broad",
+    "total_candles": 501,
+    "total_trades": 59,
+    "metrics": {
+      "sharpe": "1.257",
+      "max_drawdown": "0.0048",
+      "win_rate": "0.6610",
+      "profit_factor": "2.2174",
+      "total_return": "0.0184",
+      "total_trades": 59,
+      "sortino_ratio": "1.991",
+      "calmar_ratio": "1.9203",
+      "turnover_ratio": "2.5988",
+      "alpha": "0.013",
+      "beta": "0.0092",
+      "information_ratio": "-1.8247",
+      "max_relative_drawdown": "0.4915",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 407,
+        "BUY": 59,
+        "SELL": 34
+      },
+      "top_skip_reasons": {
+        "position_already_open": 255,
+        "no_signal": 144,
+        "no_position_held": 7,
+        "profit_target": 1
+      }
+    }
+  },
+  {
+    "symbol": "XOM",
+    "segment": "us_broad",
+    "total_candles": 501,
+    "total_trades": 41,
+    "metrics": {
+      "sharpe": "-0.4668",
+      "max_drawdown": "0.0038",
+      "win_rate": "0.5122",
+      "profit_factor": "0.7158",
+      "total_return": "-0.0018",
+      "total_trades": 41,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.4899",
+      "alpha": "-0.0026",
+      "beta": "0.0013",
+      "information_ratio": "-1.8921",
+      "max_relative_drawdown": "0.513",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 440,
+        "BUY": 41,
+        "SELL": 20
+      },
+      "top_skip_reasons": {
+        "no_signal": 236,
+        "position_already_open": 193,
+        "no_position_held": 7,
+        "position_value_zero": 3,
+        "time_exit": 1
+      }
+    }
+  },
+  {
+    "symbol": "CVX",
+    "segment": "us_broad",
+    "total_candles": 501,
+    "total_trades": 16,
+    "metrics": {
+      "sharpe": "-0.4766",
+      "max_drawdown": "0.0005",
+      "win_rate": "0.5000",
+      "profit_factor": "0.5782",
+      "total_return": "-0.0004",
+      "total_trades": 16,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0767",
+      "alpha": "-0.0006",
+      "beta": "0.0003",
+      "information_ratio": "-1.8848",
+      "max_relative_drawdown": "0.5118",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 480,
+        "BUY": 16,
+        "SELL": 5
+      },
+      "top_skip_reasons": {
+        "no_signal": 261,
+        "position_value_zero": 142,
+        "position_already_open": 57,
+        "no_position_held": 20
+      }
+    }
+  },
+  {
+    "symbol": "JPM",
+    "segment": "us_finance",
+    "total_candles": 501,
+    "total_trades": 51,
+    "metrics": {
+      "sharpe": "0.9826",
+      "max_drawdown": "0.0029",
+      "win_rate": "0.5490",
+      "profit_factor": "1.9134",
+      "total_return": "0.0073",
+      "total_trades": 51,
+      "sortino_ratio": "1.4595",
+      "calmar_ratio": "1.2578",
+      "turnover_ratio": "1.1988",
+      "alpha": "0.0022",
+      "beta": "0.0086",
+      "information_ratio": "-1.8695",
+      "max_relative_drawdown": "0.5035",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 432,
+        "BUY": 51,
+        "SELL": 17
+      },
+      "top_skip_reasons": {
+        "position_already_open": 272,
+        "no_signal": 134,
+        "position_value_zero": 17,
+        "no_position_held": 9
+      }
+    }
+  },
+  {
+    "symbol": "BAC",
+    "segment": "us_finance",
+    "total_candles": 501,
+    "total_trades": 13,
+    "metrics": {
+      "sharpe": "-1.4833",
+      "max_drawdown": "0.0013",
+      "win_rate": "0.3077",
+      "profit_factor": "0.2445",
+      "total_return": "-0.0012",
+      "total_trades": 13,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0604",
+      "alpha": "-0.0014",
+      "beta": "0.0004",
+      "information_ratio": "-1.8878",
+      "max_relative_drawdown": "0.5125",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 485,
+        "BUY": 13,
+        "SELL": 2
+      },
+      "top_skip_reasons": {
+        "position_value_zero": 234,
+        "no_signal": 203,
+        "position_already_open": 43,
+        "no_position_held": 5
+      }
+    }
+  },
+  {
+    "symbol": "GS",
+    "segment": "us_finance",
+    "total_candles": 501,
+    "total_trades": 13,
+    "metrics": {
+      "sharpe": "-0.883",
+      "max_drawdown": "0.0007",
+      "win_rate": "0.3077",
+      "profit_factor": "0.3282",
+      "total_return": "-0.0005",
+      "total_trades": 13,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0456",
+      "alpha": "-0.0007",
+      "beta": "0.0004",
+      "information_ratio": "-1.8852",
+      "max_relative_drawdown": "0.5119",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 484,
+        "BUY": 13,
+        "SELL": 3
+      },
+      "top_skip_reasons": {
+        "position_value_zero": 247,
+        "no_signal": 185,
+        "position_already_open": 43,
+        "no_position_held": 8,
+        "quantity_zero": 1
+      }
+    }
+  },
+  {
+    "symbol": "MS",
+    "segment": "us_finance",
+    "total_candles": 501,
+    "total_trades": 13,
+    "metrics": {
+      "sharpe": "-0.5624",
+      "max_drawdown": "0.0010",
+      "win_rate": "0.4615",
+      "profit_factor": "0.6009",
+      "total_return": "-0.0005",
+      "total_trades": 13,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0610",
+      "alpha": "-0.001",
+      "beta": "0.0009",
+      "information_ratio": "-1.8862",
+      "max_relative_drawdown": "0.5117",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 486,
+        "BUY": 13,
+        "SELL": 1
+      },
+      "top_skip_reasons": {
+        "position_value_zero": 213,
+        "no_signal": 203,
+        "position_already_open": 57,
+        "no_position_held": 13
+      }
+    }
+  },
+  {
+    "symbol": "V",
+    "segment": "us_finance",
+    "total_candles": 501,
+    "total_trades": 46,
+    "metrics": {
+      "sharpe": "0.71",
+      "max_drawdown": "0.0032",
+      "win_rate": "0.6739",
+      "profit_factor": "1.7725",
+      "total_return": "0.0063",
+      "total_trades": 46,
+      "sortino_ratio": "0.9708",
+      "calmar_ratio": "0.9919",
+      "turnover_ratio": "1.4862",
+      "alpha": "0.0029",
+      "beta": "0.0058",
+      "information_ratio": "-1.8675",
+      "max_relative_drawdown": "0.507",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 439,
+        "BUY": 46,
+        "SELL": 15
+      },
+      "top_skip_reasons": {
+        "position_already_open": 266,
+        "no_signal": 170,
+        "no_position_held": 2,
+        "profit_target": 1
+      }
+    }
+  },
+  {
+    "symbol": "MA",
+    "segment": "us_finance",
+    "total_candles": 501,
+    "total_trades": 40,
+    "metrics": {
+      "sharpe": "0.0941",
+      "max_drawdown": "0.0029",
+      "win_rate": "0.4750",
+      "profit_factor": "1.0612",
+      "total_return": "0.0003",
+      "total_trades": 40,
+      "sortino_ratio": "0.1284",
+      "calmar_ratio": "0.0529",
+      "turnover_ratio": "0.5081",
+      "alpha": "-0.0013",
+      "beta": "0.0027",
+      "information_ratio": "-1.8863",
+      "max_relative_drawdown": "0.5112",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 448,
+        "BUY": 40,
+        "SELL": 12
+      },
+      "top_skip_reasons": {
+        "position_already_open": 290,
+        "no_signal": 154,
+        "time_exit": 2,
+        "no_position_held": 1,
+        "profit_target": 1
+      }
+    }
+  },
+  {
+    "symbol": "BRK-B",
+    "segment": "us_finance",
+    "total_candles": 501,
+    "total_trades": 42,
+    "metrics": {
+      "sharpe": "-0.1357",
+      "max_drawdown": "0.0027",
+      "win_rate": "0.5000",
+      "profit_factor": "0.9223",
+      "total_return": "-0.0006",
+      "total_trades": 42,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.7698",
+      "alpha": "-0.0036",
+      "beta": "0.0052",
+      "information_ratio": "-1.8944",
+      "max_relative_drawdown": "0.5111",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 449,
+        "BUY": 42,
+        "SELL": 9
+      },
+      "top_skip_reasons": {
+        "position_already_open": 308,
+        "no_signal": 134,
+        "no_position_held": 4,
+        "profit_target": 2,
+        "time_exit": 1
+      }
+    }
+  },
+  {
+    "symbol": "C",
+    "segment": "us_finance",
+    "total_candles": 501,
+    "total_trades": 24,
+    "metrics": {
+      "sharpe": "-0.5863",
+      "max_drawdown": "0.0011",
+      "win_rate": "0.4583",
+      "profit_factor": "0.5547",
+      "total_return": "-0.0008",
+      "total_trades": 24,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.1403",
+      "alpha": "-0.0013",
+      "beta": "0.0009",
+      "information_ratio": "-1.8873",
+      "max_relative_drawdown": "0.512",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 467,
+        "BUY": 24,
+        "SELL": 9
+      },
+      "top_skip_reasons": {
+        "no_signal": 235,
+        "position_value_zero": 175,
+        "position_already_open": 51,
+        "no_position_held": 6
+      }
+    }
+  },
+  {
+    "symbol": "UNH",
+    "segment": "us_healthcare",
+    "total_candles": 501,
+    "total_trades": 10,
+    "metrics": {
+      "sharpe": "-0.2906",
+      "max_drawdown": "0.0010",
+      "win_rate": "0.3000",
+      "profit_factor": "0.6352",
+      "total_return": "-0.0003",
+      "total_trades": 10,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0594",
+      "alpha": "-0.0004",
+      "beta": "0.0002",
+      "information_ratio": "-1.884",
+      "max_relative_drawdown": "0.5117",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 490,
+        "BUY": 10,
+        "SELL": 1
+      },
+      "top_skip_reasons": {
+        "no_signal": 293,
+        "position_value_zero": 94,
+        "position_already_open": 67,
+        "quantity_zero": 35,
+        "no_position_held": 1
+      }
+    }
+  },
+  {
+    "symbol": "LLY",
+    "segment": "us_healthcare",
+    "total_candles": 501,
+    "total_trades": 22,
+    "metrics": {
+      "sharpe": "-0.3796",
+      "max_drawdown": "0.0026",
+      "win_rate": "0.5455",
+      "profit_factor": "0.7008",
+      "total_return": "-0.0009",
+      "total_trades": 22,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.1748",
+      "alpha": "-0.0014",
+      "beta": "0.0008",
+      "information_ratio": "-1.8877",
+      "max_relative_drawdown": "0.5124",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 474,
+        "BUY": 22,
+        "SELL": 5
+      },
+      "top_skip_reasons": {
+        "no_signal": 204,
+        "quantity_zero": 148,
+        "position_already_open": 66,
+        "position_value_zero": 49,
+        "no_position_held": 7
+      }
+    }
+  },
+  {
+    "symbol": "PFE",
+    "segment": "us_healthcare",
+    "total_candles": 501,
+    "total_trades": 10,
+    "metrics": {
+      "sharpe": "0.0436",
+      "max_drawdown": "0.0004",
+      "win_rate": "0.5000",
+      "profit_factor": "1.0551",
+      "total_return": "0.0000",
+      "total_trades": 10,
+      "sortino_ratio": "0.0639",
+      "calmar_ratio": "0.0504",
+      "turnover_ratio": "0.0544",
+      "alpha": "-0.0004",
+      "beta": "0.0007",
+      "information_ratio": "-1.8836",
+      "max_relative_drawdown": "0.5114",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 489,
+        "BUY": 10,
+        "SELL": 2
+      },
+      "top_skip_reasons": {
+        "no_signal": 385,
+        "position_value_zero": 93,
+        "position_already_open": 11
+      }
+    }
+  },
+  {
+    "symbol": "ABBV",
+    "segment": "us_healthcare",
+    "total_candles": 501,
+    "total_trades": 41,
+    "metrics": {
+      "sharpe": "-0.4428",
+      "max_drawdown": "0.0040",
+      "win_rate": "0.5122",
+      "profit_factor": "0.6618",
+      "total_return": "-0.0023",
+      "total_trades": 41,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.5962",
+      "alpha": "-0.0032",
+      "beta": "0.0015",
+      "information_ratio": "-1.8941",
+      "max_relative_drawdown": "0.5137",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 450,
+        "BUY": 41,
+        "SELL": 10
+      },
+      "top_skip_reasons": {
+        "position_already_open": 237,
+        "no_signal": 203,
+        "no_position_held": 4,
+        "position_value_zero": 4,
+        "time_exit": 2
+      }
+    }
+  },
+  {
+    "symbol": "MRK",
+    "segment": "us_healthcare",
+    "total_candles": 501,
+    "total_trades": 17,
+    "metrics": {
+      "sharpe": "-0.419",
+      "max_drawdown": "0.0011",
+      "win_rate": "0.4118",
+      "profit_factor": "0.6947",
+      "total_return": "-0.0005",
+      "total_trades": 17,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.1025",
+      "alpha": "-0.0008",
+      "beta": "0.0005",
+      "information_ratio": "-1.8853",
+      "max_relative_drawdown": "0.5119",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 480,
+        "BUY": 17,
+        "SELL": 4
+      },
+      "top_skip_reasons": {
+        "no_signal": 323,
+        "position_already_open": 98,
+        "position_value_zero": 55,
+        "no_position_held": 3,
+        "time_exit": 1
+      }
+    }
+  },
+  {
+    "symbol": "TMO",
+    "segment": "us_healthcare",
+    "total_candles": 501,
+    "total_trades": 13,
+    "metrics": {
+      "sharpe": "-0.0907",
+      "max_drawdown": "0.0004",
+      "win_rate": "0.5385",
+      "profit_factor": "0.8614",
+      "total_return": "-0.0001",
+      "total_trades": 13,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0707",
+      "alpha": "-0.0003",
+      "beta": "0.0003",
+      "information_ratio": "-1.8834",
+      "max_relative_drawdown": "0.5115",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 485,
+        "BUY": 13,
+        "SELL": 3
+      },
+      "top_skip_reasons": {
+        "no_signal": 271,
+        "position_value_zero": 86,
+        "quantity_zero": 75,
+        "position_already_open": 52,
+        "no_position_held": 1
+      }
+    }
+  },
+  {
+    "symbol": "ABT",
+    "segment": "us_healthcare",
+    "total_candles": 501,
+    "total_trades": 29,
+    "metrics": {
+      "sharpe": "-0.2834",
+      "max_drawdown": "0.0007",
+      "win_rate": "0.5517",
+      "profit_factor": "0.7617",
+      "total_return": "-0.0003",
+      "total_trades": 29,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.1690",
+      "alpha": "-0.0009",
+      "beta": "0.0009",
+      "information_ratio": "-1.8855",
+      "max_relative_drawdown": "0.5116",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 500,
+      "action_counts": {
+        "SKIP": 462,
+        "BUY": 29,
+        "SELL": 9
+      },
+      "top_skip_reasons": {
+        "no_signal": 252,
+        "position_already_open": 129,
+        "position_value_zero": 78,
+        "no_position_held": 3
+      }
+    }
+  },
+  {
+    "symbol": "AMGN",
+    "segment": "us_healthcare",
+    "total_candles": 501,
+    "total_trades": 16,
+    "metrics": {
+      "sharpe": "-1.4771",
+      "max_drawdown": "0.0011",
+      "win_rate": "0.4375",
+      "profit_factor": "0.2061",
+      "total_return": "-0.0011",
+      "total_trades": 16,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0596",
+      "alpha": "-0.0014",
+      "beta": "0.0005",
+      "information_ratio": "-1.8879",
+      "max_relative_drawdown": "0.5125",
+      "benchmark_return": "0.5882"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 483,
+        "BUY": 16,
+        "SELL": 2
+      },
+      "top_skip_reasons": {
+        "no_signal": 213,
+        "position_value_zero": 183,
+        "position_already_open": 85,
+        "no_position_held": 2
+      }
+    }
+  },
+  {
+    "symbol": "RSX",
+    "segment": "ru_blue_chips",
+    "total_candles": 501,
+    "total_trades": 1,
+    "metrics": {
+      "sharpe": "0",
+      "max_drawdown": "0.0000",
+      "win_rate": "0.0000",
+      "profit_factor": "999.0000",
+      "total_return": "0.0000",
+      "total_trades": 1,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0049",
+      "alpha": "0.0",
+      "beta": "0.0",
+      "information_ratio": "-0.121",
+      "max_relative_drawdown": "0.4155",
+      "benchmark_return": "0.0015"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 499,
+        "BUY": 1,
+        "SELL": 1
+      },
+      "top_skip_reasons": {
+        "no_signal": 493,
+        "no_position_held": 6
+      }
+    }
+  },
+  {
+    "symbol": "ERUS",
+    "segment": "ru_blue_chips",
+    "total_candles": 501,
+    "total_trades": 0,
+    "metrics": {
+      "sharpe": "0",
+      "max_drawdown": "0.0000",
+      "win_rate": "0",
+      "profit_factor": "0",
+      "total_return": "0",
+      "total_trades": 0,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0",
+      "alpha": "0.0",
+      "beta": "0.0",
+      "information_ratio": "-0.121",
+      "max_relative_drawdown": "0.4155",
+      "benchmark_return": "0.0015"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 501
+      },
+      "top_skip_reasons": {
+        "no_signal": 494,
+        "no_position_held": 7
+      }
+    }
+  },
+  {
+    "symbol": "TUR",
+    "segment": "ru_blue_chips",
+    "total_candles": 501,
+    "total_trades": 0,
+    "metrics": {
+      "sharpe": "0",
+      "max_drawdown": "0.0000",
+      "win_rate": "0",
+      "profit_factor": "0",
+      "total_return": "0",
+      "total_trades": 0,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0",
+      "alpha": "0.0",
+      "beta": "0.0",
+      "information_ratio": "-0.121",
+      "max_relative_drawdown": "0.4155",
+      "benchmark_return": "0.0015"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 501
+      },
+      "top_skip_reasons": {
+        "no_signal": 501
+      }
+    }
+  },
+  {
+    "symbol": "EWZ",
+    "segment": "ru_blue_chips",
+    "total_candles": 501,
+    "total_trades": 0,
+    "metrics": {
+      "sharpe": "0",
+      "max_drawdown": "0.0000",
+      "win_rate": "0",
+      "profit_factor": "0",
+      "total_return": "0",
+      "total_trades": 0,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0",
+      "alpha": "0.0",
+      "beta": "0.0",
+      "information_ratio": "-0.121",
+      "max_relative_drawdown": "0.4155",
+      "benchmark_return": "0.0015"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 501
+      },
+      "top_skip_reasons": {
+        "no_signal": 501
+      }
+    }
+  },
+  {
+    "symbol": "INDA",
+    "segment": "ru_blue_chips",
+    "total_candles": 501,
+    "total_trades": 0,
+    "metrics": {
+      "sharpe": "0",
+      "max_drawdown": "0.0000",
+      "win_rate": "0",
+      "profit_factor": "0",
+      "total_return": "0",
+      "total_trades": 0,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0",
+      "alpha": "0.0",
+      "beta": "0.0",
+      "information_ratio": "-0.121",
+      "max_relative_drawdown": "0.4155",
+      "benchmark_return": "0.0015"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 501
+      },
+      "top_skip_reasons": {
+        "no_signal": 499,
+        "no_position_held": 2
+      }
+    }
+  },
+  {
+    "symbol": "XLE",
+    "segment": "ru_energy",
+    "total_candles": 501,
+    "total_trades": 0,
+    "metrics": {
+      "sharpe": "0",
+      "max_drawdown": "0.0000",
+      "win_rate": "0",
+      "profit_factor": "0",
+      "total_return": "0",
+      "total_trades": 0,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0",
+      "alpha": "0.0",
+      "beta": "0.0",
+      "information_ratio": "-0.121",
+      "max_relative_drawdown": "0.4155",
+      "benchmark_return": "0.0015"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 501
+      },
+      "top_skip_reasons": {
+        "no_signal": 501
+      }
+    }
+  },
+  {
+    "symbol": "BP",
+    "segment": "ru_energy",
+    "total_candles": 501,
+    "total_trades": 0,
+    "metrics": {
+      "sharpe": "0",
+      "max_drawdown": "0.0000",
+      "win_rate": "0",
+      "profit_factor": "0",
+      "total_return": "0",
+      "total_trades": 0,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0",
+      "alpha": "0.0",
+      "beta": "0.0",
+      "information_ratio": "-0.121",
+      "max_relative_drawdown": "0.4155",
+      "benchmark_return": "0.0015"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 501
+      },
+      "top_skip_reasons": {
+        "no_signal": 501
+      }
+    }
+  },
+  {
+    "symbol": "SHEL",
+    "segment": "ru_energy",
+    "total_candles": 501,
+    "total_trades": 0,
+    "metrics": {
+      "sharpe": "0",
+      "max_drawdown": "0.0000",
+      "win_rate": "0",
+      "profit_factor": "0",
+      "total_return": "0",
+      "total_trades": 0,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0",
+      "alpha": "0.0",
+      "beta": "0.0",
+      "information_ratio": "-0.121",
+      "max_relative_drawdown": "0.4155",
+      "benchmark_return": "0.0015"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 501
+      },
+      "top_skip_reasons": {
+        "no_signal": 500,
+        "no_position_held": 1
+      }
+    }
+  },
+  {
+    "symbol": "TTE",
+    "segment": "ru_energy",
+    "total_candles": 501,
+    "total_trades": 0,
+    "metrics": {
+      "sharpe": "0",
+      "max_drawdown": "0.0000",
+      "win_rate": "0",
+      "profit_factor": "0",
+      "total_return": "0",
+      "total_trades": 0,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0",
+      "alpha": "0.0",
+      "beta": "0.0",
+      "information_ratio": "-0.121",
+      "max_relative_drawdown": "0.4155",
+      "benchmark_return": "0.0015"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 501
+      },
+      "top_skip_reasons": {
+        "no_signal": 501
+      }
+    }
+  },
+  {
+    "symbol": "ENB",
+    "segment": "ru_energy",
+    "total_candles": 501,
+    "total_trades": 0,
+    "metrics": {
+      "sharpe": "0",
+      "max_drawdown": "0.0000",
+      "win_rate": "0",
+      "profit_factor": "0",
+      "total_return": "0",
+      "total_trades": 0,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0",
+      "alpha": "0.0",
+      "beta": "0.0",
+      "information_ratio": "-0.121",
+      "max_relative_drawdown": "0.4155",
+      "benchmark_return": "0.0015"
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 501
+      },
+      "top_skip_reasons": {
+        "no_signal": 501
+      }
+    }
+  }
+]

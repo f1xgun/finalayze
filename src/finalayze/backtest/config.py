@@ -74,3 +74,8 @@ class BacktestConfig:
     stop_loss_mode: str = "trailing"
     trend_filter_enabled: bool = False
     trend_sma_period: int = 200
+
+    # Market impact model (Sprint 2)
+    use_impact_model: bool = False
+    impact_coeff: float = 0.1
+    max_impact_bps: float = 50.0

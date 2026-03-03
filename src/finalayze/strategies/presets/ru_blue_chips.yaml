@@ -26,6 +26,8 @@ strategies:
       volume_sma_period: 20
       volume_min_ratio: 0.8
       neutral_reset_bars: 8
+      vol_target_enabled: true
+      vol_target: 0.15
   event_driven:
     enabled: false
     weight: 0.10
