@@ -91,6 +91,7 @@ class TradeResult(BaseModel):
     exit_price: Decimal
     pnl: Decimal
     pnl_pct: Decimal
+    hold_bars: int | None = None
 
 
 class PortfolioState(BaseModel):

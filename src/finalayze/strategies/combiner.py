@@ -155,13 +155,14 @@ class StrategyCombiner:
         symbol: str,
         market_id: str,
         segment_id: str,
+        dominant_strategy_name: str = "combined",
     ) -> Signal:
         """Create the combined Signal from net score and features."""
         direction = SignalDirection.BUY if net > _ZERO else SignalDirection.SELL
         confidence = float(min(abs(net), _MAX_CONFIDENCE))
         strategy_count = len(feature_contributions) // 2
         return Signal(
-            strategy_name="combined",
+            strategy_name=dominant_strategy_name,
             symbol=symbol,
             market_id=market_id,
             segment_id=segment_id,
@@ -224,6 +225,8 @@ class StrategyCombiner:
         total_weight = _ZERO
         total_enabled_weight = _ZERO
         feature_contributions: dict[str, float] = {}
+        dominant_strategy_name = "combined"
+        dominant_contribution = _ZERO
 
         # Hurst exponent routing: compute dynamic weight multipliers
         h, hurst_multipliers = self._compute_hurst_multipliers(candles)
@@ -252,6 +255,9 @@ class StrategyCombiner:
             contribution = score * Decimal(str(signal.confidence)) * weight * hurst_mult
             weighted_score += contribution
             total_weight += weight
+            if abs(contribution) > abs(dominant_contribution):
+                dominant_contribution = contribution
+                dominant_strategy_name = strategy_name
             feature_contributions[f"{strategy_name}_confidence"] = signal.confidence
             feature_contributions[f"{strategy_name}_direction"] = (
                 1.0 if signal.direction == SignalDirection.BUY else -1.0
@@ -303,7 +309,12 @@ class StrategyCombiner:
             return None
 
         return self._build_result(
-            net, feature_contributions, symbol, candles[0].market_id, segment_id
+            net,
+            feature_contributions,
+            symbol,
+            candles[0].market_id,
+            segment_id,
+            dominant_strategy_name=dominant_strategy_name,
         )
 
     def _load_config(self, segment_id: str) -> dict[str, object]:

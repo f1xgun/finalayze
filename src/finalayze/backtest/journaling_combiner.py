@@ -97,6 +97,8 @@ class JournalingStrategyCombiner(StrategyCombiner):
         total_weight = _ZERO
         total_enabled_weight = _ZERO
         feature_contributions: dict[str, float] = {}
+        dominant_strategy_name = "combined"
+        dominant_contribution = _ZERO
 
         # Hurst exponent routing: compute dynamic weight multipliers
         h, hurst_multipliers = self._compute_hurst_multipliers(candles)
@@ -142,6 +144,9 @@ class JournalingStrategyCombiner(StrategyCombiner):
             contribution = score * Decimal(str(signal.confidence)) * weight * hurst_mult
             weighted_score += contribution
             total_weight += weight
+            if abs(contribution) > abs(dominant_contribution):
+                dominant_contribution = contribution
+                dominant_strategy_name = strategy_name
             feature_contributions[f"{strategy_name}_confidence"] = signal.confidence
             feature_contributions[f"{strategy_name}_direction"] = (
                 1.0 if signal.direction == SignalDirection.BUY else -1.0
@@ -180,9 +185,7 @@ class JournalingStrategyCombiner(StrategyCombiner):
             firing = {
                 name: {
                     "direction": (
-                        "BUY"
-                        if feature_contributions.get(f"{name}_direction", 0) > 0
-                        else "SELL"
+                        "BUY" if feature_contributions.get(f"{name}_direction", 0) > 0 else "SELL"
                     ),
                     "confidence": feature_contributions.get(f"{name}_confidence", 0),
                 }
@@ -200,5 +203,10 @@ class JournalingStrategyCombiner(StrategyCombiner):
             return None
 
         return self._build_result(
-            net, feature_contributions, symbol, candles[0].market_id, segment_id
+            net,
+            feature_contributions,
+            symbol,
+            candles[0].market_id,
+            segment_id,
+            dominant_strategy_name=dominant_strategy_name,
         )

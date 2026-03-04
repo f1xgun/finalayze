@@ -272,7 +272,7 @@ class BacktestEngine:
             for sr in stop_results:
                 if sr.filled and sr.fill_price is not None:
                     entry = entry_prices.pop(sr.symbol, sr.fill_price)
-                    entry_bars.pop(sr.symbol, None)
+                    _sl_entry_bar = entry_bars.pop(sr.symbol, i)
                     entry_strategies.pop(sr.symbol, None)
                     chandelier_stops.pop(sr.symbol, None)
                     pnl = (sr.fill_price - entry) * sr.quantity
@@ -289,6 +289,7 @@ class BacktestEngine:
                         exit_price=sr.fill_price,
                         pnl=pnl,
                         pnl_pct=pnl_pct,
+                        hold_bars=i - _sl_entry_bar,
                     )
                     trades.append(trade)
                     self._record_trade(trade)
@@ -309,7 +310,7 @@ class BacktestEngine:
                         order_result = broker.submit_order(order, fill_candle)
                         if order_result.filled and order_result.fill_price is not None:
                             entry = entry_prices.pop(open_sym, order_result.fill_price)
-                            entry_bars.pop(open_sym, None)
+                            _cb_entry_bar = entry_bars.pop(open_sym, i)
                             entry_strategies.pop(open_sym, None)
                             chandelier_stops.pop(open_sym, None)
                             pnl = (order_result.fill_price - entry) * order_result.quantity
@@ -331,6 +332,7 @@ class BacktestEngine:
                                 exit_price=order_result.fill_price,
                                 pnl=pnl,
                                 pnl_pct=pnl_pct,
+                                hold_bars=i - _cb_entry_bar,
                             )
                             trades.append(trade)
                             self._record_trade(trade)
@@ -384,7 +386,7 @@ class BacktestEngine:
                             order_result = broker.submit_order(order, fill_candle)
                             if order_result.filled and order_result.fill_price is not None:
                                 entry = entry_prices.pop(symbol, order_result.fill_price)
-                                entry_bars.pop(symbol, None)
+                                _pt_entry_bar = entry_bars.pop(symbol, i)
                                 entry_strategies.pop(symbol, None)
                                 chandelier_stops.pop(symbol, None)
                                 pnl = (order_result.fill_price - entry) * order_result.quantity
@@ -406,6 +408,7 @@ class BacktestEngine:
                                     exit_price=order_result.fill_price,
                                     pnl=pnl,
                                     pnl_pct=pnl_pct,
+                                    hold_bars=i - _pt_entry_bar,
                                 )
                                 trades.append(trade)
                                 self._record_trade(trade)
@@ -459,6 +462,7 @@ class BacktestEngine:
                                 exit_price=order_result.fill_price,
                                 pnl=pnl,
                                 pnl_pct=pnl_pct,
+                                hold_bars=bars_held,
                             )
                             trades.append(trade)
                             self._record_trade(trade)
@@ -546,6 +550,7 @@ class BacktestEngine:
                         entry_bars=entry_bars,
                         entry_strategies=entry_strategies,
                         chandelier_stops=chandelier_stops,
+                        bar_index=i,
                     )
             elif signal is None:
                 self._journal_skip(
@@ -570,9 +575,11 @@ class BacktestEngine:
         # Close any remaining open positions at the last candle's close price
         if candles:
             last_candle = candles[-1]
+            _last_bar = len(candles) - 1
             for open_symbol, qty in broker.get_positions().items():
                 close_price = last_candle.close
                 entry = entry_prices.pop(open_symbol, close_price)
+                _eod_entry_bar = entry_bars.pop(open_symbol, _last_bar)
                 pnl = (close_price - entry) * qty
                 if self._transaction_costs is not None:
                     pnl -= self._transaction_costs.total_cost(close_price, qty)
@@ -586,6 +593,7 @@ class BacktestEngine:
                     exit_price=close_price,
                     pnl=pnl,
                     pnl_pct=pnl_pct,
+                    hold_bars=_last_bar - _eod_entry_bar,
                 )
                 trades.append(trade)
                 self._record_trade(trade)
@@ -701,7 +709,7 @@ class BacktestEngine:
                     for sr in stop_results:
                         if sr.filled and sr.fill_price is not None:
                             entry = entry_prices.pop(sr.symbol, sr.fill_price)
-                            entry_bars.pop(sr.symbol, None)
+                            _ms_sl_entry_bar = entry_bars.pop(sr.symbol, 0)
                             entry_strategies.pop(sr.symbol, None)
                             chandelier_stops.pop(sr.symbol, None)
                             pnl = (sr.fill_price - entry) * sr.quantity
@@ -719,6 +727,7 @@ class BacktestEngine:
                                 exit_price=sr.fill_price,
                                 pnl=pnl,
                                 pnl_pct=pnl_pct,
+                                hold_bars=bar_counts.get(sr.symbol, 0) - _ms_sl_entry_bar,
                             )
                             trades.append(trade)
                             self._record_trade(trade)
@@ -747,7 +756,7 @@ class BacktestEngine:
                                 order_result = broker.submit_order(order, fill_candle)
                                 if order_result.filled and order_result.fill_price is not None:
                                     entry = entry_prices.pop(sym, order_result.fill_price)
-                                    entry_bars.pop(sym, None)
+                                    _ms_pt_entry_bar = entry_bars.pop(sym, 0)
                                     entry_strategies.pop(sym, None)
                                     chandelier_stops.pop(sym, None)
                                     pnl = (order_result.fill_price - entry) * order_result.quantity
@@ -769,6 +778,7 @@ class BacktestEngine:
                                         exit_price=order_result.fill_price,
                                         pnl=pnl,
                                         pnl_pct=pnl_pct,
+                                        hold_bars=bar_counts.get(sym, 0) - _ms_pt_entry_bar,
                                     )
                                     trades.append(trade)
                                     self._record_trade(trade)
@@ -808,6 +818,7 @@ class BacktestEngine:
                                     exit_price=order_result.fill_price,
                                     pnl=pnl,
                                     pnl_pct=pnl_pct,
+                                    hold_bars=bars_since_entry,
                                 )
                                 trades.append(trade)
                                 self._record_trade(trade)
@@ -869,6 +880,7 @@ class BacktestEngine:
                             entry_bars=entry_bars,
                             entry_strategies=entry_strategies,
                             chandelier_stops=chandelier_stops,
+                            bar_index=bar_counts.get(sym, 0),
                         )
 
             snapshots.append(broker.get_portfolio())
@@ -885,6 +897,7 @@ class BacktestEngine:
                     continue
                 close_price = sym_candles[-1].close
                 entry = entry_prices.pop(sym, close_price)
+                _ms_eod_entry_bar = entry_bars.pop(sym, 0)
                 pnl = (close_price - entry) * qty
                 if self._transaction_costs is not None:
                     pnl -= self._transaction_costs.total_cost(close_price, qty)
@@ -898,6 +911,7 @@ class BacktestEngine:
                     exit_price=close_price,
                     pnl=pnl,
                     pnl_pct=pnl_pct,
+                    hold_bars=bar_counts.get(sym, 0) - _ms_eod_entry_bar,
                 )
                 trades.append(trade)
                 self._record_trade(trade)
@@ -1278,6 +1292,7 @@ class BacktestEngine:
         entry_bars: dict[str, int] | None = None,
         entry_strategies: dict[str, str] | None = None,
         chandelier_stops: dict[str, Decimal] | None = None,
+        bar_index: int = 0,
     ) -> None:
         """Process a SELL signal: sell all held quantity."""
         portfolio = broker.get_portfolio()
@@ -1298,8 +1313,9 @@ class BacktestEngine:
 
         if order_result.filled and order_result.fill_price is not None:
             entry = entry_prices.pop(symbol, order_result.fill_price)
-            if entry_bars is not None:
-                entry_bars.pop(symbol, None)
+            _sell_entry_bar = (
+                entry_bars.pop(symbol, bar_index) if entry_bars is not None else bar_index
+            )
             if entry_strategies is not None:
                 entry_strategies.pop(symbol, None)
             if chandelier_stops is not None:
@@ -1319,6 +1335,7 @@ class BacktestEngine:
                 exit_price=order_result.fill_price,
                 pnl=pnl,
                 pnl_pct=pnl_pct,
+                hold_bars=bar_index - _sell_entry_bar,
             )
             trades.append(trade)
             self._record_trade(trade)

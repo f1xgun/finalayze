@@ -118,7 +118,8 @@ class IterationTracker:
         segment_pnl = self._compute_segment_pnl(trades, segment_trades)
         win_rate_by_seg = self._compute_win_rates(segment_trades)
         profit_factor = self._compute_profit_factor(trades)
-        avg_hold = len(snapshots) / len(trades) if trades else 0.0
+        hold_bars_values = [t.hold_bars for t in trades if t.hold_bars is not None]
+        avg_hold = sum(hold_bars_values) / len(hold_bars_values) if hold_bars_values else 0.0
         calmar = self._compute_calmar(snapshots, wf_result.oos_max_drawdown_pct)
         sortino = self._compute_sortino(snapshots)
         turnover_adj = self._compute_turnover_adjusted(trades, snapshots)

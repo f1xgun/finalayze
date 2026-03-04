@@ -105,7 +105,7 @@ class TestStrategyCombiner:
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
         assert signal is not None
         assert signal.direction == SignalDirection.BUY
-        assert signal.strategy_name == "combined"
+        assert signal.strategy_name == "momentum"
         assert signal.symbol == "AAPL"
         assert signal.segment_id == "us_broad"
 

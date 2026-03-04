@@ -109,12 +109,15 @@ def test_len() -> None:
     assert len(registry) == EXPECTED_COUNT_AFTER_TWO
 
 
-EXPECTED_MOEX_INSTRUMENT_COUNT = 8
-EXPECTED_MOEX_SYMBOLS = {"SBER", "GAZP", "LKOH", "GMKN", "YNDX", "NVTK", "ROSN", "VTBR"}
+EXPECTED_MOEX_INSTRUMENT_COUNT = 16
+EXPECTED_MOEX_SYMBOLS = {
+    "SBER", "SBERP", "GAZP", "LKOH", "GMKN", "YNDX", "NVTK", "ROSN",
+    "VTBR", "TATN", "SNGS", "ALRS", "MGNT", "POLY", "IRAO", "TRNFP",
+}
 
 
 def test_default_registry_includes_moex_instruments() -> None:
-    """Default registry must include all 8 MOEX instruments."""
+    """Default registry must include all 16 MOEX instruments."""
     registry = build_default_registry()
     moex_instruments = registry.list_by_market("moex")
     assert len(moex_instruments) == EXPECTED_MOEX_INSTRUMENT_COUNT

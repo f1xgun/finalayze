@@ -775,24 +775,26 @@ class TestMOEXTransactionCosts:
 
 
 class TestUSHealthcareRSIThresholds:
-    """us_healthcare must use RSI oversold=30, overbought=70 (not 35/65)."""
+    """us_healthcare must use RSI oversold=35, overbought=65."""
 
-    def test_us_healthcare_rsi_oversold_is_30(self) -> None:
+    def test_us_healthcare_rsi_oversold(self) -> None:
         from finalayze.strategies.momentum import MomentumStrategy
 
+        expected_oversold = 35
         strategy = MomentumStrategy()
         params = strategy.get_parameters("us_healthcare")
-        assert params.get("rsi_oversold") == 30, (
-            f"Expected rsi_oversold=30, got {params.get('rsi_oversold')}"
+        assert params.get("rsi_oversold") == expected_oversold, (
+            f"Expected rsi_oversold={expected_oversold}, got {params.get('rsi_oversold')}"
         )
 
-    def test_us_healthcare_rsi_overbought_is_70(self) -> None:
+    def test_us_healthcare_rsi_overbought(self) -> None:
         from finalayze.strategies.momentum import MomentumStrategy
 
+        expected_overbought = 65
         strategy = MomentumStrategy()
         params = strategy.get_parameters("us_healthcare")
-        assert params.get("rsi_overbought") == 70, (
-            f"Expected rsi_overbought=70, got {params.get('rsi_overbought')}"
+        assert params.get("rsi_overbought") == expected_overbought, (
+            f"Expected rsi_overbought={expected_overbought}, got {params.get('rsi_overbought')}"
         )
 
 

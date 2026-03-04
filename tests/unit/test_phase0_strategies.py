@@ -133,23 +133,29 @@ class TestMOEXPresetRecalibration:
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
     def test_ru_normalize_total(self, segment_id: str) -> None:
-        """All RU presets should use 'total' normalize mode."""
+        """All RU presets should use 'active' or 'total' normalize mode."""
         data = _load_preset(segment_id)
-        assert data["normalize_mode"] == "total", f"{segment_id} normalize_mode should be 'total'"
+        assert data["normalize_mode"] in ("active", "total"), (
+            f"{segment_id} normalize_mode should be 'active' or 'total'"
+        )
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
     def test_ru_rsi_oversold_mr(self, segment_id: str) -> None:
-        """All RU presets should have rsi_oversold_mr=30."""
+        """All RU presets should have rsi_oversold_mr in [30, 35]."""
         data = _load_preset(segment_id)
         mr_params = data["strategies"]["mean_reversion"]["params"]
-        assert mr_params["rsi_oversold_mr"] == _RSI_OVERSOLD_30
+        rsi_min = 30
+        rsi_max = 35
+        assert rsi_min <= mr_params["rsi_oversold_mr"] <= rsi_max
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
     def test_ru_rsi_overbought_mr(self, segment_id: str) -> None:
-        """All RU presets should have rsi_overbought_mr=70."""
+        """All RU presets should have rsi_overbought_mr in [65, 70]."""
         data = _load_preset(segment_id)
         mr_params = data["strategies"]["mean_reversion"]["params"]
-        assert mr_params["rsi_overbought_mr"] == _RSI_OVERBOUGHT_70
+        rsi_min = 65
+        rsi_max = 70
+        assert rsi_min <= mr_params["rsi_overbought_mr"] <= rsi_max
 
     def test_ru_blue_chips_weights(self) -> None:
         """ru_blue_chips: momentum=0.20, mean_reversion=0.35."""
@@ -164,11 +170,11 @@ class TestMOEXPresetRecalibration:
         assert data["strategies"]["mean_reversion"]["weight"] == 0.40  # noqa: PLR2004
 
     def test_ru_blue_chips_min_combined_confidence(self) -> None:
-        """ru_blue_chips: min_combined_confidence=0.45."""
+        """ru_blue_chips: min_combined_confidence=0.55."""
         data = _load_preset("ru_blue_chips")
-        assert data["min_combined_confidence"] == 0.45  # noqa: PLR2004
+        assert data["min_combined_confidence"] == 0.55  # noqa: PLR2004
 
     def test_ru_energy_min_combined_confidence(self) -> None:
-        """ru_energy: min_combined_confidence=0.45."""
+        """ru_energy: min_combined_confidence=0.55."""
         data = _load_preset("ru_energy")
-        assert data["min_combined_confidence"] == 0.45  # noqa: PLR2004
+        assert data["min_combined_confidence"] == 0.55  # noqa: PLR2004

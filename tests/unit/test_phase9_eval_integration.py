@@ -143,9 +143,12 @@ class TestMLEnsemblePresets:
     """Test that ml_ensemble is enabled in all YAML presets."""
 
     def test_ml_ensemble_enabled_in_all_presets(self) -> None:
-        """All 8 YAML presets should have ml_ensemble.enabled = true."""
+        """All YAML presets should have ml_ensemble.enabled = true."""
+        expected_preset_count = 9
         preset_files = sorted(_PRESETS_DIR.glob("*.yaml"))
-        assert len(preset_files) == 8, f"Expected 8 presets, found {len(preset_files)}"
+        assert len(preset_files) == expected_preset_count, (
+            f"Expected {expected_preset_count} presets, found {len(preset_files)}"
+        )
 
         for preset_path in preset_files:
             with preset_path.open() as f:
