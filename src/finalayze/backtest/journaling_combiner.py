@@ -17,6 +17,7 @@ from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.combiner import (
     _BUY_SCORE,
     _SELL_SCORE,
+    _TOM_BUY_BOOST,
     _ZERO,
     StrategyCombiner,
 )
@@ -164,8 +165,6 @@ class JournalingStrategyCombiner(StrategyCombiner):
 
         # Turn-of-month effect: boost BUY confidence during the window
         if self._is_turn_of_month(candles[-1].timestamp) and net > _ZERO:
-            from finalayze.strategies.combiner import _TOM_BUY_BOOST  # noqa: PLC0415
-
             net += _TOM_BUY_BOOST
             feature_contributions["turn_of_month"] = 1.0
         else:

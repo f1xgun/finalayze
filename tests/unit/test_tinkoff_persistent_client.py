@@ -50,34 +50,32 @@ class TestTinkoffBrokerPersistentClient:
             assert broker._client is None
 
 
-class TestTinkoffFetcherPersistentClient:
-    """Verify that TinkoffFetcher reuses a single client instance."""
+class TestTinkoffFetcherClientCreation:
+    """Verify TinkoffFetcher _make_client creates correct client types."""
 
-    def test_get_client_returns_same_instance(self) -> None:
-        """Two calls to _get_client should return the same object."""
+    def test_make_client_sandbox_uses_sandbox_client(self) -> None:
+        """sandbox=True should create AsyncSandboxClient."""
         fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
         with patch("finalayze.data.fetchers.tinkoff_data.AsyncSandboxClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
-            client1 = fetcher._get_client()
-            client2 = fetcher._get_client()
+            client = fetcher._make_client()
+            assert client is mock_client
 
-            assert client1 is client2
-            mock_cls.assert_called_once_with(_TEST_TOKEN)
-
-    def test_close_clears_client(self) -> None:
-        """close() should set _client to None."""
+    def test_make_client_creates_fresh_instance_each_call(self) -> None:
+        """Each _make_client call should create a new instance (no caching)."""
         fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
         with patch("finalayze.data.fetchers.tinkoff_data.AsyncSandboxClient") as mock_cls:
-            mock_client = MagicMock()
-            mock_cls.return_value = mock_client
+            client1 = fetcher._make_client()
+            client2 = fetcher._make_client()
 
-            fetcher._get_client()
-            assert fetcher._client is not None
+            assert mock_cls.call_count == 2  # noqa: PLR2004
 
-            fetcher.close()
-            assert fetcher._client is None
+    def test_close_is_noop(self) -> None:
+        """close() is a no-op for TinkoffFetcher (fresh client per call)."""
+        fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
+        fetcher.close()  # should not raise
 
     def test_live_mode_uses_async_client(self) -> None:
         """sandbox=False should use AsyncClient, not AsyncSandboxClient."""
@@ -86,6 +84,5 @@ class TestTinkoffFetcherPersistentClient:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
-            client = fetcher._get_client()
+            client = fetcher._make_client()
             assert client is mock_client
-            mock_cls.assert_called_once_with(_TEST_TOKEN)

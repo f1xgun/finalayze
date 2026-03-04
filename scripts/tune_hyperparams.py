@@ -39,7 +39,7 @@ _DEFAULT_OUTPUT_DIR = "results/tuned_params"
 _LOOKBACK_DAYS = 1825
 _MOEX_LOOKBACK_DAYS = 730
 _N_FOLDS = 5
-_PURGE_WINDOW = 60
+_PURGE_WINDOW = 130  # Must exceed longest feature window (126-bar OU)
 _MIN_UNIQUE_CLASSES = 2
 
 _SEGMENT_SYMBOLS: dict[str, list[str]] = {
@@ -206,7 +206,8 @@ def _tune_segment(
             params = _lightgbm_search_space(trial)
         return _temporal_cv_brier(model_type, params, features, labels)
 
-    study = optuna.create_study(direction="minimize")
+    sampler = optuna.samplers.TPESampler(seed=42)
+    study = optuna.create_study(direction="minimize", sampler=sampler)
     study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
     best = study.best_params

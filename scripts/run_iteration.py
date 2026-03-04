@@ -60,7 +60,13 @@ from finalayze.data.fetchers.caching import CachingFetcher
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
 from finalayze.markets.instruments import build_default_registry
 from finalayze.risk.kelly import RollingKelly
-from finalayze.risk.regime import HMMRegimeProvider, VIXRegimeProvider
+from finalayze.risk.regime import (
+    HMMRegimeProvider,
+    StaticRegimeProvider,
+    VIXRegimeProvider,
+    compute_moex_regime_state,
+    compute_realized_vol,
+)
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.cbr_calendar import CBRCalendar, CBRRateEvent
 from finalayze.strategies.cbr_strategy_wrapper import CBRStrategyWrapper
@@ -323,6 +329,17 @@ def _setup_ml_strategy(segment: str, models_dir: Path) -> MLStrategy | None:
     from finalayze.ml.registry import MLModelRegistry  # noqa: PLC0415
 
     ensemble = EnsembleModel(models=models, lstm_model=lstm_model)
+
+    # Load calibrator if available (trained by train_models.py)
+    calibrator_path = segment_dir / "calibrator.pkl"
+    if calibrator_path.exists():
+        import pickle  # noqa: PLC0415
+
+        with calibrator_path.open("rb") as f:
+            ensemble.calibrator = pickle.load(f)  # noqa: S301
+    else:
+        print(f"    [{segment}] No calibrator found, using raw ensemble probabilities")
+
     registry = MLModelRegistry()
     registry.register(segment, ensemble)
     return MLStrategy(registry)
@@ -498,12 +515,12 @@ def _build_strategies(
     return strategies
 
 
-def _build_regime_provider(
+def _build_regime_provider(  # noqa: PLR0911
     regime_type: str,
     segment: str,
     start: datetime,
     end: datetime,
-) -> VIXRegimeProvider | HMMRegimeProvider | None:
+) -> VIXRegimeProvider | HMMRegimeProvider | StaticRegimeProvider | None:
     """Build a RegimeProvider based on CLI flag and segment type."""
     if regime_type == "none":
         return None
@@ -511,8 +528,19 @@ def _build_regime_provider(
     if regime_type == "hmm":
         return HMMRegimeProvider()
 
-    # regime_type == "vix" — only for US segments
+    # regime_type == "vix"
     if segment.startswith("ru_"):
+        # For MOEX segments, compute regime from IMOEX realized volatility
+        try:
+            moex_fetcher = CachingFetcher(_make_moex_fetcher())
+            imoex_candles = moex_fetcher.fetch_candles("IMOEX", start, end)
+            if imoex_candles:
+                vol = compute_realized_vol(imoex_candles)
+                regime_state = compute_moex_regime_state(vol)
+                print(f"    MOEX regime: {regime_state.regime.value} (vol={float(vol):.2%})")
+                return StaticRegimeProvider(regime_state)
+        except Exception:
+            print("    Warning: failed to fetch IMOEX data, regime provider disabled")
         return None
 
     vix_fetcher = CachingFetcher(YFinanceFetcher(market_id="us"))
@@ -546,7 +574,7 @@ def _run_symbol(
     benchmark_candles: list[Any] | None = None,
     use_evt_sizing: bool = False,
     use_copula_scaling: bool = False,
-    regime_provider: VIXRegimeProvider | HMMRegimeProvider | None = None,
+    regime_provider: VIXRegimeProvider | HMMRegimeProvider | StaticRegimeProvider | None = None,
     stop_loss_mode: str = "chandelier",
 ) -> tuple[list[TradeResult], list[PortfolioState], dict[str, Any] | None]:
     """Run backtest for a single symbol. Returns (trades, snapshots, summary)."""

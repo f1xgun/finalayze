@@ -26,8 +26,29 @@ class LightGBMModel(BaseMLModel):
     Returns raw probabilities; calibration is handled at the ensemble level.
     """
 
-    def __init__(self, segment_id: str) -> None:
+    def __init__(
+        self,
+        segment_id: str,
+        n_estimators: int = 200,
+        max_depth: int = 5,
+        learning_rate: float = 0.05,
+        num_leaves: int = 31,
+        subsample: float = 0.8,
+        colsample_bytree: float = 0.8,
+        min_child_samples: int = 20,
+        reg_alpha: float = 0.1,
+        reg_lambda: float = 1.0,
+    ) -> None:
         self.segment_id = segment_id
+        self._n_estimators = n_estimators
+        self._max_depth = max_depth
+        self._learning_rate = learning_rate
+        self._num_leaves = num_leaves
+        self._subsample = subsample
+        self._colsample_bytree = colsample_bytree
+        self._min_child_samples = min_child_samples
+        self._reg_alpha = reg_alpha
+        self._reg_lambda = reg_lambda
         self._model: lgb.LGBMClassifier | None = None
         self._feature_names: list[str] | None = None
 
@@ -70,14 +91,16 @@ class LightGBMModel(BaseMLModel):
         y_arr = np.array(y, dtype=int)
 
         self._model = lgb.LGBMClassifier(
-            n_estimators=200,
-            max_depth=5,
-            learning_rate=0.05,
+            n_estimators=self._n_estimators,
+            max_depth=self._max_depth,
+            learning_rate=self._learning_rate,
+            num_leaves=self._num_leaves,
             is_unbalance=True,
-            reg_alpha=0.1,
-            reg_lambda=1.0,
-            subsample=0.8,
-            colsample_bytree=0.8,
+            reg_alpha=self._reg_alpha,
+            reg_lambda=self._reg_lambda,
+            subsample=self._subsample,
+            colsample_bytree=self._colsample_bytree,
+            min_child_samples=self._min_child_samples,
             verbosity=-1,
         )
         self._model.fit(x_arr, y_arr, sample_weight=sample_weight)

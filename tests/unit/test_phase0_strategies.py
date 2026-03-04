@@ -175,6 +175,6 @@ class TestMOEXPresetRecalibration:
         assert data["min_combined_confidence"] == 0.55  # noqa: PLR2004
 
     def test_ru_energy_min_combined_confidence(self) -> None:
-        """ru_energy: min_combined_confidence=0.55."""
+        """ru_energy: min_combined_confidence=0.40."""
         data = _load_preset("ru_energy")
-        assert data["min_combined_confidence"] == 0.55  # noqa: PLR2004
+        assert data["min_combined_confidence"] == 0.40  # noqa: PLR2004

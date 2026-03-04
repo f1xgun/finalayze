@@ -309,7 +309,7 @@ def _evaluate_model(
     return f"acc={acc:.3f} brier={brier:.3f} logloss={ll:.3f}"
 
 
-def _train_and_evaluate_models(
+def _train_and_evaluate_models(  # noqa: PLR0912
     segment_id: str,
     segment_dir: Path,
     train_features: list[dict[str, float]],
@@ -329,8 +329,22 @@ def _train_and_evaluate_models(
         print(f"[{segment_id}] Using tuned LightGBM params: {lgbm_tuned}")
 
     default_depth = _get_xgboost_max_depth(segment_id)
-    max_depth = xgb_tuned.get("max_depth", default_depth) if xgb_tuned else default_depth
-    xgb = XGBoostModel(segment_id=segment_id, max_depth=max_depth)
+    xgb_kwargs: dict[str, int | float] = {"max_depth": default_depth}
+    if xgb_tuned:
+        xgb_kwargs["max_depth"] = xgb_tuned.get("max_depth", default_depth)
+        for key in (
+            "n_estimators",
+            "learning_rate",
+            "subsample",
+            "colsample_bytree",
+            "min_child_weight",
+            "gamma",
+            "reg_alpha",
+            "reg_lambda",
+        ):
+            if key in xgb_tuned:
+                xgb_kwargs[key] = xgb_tuned[key]
+    xgb = XGBoostModel(segment_id=segment_id, **xgb_kwargs)  # type: ignore[arg-type]
     xgb.fit(train_features, train_labels)
     xgb.save(segment_dir / "xgb.pkl")
 
@@ -349,7 +363,27 @@ def _train_and_evaluate_models(
     if test_features:
         results["XGB"] = _evaluate_model(xgb, test_features, test_labels)
 
-    lgbm = LightGBMModel(segment_id=segment_id)
+    lgbm_kwargs: dict[str, int | float] = {}
+    if lgbm_tuned:
+        for key in (
+            "n_estimators",
+            "max_depth",
+            "learning_rate",
+            "num_leaves",
+            "subsample",
+            "colsample_bytree",
+            "min_child_samples",
+            "reg_alpha",
+            "reg_lambda",
+        ):
+            if key in lgbm_tuned:
+                lgbm_kwargs[key] = lgbm_tuned[key]
+        # LightGBM uses feature_fraction/bagging_fraction in Optuna search space
+        if "feature_fraction" in lgbm_tuned:
+            lgbm_kwargs["colsample_bytree"] = lgbm_tuned["feature_fraction"]
+        if "bagging_fraction" in lgbm_tuned:
+            lgbm_kwargs["subsample"] = lgbm_tuned["bagging_fraction"]
+    lgbm = LightGBMModel(segment_id=segment_id, **lgbm_kwargs)  # type: ignore[arg-type]
     lgbm.fit(train_features, train_labels)
     lgbm.save(segment_dir / "lgbm.pkl")
     if test_features:

@@ -26,9 +26,29 @@ class XGBoostModel(BaseMLModel):
     Returns raw probabilities; calibration is handled at the ensemble level.
     """
 
-    def __init__(self, segment_id: str, max_depth: int = 5) -> None:
+    def __init__(
+        self,
+        segment_id: str,
+        max_depth: int = 5,
+        n_estimators: int = 200,
+        learning_rate: float = 0.05,
+        subsample: float = 0.8,
+        colsample_bytree: float = 0.8,
+        min_child_weight: int = 1,
+        gamma: float = 0.0,
+        reg_alpha: float = 0.1,
+        reg_lambda: float = 1.0,
+    ) -> None:
         self.segment_id = segment_id
         self._max_depth = max_depth
+        self._n_estimators = n_estimators
+        self._learning_rate = learning_rate
+        self._subsample = subsample
+        self._colsample_bytree = colsample_bytree
+        self._min_child_weight = min_child_weight
+        self._gamma = gamma
+        self._reg_alpha = reg_alpha
+        self._reg_lambda = reg_lambda
         self._model: xgb.XGBClassifier | None = None
         self._feature_names: list[str] | None = None
 
@@ -75,14 +95,16 @@ class XGBoostModel(BaseMLModel):
         spw = n_neg / n_pos if n_pos > 0 else 1.0
 
         self._model = xgb.XGBClassifier(
-            n_estimators=200,
+            n_estimators=self._n_estimators,
             max_depth=self._max_depth,
-            learning_rate=0.05,
+            learning_rate=self._learning_rate,
             scale_pos_weight=spw,
-            reg_alpha=0.1,
-            reg_lambda=1.0,
-            subsample=0.8,
-            colsample_bytree=0.8,
+            reg_alpha=self._reg_alpha,
+            reg_lambda=self._reg_lambda,
+            subsample=self._subsample,
+            colsample_bytree=self._colsample_bytree,
+            min_child_weight=self._min_child_weight,
+            gamma=self._gamma,
             eval_metric="logloss",
             verbosity=0,
         )

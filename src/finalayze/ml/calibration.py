@@ -1,10 +1,8 @@
 """Ensemble-level probability calibration (Layer 3).
 
 Provides a single Platt scaler for calibrating ensemble output probabilities.
-This replaces per-model calibrators to avoid double-calibration.
-
-NOTE: For now, per-model calibrators in xgboost_model.py and lightgbm_model.py
-remain as-is. This module is created for future consolidation.
+Per-model calibrators have been removed; calibration is now applied only at the
+ensemble level to avoid double-calibration.
 
 See docs/plans/2026-03-02-enhanced-improvement-plan.md, task B.5.
 """

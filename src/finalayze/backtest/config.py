@@ -16,11 +16,16 @@ if TYPE_CHECKING:
 # Default per-strategy max holding periods (bars).
 DEFAULT_STRATEGY_HOLD_BARS: dict[str, int] = {
     "momentum": 40,
+    "dual_momentum": 40,
     "mean_reversion": 20,
+    "ou_mean_reversion": 25,
     "pairs": 15,
     "event_driven": 63,
     "rsi2_connors": 10,
     "ml_ensemble": 20,
+    "dividend_gap": 10,
+    "pead": 63,
+    "cbr_calendar": 30,
 }
 
 _DEFAULT_HOLD_BARS_FALLBACK = 30

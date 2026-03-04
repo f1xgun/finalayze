@@ -1,6 +1,6 @@
 segment_id: ru_energy
 normalize_mode: "active"
-min_combined_confidence: 0.55
+min_combined_confidence: 0.40
 strategies:
   momentum:
     enabled: false

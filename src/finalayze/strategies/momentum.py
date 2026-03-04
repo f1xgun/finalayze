@@ -396,7 +396,9 @@ class MomentumStrategy(BaseStrategy):
         # Histogram rising: improving bar-over-bar (momentum building)
         hist_rising = indicators.current_hist > indicators.prev_hist and indicators.current_hist > 0
         # Histogram falling: declining bar-over-bar (momentum fading)
-        hist_falling = indicators.current_hist < indicators.prev_hist
+        hist_falling = (
+            indicators.current_hist < indicators.prev_hist and indicators.current_hist < 0
+        )
 
         # BUY: RSI recently oversold + (histogram rising OR bullish MACD crossover)
         buy_macd_ok = hist_rising or indicators.macd_crossover_buy

@@ -226,6 +226,14 @@ class SimulatedBroker(BrokerBase):
 
         return results
 
+    def update_stop_loss(self, symbol: str, new_stop: Decimal) -> None:
+        """Update the current stop-loss price for a symbol.
+
+        Only updates if the symbol has an existing stop state.
+        """
+        if symbol in self._stop_states:
+            self._stop_states[symbol].current_stop = new_stop
+
     def get_entry_atr(self, symbol: str) -> Decimal | None:
         """Return the ATR value at entry for a symbol, or None if no stop state."""
         state = self._stop_states.get(symbol)

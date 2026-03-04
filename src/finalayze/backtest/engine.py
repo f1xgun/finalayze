@@ -264,8 +264,7 @@ class BacktestEngine:
                     new_stop = max(chandelier_stops[symbol], candidate)
                     chandelier_stops[symbol] = new_stop
                     # Update broker stop state to match
-                    if symbol in broker._stop_states:
-                        broker._stop_states[symbol].current_stop = new_stop
+                    broker.update_stop_loss(symbol, new_stop)
 
             # (c) Check stop-losses after prices are updated
             stop_results = broker.check_stop_losses(candle)
@@ -1259,15 +1258,23 @@ class BacktestEngine:
             )
 
             if self._stop_loss_mode == "chandelier":
-                # Chandelier mode: compute initial stop from highest_high - mult * ATR
+                # Chandelier mode: use ATR-based stop as initial (guaranteed below
+                # entry price), then let chandelier ratchet take over on subsequent bars.
                 segment_mult = get_chandelier_multiplier(segment_id)
-                ch_stop = compute_chandelier_stop(history, atr_period=22, multiplier=segment_mult)
-                initial_stop = ch_stop if ch_stop is not None else stop_price
-                if chandelier_stops is not None:
-                    chandelier_stops[symbol] = initial_stop
-                # Use a fixed stop in the broker (chandelier ratchet is managed
-                # externally in the main loop via chandelier_stops dict)
-                broker.set_stop_loss(symbol, initial_stop)
+                initial_stop = compute_atr_stop_loss(
+                    entry_price=order_result.fill_price,
+                    candles=history,
+                    atr_period=22,
+                    atr_multiplier=Decimal(str(segment_mult)),
+                )
+                if initial_stop is not None:
+                    if chandelier_stops is not None:
+                        chandelier_stops[symbol] = initial_stop
+                    broker.set_stop_loss(symbol, initial_stop)
+                else:
+                    if chandelier_stops is not None:
+                        chandelier_stops[symbol] = stop_price
+                    broker.set_stop_loss(symbol, stop_price)
             else:
                 # Default trailing stop mode
                 broker.set_trailing_stop(
