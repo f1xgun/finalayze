@@ -29,7 +29,7 @@ logger = structlog.get_logger(__name__)
 
 # Confidence scaling constants
 _CONFIDENCE_BASE = 0.45
-_CONFIDENCE_SCALE = 0.04  # per 1% gap above threshold
+_CONFIDENCE_SCALE = 0.06  # per 1% gap above threshold
 _MAX_CONFIDENCE = 0.90
 
 
@@ -102,7 +102,7 @@ class DividendGapStrategy(BaseStrategy):
         """Clear all state between backtest runs."""
         self._active_gaps.clear()
 
-    def generate_signal(  # noqa: PLR0911
+    def generate_signal(  # noqa: PLR0911, PLR0912
         self,
         symbol: str,
         candles: list[Candle],

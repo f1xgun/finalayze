@@ -65,10 +65,45 @@ Layer 6: API / Dashboard        api/, dashboard/
 
 **Module agents (implementers):** `core-agent`, `config-agent`, `data-agent`, `markets-agent`, `analysis-agent`, `ml-agent`, `strategies-agent`, `risk-agent`, `execution-agent`, `backtest-agent`, `api-agent`, `infra-agent`
 
-## Current Phase
+## Current Status (2026-03-05)
 
-**Phase 1 -- Foundation, US Market & Sandbox** (not started).
-See [docs/plans/PHASE_1.md](docs/plans/PHASE_1.md).
+**Sprint state:** Week 2 structural fixes complete. 1995 tests passing.
+
+### Domain Health
+
+| Domain | Grade | Key Issue |
+|---|---|---|
+| **Strategies** | C | Combiner destroys alpha — isolated Sharpe +0.14 → combined -0.0003. `event_driven`, `ml_ensemble`, `pead` disabled (0 signals). |
+| **Data** | B | US (yfinance) works. MOEX requires `FINALAYZE_TINKOFF_TOKEN`; yfinance .ME tickers return 0 data. Dividend pipeline wired (TinkoffFetcher + static YAML fallback). |
+| **Risk** | B- | Position sizing currency-aware (RUB 5000 / USD 500). Half-Kelly + 11-check pre-trade pipeline. Circuit breakers functional. |
+| **ML** | D | Models untrained, `ml_ensemble` disabled in all presets. Feature engineering + training pipeline exist but unused. |
+| **Backtest** | B | Engine works, isolation test script functional, iteration tracking works. Walk-forward config (3yr train + 1yr test) exceeds 2yr data range. |
+| **Execution** | B+ | Alpaca + Tinkoff brokers wired. RetryPolicy with backoff. Simulated broker for backtests. |
+| **Analysis** | D | LLM client + NewsAnalyzer exist but `event_driven` disabled (no real-time news feed). |
+| **API/Dashboard** | B+ | 20+ REST endpoints, Prometheus metrics, Streamlit dashboard. All operational. |
+
+### Critical Blocker: Strategy Combiner
+
+The `StrategyCombiner` with "firing" normalization is the #1 source of value destruction:
+- Opposing strategies (momentum vs mean_reversion) cancel signals
+- Dead strategies waste weight budget even when disabled (now fixed)
+- `min_combined_confidence` was too high, filtering 90% of signals (now 0.38)
+- **50+ iterations, 100% REJECT rate** — no iteration has passed quality gates
+
+### Isolated Strategy Performance (us_tech, 2022-2025)
+
+| Strategy | Sharpe | PF | Trades | Status |
+|---|---|---|---|---|
+| dual_momentum | +0.137 | 1.29 | 414 | Enabled (us_tech) |
+| mean_reversion | +0.034 | 1.98 | 27 | Enabled |
+| rsi2_connors | +0.020 | 0.94 | 73 | Enabled |
+| momentum | -0.014 | 1.46 | 27 | Enabled (reduced weight) |
+| ou_mean_reversion | -0.038 | 0.91 | 67 | Disabled (us_tech) |
+
+### MOEX Data Requirement
+
+All MOEX data (candles, dividends, instruments) **must** use T-Bank (Tinkoff Invest) gRPC API.
+yfinance cannot fetch MOEX tickers. Set `FINALAYZE_TINKOFF_TOKEN` env var.
 
 ## Quick Commands
 
@@ -77,4 +112,6 @@ uv sync                    # install dependencies
 uv run pytest              # run tests
 uv run ruff check .        # lint
 uv run mypy src/           # type-check
+uv run python scripts/run_iteration.py --name <name> --description <desc> --segments us_tech,us_broad
+uv run python scripts/run_strategy_isolation.py --segment us_tech --all
 ```

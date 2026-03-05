@@ -73,12 +73,11 @@ class TinkoffFetcher(BaseFetcher):
         self._registry = registry
         self._sandbox = sandbox
         self._rate_limiter = rate_limiter
+
     def _make_client(self) -> AsyncClient | AsyncSandboxClient:
         """Create a new async client instance."""
         if self._sandbox:
-            return AsyncSandboxClient(
-                self._token, target=_TBANK_GRPC_SANDBOX_TARGET
-            )
+            return AsyncSandboxClient(self._token, target=_TBANK_GRPC_SANDBOX_TARGET)
         return AsyncClient(self._token, target=_TBANK_GRPC_TARGET)
 
     def close(self) -> None:
@@ -150,6 +149,71 @@ class TinkoffFetcher(BaseFetcher):
         Quotation.nano: fractional part in billionths (1/1_000_000_000)
         """
         return Decimal(q.units) + Decimal(q.nano) / _NANO_DIVISOR
+
+    def fetch_dividends(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[dict[str, Any]]:
+        """Fetch dividend events for a MOEX symbol.
+
+        Returns a list of dicts with keys: ex_date (datetime), amount (float).
+        ``ex_date`` is ``last_buy_date`` from Tinkoff (last day to buy for dividend).
+        """
+        figi = self._symbol_to_figi(symbol)
+
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+
+        try:
+            raw_dividends = asyncio.run(self._fetch_dividends_async(figi, start, end))
+        except InstrumentNotFoundError:
+            raise
+        except Exception as exc:
+            msg = f"Tinkoff gRPC error fetching dividends for {symbol}: {exc}"
+            raise DataFetchError(msg) from exc
+
+        return [self._map_dividend(d) for d in raw_dividends]
+
+    async def _fetch_dividends_async(
+        self,
+        figi: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[Any]:
+        """Async call to Tinkoff SDK get_dividends."""
+        client = self._make_client()
+        async with client as services:
+            response = await services.instruments.get_dividends(
+                figi=figi,
+                from_=start,
+                to=end,
+            )
+            return list(response.dividends)
+
+    @staticmethod
+    def _next_business_day(dt: datetime) -> datetime:
+        """Advance a datetime to the next business day (skip weekends)."""
+        from datetime import timedelta  # noqa: PLC0415
+
+        one_day = timedelta(days=1)
+        nxt = dt + one_day
+        # Saturday=5, Sunday=6
+        while nxt.weekday() >= 5:  # noqa: PLR2004
+            nxt += one_day
+        return nxt
+
+    def _map_dividend(self, d: Any) -> dict[str, Any]:
+        """Map a Tinkoff Dividend to a plain dict.
+
+        Tinkoff returns ``last_buy_date`` — the last day to buy for dividend.
+        The actual ex-dividend gap occurs on the **next trading day**, so we
+        shift forward by one business day to align with DividendGapStrategy.
+        """
+        amount = self._quotation_to_decimal(d.dividend_net)
+        ex_date = self._next_business_day(d.last_buy_date)
+        return {"ex_date": ex_date, "amount": float(amount)}
 
     def _map_candle(self, raw: Any, symbol: str, timeframe: str = "1d") -> Candle:
         """Map a Tinkoff HistoricCandle to our Candle schema."""

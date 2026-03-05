@@ -34,7 +34,9 @@ class TestTinkoffBrokerPersistentClient:
             client2 = broker._get_client()
 
             assert client1 is client2
-            mock_cls.assert_called_once_with(_TEST_TOKEN)
+            mock_cls.assert_called_once_with(
+                _TEST_TOKEN, target="sandbox-invest-public-api.tbank.ru:443"
+            )
 
     def test_close_clears_client(self) -> None:
         """close() should set _client to None."""

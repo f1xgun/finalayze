@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +11,11 @@ from t_tech.invest import OrderDirection
 
 from finalayze.core.exceptions import BrokerError, InstrumentNotFoundError
 from finalayze.execution.broker_base import OrderRequest
-from finalayze.execution.tinkoff_broker import TinkoffBroker
+from finalayze.execution.tinkoff_broker import (
+    _TBANK_GRPC_SANDBOX_TARGET,
+    _TBANK_GRPC_TARGET,
+    TinkoffBroker,
+)
 from finalayze.markets.instruments import DEFAULT_MOEX_INSTRUMENTS, Instrument, InstrumentRegistry
 
 SBER_FIGI = "BBG004730N88"
@@ -282,3 +287,52 @@ class TestTinkoffBrokerCancelOrder:
             broker = _make_broker()
             with pytest.raises(BrokerError, match="gRPC cancel failed"):
                 broker.cancel_order("order-xyz")
+
+
+_EXPECTED_LIVE_TARGET = "invest-public-api.tbank.ru:443"
+_EXPECTED_SANDBOX_TARGET = "sandbox-invest-public-api.tbank.ru:443"
+
+
+class TestTinkoffBrokerGrpcTarget:
+    """Verify that TinkoffBroker passes the correct gRPC target= to SDK clients."""
+
+    def test_target_constants_defined(self) -> None:
+        """Module-level constants for gRPC targets must exist and be correct."""
+        assert _TBANK_GRPC_TARGET == _EXPECTED_LIVE_TARGET
+        assert _TBANK_GRPC_SANDBOX_TARGET == _EXPECTED_SANDBOX_TARGET
+
+    def test_sandbox_client_receives_target(self) -> None:
+        """In sandbox mode, AsyncSandboxClient must be constructed with target=."""
+        mock_client = MagicMock()
+        with patch(
+            "finalayze.execution.tinkoff_broker.AsyncSandboxClient",
+            return_value=mock_client,
+        ) as mock_cls:
+            broker = _make_broker(sandbox=True)
+            client = broker._get_client()  # noqa: SLF001
+
+        mock_cls.assert_called_once_with(
+            "fake_token",
+            target=_EXPECTED_SANDBOX_TARGET,  # noqa: S106
+        )
+        assert client is mock_client
+
+    def test_live_client_receives_target(self) -> None:
+        """In live mode, AsyncClient must be constructed with target=."""
+        mock_client = MagicMock()
+        with patch(
+            "finalayze.execution.tinkoff_broker.AsyncClient",
+            return_value=mock_client,
+        ) as mock_cls:
+            broker = _make_broker(sandbox=False)
+            client = broker._get_client()  # noqa: SLF001
+
+        mock_cls.assert_called_once_with(
+            "fake_token",
+            target=_EXPECTED_LIVE_TARGET,  # noqa: S106
+        )
+        assert client is mock_client
+
+    def test_grpc_dns_resolver_env_set(self) -> None:
+        """GRPC_DNS_RESOLVER env var must be set to 'native' after module import."""
+        assert os.environ.get("GRPC_DNS_RESOLVER") == "native"

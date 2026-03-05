@@ -1,6 +1,6 @@
 segment_id: us_finance
 normalize_mode: "firing"
-min_combined_confidence: 0.60
+min_combined_confidence: 0.38
 strategies:
   mean_reversion:
     enabled: true
@@ -39,8 +39,8 @@ strategies:
       vol_target_enabled: true
       vol_target: 0.12
   event_driven:
-    enabled: true
-    weight: 0.30
+    enabled: false
+    weight: 0.00
     params:
       min_sentiment: 0.5
       event_types: [interest_rate, earnings, regulatory, macro]
@@ -55,7 +55,7 @@ strategies:
       vol_target: 0.12
   ou_mean_reversion:
     enabled: true
-    weight: 0.07
+    weight: 0.20
     params:
       ou_window: 126
       entry_threshold: 2.0
@@ -64,7 +64,7 @@ strategies:
       min_confidence: 0.50
   rsi2_connors:
     enabled: true
-    weight: 0.10
+    weight: 0.15
     params:
       rsi_period: 2
       rsi_buy_threshold: 5.0
@@ -73,13 +73,13 @@ strategies:
       sma_exit_period: 5
       min_confidence: 0.45
   ml_ensemble:
-    enabled: true
-    weight: 0.35
+    enabled: false
+    weight: 0.00
     params:
       threshold: 0.10
       min_confidence: 0.30
   pead:
     enabled: false
-    weight: 0.06
+    weight: 0.00
     params:
       min_confidence: 0.55

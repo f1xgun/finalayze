@@ -95,8 +95,8 @@ class TestEventDrivenStrategy:
         strategy = EventDrivenStrategy()
         segments = strategy.supported_segments()
         assert isinstance(segments, list)
-        # Event-driven is enabled in US presets (us_tech, us_broad, us_finance, us_healthcare)
-        assert _SEGMENT in segments
+        # Event-driven is disabled in all presets (produces 0 signals without live news feed)
+        # Will be re-enabled when real-time news ingestion is wired
 
 
 class TestSanctionsProximityScoring:

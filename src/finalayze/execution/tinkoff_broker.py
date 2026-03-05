@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import math
+import os
 import threading
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -31,8 +32,13 @@ if TYPE_CHECKING:
     from finalayze.execution.retry import RetryPolicy
     from finalayze.markets.instruments import InstrumentRegistry
 
+# gRPC C-ares DNS resolver may fail on some systems; use native resolver.
+os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
+
 _MOEX_MARKET_ID = "moex"
 _NANO_DIVISOR = Decimal(1_000_000_000)
+_TBANK_GRPC_TARGET = "invest-public-api.tbank.ru:443"
+_TBANK_GRPC_SANDBOX_TARGET = "sandbox-invest-public-api.tbank.ru:443"
 
 
 class TinkoffBroker(BrokerBase):
@@ -64,8 +70,12 @@ class TinkoffBroker(BrokerBase):
         if self._client is None:
             with self._client_lock:
                 if self._client is None:  # double-check
-                    cls = AsyncSandboxClient if self._sandbox else AsyncClient
-                    self._client = cls(self._token)
+                    if self._sandbox:
+                        self._client = AsyncSandboxClient(
+                            self._token, target=_TBANK_GRPC_SANDBOX_TARGET
+                        )
+                    else:
+                        self._client = AsyncClient(self._token, target=_TBANK_GRPC_TARGET)
         return self._client
 
     def close(self) -> None:

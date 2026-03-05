@@ -7,6 +7,7 @@ re-downloading on repeated backtest runs.
 from __future__ import annotations
 
 import json
+from datetime import datetime as _datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -68,6 +69,38 @@ class CachingFetcher(BaseFetcher):
             path.write_text(json.dumps([c.model_dump(mode="json") for c in candles], default=str))
 
         return candles
+
+    def fetch_dividends(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[dict]:
+        """Fetch dividends, delegating to the inner fetcher with file-based caching.
+
+        If the inner fetcher does not support fetch_dividends, returns an empty list.
+        Dividends are stable historical data so they are cached for the backtest session.
+        """
+        if not hasattr(self._delegate, "fetch_dividends"):
+            return []
+
+        cache_key = f"{symbol}__div__{start:%Y%m%d}__{end:%Y%m%d}.json"
+        path = self._cache_dir / cache_key
+
+        if path.exists():
+            raw = json.loads(path.read_text())
+            # Restore ex_date from string (json.dumps(default=str) serialises datetime)
+            for item in raw:
+                if isinstance(item.get("ex_date"), str):
+                    item["ex_date"] = _datetime.fromisoformat(item["ex_date"])
+            return raw
+
+        result = self._delegate.fetch_dividends(symbol, start, end)
+
+        if result:
+            path.write_text(json.dumps(result, default=str))
+
+        return result
 
     def invalidate(
         self,

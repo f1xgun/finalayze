@@ -140,10 +140,10 @@ class SilentStrategy(BaseStrategy):
         return {}
 
 
-# ── Pre-Fix A: Combiner total_enabled_weight only counts registered strategies ─
+# ── Pre-Fix A: Combiner total_enabled_weight counts ALL enabled strategies ─────
 class TestCombinerPhantomWeight:
-    def test_unregistered_strategy_not_in_total_weight(self, tmp_path: Path) -> None:
-        """Combiner should not count weight for strategies not in self._strategies."""
+    def test_total_mode_includes_unregistered_weight(self, tmp_path: Path) -> None:
+        """In 'total' mode, denominator includes ALL enabled strategies from config."""
         combiner = StrategyCombiner(
             strategies=[AlwaysBuyStrategy()],
             normalize_mode="total",
@@ -165,21 +165,20 @@ class TestCombinerPhantomWeight:
         candles = _make_candle_series(count=5)
         signal = combiner.generate_signal("TEST", candles, "test_seg")
 
-        # With Pre-Fix A: denominator = 0.40 (only always_buy counted)
-        # net = 0.9 * 0.40 / 0.40 = 0.9 → should pass 0.50 gate
-        assert signal is not None
-        assert signal.direction == SignalDirection.BUY
+        # total_enabled_weight = 0.40 + 0.60 = 1.00 (all enabled in config)
+        # net = 0.9 * 0.40 / 1.00 = 0.36 → below 0.50 threshold → None
+        assert signal is None
 
-    def test_unregistered_strategy_dilutes_before_fix(self, tmp_path: Path) -> None:
-        """Verify the math: in total mode, denominator = registered weight only."""
+    def test_total_mode_dilutes_with_unregistered(self, tmp_path: Path) -> None:
+        """In total mode, unregistered strategies dilute the combined score."""
         combiner = StrategyCombiner(
             strategies=[AlwaysBuyStrategy()],
             normalize_mode="total",
         )
         presets_dir = tmp_path / "presets"
         presets_dir.mkdir()
-        # always_buy weight=0.30, total registered weight=0.30
-        # net = 0.9 * 0.30 / 0.30 = 0.9 → passes
+        # always_buy weight=0.30, total config weight=1.00
+        # net = 0.9 * 0.30 / 1.00 = 0.27 → below threshold → None
         (presets_dir / "test_seg.yaml").write_text(
             "strategies:\n"
             "  always_buy:\n"
@@ -197,9 +196,8 @@ class TestCombinerPhantomWeight:
         candles = _make_candle_series(count=5)
         signal = combiner.generate_signal("TEST", candles, "test_seg")
 
-        # Denominator should be 0.30 (only registered), not 1.00
-        assert signal is not None
-        assert signal.confidence == pytest.approx(0.9, abs=0.01)
+        # Denominator = 1.00 (all enabled), so score is diluted → below threshold
+        assert signal is None
 
 
 # ── Pre-Fix B: Kelly returns zero on negative expectancy ───────────────────────

@@ -1117,11 +1117,13 @@ class BacktestEngine:
             )
 
         asset_vol = compute_realized_vol(history) or Decimal("0.20")
+        # Currency-aware min position: RUB segments use ~5000 RUB, USD uses $500
+        min_pos = Decimal(5000) if segment_id.startswith("ru_") else Decimal(500)
         context = SizingContext(
             equity=portfolio.equity,
             base_position=base_position,
             max_position_pct=self._max_position_pct,
-            min_position_size=Decimal(500),
+            min_position_size=min_pos,
             asset_vol=asset_vol,
             target_vol=self._target_vol or Decimal("0.15"),
             regime_scale=Decimal(str(regime_position_scale or 1.0)),

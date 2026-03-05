@@ -16,8 +16,8 @@ _HIST_NEGATIVE = -0.5
 _HIST_PREV_NEGATIVE = -1.0
 _HIST_POSITIVE = 0.3
 _HIST_PREV_POSITIVE = 0.1
-_BB_STD_DEV_25 = 2.5
-_BB_STD_DEV_30 = 3.0
+_BB_STD_DEV_18 = 1.8
+_BB_STD_DEV_20 = 2.0
 _RSI_OVERSOLD_30 = 30
 _RSI_OVERBOUGHT_70 = 70
 
@@ -113,68 +113,74 @@ class TestMOEXPresetRecalibration:
     """Verify updated values in RU preset YAML files."""
 
     def test_ru_blue_chips_bb_std_dev(self) -> None:
-        """ru_blue_chips bb_std_dev should be 2.5."""
+        """ru_blue_chips bb_std_dev should be 2.0."""
         data = _load_preset("ru_blue_chips")
         bb_std = data["strategies"]["mean_reversion"]["params"]["bb_std_dev"]
-        assert bb_std == _BB_STD_DEV_25
+        assert bb_std == _BB_STD_DEV_20
 
     def test_ru_energy_bb_std_dev(self) -> None:
-        """ru_energy bb_std_dev should be 3.0."""
+        """ru_energy bb_std_dev should be 2.0."""
         data = _load_preset("ru_energy")
         bb_std = data["strategies"]["mean_reversion"]["params"]["bb_std_dev"]
-        assert bb_std == _BB_STD_DEV_30
+        assert bb_std == _BB_STD_DEV_20
 
-    def test_ru_energy_momentum_disabled(self) -> None:
-        """ru_energy momentum should be disabled."""
+    def test_ru_energy_momentum_enabled(self) -> None:
+        """ru_energy momentum should be enabled for diversification."""
         data = _load_preset("ru_energy")
         momentum_cfg = data["strategies"]["momentum"]
-        assert momentum_cfg["enabled"] is False
-        assert momentum_cfg["weight"] == 0
+        assert momentum_cfg["enabled"] is True
+        assert momentum_cfg["weight"] == 0.25  # noqa: PLR2004
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
-    def test_ru_normalize_total(self, segment_id: str) -> None:
-        """All RU presets should use 'active' or 'total' normalize mode."""
+    def test_ru_normalize_firing(self, segment_id: str) -> None:
+        """All RU presets should use 'firing' normalize mode (match US presets)."""
         data = _load_preset(segment_id)
-        assert data["normalize_mode"] in ("active", "total"), (
-            f"{segment_id} normalize_mode should be 'active' or 'total'"
-        )
+        assert data["normalize_mode"] == "firing", f"{segment_id} normalize_mode should be 'firing'"
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
     def test_ru_rsi_oversold_mr(self, segment_id: str) -> None:
-        """All RU presets should have rsi_oversold_mr in [30, 35]."""
+        """All RU presets should have rsi_oversold_mr = 25 (extreme entries)."""
         data = _load_preset(segment_id)
         mr_params = data["strategies"]["mean_reversion"]["params"]
-        rsi_min = 30
-        rsi_max = 35
-        assert rsi_min <= mr_params["rsi_oversold_mr"] <= rsi_max
+        rsi_expected = 25
+        assert mr_params["rsi_oversold_mr"] == rsi_expected
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
     def test_ru_rsi_overbought_mr(self, segment_id: str) -> None:
-        """All RU presets should have rsi_overbought_mr in [65, 70]."""
+        """All RU presets should have rsi_overbought_mr = 75 (extreme entries)."""
         data = _load_preset(segment_id)
         mr_params = data["strategies"]["mean_reversion"]["params"]
-        rsi_min = 65
-        rsi_max = 70
-        assert rsi_min <= mr_params["rsi_overbought_mr"] <= rsi_max
+        rsi_expected = 75
+        assert mr_params["rsi_overbought_mr"] == rsi_expected
 
     def test_ru_blue_chips_weights(self) -> None:
-        """ru_blue_chips: momentum=0.20, mean_reversion=0.35."""
+        """ru_blue_chips: momentum=0.25, mean_reversion=0.35."""
         data = _load_preset("ru_blue_chips")
         strategies = data["strategies"]
-        assert strategies["momentum"]["weight"] == 0.20  # noqa: PLR2004
+        assert strategies["momentum"]["weight"] == 0.25  # noqa: PLR2004
         assert strategies["mean_reversion"]["weight"] == 0.35  # noqa: PLR2004
 
     def test_ru_energy_mean_reversion_weight(self) -> None:
-        """ru_energy: mean_reversion=0.40."""
+        """ru_energy: mean_reversion=0.35."""
         data = _load_preset("ru_energy")
-        assert data["strategies"]["mean_reversion"]["weight"] == 0.40  # noqa: PLR2004
+        assert data["strategies"]["mean_reversion"]["weight"] == 0.35  # noqa: PLR2004
 
-    def test_ru_blue_chips_min_combined_confidence(self) -> None:
-        """ru_blue_chips: min_combined_confidence=0.55."""
-        data = _load_preset("ru_blue_chips")
-        assert data["min_combined_confidence"] == 0.55  # noqa: PLR2004
+    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
+    def test_ru_min_combined_confidence(self, segment_id: str) -> None:
+        """All RU presets: min_combined_confidence=0.38 (lowered to allow more signals)."""
+        data = _load_preset(segment_id)
+        assert data["min_combined_confidence"] == 0.38  # noqa: PLR2004
 
-    def test_ru_energy_min_combined_confidence(self) -> None:
-        """ru_energy: min_combined_confidence=0.40."""
-        data = _load_preset("ru_energy")
-        assert data["min_combined_confidence"] == 0.40  # noqa: PLR2004
+    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
+    def test_ru_trend_filter_enabled(self, segment_id: str) -> None:
+        """All RU presets should have trend_filter enabled on mean_reversion."""
+        data = _load_preset(segment_id)
+        mr_params = data["strategies"]["mean_reversion"]["params"]
+        assert mr_params.get("trend_filter") is True
+
+    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
+    def test_ru_has_rsi2_connors(self, segment_id: str) -> None:
+        """All RU presets should have rsi2_connors strategy configured."""
+        data = _load_preset(segment_id)
+        rsi2 = data["strategies"].get("rsi2_connors", {})
+        assert rsi2.get("enabled") is True

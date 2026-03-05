@@ -27,7 +27,7 @@ import traceback
 from dotenv import load_dotenv
 
 load_dotenv()
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -374,35 +374,83 @@ def _load_event_data(event_data_dir: Path) -> dict[str, Any]:
     return data
 
 
-def _setup_dividend_gap_strategy(
-    segment: str,  # noqa: ARG001
+def _setup_dividend_gap_strategy(  # noqa: PLR0912
+    segment: str,
     symbols: list[str],
-    event_data: dict[str, Any],
+    fetcher: BaseFetcher,
+    start: datetime,
+    end: datetime,
+    event_data: dict[str, Any] | None = None,
 ) -> DividendGapStrategy | None:
-    """Create DividendGapStrategy with loaded dividend events.
+    """Create DividendGapStrategy with populated dividend calendar.
 
-    Loads dividend data for ALL symbols present in the event data that also
-    appear in the current segment's symbol list.
+    Data sources (in priority order):
+    1. Tinkoff API via fetcher.fetch_dividends() — returns ex-dates with +1 bday shift
+    2. Pre-built event_data JSON files (--event-data-dir)
+    3. Static moex_dividends.yaml fallback for yfinance-based backtests
     """
-    dividends = event_data.get("dividends", {})
-    if not dividends:
+    if not segment.startswith("ru_"):
         return None
+
     strategy = DividendGapStrategy()
-    # Only load dividends for symbols in this segment
-    segment_symbols = set(symbols)
     count = 0
-    for symbol, entries in dividends.items():
-        if symbol not in segment_symbols:
-            continue
-        for entry in entries:
-            strategy.add_dividend(
-                symbol,
-                DividendEntry(
-                    ex_date=datetime.strptime(entry["ex_date"], "%Y-%m-%d").replace(tzinfo=UTC),
-                    amount=float(entry["amount"]),
-                ),
-            )
-            count += 1
+
+    # Priority 1: Tinkoff API (fetcher has fetch_dividends)
+    if hasattr(fetcher, "fetch_dividends"):
+        for symbol in symbols:
+            try:
+                divs = fetcher.fetch_dividends(symbol, start, end)
+                for div in divs:
+                    strategy.add_dividend(
+                        symbol,
+                        DividendEntry(ex_date=div["ex_date"], amount=div["amount"]),
+                    )
+                    count += 1
+            except Exception:
+                continue
+
+    # Priority 2: pre-built event data
+    if count == 0 and event_data is not None:
+        dividends = event_data.get("dividends", {})
+        segment_symbols = set(symbols)
+        for symbol, entries in dividends.items():
+            if symbol not in segment_symbols:
+                continue
+            for entry in entries:
+                strategy.add_dividend(
+                    symbol,
+                    DividendEntry(
+                        ex_date=datetime.strptime(entry["ex_date"], "%Y-%m-%d").replace(tzinfo=UTC),
+                        amount=float(entry["amount"]),
+                    ),
+                )
+                count += 1
+
+    # Priority 3: static YAML fallback
+    if count == 0:
+        yaml_path = _PRESETS_DIR / "moex_dividends.yaml"
+        if yaml_path.exists():
+            with yaml_path.open() as f:
+                static_data = yaml.safe_load(f) or {}
+            one_day = timedelta(days=1)
+            for symbol in symbols:
+                for entry in static_data.get(symbol, []):
+                    ex_date_raw = entry["ex_date"]
+                    if isinstance(ex_date_raw, str):
+                        last_buy = datetime.strptime(ex_date_raw, "%Y-%m-%d").replace(tzinfo=UTC)
+                    else:
+                        last_buy = ex_date_raw
+                    # Shift last_buy_date → actual ex-div date (+1 business day)
+                    ex_date = last_buy + one_day
+                    while ex_date.weekday() >= 5:  # noqa: PLR2004
+                        ex_date += one_day
+                    if start <= ex_date <= end:
+                        strategy.add_dividend(
+                            symbol,
+                            DividendEntry(ex_date=ex_date, amount=float(entry["amount"])),
+                        )
+                        count += 1
+
     if count == 0:
         return None
     return strategy
@@ -498,12 +546,15 @@ def _build_strategies(
         if ml is not None:
             strategies.append(ml)
 
-    # Event-driven strategies (require event data)
-    if event_data is not None:
-        div_gap = _setup_dividend_gap_strategy(segment, symbols or [], event_data)
-        if div_gap is not None:
-            strategies.append(div_gap)
+    # Dividend gap — always try for RU segments (API > event_data > static YAML)
+    div_gap = _setup_dividend_gap_strategy(
+        segment, symbols or [], fetcher, start, end, event_data=event_data
+    )
+    if div_gap is not None:
+        strategies.append(div_gap)
 
+    # Other event-driven strategies (require event data)
+    if event_data is not None:
         pead = _setup_pead_strategy(segment, symbols or [], event_data)
         if pead is not None:
             strategies.append(pead)
@@ -998,6 +1049,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             max_drawdown=zero_ci,
             win_rate=zero_ci,
             profit_factor=zero_ci,
+            n_simulations=0,
+            n_trades=0,
         )
 
     # Build a synthetic WalkForwardResult from the direct backtest run

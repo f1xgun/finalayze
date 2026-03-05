@@ -562,8 +562,15 @@ class TradingLoop:
 
         sentiment_score = self._get_sentiment(seg_id)
 
+        broker = self._broker_router.route(market_id)
+        has_open_position = broker.has_position(instrument.symbol)
+
         signal = self._strategy.generate_signal(
-            instrument.symbol, candles, seg_id, sentiment_score=sentiment_score
+            instrument.symbol,
+            candles,
+            seg_id,
+            sentiment_score=sentiment_score,
+            has_open_position=has_open_position,
         )
         if signal is None:
             return
@@ -944,8 +951,13 @@ class TradingLoop:
                 portfolio = broker.get_portfolio()
                 equity = portfolio.equity
                 new_baselines[market_id] = equity
+
+                # Compute P&L BEFORE updating baseline
+                baseline = self._baseline_equities.get(market_id, equity)
+                market_pnl[market_id] = equity - baseline
+
+                # Now update baseline for next trading day
                 self._baseline_equities[market_id] = equity
-                market_pnl[market_id] = _ZERO  # simplified: actual P&L tracked separately
                 cb.reset_daily(new_baseline=equity)
             except Exception:
                 _log.exception("_daily_reset: failed to reset for market %s", market_id)
@@ -965,7 +977,7 @@ class TradingLoop:
         from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
 
         for market_id, equity in new_baselines.items():
-            MetricsCollector.set_daily_pnl(market_id, 0.0)
+            MetricsCollector.set_daily_pnl(market_id, float(market_pnl[market_id]))
             MetricsCollector.set_portfolio_equity(market_id, float(equity))
 
         self._alerter.on_daily_summary(market_pnl, total_equity)

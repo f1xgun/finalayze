@@ -297,6 +297,52 @@ class TestTradingLoopStrategyCycle:
         loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
 
 
+class TestHasOpenPositionPassthrough:
+    """P0: _process_instrument must pass has_open_position to strategy."""
+
+    def _make_buy_signal(self) -> Signal:
+        return Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+
+    def test_has_open_position_passed_to_strategy(self) -> None:
+        """generate_signal should receive has_open_position from broker."""
+        signal = self._make_buy_signal()
+        loop = _make_trading_loop(signal=signal)
+        # Make broker report an open position
+        mock_broker = loop._broker_router.route.return_value  # type: ignore[attr-defined]
+        mock_broker.has_position.return_value = True
+
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+
+        # Verify generate_signal was called with has_open_position=True
+        call_kwargs = loop._strategy.generate_signal.call_args  # type: ignore[attr-defined]
+        assert call_kwargs.kwargs.get("has_open_position") is True
+
+    def test_has_open_position_false_when_no_position(self) -> None:
+        """generate_signal should receive has_open_position=False when no position."""
+        signal = self._make_buy_signal()
+        loop = _make_trading_loop(signal=signal)
+        mock_broker = loop._broker_router.route.return_value  # type: ignore[attr-defined]
+        mock_broker.has_position.return_value = False
+
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+
+        call_kwargs = loop._strategy.generate_signal.call_args  # type: ignore[attr-defined]
+        assert call_kwargs.kwargs.get("has_open_position") is False
+
+
 class TestModeGate:
     """6A.1: DEBUG mode must not send orders."""
 
@@ -436,6 +482,91 @@ class TestTradingLoopDailyReset:
         loop = _make_trading_loop()
         loop._daily_reset()  # type: ignore[attr-defined]
         loop._cross_market_breaker.reset_daily.assert_called_once()  # type: ignore[attr-defined]
+
+
+class TestDailyPnLComputation:
+    """Bug 7: Daily P&L must report actual equity change, not zero."""
+
+    BASELINE = Decimal(1000000)
+    CURRENT_EQUITY = Decimal(1005000)
+    EXPECTED_PNL = Decimal(5000)
+
+    def test_daily_reset_computes_pnl_from_baseline(self) -> None:
+        """P&L = current_equity - baseline_equity, sent to alerter."""
+        loop = _make_trading_loop()
+        # Set baseline equity before the day started
+        loop._baseline_equities[MARKET_US] = self.BASELINE  # type: ignore[attr-defined]
+
+        # Mock broker to return current equity
+        mock_broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
+        mock_broker.get_portfolio.return_value = MagicMock(
+            equity=self.CURRENT_EQUITY, cash=Decimal(50000)
+        )
+
+        loop._daily_reset()  # type: ignore[attr-defined]
+
+        # Verify alerter received actual P&L, not zero
+        call_args = loop._alerter.on_daily_summary.call_args  # type: ignore[attr-defined]
+        market_pnl = call_args.args[0]
+        assert market_pnl[MARKET_US] == self.EXPECTED_PNL
+
+    def test_daily_reset_reports_pnl_to_metrics(self) -> None:
+        """MetricsCollector.set_daily_pnl must receive actual P&L float."""
+        loop = _make_trading_loop()
+        loop._baseline_equities[MARKET_US] = self.BASELINE  # type: ignore[attr-defined]
+
+        mock_broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
+        mock_broker.get_portfolio.return_value = MagicMock(
+            equity=self.CURRENT_EQUITY, cash=Decimal(50000)
+        )
+
+        with patch("finalayze.api.metrics.MetricsCollector") as mock_mc:
+            loop._daily_reset()  # type: ignore[attr-defined]
+            mock_mc.set_daily_pnl.assert_called_with(MARKET_US, float(self.EXPECTED_PNL))
+
+    def test_daily_reset_negative_pnl(self) -> None:
+        """Negative P&L (loss) should be reported correctly."""
+        loop = _make_trading_loop()
+        loop._baseline_equities[MARKET_US] = Decimal(1000000)  # type: ignore[attr-defined]
+
+        mock_broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
+        mock_broker.get_portfolio.return_value = MagicMock(
+            equity=Decimal(995000), cash=Decimal(50000)
+        )
+
+        loop._daily_reset()  # type: ignore[attr-defined]
+
+        call_args = loop._alerter.on_daily_summary.call_args  # type: ignore[attr-defined]
+        market_pnl = call_args.args[0]
+        assert market_pnl[MARKET_US] == Decimal(-5000)
+
+    def test_daily_reset_no_baseline_defaults_to_zero_pnl(self) -> None:
+        """When no baseline exists yet, P&L should be zero (first day)."""
+        loop = _make_trading_loop()
+        # Do NOT set any baseline -- simulate first trading day
+        loop._baseline_equities.clear()  # type: ignore[attr-defined]
+
+        loop._daily_reset()  # type: ignore[attr-defined]
+
+        call_args = loop._alerter.on_daily_summary.call_args  # type: ignore[attr-defined]
+        market_pnl = call_args.args[0]
+        # With no baseline, current - current = 0
+        assert market_pnl[MARKET_US] == Decimal(0)
+
+    def test_daily_reset_updates_baseline_after_pnl(self) -> None:
+        """After _daily_reset, baseline should be updated to current equity."""
+        loop = _make_trading_loop()
+        loop._baseline_equities[MARKET_US] = self.BASELINE  # type: ignore[attr-defined]
+
+        mock_broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
+        mock_broker.get_portfolio.return_value = MagicMock(
+            equity=self.CURRENT_EQUITY, cash=Decimal(50000)
+        )
+
+        loop._daily_reset()  # type: ignore[attr-defined]
+
+        # After reset, baseline should be updated to current equity for next day
+        assert loop._baseline_equities[MARKET_US] == self.CURRENT_EQUITY  # type: ignore[attr-defined]
 
 
 class TestWeeklyReset:

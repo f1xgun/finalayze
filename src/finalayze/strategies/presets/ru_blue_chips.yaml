@@ -1,36 +1,37 @@
 segment_id: ru_blue_chips
-normalize_mode: "active"
-min_combined_confidence: 0.55
+normalize_mode: "firing"
+min_combined_confidence: 0.38
 strategies:
   momentum:
     enabled: true
-    weight: 0.20
+    weight: 0.25
     params:
       rsi_period: 14
-      rsi_oversold: 25
-      rsi_overbought: 75
+      rsi_oversold: 30
+      rsi_overbought: 70
       macd_fast: 10
       macd_slow: 22
-      min_confidence: 0.35
+      macd_hist_lookback: 3
+      min_confidence: 0.40
       lookback_bars: 5
-      stop_atr_multiplier: 3.0
-      trail_activation_atr: 1.0
-      trail_distance_atr: 1.5
-      trend_filter: false
-      trend_sma_period: 50
+      stop_atr_multiplier: 3.5
+      trail_activation_atr: 1.5
+      trail_distance_atr: 2.0
+      trend_filter: true
+      trend_sma_period: 100
       trend_sma_buffer_pct: 2.0
       adx_filter: true
       adx_period: 14
-      adx_threshold: 18
+      adx_threshold: 20
       volume_filter: true
       volume_sma_period: 20
-      volume_min_ratio: 0.5
+      volume_min_ratio: 0.8
       neutral_reset_bars: 8
       vol_target_enabled: true
-      vol_target: 0.12
+      vol_target: 0.15
   event_driven:
     enabled: false
-    weight: 0.10
+    weight: 0.00
     params:
       min_sentiment: 0.6
       event_types: [geopolitical, sanctions, cbr_rate, commodity_price, earnings]
@@ -39,38 +40,51 @@ strategies:
     weight: 0.35
     params:
       bb_period: 20
-      bb_std_dev: 2.5
-      min_confidence: 0.35
+      bb_std_dev: 2.0
+      min_confidence: 0.40
       exit_at_mean: true
-      rsi_oversold_mr: 35
-      rsi_overbought_mr: 65
+      trend_filter: true
+      trend_sma_period: 50
+      trend_sma_buffer_pct: 1.5
+      rsi_oversold_mr: 25
+      rsi_overbought_mr: 75
   pairs:
     enabled: true
     weight: 0.10
     params:
-      pairs: [[SBER, VTBR], [GAZP, LKOH], [SBER, GMKN]]
+      pairs: [[SBER, VTBR], [GAZP, LKOH]]
       z_entry: 1.5
       z_exit: 0.0
       min_confidence: 0.40
-      use_kalman: true
-  ml_ensemble:
+  dividend_gap:
     enabled: true
-    weight: 0.25
+    weight: 0.20
+    params:
+      min_gap_pct: 3.0
+      max_hold_bars: 60
+      min_confidence: 0.40
+  ml_ensemble:
+    enabled: false
+    weight: 0.00
     params:
       threshold: 0.10
       min_confidence: 0.30
-  dividend_gap:
+  rsi2_connors:
     enabled: true
-    weight: 0.08
-    params:
-      min_confidence: 0.50
-  cbr_calendar:
-    enabled: true
-    weight: 0.03
-    params:
-      min_confidence: 0.45
-  pead:
-    enabled: false
     weight: 0.10
     params:
-      min_confidence: 0.55
+      rsi_period: 2
+      rsi_buy_threshold: 5.0
+      rsi_sell_threshold: 95.0
+      sma_trend_period: 200
+      sma_exit_period: 5
+      min_confidence: 0.45
+  ou_mean_reversion:
+    enabled: false
+    weight: 0.07
+    params:
+      ou_window: 126
+      entry_threshold: 2.0
+      exit_threshold: 0.5
+      use_mle: true
+      min_confidence: 0.50

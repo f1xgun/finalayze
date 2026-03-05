@@ -84,7 +84,12 @@ class MockStrategy(BaseStrategy):
         return {}
 
     def generate_signal(
-        self, symbol: str, candles: list[Candle], segment_id: str, sentiment_score: float = 0.0
+        self,
+        symbol: str,
+        candles: list[Candle],
+        segment_id: str,
+        sentiment_score: float = 0.0,
+        has_open_position: bool = False,
     ) -> Signal | None:
         return self._return_signal
 
@@ -210,6 +215,7 @@ class TestStrategyCombiner:
                 candles: list[Candle],
                 segment_id: str,
                 sentiment_score: float = 0.0,
+                has_open_position: bool = False,
             ) -> Signal | None:
                 called_tracker.append(True)
                 return _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
@@ -660,3 +666,209 @@ class TestTurnOfMonth:
         assert signal_tom.confidence == pytest.approx(
             signal_mid.confidence + self.TOM_BOOST, abs=0.01
         )
+
+
+# ── normalize_mode "active" tests ────────────────────────────────────────────
+
+# Constants for active-mode tests (no magic numbers)
+_ACTIVE_WEIGHT_A = 0.3
+_ACTIVE_WEIGHT_B = 0.3
+_ACTIVE_WEIGHT_C = 0.2
+_ACTIVE_WEIGHT_D = 0.2
+_ACTIVE_CONFIDENCE_A = 0.9
+_ACTIVE_CONFIDENCE_B = 0.8
+_ACTIVE_MIN_CONFIDENCE = 0.10  # low threshold so signals aren't filtered
+
+
+class TestCombinerNormalizeModeActive:
+    """Tests for normalize_mode='active' — normalizes by data-ready weight."""
+
+    def _make_config(self, normalize_mode: str = "active") -> dict[str, Any]:
+        return {
+            "normalize_mode": normalize_mode,
+            "min_combined_confidence": _ACTIVE_MIN_CONFIDENCE,
+            "strategies": {
+                "strat_a": {"enabled": True, "weight": _ACTIVE_WEIGHT_A},
+                "strat_b": {"enabled": True, "weight": _ACTIVE_WEIGHT_B},
+                "strat_c": {"enabled": True, "weight": _ACTIVE_WEIGHT_C},
+                "strat_d": {"enabled": True, "weight": _ACTIVE_WEIGHT_D},
+            },
+        }
+
+    def _make_strategies(self) -> list[MockStrategy]:
+        """4 strategies: A and B fire BUY, C and D return None."""
+        sig_a = _make_signal(SignalDirection.BUY, _ACTIVE_CONFIDENCE_A, "strat_a")
+        sig_b = _make_signal(SignalDirection.BUY, _ACTIVE_CONFIDENCE_B, "strat_b")
+        return [
+            MockStrategy("strat_a", sig_a),
+            MockStrategy("strat_b", sig_b),
+            MockStrategy("strat_c", None),
+            MockStrategy("strat_d", None),
+        ]
+
+    def test_active_mode_uses_data_ready_weight(self) -> None:
+        """Active: denominator = data_ready weight (all 4 called) = 1.0."""
+        strategies = self._make_strategies()
+        combiner = StrategyCombiner(strategies, normalize_mode="active")
+        candles = _make_candles()
+        config = self._make_config("active")
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY
+        # net = (0.9*0.3 + 0.8*0.3) / 1.0 = 0.51
+        assert signal.confidence == pytest.approx(0.51, abs=0.02)
+
+    def test_firing_mode_higher_confidence_than_active(self) -> None:
+        """Firing: denominator = firing weight (2 fired) = 0.6 → higher score."""
+        strategies = self._make_strategies()
+        combiner = StrategyCombiner(strategies, normalize_mode="firing")
+        candles = _make_candles()
+        config = self._make_config("firing")
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert signal is not None
+        # net = 0.51 / 0.6 = 0.85
+        assert signal.confidence == pytest.approx(0.85, abs=0.02)
+
+    def test_active_confidence_lower_than_firing(self) -> None:
+        """Active produces lower confidence than firing for same input."""
+        candles = _make_candles()
+
+        combiner_a = StrategyCombiner(self._make_strategies(), normalize_mode="active")
+        config_a = self._make_config("active")
+        with patch.object(combiner_a, "_load_config", return_value=config_a):
+            sig_a = combiner_a.generate_signal("AAPL", candles, "us_broad")
+
+        combiner_f = StrategyCombiner(self._make_strategies(), normalize_mode="firing")
+        config_f = self._make_config("firing")
+        with patch.object(combiner_f, "_load_config", return_value=config_f):
+            sig_f = combiner_f.generate_signal("AAPL", candles, "us_broad")
+
+        assert sig_a is not None and sig_f is not None
+        assert sig_a.confidence < sig_f.confidence
+
+    def test_active_equals_total_when_all_registered(self) -> None:
+        """When all config strategies are registered, active == total."""
+        candles = _make_candles()
+
+        combiner_a = StrategyCombiner(self._make_strategies(), normalize_mode="active")
+        config_a = self._make_config("active")
+        with patch.object(combiner_a, "_load_config", return_value=config_a):
+            sig_a = combiner_a.generate_signal("AAPL", candles, "us_broad")
+
+        combiner_t = StrategyCombiner(self._make_strategies(), normalize_mode="total")
+        config_t = self._make_config("total")
+        with patch.object(combiner_t, "_load_config", return_value=config_t):
+            sig_t = combiner_t.generate_signal("AAPL", candles, "us_broad")
+
+        assert sig_a is not None and sig_t is not None
+        assert sig_a.confidence == pytest.approx(sig_t.confidence, abs=0.01)
+
+    def test_active_differs_from_total_when_strategy_missing(self) -> None:
+        """When strategies are in config but not registered, active != total."""
+        sig_a = _make_signal(SignalDirection.BUY, _ACTIVE_CONFIDENCE_A, "strat_a")
+        sig_b = _make_signal(SignalDirection.BUY, _ACTIVE_CONFIDENCE_B, "strat_b")
+        only_ab = [MockStrategy("strat_a", sig_a), MockStrategy("strat_b", sig_b)]
+        candles = _make_candles()
+
+        combiner_a = StrategyCombiner(list(only_ab), normalize_mode="active")
+        config_a = self._make_config("active")
+        with patch.object(combiner_a, "_load_config", return_value=config_a):
+            sig_active = combiner_a.generate_signal("AAPL", candles, "us_broad")
+
+        combiner_t = StrategyCombiner(
+            [MockStrategy("strat_a", sig_a), MockStrategy("strat_b", sig_b)],
+            normalize_mode="total",
+        )
+        config_t = self._make_config("total")
+        with patch.object(combiner_t, "_load_config", return_value=config_t):
+            sig_total = combiner_t.generate_signal("AAPL", candles, "us_broad")
+
+        assert sig_active is not None and sig_total is not None
+        # active: 0.51/0.6=0.85 vs total: 0.51/1.0=0.51
+        assert sig_active.confidence > sig_total.confidence
+
+
+class TestCombinerPassesHasOpenPosition:
+    """Tests that has_open_position is propagated to child strategies."""
+
+    def test_has_open_position_passed_to_child_strategies(self) -> None:
+        """Combiner must forward has_open_position to each child strategy."""
+        received_values: list[bool] = []
+
+        class TrackingStrategy(BaseStrategy):
+            @property
+            def name(self) -> str:
+                return "tracker"
+
+            def supported_segments(self) -> list[str]:
+                return ["us_broad"]
+
+            def get_parameters(self, segment_id: str) -> dict[str, object]:
+                return {}
+
+            def generate_signal(
+                self,
+                symbol: str,
+                candles: list[Candle],
+                segment_id: str,
+                sentiment_score: float = 0.0,
+                has_open_position: bool = False,
+            ) -> Signal | None:
+                received_values.append(has_open_position)
+                return _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "tracker")
+
+        config: dict[str, Any] = {
+            "strategies": {"tracker": {"enabled": True, "weight": 1.0}},
+            "min_combined_confidence": 0.0,
+        }
+        strategy = TrackingStrategy()
+        combiner = StrategyCombiner([strategy])
+        candles = _make_candles()
+
+        with patch.object(combiner, "_load_config", return_value=config):
+            combiner.generate_signal("AAPL", candles, "us_broad", has_open_position=True)
+
+        assert len(received_values) == 1
+        assert received_values[0] is True
+
+    def test_has_open_position_defaults_to_false(self) -> None:
+        """When has_open_position not passed, child strategies receive False."""
+        received_values: list[bool] = []
+
+        class TrackingStrategy(BaseStrategy):
+            @property
+            def name(self) -> str:
+                return "tracker"
+
+            def supported_segments(self) -> list[str]:
+                return ["us_broad"]
+
+            def get_parameters(self, segment_id: str) -> dict[str, object]:
+                return {}
+
+            def generate_signal(
+                self,
+                symbol: str,
+                candles: list[Candle],
+                segment_id: str,
+                sentiment_score: float = 0.0,
+                has_open_position: bool = False,
+            ) -> Signal | None:
+                received_values.append(has_open_position)
+                return _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "tracker")
+
+        config: dict[str, Any] = {
+            "strategies": {"tracker": {"enabled": True, "weight": 1.0}},
+            "min_combined_confidence": 0.0,
+        }
+        strategy = TrackingStrategy()
+        combiner = StrategyCombiner([strategy])
+        candles = _make_candles()
+
+        with patch.object(combiner, "_load_config", return_value=config):
+            combiner.generate_signal("AAPL", candles, "us_broad")
+
+        assert len(received_values) == 1
+        assert received_values[0] is False

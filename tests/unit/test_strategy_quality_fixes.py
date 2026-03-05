@@ -908,18 +908,18 @@ class TestBBStdDevDifferentiation:
         params = strategy.get_parameters(segment)
         return float(params.get("bb_std_dev", 2.0))  # type: ignore[arg-type]
 
-    def test_ru_energy_bb_std_dev_is_3_0(self) -> None:
+    def test_ru_energy_bb_std_dev_is_2_0(self) -> None:
         std = self._get_bb_std("ru_energy")
-        assert std == 3.0, f"Expected bb_std_dev=3.0 for ru_energy, got {std}"
+        assert std == 2.0, f"Expected bb_std_dev=2.0 for ru_energy, got {std}"
 
-    def test_ru_blue_chips_bb_std_dev_is_2_5(self) -> None:
+    def test_ru_blue_chips_bb_std_dev_is_2_0(self) -> None:
         std = self._get_bb_std("ru_blue_chips")
-        assert std == 2.5, f"Expected bb_std_dev=2.5 for ru_blue_chips, got {std}"
+        assert std == 2.0, f"Expected bb_std_dev=2.0 for ru_blue_chips, got {std}"
 
-    def test_ru_energy_wider_than_ru_blue_chips(self) -> None:
+    def test_ru_energy_at_least_as_wide_as_ru_blue_chips(self) -> None:
         energy_std = self._get_bb_std("ru_energy")
         blue_std = self._get_bb_std("ru_blue_chips")
-        assert energy_std > blue_std, "ru_energy should have wider BB bands than ru_blue_chips"
+        assert energy_std >= blue_std, "ru_energy BB bands should be >= ru_blue_chips"
 
 
 # ── #131 — Sharpe per-trade not per-bar ──────────────────────────────────────

@@ -140,23 +140,26 @@ class TestMLStrategyWiring:
 
 
 class TestMLEnsemblePresets:
-    """Test that ml_ensemble is enabled in all YAML presets."""
+    """Test that ml_ensemble section exists in all YAML presets (disabled until trained)."""
 
-    def test_ml_ensemble_enabled_in_all_presets(self) -> None:
-        """All YAML presets should have ml_ensemble.enabled = true."""
+    def test_ml_ensemble_present_in_all_presets(self) -> None:
+        """All segment YAML presets should have ml_ensemble section."""
         expected_preset_count = 9
+        # Filter to segment presets only (have segment_id key), skip data files like moex_dividends
         preset_files = sorted(_PRESETS_DIR.glob("*.yaml"))
-        assert len(preset_files) == expected_preset_count, (
-            f"Expected {expected_preset_count} presets, found {len(preset_files)}"
+        segment_presets = []
+        for p in preset_files:
+            with p.open() as f:
+                data = yaml.safe_load(f)
+            if isinstance(data, dict) and "segment_id" in data:
+                segment_presets.append((p, data))
+        assert len(segment_presets) == expected_preset_count, (
+            f"Expected {expected_preset_count} segment presets, found {len(segment_presets)}"
         )
 
-        for preset_path in preset_files:
-            with preset_path.open() as f:
-                data = yaml.safe_load(f)
-            ml_cfg = data.get("strategies", {}).get("ml_ensemble", {})
-            assert ml_cfg.get("enabled") is True, (
-                f"{preset_path.name}: ml_ensemble.enabled should be true"
-            )
+        for preset_path, data in segment_presets:
+            ml_cfg = data.get("strategies", {}).get("ml_ensemble")
+            assert ml_cfg is not None, f"{preset_path.name}: ml_ensemble section should exist"
 
 
 # ── Integration ───────────────────────────────────────────────────────────────

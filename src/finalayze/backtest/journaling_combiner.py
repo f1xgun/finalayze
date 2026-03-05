@@ -97,6 +97,7 @@ class JournalingStrategyCombiner(StrategyCombiner):
         weighted_score = _ZERO
         total_weight = _ZERO
         total_enabled_weight = _ZERO
+        data_ready_weight = _ZERO  # strategies registered + enabled (data-ready)
         feature_contributions: dict[str, float] = {}
         dominant_strategy_name = "combined"
         dominant_contribution = _ZERO
@@ -112,13 +113,18 @@ class JournalingStrategyCombiner(StrategyCombiner):
                 continue
 
             weight = self._resolve_weight(strategy_name, strategy_cfg, effective_overrides)
+            total_enabled_weight += weight  # all enabled strategies in config
             strategy = self._strategies.get(strategy_name)
             if strategy is None:
                 continue
-            total_enabled_weight += weight
+            data_ready_weight += weight  # registered + enabled (actually called)
 
             signal = strategy.generate_signal(
-                symbol, candles, segment_id, sentiment_score=sentiment_score
+                symbol,
+                candles,
+                segment_id,
+                sentiment_score=sentiment_score,
+                has_open_position=has_open_position,
             )
 
             # Record per-strategy signal and weight
@@ -157,7 +163,12 @@ class JournalingStrategyCombiner(StrategyCombiner):
             self._last_net_score = 0.0
             return None
 
-        denominator = total_enabled_weight if effective_normalize == "total" else total_weight
+        if effective_normalize == "total":
+            denominator = total_enabled_weight
+        elif effective_normalize == "active":
+            denominator = data_ready_weight if data_ready_weight > _ZERO else total_enabled_weight
+        else:  # "firing" (default)
+            denominator = total_weight
         if denominator == _ZERO:
             self._last_net_score = 0.0
             return None

@@ -1,10 +1,10 @@
 segment_id: us_tech
 normalize_mode: "firing"
-min_combined_confidence: 0.60
+min_combined_confidence: 0.38
 strategies:
   momentum:
     enabled: true
-    weight: 0.30
+    weight: 0.20
     params:
       rsi_period: 14
       rsi_oversold: 35
@@ -31,7 +31,7 @@ strategies:
       vol_target: 0.12
   mean_reversion:
     enabled: true
-    weight: 0.25
+    weight: 0.30
     params:
       bb_period: 20
       bb_std_dev: 2.0
@@ -43,8 +43,8 @@ strategies:
       rsi_oversold_mr: 35
       rsi_overbought_mr: 65
   event_driven:
-    enabled: true
-    weight: 0.32
+    enabled: false
+    weight: 0.00
     params:
       min_sentiment: 0.5
       event_types: [earnings, fda, product_launch]
@@ -57,14 +57,14 @@ strategies:
       z_exit: 0.0
       min_confidence: 0.40
   ml_ensemble:
-    enabled: true
-    weight: 0.20
+    enabled: false
+    weight: 0.00
     params:
       threshold: 0.10
       min_confidence: 0.30
   dual_momentum:
-    enabled: false
-    weight: 0.07
+    enabled: true
+    weight: 0.25
     params:
       lookback_fast: 63
       lookback_slow: 252
@@ -72,8 +72,8 @@ strategies:
       vol_target_enabled: true
       vol_target: 0.12
   ou_mean_reversion:
-    enabled: true
-    weight: 0.07
+    enabled: false
+    weight: 0.00
     params:
       ou_window: 126
       entry_threshold: 2.0
@@ -82,7 +82,7 @@ strategies:
       min_confidence: 0.50
   rsi2_connors:
     enabled: true
-    weight: 0.10
+    weight: 0.15
     params:
       rsi_period: 2
       rsi_buy_threshold: 5.0
@@ -92,6 +92,6 @@ strategies:
       min_confidence: 0.45
   pead:
     enabled: false
-    weight: 0.06
+    weight: 0.00
     params:
       min_confidence: 0.55

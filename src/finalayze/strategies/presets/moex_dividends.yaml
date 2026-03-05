@@ -1,0 +1,42 @@
+# Historical MOEX dividend last-buy-dates for backtesting
+# Source: Tinkoff Invest API (get_dividends), fetched 2026-03-05
+# ex_date = last buy date (Tinkoff convention); actual ex-div is next trading day
+SBER:
+  - {ex_date: "2023-05-10", amount: 25.0}
+  - {ex_date: "2024-07-10", amount: 33.3}
+GAZP:
+  - {ex_date: "2022-10-10", amount: 51.03}
+LKOH:
+  - {ex_date: "2022-12-20", amount: 537.0}
+  - {ex_date: "2022-12-20", amount: 256.0}
+  - {ex_date: "2023-06-02", amount: 438.0}
+  - {ex_date: "2023-12-14", amount: 447.0}
+  - {ex_date: "2024-05-06", amount: 498.0}
+  - {ex_date: "2024-12-16", amount: 514.0}
+GMKN:
+  - {ex_date: "2022-01-13", amount: 15.2317}
+  - {ex_date: "2022-06-13", amount: 11.6622}
+  - {ex_date: "2023-12-25", amount: 9.1533}
+ROSN:
+  - {ex_date: "2022-07-08", amount: 23.63}
+  - {ex_date: "2023-01-11", amount: 20.39}
+  - {ex_date: "2023-07-10", amount: 17.97}
+  - {ex_date: "2024-01-10", amount: 30.77}
+  - {ex_date: "2024-07-08", amount: 29.01}
+TATN:
+  - {ex_date: "2022-01-07", amount: 9.98}
+  - {ex_date: "2022-07-07", amount: 16.14}
+  - {ex_date: "2022-10-10", amount: 32.71}
+  - {ex_date: "2023-01-09", amount: 6.86}
+  - {ex_date: "2023-07-10", amount: 27.71}
+  - {ex_date: "2023-10-10", amount: 27.54}
+  - {ex_date: "2024-01-08", amount: 35.17}
+  - {ex_date: "2024-07-08", amount: 25.17}
+  - {ex_date: "2024-10-07", amount: 38.2}
+NVTK:
+  - {ex_date: "2022-05-04", amount: 43.77}
+  - {ex_date: "2022-10-06", amount: 45.0}
+  - {ex_date: "2023-05-02", amount: 60.58}
+  - {ex_date: "2023-10-09", amount: 34.5}
+  - {ex_date: "2024-03-25", amount: 44.09}
+  - {ex_date: "2024-10-10", amount: 35.5}
