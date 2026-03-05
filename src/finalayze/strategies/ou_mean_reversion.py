@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
+import yaml
 from scipy.optimize import minimize
 
 if TYPE_CHECKING:
@@ -18,6 +20,8 @@ if TYPE_CHECKING:
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.risk.regime import MarketRegime, RegimeState
 from finalayze.strategies.base import BaseStrategy
+
+_PRESETS_DIR = Path(__file__).parent / "presets"
 
 _CONFIDENCE_BASE = 0.4
 _CONFIDENCE_SCALE = 0.15
@@ -240,6 +244,8 @@ class OUMeanReversionStrategy(BaseStrategy):
         self._half_life_range = half_life_range
         self._use_mle = use_mle
         self._cached_params: dict[str, OUParams] = {}
+        # Cache YAML params per segment to avoid reloading on every bar
+        self._yaml_params_cache: dict[str, dict[str, object]] = {}
 
     @property
     def name(self) -> str:
@@ -248,9 +254,37 @@ class OUMeanReversionStrategy(BaseStrategy):
     def supported_segments(self) -> list[str]:
         return list(self._SEGMENT_PARAMS.keys())
 
+    def _load_yaml_params(self, segment_id: str) -> dict[str, object]:
+        """Load ou_mean_reversion parameters from the YAML preset.
+
+        Results are cached per segment_id to avoid reloading on every bar.
+        """
+        if segment_id in self._yaml_params_cache:
+            return self._yaml_params_cache[segment_id]
+        try:
+            preset_path = _PRESETS_DIR / f"{segment_id}.yaml"
+            with preset_path.open() as f:
+                data = yaml.safe_load(f)
+            params = dict(data["strategies"]["ou_mean_reversion"]["params"])
+        except (FileNotFoundError, KeyError, TypeError):
+            params = {}
+        self._yaml_params_cache[segment_id] = params
+        return params
+
     def get_parameters(self, segment_id: str) -> dict[str, object]:
-        """Return parameters for a segment, using constructor overrides if set."""
+        """Return parameters for a segment.
+
+        Priority: constructor overrides > YAML preset > _SEGMENT_PARAMS defaults.
+        """
+        # Start with hardcoded class defaults
         base = dict(self._SEGMENT_PARAMS.get(segment_id, self._SEGMENT_PARAMS["us_broad"]))
+
+        # Overlay YAML preset params (higher priority than class defaults)
+        yaml_params = self._load_yaml_params(segment_id)
+        if yaml_params:
+            base = {**base, **yaml_params}
+
+        # Constructor overrides have highest priority
         if self._ou_window is not None:
             base["ou_window"] = self._ou_window
         if self._entry_threshold is not None:

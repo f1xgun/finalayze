@@ -12,8 +12,8 @@ import structlog
 import yaml
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.strategies.adx import compute_adx
 from finalayze.strategies.hrp import compute_hrp_weights
-from finalayze.strategies.hurst import compute_hurst_exponent
 
 logger = structlog.get_logger(__name__)
 
@@ -24,20 +24,18 @@ if TYPE_CHECKING:
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
 _MIN_COMBINED_CONFIDENCE = Decimal("0.50")
-_MIN_EXIT_CONFIDENCE = Decimal("0.10")
+_MIN_EXIT_CONFIDENCE = Decimal("0.38")
 _BUY_SCORE = Decimal(1)
 _SELL_SCORE = Decimal(-1)
 _MAX_CONFIDENCE = Decimal("1.0")
 _ZERO = Decimal(0)
 _DEFAULT_WEIGHT = Decimal("1.0")
 
-# Hurst exponent routing constants
+# ADX regime routing constants
 _MOMENTUM_STRATEGIES = frozenset({"momentum", "dual_momentum"})
 _MR_STRATEGIES = frozenset({"mean_reversion", "pairs", "ou_mean_reversion", "rsi2_connors"})
-_HURST_TRENDING_THRESHOLD = 0.55
-_HURST_MR_THRESHOLD = 0.45
-_HURST_BOOST = 1.5
-_HURST_SUPPRESS = 1.0 / _HURST_BOOST
+_ADX_TREND_THRESHOLD = 30
+_ADX_MR_THRESHOLD = 20
 
 # Turn-of-month effect: boost BUY confidence during last 1 + first 3 calendar days
 _TOM_BUY_BOOST = Decimal("0.05")
@@ -117,21 +115,51 @@ class StrategyCombiner:
             return _DEFAULT_WEIGHT
 
     @staticmethod
-    def _compute_hurst_multipliers(candles: list[Candle]) -> tuple[float, dict[str, float]]:
-        """Compute Hurst exponent and per-strategy weight multipliers."""
-        h = compute_hurst_exponent([float(c.close) for c in candles])
-        multipliers: dict[str, float] = {}
-        if h > _HURST_TRENDING_THRESHOLD:
-            for s in _MOMENTUM_STRATEGIES:
-                multipliers[s] = _HURST_BOOST
-            for s in _MR_STRATEGIES:
-                multipliers[s] = _HURST_SUPPRESS
-        elif h < _HURST_MR_THRESHOLD:
-            for s in _MOMENTUM_STRATEGIES:
-                multipliers[s] = _HURST_SUPPRESS
-            for s in _MR_STRATEGIES:
-                multipliers[s] = _HURST_BOOST
-        return h, multipliers
+    def _compute_adx_regime(
+        candles: list[Candle], config: dict[str, object]
+    ) -> tuple[float | None, str]:
+        """Compute ADX and determine regime: 'trend', 'mr', or 'ambiguous'.
+
+        Returns:
+            Tuple of (adx_value, regime_label). adx_value is None when
+            insufficient data or routing is disabled.
+        """
+        routing_cfg = config.get("regime_routing", {})
+        if isinstance(routing_cfg, dict) and not routing_cfg.get("enabled", True):
+            return None, "ambiguous"
+
+        period = (
+            int(routing_cfg.get("adx_period", 14))
+            if isinstance(routing_cfg, dict)
+            else 14
+        )
+        trend_threshold = (
+            int(routing_cfg.get("trend_threshold", _ADX_TREND_THRESHOLD))
+            if isinstance(routing_cfg, dict)
+            else _ADX_TREND_THRESHOLD
+        )
+        mr_threshold = (
+            int(routing_cfg.get("mr_threshold", _ADX_MR_THRESHOLD))
+            if isinstance(routing_cfg, dict)
+            else _ADX_MR_THRESHOLD
+        )
+
+        closes = [float(c.close) for c in candles]
+        highs = [float(c.high) for c in candles]
+        lows = [float(c.low) for c in candles]
+
+        adx_value = compute_adx(closes, highs, lows, period)
+        if adx_value is None:
+            return None, "ambiguous"  # fall back when insufficient data
+
+        if adx_value > trend_threshold:
+            regime = "trend"
+        elif adx_value < mr_threshold:
+            regime = "mr"
+        else:
+            regime = "ambiguous"
+
+        return adx_value, regime
 
     def _parse_config(self, config: dict[str, object]) -> tuple[dict[str, object], str, Decimal]:
         """Extract strategies config, normalize mode, and min confidence from config."""
@@ -202,6 +230,32 @@ class StrategyCombiner:
             threshold = min(min_confidence, exit_conf)
         return threshold
 
+    # ── Hooks for subclass extension (JournalingStrategyCombiner) ──────────
+
+    def _on_generate_start(self, symbol: str, segment_id: str) -> None:
+        """Hook: called at start of generate_signal, before strategy loop."""
+
+    def _on_strategy_signal(
+        self,
+        name: str,
+        strategy: BaseStrategy,
+        signal: Signal | None,
+        weight: Decimal,
+    ) -> None:
+        """Hook: called after each strategy fires (including None signals)."""
+
+    def _on_normalized(self, net: float, features: dict[str, float]) -> None:
+        """Hook: called after normalization (or 0.0 on early return)."""
+
+    def _on_final_signal(
+        self,
+        signal: Signal | None,
+        contributions: dict[str, float],
+    ) -> None:
+        """Hook: called with the final signal (or None if below threshold)."""
+
+    # ── Core signal generation ──────────────────────────────────────────
+
     def generate_signal(  # noqa: PLR0912, PLR0915
         self,
         symbol: str,
@@ -213,10 +267,17 @@ class StrategyCombiner:
     ) -> Signal | None:
         """Generate a combined signal by weighting enabled strategy signals.
 
+        Uses ADX regime routing to gate strategy pools:
+        - trend regime (ADX > 30): only momentum strategies fire
+        - mr regime (ADX < 20): only mean-reversion strategies fire
+        - ambiguous regime (20 <= ADX <= 30): both pools fire, dominant pool wins
+
         Args:
             weight_overrides: When provided, these weights are used instead of
                 the YAML-configured weights for each named strategy.
         """
+        self._on_generate_start(symbol, segment_id)
+
         config = self._load_config(segment_id)
         strategies_cfg, effective_normalize, effective_min_confidence = self._parse_config(config)
         effective_overrides, hrp_overrides = self._resolve_effective_overrides(weight_overrides)
@@ -229,9 +290,20 @@ class StrategyCombiner:
         dominant_strategy_name = "combined"
         dominant_contribution = _ZERO
 
-        # Hurst exponent routing: compute dynamic weight multipliers
-        h, hurst_multipliers = self._compute_hurst_multipliers(candles)
-        feature_contributions["hurst_exponent"] = h
+        # ADX regime routing
+        adx_value, regime = self._compute_adx_regime(candles, config)
+        feature_contributions["adx_value"] = adx_value if adx_value is not None else 0.0
+        feature_contributions["adx_regime"] = {"trend": 1.0, "mr": -1.0, "ambiguous": 0.0}[regime]
+
+        # Per-pool score tracking for ambiguous regime dominant-pool-wins logic
+        trend_score = _ZERO
+        mr_score = _ZERO
+        neutral_score = _ZERO
+        trend_weight = _ZERO
+        mr_weight = _ZERO
+        neutral_weight = _ZERO
+        trend_pool_fired = False
+        mr_pool_fired = False
 
         for strategy_name, strategy_cfg in strategies_cfg.items():
             if not isinstance(strategy_cfg, dict):
@@ -246,6 +318,17 @@ class StrategyCombiner:
                 continue
             data_ready_weight += weight  # registered + enabled (actually called)
 
+            # ADX regime gating: skip strategies that belong to the wrong pool
+            is_trend = strategy_name in _MOMENTUM_STRATEGIES
+            is_mr = strategy_name in _MR_STRATEGIES
+
+            if regime == "trend" and is_mr:
+                self._on_strategy_signal(strategy_name, strategy, None, weight)
+                continue  # skip MR strategies in trending market
+            if regime == "mr" and is_trend:
+                self._on_strategy_signal(strategy_name, strategy, None, weight)
+                continue  # skip trend strategies in range-bound market
+
             signal = strategy.generate_signal(
                 symbol,
                 candles,
@@ -253,14 +336,28 @@ class StrategyCombiner:
                 sentiment_score=sentiment_score,
                 has_open_position=has_open_position,
             )
+            self._on_strategy_signal(strategy_name, strategy, signal, weight)
             if signal is None:
                 continue
 
             score = _BUY_SCORE if signal.direction == SignalDirection.BUY else _SELL_SCORE
-            hurst_mult = Decimal(str(hurst_multipliers.get(strategy_name, 1.0)))
-            contribution = score * Decimal(str(signal.confidence)) * weight * hurst_mult
+            contribution = score * Decimal(str(signal.confidence)) * weight
             weighted_score += contribution
             total_weight += weight
+
+            # Track per-pool scores for ambiguous regime
+            if is_trend:
+                trend_score += contribution
+                trend_weight += weight
+                trend_pool_fired = True
+            elif is_mr:
+                mr_score += contribution
+                mr_weight += weight
+                mr_pool_fired = True
+            else:
+                neutral_score += contribution
+                neutral_weight += weight
+
             if abs(contribution) > abs(dominant_contribution):
                 dominant_contribution = contribution
                 dominant_strategy_name = strategy_name
@@ -269,7 +366,20 @@ class StrategyCombiner:
                 1.0 if signal.direction == SignalDirection.BUY else -1.0
             )
 
+        # Ambiguous regime: dominant pool wins when both pools fired
+        if regime == "ambiguous" and trend_pool_fired and mr_pool_fired:
+            if abs(trend_score) >= abs(mr_score):
+                # Keep trend + neutral, remove MR contributions
+                weighted_score = trend_score + neutral_score
+                total_weight = trend_weight + neutral_weight
+            else:
+                # Keep MR + neutral, remove trend contributions
+                weighted_score = mr_score + neutral_score
+                total_weight = mr_weight + neutral_weight
+
         if total_weight == _ZERO:
+            self._on_normalized(0.0, feature_contributions)
+            self._on_final_signal(None, feature_contributions)
             return None
 
         if effective_normalize == "total":
@@ -279,6 +389,8 @@ class StrategyCombiner:
         else:  # "firing" (default)
             denominator = total_weight
         if denominator == _ZERO:
+            self._on_normalized(0.0, feature_contributions)
+            self._on_final_signal(None, feature_contributions)
             return None
         net = weighted_score / denominator
 
@@ -293,6 +405,8 @@ class StrategyCombiner:
         if hrp_overrides is not None:
             for sname, sweight in hrp_overrides.items():
                 feature_contributions[f"hrp_weight_{sname}"] = float(sweight)
+
+        self._on_normalized(float(net), feature_contributions)
 
         threshold = self._effective_threshold(
             config, effective_min_confidence, has_open_position, net
@@ -317,9 +431,10 @@ class StrategyCombiner:
                     net_score=float(net),
                     threshold=float(threshold),
                 )
+            self._on_final_signal(None, feature_contributions)
             return None
 
-        return self._build_result(
+        result = self._build_result(
             net,
             feature_contributions,
             symbol,
@@ -327,6 +442,8 @@ class StrategyCombiner:
             segment_id,
             dominant_strategy_name=dominant_strategy_name,
         )
+        self._on_final_signal(result, feature_contributions)
+        return result
 
     def _load_config(self, segment_id: str) -> dict[str, object]:
         """Load segment YAML preset, returning an empty dict if not found or malformed."""

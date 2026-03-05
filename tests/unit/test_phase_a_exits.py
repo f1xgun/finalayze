@@ -348,11 +348,11 @@ class TestResolveMaxHoldBars:
 
     def test_default_strategy_hold_bars_values(self) -> None:
         """Verify all default per-strategy values match the plan."""
-        assert DEFAULT_STRATEGY_HOLD_BARS["momentum"] == 40
+        assert DEFAULT_STRATEGY_HOLD_BARS["momentum"] == 30
         assert DEFAULT_STRATEGY_HOLD_BARS["mean_reversion"] == 20
-        assert DEFAULT_STRATEGY_HOLD_BARS["pairs"] == 15
+        assert DEFAULT_STRATEGY_HOLD_BARS["pairs"] == 20
         assert DEFAULT_STRATEGY_HOLD_BARS["event_driven"] == 63
-        assert DEFAULT_STRATEGY_HOLD_BARS["rsi2_connors"] == 10
+        assert DEFAULT_STRATEGY_HOLD_BARS["rsi2_connors"] == 5
         assert DEFAULT_STRATEGY_HOLD_BARS["ml_ensemble"] == 20
 
 

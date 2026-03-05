@@ -155,19 +155,23 @@ class TestStrategyCombiner:
         assert signal is None
 
     def test_combine_respects_min_confidence(self) -> None:
-        """When weighted score is below min_combined_confidence, return None."""
-        # Equal and opposite signals with equal weights -> net score = 0 -> None
+        """When weighted score is below min_combined_confidence, return None.
+
+        Uses neutral strategies (not in momentum/MR pools) so ADX regime
+        routing does not apply dominant-pool-wins logic.
+        """
+        # Equal and opposite signals from neutral strategies -> net score = 0 -> None
         equal_weight_config: dict[str, Any] = {
             "strategies": {
-                "momentum": {"enabled": True, "weight": 0.5},
-                "mean_reversion": {"enabled": True, "weight": 0.5},
+                "strat_x": {"enabled": True, "weight": 0.5},
+                "strat_y": {"enabled": True, "weight": 0.5},
             }
         }
-        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
-        sell_signal = _make_signal(SignalDirection.SELL, HIGH_CONFIDENCE, "mean_reversion")
-        momentum = MockStrategy("momentum", buy_signal)
-        mean_rev = MockStrategy("mean_reversion", sell_signal)
-        combiner = StrategyCombiner([momentum, mean_rev])
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "strat_x")
+        sell_signal = _make_signal(SignalDirection.SELL, HIGH_CONFIDENCE, "strat_y")
+        strat_x = MockStrategy("strat_x", buy_signal)
+        strat_y = MockStrategy("strat_y", sell_signal)
+        combiner = StrategyCombiner([strat_x, strat_y])
         candles = _make_candles()
         with patch.object(combiner, "_load_config", return_value=equal_weight_config):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
@@ -416,18 +420,22 @@ class TestCombinerNormalizationMode:
         assert signal is None
 
     def test_normalize_total_mode_strong_consensus(self) -> None:
-        """In total mode, two strategies both firing BUY passes."""
+        """In total mode, two neutral strategies both firing BUY passes.
+
+        Uses neutral strategies (not in momentum/MR pools) to avoid ADX
+        dominant-pool-wins logic.
+        """
         config: dict[str, Any] = {
             "strategies": {
-                "momentum": {"enabled": True, "weight": 0.5},
-                "mean_reversion": {"enabled": True, "weight": 0.5},
+                "strat_a": {"enabled": True, "weight": 0.5},
+                "strat_b": {"enabled": True, "weight": 0.5},
             }
         }
-        buy_sig1 = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
-        buy_sig2 = _make_signal(SignalDirection.BUY, 0.8, "mean_reversion")
-        momentum = MockStrategy("momentum", buy_sig1)
-        mean_rev = MockStrategy("mean_reversion", buy_sig2)
-        combiner = StrategyCombiner([momentum, mean_rev], normalize_mode="total")
+        buy_sig1 = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "strat_a")
+        buy_sig2 = _make_signal(SignalDirection.BUY, 0.8, "strat_b")
+        strat_a = MockStrategy("strat_a", buy_sig1)
+        strat_b = MockStrategy("strat_b", buy_sig2)
+        combiner = StrategyCombiner([strat_a, strat_b], normalize_mode="total")
         candles = _make_candles()
         with patch.object(combiner, "_load_config", return_value=config):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
@@ -456,94 +464,37 @@ class TestCombinerNormalizationMode:
         assert signal is None
 
 
-class TestHurstRouting:
-    """Tests for Hurst exponent-based weight adjustment in the combiner."""
+class TestADXRouting:
+    """Tests for ADX-based regime routing in the combiner (replaced Hurst)."""
 
-    # Constants
-    TRENDING_STEP = 1.0
-    TRENDING_LENGTH = 300
-    MR_AMPLITUDE = 10.0
-    MR_LENGTH = 300
-    HURST_BOOST = 1.5
-    HURST_SUPPRESS = 1.0 / 1.5
-
-    @staticmethod
-    def _make_trending_candles(count: int = 300) -> list[Candle]:
-        """Create candles with a strong uptrend (H >> 0.55)."""
-        candles_list = []
-        from datetime import UTC, datetime, timedelta
-
-        base_time = datetime(2024, 1, 1, tzinfo=UTC)
-        for i in range(count):
-            price = Decimal(str(100.0 + 1.0 * i))
-            candles_list.append(
-                Candle(
-                    symbol="AAPL",
-                    market_id="us",
-                    timeframe="1d",
-                    timestamp=base_time + timedelta(days=i),
-                    open=price,
-                    high=price + Decimal(1),
-                    low=price - Decimal(1),
-                    close=price,
-                    volume=VOLUME,
-                )
-            )
-        return candles_list
-
-    @staticmethod
-    def _make_mr_candles(count: int = 300) -> list[Candle]:
-        """Create candles with mean-reverting behavior (H << 0.45)."""
-        candles_list = []
-        from datetime import UTC, datetime, timedelta
-
-        base_time = datetime(2024, 1, 1, tzinfo=UTC)
-        for i in range(count):
-            price = Decimal(str(100.0 + 10.0 * ((-1) ** i)))
-            candles_list.append(
-                Candle(
-                    symbol="AAPL",
-                    market_id="us",
-                    timeframe="1d",
-                    timestamp=base_time + timedelta(days=i),
-                    open=price,
-                    high=price + Decimal(1),
-                    low=price - Decimal(1),
-                    close=price,
-                    volume=VOLUME,
-                )
-            )
-        return candles_list
-
-    def test_hurst_routing_boosts_momentum_in_trend(self) -> None:
-        """With trending candles, momentum contribution should be scaled up by 1.5x."""
+    def test_adx_features_present_in_signal(self) -> None:
+        """Combined signal features contain adx_value and adx_regime."""
         config: dict[str, Any] = {
             "strategies": {
                 "momentum": {"enabled": True, "weight": 1.0},
-                "mean_reversion": {"enabled": True, "weight": 1.0},
             },
-            "min_combined_confidence": 0.0,  # accept any non-zero signal
+            "min_combined_confidence": 0.0,
         }
-        # Both strategies fire BUY with same confidence
         mom_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
-        mr_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "mean_reversion")
         momentum = MockStrategy("momentum", mom_signal)
-        mean_rev = MockStrategy("mean_reversion", mr_signal)
+        combiner = StrategyCombiner([momentum])
+        candles = _make_candles()
 
-        candles = self._make_trending_candles()
-
-        # With Hurst routing: momentum * 1.5, mean_reversion * (1/1.5)
-        combiner = StrategyCombiner([momentum, mean_rev])
-        with patch.object(combiner, "_load_config", return_value=config):
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch(
+                "finalayze.strategies.combiner.compute_adx",
+                return_value=25.0,
+            ),
+        ):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
 
         assert signal is not None
-        assert "hurst_exponent" in signal.features
-        # In trending regime, hurst > 0.55
-        assert signal.features["hurst_exponent"] > 0.55  # noqa: PLR2004
+        assert "adx_value" in signal.features
+        assert "adx_regime" in signal.features
 
-    def test_hurst_routing_boosts_mr_in_mean_reversion(self) -> None:
-        """With oscillating candles, MR contribution should be scaled up by 1.5x."""
+    def test_adx_regime_trend_only_momentum_fires(self) -> None:
+        """In trending regime (ADX > 30), MR strategies are gated out."""
         config: dict[str, Any] = {
             "strategies": {
                 "momentum": {"enabled": True, "weight": 1.0},
@@ -556,16 +507,53 @@ class TestHurstRouting:
         momentum = MockStrategy("momentum", mom_signal)
         mean_rev = MockStrategy("mean_reversion", mr_signal)
 
-        candles = self._make_mr_candles()
-
         combiner = StrategyCombiner([momentum, mean_rev])
-        with patch.object(combiner, "_load_config", return_value=config):
+        candles = _make_candles()
+
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch(
+                "finalayze.strategies.combiner.compute_adx",
+                return_value=35.0,
+            ),
+        ):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
 
         assert signal is not None
-        assert "hurst_exponent" in signal.features
-        # In mean-reverting regime, hurst < 0.45
-        assert signal.features["hurst_exponent"] < 0.45  # noqa: PLR2004
+        assert signal.features["adx_regime"] == 1.0  # trend
+        # MR signal should NOT appear in features (was gated out)
+        assert "mean_reversion_confidence" not in signal.features
+
+    def test_adx_regime_mr_only_mr_fires(self) -> None:
+        """In MR regime (ADX < 20), momentum strategies are gated out."""
+        config: dict[str, Any] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 1.0},
+                "mean_reversion": {"enabled": True, "weight": 1.0},
+            },
+            "min_combined_confidence": 0.0,
+        }
+        mom_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        mr_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "mean_reversion")
+        momentum = MockStrategy("momentum", mom_signal)
+        mean_rev = MockStrategy("mean_reversion", mr_signal)
+
+        combiner = StrategyCombiner([momentum, mean_rev])
+        candles = _make_candles()
+
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch(
+                "finalayze.strategies.combiner.compute_adx",
+                return_value=15.0,
+            ),
+        ):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        assert signal is not None
+        assert signal.features["adx_regime"] == -1.0  # mr
+        # Momentum signal should NOT appear in features (was gated out)
+        assert "momentum_confidence" not in signal.features
 
 
 class TestTurnOfMonth:

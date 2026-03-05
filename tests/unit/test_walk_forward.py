@@ -23,21 +23,21 @@ from finalayze.strategies.base import BaseStrategy
 DEFAULT_START = date(2018, 1, 1)
 DEFAULT_END = date(2025, 1, 1)
 
-# With default config (train=3yr, test=1yr, step=6mo) on 2018-2025,
-# windows generated should be approximately 7.
-EXPECTED_MIN_WINDOWS_DEFAULT = 5
-EXPECTED_MAX_WINDOWS_DEFAULT = 9
+# With default config (train=12mo, test=6mo, step=6mo) on 2018-2025,
+# windows generated should be numerous (many 18-month spans fit in 7 years).
+EXPECTED_MIN_WINDOWS_DEFAULT = 10
+EXPECTED_MAX_WINDOWS_DEFAULT = 14
 
 SHORT_DATA_START = date(2020, 1, 1)
-SHORT_DATA_END = date(2022, 6, 1)
+SHORT_DATA_END = date(2020, 12, 1)
 
-CUSTOM_TRAIN_YEARS = 2
-CUSTOM_TEST_YEARS = 1
+CUSTOM_TRAIN_MONTHS = 24
+CUSTOM_TEST_MONTHS = 12
 CUSTOM_STEP_MONTHS = 12
 
 CUSTOM_START = date(2018, 1, 1)
 CUSTOM_END = date(2025, 1, 1)
-# With train=2yr, test=1yr, step=12mo, we step annually starting 2018.
+# With train=24mo, test=12mo, step=12mo, we step annually starting 2018.
 # Window 1: train 2018-01-01..2019-12-31, test 2020-01-01..2020-12-31
 # Window 2: train 2019-01-01..2020-12-31, test 2021-01-01..2021-12-31
 # Window 3: train 2020-01-01..2021-12-31, test 2022-01-01..2022-12-31
@@ -57,10 +57,10 @@ CANDLE_VOLUME = 1000
 
 RUN_SEGMENT = "us_tech"
 RUN_INITIAL_CASH = Decimal(100000)
-RUN_TRAIN_YEARS = 2
-RUN_TEST_YEARS = 1
+RUN_TRAIN_MONTHS = 24
+RUN_TEST_MONTHS = 12
 RUN_STEP_MONTHS = 12
-# With 7 years of data (2018-2025), 2yr train + 1yr test + 12mo step -> 5 windows
+# With 7 years of data (2018-2025), 24mo train + 12mo test + 12mo step -> 5 windows
 RUN_EXPECTED_WINDOWS = 5
 # Weekly candles over 7 years ~ 365 candles
 RUN_CANDLE_DAYS = 7  # Generate one candle per week
@@ -118,8 +118,8 @@ class TestGenerateWindows:
     def test_generate_windows_short_data(self) -> None:
         """Data too short for any complete window returns empty list."""
         optimizer = WalkForwardOptimizer()
-        # Default needs 3yr train + 1yr test = 4yr minimum.
-        # 2.5 years of data is not enough.
+        # Default needs 12mo train + 6mo test = 18mo minimum.
+        # 11 months of data is not enough.
         windows = optimizer.generate_windows(SHORT_DATA_START, SHORT_DATA_END)
 
         assert windows == []
@@ -139,10 +139,10 @@ class TestGenerateWindows:
             assert w.test_start <= w.test_end
 
     def test_custom_config(self) -> None:
-        """Custom train_years/test_years/step_months produces expected windows."""
+        """Custom train_months/test_months/step_months produces expected windows."""
         config = WalkForwardConfig(
-            train_years=CUSTOM_TRAIN_YEARS,
-            test_years=CUSTOM_TEST_YEARS,
+            train_months=CUSTOM_TRAIN_MONTHS,
+            test_months=CUSTOM_TEST_MONTHS,
             step_months=CUSTOM_STEP_MONTHS,
         )
         optimizer = WalkForwardOptimizer(config=config)
@@ -235,8 +235,8 @@ class TestWalkForwardRun:
     def test_run_populates_result(self) -> None:
         """run() produces a WalkForwardResult with windows and metrics."""
         config = WalkForwardConfig(
-            train_years=RUN_TRAIN_YEARS,
-            test_years=RUN_TEST_YEARS,
+            train_months=RUN_TRAIN_MONTHS,
+            test_months=RUN_TEST_MONTHS,
             step_months=RUN_STEP_MONTHS,
         )
         optimizer = WalkForwardOptimizer(config=config)
@@ -274,8 +274,8 @@ class TestWalkForwardSnapshots:
         from finalayze.core.schemas import PortfolioState
 
         config = WalkForwardConfig(
-            train_years=RUN_TRAIN_YEARS,
-            test_years=RUN_TEST_YEARS,
+            train_months=RUN_TRAIN_MONTHS,
+            test_months=RUN_TEST_MONTHS,
             step_months=RUN_STEP_MONTHS,
         )
         optimizer = WalkForwardOptimizer(config=config)
@@ -291,8 +291,8 @@ class TestWalkForwardSnapshots:
     def test_wf_max_drawdown_from_snapshots(self) -> None:
         """oos_max_drawdown_pct is computed from bar-level snapshots, not per-trade PnL."""
         config = WalkForwardConfig(
-            train_years=RUN_TRAIN_YEARS,
-            test_years=RUN_TEST_YEARS,
+            train_months=RUN_TRAIN_MONTHS,
+            test_months=RUN_TEST_MONTHS,
             step_months=RUN_STEP_MONTHS,
         )
         optimizer = WalkForwardOptimizer(config=config)
@@ -330,8 +330,8 @@ class TestWalkForwardPerFoldSharpe:
         Per-fold aggregation avoids this.
         """
         config = WalkForwardConfig(
-            train_years=RUN_TRAIN_YEARS,
-            test_years=RUN_TEST_YEARS,
+            train_months=RUN_TRAIN_MONTHS,
+            test_months=RUN_TEST_MONTHS,
             step_months=RUN_STEP_MONTHS,
         )
         optimizer = WalkForwardOptimizer(config=config)
@@ -364,8 +364,8 @@ class TestWalkForwardPerFoldSharpe:
     def test_wf_per_fold_trade_counts_sum(self) -> None:
         """Sum of per-fold trade counts equals total_oos_trades."""
         config = WalkForwardConfig(
-            train_years=RUN_TRAIN_YEARS,
-            test_years=RUN_TEST_YEARS,
+            train_months=RUN_TRAIN_MONTHS,
+            test_months=RUN_TEST_MONTHS,
             step_months=RUN_STEP_MONTHS,
         )
         optimizer = WalkForwardOptimizer(config=config)
@@ -384,8 +384,8 @@ class TestWalkForwardOptimization:
     def test_walk_forward_without_grid_uses_default_engine(self) -> None:
         """No param_grid -> runs default engine on test windows (backward compat)."""
         config = WalkForwardConfig(
-            train_years=RUN_TRAIN_YEARS,
-            test_years=RUN_TEST_YEARS,
+            train_months=RUN_TRAIN_MONTHS,
+            test_months=RUN_TEST_MONTHS,
             step_months=RUN_STEP_MONTHS,
         )
         optimizer = WalkForwardOptimizer(config=config)
@@ -399,8 +399,8 @@ class TestWalkForwardOptimization:
     def test_walk_forward_with_grid_optimizes_on_train(self) -> None:
         """Provide param_grid and engine_factory -> optimizer selects best."""
         config = WalkForwardConfig(
-            train_years=RUN_TRAIN_YEARS,
-            test_years=RUN_TEST_YEARS,
+            train_months=RUN_TRAIN_MONTHS,
+            test_months=RUN_TEST_MONTHS,
             step_months=RUN_STEP_MONTHS,
         )
         factory_calls: list[dict[str, object]] = []
@@ -438,8 +438,8 @@ class TestWalkForwardOptimization:
     def test_walk_forward_train_data_not_discarded(self) -> None:
         """Verify train candles are passed to _optimize_on_train."""
         config = WalkForwardConfig(
-            train_years=RUN_TRAIN_YEARS,
-            test_years=RUN_TEST_YEARS,
+            train_months=RUN_TRAIN_MONTHS,
+            test_months=RUN_TEST_MONTHS,
             step_months=RUN_STEP_MONTHS,
         )
         train_lengths: list[int] = []
@@ -462,3 +462,71 @@ class TestWalkForwardOptimization:
         # Train data should be non-empty for each window
         assert len(train_lengths) > 0
         assert all(length > 0 for length in train_lengths)
+
+
+# ── RC4: months-based config and zero-windows guard ─────────────────────
+
+# 3 years of data with 12mo train + 6mo test => at least 2 windows
+RC4_THREE_YEAR_START = date(2020, 1, 1)
+RC4_THREE_YEAR_END = date(2023, 1, 1)
+RC4_TRAIN_MONTHS = 12
+RC4_TEST_MONTHS = 6
+RC4_STEP_MONTHS = 6
+RC4_MIN_WINDOWS_3Y = 2
+
+# Data range too short for even one window (less than train + test)
+RC4_SHORT_START = date(2023, 1, 1)
+RC4_SHORT_END = date(2024, 2, 1)  # 13 months, need 18 (12 train + 6 test)
+
+
+class TestRC4MonthsConfig:
+    """RC4: WalkForwardConfig uses train_months/test_months instead of years."""
+
+    def test_months_config_3y_data_produces_windows(self) -> None:
+        """train_months=12, test_months=6, step_months=6 on 3 years of data produces >=2 windows."""
+        config = WalkForwardConfig(
+            train_months=RC4_TRAIN_MONTHS,
+            test_months=RC4_TEST_MONTHS,
+            step_months=RC4_STEP_MONTHS,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        windows = optimizer.generate_windows(RC4_THREE_YEAR_START, RC4_THREE_YEAR_END)
+
+        assert len(windows) >= RC4_MIN_WINDOWS_3Y
+
+        # Verify window structure
+        for w in windows:
+            assert w.train_end < w.test_start
+            assert w.train_start <= w.train_end
+            assert w.test_start <= w.test_end
+
+    def test_zero_windows_short_data(self) -> None:
+        """Data range shorter than train+test produces 0 windows and logs warning."""
+        config = WalkForwardConfig(
+            train_months=RC4_TRAIN_MONTHS,
+            test_months=RC4_TEST_MONTHS,
+            step_months=RC4_STEP_MONTHS,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        windows = optimizer.generate_windows(RC4_SHORT_START, RC4_SHORT_END)
+
+        assert windows == []
+
+    def test_zero_windows_run_returns_empty_result(self) -> None:
+        """run() with data too short for any window returns empty WalkForwardResult."""
+        config = WalkForwardConfig(
+            train_months=RC4_TRAIN_MONTHS,
+            test_months=RC4_TEST_MONTHS,
+            step_months=RC4_STEP_MONTHS,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        candles = _make_candles_range(RC4_SHORT_START, RC4_SHORT_END)
+        strategy = _AlternatingStrategy()
+        engine = BacktestEngine(strategy=strategy, initial_cash=RUN_INITIAL_CASH)
+
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
+
+        assert isinstance(result, WalkForwardResult)
+        assert len(result.windows) == 0
+        assert result.total_oos_trades == 0
+        assert result.oos_sharpe == 0.0

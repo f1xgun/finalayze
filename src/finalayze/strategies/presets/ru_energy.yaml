@@ -1,6 +1,11 @@
 segment_id: ru_energy
 normalize_mode: "firing"
-min_combined_confidence: 0.38
+min_combined_confidence: 0.30
+regime_routing:
+  enabled: true
+  adx_period: 14
+  trend_threshold: 30
+  mr_threshold: 20
 strategies:
   momentum:
     enabled: true

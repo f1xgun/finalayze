@@ -275,8 +275,8 @@ class TestCombinerExitPassThrough:
         return combiner
 
     def test_combiner_exit_passes_with_open_position(self) -> None:
-        """SELL signal below normal threshold passes when has_open_position=True."""
-        sell_strat = self._make_sell_strategy(confidence=0.15)
+        """SELL signal above exit threshold passes when has_open_position=True."""
+        sell_strat = self._make_sell_strategy(confidence=0.45)
         combiner = self._make_combiner_with_yaml([sell_strat])
 
         signal = combiner.generate_signal(
@@ -285,7 +285,7 @@ class TestCombinerExitPassThrough:
             SEGMENT_ID,
             has_open_position=True,
         )
-        # Should pass because exit threshold (0.10) < abs_net (0.15)
+        # Should pass because exit threshold (0.38) < abs_net (0.45)
         assert signal is not None
         assert signal.direction == SignalDirection.SELL
 

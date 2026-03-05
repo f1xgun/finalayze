@@ -184,7 +184,9 @@ class TestDualMomentumVolTarget:
                 )
             )
 
-        signal = strategy.generate_signal("TEST", candles, "us_tech")
+        # Use a non-preset segment so YAML params fall back to defaults
+        # (no min_confidence filter beyond the base 0.4)
+        signal = strategy.generate_signal("TEST", candles, "test_segment")
         assert signal is not None
         assert signal.confidence >= 0.0
         assert signal.confidence <= 1.0

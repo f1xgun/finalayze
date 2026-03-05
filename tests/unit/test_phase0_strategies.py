@@ -167,9 +167,9 @@ class TestMOEXPresetRecalibration:
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
     def test_ru_min_combined_confidence(self, segment_id: str) -> None:
-        """All RU presets: min_combined_confidence=0.38 (lowered to allow more signals)."""
+        """All RU presets: min_combined_confidence=0.30 (lowered for ADX routing)."""
         data = _load_preset(segment_id)
-        assert data["min_combined_confidence"] == 0.38  # noqa: PLR2004
+        assert data["min_combined_confidence"] == 0.30  # noqa: PLR2004
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
     def test_ru_trend_filter_enabled(self, segment_id: str) -> None:

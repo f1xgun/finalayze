@@ -15,20 +15,52 @@ if TYPE_CHECKING:
 
 # Default per-strategy max holding periods (bars).
 DEFAULT_STRATEGY_HOLD_BARS: dict[str, int] = {
-    "momentum": 40,
-    "dual_momentum": 40,
+    "momentum": 30,
+    "dual_momentum": 30,
     "mean_reversion": 20,
     "ou_mean_reversion": 25,
-    "pairs": 15,
+    "pairs": 20,
     "event_driven": 63,
-    "rsi2_connors": 10,
+    "rsi2_connors": 5,
     "ml_ensemble": 20,
-    "dividend_gap": 10,
+    "dividend_gap": 15,
     "pead": 63,
     "cbr_calendar": 30,
 }
 
 _DEFAULT_HOLD_BARS_FALLBACK = 30
+
+# Per-strategy ATR stop-loss multipliers (wider stops for mean-reversion).
+DEFAULT_STRATEGY_STOP_ATR: dict[str, float] = {
+    "momentum": 2.5,
+    "dual_momentum": 3.0,
+    "mean_reversion": 3.5,
+    "ou_mean_reversion": 3.5,
+    "pairs": 3.0,
+    "event_driven": 3.0,
+    "rsi2_connors": 2.5,
+    "ml_ensemble": 3.0,
+    "dividend_gap": 3.0,
+    "pead": 3.0,
+    "cbr_calendar": 3.0,
+}
+
+_DEFAULT_STOP_ATR_FALLBACK = 3.0
+
+
+def resolve_stop_atr_multiplier(
+    strategy_name: str,
+    *,
+    segment_id: str = "",
+) -> Decimal:
+    """Resolve the ATR stop-loss multiplier for a strategy.
+
+    MOEX segments get a 1.2x uplift due to higher ATR/price ratios.
+    """
+    base = DEFAULT_STRATEGY_STOP_ATR.get(strategy_name, _DEFAULT_STOP_ATR_FALLBACK)
+    if segment_id.startswith("ru_"):
+        base *= 1.2
+    return Decimal(str(base))
 
 
 def resolve_max_hold_bars(

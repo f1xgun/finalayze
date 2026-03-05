@@ -73,28 +73,37 @@ Layer 6: API / Dashboard        api/, dashboard/
 
 | Domain | Grade | Key Issue |
 |---|---|---|
-| **Strategies** | C | Combiner destroys alpha — isolated Sharpe +0.14 → combined -0.0003. `event_driven`, `ml_ensemble`, `pead` disabled (0 signals). |
+| **Strategies** | B- | ADX regime routing separates trend/MR pools. Win rate 42-54%, PF 1.22. `event_driven`, `ml_ensemble`, `pead` disabled. Trade count still low (626). |
 | **Data** | B | US (yfinance) works. MOEX requires `FINALAYZE_TINKOFF_TOKEN`; yfinance .ME tickers return 0 data. Dividend pipeline wired (TinkoffFetcher + static YAML fallback). |
-| **Risk** | B- | Position sizing currency-aware (RUB 5000 / USD 500). Half-Kelly + 11-check pre-trade pipeline. Circuit breakers functional. |
+| **Risk** | B | Pipeline floor (15% of base) prevents cascade. Strategy-specific ATR stops. Currency-aware sizing (RUB 5000 / USD 500). Half-Kelly + 11-check pre-trade pipeline. |
 | **ML** | D | Models untrained, `ml_ensemble` disabled in all presets. Feature engineering + training pipeline exist but unused. |
-| **Backtest** | B | Engine works, isolation test script functional, iteration tracking works. Walk-forward config (3yr train + 1yr test) exceeds 2yr data range. |
+| **Backtest** | B+ | Engine works. Grace bar prevents same-candle stop-outs. Walk-forward uses months (12mo train + 6mo test). Strategy-specific max hold bars. |
 | **Execution** | B+ | Alpaca + Tinkoff brokers wired. RetryPolicy with backoff. Simulated broker for backtests. |
 | **Analysis** | D | LLM client + NewsAnalyzer exist but `event_driven` disabled (no real-time news feed). |
 | **API/Dashboard** | B+ | 20+ REST endpoints, Prometheus metrics, Streamlit dashboard. All operational. |
 
-### Critical Blocker: Strategy Combiner
+### Week 3 Structural Fixes
 
-The `StrategyCombiner` with "firing" normalization is the #1 source of value destruction:
-- Opposing strategies (momentum vs mean_reversion) cancel signals
-- Dead strategies waste weight budget even when disabled (now fixed)
-- `min_combined_confidence` was too high, filtering 90% of signals (now 0.38)
-- **50+ iterations, 100% REJECT rate** — no iteration has passed quality gates
+**Completed:**
+- **ADX(14) regime routing**: trend pool (ADX>30, momentum/dual_momentum), MR pool (ADX<20, mean_reversion/rsi2/OU/pairs), ambiguous zone (20-30, dominant-pool-wins)
+- **DRY JournalingStrategyCombiner**: 4-hook architecture, no more code duplication
+- **Strategy-specific ATR stops**: momentum=2.5, dual_momentum=3.0, mean_reversion=3.5, rsi2=2.5, MOEX 1.2x uplift
+- **Pipeline floor**: 15% of base_position prevents cascading reduction
+- **Walk-forward months**: 12mo train + 6mo test + 6mo step (was 3yr+1yr years which produced 0 OOS windows)
+- **YAML params wired**: DualMomentum and OU now read YAML configs
+- **Grace bar**: Skip stop-loss check on fill candle (prevents same-candle stop-outs)
+- **Exit confidence 0.38**: Matches entry threshold, prevents weak SELL signal churn
+- **dual_momentum SELL**: Score <= -0.05 triggers SELL signal with deduplication
+
+**Results**: Win rate 15%→50%, PF 1.05→1.22, Max DD 0.46%→0.25%. Trade count dropped 1198→626 (fewer noise trades). WF Sharpe still negative (-0.004).
+
+**Remaining bottleneck**: Trade count (626 vs 1300 target). Individual strategies fire rarely; ADX routing + 0.30 threshold filter most signals. Need more signal sources or lower-latency signals.
 
 ### Isolated Strategy Performance (us_tech, 2022-2025)
 
 | Strategy | Sharpe | PF | Trades | Status |
 |---|---|---|---|---|
-| dual_momentum | +0.137 | 1.29 | 414 | Enabled (us_tech) |
+| dual_momentum | +0.137 | 1.29 | 414 | Enabled (us_tech), SELL at -0.05 |
 | mean_reversion | +0.034 | 1.98 | 27 | Enabled |
 | rsi2_connors | +0.020 | 0.94 | 73 | Enabled |
 | momentum | -0.014 | 1.46 | 27 | Enabled (reduced weight) |

@@ -21,6 +21,9 @@ _EVT_SCALE_FACTOR = Decimal("0.5")
 _EVT_MIN_HISTORY = 100
 _EVT_RECENT_WINDOW = 60
 
+# Pipeline floor: prevent cascading reduction beyond 85% of base_position
+_PIPELINE_FLOOR_FACTOR = Decimal("0.15")
+
 
 @dataclass(frozen=True, slots=True)
 class SizingContext:
@@ -138,10 +141,20 @@ class PositionSizingPipeline:
         """Run the pipeline and return the final position size.
 
         Returns Decimal(0) if the result is below min_position_size.
+        Applies a pipeline floor (15% of base_position) to prevent cascading
+        reduction from eliminating otherwise-viable positions.
         """
         size = context.base_position
         for step in self._steps:
             size = step.adjust(size, context)
+        # Pipeline floor: prevent cascading reduction beyond 85% of base
+        floor = context.base_position * _PIPELINE_FLOOR_FACTOR
+        size = max(size, floor)
+        # Guarded round-up: only if Kelly base was viable (positive expectancy)
+        if context.base_position > context.min_position_size:
+            half_min = context.min_position_size * Decimal("0.5")
+            if half_min <= size < context.min_position_size:
+                size = context.min_position_size
         if size < context.min_position_size:
             return Decimal(0)
         return min(size, context.equity * context.max_position_pct)

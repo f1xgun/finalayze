@@ -847,6 +847,12 @@ def _parse_args() -> argparse.Namespace:
         default="chandelier",
         help="Stop-loss mode: trailing or chandelier (default)",
     )
+    parser.add_argument(
+        "--wf-train-months", type=int, default=12, help="Walk-forward train window in months"
+    )
+    parser.add_argument(
+        "--wf-test-months", type=int, default=6, help="Walk-forward test window in months"
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 

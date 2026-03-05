@@ -13,7 +13,11 @@ from uuid import uuid4
 
 import structlog
 
-from finalayze.backtest.config import BacktestConfig, resolve_max_hold_bars
+from finalayze.backtest.config import (
+    BacktestConfig,
+    resolve_max_hold_bars,
+    resolve_stop_atr_multiplier,
+)
 from finalayze.backtest.decision_journal import (
     CandleSnapshot,
     DecisionJournal,
@@ -31,7 +35,7 @@ from finalayze.core.schemas import (
 from finalayze.execution.broker_base import OrderRequest
 from finalayze.execution.simulated_broker import SimulatedBroker
 from finalayze.risk.chandelier_exit import compute_chandelier_stop, get_chandelier_multiplier
-from finalayze.risk.kelly import TradeRecord
+from finalayze.risk.kelly import RollingKelly, TradeRecord
 from finalayze.risk.position_sizer import (
     compute_position_size,
     compute_realized_vol,
@@ -52,7 +56,6 @@ from finalayze.risk.stop_loss import compute_atr_stop_loss
 if TYPE_CHECKING:
     from finalayze.backtest.costs import TransactionCosts
     from finalayze.risk.circuit_breaker import CircuitBreaker
-    from finalayze.risk.kelly import RollingKelly
     from finalayze.risk.loss_limits import LossLimitTracker
     from finalayze.risk.regime import RegimeProvider
     from finalayze.strategies.base import BaseStrategy
@@ -121,7 +124,8 @@ class BacktestEngine:
         self._trail_activation_atr = cfg.trail_activation_atr
         self._trail_distance_atr = cfg.trail_distance_atr
         self._circuit_breaker = cfg.circuit_breaker
-        self._rolling_kelly = cfg.rolling_kelly
+        # Always use RollingKelly for graduated warm-up (1% fixed-fractional → pure Kelly)
+        self._rolling_kelly = cfg.rolling_kelly or RollingKelly()
         self._loss_limits = cfg.loss_limits
         self._target_vol = cfg.target_vol
         self._decision_journal = cfg.decision_journal
@@ -267,9 +271,17 @@ class BacktestEngine:
                     broker.update_stop_loss(symbol, new_stop)
 
             # (c) Check stop-losses after prices are updated
-            stop_results = broker.check_stop_losses(candle)
+            # Skip stop check on the fill candle (entry bar + 1) to avoid
+            # intraday lows below stop on the same candle used for the fill.
+            entry_bar_for_sym = entry_bars.get(symbol, -2)
+            if entry_bar_for_sym + 1 == i:
+                stop_results = []
+            else:
+                stop_results = broker.check_stop_losses(candle)
+            stop_filled = False
             for sr in stop_results:
                 if sr.filled and sr.fill_price is not None:
+                    stop_filled = True
                     entry = entry_prices.pop(sr.symbol, sr.fill_price)
                     _sl_entry_bar = entry_bars.pop(sr.symbol, i)
                     entry_strategies.pop(sr.symbol, None)
@@ -292,6 +304,11 @@ class BacktestEngine:
                     )
                     trades.append(trade)
                     self._record_trade(trade)
+
+            # After stop-loss exit, skip to next bar (don't re-enter same bar)
+            if stop_filled:
+                snapshots.append(broker.get_portfolio())
+                continue
 
             # (c2) Check circuit breaker level
             if self._circuit_breaker is not None:
@@ -1201,11 +1218,13 @@ class BacktestEngine:
             )
             return
 
-        # Pre-compute ATR stop-loss — reject trade if stop cannot be computed
+        # Pre-compute ATR stop-loss — use strategy-specific multiplier
+        strategy_name = signal.strategy_name if signal is not None else ""
+        stop_atr_mult = resolve_stop_atr_multiplier(strategy_name, segment_id=segment_id)
         stop_price = compute_atr_stop_loss(
             entry_price=fill_price,
             candles=history,
-            atr_multiplier=self._atr_multiplier,
+            atr_multiplier=stop_atr_mult,
         )
         if stop_price is None:
             self._journal_skip(
@@ -1253,9 +1272,10 @@ class BacktestEngine:
                 broker.deduct_fees(cost)
 
             # Set stop-loss based on mode
+            # Use the strategy-specific multiplier to recover correct ATR value
             atr_value = (
-                (order_result.fill_price - stop_price) / self._atr_multiplier
-                if self._atr_multiplier > 0
+                (order_result.fill_price - stop_price) / stop_atr_mult
+                if stop_atr_mult > 0
                 else Decimal(0)
             )
 

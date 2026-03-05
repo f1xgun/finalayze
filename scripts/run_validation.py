@@ -288,8 +288,8 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("--output", default=None, help="Output CSV path")
-    parser.add_argument("--train-years", type=int, default=3, help="Walk-forward train years")
-    parser.add_argument("--test-years", type=int, default=1, help="Walk-forward test years")
+    parser.add_argument("--train-months", type=int, default=12, help="Walk-forward train months")
+    parser.add_argument("--test-months", type=int, default=6, help="Walk-forward test months")
     parser.add_argument("--step-months", type=int, default=6, help="Walk-forward step months")
     parser.add_argument(
         "--no-benchmark",
@@ -357,8 +357,8 @@ def main() -> None:
     print("-" * _SEPARATOR_WIDTH)
 
     wf_config = WalkForwardConfig(
-        train_years=args.train_years,
-        test_years=args.test_years,
+        train_months=args.train_months,
+        test_months=args.test_months,
         step_months=args.step_months,
     )
 

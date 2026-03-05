@@ -7,6 +7,7 @@ performance can be evaluated on truly unseen data.
 from __future__ import annotations
 
 import itertools
+import logging
 import math
 import statistics
 from dataclasses import dataclass, field
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
 
     from finalayze.backtest.engine import BacktestEngine
     from finalayze.core.schemas import Candle, PortfolioState, TradeResult
+
+logger = logging.getLogger(__name__)
 
 ParameterGrid = dict[str, list[object]]
 
@@ -40,10 +43,14 @@ class WalkForwardWindow:
 
 @dataclass(frozen=True, slots=True)
 class WalkForwardConfig:
-    """Configuration for walk-forward window generation."""
+    """Configuration for walk-forward window generation.
 
-    train_years: int = 3
-    test_years: int = 1
+    Uses months for train/test window sizes for finer granularity.
+    Default: 12-month train, 6-month test, 6-month step.
+    """
+
+    train_months: int = 12
+    test_months: int = 6
     step_months: int = 6
 
 
@@ -80,9 +87,9 @@ class WalkForwardOptimizer:
     def generate_windows(self, start_date: date, end_date: date) -> list[WalkForwardWindow]:
         """Generate rolling train/test windows.
 
-        Example with default config (train=3yr, test=1yr, step=6mo) on 2018-2025:
-        Window 1: Train 2018-01 to 2020-12, Test 2021-01 to 2021-12
-        Window 2: Train 2018-07 to 2021-06, Test 2021-07 to 2022-06
+        Example with default config (train=12mo, test=6mo, step=6mo) on 2020-2023:
+        Window 1: Train 2020-01 to 2020-12, Test 2021-01 to 2021-06
+        Window 2: Train 2020-07 to 2021-06, Test 2021-07 to 2021-12
         ...etc
         """
         windows: list[WalkForwardWindow] = []
@@ -91,12 +98,12 @@ class WalkForwardOptimizer:
         while True:
             train_end = (
                 current_start
-                + relativedelta(years=self._config.train_years)
+                + relativedelta(months=self._config.train_months)
                 - relativedelta(days=1)
             )
             test_start = train_end + relativedelta(days=1)
             test_end = (
-                test_start + relativedelta(years=self._config.test_years) - relativedelta(days=1)
+                test_start + relativedelta(months=self._config.test_months) - relativedelta(days=1)
             )
 
             if test_end > end_date:
@@ -150,6 +157,10 @@ class WalkForwardOptimizer:
         start_date = min(c.timestamp.date() for c in candles)
         end_date = max(c.timestamp.date() for c in candles)
         windows = self.generate_windows(start_date, end_date)
+
+        if not windows:
+            logger.warning("walk_forward_zero_windows: start=%s end=%s", start_date, end_date)
+            return WalkForwardResult()
 
         all_trades: list[TradeResult] = []
         all_snapshots: list[PortfolioState] = []
