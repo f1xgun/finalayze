@@ -147,25 +147,27 @@ class StalenessDetector:
 
     def update_features(self, features: dict[str, float]) -> None:
         """Add a new feature observation to per-feature recent windows."""
-        for k, v in features.items():
-            if k in self._feature_recent:
-                self._feature_recent[k].append(v)
+        with self._lock:
+            for k, v in features.items():
+                if k in self._feature_recent:
+                    self._feature_recent[k].append(v)
 
     def get_top_drifting_features(self, n: int = 3) -> list[tuple[str, float]]:
         """Return top-n features by KL divergence (descending).
 
         Only features with >= min_samples recent values are considered.
         """
-        drifts: list[tuple[str, float]] = []
-        for name, train_vals in self._feature_training.items():
-            recent_deque = self._feature_recent.get(name)
-            if recent_deque is None or len(recent_deque) < self._min_samples:
-                continue
-            recent_arr = np.array(recent_deque, dtype=np.float64)
-            kl = compute_kl_divergence(train_vals, recent_arr)
-            drifts.append((name, kl))
-        drifts.sort(key=lambda x: x[1], reverse=True)
-        return drifts[:n]
+        with self._lock:
+            drifts: list[tuple[str, float]] = []
+            for name, train_vals in self._feature_training.items():
+                recent_deque = self._feature_recent.get(name)
+                if recent_deque is None or len(recent_deque) < self._min_samples:
+                    continue
+                recent_arr = np.array(recent_deque, dtype=np.float64)
+                kl = compute_kl_divergence(train_vals, recent_arr)
+                drifts.append((name, kl))
+            drifts.sort(key=lambda x: x[1], reverse=True)
+            return drifts[:n]
 
     # --- E3: Output-distribution KL ---
 
@@ -175,31 +177,35 @@ class StalenessDetector:
 
     def update_output(self, value: float) -> None:
         """Add a new model prediction to the recent output window."""
-        self._recent_output_values.append(value)
+        with self._lock:
+            self._recent_output_values.append(value)
 
     def get_output_kl_score(self) -> float | None:
         """Return KL divergence of output distributions, or None."""
-        if self._train_output_values is None:
-            return None
-        if len(self._recent_output_values) < self._min_samples:
-            return None
-        recent = np.array(self._recent_output_values, dtype=np.float64)
+        with self._lock:
+            if self._train_output_values is None:
+                return None
+            if len(self._recent_output_values) < self._min_samples:
+                return None
+            recent = np.array(self._recent_output_values, dtype=np.float64)
         return compute_kl_divergence(self._train_output_values, recent)
 
     # --- E3: Rolling Brier score ---
 
     def update_brier(self, predicted_prob: float, actual: int) -> None:
         """Add a prediction-outcome pair for rolling Brier score."""
-        self._recent_probas.append(predicted_prob)
-        self._recent_actuals.append(actual)
+        with self._lock:
+            self._recent_probas.append(predicted_prob)
+            self._recent_actuals.append(actual)
 
     def get_rolling_brier(self) -> float | None:
         """Return rolling Brier score over the last 60 observations.
 
         Returns None if fewer than min_samples observations.
         """
-        if len(self._recent_probas) < self._min_samples:
-            return None
-        probas = np.array(self._recent_probas, dtype=np.float64)
-        actuals = np.array(self._recent_actuals, dtype=np.float64)
+        with self._lock:
+            if len(self._recent_probas) < self._min_samples:
+                return None
+            probas = np.array(self._recent_probas, dtype=np.float64)
+            actuals = np.array(self._recent_actuals, dtype=np.float64)
         return float(np.mean((probas - actuals) ** 2))

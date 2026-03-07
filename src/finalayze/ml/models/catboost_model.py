@@ -89,10 +89,6 @@ class CatBoostModel(BaseMLModel):
         x_arr = np.array([[row[k] for k in sorted(row)] for row in X], dtype=float)
         y_arr = np.array(y, dtype=int)
 
-        n_pos = int(np.sum(y_arr == 1))
-        n_neg = int(np.sum(y_arr == 0))
-        spw = n_neg / n_pos if n_pos > 0 else 1.0
-
         # Temporal validation split: last 10% for early stopping monitoring
         n_val = max(int(len(x_arr) * 0.1), 1)
         x_train, x_val = x_arr[:-n_val], x_arr[-n_val:]
@@ -106,7 +102,8 @@ class CatBoostModel(BaseMLModel):
             l2_leaf_reg=self._l2_leaf_reg,
             random_strength=self._random_strength,
             bagging_temperature=self._bagging_temperature,
-            scale_pos_weight=spw,
+            boosting_type="Ordered",
+            auto_class_weights="Balanced",
             eval_metric="Logloss",
             early_stopping_rounds=25,
             verbose=0,

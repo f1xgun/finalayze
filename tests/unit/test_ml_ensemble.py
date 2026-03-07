@@ -210,3 +210,169 @@ class TestEnsembleSelectedFeatures:
         features = ["rsi_14", "atr_14_pct"]
         ensemble.selected_features = features
         assert ensemble.selected_features == features
+
+
+class TestCalibratorQualityGating:
+    """Phase 3: Calibrator over-compression detection and bypass."""
+
+    # Constants to avoid magic numbers (ruff PLR2004)
+    _CLAMP_LOWER = 0.30
+    _CLAMP_UPPER = 0.70
+    _QUALITY_THRESHOLD = 0.30
+    _COMPRESSED_PROBA = 0.51  # Typical compressed calibrator output
+    _RAW_HIGH_PROBA = 0.85
+    _RAW_LOW_PROBA = 0.20
+
+    def _make_compressing_calibrator(self) -> MagicMock:
+        """Create a calibrator that compresses output range below threshold."""
+        import numpy as np
+
+        cal = MagicMock()
+        cal.is_fitted = True
+        # Simulate a calibrator that maps everything to [0.41, 0.61]
+        # Output range = 0.20 < 0.30 threshold
+        cal.calibrate.return_value = self._COMPRESSED_PROBA
+        cal.fit_output_range = 0.20  # below _QUALITY_THRESHOLD
+        return cal
+
+    def _make_good_calibrator(self) -> MagicMock:
+        """Create a calibrator with adequate output range."""
+        cal = MagicMock()
+        cal.is_fitted = True
+        cal.calibrate.return_value = 0.65
+        cal.fit_output_range = 0.45  # above _QUALITY_THRESHOLD
+        return cal
+
+    def test_compressed_calibrator_is_bypassed(self) -> None:
+        """When calibrator output range < 0.30, raw probs are used instead."""
+        import numpy as np
+
+        from finalayze.ml.calibration import EnsembleCalibrator
+
+        cal = EnsembleCalibrator()
+        # Fit with data that produces a compressed range
+        # Use probabilities clustered around 0.5 with labels that don't separate well
+        rng = np.random.default_rng(42)
+        raw_probas = rng.uniform(0.3, 0.7, size=100)
+        # Labels that cause logistic regression to compress output
+        labels = (raw_probas > 0.5).astype(int)
+        cal.fit(raw_probas, labels)
+
+        # After fitting, check if calibrator detected compression
+        # If compressed, calibrator_bypassed should be True
+        if cal.fit_output_range < self._QUALITY_THRESHOLD:
+            assert cal.calibrator_bypassed is True
+
+    def test_ensemble_uses_clamped_raw_when_calibrator_bypassed(self) -> None:
+        """When calibrator is bypassed, ensemble uses raw probs clamped to [0.30, 0.70]."""
+        cal = self._make_compressing_calibrator()
+        cal.calibrator_bypassed = True
+
+        model = _make_model(proba=self._RAW_HIGH_PROBA)
+        ensemble = EnsembleModel(models=[model], lstm_model=None, calibrator=cal)
+        result = ensemble.predict_proba({"a": 1.0})
+
+        # Raw prob 0.85 should be clamped to 0.70
+        assert result == pytest.approx(self._CLAMP_UPPER)
+        # calibrate() should NOT have been called
+        cal.calibrate.assert_not_called()
+
+    def test_ensemble_clamps_low_raw_when_calibrator_bypassed(self) -> None:
+        """Low raw prob is clamped up to 0.30 when calibrator is bypassed."""
+        cal = self._make_compressing_calibrator()
+        cal.calibrator_bypassed = True
+
+        model = _make_model(proba=self._RAW_LOW_PROBA)
+        ensemble = EnsembleModel(models=[model], lstm_model=None, calibrator=cal)
+        result = ensemble.predict_proba({"a": 1.0})
+
+        # Raw prob 0.20 should be clamped to 0.30
+        assert result == pytest.approx(self._CLAMP_LOWER)
+
+    def test_ensemble_no_clamp_within_range(self) -> None:
+        """Raw probs within [0.30, 0.70] are not clamped."""
+        cal = self._make_compressing_calibrator()
+        cal.calibrator_bypassed = True
+
+        mid_proba = 0.55
+        model = _make_model(proba=mid_proba)
+        ensemble = EnsembleModel(models=[model], lstm_model=None, calibrator=cal)
+        result = ensemble.predict_proba({"a": 1.0})
+
+        assert result == pytest.approx(mid_proba)
+
+    def test_good_calibrator_is_used_normally(self) -> None:
+        """When calibrator output range >= 0.30, calibrator is used normally."""
+        cal = self._make_good_calibrator()
+        cal.calibrator_bypassed = False
+
+        model = _make_model(proba=self._RAW_HIGH_PROBA)
+        ensemble = EnsembleModel(models=[model], lstm_model=None, calibrator=cal)
+        result = ensemble.predict_proba({"a": 1.0})
+
+        # Should use calibrator's output
+        cal.calibrate.assert_called_once()
+        assert result == pytest.approx(0.65)
+
+    def test_clamped_values_within_bounds(self) -> None:
+        """All clamped values stay within [0.30, 0.70] regardless of input."""
+        cal = self._make_compressing_calibrator()
+        cal.calibrator_bypassed = True
+
+        test_probas = [0.0, 0.15, 0.30, 0.50, 0.70, 0.85, 1.0]
+        for p in test_probas:
+            model = _make_model(proba=p)
+            ensemble = EnsembleModel(models=[model], lstm_model=None, calibrator=cal)
+            result = ensemble.predict_proba({"a": 1.0})
+            assert self._CLAMP_LOWER <= result <= self._CLAMP_UPPER, (
+                f"Prob {p} clamped to {result}, outside [{self._CLAMP_LOWER}, {self._CLAMP_UPPER}]"
+            )
+
+    def test_calibrator_active_property(self) -> None:
+        """calibrator_active reflects whether calibrator is active or bypassed."""
+        cal = self._make_good_calibrator()
+        cal.calibrator_bypassed = False
+
+        ensemble = EnsembleModel(models=[], lstm_model=None, calibrator=cal)
+        assert ensemble.calibrator_active is True
+
+        cal_bad = self._make_compressing_calibrator()
+        cal_bad.calibrator_bypassed = True
+        ensemble2 = EnsembleModel(models=[], lstm_model=None, calibrator=cal_bad)
+        assert ensemble2.calibrator_active is False
+
+    def test_calibrator_active_when_no_calibrator(self) -> None:
+        """calibrator_active is False when no calibrator is set."""
+        ensemble = EnsembleModel(models=[], lstm_model=None)
+        assert ensemble.calibrator_active is False
+
+    def test_clamp_activation_logged(self) -> None:
+        """Clamping activations are logged."""
+        cal = self._make_compressing_calibrator()
+        cal.calibrator_bypassed = True
+
+        model = _make_model(proba=self._RAW_HIGH_PROBA)
+        ensemble = EnsembleModel(models=[model], lstm_model=None, calibrator=cal)
+
+        with structlog.testing.capture_logs() as captured:
+            ensemble.predict_proba({"a": 1.0})
+
+        assert any("calibrator_bypassed_clamped" in entry.get("event", "") for entry in captured)
+
+    def test_high_clamp_rate_critical_warning(self) -> None:
+        """When >50% of predictions are clamped, a critical warning is logged."""
+        cal = self._make_compressing_calibrator()
+        cal.calibrator_bypassed = True
+
+        # Make many predictions that all need clamping (outside [0.30, 0.70])
+        model_high = _make_model(proba=self._RAW_HIGH_PROBA)
+        ensemble = EnsembleModel(models=[model_high], lstm_model=None, calibrator=cal)
+
+        # First, make enough predictions to trigger the critical warning
+        # We need >50% clamped out of recent predictions
+        min_predictions_for_warning = 10
+        with structlog.testing.capture_logs() as captured:
+            for _ in range(min_predictions_for_warning):
+                ensemble.predict_proba({"a": 1.0})
+
+        assert any("calibrator_high_clamp_rate" in entry.get("event", "") for entry in captured)

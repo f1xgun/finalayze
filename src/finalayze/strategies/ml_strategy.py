@@ -102,6 +102,16 @@ class MLStrategy(BaseStrategy):
         # Filter to MI-selected features if the ensemble was trained with feature selection
         selected = getattr(ensemble, "selected_features", None)
         if selected is not None:
+            missing = [k for k in selected if k not in features]
+            if missing:
+                _log.warning(
+                    "ml_feature_mismatch",
+                    segment_id=segment_id,
+                    symbol=symbol,
+                    missing_features=missing,
+                    selected_count=len(selected),
+                    available_count=len(features),
+                )
             features = {k: features[k] for k in selected if k in features}
 
         try:
