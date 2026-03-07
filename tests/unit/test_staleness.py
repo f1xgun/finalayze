@@ -165,3 +165,125 @@ class TestStalenessDetector:
         for val in rng.standard_normal(total_points):
             detector.update(float(val))
         assert len(detector._recent_values) == small_window
+
+    def test_default_threshold_is_030(self) -> None:
+        """E3: Default threshold lowered from 0.5 to 0.3."""
+        detector = StalenessDetector()
+        assert detector._threshold == 0.3  # noqa: PLR2004
+
+
+class TestPerFeatureDrift:
+    """E3: Per-feature drift tracking."""
+
+    def test_top_drifting_features_identifies_shifted(self) -> None:
+        """Feature that shifts should appear in top drifting list."""
+        rng = np.random.default_rng(SEED)
+        detector = StalenessDetector(min_samples=MIN_SAMPLES)
+
+        # Train: feature_a stable, feature_b stable
+        detector.set_feature_training({
+            "feature_a": rng.standard_normal(N_SAMPLES).tolist(),
+            "feature_b": rng.standard_normal(N_SAMPLES).tolist(),
+        })
+
+        # Recent: feature_a shifts, feature_b stays
+        for _ in range(N_RECENT):
+            detector.update_features({
+                "feature_a": float(rng.standard_normal() + SHIFTED_MEAN),
+                "feature_b": float(rng.standard_normal()),
+            })
+
+        top = detector.get_top_drifting_features(n=2)
+        assert len(top) > 0
+        # feature_a should have higher drift than feature_b
+        assert top[0][0] == "feature_a"
+        assert top[0][1] > top[1][1]
+
+    def test_top_drifting_insufficient_data(self) -> None:
+        """With too few recent values, returns empty."""
+        detector = StalenessDetector(min_samples=MIN_SAMPLES)
+        detector.set_feature_training({"f1": [1.0, 2.0, 3.0]})
+        detector.update_features({"f1": 1.0})
+        assert detector.get_top_drifting_features() == []
+
+    def test_top_drifting_respects_n(self) -> None:
+        """Returns at most n features."""
+        rng = np.random.default_rng(SEED)
+        detector = StalenessDetector(min_samples=10)
+        features = {f"f{i}": rng.standard_normal(N_SAMPLES).tolist() for i in range(5)}
+        detector.set_feature_training(features)
+        for _ in range(100):
+            detector.update_features({f"f{i}": float(rng.standard_normal()) for i in range(5)})
+        top = detector.get_top_drifting_features(n=2)
+        assert len(top) <= 2  # noqa: PLR2004
+
+
+class TestOutputDistributionKL:
+    """E3: Output-distribution KL tracking."""
+
+    def test_output_kl_none_without_training(self) -> None:
+        """Returns None when training output not set."""
+        detector = StalenessDetector()
+        assert detector.get_output_kl_score() is None
+
+    def test_output_kl_none_insufficient_recent(self) -> None:
+        """Returns None when fewer than min_samples predictions."""
+        detector = StalenessDetector(min_samples=MIN_SAMPLES)
+        detector.set_output_training([0.5] * N_SAMPLES)
+        detector.update_output(0.7)
+        assert detector.get_output_kl_score() is None
+
+    def test_output_kl_detects_shift(self) -> None:
+        """KL > 0 when output distribution shifts."""
+        rng = np.random.default_rng(SEED)
+        detector = StalenessDetector(min_samples=MIN_SAMPLES)
+        train_outputs = rng.uniform(0.3, 0.7, N_SAMPLES).tolist()
+        detector.set_output_training(train_outputs)
+
+        # Feed biased predictions
+        for _ in range(N_RECENT):
+            detector.update_output(float(rng.uniform(0.7, 0.9)))
+
+        score = detector.get_output_kl_score()
+        assert score is not None
+        assert score > 0.0
+
+
+class TestRollingBrierScore:
+    """E3: Rolling 60-day Brier score tracker."""
+
+    def test_rolling_brier_none_insufficient(self) -> None:
+        """Returns None with too few observations."""
+        detector = StalenessDetector(min_samples=50)
+        detector.update_brier(0.7, 1)
+        assert detector.get_rolling_brier() is None
+
+    def test_rolling_brier_perfect_predictions(self) -> None:
+        """Perfect predictions give Brier score ~ 0."""
+        detector = StalenessDetector(min_samples=10)
+        for _ in range(60):
+            detector.update_brier(1.0, 1)
+            detector.update_brier(0.0, 0)
+        brier = detector.get_rolling_brier()
+        assert brier is not None
+        assert brier < 0.01  # noqa: PLR2004
+
+    def test_rolling_brier_random_predictions(self) -> None:
+        """Random 0.5 predictions give Brier score = 0.25."""
+        detector = StalenessDetector(min_samples=10)
+        for _ in range(60):
+            detector.update_brier(0.5, 1)
+            detector.update_brier(0.5, 0)
+        brier = detector.get_rolling_brier()
+        assert brier is not None
+        assert abs(brier - 0.25) < 0.01  # noqa: PLR2004
+
+    def test_rolling_brier_bad_predictions(self) -> None:
+        """Inverted predictions give Brier score close to 1.0."""
+        detector = StalenessDetector(min_samples=10)
+        for _ in range(60):
+            detector.update_brier(0.0, 1)
+            detector.update_brier(1.0, 0)
+        brier = detector.get_rolling_brier()
+        assert brier is not None
+        assert brier > 0.90  # noqa: PLR2004

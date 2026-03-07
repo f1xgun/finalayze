@@ -26,6 +26,7 @@ _log = structlog.get_logger()
 
 _DEFAULT_THRESHOLD = 0.08
 _DEFAULT_MIN_CONFIDENCE = 0.15
+_DEFAULT_BASE_RATE = 0.50
 _UNTRAINED_PROB = 0.5
 _UNTRAINED_EPSILON = 1e-9
 
@@ -146,17 +147,23 @@ class MLStrategy(BaseStrategy):
     def _map_probability(
         self, prob: float, segment_id: str
     ) -> tuple[SignalDirection, float] | None:
-        """Map a BUY probability to direction + confidence, or None if in deadzone."""
+        """Map a BUY probability to direction + confidence, or None if in deadzone.
+
+        Uses ``base_rate`` from YAML params (default 0.50) as the neutral
+        center instead of hardcoded 0.50.  This enables base-rate correction:
+        if training labels have mean(y) != 0.50, the threshold shifts accordingly.
+        """
         params = self.get_parameters(segment_id)
         threshold = float(params.get("threshold", _DEFAULT_THRESHOLD))  # type: ignore[arg-type]
         min_confidence = float(params.get("min_confidence", _DEFAULT_MIN_CONFIDENCE))  # type: ignore[arg-type]
+        base_rate = float(params.get("base_rate", _DEFAULT_BASE_RATE))  # type: ignore[arg-type]
 
-        if prob > _UNTRAINED_PROB + threshold:
+        if prob > base_rate + threshold:
             direction = SignalDirection.BUY
-            confidence = (prob - _UNTRAINED_PROB) * 2
-        elif prob < _UNTRAINED_PROB - threshold:
+            confidence = (prob - base_rate) * 2
+        elif prob < base_rate - threshold:
             direction = SignalDirection.SELL
-            confidence = (_UNTRAINED_PROB - prob) * 2
+            confidence = (base_rate - prob) * 2
         else:
             return None
 

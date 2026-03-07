@@ -345,6 +345,83 @@ class TestUncertaintyReduction:
         assert result is not None
 
 
+class TestBaseRateCorrection:
+    """E2: base_rate parameter shifts direction thresholds."""
+
+    def test_base_rate_correction_buy(self) -> None:
+        """base_rate=0.55, prob=0.72, threshold=0.08 -> BUY (0.72 > 0.55+0.08=0.63)."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.72
+        ensemble.selected_features = None
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        params = {"base_rate": 0.55, "threshold": 0.08}
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value=params),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        assert result.direction == SignalDirection.BUY
+        # confidence = (0.72 - 0.55) * 2 = 0.34
+        expected_confidence = (0.72 - 0.55) * 2
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+    def test_base_rate_correction_sell(self) -> None:
+        """base_rate=0.55, prob=0.40, threshold=0.08 -> SELL (0.40 < 0.55-0.08=0.47)."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.40
+        ensemble.selected_features = None
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        params = {"base_rate": 0.55, "threshold": 0.08}
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value=params),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        assert result.direction == SignalDirection.SELL
+        # confidence = (0.55 - 0.40) * 2 = 0.30
+        expected_confidence = (0.55 - 0.40) * 2
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+    def test_base_rate_default_is_05(self) -> None:
+        """Without base_rate param, behavior unchanged (uses 0.50 center)."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.7
+        ensemble.selected_features = None
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        # No base_rate in params -> defaults to 0.50
+        params: dict[str, object] = {}
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value=params),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        assert result.direction == SignalDirection.BUY
+        # confidence = (0.7 - 0.5) * 2 = 0.4
+        expected_confidence = (0.7 - 0.5) * 2
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+
 class TestSupportedSegments:
     def test_supported_segments_from_yaml(self) -> None:
         """ml_ensemble disabled in all presets (models not production-ready)."""
