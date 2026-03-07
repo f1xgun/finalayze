@@ -142,12 +142,8 @@ class StalenessDetector:
 
     def set_feature_training(self, features: dict[str, list[float]]) -> None:
         """Record per-feature training distributions."""
-        self._feature_training = {
-            k: np.array(v, dtype=np.float64) for k, v in features.items()
-        }
-        self._feature_recent = {
-            k: deque(maxlen=self._window_size) for k in features
-        }
+        self._feature_training = {k: np.array(v, dtype=np.float64) for k, v in features.items()}
+        self._feature_recent = {k: deque(maxlen=self._window_size) for k in features}
 
     def update_features(self, features: dict[str, float]) -> None:
         """Add a new feature observation to per-feature recent windows."""

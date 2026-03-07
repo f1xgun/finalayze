@@ -62,9 +62,7 @@ def check_accuracy_gate(metrics: FoldMetrics) -> QualityGateResult:
             threshold=1.0,
             detail="n_effective <= 0",
         )
-    threshold = _COIN_FLIP_ACCURACY + _ACCURACY_Z * math.sqrt(
-        _COIN_FLIP_VARIANCE / n_effective
-    )
+    threshold = _COIN_FLIP_ACCURACY + _ACCURACY_Z * math.sqrt(_COIN_FLIP_VARIANCE / n_effective)
     passed = metrics.accuracy > threshold
     return QualityGateResult(
         passed=passed, gate_name="accuracy", value=metrics.accuracy, threshold=threshold
@@ -167,10 +165,7 @@ def evaluate_walk_forward(
 
     for gate_name in sorted(gate_names):
         passes = sum(
-            1
-            for fold in fold_results
-            for r in fold
-            if r.gate_name == gate_name and r.passed
+            1 for fold in fold_results for r in fold if r.gate_name == gate_name and r.passed
         )
         rate = passes / n_folds
         gate_pass_rates[gate_name] = rate
