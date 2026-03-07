@@ -118,6 +118,17 @@ class MLStrategy(BaseStrategy):
             return None
         direction, confidence = result
 
+        # C5: reduce confidence when ensemble models disagree
+        _UNCERTAINTY_THRESHOLD = 0.10  # noqa: N806
+        probas = getattr(ensemble, "last_model_probas", None)
+        _MIN_MODELS = 2  # noqa: N806
+        if isinstance(probas, dict) and len(probas) >= _MIN_MODELS:
+            import numpy as _np  # noqa: PLC0415
+
+            uncertainty = float(_np.std(list(probas.values())))
+            if uncertainty > _UNCERTAINTY_THRESHOLD:
+                confidence *= 1.0 - uncertainty
+
         params = self.get_parameters(segment_id)
         threshold = float(params.get("threshold", _DEFAULT_THRESHOLD))  # type: ignore[arg-type]
         market_id = candles[0].market_id

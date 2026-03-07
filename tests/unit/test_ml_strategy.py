@@ -272,6 +272,79 @@ class TestFeatureFiltering:
         assert called_features == {"bb_pct_b": 0.42}
 
 
+class TestUncertaintyReduction:
+    """C5: Ensemble disagreement reduces confidence in MLStrategy."""
+
+    def test_high_uncertainty_reduces_confidence(self) -> None:
+        """When prediction_uncertainty > 0.10, confidence is scaled down."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.8
+        ensemble.selected_features = None
+        # Set model probas so std = 0.20 (two values 0.2 apart from mean)
+        ensemble.last_model_probas = {"XGBoostModel": 0.6, "LightGBMModel": 1.0}
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value={}),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        # Raw confidence = (0.8 - 0.5) * 2 = 0.6
+        # After uncertainty: 0.6 * (1.0 - 0.20) = 0.48
+        expected_confidence = 0.6 * 0.8
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+    def test_low_uncertainty_no_reduction(self) -> None:
+        """When prediction_uncertainty <= 0.10, confidence is not reduced."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.8
+        ensemble.selected_features = None
+        # Set model probas so std ~ 0.05 (low disagreement, below threshold)
+        ensemble.last_model_probas = {"XGBoostModel": 0.75, "LightGBMModel": 0.85}
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value={}),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        # Raw confidence = (0.8 - 0.5) * 2 = 0.6, unchanged
+        expected_confidence = 0.6
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+    def test_missing_uncertainty_attribute_no_crash(self) -> None:
+        """Graceful when ensemble lacks prediction_uncertainty (legacy mocks)."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock(spec=[])
+        ensemble.predict_proba = MagicMock(return_value=0.8)
+        ensemble.selected_features = None
+        # No prediction_uncertainty attribute → getattr returns 0.0
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value={}),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+
+
 class TestSupportedSegments:
     def test_supported_segments_from_yaml(self) -> None:
         """ml_ensemble disabled in all presets (models not production-ready)."""

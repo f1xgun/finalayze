@@ -52,9 +52,9 @@ def load_registry(model_dir: Path, segments: list[str]) -> MLModelRegistry:
 
 def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:
     """Load individual model files and assemble an EnsembleModel."""
+    from finalayze.ml.models.catboost_model import CatBoostModel  # noqa: PLC0415
     from finalayze.ml.models.ensemble import EnsembleModel  # noqa: PLC0415
     from finalayze.ml.models.lightgbm_model import LightGBMModel  # noqa: PLC0415
-    from finalayze.ml.models.lstm_model import LSTMModel  # noqa: PLC0415
     from finalayze.ml.models.xgboost_model import XGBoostModel  # noqa: PLC0415
 
     models: list[BaseMLModel] = []
@@ -67,9 +67,16 @@ def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:
     if lgbm_path.exists():
         models.append(LightGBMModel.load_from(lgbm_path))
 
-    lstm_model: LSTMModel | None = None
+    # CatBoost (primary third model); fall back to LSTM for backward compat
+    catboost_path = segment_dir / "catboost.pkl"
     lstm_path = segment_dir / "lstm.pkl"
-    if lstm_path.exists():
+    lstm_model = None  # kept for backward compat with EnsembleModel API
+
+    if catboost_path.exists():
+        models.append(CatBoostModel.load_from(catboost_path))
+    elif lstm_path.exists():
+        from finalayze.ml.models.lstm_model import LSTMModel  # noqa: PLC0415
+
         lstm_model = LSTMModel(segment_id=segment_id)
         lstm_model.load(lstm_path)
 
@@ -119,6 +126,8 @@ def save_ensemble(model_dir: Path, segment_id: str, ensemble: EnsembleModel) -> 
             _atomic_save(model, segment_dir / "xgb.pkl")
         elif "lightgbm" in model_type:
             _atomic_save(model, segment_dir / "lgbm.pkl")
+        elif "catboost" in model_type:
+            _atomic_save(model, segment_dir / "catboost.pkl")
 
     if ensemble._lstm_model is not None:
         ensemble._lstm_model.save(segment_dir / "lstm.pkl")

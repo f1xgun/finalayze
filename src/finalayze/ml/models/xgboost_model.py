@@ -34,8 +34,8 @@ class XGBoostModel(BaseMLModel):
         learning_rate: float = 0.05,
         subsample: float = 0.8,
         colsample_bytree: float = 0.8,
-        min_child_weight: int = 1,
-        gamma: float = 0.0,
+        min_child_weight: int = 5,
+        gamma: float = 0.1,
         reg_alpha: float = 0.1,
         reg_lambda: float = 1.0,
     ) -> None:

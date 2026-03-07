@@ -1,4 +1,4 @@
-"""Train XGBoost + LightGBM + LSTM models per market segment.
+"""Train XGBoost + LightGBM + CatBoost models per market segment.
 
 Usage:
     uv run python scripts/train_models.py
@@ -38,8 +38,8 @@ from finalayze.core.models import CandleModel
 from finalayze.core.schemas import Candle
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
 from finalayze.ml.features.technical import compute_features  # noqa: F401
+from finalayze.ml.models.catboost_model import CatBoostModel
 from finalayze.ml.models.lightgbm_model import LightGBMModel
-from finalayze.ml.models.lstm_model import LSTMModel
 from finalayze.ml.models.xgboost_model import XGBoostModel
 from finalayze.ml.training import DEFAULT_WINDOW_SIZE, build_windows
 from finalayze.ml.training.feature_selection import select_features_mi
@@ -76,7 +76,6 @@ def _load_tuned_params(segment_id: str, model_type: str) -> dict | None:
 _LOOKBACK_DAYS = 1825  # 5 years of history for US segments
 _MOEX_LOOKBACK_DAYS = 730  # 2 years for MOEX (post-sanctions structural break)
 _DEFAULT_OUTPUT_DIR = "models/"
-_SEQUENCE_LENGTH = 20
 _MIN_CANDLES = _WINDOW_SIZE + 1  # need at least WINDOW_SIZE + 1 for one sample
 _PURGE_GAP = _WINDOW_SIZE + _TB_MAX_HOLD  # 80 bars: feature window + label horizon
 
@@ -126,6 +125,16 @@ def _get_max_features(segment_id: str) -> int:
 def _get_xgboost_max_depth(segment_id: str) -> int:
     """Return XGBoost max_depth: 3 for MOEX, 5 for US."""
     return _MOEX_MAX_DEPTH if _is_moex_segment(segment_id) else _US_MAX_DEPTH
+
+
+# CatBoost depth: shallower for MOEX (smaller dataset)
+_US_CATBOOST_DEPTH = 4
+_MOEX_CATBOOST_DEPTH = 3
+
+
+def _get_catboost_depth(segment_id: str) -> int:
+    """Return CatBoost depth: 3 for MOEX, 4 for US."""
+    return _MOEX_CATBOOST_DEPTH if _is_moex_segment(segment_id) else _US_CATBOOST_DEPTH
 
 
 def _fetch_tinkoff_candles(symbol: str) -> list[Candle]:
@@ -403,6 +412,23 @@ def _build_dataset_triple_barrier(
     return features_out, labels_out, weights_out, hold_bars_out
 
 
+def _compute_model_weights(
+    results: dict[str, str],
+) -> dict[str, float]:
+    """Compute performance-weighted averaging weights from accuracy results.
+
+    Weight = max(0, accuracy - 0.50)^2. Auto-excludes coin-flip models.
+    """
+    weights: dict[str, float] = {}
+    for name, result_str in results.items():
+        acc = 0.5
+        for part in result_str.split():
+            if part.startswith("acc="):
+                acc = float(part.split("=")[1])
+        weights[name.lower()] = max(0.0, acc - 0.50) ** 2
+    return weights
+
+
 def train_one_segment(  # noqa: PLR0915
     segment_id: str,
     symbols: list[str],
@@ -500,10 +526,6 @@ def train_one_segment(  # noqa: PLR0915
 
     sample_weights = decay_weights * uniqueness * normalized_bw
 
-    if len(train_features) < _SEQUENCE_LENGTH:
-        print(f"[{segment_id}] Train split too small for LSTM -- skipping.")
-        return
-
     segment_dir = output_dir / segment_id
     segment_dir.mkdir(parents=True, exist_ok=True)
 
@@ -527,9 +549,15 @@ def train_one_segment(  # noqa: PLR0915
     summary = " | ".join(f"{k}: {v}" for k, v in results.items())
     print(f"[{segment_id}] {summary}")
 
+    # Compute and save performance-weighted model weights
+    model_weights = _compute_model_weights(results)
+    weights_path = segment_dir / "model_weights.json"
+    weights_path.write_text(json.dumps(model_weights, indent=2))
+    print(f"[{segment_id}] Saved model_weights.json: {model_weights}")
+
 
 def _evaluate_model(
-    model: XGBoostModel | LightGBMModel | LSTMModel,
+    model: XGBoostModel | LightGBMModel | CatBoostModel,
     test_features: list[dict[str, float]],
     test_labels: list[int],
 ) -> str:
@@ -625,18 +653,19 @@ def _train_and_evaluate_models(  # noqa: PLR0912
     if test_features:
         results["LGBM"] = _evaluate_model(lgbm, test_features, test_labels)
 
-    lstm = LSTMModel(segment_id=segment_id, sequence_length=_SEQUENCE_LENGTH)
-    lstm.fit(train_features, train_labels, sample_weight=sample_weights)
-    lstm.save(segment_dir / "lstm.pkl")
+    catboost_depth = _get_catboost_depth(segment_id)
+    catboost = CatBoostModel(segment_id=segment_id, depth=catboost_depth)
+    catboost.fit(train_features, train_labels, sample_weight=sample_weights)
+    catboost.save(segment_dir / "catboost.pkl")
     if test_features:
-        results["LSTM"] = _evaluate_model(lstm, test_features, test_labels)
+        results["CATBOOST"] = _evaluate_model(catboost, test_features, test_labels)
 
     # Fit EnsembleCalibrator on CALIBRATION set raw probabilities (out-of-sample)
     if cal_features and cal_labels:
         _fit_and_save_calibrator(
             segment_id,
             segment_dir,
-            [xgb, lgbm, lstm],
+            [xgb, lgbm, catboost],
             cal_features,
             cal_labels,
         )
@@ -647,7 +676,7 @@ def _train_and_evaluate_models(  # noqa: PLR0912
 def _fit_and_save_calibrator(
     segment_id: str,
     segment_dir: Path,
-    models: list[XGBoostModel | LightGBMModel | LSTMModel],
+    models: list[XGBoostModel | LightGBMModel | CatBoostModel],
     test_features: list[dict[str, float]],
     test_labels: list[int],
 ) -> None:

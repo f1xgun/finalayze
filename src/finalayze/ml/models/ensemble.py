@@ -37,12 +37,14 @@ class EnsembleModel:
         stacking: StackingEnsemble | None = None,
         calibrator: EnsembleCalibrator | None = None,
         selected_features: list[str] | None = None,
+        model_weights: dict[str, float] | None = None,
     ) -> None:
         self._models = models
         self._lstm_model = lstm_model
         self._stacking = stacking
         self._calibrator = calibrator
         self.selected_features = selected_features
+        self._model_weights = model_weights
         self.last_model_probas: dict[str, float] = {}
 
     def predict_proba(self, features: dict[str, float], *, symbol: str = "__default__") -> float:
@@ -92,10 +94,32 @@ class EnsembleModel:
         # Use stacking XOR calibrator (not both — double-calibration risk)
         if self._stacking is not None and self._stacking.is_fitted:
             return self._stacking.predict_proba(probs)  # already calibrated
-        if self._calibrator is not None and self._calibrator.is_fitted:
+
+        # Compute raw average: weighted if weights provided, else equal
+        model_names = list(model_probas.keys())
+        if self._model_weights and model_names:
+            weighted_sum = 0.0
+            weight_sum = 0.0
+            for name, prob in zip(model_names, probs, strict=False):
+                w = self._model_weights.get(name, 0.0)
+                weighted_sum += w * prob
+                weight_sum += w
+            raw = weighted_sum / weight_sum if weight_sum > 0 else _DEFAULT_PROB
+        else:
             raw = sum(probs) / len(probs)
+
+        if self._calibrator is not None and self._calibrator.is_fitted:
             return self._calibrator.calibrate(raw)
-        return sum(probs) / len(probs)
+        return raw
+
+    @property
+    def prediction_uncertainty(self) -> float:
+        """Standard deviation of per-model probabilities (epistemic uncertainty proxy)."""
+        if not self.last_model_probas or len(self.last_model_probas) < 2:  # noqa: PLR2004
+            return 0.0
+        import numpy as np  # noqa: PLC0415
+
+        return float(np.std(list(self.last_model_probas.values())))
 
     def fit(
         self,

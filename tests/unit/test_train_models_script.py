@@ -17,7 +17,7 @@ from finalayze.core.schemas import Candle
 # Constants
 N_CANDLES = 120  # enough for 60-candle windows + max_hold for triple barrier
 WINDOW_SIZE = 60
-EXPECTED_MODEL_FILES = {"xgb.pkl", "lgbm.pkl", "lstm.pkl"}
+EXPECTED_MODEL_FILES = {"xgb.pkl", "lgbm.pkl", "catboost.pkl"}
 
 
 def _make_candles(n: int = N_CANDLES, symbol: str = "AAPL") -> list[Candle]:

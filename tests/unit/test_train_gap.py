@@ -138,7 +138,7 @@ class TestTrainGap:
             ),
             patch("scripts.train_models.XGBoostModel", return_value=mock_model),
             patch("scripts.train_models.LightGBMModel", return_value=mock_model),
-            patch("scripts.train_models.LSTMModel", return_value=mock_model),
+            patch("scripts.train_models.CatBoostModel", return_value=mock_model),
         ):
             train_one_segment("us_tech", ["AAPL"], Path("/tmp/test_models"))
 

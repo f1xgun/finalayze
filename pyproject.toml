@@ -24,6 +24,7 @@ dependencies = [
     "scikit-learn>=1.5.0",
     "xgboost>=2.1.0",
     "lightgbm>=4.5.0",
+    "catboost>=1.2.0",
     "torch>=2.5.0",
     # Data & Analysis
     "pandas>=2.2.0",
@@ -169,6 +170,7 @@ module = [
     "sklearn.*",
     "xgboost.*",
     "lightgbm.*",
+    "catboost.*",
     "torch.*",
     "openai.*",
     "t_tech.*",
