@@ -64,6 +64,10 @@ _MOEX_ATR_UPLIFT = 1.2  # MOEX 1.2x uplift for wider barriers
 LABEL_MODE_TRIPLE_BARRIER = "triple_barrier"
 LABEL_MODE_DIRECTION = "direction"
 
+# Benchmark tickers for market-neutral (excess return) labels
+_US_BENCHMARK = "SPY"
+_MOEX_BENCHMARK = "IMOEX"  # Moscow Exchange index
+
 
 def _load_tuned_params(segment_id: str, model_type: str) -> dict | None:
     """Load Optuna-tuned params if available, else return None."""
@@ -171,6 +175,147 @@ _MOEX_CATBOOST_DEPTH = 3
 def _get_catboost_depth(segment_id: str) -> int:
     """Return CatBoost depth: 3 for MOEX, 4 for US."""
     return _MOEX_CATBOOST_DEPTH if _is_moex_segment(segment_id) else _US_CATBOOST_DEPTH
+
+
+def _align_benchmark_candles(
+    stock_candles: list[Candle],
+    benchmark_candles: list[Candle],
+) -> list[Candle]:
+    """Align benchmark candles to stock candles by date (timestamp-based join).
+
+    For each stock candle, find the benchmark candle with the closest date
+    that is <= stock date. This prevents look-ahead bias and handles
+    missing benchmark dates (holidays, halts).
+
+    If benchmark has no data at all, returns an empty list.
+    If a stock candle's date is before the earliest benchmark date,
+    the earliest benchmark candle is used (back-fill edge case).
+
+    Returns a list of benchmark candles with the same length as stock_candles,
+    with each entry corresponding to the aligned benchmark candle.
+    """
+    if not benchmark_candles or not stock_candles:
+        return []
+
+    # Build date -> candle mapping using date part only (ignore time)
+    bench_by_date: dict[datetime, Candle] = {}
+    for c in benchmark_candles:
+        # Use date at midnight UTC for consistent matching
+        key = c.timestamp.replace(hour=0, minute=0, second=0, microsecond=0)
+        bench_by_date[key] = c
+
+    # Sort benchmark dates for forward-fill lookup
+    sorted_bench_dates = sorted(bench_by_date.keys())
+    if not sorted_bench_dates:
+        return []
+
+    aligned: list[Candle] = []
+    last_bench: Candle = bench_by_date[sorted_bench_dates[0]]
+
+    # Build a forward-filled map: iterate through all dates in order
+    # and carry forward the last known benchmark candle
+    from datetime import timedelta as _td  # noqa: PLC0415
+
+    # Pre-build forward-filled lookup for efficiency
+    min_date = min(
+        sorted_bench_dates[0],
+        stock_candles[0].timestamp.replace(hour=0, minute=0, second=0, microsecond=0),
+    )
+    max_date = max(
+        sorted_bench_dates[-1],
+        stock_candles[-1].timestamp.replace(hour=0, minute=0, second=0, microsecond=0),
+    )
+
+    ffill_map: dict[datetime, Candle] = {}
+    current = min_date
+    current_bench = bench_by_date.get(sorted_bench_dates[0])
+    assert current_bench is not None
+
+    while current <= max_date:
+        if current in bench_by_date:
+            current_bench = bench_by_date[current]
+        ffill_map[current] = current_bench
+        current += _td(days=1)
+
+    for stock_c in stock_candles:
+        stock_date = stock_c.timestamp.replace(hour=0, minute=0, second=0, microsecond=0)
+        if stock_date in ffill_map:
+            aligned.append(ffill_map[stock_date])
+        else:
+            # Edge case: stock date outside range -- use last known
+            aligned.append(last_bench)
+
+    return aligned
+
+
+def _fetch_benchmark_candles(
+    segment_id: str,
+) -> list[Candle] | None:
+    """Fetch benchmark candles for excess-return labeling.
+
+    US segments: SPY via YFinanceFetcher.
+    MOEX segments: IMOEX via TinkoffFetcher (requires token, else None).
+
+    Returns None if benchmark cannot be fetched.
+    """
+    if _is_moex_segment(segment_id):
+        return _fetch_moex_benchmark(segment_id)
+    return _fetch_us_benchmark(segment_id)
+
+
+def _fetch_moex_benchmark(segment_id: str) -> list[Candle] | None:
+    """Fetch IMOEX benchmark for MOEX segments via Tinkoff API."""
+    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN")
+    if not token:
+        print(f"  [{segment_id}] FINALAYZE_TINKOFF_TOKEN not set, skipping MOEX benchmark (IMOEX).")
+        return None
+    try:
+        from finalayze.data.fetchers.tinkoff_data import (  # noqa: PLC0415
+            TinkoffFetcher,
+        )
+        from finalayze.markets.instruments import (  # noqa: PLC0415
+            build_default_registry,
+        )
+
+        registry = build_default_registry()
+        fetcher = TinkoffFetcher(token=token, registry=registry, sandbox=False)
+        end = datetime.now(tz=UTC)
+        start = end - timedelta(days=_MOEX_LOOKBACK_DAYS)
+        candles = fetcher.fetch_candles(_MOEX_BENCHMARK, start, end)
+        if candles:
+            print(f"  [{segment_id}] Fetched {len(candles)} benchmark candles ({_MOEX_BENCHMARK}).")
+            return candles
+        print(
+            f"  [{segment_id}] No benchmark candles for {_MOEX_BENCHMARK}, skipping excess returns."
+        )
+        return None
+    except Exception as exc:
+        print(f"  [{segment_id}] Failed to fetch MOEX benchmark: {exc}, skipping excess returns.")
+        return None
+
+
+def _fetch_us_benchmark(segment_id: str) -> list[Candle] | None:
+    """Fetch SPY benchmark for US segments via yfinance."""
+    lookback = _get_lookback_days(segment_id)
+    end = datetime.now(tz=UTC)
+    start = end - timedelta(days=lookback)
+    market_id = segment_id.split("_", maxsplit=1)[0]
+    fetcher = YFinanceFetcher(market_id=market_id)
+    try:
+        candles = fetcher.fetch_candles(_US_BENCHMARK, start, end)
+        if candles:
+            print(f"  [{segment_id}] Fetched {len(candles)} benchmark candles ({_US_BENCHMARK}).")
+            return candles
+        print(
+            f"  [{segment_id}] No benchmark candles for {_US_BENCHMARK}, skipping excess returns."
+        )
+        return None
+    except Exception as exc:
+        print(
+            f"  [{segment_id}] Failed to fetch benchmark "
+            f"({_US_BENCHMARK}): {exc}, skipping excess returns."
+        )
+        return None
 
 
 def _fetch_tinkoff_candles(symbol: str) -> list[Candle]:
@@ -356,6 +501,8 @@ def _build_dataset(
     symbols: list[str],
     settings: Settings | None = None,
     label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
+    *,
+    excess_returns: bool = False,
 ) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None]:
     """Build (features, labels, barrier_weights, hold_bars) per symbol.
 
@@ -368,7 +515,7 @@ def _build_dataset(
         hold_bars is non-None only in triple_barrier mode.
     """
     features, labels, weights, hold_bars, _timestamps = _build_dataset_with_timestamps(
-        segment_id, symbols, settings, label_mode
+        segment_id, symbols, settings, label_mode, excess_returns=excess_returns
     )
     return features, labels, weights, hold_bars
 
@@ -378,6 +525,8 @@ def _build_dataset_with_timestamps(
     symbols: list[str],
     settings: Settings | None = None,
     label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
+    *,
+    excess_returns: bool = False,
 ) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None, list[datetime]]:
     """Build dataset with timestamps for calendar-date splitting (D4).
 
@@ -389,7 +538,13 @@ def _build_dataset_with_timestamps(
     market_id = segment_id.split("_", maxsplit=1)[0]
 
     if label_mode == LABEL_MODE_TRIPLE_BARRIER:
-        return _build_dataset_triple_barrier(segment_id, symbols, market_id, settings)
+        return _build_dataset_triple_barrier(
+            segment_id,
+            symbols,
+            market_id,
+            settings,
+            excess_returns=excess_returns,
+        )
     return _build_dataset_direction(segment_id, symbols, market_id, settings)
 
 
@@ -420,13 +575,26 @@ def _build_dataset_triple_barrier(
     symbols: list[str],
     market_id: str,
     settings: Settings,
+    *,
+    excess_returns: bool = False,
 ) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None, list[datetime]]:
-    """Build dataset with triple barrier labels."""
+    """Build dataset with triple barrier labels.
+
+    When excess_returns=True, fetches benchmark candles (SPY for US, IMOEX
+    for MOEX) and aligns them per-symbol to produce market-neutral labels.
+    """
     import numpy as _np  # noqa: PLC0415
 
     tb_params = _get_triple_barrier_params(segment_id)
     min_candles_tb = _WINDOW_SIZE + int(tb_params["max_hold"]) + 1
     rows: list[tuple[datetime, dict[str, float], int, float, int]] = []
+
+    # Fetch benchmark candles once if excess returns requested
+    raw_benchmark: list[Candle] | None = None
+    if excess_returns:
+        raw_benchmark = _fetch_benchmark_candles(segment_id)
+        if raw_benchmark is None:
+            print(f"  [{segment_id}] Could not fetch benchmark, falling back to absolute returns.")
 
     for symbol in symbols:
         candles = _fetch_symbol_candles(symbol, market_id, settings, segment_id=segment_id)
@@ -436,6 +604,19 @@ def _build_dataset_triple_barrier(
                 f"need {min_candles_tb}+ for triple barrier -- skipping."
             )
             continue
+
+        # Align benchmark to this symbol's candles
+        aligned_bench: list[Candle] | None = None
+        if raw_benchmark:
+            aligned_bench = _align_benchmark_candles(candles, raw_benchmark)
+            if len(aligned_bench) != len(candles):
+                print(
+                    f"  [{segment_id}] {symbol}: benchmark alignment "
+                    f"mismatch ({len(aligned_bench)} vs {len(candles)}), "
+                    "falling back to absolute returns."
+                )
+                aligned_bench = None
+
         x_sym, y_sym, w_sym, ts_sym, hb_sym = build_triple_barrier_dataset(
             candles,
             window_size=_WINDOW_SIZE,
@@ -444,10 +625,14 @@ def _build_dataset_triple_barrier(
             max_hold=int(tb_params["max_hold"]),
             atr_period=int(tb_params["atr_period"]),
             atr_scale=bool(tb_params["atr_scale"]),
+            benchmark_candles=aligned_bench,
         )
+
+        label_type = "excess-return" if aligned_bench else "absolute"
+        pos_rate = f"{sum(y_sym) / len(y_sym):.1%}" if y_sym else "N/A"
         print(
             f"  [{segment_id}] {symbol}: {len(x_sym)} triple barrier samples "
-            f"(label balance: {sum(y_sym)}/{len(y_sym)} positive)"
+            f"({label_type}, {pos_rate} positive)"
         )
         for ts, feat, lbl, wt, hb in zip(ts_sym, x_sym, y_sym, w_sym, hb_sym, strict=True):
             rows.append((ts, feat, lbl, wt, hb))
@@ -458,6 +643,18 @@ def _build_dataset_triple_barrier(
     weights_out = _np.array([r[3] for r in rows], dtype=float) if rows else None
     hold_bars_out = [r[4] for r in rows] if rows else None
     timestamps_out = [r[0] for r in rows]
+
+    # Log overall label distribution
+    if labels_out:
+        pos_count = sum(labels_out)
+        total = len(labels_out)
+        label_mode_str = "Market-neutral" if raw_benchmark else "Absolute"
+        print(
+            f"  [{segment_id}] {label_mode_str} labels: "
+            f"{pos_count / total:.1%} positive "
+            f"({pos_count}/{total})"
+        )
+
     return features_out, labels_out, weights_out, hold_bars_out, timestamps_out
 
 
@@ -613,6 +810,8 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
     output_dir: Path,
     settings: Settings | None = None,
     label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
+    *,
+    excess_returns: bool = False,
 ) -> dict[str, float] | None:
     """Train models using walk-forward validation (D1).
 
@@ -631,7 +830,11 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
 
     print(f"\n[{segment_id}] Walk-forward training (label_mode={label_mode})...")
     features, labels, barrier_weights, hold_bars, timestamps = _build_dataset_with_timestamps(
-        segment_id, symbols, settings, label_mode
+        segment_id,
+        symbols,
+        settings,
+        label_mode,
+        excess_returns=excess_returns,
     )
     if not features:
         print(f"[{segment_id}] No samples -- skipping.")
@@ -777,6 +980,8 @@ def train_one_segment(  # noqa: PLR0915
     output_dir: Path,
     settings: Settings | None = None,
     label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
+    *,
+    excess_returns: bool = False,
 ) -> None:
     """Train and save models for a single segment."""
     import numpy as _np  # noqa: PLC0415
@@ -790,6 +995,7 @@ def train_one_segment(  # noqa: PLR0915
         symbols,
         settings,
         label_mode=label_mode,
+        excess_returns=excess_returns,
     )
     if not features_list:
         print(f"[{segment_id}] No samples -- skipping.")
@@ -1093,6 +1299,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
         help="Use walk-forward validation (D1) instead of single split.",
     )
+    parser.add_argument(
+        "--excess-returns",
+        action="store_true",
+        default=False,
+        help=(
+            "Use market-neutral (excess return) labels by subtracting "
+            "benchmark return (SPY for US, IMOEX for MOEX). "
+            "Only applies to triple_barrier label mode."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1102,13 +1318,16 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     label_mode: str = args.label_mode
     walk_forward: bool = args.walk_forward
+    excess_returns: bool = args.excess_returns
 
     if args.segment:
         segments = {args.segment: _SEGMENT_SYMBOLS.get(args.segment, [])}
     else:
         segments = _SEGMENT_SYMBOLS
 
-    print(f"Label mode: {label_mode}, Walk-forward: {walk_forward}")
+    print(
+        f"Label mode: {label_mode}, Walk-forward: {walk_forward}, Excess returns: {excess_returns}"
+    )
 
     # Collect p-values for BH correction (D3) across all segments
     segment_accuracies: dict[str, float] = {}
@@ -1121,6 +1340,7 @@ def main() -> None:
                     symbols=symbols,
                     output_dir=output_dir,
                     label_mode=label_mode,
+                    excess_returns=excess_returns,
                 )
                 if gate_rates and "accuracy" in gate_rates:
                     # Load best accuracy from saved results
@@ -1134,6 +1354,7 @@ def main() -> None:
                     symbols=symbols,
                     output_dir=output_dir,
                     label_mode=label_mode,
+                    excess_returns=excess_returns,
                 )
         except FileNotFoundError as exc:
             print(f"[{segment_id}] FileNotFoundError -- {exc}, skipping.")
