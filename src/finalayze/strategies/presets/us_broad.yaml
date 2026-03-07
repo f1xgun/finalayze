@@ -58,8 +58,8 @@ strategies:
       threshold: 0.10
       min_confidence: 0.30
   dual_momentum:
-    enabled: false
-    weight: 0.07
+    enabled: true
+    weight: 0.10
     params:
       lookback_1m: 21
       lookback_3m: 63

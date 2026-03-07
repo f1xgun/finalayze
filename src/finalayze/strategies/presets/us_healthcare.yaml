@@ -55,8 +55,8 @@ strategies:
       vol_target_enabled: true
       vol_target: 0.20
   dual_momentum:
-    enabled: false
-    weight: 0.07
+    enabled: true
+    weight: 0.10
     params:
       lookback_1m: 21
       lookback_3m: 63

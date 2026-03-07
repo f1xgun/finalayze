@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -86,11 +87,10 @@ def create_search_space(trial: optuna.Trial) -> dict[str, Any]:
 
 
 def apply_params_to_yaml(segment_id: str, params: dict[str, Any]) -> None:
-    """Apply tuned params to the segment YAML preset (in-place).
+    """Apply tuned params to the segment YAML preset using surgical text edits.
 
-    Reads the existing preset, patches the relevant fields, and writes back.
-    This is intended to be called once with the best params after optimisation
-    completes.
+    Uses regex replacement instead of yaml.dump to preserve formatting and
+    avoid silent value corruption.
 
     Args:
         segment_id: Segment identifier (e.g. ``us_tech``).
@@ -98,36 +98,58 @@ def apply_params_to_yaml(segment_id: str, params: dict[str, Any]) -> None:
     """
     presets_dir = _PROJECT_ROOT / "src" / "finalayze" / "strategies" / "presets"
     yaml_path = presets_dir / f"{segment_id}.yaml"
-    with yaml_path.open() as f:
-        config = yaml.safe_load(f)
+    text = yaml_path.read_text()
 
     if "min_combined_confidence" in params:
-        config["min_combined_confidence"] = round(float(params["min_combined_confidence"]), 2)
+        val = round(float(params["min_combined_confidence"]), 2)
+        text = re.sub(
+            r"(min_combined_confidence:\s*)\S+",
+            rf"\g<1>{val}",
+            text,
+        )
 
     if "vol_target" in params:
-        for strat_cfg in config.get("strategies", {}).values():
-            if isinstance(strat_cfg, dict) and strat_cfg.get("params", {}).get(
-                "vol_target_enabled"
-            ):
-                strat_cfg["params"]["vol_target"] = round(float(params["vol_target"]), 2)
+        val = round(float(params["vol_target"]), 2)
+        text = re.sub(
+            r"(vol_target:\s*)\S+",
+            rf"\g<1>{val}",
+            text,
+            flags=re.MULTILINE,
+        )
 
-    routing = config.get("regime_routing", {})
-    if isinstance(routing, dict):
-        if "trend_threshold" in params:
-            routing["trend_threshold"] = int(params["trend_threshold"])
-        if "mr_threshold" in params:
-            routing["mr_threshold"] = int(params["mr_threshold"])
+    if "trend_threshold" in params:
+        val = int(params["trend_threshold"])
+        text = re.sub(
+            r"(trend_threshold:\s*)\S+",
+            rf"\g<1>{val}",
+            text,
+        )
 
-    rsi2 = config.get("strategies", {}).get("rsi2_connors", {})
-    if isinstance(rsi2, dict):
-        p = rsi2.setdefault("params", {})
-        if "rsi_buy_threshold" in params:
-            p["rsi_buy_threshold"] = round(float(params["rsi_buy_threshold"]), 1)
-        if "rsi_sell_threshold" in params:
-            p["rsi_sell_threshold"] = round(float(params["rsi_sell_threshold"]), 1)
+    if "mr_threshold" in params:
+        val = int(params["mr_threshold"])
+        text = re.sub(
+            r"(mr_threshold:\s*)\S+",
+            rf"\g<1>{val}",
+            text,
+        )
 
-    with yaml_path.open("w") as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+    if "rsi_buy_threshold" in params:
+        val = round(float(params["rsi_buy_threshold"]), 1)
+        text = re.sub(
+            r"(rsi_buy_threshold:\s*)\S+",
+            rf"\g<1>{val}",
+            text,
+        )
+
+    if "rsi_sell_threshold" in params:
+        val = round(float(params["rsi_sell_threshold"]), 1)
+        text = re.sub(
+            r"(rsi_sell_threshold:\s*)\S+",
+            rf"\g<1>{val}",
+            text,
+        )
+
+    yaml_path.write_text(text)
 
 
 def _apply_params_to_config(config: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -169,9 +191,10 @@ def _apply_params_to_config(config: dict[str, Any], params: dict[str, Any]) -> d
 def run_backtest_for_trial(segment_id: str, params: dict[str, Any]) -> dict[str, float]:
     """Run a backtest with given params and return metrics.
 
-    Creates a temporary YAML config with the trial params applied, runs the
-    full backtest pipeline via ``run_iteration`` infrastructure, and returns
-    key metrics for the composite objective.
+    Creates a temporary YAML config with the trial params applied, writes it
+    to a temp directory as ``{segment_id}.yaml``, and overrides the combiner's
+    preset directory so ``_load_config`` reads the trial config instead of the
+    original preset.
 
     Args:
         segment_id: Segment identifier (e.g. ``us_tech``).
@@ -189,10 +212,12 @@ def run_backtest_for_trial(segment_id: str, params: dict[str, Any]) -> dict[str,
 
     config = _apply_params_to_config(base_config, params)
 
-    # Write temp YAML, run backtest, clean up
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
-        yaml.dump(config, tmp, default_flow_style=False, sort_keys=False)
-        tmp_path = Path(tmp.name)
+    # Write temp YAML to a temp directory using the segment filename so that
+    # StrategyCombiner._load_config can find it via _presets_dir override.
+    tmp_dir = tempfile.mkdtemp(prefix="optuna_preset_")
+    tmp_preset_path = Path(tmp_dir) / f"{segment_id}.yaml"
+    with tmp_preset_path.open("w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
     try:
         # Import the iteration runner's internal machinery
@@ -243,6 +268,8 @@ def run_backtest_for_trial(segment_id: str, params: dict[str, Any]) -> dict[str,
                 strategies=strategies,
                 allocation_mode="hrp",
             )
+            # Override presets dir so combiner reads the trial config
+            combiner._presets_dir = Path(tmp_dir)
             journal = DecisionJournal()
 
             engine = BacktestEngine(
@@ -271,7 +298,9 @@ def run_backtest_for_trial(segment_id: str, params: dict[str, Any]) -> dict[str,
     except Exception:
         return {"wf_sharpe": -1.0, "trades": 0, "max_dd": 1.0}
     finally:
-        tmp_path.unlink(missing_ok=True)
+        import shutil  # noqa: PLC0415
+
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _parse_args() -> argparse.Namespace:

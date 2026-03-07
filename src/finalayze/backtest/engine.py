@@ -1143,12 +1143,17 @@ class BacktestEngine:
         check_dt = fill_candle.timestamp
         if check_dt.hour == 0 and check_dt.minute == 0:
             check_dt = datetime.combine(check_dt.date(), _US_MARKET_OPEN_UTC)
+        market_id = "moex" if segment_id.startswith("ru_") else "us"
         result = checker.check(
             order_value=position_value,
             portfolio_equity=portfolio.equity,
             available_cash=portfolio.cash,
             open_position_count=len(portfolio.positions),
             dt=check_dt,
+            market_id=market_id,
+            symbol=symbol,
+            open_positions=list(broker.get_positions().keys()),
+            strategy_name=signal.strategy_name if signal is not None else None,
         )
         if not result.passed:
             if self._decision_journal is not None:

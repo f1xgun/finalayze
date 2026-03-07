@@ -51,8 +51,8 @@ strategies:
       min_sentiment: 0.5
       event_types: [interest_rate, earnings, regulatory, macro]
   dual_momentum:
-    enabled: false
-    weight: 0.07
+    enabled: true
+    weight: 0.10
     params:
       lookback_1m: 21
       lookback_3m: 63
