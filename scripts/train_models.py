@@ -47,7 +47,9 @@ from finalayze.ml.training.labeling import build_triple_barrier_dataset
 from finalayze.ml.training.sample_weights import compute_decay_weights
 
 _WINDOW_SIZE = DEFAULT_WINDOW_SIZE
-_TRAIN_RATIO = 0.8
+_TRAIN_RATIO = 0.70
+_CALIBRATION_RATIO = 0.15
+_TEST_RATIO = 0.15
 _TUNED_PARAMS_DIR = Path(__file__).parent.parent / "results" / "tuned_params"
 
 # Triple barrier parameters (match engine execution params)
@@ -76,21 +78,29 @@ _MOEX_LOOKBACK_DAYS = 730  # 2 years for MOEX (post-sanctions structural break)
 _DEFAULT_OUTPUT_DIR = "models/"
 _SEQUENCE_LENGTH = 20
 _MIN_CANDLES = _WINDOW_SIZE + 1  # need at least WINDOW_SIZE + 1 for one sample
+_PURGE_GAP = _WINDOW_SIZE + _TB_MAX_HOLD  # 80 bars: feature window + label horizon
 
 # XGBoost max_depth: shallower for MOEX (smaller dataset, prevent overfit)
 _US_MAX_DEPTH = 5
 _MOEX_MAX_DEPTH = 3
 
-# Map segment_id → representative symbols for yfinance fallback
+# Map segment_id -> representative symbols for training data
 _SEGMENT_SYMBOLS: dict[str, list[str]] = {
-    "us_tech": ["AAPL", "MSFT", "GOOGL"],
-    "us_healthcare": ["JNJ", "PFE", "UNH"],
-    "us_finance": ["JPM", "BAC", "GS"],
-    "us_broad": ["SPY", "QQQ", "IWM"],
-    "ru_blue_chips": ["SBER.ME", "GAZP.ME", "LKOH.ME"],
-    "ru_energy": ["NVTK.ME", "ROSN.ME"],
-    "ru_tech": ["YNDX.ME", "OZON.ME"],
-    "ru_finance": ["VTBR.ME", "MOEX.ME"],
+    "us_tech": [
+        "AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN", "TSLA",
+        "CRM", "ADBE", "INTC", "AMD", "AVGO", "CSCO", "ORCL", "QCOM",
+    ],
+    "us_healthcare": [
+        "JNJ", "PFE", "UNH", "ABBV", "MRK", "LLY", "TMO", "ABT", "BMY", "AMGN", "GILD", "MDT",
+    ],
+    "us_finance": [
+        "JPM", "BAC", "GS", "MS", "WFC", "C", "BLK", "SCHW", "AXP", "USB", "PNC", "TFC",
+    ],
+    "us_broad": ["SPY", "QQQ", "DIA", "IWM", "VTI"],
+    "ru_blue_chips": ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK", "PLZL", "MGNT"],
+    "ru_energy": ["ROSN", "TATN", "NVTK", "LKOH", "SNGS", "SIBN"],
+    "ru_tech": ["YNDX", "OZON", "VKCO", "CIAN"],
+    "ru_finance": ["SBER", "VTBR", "TCSG", "MOEX", "CBOM"],
 }
 
 
@@ -124,7 +134,7 @@ def _fetch_tinkoff_candles(symbol: str) -> list[Candle]:
         print(f"  [warn] FINALAYZE_TINKOFF_TOKEN not set, skipping Tinkoff fetch for {symbol}")
         return []
 
-    # Strip yfinance .ME suffix — registry uses plain tickers
+    # Strip yfinance .ME suffix -- registry uses plain tickers
     clean_symbol = symbol.removesuffix(".ME")
 
     try:
@@ -252,13 +262,48 @@ def _get_triple_barrier_params(segment_id: str) -> dict[str, float | int | bool]
     }
 
 
+def _compute_uniqueness_from_hold_bars(hold_bars: list[int]) -> np.ndarray:  # type: ignore[type-arg]
+    """Compute sample uniqueness from hold bar counts.
+
+    Uses a sliding window approach: sample i spans bars [i, i + hold_bars[i]).
+    Concurrency at each bar = number of active samples.
+    Uniqueness = 1 / mean(concurrency over sample's span).
+
+    O(n * max_hold) instead of O(n^2).
+    """
+    import numpy as _np  # noqa: PLC0415
+
+    n = len(hold_bars)
+    if n == 0:
+        return _np.array([], dtype=_np.float64)
+
+    max_bar = n + max(hold_bars) if hold_bars else n
+    concurrency = _np.zeros(max_bar, dtype=_np.float64)
+
+    # Count concurrent samples at each bar
+    for i, hb in enumerate(hold_bars):
+        if hb > 0:
+            concurrency[i : i + hb] += 1.0
+
+    # Compute uniqueness for each sample
+    uniqueness = _np.empty(n, dtype=_np.float64)
+    for i, hb in enumerate(hold_bars):
+        if hb <= 0:
+            uniqueness[i] = 1.0
+            continue
+        avg_conc = float(concurrency[i : i + hb].mean())
+        uniqueness[i] = 1.0 / avg_conc if avg_conc > 0 else 1.0
+
+    return uniqueness
+
+
 def _build_dataset(
     segment_id: str,
     symbols: list[str],
     settings: Settings | None = None,
     label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
-) -> tuple[list[dict[str, float]], list[int], np.ndarray | None]:
-    """Build (features, labels, barrier_weights) by processing each symbol independently.
+) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None]:
+    """Build (features, labels, barrier_weights, hold_bars) per symbol.
 
     Collects windows from all symbols and sorts by timestamp to maintain
     proper temporal ordering for train/test splits (no future leakage).
@@ -270,8 +315,9 @@ def _build_dataset(
         label_mode: "triple_barrier" (default) or "direction".
 
     Returns:
-        Tuple of (features, labels, barrier_weights).
+        Tuple of (features, labels, barrier_weights, hold_bars).
         barrier_weights is non-None only in triple_barrier mode (abs(pnl_pct)).
+        hold_bars is non-None only in triple_barrier mode.
     """
     if settings is None:
         settings = Settings()
@@ -287,7 +333,7 @@ def _build_dataset_direction(
     symbols: list[str],
     market_id: str,
     settings: Settings,
-) -> tuple[list[dict[str, float]], list[int], np.ndarray | None]:
+) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None]:
     """Build dataset with simple next-bar direction labels (old behavior)."""
     rows: list[tuple[datetime, dict[str, float], int]] = []
     for symbol in symbols:
@@ -300,7 +346,7 @@ def _build_dataset_direction(
     rows.sort(key=lambda r: r[0])
     features_out = [r[1] for r in rows]
     labels_out = [r[2] for r in rows]
-    return features_out, labels_out, None
+    return features_out, labels_out, None, None
 
 
 def _build_dataset_triple_barrier(
@@ -308,23 +354,23 @@ def _build_dataset_triple_barrier(
     symbols: list[str],
     market_id: str,
     settings: Settings,
-) -> tuple[list[dict[str, float]], list[int], np.ndarray | None]:
+) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None]:
     """Build dataset with triple barrier labels."""
     import numpy as _np  # noqa: PLC0415
 
     tb_params = _get_triple_barrier_params(segment_id)
     min_candles_tb = _WINDOW_SIZE + int(tb_params["max_hold"]) + 1
-    rows: list[tuple[datetime, dict[str, float], int, float]] = []
+    rows: list[tuple[datetime, dict[str, float], int, float, int]] = []
 
     for symbol in symbols:
         candles = _fetch_symbol_candles(symbol, market_id, settings, segment_id=segment_id)
         if len(candles) < min_candles_tb:
             print(
                 f"  [{segment_id}] {symbol}: only {len(candles)} candles, "
-                f"need {min_candles_tb}+ for triple barrier — skipping."
+                f"need {min_candles_tb}+ for triple barrier -- skipping."
             )
             continue
-        x_sym, y_sym, w_sym, ts_sym = build_triple_barrier_dataset(
+        x_sym, y_sym, w_sym, ts_sym, hb_sym = build_triple_barrier_dataset(
             candles,
             window_size=_WINDOW_SIZE,
             upper_atr_mult=float(tb_params["upper_atr_mult"]),
@@ -337,17 +383,18 @@ def _build_dataset_triple_barrier(
             f"  [{segment_id}] {symbol}: {len(x_sym)} triple barrier samples "
             f"(label balance: {sum(y_sym)}/{len(y_sym)} positive)"
         )
-        for ts, feat, lbl, wt in zip(ts_sym, x_sym, y_sym, w_sym, strict=True):
-            rows.append((ts, feat, lbl, wt))
+        for ts, feat, lbl, wt, hb in zip(ts_sym, x_sym, y_sym, w_sym, hb_sym, strict=True):
+            rows.append((ts, feat, lbl, wt, hb))
 
     rows.sort(key=lambda r: r[0])
     features_out = [r[1] for r in rows]
     labels_out = [r[2] for r in rows]
     weights_out = _np.array([r[3] for r in rows], dtype=float) if rows else None
-    return features_out, labels_out, weights_out
+    hold_bars_out = [r[4] for r in rows] if rows else None
+    return features_out, labels_out, weights_out, hold_bars_out
 
 
-def train_one_segment(
+def train_one_segment(  # noqa: PLR0915
     segment_id: str,
     symbols: list[str],
     output_dir: Path,
@@ -355,22 +402,24 @@ def train_one_segment(
     label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
 ) -> None:
     """Train and save models for a single segment."""
+    import numpy as _np  # noqa: PLC0415
+
     if settings is None:
         settings = Settings()
     print(f"\n[{segment_id}] Fetching candles for {symbols} (label_mode={label_mode})...")
 
-    features_list, label_list, barrier_weights = _build_dataset(
+    features_list, label_list, barrier_weights, hold_bars = _build_dataset(
         segment_id,
         symbols,
         settings,
         label_mode=label_mode,
     )
     if not features_list:
-        print(f"[{segment_id}] No samples — skipping.")
+        print(f"[{segment_id}] No samples -- skipping.")
         return
 
     if len(features_list) < _WINDOW_SIZE:
-        print(f"[{segment_id}] Only {len(features_list)} samples — need {_WINDOW_SIZE}+, skipping.")
+        print(f"[{segment_id}] Only {len(features_list)} samples, need {_WINDOW_SIZE}+, skipping.")
         return
 
     print(
@@ -378,14 +427,28 @@ def train_one_segment(
         f"(label balance: {sum(label_list)}/{len(label_list)} positive)"
     )
 
-    split = int(len(features_list) * _TRAIN_RATIO)
-    gap_end = min(split + _WINDOW_SIZE, len(features_list))
-    train_features = features_list[:split]
-    test_features = features_list[gap_end:]
-    train_labels = label_list[:split]
-    test_labels = label_list[gap_end:]
+    # Three-way temporal split: train / calibration / test
+    # Purge gaps between each split prevent label leakage
+    n = len(features_list)
+    train_end = int(n * _TRAIN_RATIO)
+    cal_start = min(train_end + _PURGE_GAP, n)
+    cal_end = int(n * (_TRAIN_RATIO + _CALIBRATION_RATIO))
+    test_start = min(cal_end + _PURGE_GAP, n)
 
-    # Feature selection on TRAIN data only (no leakage — design doc 2.3)
+    train_features = features_list[:train_end]
+    train_labels = label_list[:train_end]
+    cal_features = features_list[cal_start:cal_end]
+    cal_labels = label_list[cal_start:cal_end]
+    test_features = features_list[test_start:]
+    test_labels = label_list[test_start:]
+
+    print(
+        f"[{segment_id}] Split: train={len(train_features)}, "
+        f"cal={len(cal_features)}, test={len(test_features)} "
+        f"(purge_gap={_PURGE_GAP})"
+    )
+
+    # Feature selection on TRAIN data only (no leakage -- design doc 2.3)
     selected_features: list[str] | None = None
     if train_features:
         import pandas as pd  # noqa: PLC0415
@@ -397,22 +460,35 @@ def train_one_segment(
         if selected_features:
             print(f"[{segment_id}] Selected {len(selected_features)}/{len(feature_names)} features")
             train_features = [{k: row[k] for k in selected_features} for row in train_features]
+            cal_features = [{k: row[k] for k in selected_features} for row in cal_features]
             test_features = [{k: row[k] for k in selected_features} for row in test_features]
 
-    # Compute sample weights: combine decay weights with barrier weights if available
+    # Compute sample weights: combine decay, uniqueness, and barrier weights
     decay_weights = compute_decay_weights(len(train_features))
-    if barrier_weights is not None and len(barrier_weights) > 0:
-        # Use barrier weights (abs(pnl_pct)) for the train portion, multiplied by decay
-        train_barrier_weights = barrier_weights[:split]
-        # Normalize barrier weights to mean=1 to preserve decay weight scale
-        bw_mean = float(train_barrier_weights.mean()) if len(train_barrier_weights) > 0 else 1.0
-        normalized_bw = train_barrier_weights / bw_mean if bw_mean > 0 else train_barrier_weights
-        sample_weights = decay_weights * normalized_bw
+
+    # Uniqueness from overlapping labels (A6)
+    if hold_bars is not None and len(hold_bars) >= train_end:
+        train_hold_bars = hold_bars[:train_end]
+        uniqueness = _compute_uniqueness_from_hold_bars(train_hold_bars)
+        # Normalize to mean=1
+        u_mean = float(uniqueness.mean()) if len(uniqueness) > 0 else 1.0
+        uniqueness = uniqueness / u_mean if u_mean > 0 else uniqueness
     else:
-        sample_weights = decay_weights
+        uniqueness = _np.ones(len(train_features), dtype=_np.float64)
+
+    # Barrier weights: use sqrt to dampen extreme PnL values (A6)
+    if barrier_weights is not None and len(barrier_weights) > 0:
+        train_bw = barrier_weights[:train_end]
+        dampened_bw = _np.sqrt(_np.abs(train_bw))
+        bw_mean = float(dampened_bw.mean()) if len(dampened_bw) > 0 else 1.0
+        normalized_bw = dampened_bw / bw_mean if bw_mean > 0 else dampened_bw
+    else:
+        normalized_bw = _np.ones(len(train_features), dtype=_np.float64)
+
+    sample_weights = decay_weights * uniqueness * normalized_bw
 
     if len(train_features) < _SEQUENCE_LENGTH:
-        print(f"[{segment_id}] Train split too small for LSTM — skipping.")
+        print(f"[{segment_id}] Train split too small for LSTM -- skipping.")
         return
 
     segment_dir = output_dir / segment_id
@@ -429,6 +505,8 @@ def train_one_segment(
         segment_dir,
         train_features,
         train_labels,
+        cal_features,
+        cal_labels,
         test_features,
         test_labels,
         sample_weights=sample_weights,
@@ -456,6 +534,8 @@ def _train_and_evaluate_models(  # noqa: PLR0912
     segment_dir: Path,
     train_features: list[dict[str, float]],
     train_labels: list[int],
+    cal_features: list[dict[str, float]],
+    cal_labels: list[int],
     test_features: list[dict[str, float]],
     test_labels: list[int],
     sample_weights: np.ndarray | None = None,  # type: ignore[type-arg]
@@ -538,14 +618,14 @@ def _train_and_evaluate_models(  # noqa: PLR0912
     if test_features:
         results["LSTM"] = _evaluate_model(lstm, test_features, test_labels)
 
-    # Fit EnsembleCalibrator on TEST set raw probabilities (out-of-sample)
-    if test_features and test_labels:
+    # Fit EnsembleCalibrator on CALIBRATION set raw probabilities (out-of-sample)
+    if cal_features and cal_labels:
         _fit_and_save_calibrator(
             segment_id,
             segment_dir,
             [xgb, lgbm, lstm],
-            test_features,
-            test_labels,
+            cal_features,
+            cal_labels,
         )
 
     return results
@@ -647,9 +727,9 @@ def main() -> None:
                 label_mode=label_mode,
             )
         except FileNotFoundError as exc:
-            print(f"[{segment_id}] FileNotFoundError — {exc}, skipping.")
+            print(f"[{segment_id}] FileNotFoundError -- {exc}, skipping.")
         except Exception as exc:
-            print(f"[{segment_id}] Unexpected error — {exc}, skipping.")
+            print(f"[{segment_id}] Unexpected error -- {exc}, skipping.")
 
 
 if __name__ == "__main__":
