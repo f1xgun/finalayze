@@ -18,18 +18,24 @@ if TYPE_CHECKING:
 _MIN_CANDLES = 30
 _SPLIT_WARNING_THRESHOLD = 0.40
 
-# Lookback lengths for new indicators
+# Lookback lengths for indicators
 _ROC_LENGTH = 10
 _OBV_SLOPE_LENGTH = 10
 _RSI_LOOKBACK = 14
-_DOW_DIVISOR = 5
-_MIN_SMA_POINTS = 2
-_RSI_SCALE = 100.0
 _PROXIMITY_WINDOW = 252
 _AMIHUD_WINDOW = 20
 _MIN_CS_BARS = 2
 _WAVELET_LEVEL = 3
 _MIN_WAVELET_SAMPLES = 16  # pywt.wavedec('db4', level=3) needs at least 2^level samples
+
+# Lagged return lookback thresholds (minimum bars needed)
+_RET_1D_MIN = 2
+_RET_5D_MIN = 6
+_RET_21D_MIN = 22
+
+# Return distribution constants
+_RECENT_RETURN_WINDOW = 20
+_MIN_SKEW_BARS = 5
 
 _log = logging.getLogger(__name__)
 
@@ -81,7 +87,10 @@ def _compute_wavelet_features(log_returns: list[float]) -> dict[str, float]:
     }
 
 
-def compute_features(candles: list[Candle], sentiment_score: float = 0.0) -> dict[str, float]:
+def compute_features(
+    candles: list[Candle],
+    sentiment_score: float = 0.0,  # noqa: ARG001 — kept for backward compatibility
+) -> dict[str, float]:
     """Compute technical features from a list of candles.
 
     Args:
@@ -121,10 +130,11 @@ def compute_features(candles: list[Candle], sentiment_score: float = 0.0) -> dic
     log_returns = list(np.diff(np.log(np.array(closes, dtype=float))))
     wavelet = _compute_wavelet_features(log_returns)
 
-    all_features = {**core, **extra, **wavelet, "sentiment": sentiment_score}
+    all_features = {**core, **extra, **wavelet}
 
     feature_df = pd.DataFrame({k: [v] for k, v in all_features.items()})
-    feature_df = feature_df.ffill().bfill().fillna(0)
+    # Safety net: replace any remaining NaN/inf with 0 (feature-specific defaults above)
+    feature_df = feature_df.replace([np.inf, -np.inf], np.nan).fillna(0)
 
     return {col: float(feature_df[col].iloc[0]) for col in feature_df.columns}
 
@@ -198,7 +208,7 @@ def _compute_extra_features(
     candles: list[Candle],
     last_close: float,
 ) -> dict[str, float]:
-    """Compute the 10 new features added in 6C.1."""
+    """Compute extra features beyond the 5 core indicators."""
     closes = [float(c.close) for c in candles]
 
     # ROC(10)
@@ -217,14 +227,6 @@ def _compute_extra_features(
         if adx_cols:
             adx_val = float(adx_df[adx_cols[0]].iloc[-1])
 
-    # MA slope (20-bar SMA), normalized by price
-    sma_20 = ta.sma(close_s, length=20)
-    ma_slope = 0.0
-    if sma_20 is not None and len(sma_20) >= _MIN_SMA_POINTS:
-        sma_curr = float(sma_20.iloc[-1])
-        sma_prev = float(sma_20.iloc[-2])
-        ma_slope = (sma_curr - sma_prev) / last_close if last_close > 0 else 0.0
-
     # Historical volatility (20): stdev of returns
     returns = close_s.pct_change()
     hist_vol = ta.stdev(returns, length=20)
@@ -232,12 +234,6 @@ def _compute_extra_features(
 
     # Garman-Klass volatility (20)
     gk_vol_val = _garman_klass_vol(open_s, high_s, low_s, close_s, length=20)
-
-    # Day-of-week cyclical encoding
-    last_ts = candles[-1].timestamp
-    dow = last_ts.weekday()  # 0=Monday, 4=Friday
-    dow_sin = math.sin(2 * math.pi * dow / _DOW_DIVISOR)
-    dow_cos = math.cos(2 * math.pi * dow / _DOW_DIVISOR)
 
     # OBV slope (10), normalized by volume mean
     obv = ta.obv(close_s, volume_s)
@@ -248,29 +244,78 @@ def _compute_extra_features(
         vol_mean = float(volume_s.mean())
         obv_slope_val = slope / vol_mean if vol_mean > 0 else 0.0
 
-    # RSI divergence: difference between price ROC and RSI ROC over 14 bars
+    # RSI divergence: z-score normalized price vs RSI changes over 14 bars
     rsi = ta.rsi(close_s, length=14)
     rsi_divergence = 0.0
-    if rsi is not None and len(rsi) >= _RSI_LOOKBACK:
-        prev_close = closes[-_RSI_LOOKBACK]
-        price_roc_14 = (closes[-1] - prev_close) / prev_close if prev_close != 0 else 0.0
-        rsi_roc_14 = (float(rsi.iloc[-1]) - float(rsi.iloc[-_RSI_LOOKBACK])) / _RSI_SCALE
-        rsi_divergence = price_roc_14 - rsi_roc_14
+    if rsi is not None and len(rsi) >= _RSI_LOOKBACK and len(closes) >= _RSI_LOOKBACK:
+        price_returns = close_s.pct_change().iloc[-_RSI_LOOKBACK:]
+        rsi_changes = rsi.diff().iloc[-_RSI_LOOKBACK:]
+        # Z-score normalize
+        pr_std = float(price_returns.std())
+        rc_std = float(rsi_changes.std())
+        if pr_std > 0 and rc_std > 0 and math.isfinite(pr_std) and math.isfinite(rc_std):
+            price_z = float(price_returns.iloc[-1]) / pr_std
+            rsi_z = float(rsi_changes.iloc[-1]) / rc_std
+            rsi_divergence = price_z - rsi_z
 
+    predictive = _compute_predictive_features(close_s, closes, returns)
     microstructure = _compute_microstructure_features(close_s, high_s, low_s, volume_s, last_close)
 
     return {
         "roc_10": roc_val,
         "willr_14": willr_val,
         "adx_14": adx_val,
-        "ma_slope_20": ma_slope,
         "hist_vol_20": hist_vol_val,
         "gk_vol_20": gk_vol_val,
-        "dow_sin": dow_sin,
-        "dow_cos": dow_cos,
         "obv_slope_10": obv_slope_val,
         "rsi_divergence": rsi_divergence,
+        **predictive,
         **microstructure,
+    }
+
+
+def _compute_predictive_features(
+    close_s: pd.Series,
+    closes: list[float],
+    returns: pd.Series,
+) -> dict[str, float]:
+    """Compute lagged returns, return distribution, and short-period RSI features."""
+    # Lagged returns (most predictive feature class in financial ML)
+    ret_1d = closes[-1] / closes[-2] - 1 if len(closes) >= _RET_1D_MIN else 0.0
+    ret_5d = closes[-1] / closes[-6] - 1 if len(closes) >= _RET_5D_MIN else 0.0
+    ret_21d = closes[-1] / closes[-22] - 1 if len(closes) >= _RET_21D_MIN else 0.0
+
+    # Return distribution (Harvey & Siddique 2000)
+    recent_returns = returns.iloc[-_RECENT_RETURN_WINDOW:].dropna()
+    skew_20d = float(recent_returns.skew()) if len(recent_returns) >= _MIN_SKEW_BARS else 0.0
+    kurt_20d = float(recent_returns.kurtosis()) if len(recent_returns) >= _MIN_SKEW_BARS else 0.0
+    max_ret_20d = float(recent_returns.max()) if len(recent_returns) >= 1 else 0.0
+    min_ret_20d = float(recent_returns.min()) if len(recent_returns) >= 1 else 0.0
+    if not math.isfinite(skew_20d):
+        skew_20d = 0.0
+    if not math.isfinite(kurt_20d):
+        kurt_20d = 0.0
+
+    # Short-period RSI (Connors RSI family)
+    rsi_2 = ta.rsi(close_s, length=2)
+    rsi_2_val = float(rsi_2.iloc[-1]) if rsi_2 is not None and not rsi_2.empty else 50.0
+    if not math.isfinite(rsi_2_val):
+        rsi_2_val = 50.0
+    rsi_5 = ta.rsi(close_s, length=5)
+    rsi_5_val = float(rsi_5.iloc[-1]) if rsi_5 is not None and not rsi_5.empty else 50.0
+    if not math.isfinite(rsi_5_val):
+        rsi_5_val = 50.0
+
+    return {
+        "ret_1d": ret_1d,
+        "ret_5d": ret_5d,
+        "ret_21d": ret_21d,
+        "skew_20d": skew_20d,
+        "kurt_20d": kurt_20d,
+        "max_ret_20d": max_ret_20d,
+        "min_ret_20d": min_ret_20d,
+        "rsi_2": rsi_2_val,
+        "rsi_5": rsi_5_val,
     }
 
 
@@ -281,23 +326,23 @@ def _compute_microstructure_features(
     volume_s: pd.Series,
     last_close: float,
 ) -> dict[str, float]:
-    """Compute microstructure features: 52wk proximity, Amihud, Corwin-Schultz."""
+    """Compute microstructure features: rolling high proximity, Amihud, Corwin-Schultz."""
     # 52-week high proximity: close / rolling_max(close, 252)
     rolling_max_252 = close_s.rolling(min(_PROXIMITY_WINDOW, len(close_s)), min_periods=1).max()
     rm_val = float(rolling_max_252.iloc[-1])
     proximity_52wk = last_close / rm_val if rm_val > 0 and math.isfinite(rm_val) else 1.0
 
-    # Amihud illiquidity ratio (20-day rolling mean)
+    # Amihud illiquidity ratio (20-day rolling mean), log-transformed for normalization
     dollar_volume = close_s * volume_s
     abs_returns = close_s.pct_change().abs()
     illiq_per_bar = abs_returns / dollar_volume
     illiq_per_bar = illiq_per_bar.replace([np.inf, -np.inf], np.nan)
     amihud_rolling = illiq_per_bar.rolling(_AMIHUD_WINDOW, min_periods=1).mean()
     amihud_val = float(amihud_rolling.iloc[-1])
-    amihud_20d = amihud_val if math.isfinite(amihud_val) else 0.0
+    amihud_20d = math.log1p(amihud_val * 1e6) if math.isfinite(amihud_val) else 0.0
 
     return {
-        "proximity_52wk": proximity_52wk,
+        "proximity_rolling_high": proximity_52wk,
         "amihud_20d": amihud_20d,
         "corwin_schultz_spread": _corwin_schultz(high_s, low_s),
     }

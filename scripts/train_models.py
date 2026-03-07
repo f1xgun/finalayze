@@ -84,6 +84,10 @@ _PURGE_GAP = _WINDOW_SIZE + _TB_MAX_HOLD  # 80 bars: feature window + label hori
 _US_MAX_DEPTH = 5
 _MOEX_MAX_DEPTH = 3
 
+# MI feature selection: fewer features for MOEX (smaller dataset, 50:1 sample-to-feature ratio)
+_US_MAX_FEATURES = 15
+_MOEX_MAX_FEATURES = 10
+
 # Map segment_id -> representative symbols for training data
 _SEGMENT_SYMBOLS: dict[str, list[str]] = {
     "us_tech": [
@@ -112,6 +116,11 @@ def _is_moex_segment(segment_id: str) -> bool:
 def _get_lookback_days(segment_id: str) -> int:
     """Return lookback days: 2 years for MOEX, 5 years for US."""
     return _MOEX_LOOKBACK_DAYS if _is_moex_segment(segment_id) else _LOOKBACK_DAYS
+
+
+def _get_max_features(segment_id: str) -> int:
+    """Return max MI-selected features: 10 for MOEX, 15 for US."""
+    return _MOEX_MAX_FEATURES if _is_moex_segment(segment_id) else _US_MAX_FEATURES
 
 
 def _get_xgboost_max_depth(segment_id: str) -> int:
@@ -456,9 +465,13 @@ def train_one_segment(  # noqa: PLR0915
         feature_names = sorted(train_features[0].keys())
         train_df = pd.DataFrame(train_features)
         train_series = pd.Series(train_labels)
-        selected_features = select_features_mi(train_df, train_series, max_features=15)
+        max_feats = _get_max_features(segment_id)
+        selected_features = select_features_mi(train_df, train_series, max_features=max_feats)
         if selected_features:
-            print(f"[{segment_id}] Selected {len(selected_features)}/{len(feature_names)} features")
+            print(
+                f"[{segment_id}] Selected {len(selected_features)}/{len(feature_names)} "
+                f"features (max={max_feats})"
+            )
             train_features = [{k: row[k] for k in selected_features} for row in train_features]
             cal_features = [{k: row[k] for k in selected_features} for row in cal_features]
             test_features = [{k: row[k] for k in selected_features} for row in test_features]

@@ -131,6 +131,14 @@ class TestTrainModelsScript:
         args = mod._parse_args(["--label-mode", "triple_barrier"])  # type: ignore[union-attr]
         assert args.label_mode == "triple_barrier"
 
+    def test_moex_segment_gets_fewer_max_features(self) -> None:
+        """MOEX segments use max_features=10, US segments use 15."""
+        mod = _load_script_module()
+        assert mod._get_max_features("us_tech") == 15  # type: ignore[union-attr]
+        assert mod._get_max_features("ru_blue_chips") == 10  # type: ignore[union-attr]
+        assert mod._get_max_features("ru_energy") == 10  # type: ignore[union-attr]
+        assert mod._get_max_features("us_broad") == 15  # type: ignore[union-attr]
+
     def test_moex_segment_uses_atr_uplift(self) -> None:
         """MOEX segments get 1.2x ATR uplift for triple barrier params."""
         mod = _load_script_module()

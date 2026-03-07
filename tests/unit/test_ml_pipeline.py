@@ -23,18 +23,23 @@ _FEATURE_NAMES = {
     "bb_pct_b",
     "volume_ratio_20d",
     "atr_14_pct",
-    "sentiment",
     "roc_10",
     "willr_14",
     "adx_14",
-    "ma_slope_20",
     "hist_vol_20",
     "gk_vol_20",
-    "dow_sin",
-    "dow_cos",
     "obv_slope_10",
     "rsi_divergence",
-    "proximity_52wk",
+    "ret_1d",
+    "ret_5d",
+    "ret_21d",
+    "skew_20d",
+    "kurt_20d",
+    "max_ret_20d",
+    "min_ret_20d",
+    "rsi_2",
+    "rsi_5",
+    "proximity_rolling_high",
     "amihud_20d",
     "corwin_schultz_spread",
     "wavelet_approx_energy",
@@ -55,9 +60,9 @@ class TestComputeFeatures:
         features = _make_features()
         assert all(isinstance(v, float) for v in features.values())
 
-    def test_sentiment_passed_through(self) -> None:
+    def test_sentiment_param_accepted_but_not_in_output(self) -> None:
         features = _make_features(sentiment=0.75)
-        assert features["sentiment"] == pytest.approx(0.75)
+        assert "sentiment" not in features
 
     def test_insufficient_candles_raises(self) -> None:
         base_date = datetime(2024, 1, 1, tzinfo=UTC)
