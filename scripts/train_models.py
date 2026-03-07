@@ -44,6 +44,7 @@ from finalayze.ml.models.xgboost_model import XGBoostModel
 from finalayze.ml.training import DEFAULT_WINDOW_SIZE, build_windows
 from finalayze.ml.training.feature_selection import select_features_mi
 from finalayze.ml.training.labeling import build_triple_barrier_dataset
+from finalayze.ml.training.quality_gates import FoldMetrics
 from finalayze.ml.training.sample_weights import compute_decay_weights
 
 _WINDOW_SIZE = DEFAULT_WINDOW_SIZE
@@ -90,14 +91,49 @@ _MOEX_MAX_FEATURES = 10
 # Map segment_id -> representative symbols for training data
 _SEGMENT_SYMBOLS: dict[str, list[str]] = {
     "us_tech": [
-        "AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN", "TSLA",
-        "CRM", "ADBE", "INTC", "AMD", "AVGO", "CSCO", "ORCL", "QCOM",
+        "AAPL",
+        "MSFT",
+        "GOOGL",
+        "NVDA",
+        "META",
+        "AMZN",
+        "TSLA",
+        "CRM",
+        "ADBE",
+        "INTC",
+        "AMD",
+        "AVGO",
+        "CSCO",
+        "ORCL",
+        "QCOM",
     ],
     "us_healthcare": [
-        "JNJ", "PFE", "UNH", "ABBV", "MRK", "LLY", "TMO", "ABT", "BMY", "AMGN", "GILD", "MDT",
+        "JNJ",
+        "PFE",
+        "UNH",
+        "ABBV",
+        "MRK",
+        "LLY",
+        "TMO",
+        "ABT",
+        "BMY",
+        "AMGN",
+        "GILD",
+        "MDT",
     ],
     "us_finance": [
-        "JPM", "BAC", "GS", "MS", "WFC", "C", "BLK", "SCHW", "AXP", "USB", "PNC", "TFC",
+        "JPM",
+        "BAC",
+        "GS",
+        "MS",
+        "WFC",
+        "C",
+        "BLK",
+        "SCHW",
+        "AXP",
+        "USB",
+        "PNC",
+        "TFC",
     ],
     "us_broad": ["SPY", "QQQ", "DIA", "IWM", "VTI"],
     "ru_blue_chips": ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK", "PLZL", "MGNT"],
@@ -326,16 +362,27 @@ def _build_dataset(
     Collects windows from all symbols and sorts by timestamp to maintain
     proper temporal ordering for train/test splits (no future leakage).
 
-    Args:
-        segment_id: Segment identifier (e.g. "us_tech", "ru_blue_chips").
-        symbols: List of ticker symbols.
-        settings: Application settings.
-        label_mode: "triple_barrier" (default) or "direction".
-
     Returns:
         Tuple of (features, labels, barrier_weights, hold_bars).
         barrier_weights is non-None only in triple_barrier mode (abs(pnl_pct)).
         hold_bars is non-None only in triple_barrier mode.
+    """
+    features, labels, weights, hold_bars, _timestamps = _build_dataset_with_timestamps(
+        segment_id, symbols, settings, label_mode
+    )
+    return features, labels, weights, hold_bars
+
+
+def _build_dataset_with_timestamps(
+    segment_id: str,
+    symbols: list[str],
+    settings: Settings | None = None,
+    label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
+) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None, list[datetime]]:
+    """Build dataset with timestamps for calendar-date splitting (D4).
+
+    Returns:
+        Tuple of (features, labels, barrier_weights, hold_bars, timestamps).
     """
     if settings is None:
         settings = Settings()
@@ -351,7 +398,7 @@ def _build_dataset_direction(
     symbols: list[str],
     market_id: str,
     settings: Settings,
-) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None]:
+) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None, list[datetime]]:
     """Build dataset with simple next-bar direction labels (old behavior)."""
     rows: list[tuple[datetime, dict[str, float], int]] = []
     for symbol in symbols:
@@ -364,7 +411,8 @@ def _build_dataset_direction(
     rows.sort(key=lambda r: r[0])
     features_out = [r[1] for r in rows]
     labels_out = [r[2] for r in rows]
-    return features_out, labels_out, None, None
+    timestamps_out = [r[0] for r in rows]
+    return features_out, labels_out, None, None, timestamps_out
 
 
 def _build_dataset_triple_barrier(
@@ -372,7 +420,7 @@ def _build_dataset_triple_barrier(
     symbols: list[str],
     market_id: str,
     settings: Settings,
-) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None]:
+) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None, list[datetime]]:
     """Build dataset with triple barrier labels."""
     import numpy as _np  # noqa: PLC0415
 
@@ -409,7 +457,87 @@ def _build_dataset_triple_barrier(
     labels_out = [r[2] for r in rows]
     weights_out = _np.array([r[3] for r in rows], dtype=float) if rows else None
     hold_bars_out = [r[4] for r in rows] if rows else None
-    return features_out, labels_out, weights_out, hold_bars_out
+    timestamps_out = [r[0] for r in rows]
+    return features_out, labels_out, weights_out, hold_bars_out, timestamps_out
+
+
+# Walk-forward parameters (D1)
+_WF_TRAIN_MONTHS = 12
+_WF_CAL_MONTHS = 2
+_WF_TEST_MONTHS = 4
+_WF_STEP_MONTHS = 3
+
+# BH correction (D3)
+_BH_FDR = 0.10
+
+
+def _generate_walk_forward_folds(
+    timestamps: list[datetime],
+) -> list[tuple[list[int], list[int], list[int]]]:
+    """Generate walk-forward fold indices split by calendar date (D4).
+
+    Each fold has: train indices, calibration indices, test indices.
+    Purge gaps are applied between splits to prevent label leakage.
+
+    Returns list of (train_idx, cal_idx, test_idx) tuples.
+    """
+    if not timestamps:
+        return []
+
+    start_date = timestamps[0]
+    end_date = timestamps[-1]
+
+    folds: list[tuple[list[int], list[int], list[int]]] = []
+    fold_start = start_date
+
+    while True:
+        train_end = fold_start + timedelta(days=_WF_TRAIN_MONTHS * 30)
+        purge1_end = train_end + timedelta(days=_PURGE_GAP)
+        cal_end = purge1_end + timedelta(days=_WF_CAL_MONTHS * 30)
+        purge2_end = cal_end + timedelta(days=_PURGE_GAP)
+        test_end = purge2_end + timedelta(days=_WF_TEST_MONTHS * 30)
+
+        if test_end > end_date + timedelta(days=1):
+            break
+
+        # Calendar-date split (D4): indices by date range, not row index
+        train_idx = [i for i, ts in enumerate(timestamps) if fold_start <= ts < train_end]
+        cal_idx = [i for i, ts in enumerate(timestamps) if purge1_end <= ts < cal_end]
+        test_idx = [i for i, ts in enumerate(timestamps) if purge2_end <= ts < test_end]
+
+        if train_idx and test_idx:
+            folds.append((train_idx, cal_idx, test_idx))
+
+        fold_start += timedelta(days=_WF_STEP_MONTHS * 30)
+
+    return folds
+
+
+def _apply_bh_correction(
+    p_values: list[float],
+    fdr: float = _BH_FDR,
+) -> list[bool]:
+    """Apply Benjamini-Hochberg FDR correction (D3).
+
+    Returns a list of booleans: True if the model passes at that index.
+    """
+    if not p_values:
+        return []
+
+    n = len(p_values)
+    # Sort p-values with original indices
+    indexed = sorted(enumerate(p_values), key=lambda x: x[1])
+    results = [False] * n
+
+    for rank, (orig_idx, pval) in enumerate(indexed, start=1):
+        threshold = (rank / n) * fdr
+        if pval <= threshold:
+            results[orig_idx] = True
+        else:
+            # Once we fail, all higher p-values also fail
+            break
+
+    return results
 
 
 def _compute_model_weights(
@@ -427,6 +555,220 @@ def _compute_model_weights(
                 acc = float(part.split("=")[1])
         weights[name.lower()] = max(0.0, acc - 0.50) ** 2
     return weights
+
+
+def _evaluate_fold_metrics(
+    models: list[XGBoostModel | LightGBMModel | CatBoostModel],
+    test_features: list[dict[str, float]],
+    test_labels: list[int],
+    mean_uniqueness: float = 1.0,
+) -> FoldMetrics:
+    """Evaluate models on a test fold and compute FoldMetrics for quality gates."""
+    probas_all: list[float] = []
+    for feat in test_features:
+        probs = []
+        for m in models:
+            trained = getattr(m, "_trained", None) or getattr(m, "_model", None)
+            if trained is None:
+                continue
+            try:
+                probs.append(m.predict_proba(feat))
+            except Exception:
+                continue
+        probas_all.append(sum(probs) / len(probs) if probs else 0.5)
+
+    preds = [round(p) for p in probas_all]
+    n_test = len(test_labels)
+    n_pos = sum(test_labels)
+    n_neg = n_test - n_pos
+
+    acc = float(accuracy_score(test_labels, preds)) if n_test > 0 else 0.5
+    brier = float(brier_score_loss(test_labels, probas_all)) if n_test > 0 else 0.25
+
+    # Sensitivity / specificity
+    tp = sum(1 for p, y in zip(preds, test_labels, strict=True) if p == 1 and y == 1)
+    tn = sum(1 for p, y in zip(preds, test_labels, strict=True) if p == 0 and y == 0)
+    sensitivity = tp / n_pos if n_pos > 0 else 0.0
+    specificity = tn / n_neg if n_neg > 0 else 0.0
+
+    buy_count = sum(preds)
+    buy_ratio = buy_count / n_test if n_test > 0 else 0.5
+
+    return FoldMetrics(
+        accuracy=acc,
+        brier_score=brier,
+        log_loss=float(log_loss(test_labels, probas_all, labels=[0, 1])) if n_test > 0 else 1.0,
+        n_test=n_test,
+        mean_uniqueness=mean_uniqueness,
+        buy_ratio=buy_ratio,
+        sensitivity=sensitivity,
+        specificity=specificity,
+        signal_count=n_test,
+    )
+
+
+def train_walk_forward(  # noqa: PLR0912, PLR0915
+    segment_id: str,
+    symbols: list[str],
+    output_dir: Path,
+    settings: Settings | None = None,
+    label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
+) -> dict[str, float] | None:
+    """Train models using walk-forward validation (D1).
+
+    Aligned with backtest walk-forward: 12mo train, 2mo cal, 4mo test, 3mo step.
+    Returns per-gate pass rates, or None if insufficient data.
+    """
+    import numpy as _np  # noqa: PLC0415
+
+    from finalayze.ml.training.quality_gates import (  # noqa: PLC0415
+        evaluate_fold,
+        evaluate_walk_forward,
+    )
+
+    if settings is None:
+        settings = Settings()
+
+    print(f"\n[{segment_id}] Walk-forward training (label_mode={label_mode})...")
+    features, labels, barrier_weights, hold_bars, timestamps = _build_dataset_with_timestamps(
+        segment_id, symbols, settings, label_mode
+    )
+    if not features:
+        print(f"[{segment_id}] No samples -- skipping.")
+        return None
+
+    folds = _generate_walk_forward_folds(timestamps)
+    if not folds:
+        min_months = _WF_TRAIN_MONTHS + _WF_CAL_MONTHS + _WF_TEST_MONTHS
+        print(f"[{segment_id}] No valid WF folds (need {min_months}+ months of data).")
+        return None
+
+    print(f"[{segment_id}] {len(folds)} walk-forward folds")
+
+    all_fold_results = []
+    best_acc = 0.0
+    best_models: list[XGBoostModel | LightGBMModel | CatBoostModel] | None = None
+    best_selected_features: list[str] | None = None
+
+    for fold_idx, (train_idx, cal_idx, test_idx) in enumerate(folds):
+        train_f = [features[i] for i in train_idx]
+        train_l = [labels[i] for i in train_idx]
+        cal_f = [features[i] for i in cal_idx]
+        test_f = [features[i] for i in test_idx]
+        test_l = [labels[i] for i in test_idx]
+
+        if len(train_f) < _WINDOW_SIZE:
+            print(f"[{segment_id}] Fold {fold_idx}: too few train ({len(train_f)}), skip.")
+            continue
+
+        # Feature selection on train data only
+        import pandas as pd  # noqa: PLC0415
+
+        train_df = pd.DataFrame(train_f)
+        train_series = pd.Series(train_l)
+        max_feats = _get_max_features(segment_id)
+        selected = select_features_mi(train_df, train_series, max_features=max_feats)
+
+        if selected:
+            train_f = [{k: row[k] for k in selected} for row in train_f]
+            cal_f = [{k: row[k] for k in selected} for row in cal_f]
+            test_f = [{k: row[k] for k in selected} for row in test_f]
+
+        # Sample weights
+        decay_w = compute_decay_weights(len(train_f))
+        if hold_bars is not None:
+            train_hb = [hold_bars[i] for i in train_idx if i < len(hold_bars)]
+            if train_hb:
+                uniq = _compute_uniqueness_from_hold_bars(train_hb)
+                u_mean = float(uniq.mean()) if len(uniq) > 0 else 1.0
+                uniq = uniq / u_mean if u_mean > 0 else uniq
+            else:
+                uniq = _np.ones(len(train_f), dtype=_np.float64)
+        else:
+            uniq = _np.ones(len(train_f), dtype=_np.float64)
+
+        if barrier_weights is not None:
+            bw_idx = [i for i in train_idx if i < len(barrier_weights)]
+            train_bw = _np.array([barrier_weights[i] for i in bw_idx])
+            dampened = _np.sqrt(_np.abs(train_bw))
+            bw_mean = float(dampened.mean()) if len(dampened) > 0 else 1.0
+            norm_bw = dampened / bw_mean if bw_mean > 0 else dampened
+        else:
+            norm_bw = _np.ones(len(train_f), dtype=_np.float64)
+
+        sw = decay_w * uniq[: len(decay_w)] * norm_bw[: len(decay_w)]
+
+        # Train models
+        xgb = XGBoostModel(segment_id=segment_id, max_depth=_get_xgboost_max_depth(segment_id))
+        lgbm = LightGBMModel(segment_id=segment_id)
+        cat = CatBoostModel(segment_id=segment_id, depth=_get_catboost_depth(segment_id))
+
+        xgb.fit(train_f, train_l, sample_weight=sw)
+        lgbm.fit(train_f, train_l, sample_weight=sw)
+        cat.fit(train_f, train_l, sample_weight=sw)
+
+        models = [xgb, lgbm, cat]
+        mean_uniq = float(uniq.mean()) if len(uniq) > 0 else 1.0
+
+        # Evaluate on test fold
+        if test_f:
+            fold_metrics = _evaluate_fold_metrics(models, test_f, test_l, mean_uniq)
+            gate_results = evaluate_fold(fold_metrics)
+            all_fold_results.append(gate_results)
+
+            passed_count = sum(1 for r in gate_results if r.passed)
+            total_gates = len(gate_results)
+            print(
+                f"[{segment_id}] Fold {fold_idx}: acc={fold_metrics.accuracy:.3f}, "
+                f"brier={fold_metrics.brier_score:.3f}, "
+                f"gates={passed_count}/{total_gates}, "
+                f"train={len(train_f)}, cal={len(cal_f)}, test={len(test_f)}"
+            )
+
+            if fold_metrics.accuracy > best_acc:
+                best_acc = fold_metrics.accuracy
+                best_models = models
+                best_selected_features = selected
+
+    if not all_fold_results:
+        print(f"[{segment_id}] No folds produced results.")
+        return None
+
+    overall_passed, gate_pass_rates = evaluate_walk_forward(all_fold_results)
+
+    status_str = "PASS" if overall_passed else "FAIL"
+    print(f"\n[{segment_id}] Walk-forward results (overall: {status_str}):")
+    for gate_name, rate in sorted(gate_pass_rates.items()):
+        status = "PASS" if rate >= 0.60 else "FAIL"  # noqa: PLR2004
+        print(f"  {gate_name:>20s}: {rate:.1%} [{status}]")
+
+    # Save best models from walk-forward
+    if best_models:
+        segment_dir = output_dir / segment_id
+        segment_dir.mkdir(parents=True, exist_ok=True)
+
+        best_models[0].save(segment_dir / "xgb.pkl")
+        best_models[1].save(segment_dir / "lgbm.pkl")
+        best_models[2].save(segment_dir / "catboost.pkl")  # type: ignore[union-attr]
+
+        if best_selected_features:
+            (segment_dir / "selected_features.json").write_text(json.dumps(best_selected_features))
+
+        # Save gate results for downstream BH correction
+        gate_results_path = segment_dir / "wf_gate_results.json"
+        gate_results_path.write_text(
+            json.dumps(
+                {
+                    "overall_passed": overall_passed,
+                    "gate_pass_rates": gate_pass_rates,
+                    "n_folds": len(all_fold_results),
+                    "best_accuracy": best_acc,
+                },
+                indent=2,
+            )
+        )
+
+    return gate_pass_rates
 
 
 def train_one_segment(  # noqa: PLR0915
@@ -724,7 +1066,7 @@ def _fit_and_save_calibrator(
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train XGBoost + LightGBM + LSTM models per segment"
+        description="Train XGBoost + LightGBM + CatBoost models per segment"
     )
     parser.add_argument(
         "--segment",
@@ -745,6 +1087,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             f"labels (default), '{LABEL_MODE_DIRECTION}' uses simple next-bar direction labels."
         ),
     )
+    parser.add_argument(
+        "--walk-forward",
+        action="store_true",
+        default=False,
+        help="Use walk-forward validation (D1) instead of single split.",
+    )
     return parser.parse_args(argv)
 
 
@@ -753,25 +1101,92 @@ def main() -> None:
     args = _parse_args()
     output_dir = Path(args.output_dir)
     label_mode: str = args.label_mode
+    walk_forward: bool = args.walk_forward
 
     if args.segment:
         segments = {args.segment: _SEGMENT_SYMBOLS.get(args.segment, [])}
     else:
         segments = _SEGMENT_SYMBOLS
 
-    print(f"Label mode: {label_mode}")
+    print(f"Label mode: {label_mode}, Walk-forward: {walk_forward}")
+
+    # Collect p-values for BH correction (D3) across all segments
+    segment_accuracies: dict[str, float] = {}
+
     for segment_id, symbols in segments.items():
         try:
-            train_one_segment(
-                segment_id=segment_id,
-                symbols=symbols,
-                output_dir=output_dir,
-                label_mode=label_mode,
-            )
+            if walk_forward:
+                gate_rates = train_walk_forward(
+                    segment_id=segment_id,
+                    symbols=symbols,
+                    output_dir=output_dir,
+                    label_mode=label_mode,
+                )
+                if gate_rates and "accuracy" in gate_rates:
+                    # Load best accuracy from saved results
+                    results_path = output_dir / segment_id / "wf_gate_results.json"
+                    if results_path.exists():
+                        wf_data = json.loads(results_path.read_text())
+                        segment_accuracies[segment_id] = wf_data.get("best_accuracy", 0.5)
+            else:
+                train_one_segment(
+                    segment_id=segment_id,
+                    symbols=symbols,
+                    output_dir=output_dir,
+                    label_mode=label_mode,
+                )
         except FileNotFoundError as exc:
             print(f"[{segment_id}] FileNotFoundError -- {exc}, skipping.")
         except Exception as exc:
             print(f"[{segment_id}] Unexpected error -- {exc}, skipping.")
+
+    # BH correction across all segments (D3)
+    if walk_forward and segment_accuracies:
+        _apply_bh_across_segments(segment_accuracies, output_dir)
+
+
+def _apply_bh_across_segments(
+    segment_accuracies: dict[str, float],
+    output_dir: Path,
+) -> None:
+    """Apply BH multiple testing correction across all segments (D3).
+
+    Converts accuracies to p-values using binomial test, then applies BH correction.
+    Disables models in segments that fail the correction.
+    """
+    from scipy.stats import binom_test  # noqa: PLC0415
+
+    segment_ids = list(segment_accuracies.keys())
+    p_values: list[float] = []
+
+    for seg_id in segment_ids:
+        acc = segment_accuracies[seg_id]
+        # Load n_test from wf results
+        results_path = output_dir / seg_id / "wf_gate_results.json"
+        n_folds = 1
+        if results_path.exists():
+            wf_data = json.loads(results_path.read_text())
+            n_folds = wf_data.get("n_folds", 1)
+
+        # Approximate: accuracy > 0.5 is the null hypothesis test
+        n_correct = int(acc * n_folds * 100)  # approximate
+        n_total = n_folds * 100
+        p_val = float(binom_test(n_correct, n_total, 0.5, alternative="greater"))
+        p_values.append(p_val)
+
+    passes = _apply_bh_correction(p_values, fdr=_BH_FDR)
+
+    print("\n=== BH Multiple Testing Correction (D3) ===")
+    for seg_id, p_val, passed in zip(segment_ids, p_values, passes, strict=True):
+        status = "PASS" if passed else "FAIL (disabled)"
+        print(f"  {seg_id:>20s}: p={p_val:.4f} [{status}]")
+        if not passed:
+            # Mark segment as failed in its results file
+            results_path = output_dir / seg_id / "wf_gate_results.json"
+            if results_path.exists():
+                wf_data = json.loads(results_path.read_text())
+                wf_data["bh_passed"] = False
+                results_path.write_text(json.dumps(wf_data, indent=2))
 
 
 if __name__ == "__main__":
