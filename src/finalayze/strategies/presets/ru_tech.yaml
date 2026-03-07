@@ -1,11 +1,12 @@
 segment_id: ru_tech
 normalize_mode: "firing"
 min_combined_confidence: 0.30
+min_exit_confidence: 0.25
 regime_routing:
   enabled: true
   adx_period: 14
-  trend_threshold: 30
-  mr_threshold: 20
+  trend_threshold: 35
+  mr_threshold: 15
 strategies:
   momentum:
     enabled: true
@@ -33,7 +34,7 @@ strategies:
       volume_min_ratio: 1.0
       neutral_reset_bars: 8
       vol_target_enabled: true
-      vol_target: 0.15
+      vol_target: 0.20
   mean_reversion:
     enabled: true
     weight: 0.35
@@ -44,7 +45,7 @@ strategies:
       exit_at_mean: true
       trend_filter: true
       trend_sma_period: 50
-      trend_sma_buffer_pct: 1.5
+      trend_sma_buffer_pct: 3.0
       rsi_oversold_mr: 25
       rsi_overbought_mr: 75
   event_driven:
@@ -76,8 +77,8 @@ strategies:
     weight: 0.10
     params:
       rsi_period: 2
-      rsi_buy_threshold: 5.0
-      rsi_sell_threshold: 95.0
+      rsi_buy_threshold: 10.0
+      rsi_sell_threshold: 90.0
       sma_trend_period: 200
       sma_exit_period: 5
       min_confidence: 0.45

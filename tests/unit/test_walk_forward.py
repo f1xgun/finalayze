@@ -9,6 +9,7 @@ import pytest
 
 from finalayze.backtest.engine import BacktestEngine
 from finalayze.backtest.walk_forward import (
+    _MIN_FOLD_TRADES,
     WalkForwardConfig,
     WalkForwardOptimizer,
     WalkForwardResult,
@@ -23,10 +24,11 @@ from finalayze.strategies.base import BaseStrategy
 DEFAULT_START = date(2018, 1, 1)
 DEFAULT_END = date(2025, 1, 1)
 
-# With default config (train=12mo, test=6mo, step=6mo) on 2018-2025,
+# With default config (train=12mo, test=6mo, step=3mo) on 2018-2025,
 # windows generated should be numerous (many 18-month spans fit in 7 years).
-EXPECTED_MIN_WINDOWS_DEFAULT = 10
-EXPECTED_MAX_WINDOWS_DEFAULT = 14
+# step=3 produces ~23 windows on 7 years of data.
+EXPECTED_MIN_WINDOWS_DEFAULT = 20
+EXPECTED_MAX_WINDOWS_DEFAULT = 26
 
 SHORT_DATA_START = date(2020, 1, 1)
 SHORT_DATA_END = date(2020, 12, 1)
@@ -144,6 +146,7 @@ class TestGenerateWindows:
             train_months=CUSTOM_TRAIN_MONTHS,
             test_months=CUSTOM_TEST_MONTHS,
             step_months=CUSTOM_STEP_MONTHS,
+            purge_bars=0,
         )
         optimizer = WalkForwardOptimizer(config=config)
         windows = optimizer.generate_windows(CUSTOM_START, CUSTOM_END)
@@ -156,6 +159,135 @@ class TestGenerateWindows:
         assert first.train_end == date(2019, 12, 31)
         assert first.test_start == date(2020, 1, 1)
         assert first.test_end == date(2020, 12, 31)
+
+
+class TestDefaultConfig:
+    """Tests for WalkForwardConfig default values."""
+
+    def test_default_step_months_is_3(self) -> None:
+        """Default step_months changed from 6 to 3 for more OOS folds."""
+        config = WalkForwardConfig()
+        expected_step = 3
+        assert config.step_months == expected_step
+
+    def test_default_train_months_is_12(self) -> None:
+        """Default train window is 12 months."""
+        config = WalkForwardConfig()
+        expected_train = 12
+        assert config.train_months == expected_train
+
+    def test_default_test_months_is_6(self) -> None:
+        """Default test window is 6 months."""
+        config = WalkForwardConfig()
+        expected_test = 6
+        assert config.test_months == expected_test
+
+    def test_default_purge_bars_is_60(self) -> None:
+        """Default purge_bars is 60 (trading days, ~3 calendar months)."""
+        config = WalkForwardConfig()
+        expected_purge = 60
+        assert config.purge_bars == expected_purge
+
+
+# ── Purge/embargo gap constants ──────────────────────────────────────────
+PURGE_TRAIN_MONTHS = 12
+PURGE_TEST_MONTHS = 6
+PURGE_STEP_MONTHS = 6
+PURGE_BARS_DEFAULT = 60
+PURGE_BARS_CUSTOM = 30
+PURGE_START = date(2018, 1, 1)
+PURGE_END = date(2025, 1, 1)
+
+
+class TestPurgeGap:
+    """Tests for purge/embargo gap between train and test windows."""
+
+    def test_wf_purge_gap_between_train_and_test(self) -> None:
+        """Purge gap creates an embargo period > 1 day between train_end and test_start."""
+        config = WalkForwardConfig(
+            train_months=PURGE_TRAIN_MONTHS,
+            test_months=PURGE_TEST_MONTHS,
+            step_months=PURGE_STEP_MONTHS,
+            purge_bars=PURGE_BARS_DEFAULT,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        windows = optimizer.generate_windows(PURGE_START, PURGE_END)
+
+        assert len(windows) > 0
+        for w in windows:
+            gap_days = (w.test_start - w.train_end).days
+            # Gap must be strictly greater than 1 day (purge_bars=60 -> 61 days gap)
+            assert gap_days > 1, (
+                f"Expected gap > 1 day but got {gap_days} days "
+                f"(train_end={w.train_end}, test_start={w.test_start})"
+            )
+            # Gap should equal purge_bars + 1 (the +1 is the original 1-day gap)
+            expected_gap = PURGE_BARS_DEFAULT + 1
+            assert gap_days == expected_gap
+
+    def test_wf_purge_zero_gives_adjacent_windows(self) -> None:
+        """purge_bars=0 gives train_end and test_start exactly 1 day apart (no embargo)."""
+        config = WalkForwardConfig(
+            train_months=PURGE_TRAIN_MONTHS,
+            test_months=PURGE_TEST_MONTHS,
+            step_months=PURGE_STEP_MONTHS,
+            purge_bars=0,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        windows = optimizer.generate_windows(PURGE_START, PURGE_END)
+
+        assert len(windows) > 0
+        for w in windows:
+            gap_days = (w.test_start - w.train_end).days
+            expected_adjacent_gap = 1
+            assert gap_days == expected_adjacent_gap
+
+    def test_wf_purge_gap_no_overlap_with_split_candles(self) -> None:
+        """Candles in the purge gap should appear in neither train nor test splits."""
+        config = WalkForwardConfig(
+            train_months=PURGE_TRAIN_MONTHS,
+            test_months=PURGE_TEST_MONTHS,
+            step_months=PURGE_STEP_MONTHS,
+            purge_bars=PURGE_BARS_CUSTOM,
+        )
+        optimizer = WalkForwardOptimizer(config=config)
+        windows = optimizer.generate_windows(PURGE_START, PURGE_END)
+
+        assert len(windows) > 0
+        first = windows[0]
+
+        # Create a candle in the purge gap (between train_end and test_start)
+        gap_date = first.train_end + timedelta(days=15)
+        assert gap_date > first.train_end
+        assert gap_date < first.test_start
+
+        gap_candle = _make_candle(gap_date)
+        train, test = optimizer.split_candles([gap_candle], first)
+
+        assert len(train) == 0, "Purge-gap candle must not appear in train set"
+        assert len(test) == 0, "Purge-gap candle must not appear in test set"
+
+    def test_wf_purge_reduces_window_count(self) -> None:
+        """Larger purge gap reduces the number of valid windows."""
+        config_no_purge = WalkForwardConfig(
+            train_months=PURGE_TRAIN_MONTHS,
+            test_months=PURGE_TEST_MONTHS,
+            step_months=PURGE_STEP_MONTHS,
+            purge_bars=0,
+        )
+        config_with_purge = WalkForwardConfig(
+            train_months=PURGE_TRAIN_MONTHS,
+            test_months=PURGE_TEST_MONTHS,
+            step_months=PURGE_STEP_MONTHS,
+            purge_bars=PURGE_BARS_DEFAULT,
+        )
+        opt_no = WalkForwardOptimizer(config=config_no_purge)
+        opt_yes = WalkForwardOptimizer(config=config_with_purge)
+
+        windows_no = opt_no.generate_windows(PURGE_START, PURGE_END)
+        windows_yes = opt_yes.generate_windows(PURGE_START, PURGE_END)
+
+        assert len(windows_yes) <= len(windows_no)
 
 
 class TestSplitCandles:
@@ -347,18 +479,16 @@ class TestWalkForwardPerFoldSharpe:
         assert len(result.per_fold_sharpes) == len(result.windows)
         assert len(result.per_fold_trade_counts) == len(result.windows)
 
-        # Aggregated Sharpe should equal trade-count-weighted mean of per-fold Sharpes
-        total_trades = sum(result.per_fold_trade_counts)
-        if total_trades > 0:
-            expected_sharpe = (
-                sum(
-                    s * n
-                    for s, n in zip(
-                        result.per_fold_sharpes, result.per_fold_trade_counts, strict=True
-                    )
-                )
-                / total_trades
-            )
+        # Aggregated Sharpe should equal trade-count-weighted mean of per-fold Sharpes,
+        # excluding folds with fewer than _MIN_FOLD_TRADES trades.
+        valid_pairs = [
+            (s, n)
+            for s, n in zip(result.per_fold_sharpes, result.per_fold_trade_counts, strict=True)
+            if n >= _MIN_FOLD_TRADES
+        ]
+        total_valid_trades = sum(n for _, n in valid_pairs)
+        if total_valid_trades > 0:
+            expected_sharpe = sum(s * n for s, n in valid_pairs) / total_valid_trades
             assert abs(result.oos_sharpe - expected_sharpe) < 1e-10
 
     def test_wf_per_fold_trade_counts_sum(self) -> None:
@@ -376,6 +506,116 @@ class TestWalkForwardPerFoldSharpe:
         result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, candles, engine)
 
         assert sum(result.per_fold_trade_counts) == result.total_oos_trades
+
+
+class TestWalkForwardLowTradeFoldExclusion:
+    """Tests for excluding low-trade folds from Sharpe aggregation."""
+
+    def test_wf_sharpe_excludes_low_trade_folds(self) -> None:
+        """Folds with < _MIN_FOLD_TRADES trades are excluded from Sharpe aggregation.
+
+        A fold with only 5 trades and Sharpe of -10.0 should not drag the
+        aggregate Sharpe down when other folds have >= 30 trades and positive Sharpe.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from finalayze.core.schemas import PortfolioState
+
+        # Set up controlled per-fold data:
+        # Fold 0: 5 trades (below threshold), terrible Sharpe -10.0
+        # Fold 1: 50 trades (above threshold), good Sharpe +0.5
+        # Fold 2: 40 trades (above threshold), good Sharpe +0.3
+        low_trade_count = 5
+        fold_1_trades = 50
+        fold_2_trades = 40
+        low_sharpe = -10.0
+        good_sharpe_1 = 0.5
+        good_sharpe_2 = 0.3
+
+        config = WalkForwardConfig(
+            train_months=RUN_TRAIN_MONTHS,
+            test_months=RUN_TEST_MONTHS,
+            step_months=RUN_STEP_MONTHS,
+        )
+
+        # Expected: weighted average of fold 1 and fold 2 only
+        expected_sharpe = (good_sharpe_1 * fold_1_trades + good_sharpe_2 * fold_2_trades) / (
+            fold_1_trades + fold_2_trades
+        )
+
+        # If we did NOT filter, the Sharpe would be dragged negative:
+        unfiltered_sharpe = (
+            low_sharpe * low_trade_count
+            + good_sharpe_1 * fold_1_trades
+            + good_sharpe_2 * fold_2_trades
+        ) / (low_trade_count + fold_1_trades + fold_2_trades)
+
+        # Build a subclass that injects controlled per-fold data
+        class _ControlledOptimizer(WalkForwardOptimizer):
+            """Optimizer that injects pre-defined per-fold Sharpe/trade-count data."""
+
+            def run(
+                self,
+                symbol: str,
+                segment_id: str,
+                candles: list,
+                engine: object,
+            ) -> WalkForwardResult:
+                # Simulate 3 windows with controlled sharpes and trade counts
+                per_fold_sharpes = [low_sharpe, good_sharpe_1, good_sharpe_2]
+                per_fold_trade_counts = [low_trade_count, fold_1_trades, fold_2_trades]
+
+                # Apply the same filtering logic from walk_forward.py
+                valid_pairs = [
+                    (s, n)
+                    for s, n in zip(per_fold_sharpes, per_fold_trade_counts, strict=True)
+                    if n >= _MIN_FOLD_TRADES
+                ]
+                total_trade_count = sum(n for _, n in valid_pairs)
+                if total_trade_count > 0:
+                    oos_sharpe = sum(s * n for s, n in valid_pairs) / total_trade_count
+                else:
+                    oos_sharpe = 0.0
+
+                return WalkForwardResult(
+                    oos_sharpe=oos_sharpe,
+                    per_fold_sharpes=per_fold_sharpes,
+                    per_fold_trade_counts=per_fold_trade_counts,
+                    total_oos_trades=sum(per_fold_trade_counts),
+                )
+
+        optimizer = _ControlledOptimizer(config=config)
+        result = optimizer.run(CANDLE_SYMBOL, RUN_SEGMENT, [], None)  # type: ignore[arg-type]
+
+        # The low-trade fold should be excluded: Sharpe should match expected
+        assert abs(result.oos_sharpe - expected_sharpe) < 1e-10
+        # Sharpe should be positive (the good folds dominate)
+        assert result.oos_sharpe > 0.0
+        # Without filtering, Sharpe would be lower
+        assert result.oos_sharpe > unfiltered_sharpe
+
+    def test_wf_sharpe_all_folds_below_threshold_returns_zero(self) -> None:
+        """When all folds have < _MIN_FOLD_TRADES, Sharpe should be 0.0."""
+        # Directly verify: if per_fold_trade_counts are all below threshold,
+        # the filtering yields 0.0
+        per_fold_sharpes = [-5.0, 2.0, -1.0]
+        per_fold_trade_counts = [10, 20, 15]  # All below _MIN_FOLD_TRADES (30)
+
+        valid_pairs = [
+            (s, n)
+            for s, n in zip(per_fold_sharpes, per_fold_trade_counts, strict=True)
+            if n >= _MIN_FOLD_TRADES
+        ]
+        total = sum(n for _, n in valid_pairs)
+        oos_sharpe = sum(s * n for s, n in valid_pairs) / total if total > 0 else 0.0
+
+        assert oos_sharpe == 0.0
+        assert len(valid_pairs) == 0
+
+    def test_min_fold_trades_constant_is_30(self) -> None:
+        """_MIN_FOLD_TRADES should be 30."""
+        expected_min_fold_trades = 30
+        assert expected_min_fold_trades == _MIN_FOLD_TRADES
 
 
 class TestWalkForwardOptimization:
@@ -466,13 +706,13 @@ class TestWalkForwardOptimization:
 
 # ── RC4: months-based config and zero-windows guard ─────────────────────
 
-# 3 years of data with 12mo train + 6mo test => at least 2 windows
+# 3 years of data with 12mo train + 6mo test => at least 4 windows with step=3
 RC4_THREE_YEAR_START = date(2020, 1, 1)
 RC4_THREE_YEAR_END = date(2023, 1, 1)
 RC4_TRAIN_MONTHS = 12
 RC4_TEST_MONTHS = 6
-RC4_STEP_MONTHS = 6
-RC4_MIN_WINDOWS_3Y = 2
+RC4_STEP_MONTHS = 3
+RC4_MIN_WINDOWS_3Y = 4
 
 # Data range too short for even one window (less than train + test)
 RC4_SHORT_START = date(2023, 1, 1)

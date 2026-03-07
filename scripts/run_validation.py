@@ -290,7 +290,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default=None, help="Output CSV path")
     parser.add_argument("--train-months", type=int, default=12, help="Walk-forward train months")
     parser.add_argument("--test-months", type=int, default=6, help="Walk-forward test months")
-    parser.add_argument("--step-months", type=int, default=6, help="Walk-forward step months")
+    parser.add_argument("--step-months", type=int, default=3, help="Walk-forward step months")
     parser.add_argument(
         "--no-benchmark",
         action="store_true",

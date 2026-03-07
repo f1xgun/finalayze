@@ -91,3 +91,25 @@ class TestEnsembleExceptionHandling:
         ensemble = EnsembleModel(models=[trained, untrained], lstm_model=None)
         result = ensemble.predict_proba({"a": 1.0})
         assert result == pytest.approx(0.9)
+
+
+class TestEnsembleSelectedFeatures:
+    """Feature mismatch fix: selected_features attribute on EnsembleModel."""
+
+    def test_selected_features_default_none(self) -> None:
+        """EnsembleModel defaults selected_features to None."""
+        ensemble = EnsembleModel(models=[], lstm_model=None)
+        assert ensemble.selected_features is None
+
+    def test_selected_features_set_via_constructor(self) -> None:
+        """selected_features can be passed through the constructor."""
+        features = ["rsi_14", "macd_hist_pct", "bb_pct_b"]
+        ensemble = EnsembleModel(models=[], lstm_model=None, selected_features=features)
+        assert ensemble.selected_features == features
+
+    def test_selected_features_assignable(self) -> None:
+        """selected_features can be assigned after construction."""
+        ensemble = EnsembleModel(models=[], lstm_model=None)
+        features = ["rsi_14", "atr_14_pct"]
+        ensemble.selected_features = features
+        assert ensemble.selected_features == features

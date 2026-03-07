@@ -94,6 +94,12 @@ class XGBoostModel(BaseMLModel):
         n_neg = int(np.sum(y_arr == 0))
         spw = n_neg / n_pos if n_pos > 0 else 1.0
 
+        # Temporal validation split: last 10% for early stopping monitoring
+        n_val = max(int(len(x_arr) * 0.1), 1)
+        x_train, x_val = x_arr[:-n_val], x_arr[-n_val:]
+        y_train, y_val = y_arr[:-n_val], y_arr[-n_val:]
+        sw_train = sample_weight[:-n_val] if sample_weight is not None else None
+
         self._model = xgb.XGBClassifier(
             n_estimators=self._n_estimators,
             max_depth=self._max_depth,
@@ -106,9 +112,16 @@ class XGBoostModel(BaseMLModel):
             min_child_weight=self._min_child_weight,
             gamma=self._gamma,
             eval_metric="logloss",
+            early_stopping_rounds=20,
             verbosity=0,
         )
-        self._model.fit(x_arr, y_arr, sample_weight=sample_weight)
+        self._model.fit(
+            x_train,
+            y_train,
+            sample_weight=sw_train,
+            eval_set=[(x_val, y_val)],
+            verbose=False,
+        )
 
     def save(self, path: Path) -> None:
         """Persist model to disk using joblib."""

@@ -13,16 +13,13 @@ from typing import Protocol
 from finalayze.risk.evt import EVTRiskEstimator
 
 _VOL_TARGET_LOWER = Decimal("0.25")
-_VOL_TARGET_UPPER = Decimal("2.0")
-_REGIME_FLOOR = Decimal("0.10")
+_VOL_TARGET_UPPER = Decimal("1.5")
+_REGIME_FLOOR = Decimal("0.15")
 _FOUR_DP = Decimal("0.0001")
 
 _EVT_SCALE_FACTOR = Decimal("0.5")
 _EVT_MIN_HISTORY = 100
 _EVT_RECENT_WINDOW = 60
-
-# Pipeline floor: prevent cascading reduction beyond 85% of base_position
-_PIPELINE_FLOOR_FACTOR = Decimal("0.15")
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +33,7 @@ class SizingContext:
         min_position_size: Minimum viable position (0.5% of equity or $500).
         asset_vol: Annualized volatility of the asset.
         target_vol: Target portfolio volatility.
-        regime_scale: Regime-based position scale (0.10 to 1.0).
+        regime_scale: Regime-based position scale (floored at 0.15 by RegimeStep).
         correlation_scale: Correlation-based scale (0.30 to 1.0).
     """
 
@@ -66,7 +63,7 @@ class KellyStep:
 
 
 class VolTargetStep:
-    """Scale position by target_vol / asset_vol, bounded [0.25x, 2.0x]."""
+    """Scale position by target_vol / asset_vol, bounded [0.25x, 1.5x]."""
 
     def adjust(self, size: Decimal, context: SizingContext) -> Decimal:
         if context.asset_vol <= 0:
@@ -77,7 +74,7 @@ class VolTargetStep:
 
 
 class RegimeStep:
-    """Scale position by regime_scale with a floor of 0.10."""
+    """Scale position by regime_scale with a floor of 0.15."""
 
     def adjust(self, size: Decimal, context: SizingContext) -> Decimal:
         scale = max(context.regime_scale, _REGIME_FLOOR)
@@ -141,15 +138,11 @@ class PositionSizingPipeline:
         """Run the pipeline and return the final position size.
 
         Returns Decimal(0) if the result is below min_position_size.
-        Applies a pipeline floor (15% of base_position) to prevent cascading
-        reduction from eliminating otherwise-viable positions.
+        RegimeStep enforces a 15% floor internally, so no pipeline-level floor is needed.
         """
         size = context.base_position
         for step in self._steps:
             size = step.adjust(size, context)
-        # Pipeline floor: prevent cascading reduction beyond 85% of base
-        floor = context.base_position * _PIPELINE_FLOOR_FACTOR
-        size = max(size, floor)
         # Guarded round-up: only if Kelly base was viable (positive expectancy)
         if context.base_position > context.min_position_size:
             half_min = context.min_position_size * Decimal("0.5")

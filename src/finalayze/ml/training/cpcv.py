@@ -145,7 +145,9 @@ def evaluate_cpcv(
     if not features:
         return {
             "fold_sharpes": [],
+            "fold_briers": [],
             "median_sharpe": 0.0,
+            "median_brier": 1.0,
             "negative_folds_pct": 1.0,
             "accepted": False,
         }
@@ -154,11 +156,15 @@ def evaluate_cpcv(
     x_arr = np.array([[row[k] for k in feature_names] for row in features], dtype=float)
     y_arr = np.array(labels, dtype=int)
 
+    from sklearn.metrics import brier_score_loss  # noqa: PLC0415
+
     fold_sharpes: list[float] = []
+    fold_briers: list[float] = []
 
     for split in splits:
         if not split.train_indices or not split.test_indices:
             fold_sharpes.append(0.0)
+            fold_briers.append(1.0)
             continue
 
         x_train = x_arr[split.train_indices]
@@ -169,6 +175,7 @@ def evaluate_cpcv(
         # Need both classes in training set
         if len(np.unique(y_train)) < _MIN_CLASSES:
             fold_sharpes.append(0.0)
+            fold_briers.append(1.0)
             continue
 
         model = xgb.XGBClassifier(
@@ -196,16 +203,22 @@ def evaluate_cpcv(
             sharpe = float(np.sign(mean_ret)) * _PERFECT_SHARPE if mean_ret != 0 else 0.0
         fold_sharpes.append(sharpe)
 
+        brier = float(brier_score_loss(y_test, probas))
+        fold_briers.append(brier)
+
     median_sharpe = float(np.median(fold_sharpes)) if fold_sharpes else 0.0
     n_negative = sum(1 for s in fold_sharpes if s < 0)
     negative_pct = n_negative / len(fold_sharpes) if fold_sharpes else 1.0
 
-    # Rejection criteria
-    accepted = median_sharpe >= 0.3 and negative_pct <= 0.40  # noqa: PLR2004
+    median_brier = float(np.median(fold_briers)) if fold_briers else 1.0
+    # Accept if median Brier < 0.25 (coin flip) and not too many bad folds
+    accepted = median_brier <= 0.25 and negative_pct <= 0.40  # noqa: PLR2004
 
     return {
         "fold_sharpes": fold_sharpes,
+        "fold_briers": fold_briers,
         "median_sharpe": median_sharpe,
+        "median_brier": median_brier,
         "negative_folds_pct": negative_pct,
         "accepted": accepted,
     }

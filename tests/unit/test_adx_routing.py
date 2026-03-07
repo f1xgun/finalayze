@@ -130,8 +130,8 @@ class TestADXRegimeRouting:
     def _config_with_regime(
         regime_enabled: bool = True,
         adx_period: int = ADX_PERIOD,
-        trend_threshold: int = 30,
-        mr_threshold: int = 20,
+        trend_threshold: int = 35,
+        mr_threshold: int = 15,
         min_confidence: float = 0.0,
     ) -> dict[str, Any]:
         return {
@@ -185,12 +185,12 @@ class TestADXRegimeRouting:
         candles = _make_candles()
         config = self._config_with_regime()
 
-        # Mock ADX to return high value (trending)
+        # Mock ADX to return high value (trending, must be > 35)
         with (
             patch.object(combiner, "_load_config", return_value=config),
             patch(
                 "finalayze.strategies.combiner.compute_adx",
-                return_value=35.0,
+                return_value=40.0,
             ),
         ):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
@@ -238,12 +238,12 @@ class TestADXRegimeRouting:
         candles = _make_candles()
         config = self._config_with_regime()
 
-        # Mock ADX to return low value (mean-reverting)
+        # Mock ADX to return low value (mean-reverting, must be < 15)
         with (
             patch.object(combiner, "_load_config", return_value=config),
             patch(
                 "finalayze.strategies.combiner.compute_adx",
-                return_value=15.0,
+                return_value=10.0,
             ),
         ):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
@@ -256,7 +256,7 @@ class TestADXRegimeRouting:
         assert signal.features["adx_regime"] == -1.0  # mr
 
     def test_regime_ambiguous_dominant_pool_wins(self) -> None:
-        """In ambiguous zone (20 <= ADX <= 30), the pool with higher score wins."""
+        """In ambiguous zone (15 <= ADX <= 35), the pool with higher score wins."""
         # Momentum BUY with high confidence, MR SELL with lower confidence
         # Momentum pool should dominate
         mom_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
@@ -393,16 +393,228 @@ class TestADXRegimeRouting:
             patch.object(combiner, "_load_config", return_value=config),
             patch(
                 "finalayze.strategies.combiner.compute_adx",
-                return_value=35.0,
+                return_value=40.0,
             ),
         ):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
 
         assert signal is not None
         assert "adx_value" in signal.features
-        assert signal.features["adx_value"] == pytest.approx(35.0)
+        assert signal.features["adx_value"] == pytest.approx(40.0)
         assert "adx_regime" in signal.features
         assert signal.features["adx_regime"] == 1.0  # trend
+
+
+# ── ADX regime transition tests ──────────────────────────────────────────────
+
+
+class TestADXHysteresis:
+    """Tests for ADX regime transition — per-symbol state tracking."""
+
+    @staticmethod
+    def _config() -> dict[str, Any]:
+        return {
+            "regime_routing": {
+                "enabled": True,
+                "adx_period": ADX_PERIOD,
+                "trend_threshold": 35,
+                "mr_threshold": 15,
+            },
+            "min_combined_confidence": 0.0,
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 1.0},
+                "mean_reversion": {"enabled": True, "weight": 1.0},
+            },
+        }
+
+    def test_adx_hysteresis_trend_no_sticky(self) -> None:
+        """ADX 36 -> 28: transitions to 'ambiguous' immediately (hysteresis=0)."""
+        mom_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        mr_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "mean_reversion")
+        momentum = MockStrategy("momentum", mom_signal)
+        mean_rev = MockStrategy("mean_reversion", mr_signal)
+        combiner = StrategyCombiner([momentum, mean_rev])
+        config = self._config()
+        candles = _make_candles()
+
+        # First call: ADX=36 -> enters "trend" (> 35)
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch("finalayze.strategies.combiner.compute_adx", return_value=36.0),
+        ):
+            sig1 = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert sig1 is not None
+        assert sig1.features["adx_regime"] == 1.0  # trend
+
+        # Second call: ADX=28 -> "ambiguous" (no hysteresis, 28 < 35)
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch("finalayze.strategies.combiner.compute_adx", return_value=28.0),
+        ):
+            sig2 = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert sig2 is not None
+        assert sig2.features["adx_regime"] == 0.0  # ambiguous
+
+    def test_adx_hysteresis_mr_no_sticky(self) -> None:
+        """ADX 14 -> 22: transitions to 'ambiguous' immediately (hysteresis=0)."""
+        mom_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        mr_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "mean_reversion")
+        momentum = MockStrategy("momentum", mom_signal)
+        mean_rev = MockStrategy("mean_reversion", mr_signal)
+        combiner = StrategyCombiner([momentum, mean_rev])
+        config = self._config()
+        candles = _make_candles()
+
+        # First call: ADX=14 -> enters "mr" (< 15)
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch("finalayze.strategies.combiner.compute_adx", return_value=14.0),
+        ):
+            sig1 = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert sig1 is not None
+        assert sig1.features["adx_regime"] == -1.0  # mr
+
+        # Second call: ADX=22 -> "ambiguous" (no hysteresis, 22 > 15)
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch("finalayze.strategies.combiner.compute_adx", return_value=22.0),
+        ):
+            sig2 = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert sig2 is not None
+        assert sig2.features["adx_regime"] == 0.0  # ambiguous
+
+    def test_adx_hysteresis_breaks_through(self) -> None:
+        """ADX 36 -> 25: transitions from 'trend' to 'ambiguous' (25 < 35)."""
+        mom_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        mr_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "mean_reversion")
+        momentum = MockStrategy("momentum", mom_signal)
+        mean_rev = MockStrategy("mean_reversion", mr_signal)
+        combiner = StrategyCombiner([momentum, mean_rev])
+        config = self._config()
+        candles = _make_candles()
+
+        # First call: ADX=36 -> enters "trend" (> 35)
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch("finalayze.strategies.combiner.compute_adx", return_value=36.0),
+        ):
+            sig1 = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert sig1 is not None
+        assert sig1.features["adx_regime"] == 1.0  # trend
+
+        # Second call: ADX=25 -> transitions to "ambiguous" (25 < 35, no hysteresis)
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch("finalayze.strategies.combiner.compute_adx", return_value=25.0),
+        ):
+            sig2 = combiner.generate_signal("AAPL", candles, "us_broad")
+        assert sig2 is not None
+        assert sig2.features["adx_regime"] == 0.0  # ambiguous
+
+    def test_adx_hysteresis_per_symbol_independent(self) -> None:
+        """AAPL in 'trend' and MSFT in 'mr' simultaneously (per-symbol state)."""
+        mom_signal_aapl = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        mr_signal_msft = Signal(
+            strategy_name="mean_reversion",
+            symbol="MSFT",
+            market_id="us",
+            segment_id="us_broad",
+            direction=SignalDirection.BUY,
+            confidence=HIGH_CONFIDENCE,
+            features={"mock_feature": HIGH_CONFIDENCE},
+            reasoning="Mock MR signal",
+        )
+        momentum = MockStrategy("momentum", mom_signal_aapl)
+        mean_rev = MockStrategy("mean_reversion", mr_signal_msft)
+        combiner = StrategyCombiner([momentum, mean_rev])
+        config = self._config()
+        candles_aapl = _make_candles()
+        candles_msft = [
+            Candle(
+                symbol="MSFT",
+                market_id="us",
+                timeframe="1d",
+                timestamp=datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=i),
+                open=BASE_PRICE,
+                high=BASE_PRICE + CANDLE_HIGH_OFFSET,
+                low=BASE_PRICE - CANDLE_LOW_OFFSET,
+                close=BASE_PRICE,
+                volume=VOLUME,
+            )
+            for i in range(CANDLE_COUNT)
+        ]
+
+        # AAPL: ADX=40 -> trend (> 35)
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch("finalayze.strategies.combiner.compute_adx", return_value=40.0),
+        ):
+            combiner.generate_signal("AAPL", candles_aapl, "us_broad")
+
+        # MSFT: ADX=10 -> mr (< 15)
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch("finalayze.strategies.combiner.compute_adx", return_value=10.0),
+        ):
+            combiner.generate_signal("MSFT", candles_msft, "us_broad")
+
+        # Verify per-symbol state is independent
+        assert combiner._adx_regimes["AAPL"] == "trend"
+        assert combiner._adx_regimes["MSFT"] == "mr"
+
+
+# ── TOM US-only tests ────────────────────────────────────────────────────────
+
+TOM_BOOST = Decimal("0.05")
+
+
+class TestTOMUSOnly:
+    """Turn-of-month boost should only apply to US segments."""
+
+    @staticmethod
+    def _make_candles_ending_at(dt: datetime, count: int = CANDLE_COUNT) -> list[Candle]:
+        return [
+            Candle(
+                symbol="AAPL",
+                market_id="us",
+                timeframe="1d",
+                timestamp=dt - timedelta(days=count - 1 - i),
+                open=BASE_PRICE,
+                high=BASE_PRICE + CANDLE_HIGH_OFFSET,
+                low=BASE_PRICE - CANDLE_LOW_OFFSET,
+                close=BASE_PRICE,
+                volume=VOLUME,
+            )
+            for i in range(count)
+        ]
+
+    def test_tom_us_only(self) -> None:
+        """TOM boost applies for us_tech but NOT for ru_blue_chips."""
+        config: dict[str, Any] = {
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 1.0},
+            },
+            "min_combined_confidence": 0.0,
+        }
+        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+
+        # TOM day: Jan 1
+        tom_dt = datetime(2024, 1, 1, tzinfo=UTC)
+        candles = self._make_candles_ending_at(tom_dt)
+
+        # US segment: TOM boost should apply
+        combiner_us = StrategyCombiner([MockStrategy("momentum", buy_signal)])
+        with patch.object(combiner_us, "_load_config", return_value=config):
+            sig_us = combiner_us.generate_signal("AAPL", candles, "us_tech")
+        assert sig_us is not None
+        assert sig_us.features["turn_of_month"] == 1.0
+
+        # RU segment: TOM boost should NOT apply
+        combiner_ru = StrategyCombiner([MockStrategy("momentum", buy_signal)])
+        with patch.object(combiner_ru, "_load_config", return_value=config):
+            sig_ru = combiner_ru.generate_signal("SBER", candles, "ru_blue_chips")
+        assert sig_ru is not None
+        assert sig_ru.features["turn_of_month"] == 0.0
 
 
 # ── Dual momentum SELL signal tests ──────────────────────────────────────────

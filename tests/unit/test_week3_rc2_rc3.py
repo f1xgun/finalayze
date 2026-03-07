@@ -47,25 +47,48 @@ def _make_context(
     )
 
 
-class TestPipelineFloor:
-    """RC2: Pipeline floor prevents cascading reduction."""
+class TestRegimeStepFloor:
+    """RegimeStep floor at 15% replaces the old pipeline-level floor."""
 
-    def test_floor_prevents_zero_from_cascading(self) -> None:
-        """Pipeline floor ensures size >= 15% of base after all steps."""
+    def test_regime_floor_at_15pct(self) -> None:
+        """regime_scale=0.05 is clamped to 0.15 by RegimeStep."""
+        step = RegimeStep()
+        context = _make_context(regime_scale=Decimal("0.05"))
+        base_size = Decimal(10000)
+        result = step.adjust(base_size, context)
+        # Floor clamps 0.05 -> 0.15, so output = 10000 * 0.15 = 1500
+        expected = Decimal("1500.0000")
+        assert result == expected
+
+    def test_regime_normal_passthrough(self) -> None:
+        """regime_scale=0.70 passes through without clamping."""
+        step = RegimeStep()
+        context = _make_context(regime_scale=Decimal("0.70"))
+        base_size = Decimal(10000)
+        result = step.adjust(base_size, context)
+        # No clamping: output = 10000 * 0.70 = 7000
+        expected = Decimal("7000.0000")
+        assert result == expected
+
+    def test_no_pipeline_floor(self) -> None:
+        """Pipeline floor no longer exists; cascading reduction can eliminate positions.
+
+        With VolTarget 0.25x and RegimeStep 0.15 floor:
+        1500 * 0.25 * 0.15 = 56.25, well below half_min (250) -> eliminated.
+        The old pipeline floor would have saved this as 1500*0.15=225; now it returns 0.
+        """
         pipeline = PositionSizingPipeline()
-        # Low regime + high vol → cascading reduction
         context = _make_context(
-            base_position=Decimal(8000),
-            regime_scale=Decimal("0.10"),
-            asset_vol=Decimal("0.60"),  # 4x target → VolTarget clamps at 0.25
+            base_position=Decimal(1500),
+            regime_scale=Decimal("0.05"),
+            asset_vol=Decimal("0.60"),  # 4x target -> VolTarget clamps at 0.25
         )
         result = pipeline.compute(context)
-        # Floor = 8000 * 0.15 = 1200, above min_position_size (500)
-        assert result >= _MIN_POS_USD
-        assert result > Decimal(0)
+        # 1500 * 0.25(vol) * 0.15(regime floor) = 56.25 < 250(half_min) -> 0
+        assert result == Decimal(0)
 
-    def test_floor_does_not_override_hard_cap(self) -> None:
-        """Pipeline floor should not exceed max position cap."""
+    def test_hard_cap_still_enforced(self) -> None:
+        """Hard cap on position size is still enforced."""
         pipeline = PositionSizingPipeline()
         context = _make_context(base_position=Decimal(50000))
         result = pipeline.compute(context)
@@ -75,25 +98,29 @@ class TestPipelineFloor:
     def test_guarded_roundup_works(self) -> None:
         """When size falls between 0.5*min and min, round up if Kelly was positive."""
         pipeline = PositionSizingPipeline()
-        # Base > min_pos (Kelly was positive), but regime/vol reduce to just below min
+        # base=2000, regime=0.15 -> RegimeStep output = 2000*0.75*0.15 = 225
+        # Actually let's pick values that land in the roundup zone [250, 500)
+        # base=3000, vol=0.15/0.20=0.75, regime=0.30 -> 3000 * 0.75 * 0.30 = 675
+        # That's above min. Let's try:
+        # base=1500, vol=target so ratio=1.0, regime=0.25 -> 1500*1.0*0.25=375
+        # 375 is in [250, 500) and base(1500) > min(500) -> rounds up to 500
         context = _make_context(
-            base_position=Decimal(4000),
-            regime_scale=Decimal("0.10"),
-            asset_vol=Decimal("0.60"),
+            base_position=Decimal(1500),
+            regime_scale=Decimal("0.25"),
+            asset_vol=Decimal("0.15"),  # same as target_vol -> ratio = 1.0
         )
         result = pipeline.compute(context)
-        # Floor = 4000 * 0.15 = 600, which is >= 500 min
-        assert result >= _MIN_POS_USD
+        assert result == _MIN_POS_USD
 
     def test_negative_expectancy_not_rounded_up(self) -> None:
         """When Kelly base is below min_position_size, don't force trades."""
         pipeline = PositionSizingPipeline()
         context = _make_context(
-            base_position=Decimal(100),  # Below min_pos → negative expectancy
+            base_position=Decimal(100),  # Below min_pos -> negative expectancy
             regime_scale=Decimal("1.0"),
         )
         result = pipeline.compute(context)
-        # Floor = 100 * 0.15 = 15, well below 500 → eliminated
+        # 100 * 0.75(vol) * 1.0(regime) = 75 < 500 -> eliminated
         assert result == Decimal(0)
 
 

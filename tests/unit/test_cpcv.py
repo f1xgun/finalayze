@@ -147,7 +147,14 @@ class TestEvaluateCPCV:
         """Result dict must contain all documented keys."""
         features, labels = self._make_separable_data(1000)
         result = evaluate_cpcv(features, labels)
-        expected_keys = {"fold_sharpes", "median_sharpe", "negative_folds_pct", "accepted"}
+        expected_keys = {
+            "fold_sharpes",
+            "fold_briers",
+            "median_sharpe",
+            "median_brier",
+            "negative_folds_pct",
+            "accepted",
+        }
         assert set(result.keys()) == expected_keys
 
     def test_cpcv_empty_data(self) -> None:

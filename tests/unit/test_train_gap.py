@@ -44,7 +44,7 @@ class TestTrainGap:
 
         mock_xgb = MagicMock()
 
-        def track_fit(x: list, y: list) -> None:
+        def track_fit(x: list, y: list, **kwargs: object) -> None:
             train_calls.append(len(x))
 
         def track_predict(f: dict) -> float:
@@ -55,7 +55,7 @@ class TestTrainGap:
         mock_xgb.predict_proba.side_effect = track_predict
 
         with (
-            patch("scripts.train_models._build_dataset", return_value=(features, labels)),
+            patch("scripts.train_models._build_dataset", return_value=(features, labels, None)),
             patch("scripts.train_models.XGBoostModel", return_value=mock_xgb),
             patch("scripts.train_models.LightGBMModel", return_value=mock_xgb),
             patch("scripts.train_models.LSTMModel", return_value=mock_xgb),

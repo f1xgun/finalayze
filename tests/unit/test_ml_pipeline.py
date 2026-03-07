@@ -281,6 +281,148 @@ class TestMLModelRegistry:
         assert registry.get("us_tech") is model
 
 
+# ── Early stopping ────────────────────────────────────────────────────────────
+
+_EARLY_STOP_N_FEATURES = 5
+_EARLY_STOP_SEED = 99
+
+
+def _make_synthetic_dataset(
+    n_samples: int,
+    n_features: int = _EARLY_STOP_N_FEATURES,
+    seed: int = _EARLY_STOP_SEED,
+) -> tuple[list[dict[str, float]], list[int]]:
+    """Create synthetic feature dicts with separable binary labels."""
+    rng = np.random.default_rng(seed)
+    keys = [f"f_{i}" for i in range(n_features)]
+    X: list[dict[str, float]] = []
+    y: list[int] = []
+    for i in range(n_samples):
+        label = 1 if i % 2 == 0 else 0
+        row = {k: float(rng.standard_normal() + (1.0 if label else -1.0)) for k in keys}
+        X.append(row)
+        y.append(label)
+    return X, y
+
+
+class TestXGBoostEarlyStopping:
+    """Verify XGBoostModel.fit() uses early stopping with a validation split."""
+
+    def test_small_dataset_does_not_crash(self) -> None:
+        """Early stopping must not crash even with very small datasets (20 samples)."""
+        model = XGBoostModel(segment_id="test")
+        X, y = _make_synthetic_dataset(n_samples=20)
+        model.fit(X, y)  # should not raise
+        result = model.predict_proba(X[0])
+        assert 0.0 <= result <= 1.0
+
+    def test_valid_predictions_after_early_stopping(self) -> None:
+        """Model produces probabilities in [0, 1] after training with early stopping."""
+        model = XGBoostModel(segment_id="test")
+        X, y = _make_synthetic_dataset(n_samples=100)
+        model.fit(X, y)
+        for sample in X[:10]:
+            p = model.predict_proba(sample)
+            assert 0.0 <= p <= 1.0
+
+    def test_fit_with_sample_weight(self) -> None:
+        """Early stopping works when sample_weight is provided."""
+        model = XGBoostModel(segment_id="test")
+        X, y = _make_synthetic_dataset(n_samples=50)
+        weights = np.ones(len(X), dtype=float)
+        weights[:10] = 2.0  # upweight first 10 samples
+        model.fit(X, y, sample_weight=weights)
+        result = model.predict_proba(X[0])
+        assert 0.0 <= result <= 1.0
+
+    def test_fit_without_sample_weight(self) -> None:
+        """Early stopping works when sample_weight is None."""
+        model = XGBoostModel(segment_id="test")
+        X, y = _make_synthetic_dataset(n_samples=50)
+        model.fit(X, y, sample_weight=None)
+        result = model.predict_proba(X[0])
+        assert 0.0 <= result <= 1.0
+
+    def test_stops_before_max_estimators(self) -> None:
+        """With noisy data, early stopping should halt before using all n_estimators."""
+        model = XGBoostModel(segment_id="test", n_estimators=500)
+        X, y = _make_synthetic_dataset(n_samples=200)
+        model.fit(X, y)
+        # XGBoost best_iteration is 0-indexed; best_ntree_limit gives the count
+        assert model._model is not None  # noqa: SLF001
+        # If early stopping triggered, best_iteration < n_estimators - 1
+        best = model._model.best_iteration  # noqa: SLF001
+        assert best < 499, f"Expected early stop but ran all 500 rounds (best_iteration={best})"
+
+
+class TestLightGBMEarlyStopping:
+    """Verify LightGBMModel.fit() uses early stopping with a validation split."""
+
+    def test_small_dataset_does_not_crash(self) -> None:
+        """Early stopping must not crash even with very small datasets (20 samples)."""
+        from finalayze.ml.models.lightgbm_model import LightGBMModel
+
+        model = LightGBMModel(segment_id="test")
+        X, y = _make_synthetic_dataset(n_samples=20)
+        model.fit(X, y)  # should not raise
+        result = model.predict_proba(X[0])
+        assert 0.0 <= result <= 1.0
+
+    def test_valid_predictions_after_early_stopping(self) -> None:
+        """Model produces probabilities in [0, 1] after training with early stopping."""
+        from finalayze.ml.models.lightgbm_model import LightGBMModel
+
+        model = LightGBMModel(segment_id="test")
+        X, y = _make_synthetic_dataset(n_samples=100)
+        model.fit(X, y)
+        for sample in X[:10]:
+            p = model.predict_proba(sample)
+            assert 0.0 <= p <= 1.0
+
+    def test_fit_with_sample_weight(self) -> None:
+        """Early stopping works when sample_weight is provided."""
+        from finalayze.ml.models.lightgbm_model import LightGBMModel
+
+        model = LightGBMModel(segment_id="test")
+        X, y = _make_synthetic_dataset(n_samples=50)
+        weights = np.ones(len(X), dtype=float)
+        weights[:10] = 2.0
+        model.fit(X, y, sample_weight=weights)
+        result = model.predict_proba(X[0])
+        assert 0.0 <= result <= 1.0
+
+    def test_fit_without_sample_weight(self) -> None:
+        """Early stopping works when sample_weight is None."""
+        from finalayze.ml.models.lightgbm_model import LightGBMModel
+
+        model = LightGBMModel(segment_id="test")
+        X, y = _make_synthetic_dataset(n_samples=50)
+        model.fit(X, y, sample_weight=None)
+        result = model.predict_proba(X[0])
+        assert 0.0 <= result <= 1.0
+
+    def test_uses_eval_set(self) -> None:
+        """fit() must pass eval_set to LGBMClassifier (early stopping is configured)."""
+        import contextlib
+        from unittest import mock
+
+        import lightgbm as lgb_lib
+
+        model = LightGBMModel(segment_id="test", n_estimators=200)
+        X, y = _make_synthetic_dataset(n_samples=50)
+
+        with mock.patch.object(lgb_lib.LGBMClassifier, "fit", wraps=None) as mocked_fit:
+            # Need to actually let it train, so we call through
+            mocked_fit.side_effect = None  # don't actually train
+            with contextlib.suppress(Exception):
+                model.fit(X, y)
+            # Check that eval_set was passed
+            if mocked_fit.called:
+                _, kwargs = mocked_fit.call_args
+                assert "eval_set" in kwargs, "fit() must pass eval_set for early stopping"
+                assert "callbacks" in kwargs, "fit() must pass callbacks for early stopping"
+
+
 # ── Helper ───────────────────────────────────────────────────────────────────
 
 

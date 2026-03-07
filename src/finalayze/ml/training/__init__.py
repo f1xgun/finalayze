@@ -23,9 +23,9 @@ if TYPE_CHECKING:
 DEFAULT_WINDOW_SIZE = 60
 
 # Validation gate thresholds (6C.7)
-_MIN_ACCURACY = 0.52
-_MAX_BRIER_SCORE = 0.25  # perfect = 0.0, coin flip = 0.25
-_MAX_LOG_LOSS = 0.69  # coin flip = ln(2) ~ 0.693
+_MIN_ACCURACY = 0.54  # 2 SE above coin-flip for n=500
+_MAX_BRIER_SCORE = 0.235  # meaningfully below coin-flip (0.250)
+_MAX_LOG_LOSS = 0.680  # below ln(2) ≈ 0.693
 
 
 @dataclass

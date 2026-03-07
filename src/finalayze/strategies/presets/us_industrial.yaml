@@ -1,11 +1,12 @@
 segment_id: us_industrial
 normalize_mode: "firing"
 min_combined_confidence: 0.30
+min_exit_confidence: 0.25
 regime_routing:
   enabled: true
   adx_period: 14
-  trend_threshold: 30
-  mr_threshold: 20
+  trend_threshold: 35
+  mr_threshold: 15
 strategies:
   momentum:
     enabled: true
@@ -33,7 +34,7 @@ strategies:
       volume_min_ratio: 0.8
       neutral_reset_bars: 8
       vol_target_enabled: true
-      vol_target: 0.12
+      vol_target: 0.20
   mean_reversion:
     enabled: true
     weight: 0.35
@@ -60,11 +61,12 @@ strategies:
     enabled: false
     weight: 0.07
     params:
-      lookback_fast: 63
-      lookback_slow: 252
+      lookback_1m: 21
+      lookback_3m: 63
+      lookback_6m: 126
       min_confidence: 0.65
       vol_target_enabled: true
-      vol_target: 0.12
+      vol_target: 0.20
   ou_mean_reversion:
     enabled: true
     weight: 0.15
@@ -79,8 +81,8 @@ strategies:
     weight: 0.15
     params:
       rsi_period: 2
-      rsi_buy_threshold: 5.0
-      rsi_sell_threshold: 95.0
+      rsi_buy_threshold: 10.0
+      rsi_sell_threshold: 90.0
       sma_trend_period: 200
       sma_exit_period: 5
       min_confidence: 0.45

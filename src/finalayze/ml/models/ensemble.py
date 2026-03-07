@@ -36,11 +36,13 @@ class EnsembleModel:
         lstm_model: LSTMModel | None = None,
         stacking: StackingEnsemble | None = None,
         calibrator: EnsembleCalibrator | None = None,
+        selected_features: list[str] | None = None,
     ) -> None:
         self._models = models
         self._lstm_model = lstm_model
         self._stacking = stacking
         self._calibrator = calibrator
+        self.selected_features = selected_features
         self.last_model_probas: dict[str, float] = {}
 
     def predict_proba(self, features: dict[str, float], *, symbol: str = "__default__") -> float:
@@ -87,16 +89,13 @@ class EnsembleModel:
                 raise PredictionError("All ensemble sub-models failed to produce a prediction")
             return _DEFAULT_PROB
 
-        # Use stacking meta-learner if available and fitted; otherwise simple mean.
+        # Use stacking XOR calibrator (not both — double-calibration risk)
         if self._stacking is not None and self._stacking.is_fitted:
-            raw = self._stacking.predict_proba(probs)
-        else:
-            raw = sum(probs) / len(probs)
-
-        # Apply ensemble-level calibration if available
+            return self._stacking.predict_proba(probs)  # already calibrated
         if self._calibrator is not None and self._calibrator.is_fitted:
+            raw = sum(probs) / len(probs)
             return self._calibrator.calibrate(raw)
-        return raw
+        return sum(probs) / len(probs)
 
     def fit(
         self,

@@ -62,6 +62,14 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
+# Sentinel value for "no entry bar recorded".  Used instead of a bare ``-2``
+# so grep can find every reference and the meaning is self-documenting.
+_NO_ENTRY_BAR = -2
+
+# 15% intraday drop forces stop even on grace bar.  Quant-validated: 10% is
+# too tight for earnings gaps; 15% corresponds to a 3+ sigma daily move.
+_CATASTROPHIC_DROP_PCT = Decimal("0.15")
+
 # Default Half-Kelly parameters (used when no RollingKelly is provided)
 _DEFAULT_WIN_RATE = Decimal("0.5")
 _DEFAULT_AVG_WIN_RATIO = Decimal("1.5")
@@ -273,37 +281,32 @@ class BacktestEngine:
             # (c) Check stop-losses after prices are updated
             # Skip stop check on the fill candle (entry bar + 1) to avoid
             # intraday lows below stop on the same candle used for the fill.
-            entry_bar_for_sym = entry_bars.get(symbol, -2)
-            if entry_bar_for_sym + 1 == i:
-                stop_results = []
+            # Exception: catastrophic drops (>= 15%) override the grace bar.
+            entry_bar_for_sym = entry_bars.get(symbol, _NO_ENTRY_BAR)
+            is_grace_bar = entry_bar_for_sym + 1 == i
+            if is_grace_bar:
+                entry_p = entry_prices.get(symbol)
+                if entry_p is not None and candle.low < entry_p * (1 - _CATASTROPHIC_DROP_PCT):
+                    stop_results = broker.check_stop_losses(candle)
+                else:
+                    stop_results = []
             else:
                 stop_results = broker.check_stop_losses(candle)
             stop_filled = False
             for sr in stop_results:
                 if sr.filled and sr.fill_price is not None:
                     stop_filled = True
-                    entry = entry_prices.pop(sr.symbol, sr.fill_price)
-                    _sl_entry_bar = entry_bars.pop(sr.symbol, i)
-                    entry_strategies.pop(sr.symbol, None)
-                    chandelier_stops.pop(sr.symbol, None)
-                    pnl = (sr.fill_price - entry) * sr.quantity
-                    # Deduct exit transaction costs
-                    if self._transaction_costs is not None:
-                        pnl -= self._transaction_costs.total_cost(sr.fill_price, sr.quantity)
-                    pnl_pct = (sr.fill_price - entry) / entry if entry != 0 else Decimal(0)
-                    trade = TradeResult(
-                        signal_id=uuid4(),
+                    self._close_position(
                         symbol=sr.symbol,
-                        side="SELL",
-                        quantity=sr.quantity,
-                        entry_price=entry,
                         exit_price=sr.fill_price,
-                        pnl=pnl,
-                        pnl_pct=pnl_pct,
-                        hold_bars=i - _sl_entry_bar,
+                        quantity=sr.quantity,
+                        entry_prices=entry_prices,
+                        entry_bars=entry_bars,
+                        entry_strategies=entry_strategies,
+                        chandelier_stops=chandelier_stops,
+                        bar_index=i,
+                        trades=trades,
                     )
-                    trades.append(trade)
-                    self._record_trade(trade)
 
             # After stop-loss exit, skip to next bar (don't re-enter same bar)
             if stop_filled:
@@ -325,33 +328,17 @@ class BacktestEngine:
                         order = OrderRequest(symbol=open_sym, side="SELL", quantity=qty)
                         order_result = broker.submit_order(order, fill_candle)
                         if order_result.filled and order_result.fill_price is not None:
-                            entry = entry_prices.pop(open_sym, order_result.fill_price)
-                            _cb_entry_bar = entry_bars.pop(open_sym, i)
-                            entry_strategies.pop(open_sym, None)
-                            chandelier_stops.pop(open_sym, None)
-                            pnl = (order_result.fill_price - entry) * order_result.quantity
-                            if self._transaction_costs is not None:
-                                pnl -= self._transaction_costs.total_cost(
-                                    order_result.fill_price, order_result.quantity
-                                )
-                            pnl_pct = (
-                                (order_result.fill_price - entry) / entry
-                                if entry != 0
-                                else Decimal(0)
-                            )
-                            trade = TradeResult(
-                                signal_id=uuid4(),
+                            self._close_position(
                                 symbol=open_sym,
-                                side="SELL",
-                                quantity=order_result.quantity,
-                                entry_price=entry,
                                 exit_price=order_result.fill_price,
-                                pnl=pnl,
-                                pnl_pct=pnl_pct,
-                                hold_bars=i - _cb_entry_bar,
+                                quantity=order_result.quantity,
+                                entry_prices=entry_prices,
+                                entry_bars=entry_bars,
+                                entry_strategies=entry_strategies,
+                                chandelier_stops=chandelier_stops,
+                                bar_index=i,
+                                trades=trades,
                             )
-                            trades.append(trade)
-                            self._record_trade(trade)
                     snapshots.append(broker.get_portfolio())
                     continue
 
@@ -401,33 +388,17 @@ class BacktestEngine:
                             order = OrderRequest(symbol=symbol, side="SELL", quantity=held)
                             order_result = broker.submit_order(order, fill_candle)
                             if order_result.filled and order_result.fill_price is not None:
-                                entry = entry_prices.pop(symbol, order_result.fill_price)
-                                _pt_entry_bar = entry_bars.pop(symbol, i)
-                                entry_strategies.pop(symbol, None)
-                                chandelier_stops.pop(symbol, None)
-                                pnl = (order_result.fill_price - entry) * order_result.quantity
-                                if self._transaction_costs is not None:
-                                    pnl -= self._transaction_costs.total_cost(
-                                        order_result.fill_price, order_result.quantity
-                                    )
-                                pnl_pct = (
-                                    (order_result.fill_price - entry) / entry
-                                    if entry != 0
-                                    else Decimal(0)
-                                )
-                                trade = TradeResult(
-                                    signal_id=uuid4(),
+                                self._close_position(
                                     symbol=symbol,
-                                    side="SELL",
-                                    quantity=order_result.quantity,
-                                    entry_price=entry,
                                     exit_price=order_result.fill_price,
-                                    pnl=pnl,
-                                    pnl_pct=pnl_pct,
-                                    hold_bars=i - _pt_entry_bar,
+                                    quantity=order_result.quantity,
+                                    entry_prices=entry_prices,
+                                    entry_bars=entry_bars,
+                                    entry_strategies=entry_strategies,
+                                    chandelier_stops=chandelier_stops,
+                                    bar_index=i,
+                                    trades=trades,
                                 )
-                                trades.append(trade)
-                                self._record_trade(trade)
                                 self._journal_skip(
                                     timestamp=candle.timestamp,
                                     symbol=symbol,
@@ -455,33 +426,17 @@ class BacktestEngine:
                         order = OrderRequest(symbol=symbol, side="SELL", quantity=held)
                         order_result = broker.submit_order(order, fill_candle)
                         if order_result.filled and order_result.fill_price is not None:
-                            entry = entry_prices.pop(symbol, order_result.fill_price)
-                            entry_bars.pop(symbol, None)
-                            entry_strategies.pop(symbol, None)
-                            chandelier_stops.pop(symbol, None)
-                            pnl = (order_result.fill_price - entry) * order_result.quantity
-                            if self._transaction_costs is not None:
-                                pnl -= self._transaction_costs.total_cost(
-                                    order_result.fill_price, order_result.quantity
-                                )
-                            pnl_pct = (
-                                (order_result.fill_price - entry) / entry
-                                if entry != 0
-                                else Decimal(0)
-                            )
-                            trade = TradeResult(
-                                signal_id=uuid4(),
+                            self._close_position(
                                 symbol=symbol,
-                                side="SELL",
-                                quantity=order_result.quantity,
-                                entry_price=entry,
                                 exit_price=order_result.fill_price,
-                                pnl=pnl,
-                                pnl_pct=pnl_pct,
-                                hold_bars=bars_held,
+                                quantity=order_result.quantity,
+                                entry_prices=entry_prices,
+                                entry_bars=entry_bars,
+                                entry_strategies=entry_strategies,
+                                chandelier_stops=chandelier_stops,
+                                bar_index=i,
+                                trades=trades,
                             )
-                            trades.append(trade)
-                            self._record_trade(trade)
                             self._journal_skip(
                                 timestamp=candle.timestamp,
                                 symbol=symbol,
@@ -593,26 +548,17 @@ class BacktestEngine:
             last_candle = candles[-1]
             _last_bar = len(candles) - 1
             for open_symbol, qty in broker.get_positions().items():
-                close_price = last_candle.close
-                entry = entry_prices.pop(open_symbol, close_price)
-                _eod_entry_bar = entry_bars.pop(open_symbol, _last_bar)
-                pnl = (close_price - entry) * qty
-                if self._transaction_costs is not None:
-                    pnl -= self._transaction_costs.total_cost(close_price, qty)
-                pnl_pct = (close_price - entry) / entry if entry != 0 else Decimal(0)
-                trade = TradeResult(
-                    signal_id=uuid4(),
+                self._close_position(
                     symbol=open_symbol,
-                    side="SELL",
+                    exit_price=last_candle.close,
                     quantity=qty,
-                    entry_price=entry,
-                    exit_price=close_price,
-                    pnl=pnl,
-                    pnl_pct=pnl_pct,
-                    hold_bars=_last_bar - _eod_entry_bar,
+                    entry_prices=entry_prices,
+                    entry_bars=entry_bars,
+                    entry_strategies=entry_strategies,
+                    chandelier_stops=chandelier_stops,
+                    bar_index=_last_bar,
+                    trades=trades,
                 )
-                trades.append(trade)
-                self._record_trade(trade)
 
         # Log per-symbol strategy activity summary
         self._last_run_summary = {
@@ -713,43 +659,47 @@ class BacktestEngine:
                     if candidate is not None:
                         new_stop = max(chandelier_stops[sym], candidate)
                         chandelier_stops[sym] = new_stop
-                        if sym in broker._stop_states:
-                            broker._stop_states[sym].current_stop = new_stop
+                        broker.update_stop_loss(sym, new_stop)
 
-            # Check stop-losses for all symbols
+            # Check stop-losses for all symbols (with grace bar + catastrophic override)
+            stop_filled_symbols: set[str] = set()
             for sym in symbols:
-                if sym in candle_index and ts in candle_index[sym]:
-                    sym_candles = candles_by_symbol.get(sym, [])
-                    idx = candle_index[sym][ts]
-                    stop_results = broker.check_stop_losses(sym_candles[idx])
-                    for sr in stop_results:
-                        if sr.filled and sr.fill_price is not None:
-                            entry = entry_prices.pop(sr.symbol, sr.fill_price)
-                            _ms_sl_entry_bar = entry_bars.pop(sr.symbol, 0)
-                            entry_strategies.pop(sr.symbol, None)
-                            chandelier_stops.pop(sr.symbol, None)
-                            pnl = (sr.fill_price - entry) * sr.quantity
-                            if self._transaction_costs is not None:
-                                pnl -= self._transaction_costs.total_cost(
-                                    sr.fill_price, sr.quantity
-                                )
-                            pnl_pct = (sr.fill_price - entry) / entry if entry != 0 else Decimal(0)
-                            trade = TradeResult(
-                                signal_id=uuid4(),
-                                symbol=sr.symbol,
-                                side="SELL",
-                                quantity=sr.quantity,
-                                entry_price=entry,
-                                exit_price=sr.fill_price,
-                                pnl=pnl,
-                                pnl_pct=pnl_pct,
-                                hold_bars=bar_counts.get(sr.symbol, 0) - _ms_sl_entry_bar,
-                            )
-                            trades.append(trade)
-                            self._record_trade(trade)
+                if sym not in candle_index or ts not in candle_index[sym]:
+                    continue
+                sym_candles = candles_by_symbol.get(sym, [])
+                idx = candle_index[sym][ts]
+                candle = sym_candles[idx]
+
+                # Grace bar: skip stop on the fill candle, unless catastrophic drop
+                is_grace = entry_bars.get(sym, _NO_ENTRY_BAR) + 1 == bar_counts.get(sym, 0)
+                if is_grace:
+                    entry_p = entry_prices.get(sym)
+                    if entry_p is not None and candle.low < entry_p * (1 - _CATASTROPHIC_DROP_PCT):
+                        stop_results = broker.check_stop_losses(candle)
+                    else:
+                        stop_results = []
+                else:
+                    stop_results = broker.check_stop_losses(candle)
+
+                for sr in stop_results:
+                    if sr.filled and sr.fill_price is not None:
+                        stop_filled_symbols.add(sr.symbol)
+                        self._close_position(
+                            symbol=sr.symbol,
+                            exit_price=sr.fill_price,
+                            quantity=sr.quantity,
+                            entry_prices=entry_prices,
+                            entry_bars=entry_bars,
+                            entry_strategies=entry_strategies,
+                            chandelier_stops=chandelier_stops,
+                            bar_index=bar_counts.get(sr.symbol, 0),
+                            trades=trades,
+                        )
 
             # Check profit target and time exit for all symbols
             for sym in symbols:
+                if sym in stop_filled_symbols:
+                    continue
                 if sym not in candle_index or ts not in candle_index[sym]:
                     continue
                 sym_candles = candles_by_symbol.get(sym, [])
@@ -771,33 +721,17 @@ class BacktestEngine:
                                 order = OrderRequest(symbol=sym, side="SELL", quantity=held)
                                 order_result = broker.submit_order(order, fill_candle)
                                 if order_result.filled and order_result.fill_price is not None:
-                                    entry = entry_prices.pop(sym, order_result.fill_price)
-                                    _ms_pt_entry_bar = entry_bars.pop(sym, 0)
-                                    entry_strategies.pop(sym, None)
-                                    chandelier_stops.pop(sym, None)
-                                    pnl = (order_result.fill_price - entry) * order_result.quantity
-                                    if self._transaction_costs is not None:
-                                        pnl -= self._transaction_costs.total_cost(
-                                            order_result.fill_price, order_result.quantity
-                                        )
-                                    pnl_pct = (
-                                        (order_result.fill_price - entry) / entry
-                                        if entry != 0
-                                        else Decimal(0)
-                                    )
-                                    trade = TradeResult(
-                                        signal_id=uuid4(),
+                                    self._close_position(
                                         symbol=sym,
-                                        side="SELL",
-                                        quantity=order_result.quantity,
-                                        entry_price=entry,
                                         exit_price=order_result.fill_price,
-                                        pnl=pnl,
-                                        pnl_pct=pnl_pct,
-                                        hold_bars=bar_counts.get(sym, 0) - _ms_pt_entry_bar,
+                                        quantity=order_result.quantity,
+                                        entry_prices=entry_prices,
+                                        entry_bars=entry_bars,
+                                        entry_strategies=entry_strategies,
+                                        chandelier_stops=chandelier_stops,
+                                        bar_index=bar_counts.get(sym, 0),
+                                        trades=trades,
                                     )
-                                    trades.append(trade)
-                                    self._record_trade(trade)
                                 continue
 
                 # Time-based exit check
@@ -811,37 +745,23 @@ class BacktestEngine:
                             order = OrderRequest(symbol=sym, side="SELL", quantity=held)
                             order_result = broker.submit_order(order, fill_candle)
                             if order_result.filled and order_result.fill_price is not None:
-                                entry = entry_prices.pop(sym, order_result.fill_price)
-                                entry_bars.pop(sym, None)
-                                entry_strategies.pop(sym, None)
-                                chandelier_stops.pop(sym, None)
-                                pnl = (order_result.fill_price - entry) * order_result.quantity
-                                if self._transaction_costs is not None:
-                                    pnl -= self._transaction_costs.total_cost(
-                                        order_result.fill_price, order_result.quantity
-                                    )
-                                pnl_pct = (
-                                    (order_result.fill_price - entry) / entry
-                                    if entry != 0
-                                    else Decimal(0)
-                                )
-                                trade = TradeResult(
-                                    signal_id=uuid4(),
+                                self._close_position(
                                     symbol=sym,
-                                    side="SELL",
-                                    quantity=order_result.quantity,
-                                    entry_price=entry,
                                     exit_price=order_result.fill_price,
-                                    pnl=pnl,
-                                    pnl_pct=pnl_pct,
-                                    hold_bars=bars_since_entry,
+                                    quantity=order_result.quantity,
+                                    entry_prices=entry_prices,
+                                    entry_bars=entry_bars,
+                                    entry_strategies=entry_strategies,
+                                    chandelier_stops=chandelier_stops,
+                                    bar_index=bar_counts.get(sym, 0),
+                                    trades=trades,
                                 )
-                                trades.append(trade)
-                                self._record_trade(trade)
                             continue
 
-            # Generate signals for each symbol
+            # Generate signals for each symbol (skip those stopped out this bar)
             for sym in symbols:
+                if sym in stop_filled_symbols:
+                    continue
                 sym_candles = candles_by_symbol.get(sym, [])
                 if sym not in candle_index or ts not in candle_index[sym]:
                     continue
@@ -911,26 +831,17 @@ class BacktestEngine:
                 qty = broker.get_positions().get(sym, Decimal(0))
                 if qty <= 0:
                     continue
-                close_price = sym_candles[-1].close
-                entry = entry_prices.pop(sym, close_price)
-                _ms_eod_entry_bar = entry_bars.pop(sym, 0)
-                pnl = (close_price - entry) * qty
-                if self._transaction_costs is not None:
-                    pnl -= self._transaction_costs.total_cost(close_price, qty)
-                pnl_pct = (close_price - entry) / entry if entry != 0 else Decimal(0)
-                trade = TradeResult(
-                    signal_id=uuid4(),
+                self._close_position(
                     symbol=sym,
-                    side="SELL",
+                    exit_price=sym_candles[-1].close,
                     quantity=qty,
-                    entry_price=entry,
-                    exit_price=close_price,
-                    pnl=pnl,
-                    pnl_pct=pnl_pct,
-                    hold_bars=bar_counts.get(sym, 0) - _ms_eod_entry_bar,
+                    entry_prices=entry_prices,
+                    entry_bars=entry_bars,
+                    entry_strategies=entry_strategies,
+                    chandelier_stops=chandelier_stops,
+                    bar_index=bar_counts.get(sym, 0),
+                    trades=trades,
                 )
-                trades.append(trade)
-                self._record_trade(trade)
 
         return trades, snapshots
 
@@ -951,6 +862,68 @@ class BacktestEngine:
         """Record a completed trade in the Rolling Kelly estimator."""
         if self._rolling_kelly is not None:
             self._rolling_kelly.update(TradeRecord(pnl=trade.pnl, pnl_pct=trade.pnl_pct))
+
+    def _close_position(
+        self,
+        *,
+        symbol: str,
+        exit_price: Decimal,
+        quantity: Decimal,
+        entry_prices: dict[str, Decimal],
+        entry_bars: dict[str, int],
+        entry_strategies: dict[str, str],
+        chandelier_stops: dict[str, Decimal],
+        bar_index: int,
+        trades: list[TradeResult],
+    ) -> TradeResult:
+        """Close a position and record the trade.
+
+        Mutates *entry_prices*, *entry_bars*, *entry_strategies*, and
+        *chandelier_stops* by popping the key for *symbol*.  The resulting
+        ``TradeResult`` is appended to *trades* and recorded in the Rolling
+        Kelly estimator.
+
+        Args:
+            symbol: Ticker being closed.
+            exit_price: Price at which the position is exited.
+            quantity: Number of shares/contracts to close.
+            entry_prices: Mutable map of open-entry prices; symbol is popped.
+            entry_bars: Mutable map of the bar index at which entry occurred;
+                symbol is popped.
+            entry_strategies: Mutable map of the strategy name that opened the
+                position; symbol is popped.
+            chandelier_stops: Mutable map of chandelier stop prices; symbol
+                is popped.
+            bar_index: Current bar index (used to compute hold_bars).
+            trades: Mutable list; the new TradeResult is appended.
+
+        Returns:
+            The created ``TradeResult``.
+        """
+        entry = entry_prices.pop(symbol, exit_price)
+        entry_bar = entry_bars.pop(symbol, bar_index)
+        entry_strategies.pop(symbol, None)
+        chandelier_stops.pop(symbol, None)
+
+        pnl = (exit_price - entry) * quantity
+        if self._transaction_costs is not None:
+            pnl -= self._transaction_costs.total_cost(exit_price, quantity)
+        pnl_pct = (exit_price - entry) / entry if entry != 0 else Decimal(0)
+
+        trade = TradeResult(
+            signal_id=uuid4(),
+            symbol=symbol,
+            side="SELL",
+            quantity=quantity,
+            entry_price=entry,
+            exit_price=exit_price,
+            pnl=pnl,
+            pnl_pct=pnl_pct,
+            hold_bars=bar_index - entry_bar,
+        )
+        trades.append(trade)
+        self._record_trade(trade)
+        return trade
 
     def _journal_decision(
         self,
@@ -1341,33 +1314,21 @@ class BacktestEngine:
         order_result = broker.submit_order(order, fill_candle)
 
         if order_result.filled and order_result.fill_price is not None:
-            entry = entry_prices.pop(symbol, order_result.fill_price)
-            _sell_entry_bar = (
-                entry_bars.pop(symbol, bar_index) if entry_bars is not None else bar_index
-            )
-            if entry_strategies is not None:
-                entry_strategies.pop(symbol, None)
-            if chandelier_stops is not None:
-                chandelier_stops.pop(symbol, None)
-            pnl = (order_result.fill_price - entry) * order_result.quantity
-            if self._transaction_costs is not None:
-                pnl -= self._transaction_costs.total_cost(
-                    order_result.fill_price, order_result.quantity
-                )
-            pnl_pct = (order_result.fill_price - entry) / entry if entry != 0 else Decimal(0)
-            trade = TradeResult(
-                signal_id=uuid4(),
+            # Use empty dicts as fallback when optional tracking dicts are None
+            _eb = entry_bars if entry_bars is not None else {}
+            _es = entry_strategies if entry_strategies is not None else {}
+            _cs = chandelier_stops if chandelier_stops is not None else {}
+            self._close_position(
                 symbol=symbol,
-                side="SELL",
-                quantity=order_result.quantity,
-                entry_price=entry,
                 exit_price=order_result.fill_price,
-                pnl=pnl,
-                pnl_pct=pnl_pct,
-                hold_bars=bar_index - _sell_entry_bar,
+                quantity=order_result.quantity,
+                entry_prices=entry_prices,
+                entry_bars=_eb,
+                entry_strategies=_es,
+                chandelier_stops=_cs,
+                bar_index=bar_index,
+                trades=trades,
             )
-            trades.append(trade)
-            self._record_trade(trade)
 
             # Journal the successful SELL
             if self._decision_journal is not None:

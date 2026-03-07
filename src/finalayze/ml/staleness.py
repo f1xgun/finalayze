@@ -8,6 +8,7 @@ the training distribution to the recent data distribution.
 
 from __future__ import annotations
 
+import threading
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
@@ -88,6 +89,7 @@ class StalenessDetector:
         self._min_samples = min_samples
         self._recent_values: deque[float] = deque(maxlen=window_size)
         self._training_values: NDArray[Any] | None = None
+        self._lock = threading.Lock()
 
     def set_training_distribution(self, values: list[float]) -> None:
         """Record the training data distribution."""
@@ -95,7 +97,8 @@ class StalenessDetector:
 
     def update(self, value: float) -> None:
         """Add a new data point to the recent window."""
-        self._recent_values.append(value)
+        with self._lock:
+            self._recent_values.append(value)
 
     def get_kl_score(self) -> float | None:
         """Return current KL divergence, or ``None`` if insufficient data.
@@ -104,11 +107,12 @@ class StalenessDetector:
         - Training distribution has not been set, OR
         - Fewer than ``min_samples`` recent values have been collected.
         """
-        if self._training_values is None:
-            return None
-        if len(self._recent_values) < self._min_samples:
-            return None
-        recent_array = np.array(self._recent_values, dtype=np.float64)
+        with self._lock:
+            if self._training_values is None:
+                return None
+            if len(self._recent_values) < self._min_samples:
+                return None
+            recent_array = np.array(self._recent_values, dtype=np.float64)
         return compute_kl_divergence(self._training_values, recent_array)
 
     def is_stale(self) -> bool:

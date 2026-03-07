@@ -20,6 +20,8 @@ import pandas_ta as ta
 from finalayze.ml.features.technical import compute_features
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from finalayze.core.schemas import Candle
 
 
@@ -57,6 +59,8 @@ def triple_barrier_label(
     max_hold: int = 20,
     atr_scale: bool = True,
     atr_period: int = 14,
+    lower_atr_mult: float = 2.0,
+    upper_atr_mult: float = 2.0,
 ) -> TripleBarrierResult | None:
     """Apply triple barrier labeling at a given entry index.
 
@@ -68,6 +72,8 @@ def triple_barrier_label(
         max_hold: Maximum bars to hold before vertical barrier.
         atr_scale: If True, scale barriers using ATR instead of fixed pct.
         atr_period: Period for ATR computation.
+        lower_atr_mult: ATR multiplier for the lower (stop-loss) barrier.
+        upper_atr_mult: ATR multiplier for the upper (profit-target) barrier.
 
     Returns:
         TripleBarrierResult or None if the label should be discarded (noise).
@@ -88,8 +94,8 @@ def triple_barrier_label(
         atr_val = _compute_atr(history, atr_period)
         if atr_val is not None and atr_val > 0:
             atr_pct = atr_val / entry_price
-            effective_upper = 2.0 * atr_pct
-            effective_lower = 2.0 * atr_pct
+            effective_upper = upper_atr_mult * atr_pct
+            effective_lower = lower_atr_mult * atr_pct
         # If ATR not computable, fall back to fixed pct
 
     upper_barrier = entry_price * (1.0 + effective_upper)
@@ -156,18 +162,22 @@ def build_triple_barrier_dataset(
     max_hold: int = 20,
     atr_scale: bool = True,
     atr_period: int = 14,
-) -> tuple[list[dict[str, float]], list[int], list[float]]:
+    lower_atr_mult: float = 2.0,
+    upper_atr_mult: float = 2.0,
+) -> tuple[list[dict[str, float]], list[int], list[float], list[datetime]]:
     """Build a dataset using triple barrier labels.
 
     Returns:
-        Tuple of (features, labels, sample_weights).
+        Tuple of (features, labels, sample_weights, timestamps).
         sample_weights are abs(pnl_pct) for weighting in training.
+        timestamps are the entry bar timestamps for temporal ordering.
     """
     sorted_candles = sorted(candles, key=lambda c: c.timestamp)
 
     features_list: list[dict[str, float]] = []
     label_list: list[int] = []
     weight_list: list[float] = []
+    ts_list: list[datetime] = []
 
     # Need window_size bars for features + max_hold bars for label
     for i in range(len(sorted_candles) - window_size - max_hold):
@@ -187,6 +197,8 @@ def build_triple_barrier_dataset(
             max_hold=max_hold,
             atr_scale=atr_scale,
             atr_period=atr_period,
+            lower_atr_mult=lower_atr_mult,
+            upper_atr_mult=upper_atr_mult,
         )
 
         if result is None:
@@ -195,5 +207,6 @@ def build_triple_barrier_dataset(
         features_list.append(row_features)
         label_list.append(result.label)
         weight_list.append(abs(result.pnl_pct))
+        ts_list.append(sorted_candles[entry_index].timestamp)
 
-    return features_list, label_list, weight_list
+    return features_list, label_list, weight_list, ts_list

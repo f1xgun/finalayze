@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from finalayze.ml.models.ensemble import EnsembleModel
+    from finalayze.ml.models.stacking import StackingEnsemble
 
 
 class MLModelRegistry:
@@ -30,7 +31,11 @@ class MLModelRegistry:
         with self._lock:
             return self._models.get(segment_id)
 
-    def create_ensemble(self, segment_id: str) -> EnsembleModel:
+    def create_ensemble(
+        self,
+        segment_id: str,
+        stacking: StackingEnsemble | None = None,
+    ) -> EnsembleModel:
         """Create a new EnsembleModel with XGBoost + LightGBM + LSTM for a segment.
 
         The models are untrained; call ``ensemble.fit(X, y)`` or load saved
@@ -44,4 +49,4 @@ class MLModelRegistry:
         xgb = XGBoostModel(segment_id=segment_id)
         lgbm = LightGBMModel(segment_id=segment_id)
         lstm = LSTMModel(segment_id=segment_id)
-        return EnsembleModel(models=[xgb, lgbm], lstm_model=lstm)
+        return EnsembleModel(models=[xgb, lgbm], lstm_model=lstm, stacking=stacking)

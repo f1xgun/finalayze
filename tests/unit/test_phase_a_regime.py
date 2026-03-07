@@ -292,14 +292,14 @@ class TestVolTargetStep:
         assert result == expected
 
     def test_vol_target_step_bounds_upper(self) -> None:
-        """Scaling capped at 2.0x when asset_vol is very low."""
+        """Scaling capped at 1.5x when asset_vol is very low."""
         step = VolTargetStep()
         ctx = _make_sizing_context(
             target_vol=Decimal("0.30"),
-            asset_vol=Decimal("0.05"),  # ratio = 6.0, capped to 2.0
+            asset_vol=Decimal("0.05"),  # ratio = 6.0, capped to 1.5
         )
         result = step.adjust(_BASE_POSITION, ctx)
-        expected = _BASE_POSITION * Decimal("2.0")
+        expected = _BASE_POSITION * Decimal("1.5")
         assert result == expected
 
     def test_vol_target_step_bounds_lower(self) -> None:

@@ -68,10 +68,10 @@ class TestGenerateSignal:
         assert result is None
 
     def test_buy_above_threshold(self) -> None:
-        """Probability 0.8 with default threshold 0.15 → BUY."""
+        """Probability 0.7 with default threshold 0.08 → BUY."""
         registry = MLModelRegistry()
         ensemble = MagicMock()
-        ensemble.predict_proba.return_value = 0.8
+        ensemble.predict_proba.return_value = 0.7
         registry.register("us_tech", ensemble)
 
         strategy = MLStrategy(registry=registry)
@@ -82,14 +82,14 @@ class TestGenerateSignal:
 
         assert result is not None
         assert result.direction == SignalDirection.BUY
-        expected_confidence = (0.8 - 0.5) * 2  # 0.6
+        expected_confidence = (0.7 - 0.5) * 2  # 0.4
         assert abs(result.confidence - expected_confidence) < 1e-6
 
     def test_sell_below_threshold(self) -> None:
-        """Probability 0.2 with default threshold 0.15 → SELL."""
+        """Probability 0.3 with default threshold 0.08 → SELL."""
         registry = MLModelRegistry()
         ensemble = MagicMock()
-        ensemble.predict_proba.return_value = 0.2
+        ensemble.predict_proba.return_value = 0.3
         registry.register("us_tech", ensemble)
 
         strategy = MLStrategy(registry=registry)
@@ -100,14 +100,14 @@ class TestGenerateSignal:
 
         assert result is not None
         assert result.direction == SignalDirection.SELL
-        expected_confidence = (0.5 - 0.2) * 2  # 0.6
+        expected_confidence = (0.5 - 0.3) * 2  # 0.4
         assert abs(result.confidence - expected_confidence) < 1e-6
 
     def test_neutral_within_threshold(self) -> None:
-        """Probability 0.6, threshold 0.15 → None (deadzone)."""
+        """Probability 0.55, threshold 0.08 → None (deadzone)."""
         registry = MLModelRegistry()
         ensemble = MagicMock()
-        ensemble.predict_proba.return_value = 0.6
+        ensemble.predict_proba.return_value = 0.55
         registry.register("us_tech", ensemble)
 
         strategy = MLStrategy(registry=registry)
@@ -117,6 +117,50 @@ class TestGenerateSignal:
             result = strategy.generate_signal("AAPL", candles, "us_tech")
 
         assert result is None
+
+    def test_confidence_at_or_below_min_rejected(self) -> None:
+        """Confidence at or below min_confidence must be rejected.
+
+        prob=0.575 → confidence = (0.575 - 0.5) * 2 = 0.15 <= 0.15 = _DEFAULT_MIN_CONFIDENCE.
+        The ``<=`` check ensures this returns None rather than a signal.
+        """
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.575
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        with patch(_PATCH_TARGET, return_value=_FAKE_FEATURES):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is None
+
+    def test_confidence_just_above_min_accepted(self) -> None:
+        """Confidence slightly above min_confidence must produce a signal.
+
+        With class defaults (threshold=0.08, min_confidence=0.15):
+        prob=0.59 → confidence = (0.59 - 0.5) * 2 = 0.18 > 0.15 → BUY signal.
+        """
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.59
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value={}),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        assert result.direction == SignalDirection.BUY
+        expected_confidence = (0.59 - 0.5) * 2  # 0.18
+        assert abs(result.confidence - expected_confidence) < 1e-6
 
     def test_catches_insufficient_data_error(self) -> None:
         """InsufficientDataError from compute_features is caught."""
@@ -167,12 +211,72 @@ class TestGenerateSignal:
             mock_cf.assert_called_once_with(candles, sentiment_score=0.0)
 
 
+class TestFeatureFiltering:
+    """Feature mismatch fix: MLStrategy filters features using ensemble.selected_features."""
+
+    def test_filters_features_when_selected_features_set(self) -> None:
+        """When ensemble has selected_features, only those keys are passed to predict_proba."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.selected_features = ["rsi_14", "atr_14_pct"]
+        ensemble.predict_proba.return_value = 0.8
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        all_features = {"rsi_14": 50.0, "atr_14_pct": 0.02, "macd_hist_pct": 0.01, "bb_pct_b": 0.5}
+        with patch(_PATCH_TARGET, return_value=all_features):
+            strategy.generate_signal("AAPL", candles, "us_tech")
+
+        # predict_proba should receive only the selected features
+        called_features = ensemble.predict_proba.call_args[0][0]
+        assert set(called_features.keys()) == {"rsi_14", "atr_14_pct"}
+        assert called_features["rsi_14"] == 50.0
+        assert called_features["atr_14_pct"] == 0.02
+
+    def test_no_filter_when_selected_features_none(self) -> None:
+        """When ensemble.selected_features is None, all features pass through (legacy)."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.selected_features = None
+        ensemble.predict_proba.return_value = 0.8
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        all_features = {"rsi_14": 50.0, "atr_14_pct": 0.02, "macd_hist_pct": 0.01}
+        with patch(_PATCH_TARGET, return_value=all_features):
+            strategy.generate_signal("AAPL", candles, "us_tech")
+
+        called_features = ensemble.predict_proba.call_args[0][0]
+        assert set(called_features.keys()) == {"rsi_14", "atr_14_pct", "macd_hist_pct"}
+
+    def test_filter_preserves_feature_values(self) -> None:
+        """Filtered features retain their exact values."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.selected_features = ["bb_pct_b"]
+        ensemble.predict_proba.return_value = 0.8
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        all_features = {"rsi_14": 50.0, "bb_pct_b": 0.42, "volume_ratio_20d": 1.5}
+        with patch(_PATCH_TARGET, return_value=all_features):
+            strategy.generate_signal("AAPL", candles, "us_tech")
+
+        called_features = ensemble.predict_proba.call_args[0][0]
+        assert called_features == {"bb_pct_b": 0.42}
+
+
 class TestSupportedSegments:
     def test_supported_segments_from_yaml(self) -> None:
-        """ml_ensemble disabled in all presets until models are trained."""
+        """ml_ensemble disabled in all presets (models not production-ready)."""
         registry = MLModelRegistry()
         strategy = MLStrategy(registry=registry)
         segments = strategy.supported_segments()
         assert isinstance(segments, list)
-        # ml_ensemble is disabled until trained models exist
         assert len(segments) == 0

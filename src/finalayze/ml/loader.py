@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -76,7 +77,31 @@ def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:
         msg = f"No model files found in {segment_dir}"
         raise FileNotFoundError(msg)
 
-    return EnsembleModel(models=models, lstm_model=lstm_model)
+    # Load MI-selected feature list if available (feature mismatch fix)
+    selected_features: list[str] | None = None
+    features_path = segment_dir / "selected_features.json"
+    if features_path.exists():
+        selected_features = json.loads(features_path.read_text())
+
+    # Load fitted EnsembleCalibrator if available
+    from finalayze.ml.calibration import EnsembleCalibrator  # noqa: PLC0415
+
+    calibrator: EnsembleCalibrator | None = None
+    calibrator_path = segment_dir / "calibrator.pkl"
+    if calibrator_path.exists():
+        import joblib  # noqa: PLC0415
+
+        loaded_cal = joblib.load(calibrator_path)
+        if isinstance(loaded_cal, EnsembleCalibrator) and loaded_cal.is_fitted:
+            calibrator = loaded_cal
+            _log.debug("Loaded fitted calibrator for segment %s", segment_id)
+
+    return EnsembleModel(
+        models=models,
+        lstm_model=lstm_model,
+        selected_features=selected_features,
+        calibrator=calibrator,
+    )
 
 
 def save_ensemble(model_dir: Path, segment_id: str, ensemble: EnsembleModel) -> None:
@@ -97,6 +122,15 @@ def save_ensemble(model_dir: Path, segment_id: str, ensemble: EnsembleModel) -> 
 
     if ensemble._lstm_model is not None:
         ensemble._lstm_model.save(segment_dir / "lstm.pkl")
+
+    # Persist MI-selected feature list alongside models (feature mismatch fix)
+    if ensemble.selected_features is not None:
+        features_path = segment_dir / "selected_features.json"
+        features_path.write_text(json.dumps(ensemble.selected_features))
+
+    # Persist fitted EnsembleCalibrator alongside models
+    if ensemble._calibrator is not None and getattr(ensemble._calibrator, "is_fitted", False):
+        _atomic_save(ensemble._calibrator, segment_dir / "calibrator.pkl")
 
 
 def _get_hmac_key() -> str:

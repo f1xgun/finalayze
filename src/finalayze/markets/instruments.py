@@ -262,6 +262,24 @@ DEFAULT_MOEX_INSTRUMENTS: list[Instrument] = [
         lot_size=100,
         currency="RUB",
     ),
+    Instrument(
+        symbol="OZON",
+        market_id="moex",
+        name="Ozon Holdings",
+        instrument_type="stock",
+        figi="BBG00Y91R9T3",
+        lot_size=1,
+        currency="RUB",
+    ),
+    Instrument(
+        symbol="MOEX",
+        market_id="moex",
+        name="Moscow Exchange",
+        instrument_type="stock",
+        figi="BBG004730JJ5",
+        lot_size=10,
+        currency="RUB",
+    ),
 ]
 
 

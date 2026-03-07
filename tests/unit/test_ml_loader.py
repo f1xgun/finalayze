@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import pickle
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import joblib
+import numpy as np
 import pytest
 
+from finalayze.ml.calibration import EnsembleCalibrator
 from finalayze.ml.loader import load_registry, save_ensemble
+from finalayze.ml.models.ensemble import EnsembleModel
+from finalayze.ml.models.xgboost_model import XGBoostModel
 
 
 class TestLoadRegistry:
@@ -65,6 +71,8 @@ class TestSaveEnsemble:
         xgb_model.save = MagicMock()
         ensemble._models = [xgb_model]
         ensemble._lstm_model = None
+        ensemble.selected_features = None
+        ensemble._calibrator = None
 
         with patch("finalayze.ml.loader._atomic_save") as mock_save:
             save_ensemble(tmp_path, "us_tech", ensemble)
@@ -164,3 +172,190 @@ class TestLSTMAtomicSave:
         # Scaler file should NOT exist (atomic save cleaned up)
         scaler_path = tmp_path / "lstm.pkl.scaler.pkl"
         assert not scaler_path.exists()
+
+
+class TestSelectedFeaturesLoading:
+    """Feature mismatch fix: selected_features.json persistence in loader."""
+
+    def test_load_selected_features_when_file_exists(self, tmp_path: Path) -> None:
+        """Loader reads selected_features.json and sets it on EnsembleModel."""
+        segment_dir = tmp_path / "us_tech"
+        segment_dir.mkdir(parents=True)
+
+        # Create a minimal XGBoost model
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        # Write selected_features.json
+        selected = ["a", "b"]
+        (segment_dir / "selected_features.json").write_text(json.dumps(selected))
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        ensemble = registry.get("us_tech")
+        assert ensemble is not None
+        assert ensemble.selected_features == ["a", "b"]
+
+    def test_load_without_selected_features_file(self, tmp_path: Path) -> None:
+        """Legacy models without selected_features.json get None (graceful degradation)."""
+        segment_dir = tmp_path / "us_tech"
+        segment_dir.mkdir(parents=True)
+
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        ensemble = registry.get("us_tech")
+        assert ensemble is not None
+        assert ensemble.selected_features is None
+
+    def test_save_ensemble_writes_selected_features(self, tmp_path: Path) -> None:
+        """save_ensemble persists selected_features.json when set on ensemble."""
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None, selected_features=["a", "b"])
+
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        features_path = tmp_path / "us_tech" / "selected_features.json"
+        assert features_path.exists()
+        loaded = json.loads(features_path.read_text())
+        assert loaded == ["a", "b"]
+
+    def test_save_ensemble_no_selected_features_no_file(self, tmp_path: Path) -> None:
+        """save_ensemble does not write selected_features.json when None."""
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None)
+
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        features_path = tmp_path / "us_tech" / "selected_features.json"
+        assert not features_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Constants for calibrator round-trip tests
+# ---------------------------------------------------------------------------
+_N_TRAIN = 20
+_N_CAL_SAMPLES = 200
+
+
+def _make_fitted_calibrator() -> EnsembleCalibrator:
+    """Create a fitted EnsembleCalibrator with well-separated data."""
+    rng = np.random.default_rng(42)
+    raw_probas = np.concatenate(
+        [
+            rng.uniform(0.1, 0.4, _N_CAL_SAMPLES // 2),
+            rng.uniform(0.6, 0.9, _N_CAL_SAMPLES // 2),
+        ]
+    )
+    labels = np.array([0] * (_N_CAL_SAMPLES // 2) + [1] * (_N_CAL_SAMPLES // 2))
+    cal = EnsembleCalibrator()
+    cal.fit(raw_probas, labels)
+    assert cal.is_fitted
+    return cal
+
+
+class TestCalibratorRoundTrip:
+    """Save ensemble with calibrator, load it, verify calibrator survives."""
+
+    def test_save_load_preserves_calibrator(self, tmp_path: Path) -> None:
+        """Round-trip: save ensemble with fitted calibrator, load, calibrator is present."""
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * _N_TRAIN, [1, 0] * (_N_TRAIN // 2))
+
+        calibrator = _make_fitted_calibrator()
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None, calibrator=calibrator)
+
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        # calibrator.pkl must exist
+        assert (tmp_path / "us_tech" / "calibrator.pkl").exists()
+
+        # Load back via registry
+        registry = load_registry(tmp_path, ["us_tech"])
+        loaded = registry.get("us_tech")
+        assert loaded is not None
+        assert loaded._calibrator is not None
+        assert loaded._calibrator.is_fitted
+
+    def test_loaded_calibrator_produces_same_output(self, tmp_path: Path) -> None:
+        """Loaded calibrator produces the same calibrated value as the original."""
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * _N_TRAIN, [1, 0] * (_N_TRAIN // 2))
+
+        calibrator = _make_fitted_calibrator()
+        original_cal_low = calibrator.calibrate(0.2)
+        original_cal_high = calibrator.calibrate(0.8)
+
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None, calibrator=calibrator)
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        loaded = registry.get("us_tech")
+        assert loaded is not None
+        assert loaded._calibrator is not None
+
+        loaded_cal_low = loaded._calibrator.calibrate(0.2)
+        loaded_cal_high = loaded._calibrator.calibrate(0.8)
+
+        assert loaded_cal_low == pytest.approx(original_cal_low, abs=1e-6)
+        assert loaded_cal_high == pytest.approx(original_cal_high, abs=1e-6)
+
+    def test_load_without_calibrator_still_works(self, tmp_path: Path) -> None:
+        """Graceful degradation: if calibrator.pkl is missing, ensemble loads fine."""
+        segment_dir = tmp_path / "us_tech"
+        segment_dir.mkdir(parents=True)
+
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * _N_TRAIN, [1, 0] * (_N_TRAIN // 2))
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        # No calibrator.pkl file
+        assert not (segment_dir / "calibrator.pkl").exists()
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        loaded = registry.get("us_tech")
+        assert loaded is not None
+        # Should work without calibrator (returns raw proba)
+        result = loaded.predict_proba({"a": 1.0, "b": 2.0})
+        assert 0.0 <= result <= 1.0
+
+    def test_save_ensemble_without_calibrator_no_file(self, tmp_path: Path) -> None:
+        """If ensemble has no calibrator, no calibrator.pkl is written."""
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * _N_TRAIN, [1, 0] * (_N_TRAIN // 2))
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None)
+
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        assert not (tmp_path / "us_tech" / "calibrator.pkl").exists()
+
+    def test_calibrated_probas_pulled_toward_center(self) -> None:
+        """For a ~50% accuracy model, calibration should pull extreme probas toward 0.5."""
+        rng = np.random.default_rng(42)
+        # Simulate a poorly calibrated model: outputs extreme probas
+        # but actual labels are close to 50/50
+        n = 200
+        raw_probas = np.concatenate(
+            [
+                rng.uniform(0.0, 0.2, n // 2),
+                rng.uniform(0.8, 1.0, n // 2),
+            ]
+        )
+        # Labels are only slightly correlated (model is not that good)
+        labels = rng.integers(0, 2, n)
+
+        cal = EnsembleCalibrator()
+        cal.fit(raw_probas, labels)
+        assert cal.is_fitted
+
+        # For a model with ~50% accuracy, extreme raw probas should be
+        # pulled toward 0.5 after calibration
+        cal_low = cal.calibrate(0.1)
+        cal_high = cal.calibrate(0.9)
+        # Calibrated should be less extreme than raw
+        assert cal_low > 0.1  # pulled up from 0.1
+        assert cal_high < 0.9  # pulled down from 0.9

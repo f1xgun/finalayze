@@ -90,6 +90,12 @@ class LightGBMModel(BaseMLModel):
         x_arr = np.array([[row[k] for k in sorted(row)] for row in X], dtype=float)
         y_arr = np.array(y, dtype=int)
 
+        # Temporal validation split: last 10% for early stopping monitoring
+        n_val = max(int(len(x_arr) * 0.1), 1)
+        x_train, x_val = x_arr[:-n_val], x_arr[-n_val:]
+        y_train, y_val = y_arr[:-n_val], y_arr[-n_val:]
+        sw_train = sample_weight[:-n_val] if sample_weight is not None else None
+
         self._model = lgb.LGBMClassifier(
             n_estimators=self._n_estimators,
             max_depth=self._max_depth,
@@ -103,7 +109,13 @@ class LightGBMModel(BaseMLModel):
             min_child_samples=self._min_child_samples,
             verbosity=-1,
         )
-        self._model.fit(x_arr, y_arr, sample_weight=sample_weight)
+        self._model.fit(
+            x_train,
+            y_train,
+            sample_weight=sw_train,
+            eval_set=[(x_val, y_val)],
+            callbacks=[lgb.early_stopping(20, verbose=False), lgb.log_evaluation(0)],
+        )
 
     def save(self, path: Path) -> None:
         """Persist model to disk using joblib."""

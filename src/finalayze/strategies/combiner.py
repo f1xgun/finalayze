@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
 _MIN_COMBINED_CONFIDENCE = Decimal("0.50")
-_MIN_EXIT_CONFIDENCE = Decimal("0.38")
+_MIN_EXIT_CONFIDENCE = Decimal("0.25")
 _BUY_SCORE = Decimal(1)
 _SELL_SCORE = Decimal(-1)
 _MAX_CONFIDENCE = Decimal("1.0")
@@ -34,8 +34,12 @@ _DEFAULT_WEIGHT = Decimal("1.0")
 # ADX regime routing constants
 _MOMENTUM_STRATEGIES = frozenset({"momentum", "dual_momentum"})
 _MR_STRATEGIES = frozenset({"mean_reversion", "pairs", "ou_mean_reversion", "rsi2_connors"})
-_ADX_TREND_THRESHOLD = 30
-_ADX_MR_THRESHOLD = 20
+
+# Reinforcer-only strategies: can boost other signals but never create standalone trades.
+# When only reinforcer strategies fire, the combined signal is suppressed.
+_REINFORCER_STRATEGIES = frozenset({"ml_ensemble"})
+_ADX_TREND_THRESHOLD = 35
+_ADX_MR_THRESHOLD = 15
 
 # Turn-of-month effect: boost BUY confidence during last 1 + first 3 calendar days
 _TOM_BUY_BOOST = Decimal("0.05")
@@ -59,6 +63,7 @@ class StrategyCombiner:
         self._allocation_mode = allocation_mode
         self._strategy_returns: dict[str, list[float]] = defaultdict(list)
         self._hrp_weights: dict[str, Decimal] | None = None
+        self._adx_regimes: dict[str, str] = {}
 
     def record_strategy_return(self, strategy_name: str, ret: float) -> None:
         """Record a strategy return observation for HRP weight computation.
@@ -114,11 +119,17 @@ class StrategyCombiner:
         except InvalidOperation:
             return _DEFAULT_WEIGHT
 
-    @staticmethod
     def _compute_adx_regime(
-        candles: list[Candle], config: dict[str, object]
+        self,
+        symbol: str,
+        candles: list[Candle],
+        config: dict[str, object],
     ) -> tuple[float | None, str]:
         """Compute ADX and determine regime: 'trend', 'mr', or 'ambiguous'.
+
+        Simple threshold routing: ADX > trend_threshold is 'trend',
+        ADX < mr_threshold is 'mr', otherwise 'ambiguous'. Per-symbol
+        regime state is tracked for downstream consumers.
 
         Returns:
             Tuple of (adx_value, regime_label). adx_value is None when
@@ -128,11 +139,7 @@ class StrategyCombiner:
         if isinstance(routing_cfg, dict) and not routing_cfg.get("enabled", True):
             return None, "ambiguous"
 
-        period = (
-            int(routing_cfg.get("adx_period", 14))
-            if isinstance(routing_cfg, dict)
-            else 14
-        )
+        period = int(routing_cfg.get("adx_period", 14)) if isinstance(routing_cfg, dict) else 14
         trend_threshold = (
             int(routing_cfg.get("trend_threshold", _ADX_TREND_THRESHOLD))
             if isinstance(routing_cfg, dict)
@@ -152,6 +159,7 @@ class StrategyCombiner:
         if adx_value is None:
             return None, "ambiguous"  # fall back when insufficient data
 
+        # Simple threshold routing (no hysteresis)
         if adx_value > trend_threshold:
             regime = "trend"
         elif adx_value < mr_threshold:
@@ -159,6 +167,7 @@ class StrategyCombiner:
         else:
             regime = "ambiguous"
 
+        self._adx_regimes[symbol] = regime
         return adx_value, regime
 
     def _parse_config(self, config: dict[str, object]) -> tuple[dict[str, object], str, Decimal]:
@@ -291,7 +300,7 @@ class StrategyCombiner:
         dominant_contribution = _ZERO
 
         # ADX regime routing
-        adx_value, regime = self._compute_adx_regime(candles, config)
+        adx_value, regime = self._compute_adx_regime(symbol, candles, config)
         feature_contributions["adx_value"] = adx_value if adx_value is not None else 0.0
         feature_contributions["adx_regime"] = {"trend": 1.0, "mr": -1.0, "ambiguous": 0.0}[regime]
 
@@ -382,6 +391,17 @@ class StrategyCombiner:
             self._on_final_signal(None, feature_contributions)
             return None
 
+        # Reinforcer-only check: if every firing strategy is a reinforcer, suppress the signal.
+        firing_names = {
+            name
+            for name in self._strategies
+            if f"{name}_confidence" in feature_contributions
+        }
+        if firing_names and firing_names <= _REINFORCER_STRATEGIES:
+            self._on_normalized(0.0, feature_contributions)
+            self._on_final_signal(None, feature_contributions)
+            return None
+
         if effective_normalize == "total":
             denominator = total_enabled_weight
         elif effective_normalize == "active":
@@ -394,8 +414,12 @@ class StrategyCombiner:
             return None
         net = weighted_score / denominator
 
-        # Turn-of-month effect: boost BUY confidence during the window
-        if self._is_turn_of_month(candles[-1].timestamp) and net > _ZERO:
+        # Turn-of-month effect: boost BUY confidence during the window (US segments only)
+        if (
+            segment_id.startswith("us_")
+            and self._is_turn_of_month(candles[-1].timestamp)
+            and net > _ZERO
+        ):
             net += _TOM_BUY_BOOST
             feature_contributions["turn_of_month"] = 1.0
         else:

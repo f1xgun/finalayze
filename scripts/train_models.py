@@ -4,6 +4,8 @@ Usage:
     uv run python scripts/train_models.py
     uv run python scripts/train_models.py --segment us_tech
     uv run python scripts/train_models.py --segment us_tech --output-dir models/
+    uv run python scripts/train_models.py --label-mode direction  # old next-bar labels
+    uv run python scripts/train_models.py --label-mode triple_barrier  # default
 """
 
 from __future__ import annotations
@@ -15,6 +17,10 @@ import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
 
 # Ensure src/ and project root are importable when run directly
 _PROJECT_ROOT = Path(__file__).parent.parent
@@ -36,10 +42,24 @@ from finalayze.ml.models.lightgbm_model import LightGBMModel
 from finalayze.ml.models.lstm_model import LSTMModel
 from finalayze.ml.models.xgboost_model import XGBoostModel
 from finalayze.ml.training import DEFAULT_WINDOW_SIZE, build_windows
+from finalayze.ml.training.feature_selection import select_features_mi
+from finalayze.ml.training.labeling import build_triple_barrier_dataset
+from finalayze.ml.training.sample_weights import compute_decay_weights
 
 _WINDOW_SIZE = DEFAULT_WINDOW_SIZE
 _TRAIN_RATIO = 0.8
 _TUNED_PARAMS_DIR = Path(__file__).parent.parent / "results" / "tuned_params"
+
+# Triple barrier parameters (match engine execution params)
+_TB_UPPER_ATR_MULT = 2.0  # match ml_ensemble ATR stop
+_TB_LOWER_ATR_MULT = 2.0  # symmetric barriers
+_TB_MAX_HOLD = 20  # match DEFAULT_STRATEGY_HOLD_BARS["ml_ensemble"]
+_TB_ATR_PERIOD = 14  # standard
+_MOEX_ATR_UPLIFT = 1.2  # MOEX 1.2x uplift for wider barriers
+
+# Label mode choices
+LABEL_MODE_TRIPLE_BARRIER = "triple_barrier"
+LABEL_MODE_DIRECTION = "direction"
 
 
 def _load_tuned_params(segment_id: str, model_type: str) -> dict | None:
@@ -92,45 +112,30 @@ def _get_xgboost_max_depth(segment_id: str) -> int:
 def _fetch_tinkoff_candles(symbol: str) -> list[Candle]:
     """Fetch candles from Tinkoff Invest API for MOEX symbols.
 
-    Requires TINKOFF_TOKEN environment variable. Returns empty list on failure.
+    Uses TinkoffFetcher which handles FIGI resolution, correct API endpoint
+    (invest-public-api.tbank.ru:443), and GRPC_DNS_RESOLVER=native.
+    Requires FINALAYZE_TINKOFF_TOKEN environment variable.
+
+    Strips '.ME' suffix if present (yfinance convention) since the instrument
+    registry uses plain MOEX tickers (SBER, GAZP, etc.).
     """
-    token = os.environ.get("TINKOFF_TOKEN")
+    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN")
     if not token:
-        print(f"  [warn] TINKOFF_TOKEN not set, skipping Tinkoff fetch for {symbol}")
+        print(f"  [warn] FINALAYZE_TINKOFF_TOKEN not set, skipping Tinkoff fetch for {symbol}")
         return []
 
+    # Strip yfinance .ME suffix — registry uses plain tickers
+    clean_symbol = symbol.removesuffix(".ME")
+
     try:
-        from t_tech.invest import AsyncClient, CandleInterval  # noqa: PLC0415
+        from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
+        from finalayze.markets.instruments import build_default_registry  # noqa: PLC0415
 
-        async def _fetch() -> list[Candle]:
-            end = datetime.now(tz=UTC)
-            start = end - timedelta(days=_MOEX_LOOKBACK_DAYS)
-            candles_out: list[Candle] = []
-            async with AsyncClient(token) as client:
-                async for candle in client.get_all_candles(
-                    figi=symbol,
-                    from_=start,
-                    to=end,
-                    interval=CandleInterval.CANDLE_INTERVAL_DAY,
-                ):
-                    from decimal import Decimal  # noqa: PLC0415
-
-                    candles_out.append(
-                        Candle(
-                            symbol=symbol,
-                            market_id="moex",
-                            timeframe="1d",
-                            timestamp=candle.time,
-                            open=Decimal(str(candle.open.units + candle.open.nano / 1e9)),
-                            high=Decimal(str(candle.high.units + candle.high.nano / 1e9)),
-                            low=Decimal(str(candle.low.units + candle.low.nano / 1e9)),
-                            close=Decimal(str(candle.close.units + candle.close.nano / 1e9)),
-                            volume=int(candle.volume),
-                        )
-                    )
-            return candles_out
-
-        return asyncio.run(_fetch())
+        registry = build_default_registry()
+        fetcher = TinkoffFetcher(token=token, registry=registry, sandbox=False)
+        end = datetime.now(tz=UTC)
+        start = end - timedelta(days=_MOEX_LOOKBACK_DAYS)
+        return fetcher.fetch_candles(clean_symbol, start, end)
     except Exception as exc:
         print(f"  [warn] Tinkoff fetch failed for {symbol}: {exc}")
         return []
@@ -227,19 +232,63 @@ def _build_windows(
     return features, labels
 
 
+def _get_triple_barrier_params(segment_id: str) -> dict[str, float | int | bool]:
+    """Return triple barrier parameters for a segment.
+
+    MOEX segments get 1.2x ATR uplift for wider barriers (higher volatility).
+    """
+    if _is_moex_segment(segment_id):
+        upper = _TB_UPPER_ATR_MULT * _MOEX_ATR_UPLIFT
+        lower = _TB_LOWER_ATR_MULT * _MOEX_ATR_UPLIFT
+    else:
+        upper = _TB_UPPER_ATR_MULT
+        lower = _TB_LOWER_ATR_MULT
+    return {
+        "upper_atr_mult": upper,
+        "lower_atr_mult": lower,
+        "max_hold": _TB_MAX_HOLD,
+        "atr_period": _TB_ATR_PERIOD,
+        "atr_scale": True,
+    }
+
+
 def _build_dataset(
     segment_id: str,
     symbols: list[str],
     settings: Settings | None = None,
-) -> tuple[list[dict[str, float]], list[int]]:
-    """Build (features, labels) by processing each symbol's candles independently.
+    label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
+) -> tuple[list[dict[str, float]], list[int], np.ndarray | None]:
+    """Build (features, labels, barrier_weights) by processing each symbol independently.
 
     Collects windows from all symbols and sorts by timestamp to maintain
     proper temporal ordering for train/test splits (no future leakage).
+
+    Args:
+        segment_id: Segment identifier (e.g. "us_tech", "ru_blue_chips").
+        symbols: List of ticker symbols.
+        settings: Application settings.
+        label_mode: "triple_barrier" (default) or "direction".
+
+    Returns:
+        Tuple of (features, labels, barrier_weights).
+        barrier_weights is non-None only in triple_barrier mode (abs(pnl_pct)).
     """
     if settings is None:
         settings = Settings()
     market_id = segment_id.split("_", maxsplit=1)[0]
+
+    if label_mode == LABEL_MODE_TRIPLE_BARRIER:
+        return _build_dataset_triple_barrier(segment_id, symbols, market_id, settings)
+    return _build_dataset_direction(segment_id, symbols, market_id, settings)
+
+
+def _build_dataset_direction(
+    segment_id: str,
+    symbols: list[str],
+    market_id: str,
+    settings: Settings,
+) -> tuple[list[dict[str, float]], list[int], np.ndarray | None]:
+    """Build dataset with simple next-bar direction labels (old behavior)."""
     rows: list[tuple[datetime, dict[str, float], int]] = []
     for symbol in symbols:
         candles = _fetch_symbol_candles(symbol, market_id, settings, segment_id=segment_id)
@@ -251,7 +300,51 @@ def _build_dataset(
     rows.sort(key=lambda r: r[0])
     features_out = [r[1] for r in rows]
     labels_out = [r[2] for r in rows]
-    return features_out, labels_out
+    return features_out, labels_out, None
+
+
+def _build_dataset_triple_barrier(
+    segment_id: str,
+    symbols: list[str],
+    market_id: str,
+    settings: Settings,
+) -> tuple[list[dict[str, float]], list[int], np.ndarray | None]:
+    """Build dataset with triple barrier labels."""
+    import numpy as _np  # noqa: PLC0415
+
+    tb_params = _get_triple_barrier_params(segment_id)
+    min_candles_tb = _WINDOW_SIZE + int(tb_params["max_hold"]) + 1
+    rows: list[tuple[datetime, dict[str, float], int, float]] = []
+
+    for symbol in symbols:
+        candles = _fetch_symbol_candles(symbol, market_id, settings, segment_id=segment_id)
+        if len(candles) < min_candles_tb:
+            print(
+                f"  [{segment_id}] {symbol}: only {len(candles)} candles, "
+                f"need {min_candles_tb}+ for triple barrier — skipping."
+            )
+            continue
+        x_sym, y_sym, w_sym, ts_sym = build_triple_barrier_dataset(
+            candles,
+            window_size=_WINDOW_SIZE,
+            upper_atr_mult=float(tb_params["upper_atr_mult"]),
+            lower_atr_mult=float(tb_params["lower_atr_mult"]),
+            max_hold=int(tb_params["max_hold"]),
+            atr_period=int(tb_params["atr_period"]),
+            atr_scale=bool(tb_params["atr_scale"]),
+        )
+        print(
+            f"  [{segment_id}] {symbol}: {len(x_sym)} triple barrier samples "
+            f"(label balance: {sum(y_sym)}/{len(y_sym)} positive)"
+        )
+        for ts, feat, lbl, wt in zip(ts_sym, x_sym, y_sym, w_sym, strict=True):
+            rows.append((ts, feat, lbl, wt))
+
+    rows.sort(key=lambda r: r[0])
+    features_out = [r[1] for r in rows]
+    labels_out = [r[2] for r in rows]
+    weights_out = _np.array([r[3] for r in rows], dtype=float) if rows else None
+    return features_out, labels_out, weights_out
 
 
 def train_one_segment(
@@ -259,20 +352,31 @@ def train_one_segment(
     symbols: list[str],
     output_dir: Path,
     settings: Settings | None = None,
+    label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
 ) -> None:
     """Train and save models for a single segment."""
     if settings is None:
         settings = Settings()
-    print(f"\n[{segment_id}] Fetching candles for {symbols}...")
+    print(f"\n[{segment_id}] Fetching candles for {symbols} (label_mode={label_mode})...")
 
-    features_list, label_list = _build_dataset(segment_id, symbols, settings)
+    features_list, label_list, barrier_weights = _build_dataset(
+        segment_id,
+        symbols,
+        settings,
+        label_mode=label_mode,
+    )
     if not features_list:
-        print(f"[{segment_id}] No candles — skipping.")
+        print(f"[{segment_id}] No samples — skipping.")
         return
 
     if len(features_list) < _WINDOW_SIZE:
         print(f"[{segment_id}] Only {len(features_list)} samples — need {_WINDOW_SIZE}+, skipping.")
         return
+
+    print(
+        f"[{segment_id}] Total samples: {len(features_list)} "
+        f"(label balance: {sum(label_list)}/{len(label_list)} positive)"
+    )
 
     split = int(len(features_list) * _TRAIN_RATIO)
     gap_end = min(split + _WINDOW_SIZE, len(features_list))
@@ -281,6 +385,32 @@ def train_one_segment(
     train_labels = label_list[:split]
     test_labels = label_list[gap_end:]
 
+    # Feature selection on TRAIN data only (no leakage — design doc 2.3)
+    selected_features: list[str] | None = None
+    if train_features:
+        import pandas as pd  # noqa: PLC0415
+
+        feature_names = sorted(train_features[0].keys())
+        train_df = pd.DataFrame(train_features)
+        train_series = pd.Series(train_labels)
+        selected_features = select_features_mi(train_df, train_series, max_features=15)
+        if selected_features:
+            print(f"[{segment_id}] Selected {len(selected_features)}/{len(feature_names)} features")
+            train_features = [{k: row[k] for k in selected_features} for row in train_features]
+            test_features = [{k: row[k] for k in selected_features} for row in test_features]
+
+    # Compute sample weights: combine decay weights with barrier weights if available
+    decay_weights = compute_decay_weights(len(train_features))
+    if barrier_weights is not None and len(barrier_weights) > 0:
+        # Use barrier weights (abs(pnl_pct)) for the train portion, multiplied by decay
+        train_barrier_weights = barrier_weights[:split]
+        # Normalize barrier weights to mean=1 to preserve decay weight scale
+        bw_mean = float(train_barrier_weights.mean()) if len(train_barrier_weights) > 0 else 1.0
+        normalized_bw = train_barrier_weights / bw_mean if bw_mean > 0 else train_barrier_weights
+        sample_weights = decay_weights * normalized_bw
+    else:
+        sample_weights = decay_weights
+
     if len(train_features) < _SEQUENCE_LENGTH:
         print(f"[{segment_id}] Train split too small for LSTM — skipping.")
         return
@@ -288,8 +418,20 @@ def train_one_segment(
     segment_dir = output_dir / segment_id
     segment_dir.mkdir(parents=True, exist_ok=True)
 
+    # Persist MI-selected features for inference-time filtering (feature mismatch fix)
+    if selected_features:
+        features_path = segment_dir / "selected_features.json"
+        features_path.write_text(json.dumps(selected_features))
+        print(f"[{segment_id}] Saved selected_features.json ({len(selected_features)} features)")
+
     results = _train_and_evaluate_models(
-        segment_id, segment_dir, train_features, train_labels, test_features, test_labels
+        segment_id,
+        segment_dir,
+        train_features,
+        train_labels,
+        test_features,
+        test_labels,
+        sample_weights=sample_weights,
     )
     summary = " | ".join(f"{k}: {v}" for k, v in results.items())
     print(f"[{segment_id}] {summary}")
@@ -316,6 +458,7 @@ def _train_and_evaluate_models(  # noqa: PLR0912
     train_labels: list[int],
     test_features: list[dict[str, float]],
     test_labels: list[int],
+    sample_weights: np.ndarray | None = None,  # type: ignore[type-arg]
 ) -> dict[str, str]:
     """Train XGBoost, LightGBM, and LSTM; return evaluation results."""
     results: dict[str, str] = {}
@@ -345,7 +488,7 @@ def _train_and_evaluate_models(  # noqa: PLR0912
             if key in xgb_tuned:
                 xgb_kwargs[key] = xgb_tuned[key]
     xgb = XGBoostModel(segment_id=segment_id, **xgb_kwargs)  # type: ignore[arg-type]
-    xgb.fit(train_features, train_labels)
+    xgb.fit(train_features, train_labels, sample_weight=sample_weights)
     xgb.save(segment_dir / "xgb.pkl")
 
     # Log top-10 feature importances from XGBoost
@@ -384,18 +527,77 @@ def _train_and_evaluate_models(  # noqa: PLR0912
         if "bagging_fraction" in lgbm_tuned:
             lgbm_kwargs["subsample"] = lgbm_tuned["bagging_fraction"]
     lgbm = LightGBMModel(segment_id=segment_id, **lgbm_kwargs)  # type: ignore[arg-type]
-    lgbm.fit(train_features, train_labels)
+    lgbm.fit(train_features, train_labels, sample_weight=sample_weights)
     lgbm.save(segment_dir / "lgbm.pkl")
     if test_features:
         results["LGBM"] = _evaluate_model(lgbm, test_features, test_labels)
 
     lstm = LSTMModel(segment_id=segment_id, sequence_length=_SEQUENCE_LENGTH)
-    lstm.fit(train_features, train_labels)
+    lstm.fit(train_features, train_labels, sample_weight=sample_weights)
     lstm.save(segment_dir / "lstm.pkl")
     if test_features:
         results["LSTM"] = _evaluate_model(lstm, test_features, test_labels)
 
+    # Fit EnsembleCalibrator on TEST set raw probabilities (out-of-sample)
+    if test_features and test_labels:
+        _fit_and_save_calibrator(
+            segment_id,
+            segment_dir,
+            [xgb, lgbm, lstm],
+            test_features,
+            test_labels,
+        )
+
     return results
+
+
+def _fit_and_save_calibrator(
+    segment_id: str,
+    segment_dir: Path,
+    models: list[XGBoostModel | LightGBMModel | LSTMModel],
+    test_features: list[dict[str, float]],
+    test_labels: list[int],
+) -> None:
+    """Fit EnsembleCalibrator on out-of-sample ensemble probabilities and save it.
+
+    Uses the TEST split to avoid data leakage: the calibrator sees the model's
+    out-of-sample probability distribution, not the training distribution.
+    """
+    import numpy as _np  # noqa: PLC0415
+
+    from finalayze.ml.calibration import EnsembleCalibrator  # noqa: PLC0415
+    from finalayze.ml.loader import _atomic_save  # noqa: PLC0415
+
+    raw_probas: list[float] = []
+    for feat in test_features:
+        probs: list[float] = []
+        for m in models:
+            trained = getattr(m, "_trained", None) or getattr(m, "_model", None)
+            if trained is None:
+                continue
+            try:
+                probs.append(m.predict_proba(feat))
+            except Exception:
+                continue
+        if probs:
+            raw_probas.append(sum(probs) / len(probs))
+        else:
+            raw_probas.append(0.5)
+
+    calibrator = EnsembleCalibrator()
+    calibrator.fit(_np.array(raw_probas), _np.array(test_labels))
+
+    if calibrator.is_fitted:
+        _atomic_save(calibrator, segment_dir / "calibrator.pkl")
+        # Show calibration effect
+        cal_low = calibrator.calibrate(0.2)
+        cal_high = calibrator.calibrate(0.8)
+        print(
+            f"[{segment_id}] Calibrator fitted on {len(test_features)} OOS samples: "
+            f"raw 0.2 -> {cal_low:.3f}, raw 0.8 -> {cal_high:.3f}"
+        )
+    else:
+        print(f"[{segment_id}] Calibrator skipped (insufficient OOS data or single class)")
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -412,6 +614,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=_DEFAULT_OUTPUT_DIR,
         help=f"Output directory (default: {_DEFAULT_OUTPUT_DIR})",
     )
+    parser.add_argument(
+        "--label-mode",
+        default=LABEL_MODE_TRIPLE_BARRIER,
+        choices=[LABEL_MODE_TRIPLE_BARRIER, LABEL_MODE_DIRECTION],
+        help=(
+            f"Labeling mode: '{LABEL_MODE_TRIPLE_BARRIER}' uses ATR-scaled triple barrier "
+            f"labels (default), '{LABEL_MODE_DIRECTION}' uses simple next-bar direction labels."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -419,18 +630,21 @@ def main() -> None:
     """Entry point."""
     args = _parse_args()
     output_dir = Path(args.output_dir)
+    label_mode: str = args.label_mode
 
     if args.segment:
         segments = {args.segment: _SEGMENT_SYMBOLS.get(args.segment, [])}
     else:
         segments = _SEGMENT_SYMBOLS
 
+    print(f"Label mode: {label_mode}")
     for segment_id, symbols in segments.items():
         try:
             train_one_segment(
                 segment_id=segment_id,
                 symbols=symbols,
                 output_dir=output_dir,
+                label_mode=label_mode,
             )
         except FileNotFoundError as exc:
             print(f"[{segment_id}] FileNotFoundError — {exc}, skipping.")

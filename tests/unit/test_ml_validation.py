@@ -28,11 +28,11 @@ class TestValidationGate:
         result = validate_ensemble(ensemble, features, labels)
         assert result.passed
         assert result.accuracy == 1.0
-        assert result.brier_score < 0.25
+        assert result.brier_score < 0.235
         assert result.n_samples == 4
 
     def test_validate_ensemble_fails_bad_accuracy(self) -> None:
-        """Accuracy below 52% -> not passed."""
+        """Accuracy below 54% -> not passed."""
         features = [{"a": float(i)} for i in range(10)]
         labels = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
         # All predict 0.4 -> all round to 0 -> 5/10 correct = 50%
@@ -41,10 +41,10 @@ class TestValidationGate:
 
         result = validate_ensemble(ensemble, features, labels)
         assert not result.passed
-        assert result.accuracy < 0.52
+        assert result.accuracy < 0.54
 
     def test_validate_ensemble_fails_bad_brier(self) -> None:
-        """Brier > 0.25 -> not passed even with OK accuracy."""
+        """Brier > 0.235 -> not passed even with OK accuracy."""
         features = [{"a": float(i)} for i in range(4)]
         labels = [1, 1, 0, 0]
         # Overconfident wrong: predict 0.9 for class 0, 0.1 for class 1
@@ -55,7 +55,7 @@ class TestValidationGate:
 
         result = validate_ensemble(ensemble, features, labels)
         assert not result.passed
-        assert result.brier_score > 0.25
+        assert result.brier_score > 0.235
 
     def test_validate_ensemble_fails_bad_logloss(self) -> None:
         """Log-loss above threshold -> not passed."""
@@ -67,8 +67,8 @@ class TestValidationGate:
         ensemble = _make_ensemble(probas)
 
         result = validate_ensemble(ensemble, features, labels)
-        # log-loss for near-0.5 predictions is >= ln(2) ~ 0.693
-        assert result.log_loss_val > 0.69
+        # log-loss for near-0.5 predictions is >= ln(2) ~ 0.693, above threshold 0.680
+        assert result.log_loss_val > 0.680
         assert not result.passed
 
     def test_validation_result_dataclass_fields(self) -> None:

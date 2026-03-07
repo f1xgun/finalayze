@@ -29,6 +29,7 @@ ParameterGrid = dict[str, list[object]]
 # ── Constants ────────────────────────────────────────────────────────────
 _ANNUALIZATION_FACTOR = 252  # Trading days per year
 _PERCENT = 100.0
+_MIN_FOLD_TRADES = 30  # Exclude folds with fewer trades from Sharpe aggregation
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,12 +47,25 @@ class WalkForwardConfig:
     """Configuration for walk-forward window generation.
 
     Uses months for train/test window sizes for finer granularity.
-    Default: 12-month train, 6-month test, 6-month step.
+    Default: 12-month train, 6-month test, 3-month step, 60-day purge gap.
+
+    A 3-month step (vs 6-month) roughly doubles the number of OOS folds,
+    giving better statistical power:
+    - 2yr data: ~4 folds (was ~2)
+    - 3yr data: ~7 folds (was ~3)
+    - 7yr data: ~23 folds (was ~12)
+
+    ``purge_bars`` inserts an embargo gap between the end of the training
+    window and the start of the test window.  This prevents information
+    leakage from indicators or features that use look-back windows which
+    would otherwise straddle the train/test boundary.  Default is 60
+    trading days (~3 calendar months).
     """
 
     train_months: int = 12
     test_months: int = 6
-    step_months: int = 6
+    step_months: int = 3
+    purge_bars: int = 60
 
 
 @dataclass
@@ -87,9 +101,10 @@ class WalkForwardOptimizer:
     def generate_windows(self, start_date: date, end_date: date) -> list[WalkForwardWindow]:
         """Generate rolling train/test windows.
 
-        Example with default config (train=12mo, test=6mo, step=6mo) on 2020-2023:
+        Example with default config (train=12mo, test=6mo, step=3mo) on 2020-2023:
         Window 1: Train 2020-01 to 2020-12, Test 2021-01 to 2021-06
-        Window 2: Train 2020-07 to 2021-06, Test 2021-07 to 2021-12
+        Window 2: Train 2020-04 to 2021-03, Test 2021-04 to 2021-09
+        Window 3: Train 2020-07 to 2021-06, Test 2021-07 to 2021-12
         ...etc
         """
         windows: list[WalkForwardWindow] = []
@@ -101,7 +116,7 @@ class WalkForwardOptimizer:
                 + relativedelta(months=self._config.train_months)
                 - relativedelta(days=1)
             )
-            test_start = train_end + relativedelta(days=1)
+            test_start = train_end + relativedelta(days=1 + self._config.purge_bars)
             test_end = (
                 test_start + relativedelta(months=self._config.test_months) - relativedelta(days=1)
             )
@@ -185,13 +200,16 @@ class WalkForwardOptimizer:
 
         pnl_pcts = [float(t.pnl_pct) * _PERCENT for t in all_trades]
 
-        # Aggregate Sharpe via trade-count-weighted mean of per-fold Sharpes
-        total_trade_count = sum(per_fold_trade_counts)
+        # Aggregate Sharpe via trade-count-weighted mean of per-fold Sharpes,
+        # excluding folds with too few trades (unreliable Sharpe estimates).
+        valid_pairs = [
+            (s, n)
+            for s, n in zip(per_fold_sharpes, per_fold_trade_counts, strict=True)
+            if n >= _MIN_FOLD_TRADES
+        ]
+        total_trade_count = sum(n for _, n in valid_pairs)
         if total_trade_count > 0:
-            oos_sharpe = (
-                sum(s * n for s, n in zip(per_fold_sharpes, per_fold_trade_counts, strict=True))
-                / total_trade_count
-            )
+            oos_sharpe = sum(s * n for s, n in valid_pairs) / total_trade_count
         else:
             oos_sharpe = 0.0
 

@@ -39,6 +39,7 @@ class JournalingStrategyCombiner(StrategyCombiner):
         self._last_net_score: float | None = None
         self._last_features: dict[str, float] = {}
         self._last_model_probas: dict[str, float] | None = None
+        self._last_segment_id: str | None = None
 
     @property
     def last_signals(self) -> dict[str, Signal | None]:
@@ -67,13 +68,14 @@ class JournalingStrategyCombiner(StrategyCombiner):
 
     # ── Hook overrides ──────────────────────────────────────────────────
 
-    def _on_generate_start(self, symbol: str, segment_id: str) -> None:  # noqa: ARG002
+    def _on_generate_start(self, symbol: str, segment_id: str) -> None:
         """Reset tracking state at the start of each generate_signal() call."""
         self._last_signals = {}
         self._last_weights = {}
         self._last_net_score = None
         self._last_features = {}
         self._last_model_probas = None
+        self._last_segment_id = segment_id
 
     def _on_strategy_signal(
         self,
@@ -96,7 +98,8 @@ class JournalingStrategyCombiner(StrategyCombiner):
         # Capture per-model probas from MLStrategy's EnsembleModel
         if hasattr(strategy, "_registry"):
             registry = strategy._registry
-            ensemble = getattr(registry, "get", lambda _s: None)(name)
+            seg_id = getattr(self, "_last_segment_id", None)
+            ensemble = getattr(registry, "get", lambda _s: None)(seg_id) if seg_id else None
             if ensemble is not None and hasattr(ensemble, "last_model_probas"):
                 probas = ensemble.last_model_probas
                 if probas:

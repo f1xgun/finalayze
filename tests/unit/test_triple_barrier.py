@@ -300,7 +300,7 @@ class TestBuildTripleBarrierDataset:
     """build_triple_barrier_dataset returns correct shapes."""
 
     def test_returns_correct_shapes(self) -> None:
-        """Features, labels, and weights lists have same length."""
+        """Features, labels, weights, and timestamps lists have same length."""
         # Create enough candles for at least a few samples
         # Need: window_size (60) + max_hold (20) + some extra = ~90+
         candles = []
@@ -312,7 +312,7 @@ class TestBuildTripleBarrierDataset:
             lo = price * 0.99
             candles.append(_make_candle(i, price, high=h, low=lo, open_=price))
 
-        features, labels, weights = build_triple_barrier_dataset(
+        features, labels, weights, timestamps = build_triple_barrier_dataset(
             candles,
             window_size=60,
             upper_pct=0.03,
@@ -321,13 +321,16 @@ class TestBuildTripleBarrierDataset:
             atr_scale=False,
         )
 
-        assert len(features) == len(labels) == len(weights)
+        assert len(features) == len(labels) == len(weights) == len(timestamps)
         # Should have at least some samples
         assert len(features) > 0
         # Labels are binary
         assert all(lbl in (0, 1) for lbl in labels)
         # Weights are non-negative
         assert all(w >= 0 for w in weights)
+        # Timestamps are monotonically non-decreasing
+        for j in range(1, len(timestamps)):
+            assert timestamps[j] >= timestamps[j - 1]
 
     def test_features_are_dicts(self) -> None:
         """Each feature entry is a dict of float values."""
@@ -339,7 +342,7 @@ class TestBuildTripleBarrierDataset:
             lo = price * 0.99
             candles.append(_make_candle(i, price, high=h, low=lo, open_=price))
 
-        features, _labels, _weights = build_triple_barrier_dataset(
+        features, _labels, _weights, _timestamps = build_triple_barrier_dataset(
             candles,
             window_size=60,
             upper_pct=0.03,
@@ -355,7 +358,7 @@ class TestBuildTripleBarrierDataset:
     def test_empty_with_insufficient_candles(self) -> None:
         """Returns empty lists when not enough candles."""
         candles = _make_flat_candles(10)
-        features, labels, weights = build_triple_barrier_dataset(
+        features, labels, weights, timestamps = build_triple_barrier_dataset(
             candles,
             window_size=60,
             max_hold=20,
@@ -363,6 +366,7 @@ class TestBuildTripleBarrierDataset:
         assert features == []
         assert labels == []
         assert weights == []
+        assert timestamps == []
 
 
 class TestEdgeCases:

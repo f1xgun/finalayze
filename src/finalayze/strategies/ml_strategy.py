@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 _PRESETS_DIR = Path(__file__).parent / "presets"
 _log = structlog.get_logger()
 
-_DEFAULT_THRESHOLD = 0.15
-_DEFAULT_MIN_CONFIDENCE = 0.5
+_DEFAULT_THRESHOLD = 0.08
+_DEFAULT_MIN_CONFIDENCE = 0.15
 _UNTRAINED_PROB = 0.5
 _UNTRAINED_EPSILON = 1e-9
 
@@ -98,6 +98,11 @@ class MLStrategy(BaseStrategy):
         except InsufficientDataError:
             return None
 
+        # Filter to MI-selected features if the ensemble was trained with feature selection
+        selected = getattr(ensemble, "selected_features", None)
+        if selected is not None:
+            features = {k: features[k] for k in selected if k in features}
+
         try:
             prob = ensemble.predict_proba(features, symbol=symbol)
         except Exception:
@@ -144,6 +149,6 @@ class MLStrategy(BaseStrategy):
         else:
             return None
 
-        if confidence < min_confidence:
+        if confidence <= min_confidence:
             return None
         return direction, confidence

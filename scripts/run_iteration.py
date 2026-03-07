@@ -293,55 +293,24 @@ def _setup_pairs_strategy(
 
 
 def _setup_ml_strategy(segment: str, models_dir: Path) -> MLStrategy | None:
-    """Create an MLStrategy with loaded models, or None."""
-    from finalayze.ml.models.ensemble import EnsembleModel  # noqa: PLC0415
+    """Create an MLStrategy with loaded models, or None.
+
+    Uses ``load_registry`` from the ML loader which correctly handles:
+    - Model file loading (XGBoost, LightGBM, LSTM)
+    - ``selected_features.json`` for MI feature filtering
+    - ``calibrator.pkl`` via the EnsembleModel constructor (private ``_calibrator``)
+    - HMAC integrity verification
+    """
+    from finalayze.ml.loader import load_registry  # noqa: PLC0415
 
     segment_dir = models_dir / segment
     if not segment_dir.is_dir():
         return None
 
-    xgb_path = segment_dir / "xgb.pkl"
-    lgbm_path = segment_dir / "lgbm.pkl"
-    lstm_path = segment_dir / "lstm.pkl"
-
-    models = []
-    lstm_model = None
-
-    if xgb_path.exists():
-        from finalayze.ml.models.xgboost_model import XGBoostModel  # noqa: PLC0415
-
-        models.append(XGBoostModel.load_from(xgb_path))
-
-    if lgbm_path.exists():
-        from finalayze.ml.models.lightgbm_model import LightGBMModel  # noqa: PLC0415
-
-        models.append(LightGBMModel.load_from(lgbm_path))
-
-    if lstm_path.exists():
-        from finalayze.ml.models.lstm_model import LSTMModel  # noqa: PLC0415
-
-        lstm_model = LSTMModel(segment_id=segment)
-        lstm_model.load(lstm_path)
-
-    if not models and lstm_model is None:
+    registry = load_registry(models_dir, [segment])
+    if registry.get(segment) is None:
         return None
 
-    from finalayze.ml.registry import MLModelRegistry  # noqa: PLC0415
-
-    ensemble = EnsembleModel(models=models, lstm_model=lstm_model)
-
-    # Load calibrator if available (trained by train_models.py)
-    calibrator_path = segment_dir / "calibrator.pkl"
-    if calibrator_path.exists():
-        import pickle  # noqa: PLC0415
-
-        with calibrator_path.open("rb") as f:
-            ensemble.calibrator = pickle.load(f)  # noqa: S301
-    else:
-        print(f"    [{segment}] No calibrator found, using raw ensemble probabilities")
-
-    registry = MLModelRegistry()
-    registry.register(segment, ensemble)
     return MLStrategy(registry)
 
 
@@ -827,7 +796,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--start-date", default="2023-01-01")
     parser.add_argument("--end-date", default="2024-12-31")
     parser.add_argument("--cash", type=int, default=100_000, help="Initial cash per symbol")
-    parser.add_argument("--models-dir", default=None, help="Directory with trained ML models")
+    parser.add_argument("--models-dir", default="models/", help="Directory with trained ML models")
     parser.add_argument(
         "--event-data-dir", default=None, help="Directory with event data JSON files"
     )

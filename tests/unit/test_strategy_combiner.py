@@ -494,7 +494,7 @@ class TestADXRouting:
         assert "adx_regime" in signal.features
 
     def test_adx_regime_trend_only_momentum_fires(self) -> None:
-        """In trending regime (ADX > 30), MR strategies are gated out."""
+        """In trending regime (ADX > 35), MR strategies are gated out."""
         config: dict[str, Any] = {
             "strategies": {
                 "momentum": {"enabled": True, "weight": 1.0},
@@ -514,7 +514,7 @@ class TestADXRouting:
             patch.object(combiner, "_load_config", return_value=config),
             patch(
                 "finalayze.strategies.combiner.compute_adx",
-                return_value=35.0,
+                return_value=40.0,
             ),
         ):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
@@ -525,7 +525,7 @@ class TestADXRouting:
         assert "mean_reversion_confidence" not in signal.features
 
     def test_adx_regime_mr_only_mr_fires(self) -> None:
-        """In MR regime (ADX < 20), momentum strategies are gated out."""
+        """In MR regime (ADX < 15), momentum strategies are gated out."""
         config: dict[str, Any] = {
             "strategies": {
                 "momentum": {"enabled": True, "weight": 1.0},
@@ -545,7 +545,7 @@ class TestADXRouting:
             patch.object(combiner, "_load_config", return_value=config),
             patch(
                 "finalayze.strategies.combiner.compute_adx",
-                return_value=15.0,
+                return_value=10.0,
             ),
         ):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
@@ -778,6 +778,130 @@ class TestCombinerNormalizeModeActive:
         assert sig_active.confidence > sig_total.confidence
 
 
+class TestMLSoloFireActiveMode:
+    """Verify ML-only fire under active normalization is properly attenuated."""
+
+    # Constants (no magic numbers)
+    ML_WEIGHT = 0.10
+    ML_CONFIDENCE = 0.60
+    TOTAL_ACTIVE_WEIGHT = 1.10  # sum of all 6 enabled strategy weights
+    ENTRY_THRESHOLD = 0.30
+
+    def test_ml_solo_fire_active_mode_attenuated(self) -> None:
+        """Under 'active' normalization, ML alone (weight=0.10) net score is attenuated.
+
+        When ML fires alone with confidence=0.60 and weight=0.10,
+        and total active weight = 1.10 (all 6 strategies enabled),
+        net = 0.60 * 0.10 / 1.10 ~ 0.055, well below 0.30 threshold.
+        This means ML alone cannot trigger a trade.
+        """
+        config: dict[str, Any] = {
+            "normalize_mode": "active",
+            "min_combined_confidence": self.ENTRY_THRESHOLD,
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 0.20},
+                "mean_reversion": {"enabled": True, "weight": 0.30},
+                "dual_momentum": {"enabled": True, "weight": 0.25},
+                "rsi2_connors": {"enabled": True, "weight": 0.15},
+                "pairs": {"enabled": True, "weight": 0.10},
+                "ml_ensemble": {"enabled": True, "weight": self.ML_WEIGHT},
+            },
+        }
+        # Only ml_ensemble fires; all others return None
+        ml_signal = _make_signal(
+            SignalDirection.BUY, self.ML_CONFIDENCE, "ml_ensemble"
+        )
+        strategies: list[BaseStrategy] = [
+            MockStrategy("momentum", None),
+            MockStrategy("mean_reversion", None),
+            MockStrategy("dual_momentum", None),
+            MockStrategy("rsi2_connors", None),
+            MockStrategy("pairs", None),
+            MockStrategy("ml_ensemble", ml_signal),
+        ]
+        combiner = StrategyCombiner(strategies, normalize_mode="active")
+        candles = _make_candles()
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        # net = 0.60 * 0.10 / 1.10 = 0.0545... -> well below 0.30 -> None
+        assert signal is None
+
+    def test_ml_solo_fire_firing_mode_reinforcer_suppressed(self) -> None:
+        """Under 'firing' normalization, ML alone is suppressed (reinforcer-only).
+
+        ml_ensemble is in _REINFORCER_STRATEGIES, so when it's the only
+        strategy that fires, the signal is suppressed regardless of norm mode.
+        """
+        config: dict[str, Any] = {
+            "normalize_mode": "firing",
+            "min_combined_confidence": self.ENTRY_THRESHOLD,
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 0.20},
+                "mean_reversion": {"enabled": True, "weight": 0.30},
+                "dual_momentum": {"enabled": True, "weight": 0.25},
+                "rsi2_connors": {"enabled": True, "weight": 0.15},
+                "pairs": {"enabled": True, "weight": 0.10},
+                "ml_ensemble": {"enabled": True, "weight": self.ML_WEIGHT},
+            },
+        }
+        ml_signal = _make_signal(
+            SignalDirection.BUY, self.ML_CONFIDENCE, "ml_ensemble"
+        )
+        strategies: list[BaseStrategy] = [
+            MockStrategy("momentum", None),
+            MockStrategy("mean_reversion", None),
+            MockStrategy("dual_momentum", None),
+            MockStrategy("rsi2_connors", None),
+            MockStrategy("pairs", None),
+            MockStrategy("ml_ensemble", ml_signal),
+        ]
+        combiner = StrategyCombiner(strategies, normalize_mode="firing")
+        candles = _make_candles()
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        # ML is a reinforcer-only strategy: cannot create standalone trades
+        assert signal is None
+
+    def test_ml_plus_rule_based_fires(self) -> None:
+        """ML + a rule-based strategy should produce a combined signal."""
+        config: dict[str, Any] = {
+            "normalize_mode": "firing",
+            "min_combined_confidence": self.ENTRY_THRESHOLD,
+            "strategies": {
+                "momentum": {"enabled": True, "weight": 0.20},
+                "mean_reversion": {"enabled": True, "weight": 0.30},
+                "dual_momentum": {"enabled": True, "weight": 0.25},
+                "rsi2_connors": {"enabled": True, "weight": 0.15},
+                "pairs": {"enabled": True, "weight": 0.10},
+                "ml_ensemble": {"enabled": True, "weight": self.ML_WEIGHT},
+            },
+        }
+        ml_signal = _make_signal(
+            SignalDirection.BUY, self.ML_CONFIDENCE, "ml_ensemble"
+        )
+        mom_signal = _make_signal(
+            SignalDirection.BUY, 0.50, "momentum"
+        )
+        strategies: list[BaseStrategy] = [
+            MockStrategy("momentum", mom_signal),
+            MockStrategy("mean_reversion", None),
+            MockStrategy("dual_momentum", None),
+            MockStrategy("rsi2_connors", None),
+            MockStrategy("pairs", None),
+            MockStrategy("ml_ensemble", ml_signal),
+        ]
+        combiner = StrategyCombiner(strategies, normalize_mode="firing")
+        candles = _make_candles()
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        # ML + momentum fire together → combined signal passes
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY
+
+
 class TestCombinerPassesHasOpenPosition:
     """Tests that has_open_position is propagated to child strategies."""
 
@@ -860,3 +984,47 @@ class TestCombinerPassesHasOpenPosition:
 
         assert len(received_values) == 1
         assert received_values[0] is False
+
+
+class TestExitConfidence:
+    """Tests for asymmetric entry/exit confidence thresholds."""
+
+    # Constants
+    EXIT_CONFIDENCE = 0.25
+    ENTRY_CONFIDENCE = 0.30
+    SELL_CONFIDENCE = 0.27  # above EXIT (0.25) but below ENTRY (0.30)
+
+    def test_exit_confidence_lower_than_entry(self) -> None:
+        """SELL signal with open position uses min_exit_confidence=0.25 threshold.
+
+        A SELL signal with confidence 0.27 should pass when has_open_position=True
+        (threshold is 0.25) but be filtered out when has_open_position=False
+        (threshold is 0.30).
+        """
+        config: dict[str, Any] = {
+            "strategies": {
+                "strat_x": {"enabled": True, "weight": 1.0},
+            },
+            "min_combined_confidence": self.ENTRY_CONFIDENCE,
+            "min_exit_confidence": self.EXIT_CONFIDENCE,
+        }
+        sell_signal = _make_signal(SignalDirection.SELL, self.SELL_CONFIDENCE, "strat_x")
+        strategy = MockStrategy("strat_x", sell_signal)
+        combiner = StrategyCombiner([strategy])
+        candles = _make_candles()
+
+        # With open position: threshold is min(0.30, 0.25) = 0.25 -> 0.27 >= 0.25 -> passes
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal_with_pos = combiner.generate_signal(
+                "AAPL", candles, "us_broad", has_open_position=True
+            )
+        assert signal_with_pos is not None
+        assert signal_with_pos.direction == SignalDirection.SELL
+
+        # Without open position: threshold is 0.30 -> 0.27 < 0.30 -> filtered
+        combiner2 = StrategyCombiner([MockStrategy("strat_x", sell_signal)])
+        with patch.object(combiner2, "_load_config", return_value=config):
+            signal_no_pos = combiner2.generate_signal(
+                "AAPL", candles, "us_broad", has_open_position=False
+            )
+        assert signal_no_pos is None
