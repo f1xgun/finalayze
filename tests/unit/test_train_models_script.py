@@ -151,13 +151,14 @@ class TestTrainModelsScript:
         candles = _make_candles()
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
-            features, _labels, weights = mod._build_dataset(  # type: ignore[union-attr]
+            features, _labels, weights, hold_bars = mod._build_dataset(  # type: ignore[union-attr]
                 "us_tech",
                 ["AAPL"],
                 label_mode="direction",
             )
         assert len(features) > 0
         assert weights is None
+        assert hold_bars is None
 
     def test_build_dataset_triple_barrier_returns_weights(self) -> None:
         """Triple barrier mode returns non-None barrier_weights array."""
@@ -165,7 +166,7 @@ class TestTrainModelsScript:
         candles = _make_candles(n=200)
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
-            features, _labels, weights = mod._build_dataset(  # type: ignore[union-attr]
+            features, _labels, weights, hold_bars = mod._build_dataset(  # type: ignore[union-attr]
                 "us_tech",
                 ["AAPL"],
                 label_mode="triple_barrier",
@@ -176,3 +177,5 @@ class TestTrainModelsScript:
             assert weights is not None
             assert len(weights) == len(features)
             assert all(w >= 0 for w in weights)
+            assert hold_bars is not None
+            assert len(hold_bars) == len(features)
