@@ -5,12 +5,12 @@ min_exit_confidence: 0.25
 regime_routing:
   enabled: true
   adx_period: 14
-  trend_threshold: 35
-  mr_threshold: 15
+  trend_threshold: 30
+  mr_threshold: 20
 strategies:
   momentum:
     enabled: true
-    weight: 0.25
+    weight: 0.15
     params:
       rsi_period: 14
       rsi_oversold: 30
@@ -26,10 +26,10 @@ strategies:
       trend_filter: true
       trend_sma_period: 100
       trend_sma_buffer_pct: 2.0
-      adx_filter: true
+      adx_filter: false
       adx_period: 14
       adx_threshold: 20
-      volume_filter: true
+      volume_filter: false
       volume_sma_period: 20
       volume_min_ratio: 0.8
       neutral_reset_bars: 8
@@ -43,14 +43,14 @@ strategies:
       event_types: [geopolitical, sanctions, cbr_rate, commodity_price, earnings]
   mean_reversion:
     enabled: true
-    weight: 0.35
+    weight: 0.25
     params:
       bb_period: 20
-      bb_std_dev: 2.0
+      bb_std_dev: 2.5
       min_confidence: 0.40
       exit_at_mean: true
       trend_filter: true
-      trend_sma_period: 50
+      trend_sma_period: 100
       trend_sma_buffer_pct: 3.0
       rsi_oversold_mr: 25
       rsi_overbought_mr: 75
@@ -64,7 +64,7 @@ strategies:
       min_confidence: 0.40
   dividend_gap:
     enabled: true
-    weight: 0.20
+    weight: 0.15
     params:
       min_gap_pct: 3.0
       max_hold_bars: 60
@@ -82,15 +82,25 @@ strategies:
       rsi_period: 2
       rsi_buy_threshold: 10.0
       rsi_sell_threshold: 90.0
-      sma_trend_period: 200
+      sma_trend_period: 100
       sma_exit_period: 5
       min_confidence: 0.45
-  ou_mean_reversion:
-    enabled: false
-    weight: 0.07
+  dual_momentum:
+    enabled: true
+    weight: 0.15
     params:
-      ou_window: 126
-      entry_threshold: 2.0
-      exit_threshold: 0.5
-      use_mle: true
+      lookback_1m: 21
+      lookback_3m: 63
+      lookback_6m: 126
       min_confidence: 0.50
+      vol_target_enabled: true
+      vol_target: 0.20
+  ou_mean_reversion:
+    enabled: true
+    weight: 0.10
+    params:
+      ou_window: 60
+      entry_threshold: 1.8
+      exit_threshold: 0.3
+      use_mle: true
+      min_confidence: 0.45

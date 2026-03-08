@@ -152,6 +152,9 @@ class BacktestEngine:
             pipeline_steps.append(EVTStep())
         pipeline_steps.append(HardCapsStep())
         self._sizing_pipeline = PositionSizingPipeline(steps=pipeline_steps)
+        self._max_positions_per_segment = cfg.max_positions_per_segment
+        self._correlation_cache: dict[tuple[str, str], float] = {}
+        self._correlation_update_interval: int = 50
         self._portfolio_returns: list[float] = []
         self._last_run_summary: dict[str, object] = {}
 
@@ -414,7 +417,7 @@ class BacktestEngine:
                             continue
 
             # (c5) Check time-based exit (max holding period)
-            effective_max_hold = self._resolve_hold_bars(symbol, entry_strategies)
+            effective_max_hold = self._resolve_hold_bars(symbol, entry_strategies, segment_id)
             if (
                 effective_max_hold > 0
                 and symbol in entry_bars
@@ -645,6 +648,16 @@ class BacktestEngine:
                     broker.update_prices(sym_candles[idx])
                     bar_counts[sym] = bar_counts.get(sym, 0) + 1
 
+            # Update correlation cache every N bars (portfolio mode only)
+            if ts_index % self._correlation_update_interval == 0 and len(symbols) > 1:
+                recent_candles: dict[str, list[Candle]] = {}
+                for sym in symbols:
+                    sym_candles_list = candles_by_symbol.get(sym, [])
+                    if sym in candle_index and ts in candle_index[sym]:
+                        ci = candle_index[sym][ts]
+                        recent_candles[sym] = sym_candles_list[: ci + 1]
+                self._correlation_cache = self._compute_correlations(recent_candles)
+
             # Update Chandelier stops for all symbols in portfolio mode
             if self._stop_loss_mode == "chandelier":
                 for sym in symbols:
@@ -738,7 +751,7 @@ class BacktestEngine:
                                 continue
 
                 # Time-based exit check
-                effective_max_hold = self._resolve_hold_bars(sym, entry_strategies)
+                effective_max_hold = self._resolve_hold_bars(sym, entry_strategies, segment_id)
                 if effective_max_hold > 0 and sym in entry_bars and idx + 1 < len(sym_candles):
                     bars_since_entry = bar_counts.get(sym, 0) - entry_bars.get(sym, 0)
                     if bars_since_entry >= effective_max_hold:
@@ -816,6 +829,9 @@ class BacktestEngine:
                             sym,
                             entry_prices,
                             trades,
+                            segment_id=segment_id,
+                            signal=signal,
+                            history=history,
                             entry_bars=entry_bars,
                             entry_strategies=entry_strategies,
                             chandelier_stops=chandelier_stops,
@@ -852,14 +868,16 @@ class BacktestEngine:
         self,
         symbol: str,
         entry_strategies: dict[str, str],
+        segment_id: str = "",
     ) -> int:
         """Resolve the effective max hold bars for a given symbol's position.
 
         Uses the strategy name that opened the position to look up
         per-strategy hold limits when ``max_hold_bars`` is a dict.
+        MOEX segments (``ru_*``) get a 1.3x uplift.
         """
         strategy_name = entry_strategies.get(symbol, "")
-        return resolve_max_hold_bars(self._max_hold_bars, strategy_name)
+        return resolve_max_hold_bars(self._max_hold_bars, strategy_name, segment_id=segment_id)
 
     def _record_trade(self, trade: TradeResult) -> None:
         """Record a completed trade in the Rolling Kelly estimator."""
@@ -1065,7 +1083,36 @@ class BacktestEngine:
             cb_level=cb_level,
         )
 
-    def _handle_buy(  # noqa: PLR0912, PLR0915
+    def _compute_segment_exposure(
+        self,
+        broker: SimulatedBroker,
+        segment_id: str,  # noqa: ARG002
+    ) -> Decimal:
+        """Compute the total position value for a segment (for concentration check).
+
+        In single-symbol mode, all positions belong to the same segment.
+        In portfolio mode, the engine only trades one segment at a time.
+        So current equity in positions approximates segment exposure.
+        """
+        portfolio = broker.get_portfolio()
+        position_value = portfolio.equity - portfolio.cash
+        return max(position_value, Decimal(0))
+
+    @staticmethod
+    def _compute_correlations(
+        candles_by_symbol: dict[str, list[Candle]],
+        lookback: int = 60,
+    ) -> dict[tuple[str, str], float]:
+        """Compute trailing pairwise correlations for open positions.
+
+        Delegates to :func:`finalayze.risk.correlation.compute_correlation_matrix`
+        which uses pure-Python Pearson correlation (no numpy, no NaN risk).
+        """
+        from finalayze.risk.correlation import compute_correlation_matrix  # noqa: PLC0415
+
+        return compute_correlation_matrix(candles_by_symbol, window=lookback)
+
+    def _handle_buy(  # noqa: PLR0911, PLR0912, PLR0915
         self,
         broker: SimulatedBroker,
         checker: PreTradeChecker,
@@ -1094,6 +1141,19 @@ class BacktestEngine:
             )
             return
 
+        # Check segment position cap
+        segment_count = sum(1 for _s, qty in broker.get_positions().items() if qty > 0)
+        if segment_count >= self._max_positions_per_segment:
+            self._journal_skip(
+                timestamp=fill_candle.timestamp,
+                symbol=symbol,
+                segment_id=segment_id,
+                broker=broker,
+                history=history,
+                skip_reason="segment_position_cap",
+            )
+            return
+
         portfolio = broker.get_portfolio()
 
         # Compute position size via the unified sizing pipeline
@@ -1110,7 +1170,7 @@ class BacktestEngine:
             )
 
         asset_vol = compute_realized_vol(history) or Decimal("0.20")
-        # Currency-aware min position: RUB segments use ~5000 RUB, USD uses $500
+        # Currency-aware min position: 5000 RUB floor for MOEX, $500 for US
         min_pos = Decimal(5000) if segment_id.startswith("ru_") else Decimal(500)
         context = SizingContext(
             equity=portfolio.equity,
@@ -1157,6 +1217,9 @@ class BacktestEngine:
             symbol=symbol,
             open_positions=list(broker.get_positions().keys()),
             strategy_name=signal.strategy_name if signal is not None else None,
+            sector_id=segment_id,
+            sector_exposure_value=self._compute_segment_exposure(broker, segment_id),
+            correlations=self._correlation_cache or None,
         )
         if not result.passed:
             if self._decision_journal is not None:

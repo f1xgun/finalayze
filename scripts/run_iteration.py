@@ -52,6 +52,7 @@ from finalayze.core.schemas import (
     GateResult,
     IterationMetadata,
     IterationMetrics,
+    MarketContext,
     PortfolioState,
     TradeResult,
 )
@@ -62,16 +63,17 @@ from finalayze.markets.instruments import build_default_registry
 from finalayze.risk.kelly import RollingKelly
 from finalayze.risk.regime import (
     HMMRegimeProvider,
+    RollingVolRegimeProvider,
     StaticRegimeProvider,
     VIXRegimeProvider,
-    compute_moex_regime_state,
-    compute_realized_vol,
 )
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.cbr_calendar import CBRCalendar, CBRRateEvent
 from finalayze.strategies.cbr_strategy_wrapper import CBRStrategyWrapper
 from finalayze.strategies.dividend_gap import DividendEntry, DividendGapStrategy
 from finalayze.strategies.dual_momentum import DualMomentumStrategy
+
+_FALLBACK_USDRUB = Decimal("90.0")
 from finalayze.strategies.mean_reversion import MeanReversionStrategy
 from finalayze.strategies.ml_strategy import MLStrategy
 from finalayze.strategies.momentum import MomentumStrategy
@@ -540,7 +542,7 @@ def _build_regime_provider(  # noqa: PLR0911
     segment: str,
     start: datetime,
     end: datetime,
-) -> VIXRegimeProvider | HMMRegimeProvider | StaticRegimeProvider | None:
+) -> VIXRegimeProvider | HMMRegimeProvider | StaticRegimeProvider | RollingVolRegimeProvider | None:
     """Build a RegimeProvider based on CLI flag and segment type."""
     if regime_type == "none":
         return None
@@ -550,15 +552,13 @@ def _build_regime_provider(  # noqa: PLR0911
 
     # regime_type == "vix"
     if segment.startswith("ru_"):
-        # For MOEX segments, compute regime from IMOEX realized volatility
+        # For MOEX segments, compute regime from rolling IMOEX realized volatility
         try:
             moex_fetcher = CachingFetcher(_make_moex_fetcher())
             imoex_candles = moex_fetcher.fetch_candles("IMOEX", start, end)
             if imoex_candles:
-                vol = compute_realized_vol(imoex_candles)
-                regime_state = compute_moex_regime_state(vol)
-                print(f"    MOEX regime: {regime_state.regime.value} (vol={float(vol):.2%})")
-                return StaticRegimeProvider(regime_state)
+                print(f"    MOEX regime: RollingVolRegimeProvider ({len(imoex_candles)} bars)")
+                return RollingVolRegimeProvider(imoex_candles=imoex_candles)
         except Exception:
             print("    Warning: failed to fetch IMOEX data, regime provider disabled")
         return None
@@ -584,6 +584,47 @@ def _build_regime_provider(  # noqa: PLR0911
     return VIXRegimeProvider(vix_candles=vix_candles, sma200_candles=spy_candles)
 
 
+def _normalize_trades_to_usd(
+    trades: list[TradeResult],
+    segment: str,
+) -> list[TradeResult]:
+    """Convert MOEX trade values to USD for cross-segment aggregation."""
+    if not segment.startswith("ru_"):
+        return trades
+    return [
+        TradeResult(
+            signal_id=t.signal_id,
+            symbol=t.symbol,
+            side=t.side,
+            quantity=t.quantity,
+            entry_price=t.entry_price / _FALLBACK_USDRUB,
+            exit_price=t.exit_price / _FALLBACK_USDRUB,
+            pnl=t.pnl / _FALLBACK_USDRUB,
+            pnl_pct=t.pnl_pct,  # percentage is currency-agnostic
+            hold_bars=t.hold_bars,
+        )
+        for t in trades
+    ]
+
+
+def _normalize_snapshots_to_usd(
+    snapshots: list[PortfolioState],
+    segment: str,
+) -> list[PortfolioState]:
+    """Convert MOEX portfolio snapshots to USD for aggregation."""
+    if not segment.startswith("ru_"):
+        return snapshots
+    return [
+        PortfolioState(
+            timestamp=s.timestamp,
+            equity=s.equity / _FALLBACK_USDRUB,
+            cash=s.cash / _FALLBACK_USDRUB,
+            positions=s.positions,
+        )
+        for s in snapshots
+    ]
+
+
 def _run_symbol(
     symbol: str,
     segment: str,
@@ -596,6 +637,7 @@ def _run_symbol(
     use_copula_scaling: bool = False,
     regime_provider: VIXRegimeProvider | HMMRegimeProvider | StaticRegimeProvider | None = None,
     stop_loss_mode: str = "chandelier",
+    market_context: MarketContext | None = None,
 ) -> tuple[list[TradeResult], list[PortfolioState], dict[str, Any] | None]:
     """Run backtest for a single symbol. Returns (trades, snapshots, summary)."""
     sym_dir = output_dir / segment / symbol.replace(".", "_")
@@ -606,6 +648,8 @@ def _run_symbol(
             strategies=strategies,
             allocation_mode="hrp",
         )
+        if market_context is not None:
+            combiner.set_market_context(market_context)
         journal = DecisionJournal(output_path=sym_dir / "decision_journal.jsonl")
 
         engine = BacktestEngine(
@@ -900,6 +944,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
 
     # Cache benchmark candles per market
     benchmark_cache: dict[str, list[Any] | None] = {}
+    # Cache VIX candles (shared across US segments, None for MOEX)
+    vix_cache: dict[str, list[Any] | None] = {}
 
     all_trades: list[TradeResult] = []
     all_snapshots: list[PortfolioState] = []
@@ -909,7 +955,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     print(f"\nRunning iteration '{args.name}'")
     print(f"  Period: {args.start_date} to {args.end_date}")
     print(f"  Segments: {', '.join(segments)}")
-    print(f"  Cash: ${cash:,.0f}")
+    print(f"  Cash: ${cash:,.0f} (MOEX: ₽{cash * _FALLBACK_USDRUB:,.0f})")
     print()
 
     for segment in segments:
@@ -938,6 +984,29 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                 print(f"  Benchmark: {bench_symbol} (fetch failed)")
         bench_candles = benchmark_cache[bench_symbol]
 
+        # Fetch VIX candles for US segments (used by MarketContext for ML features)
+        vix_symbol = "^VIX"
+        vix_candles: list[Any] | None = None
+        if not segment.startswith("ru_"):
+            if vix_symbol not in vix_cache:
+                try:
+                    vix_fetcher = CachingFetcher(YFinanceFetcher(market_id="us"))
+                    vix_cache[vix_symbol] = vix_fetcher.fetch_candles(vix_symbol, start, end)
+                    n_vix = len(vix_cache[vix_symbol] or [])
+                    print(f"  VIX: {vix_symbol} ({n_vix} bars)")
+                except Exception:
+                    vix_cache[vix_symbol] = None
+                    print(f"  VIX: {vix_symbol} (fetch failed)")
+            vix_candles = vix_cache[vix_symbol]
+
+        # Build MarketContext for cross-asset ML features
+        ml_market_context: MarketContext | None = None
+        if bench_candles or vix_candles:
+            ml_market_context = MarketContext(
+                benchmark_candles=bench_candles,
+                vix_candles=vix_candles,
+            )
+
         # Create appropriate fetcher for the market
         is_moex = segment.startswith("ru_")
         base_fetcher = _make_moex_fetcher() if is_moex else YFinanceFetcher(market_id=market_id)
@@ -963,6 +1032,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         print()
 
         segment_trades[segment] = []
+        # Convert cash to RUB for MOEX segments so portfolio is ~$100K equivalent
+        segment_cash = cash * _FALLBACK_USDRUB if segment.startswith("ru_") else cash
 
         for symbol in symbols:
             # Fetch candles
@@ -982,19 +1053,21 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                 segment=segment,
                 candles=candles,
                 strategies=strategies,
-                cash=cash,
+                cash=segment_cash,
                 output_dir=iter_dir,
                 benchmark_candles=bench_candles,
                 use_evt_sizing=use_evt_sizing,
                 use_copula_scaling=use_copula_scaling,
                 regime_provider=regime_provider,
                 stop_loss_mode=args.stop_loss_mode,
+                market_context=ml_market_context,
             )
 
-            all_trades.extend(trades)
-            segment_trades[segment].extend(trades)
+            normalized_trades = _normalize_trades_to_usd(trades, segment)
+            all_trades.extend(normalized_trades)
+            segment_trades[segment].extend(trades)  # keep raw for per-segment metrics
             if snapshots:
-                all_snapshots.extend(snapshots)
+                all_snapshots.extend(_normalize_snapshots_to_usd(snapshots, segment))
             if summary:
                 all_summaries.append(summary)
 

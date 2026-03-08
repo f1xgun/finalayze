@@ -79,9 +79,14 @@ def resolve_stop_atr_multiplier(
     return Decimal(str(base))
 
 
+_MOEX_HOLD_BARS_UPLIFT = 1.3
+
+
 def resolve_max_hold_bars(
     max_hold_bars: int | dict[str, int],
     strategy_name: str,
+    *,
+    segment_id: str = "",
 ) -> int:
     """Resolve the max hold bars for a given strategy.
 
@@ -89,13 +94,19 @@ def resolve_max_hold_bars(
         max_hold_bars: Either a single int (applied to all strategies) or a
             dict mapping strategy names to their specific max hold bars.
         strategy_name: The name of the strategy that opened the position.
+        segment_id: Market segment identifier. MOEX segments (``ru_*``) get a
+            1.3x uplift to account for lower liquidity and wider spreads.
 
     Returns:
         The effective max hold bars for this strategy.
     """
     if isinstance(max_hold_bars, int):
-        return max_hold_bars
-    return max_hold_bars.get(strategy_name, _DEFAULT_HOLD_BARS_FALLBACK)
+        base = max_hold_bars
+    else:
+        base = max_hold_bars.get(strategy_name, _DEFAULT_HOLD_BARS_FALLBACK)
+    if segment_id.startswith("ru_"):
+        base = int(base * _MOEX_HOLD_BARS_UPLIFT)
+    return base
 
 
 @dataclass(frozen=True)
@@ -136,6 +147,9 @@ class BacktestConfig:
     # EVT tail-risk sizing and copula correlation scaling (Sprint 3)
     use_evt_sizing: bool = False
     use_copula_scaling: bool = False
+
+    # Per-segment position cap (independent of global max_positions)
+    max_positions_per_segment: int = 8
 
     # Ambient market data for cross-asset / regime features (Phase E)
     market_context: MarketContext | None = None

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -187,3 +188,185 @@ class TestTrainModelsScript:
             assert all(w >= 0 for w in weights)
             assert hold_bars is not None
             assert len(hold_bars) == len(features)
+
+
+@pytest.mark.unit
+class TestWalkForwardUsesLastFold:
+    """Verify that train_walk_forward always saves the last fold's models,
+    not the fold with the highest accuracy (no cherry-picking / selection bias)."""
+
+    def test_last_fold_models_saved_not_best_accuracy(self, tmp_path: Path) -> None:
+        """Even when an earlier fold has higher accuracy, the last fold's models are saved."""
+        mod = _load_script_module()
+
+        # Build 500 synthetic features + labels (enough for 3 folds of 100+ train samples)
+        n_samples = 500
+        n_features = 5
+        feature_names = [f"feat_{i}" for i in range(n_features)]
+        features = [
+            {name: float(i * 10 + j) for j, name in enumerate(feature_names)}
+            for i in range(n_samples)
+        ]
+        labels = [i % 2 for i in range(n_samples)]
+        timestamps = [
+            datetime(2023, 1, 1, tzinfo=UTC) + timedelta(days=i) for i in range(n_samples)
+        ]
+
+        # Define 3 folds; train must have >= 80 samples (_WINDOW_SIZE)
+        fold_size = 100
+        folds = [
+            (
+                list(range(0, fold_size)),  # train (100)
+                list(range(fold_size, fold_size + 10)),  # cal (10)
+                list(range(fold_size + 10, fold_size + 30)),  # test (20)
+            ),
+            (
+                list(range(100, 100 + fold_size)),
+                list(range(100 + fold_size, 100 + fold_size + 10)),
+                list(range(100 + fold_size + 10, 100 + fold_size + 30)),
+            ),
+            (
+                list(range(200, 200 + fold_size)),
+                list(range(200 + fold_size, 200 + fold_size + 10)),
+                list(range(200 + fold_size + 10, 200 + fold_size + 30)),
+            ),
+        ]
+
+        # Create distinguishable mock model triplets for each fold
+        fold_model_sets: list[list[MagicMock]] = []
+        fold_accuracies = [0.90, 0.60, 0.70]  # Fold 0 has highest accuracy
+
+        for fold_i in range(len(folds)):
+            mock_models = []
+            for model_name in ["xgb", "lgbm", "cat"]:
+                m = MagicMock()
+                m._trained = True
+                m._model = True
+                m.predict_proba.return_value = 0.6
+                # Tag each model so we can identify which fold it came from
+                m._fold_tag = fold_i
+                m._model_name = model_name
+                mock_models.append(m)
+            fold_model_sets.append(mock_models)
+
+        # Track which fold's models are constructed via side_effect on model classes
+        model_call_counts = {"xgb": 0, "lgbm": 0, "cat": 0}
+
+        def make_xgb_factory(fold_models: list[list[MagicMock]]) -> object:
+            def factory(*args: object, **kwargs: object) -> MagicMock:
+                idx = model_call_counts["xgb"]
+                model_call_counts["xgb"] += 1
+                return fold_models[min(idx, len(fold_models) - 1)][0]
+
+            return factory
+
+        def make_lgbm_factory(fold_models: list[list[MagicMock]]) -> object:
+            def factory(*args: object, **kwargs: object) -> MagicMock:
+                idx = model_call_counts["lgbm"]
+                model_call_counts["lgbm"] += 1
+                return fold_models[min(idx, len(fold_models) - 1)][1]
+
+            return factory
+
+        def make_cat_factory(fold_models: list[list[MagicMock]]) -> object:
+            def factory(*args: object, **kwargs: object) -> MagicMock:
+                idx = model_call_counts["cat"]
+                model_call_counts["cat"] += 1
+                return fold_models[min(idx, len(fold_models) - 1)][2]
+
+            return factory
+
+        # Build FoldMetrics with different accuracies per fold
+        from finalayze.ml.training.quality_gates import FoldMetrics, QualityGateResult
+
+        fold_metrics_list = [
+            FoldMetrics(
+                accuracy=acc,
+                brier_score=0.20,
+                log_loss=0.50,
+                n_test=10,
+                mean_uniqueness=1.0,
+                buy_ratio=0.5,
+                sensitivity=0.5,
+                specificity=0.5,
+                signal_count=10,
+            )
+            for acc in fold_accuracies
+        ]
+
+        eval_call_count = {"idx": 0}
+
+        def mock_evaluate_fold_metrics(
+            models: list[object],
+            test_features: list[dict[str, float]],
+            test_labels: list[int],
+            mean_uniqueness: float = 1.0,
+        ) -> FoldMetrics:
+            idx = eval_call_count["idx"]
+            eval_call_count["idx"] += 1
+            return fold_metrics_list[min(idx, len(fold_metrics_list) - 1)]
+
+        # Mock gate results -- all passing
+        mock_gate_result = QualityGateResult(
+            gate_name="accuracy", passed=True, value=0.70, threshold=0.55
+        )
+
+        with (
+            patch.object(
+                mod,  # type: ignore[union-attr]
+                "_build_dataset_with_timestamps",
+                return_value=(features, labels, None, None, timestamps),
+            ),
+            patch.object(
+                mod,  # type: ignore[union-attr]
+                "_generate_walk_forward_folds",
+                return_value=folds,
+            ),
+            patch.object(mod, "XGBoostModel", side_effect=make_xgb_factory(fold_model_sets)),  # type: ignore[union-attr]
+            patch.object(mod, "LightGBMModel", side_effect=make_lgbm_factory(fold_model_sets)),  # type: ignore[union-attr]
+            patch.object(mod, "CatBoostModel", side_effect=make_cat_factory(fold_model_sets)),  # type: ignore[union-attr]
+            patch.object(
+                mod,  # type: ignore[union-attr]
+                "_evaluate_fold_metrics",
+                side_effect=mock_evaluate_fold_metrics,
+            ),
+            patch(
+                "finalayze.ml.training.quality_gates.evaluate_fold",
+                return_value=[mock_gate_result],
+            ),
+            patch(
+                "finalayze.ml.training.quality_gates.evaluate_walk_forward",
+                return_value=(True, {"accuracy": 1.0}),
+            ),
+            patch.object(mod, "select_features_mi", return_value=[]),  # type: ignore[union-attr]
+        ):
+            result = mod.train_walk_forward(  # type: ignore[union-attr]
+                segment_id="us_tech",
+                symbols=["AAPL"],
+                output_dir=tmp_path,
+            )
+
+        assert result is not None
+
+        # The saved models should be from fold 2 (last), not fold 0 (highest accuracy)
+        segment_dir = tmp_path / "us_tech"
+        assert segment_dir.is_dir()
+
+        # Verify that save() was called on the last fold's models (fold index 2)
+        last_fold_models = fold_model_sets[2]
+        last_fold_models[0].save.assert_called_once()  # xgb from fold 2
+        last_fold_models[1].save.assert_called_once()  # lgbm from fold 2
+        last_fold_models[2].save.assert_called_once()  # catboost from fold 2
+
+        # Verify that the first fold's models (highest accuracy=0.90) were NOT saved
+        first_fold_models = fold_model_sets[0]
+        first_fold_models[0].save.assert_not_called()
+        first_fold_models[1].save.assert_not_called()
+        first_fold_models[2].save.assert_not_called()
+
+        # Verify gate results JSON records the last fold's accuracy, not the best
+        gate_results_path = segment_dir / "wf_gate_results.json"
+        assert gate_results_path.exists()
+        wf_data = json.loads(gate_results_path.read_text())
+        last_fold_accuracy = 0.70
+        assert wf_data["best_accuracy"] == pytest.approx(last_fold_accuracy)

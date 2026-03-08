@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 import yaml
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.risk.position_sizer import compute_realized_vol as _compute_rv
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.vol_targeting import compute_vol_scale
 
@@ -19,6 +21,7 @@ _WEIGHT_6M = 0.3
 _CONFIDENCE_BASE = 0.4
 _CONFIDENCE_SCALE = 1.0
 _MAX_CONFIDENCE = 0.95
+_VOL_BASELINE = 0.15  # baseline annual vol for confidence normalization
 _LOOKBACK_1M = 21
 _LOOKBACK_3M = 63
 _LOOKBACK_6M = 126
@@ -187,7 +190,10 @@ class DualMomentumStrategy(BaseStrategy):
         else:
             direction = SignalDirection.BUY
 
-        confidence = min(_MAX_CONFIDENCE, _CONFIDENCE_BASE + abs(score) * _CONFIDENCE_SCALE)
+        # Vol-normalize: same return at higher vol produces lower confidence
+        asset_vol = float(_compute_rv(candles) or Decimal("0.15"))
+        normalized_score = abs(score) / max(asset_vol, 0.01) * _VOL_BASELINE
+        confidence = min(_MAX_CONFIDENCE, _CONFIDENCE_BASE + normalized_score * _CONFIDENCE_SCALE)
 
         # Min confidence filter
         if confidence < min_confidence:

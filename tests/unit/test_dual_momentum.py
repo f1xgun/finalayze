@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest  # noqa: TC002
 
@@ -94,7 +95,11 @@ class TestDualMomentum:
         assert signal is None
 
     def test_dual_momentum_confidence(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Verify confidence formula: min(0.95, 0.4 + abs(score) * 1.0)."""
+        """Verify vol-normalized confidence formula at baseline vol (0.15).
+
+        At baseline vol the formula reduces to the original:
+        min(0.95, 0.4 + abs(score) * 1.0).
+        """
         # Build prices where we can calculate exact score
         n = 130
         base_price = 100.0
@@ -119,7 +124,12 @@ class TestDualMomentum:
 
         strategy = DualMomentumStrategy()
         monkeypatch.setattr(strategy, "get_parameters", lambda _seg: _DEFAULT_PARAMS)
-        signal = strategy.generate_signal("AAPL", candles, "us_tech")
+        # Mock realized vol to baseline (0.15) so formula equals old formula
+        with patch(
+            "finalayze.strategies.dual_momentum._compute_rv",
+            return_value=Decimal("0.15"),
+        ):
+            signal = strategy.generate_signal("AAPL", candles, "us_tech")
 
         assert signal is not None
         assert abs(signal.confidence - expected_confidence) < 1e-6
@@ -149,13 +159,19 @@ class TestDualMomentum:
         candles = _make_candles(prices)
         strategy = DualMomentumStrategy()
         monkeypatch.setattr(strategy, "get_parameters", lambda _seg: _DEFAULT_PARAMS)
-        signal = strategy.generate_signal("AAPL", candles, "us_tech")
 
         ret_1m = (120.0 - 100.0) / 100.0  # 0.2
         ret_3m = (120.0 - 110.0) / 110.0  # ~0.0909
         ret_6m = (120.0 - 105.0) / 105.0  # ~0.1429
 
         expected_score = ret_1m * 0.4 + ret_3m * 0.3 + ret_6m * 0.3
+
+        # Mock realized vol to baseline (0.15) so formula equals old formula
+        with patch(
+            "finalayze.strategies.dual_momentum._compute_rv",
+            return_value=Decimal("0.15"),
+        ):
+            signal = strategy.generate_signal("AAPL", candles, "us_tech")
 
         assert signal is not None
         features = signal.features

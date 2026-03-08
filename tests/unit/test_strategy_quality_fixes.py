@@ -839,8 +839,8 @@ class TestPerSegmentMACDParameters:
 # ── #145 — ADX and volume filters disabled ────────────────────────────────────
 
 
-class TestADXVolumeFiltersEnabled:
-    """ADX filter and volume filter must be enabled in MOEX presets."""
+class TestADXVolumeFiltersDisabled:
+    """ADX filter and volume filter disabled in MOEX presets (regime routing handles ADX)."""
 
     def _get_params(self, segment: str) -> dict[str, object]:
         from finalayze.strategies.momentum import MomentumStrategy
@@ -848,25 +848,25 @@ class TestADXVolumeFiltersEnabled:
         strategy = MomentumStrategy()
         return strategy.get_parameters(segment)
 
-    def test_ru_blue_chips_adx_filter_enabled(self) -> None:
+    def test_ru_blue_chips_adx_filter_disabled(self) -> None:
         params = self._get_params("ru_blue_chips")
-        assert params.get("adx_filter") is True, (
-            f"adx_filter should be True for ru_blue_chips, got {params.get('adx_filter')}"
+        assert params.get("adx_filter") is False, (
+            "adx_filter should be False for ru_blue_chips (regime routing handles ADX)"
         )
 
-    def test_ru_blue_chips_volume_filter_enabled(self) -> None:
+    def test_ru_blue_chips_volume_filter_disabled(self) -> None:
         params = self._get_params("ru_blue_chips")
-        assert params.get("volume_filter") is True, (
-            f"volume_filter should be True for ru_blue_chips, got {params.get('volume_filter')}"
+        assert params.get("volume_filter") is False, (
+            "volume_filter should be False for ru_blue_chips (MOEX volumes naturally lower)"
         )
 
-    def test_ru_energy_adx_filter_enabled(self) -> None:
+    def test_ru_energy_adx_filter_disabled(self) -> None:
         params = self._get_params("ru_energy")
-        assert params.get("adx_filter") is True
+        assert params.get("adx_filter") is False
 
-    def test_ru_energy_volume_filter_enabled(self) -> None:
+    def test_ru_energy_volume_filter_disabled(self) -> None:
         params = self._get_params("ru_energy")
-        assert params.get("volume_filter") is True
+        assert params.get("volume_filter") is False
 
 
 # ── #148 — ATR multiplier per-market ─────────────────────────────────────────
@@ -908,13 +908,13 @@ class TestBBStdDevDifferentiation:
         params = strategy.get_parameters(segment)
         return float(params.get("bb_std_dev", 2.0))  # type: ignore[arg-type]
 
-    def test_ru_energy_bb_std_dev_is_2_0(self) -> None:
+    def test_ru_energy_bb_std_dev_is_2_8(self) -> None:
         std = self._get_bb_std("ru_energy")
-        assert std == 2.0, f"Expected bb_std_dev=2.0 for ru_energy, got {std}"
+        assert std == 2.8, f"Expected bb_std_dev=2.8 for ru_energy, got {std}"  # noqa: PLR2004
 
-    def test_ru_blue_chips_bb_std_dev_is_2_0(self) -> None:
+    def test_ru_blue_chips_bb_std_dev_is_2_5(self) -> None:
         std = self._get_bb_std("ru_blue_chips")
-        assert std == 2.0, f"Expected bb_std_dev=2.0 for ru_blue_chips, got {std}"
+        assert std == 2.5, f"Expected bb_std_dev=2.5 for ru_blue_chips, got {std}"  # noqa: PLR2004
 
     def test_ru_energy_at_least_as_wide_as_ru_blue_chips(self) -> None:
         energy_std = self._get_bb_std("ru_energy")

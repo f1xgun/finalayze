@@ -245,6 +245,42 @@ def compute_moex_regime_state(
     )
 
 
+class RollingVolRegimeProvider:
+    """Compute MOEX regime from rolling realized vol of IMOEX candles.
+
+    Unlike StaticRegimeProvider (single snapshot), this recomputes realized vol
+    at each bar using a rolling window. Matches VIXRegimeProvider's per-bar behavior.
+    """
+
+    _MIN_RETURNS_FOR_STDEV = 2
+
+    def __init__(self, imoex_candles: list[Candle], window: int = 20) -> None:
+        self._closes = [float(c.close) for c in imoex_candles]
+        self._window = window
+
+    def get_regime(self, candles: list[Candle], bar_index: int) -> RegimeState:  # noqa: ARG002
+        """Compute regime from rolling realized vol at bar_index."""
+        idx = min(bar_index, len(self._closes) - 1)
+        if idx < self._window:
+            return RegimeState.normal()
+
+        window_closes = self._closes[idx - self._window : idx + 1]
+        returns = [
+            (window_closes[i] - window_closes[i - 1]) / window_closes[i - 1]
+            for i in range(1, len(window_closes))
+            if window_closes[i - 1] != 0
+        ]
+        if len(returns) < self._MIN_RETURNS_FOR_STDEV:
+            return RegimeState.normal()
+
+        import statistics  # noqa: PLC0415
+
+        daily_vol = statistics.stdev(returns)
+        annualized_vol = Decimal(str(daily_vol * math.sqrt(252)))
+
+        return compute_moex_regime_state(annualized_vol)
+
+
 class HMMRegimeProvider:
     """Regime provider using a Hidden Markov Model with periodic retraining.
 
