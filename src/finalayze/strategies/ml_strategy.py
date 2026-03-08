@@ -14,7 +14,7 @@ import structlog
 import yaml
 
 from finalayze.core.exceptions import InsufficientDataError
-from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.core.schemas import Candle, MarketContext, Signal, SignalDirection
 from finalayze.ml.features.technical import compute_features
 from finalayze.strategies.base import BaseStrategy
 
@@ -26,6 +26,7 @@ _log = structlog.get_logger()
 
 _DEFAULT_THRESHOLD = 0.08
 _DEFAULT_MIN_CONFIDENCE = 0.15
+_DEFAULT_BASE_RATE = 0.50
 _UNTRAINED_PROB = 0.5
 _UNTRAINED_EPSILON = 1e-9
 
@@ -44,6 +45,11 @@ class MLStrategy(BaseStrategy):
     def __init__(self, registry: MLModelRegistry) -> None:
         self._registry = registry
         self._params_cache: dict[str, dict[str, object]] = {}
+        self._market_context: MarketContext | None = None
+
+    def set_market_context(self, ctx: MarketContext) -> None:
+        """Inject ambient market data (benchmark/VIX) for cross-asset features."""
+        self._market_context = ctx
 
     @property
     def name(self) -> str:
@@ -93,14 +99,35 @@ class MLStrategy(BaseStrategy):
         if ensemble is None:
             return None
 
+        benchmark = None
+        vix = None
+        if self._market_context is not None:
+            benchmark = self._market_context.benchmark_candles
+            vix = self._market_context.vix_candles
+
         try:
-            features = compute_features(candles, sentiment_score=0.0)
+            features = compute_features(
+                candles,
+                sentiment_score=0.0,
+                benchmark_candles=benchmark,
+                vix_candles=vix,
+            )
         except InsufficientDataError:
             return None
 
         # Filter to MI-selected features if the ensemble was trained with feature selection
         selected = getattr(ensemble, "selected_features", None)
         if selected is not None:
+            missing = [k for k in selected if k not in features]
+            if missing:
+                _log.warning(
+                    "ml_feature_mismatch",
+                    segment_id=segment_id,
+                    symbol=symbol,
+                    missing_features=missing,
+                    selected_count=len(selected),
+                    available_count=len(features),
+                )
             features = {k: features[k] for k in selected if k in features}
 
         try:
@@ -117,6 +144,17 @@ class MLStrategy(BaseStrategy):
         if result is None:
             return None
         direction, confidence = result
+
+        # C5: reduce confidence when ensemble models disagree
+        _UNCERTAINTY_THRESHOLD = 0.10  # noqa: N806
+        probas = getattr(ensemble, "last_model_probas", None)
+        _MIN_MODELS = 2  # noqa: N806
+        if isinstance(probas, dict) and len(probas) >= _MIN_MODELS:
+            import numpy as _np  # noqa: PLC0415
+
+            uncertainty = float(_np.std(list(probas.values())))
+            if uncertainty > _UNCERTAINTY_THRESHOLD:
+                confidence *= 1.0 - uncertainty
 
         params = self.get_parameters(segment_id)
         threshold = float(params.get("threshold", _DEFAULT_THRESHOLD))  # type: ignore[arg-type]
@@ -135,17 +173,23 @@ class MLStrategy(BaseStrategy):
     def _map_probability(
         self, prob: float, segment_id: str
     ) -> tuple[SignalDirection, float] | None:
-        """Map a BUY probability to direction + confidence, or None if in deadzone."""
+        """Map a BUY probability to direction + confidence, or None if in deadzone.
+
+        Uses ``base_rate`` from YAML params (default 0.50) as the neutral
+        center instead of hardcoded 0.50.  This enables base-rate correction:
+        if training labels have mean(y) != 0.50, the threshold shifts accordingly.
+        """
         params = self.get_parameters(segment_id)
         threshold = float(params.get("threshold", _DEFAULT_THRESHOLD))  # type: ignore[arg-type]
         min_confidence = float(params.get("min_confidence", _DEFAULT_MIN_CONFIDENCE))  # type: ignore[arg-type]
+        base_rate = float(params.get("base_rate", _DEFAULT_BASE_RATE))  # type: ignore[arg-type]
 
-        if prob > _UNTRAINED_PROB + threshold:
+        if prob > base_rate + threshold:
             direction = SignalDirection.BUY
-            confidence = (prob - _UNTRAINED_PROB) * 2
-        elif prob < _UNTRAINED_PROB - threshold:
+            confidence = (prob - base_rate) * 2
+        elif prob < base_rate - threshold:
             direction = SignalDirection.SELL
-            confidence = (_UNTRAINED_PROB - prob) * 2
+            confidence = (base_rate - prob) * 2
         else:
             return None
 

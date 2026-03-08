@@ -1,105 +1,158 @@
-"""Tests for MetaLabeler (meta-labeling with XGBoost)."""
+"""Tests for MetaLabeler (E1 -- meta-labeling)."""
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
-from finalayze.core.exceptions import InsufficientDataError
-from finalayze.ml.meta_labeler import MetaLabeler, MetaSample
-
-_MIN_SAMPLES = 30
+from finalayze.core.schemas import Signal, SignalDirection
+from finalayze.ml.meta_labeler import MetaLabeler
 
 
-def _make_samples(n: int, profitable_ratio: float = 0.6) -> list[MetaSample]:
-    """Generate synthetic MetaSamples for testing."""
-    samples: list[MetaSample] = []
-    for i in range(n):
-        profitable = i < int(n * profitable_ratio)
-        samples.append(
-            MetaSample(
-                features={"rsi": float(i % 100), "macd": float(i * 0.1)},
-                signal_direction=1.0 if i % 2 == 0 else -1.0,
-                strategy_name="momentum" if i % 3 != 0 else "mean_reversion",
-                confidence=0.5 + (i % 50) * 0.01,
-                profitable=profitable,
-            )
-        )
-    return samples
+def _make_signal(
+    *,
+    direction: SignalDirection = SignalDirection.BUY,
+    confidence: float = 0.6,
+    symbol: str = "AAPL",
+) -> Signal:
+    return Signal(
+        strategy_name="dual_momentum",
+        symbol=symbol,
+        market_id="us",
+        segment_id="us_tech",
+        direction=direction,
+        confidence=confidence,
+        features={"score": 0.8},
+        reasoning="test signal",
+    )
 
 
-class TestMetaLabeler:
-    """MetaLabeler unit tests."""
+class TestMetaLabelerPredict:
+    def test_predict_returns_probability(self) -> None:
+        """Ensemble returns 0.7, meta-labeler returns 0.7."""
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.7
+        meta = MetaLabeler(ensemble)
 
-    def test_predict_before_fit_returns_half(self) -> None:
-        labeler = MetaLabeler()
-        sample = MetaSample(
-            features={"rsi": 50.0, "macd": 0.1},
-            signal_direction=1.0,
-            strategy_name="momentum",
-            confidence=0.7,
-            profitable=None,
-        )
-        assert labeler.predict_proba(sample) == 0.5
+        signal = _make_signal()
+        result = meta.predict(signal, {"rsi_14": 50.0})
 
-    def test_fit_and_predict_range(self) -> None:
-        labeler = MetaLabeler()
-        samples = _make_samples(50)
-        labeler.fit(samples)
+        assert result == pytest.approx(0.7)
 
-        inference_sample = MetaSample(
-            features={"rsi": 45.0, "macd": 0.3},
-            signal_direction=1.0,
-            strategy_name="momentum",
-            confidence=0.6,
-            profitable=None,
-        )
-        prob = labeler.predict_proba(inference_sample)
-        assert 0.0 <= prob <= 1.0
+    def test_predict_adds_signal_features(self) -> None:
+        """Verify signal_confidence and signal_direction_buy are added to features."""
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.7
+        meta = MetaLabeler(ensemble)
 
-    def test_minimum_samples_guard(self) -> None:
-        labeler = MetaLabeler()
-        samples = _make_samples(_MIN_SAMPLES - 1)
-        with pytest.raises(InsufficientDataError, match="at least 30"):
-            labeler.fit(samples)
+        signal = _make_signal(direction=SignalDirection.BUY, confidence=0.65)
+        meta.predict(signal, {"rsi_14": 50.0})
 
-    def test_unknown_strategy_at_inference(self) -> None:
-        labeler = MetaLabeler()
-        samples = _make_samples(50)
-        labeler.fit(samples)
+        called_features = ensemble.predict_proba.call_args[0][0]
+        assert called_features["signal_confidence"] == pytest.approx(0.65)
+        assert called_features["signal_direction_buy"] == pytest.approx(1.0)
+        assert called_features["rsi_14"] == pytest.approx(50.0)
 
-        inference_sample = MetaSample(
-            features={"rsi": 45.0, "macd": 0.3},
-            signal_direction=1.0,
-            strategy_name="totally_new_strategy",
-            confidence=0.6,
-            profitable=None,
-        )
-        prob = labeler.predict_proba(inference_sample)
-        assert 0.0 <= prob <= 1.0
+    def test_predict_sell_signal_direction_feature(self) -> None:
+        """SELL signal sets signal_direction_buy=0.0."""
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.7
+        meta = MetaLabeler(ensemble)
 
-    def test_is_fitted_property(self) -> None:
-        labeler = MetaLabeler()
-        assert labeler.is_fitted is False
+        signal = _make_signal(direction=SignalDirection.SELL)
+        meta.predict(signal, {"rsi_14": 50.0})
 
-        samples = _make_samples(50)
-        labeler.fit(samples)
-        assert labeler.is_fitted is True
+        called_features = ensemble.predict_proba.call_args[0][0]
+        assert called_features["signal_direction_buy"] == pytest.approx(0.0)
 
-    def test_missing_feature_at_inference(self) -> None:
-        """Inference sample missing a feature key should fill with 0.0, not crash."""
-        labeler = MetaLabeler()
-        # Train with two features: rsi and macd
-        samples = _make_samples(50)
-        labeler.fit(samples)
+    def test_predict_untrained_returns_none(self) -> None:
+        """Ensemble returns exactly 0.5 (untrained), returns None."""
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.5
+        meta = MetaLabeler(ensemble)
 
-        # Inference sample is missing 'macd' entirely
-        inference_sample = MetaSample(
-            features={"rsi": 60.0},  # 'macd' is absent
-            signal_direction=1.0,
-            strategy_name="momentum",
-            confidence=0.65,
-            profitable=None,
-        )
-        # Must not raise; must return a valid probability
-        prob = labeler.predict_proba(inference_sample)
-        assert 0.0 <= prob <= 1.0
+        signal = _make_signal()
+        result = meta.predict(signal, {"rsi_14": 50.0})
+
+        assert result is None
+
+    def test_predict_exception_returns_none(self) -> None:
+        """Ensemble raises, returns None."""
+        ensemble = MagicMock()
+        ensemble.predict_proba.side_effect = RuntimeError("model error")
+        meta = MetaLabeler(ensemble)
+
+        signal = _make_signal()
+        result = meta.predict(signal, {"rsi_14": 50.0})
+
+        assert result is None
+
+    def test_predict_does_not_mutate_original_features(self) -> None:
+        """Original features dict should not be modified."""
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.7
+        meta = MetaLabeler(ensemble)
+
+        original = {"rsi_14": 50.0}
+        signal = _make_signal()
+        meta.predict(signal, original)
+
+        assert "signal_confidence" not in original
+
+
+class TestShouldTrade:
+    def test_above_threshold(self) -> None:
+        """0.60 > 0.40 -> True."""
+        ensemble = MagicMock()
+        meta = MetaLabeler(ensemble)
+        assert meta.should_trade(0.60) is True
+
+    def test_below_threshold(self) -> None:
+        """0.30 < 0.40 -> False."""
+        ensemble = MagicMock()
+        meta = MetaLabeler(ensemble)
+        assert meta.should_trade(0.30) is False
+
+    def test_at_threshold(self) -> None:
+        """0.40 == 0.40 -> False (strict >)."""
+        ensemble = MagicMock()
+        meta = MetaLabeler(ensemble)
+        assert meta.should_trade(0.40) is False
+
+
+class TestSizingFactor:
+    def test_above_threshold(self) -> None:
+        """p=0.70: (0.70 - 0.40) / 0.60 = 0.50."""
+        ensemble = MagicMock()
+        meta = MetaLabeler(ensemble)
+        assert meta.sizing_factor(0.70) == pytest.approx(0.50)
+
+    def test_at_threshold(self) -> None:
+        """p=0.40 -> 0.0."""
+        ensemble = MagicMock()
+        meta = MetaLabeler(ensemble)
+        assert meta.sizing_factor(0.40) == pytest.approx(0.0)
+
+    def test_max_capped(self) -> None:
+        """p=1.0 -> 1.0."""
+        ensemble = MagicMock()
+        meta = MetaLabeler(ensemble)
+        assert meta.sizing_factor(1.0) == pytest.approx(1.0)
+
+    def test_below_threshold(self) -> None:
+        """p=0.20 -> 0.0."""
+        ensemble = MagicMock()
+        meta = MetaLabeler(ensemble)
+        assert meta.sizing_factor(0.20) == pytest.approx(0.0)
+
+
+class TestCustomThreshold:
+    def test_custom_threshold(self) -> None:
+        """threshold=0.50, p=0.60 -> should_trade=True, sizing=(0.60-0.50)/0.50=0.20."""
+        ensemble = MagicMock()
+        meta = MetaLabeler(ensemble, threshold=0.50)
+
+        assert meta.threshold == pytest.approx(0.50)
+        assert meta.should_trade(0.60) is True
+        assert meta.sizing_factor(0.60) == pytest.approx(0.20)

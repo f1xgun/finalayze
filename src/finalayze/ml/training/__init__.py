@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from finalayze.core.schemas import Candle
     from finalayze.ml.models.ensemble import EnsembleModel
 
-DEFAULT_WINDOW_SIZE = 60
+DEFAULT_WINDOW_SIZE = 80
 
 # Validation gate thresholds (6C.7)
 _MIN_ACCURACY = 0.54  # 2 SE above coin-flip for n=500

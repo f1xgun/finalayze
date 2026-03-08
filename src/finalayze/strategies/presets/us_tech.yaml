@@ -66,8 +66,9 @@ strategies:
     enabled: false
     weight: 0.00
     params:
-      threshold: 0.10
-      min_confidence: 0.30
+      threshold: 0.08
+      min_confidence: 0.15
+      base_rate: 0.50
   dual_momentum:
     enabled: true
     weight: 0.25

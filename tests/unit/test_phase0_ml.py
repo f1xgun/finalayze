@@ -93,8 +93,8 @@ class TestBuildDatasetTemporalOrdering:
 
     def test_build_dataset_sorted_by_timestamp(self) -> None:
         """Multi-symbol build produces temporally ordered output."""
-        window_size = 30
-        n_candles = 100
+        window_size = 80
+        n_candles = 200
 
         # Symbol A starts earlier, symbol B starts later
         sym_a = _make_candles("AAA", n_candles, datetime(2020, 1, 1, tzinfo=UTC))
@@ -113,8 +113,8 @@ class TestBuildDatasetTemporalOrdering:
 
     def test_no_future_leakage_multi_symbol(self) -> None:
         """No test sample has a timestamp before any train sample."""
-        window_size = 30
-        n_candles = 100
+        window_size = 80
+        n_candles = 200
         train_ratio = 0.8
 
         sym_a = _make_candles("AAA", n_candles, datetime(2020, 1, 1, tzinfo=UTC))

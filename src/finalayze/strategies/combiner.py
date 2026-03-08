@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import structlog
 import yaml
 
-from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.core.schemas import Candle, MarketContext, Signal, SignalDirection
 from finalayze.strategies.adx import compute_adx
 from finalayze.strategies.hrp import compute_hrp_weights
 
@@ -56,6 +56,7 @@ class StrategyCombiner:
         strategies: list[BaseStrategy],
         normalize_mode: str = "firing",
         allocation_mode: str = "static",
+        market_context: MarketContext | None = None,
     ) -> None:
         self._strategies: dict[str, BaseStrategy] = {s.name: s for s in strategies}
         self._presets_dir = _PRESETS_DIR
@@ -64,6 +65,12 @@ class StrategyCombiner:
         self._strategy_returns: dict[str, list[float]] = defaultdict(list)
         self._hrp_weights: dict[str, Decimal] | None = None
         self._adx_regimes: dict[str, str] = {}
+
+        # Propagate market context to strategies that support it (duck typing)
+        if market_context is not None:
+            for strategy in strategies:
+                if hasattr(strategy, "set_market_context"):
+                    strategy.set_market_context(market_context)
 
     def record_strategy_return(self, strategy_name: str, ret: float) -> None:
         """Record a strategy return observation for HRP weight computation.
@@ -393,9 +400,7 @@ class StrategyCombiner:
 
         # Reinforcer-only check: if every firing strategy is a reinforcer, suppress the signal.
         firing_names = {
-            name
-            for name in self._strategies
-            if f"{name}_confidence" in feature_contributions
+            name for name in self._strategies if f"{name}_confidence" in feature_contributions
         }
         if firing_names and firing_names <= _REINFORCER_STRATEGIES:
             self._on_normalized(0.0, feature_contributions)

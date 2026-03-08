@@ -64,7 +64,7 @@ class TestWaveletFeaturesInComputeFeatures:
 
     def test_compute_features_includes_wavelet_keys(self) -> None:
         rng = np.random.default_rng(42)
-        prices = 100.0 + rng.standard_normal(40).cumsum()
+        prices = 100.0 + rng.standard_normal(80).cumsum()
         base_date = datetime(2024, 1, 1, tzinfo=UTC)
         candles = [
             Candle(
@@ -78,7 +78,7 @@ class TestWaveletFeaturesInComputeFeatures:
                 close=Decimal(str(round(float(prices[i]), 2))),
                 volume=int(1000 + rng.integers(0, 500)),
             )
-            for i in range(40)
+            for i in range(80)
         ]
         features = compute_features(candles)
         assert _WAVELET_KEYS.issubset(set(features.keys()))
@@ -87,7 +87,7 @@ class TestWaveletFeaturesInComputeFeatures:
         import math
 
         rng = np.random.default_rng(42)
-        prices = 100.0 + rng.standard_normal(40).cumsum()
+        prices = 100.0 + rng.standard_normal(80).cumsum()
         base_date = datetime(2024, 1, 1, tzinfo=UTC)
         candles = [
             Candle(
@@ -101,7 +101,7 @@ class TestWaveletFeaturesInComputeFeatures:
                 close=Decimal(str(round(float(prices[i]), 2))),
                 volume=int(1000 + rng.integers(0, 500)),
             )
-            for i in range(40)
+            for i in range(80)
         ]
         features = compute_features(candles)
         for key in _WAVELET_KEYS:

@@ -141,6 +141,9 @@ class BacktestEngine:
         self._max_hold_bars = cfg.max_hold_bars
         self._stop_loss_mode = cfg.stop_loss_mode
         self._regime_provider = regime_provider
+        # Propagate market context to strategy if it supports it (duck typing)
+        if cfg.market_context is not None and hasattr(self._strategy, "set_market_context"):
+            self._strategy.set_market_context(cfg.market_context)
         # Build position sizing pipeline with optional EVT/Copula steps
         pipeline_steps = [KellyStep(), VolTargetStep(), RegimeStep()]
         if self._config.use_copula_scaling:

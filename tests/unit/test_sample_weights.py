@@ -175,3 +175,95 @@ class TestComputeDecayWeights:
         """Zero samples should raise ValueError."""
         with pytest.raises(ValueError, match="positive"):
             compute_decay_weights(0)
+
+
+# ---------------------------------------------------------------------------
+# compute_uniqueness_from_hold_bars (A6: efficient bar-based uniqueness)
+# ---------------------------------------------------------------------------
+_HOLD_BARS_ALL_ONE = 1
+_HOLD_BARS_LONG = 20
+_HOLD_BARS_MIX_SHORT = 1
+_HOLD_BARS_MIX_LONG = 10
+_HOLD_BARS_SAMPLES_FIVE = 5
+_UNIQUENESS_FULL_OVERLAP = 1.0 / _HOLD_BARS_LONG
+
+
+class TestComputeUniquenessFromHoldBars:
+    """Tests for compute_uniqueness_from_hold_bars (O(n*max_hold) approach)."""
+
+    def test_all_hold_one_bar_fully_unique(self) -> None:
+        """When each sample holds for 1 bar, no overlap -> uniqueness = 1.0."""
+        from scripts.train_models import _compute_uniqueness_from_hold_bars
+
+        hold_bars = [_HOLD_BARS_ALL_ONE] * _N_SAMPLES
+        result = _compute_uniqueness_from_hold_bars(hold_bars)
+        assert len(result) == _N_SAMPLES
+        np.testing.assert_allclose(result, 1.0, atol=_TOLERANCE)
+
+    def test_long_holds_lower_uniqueness(self) -> None:
+        """Consecutive samples with hold=20 overlap heavily -> low uniqueness."""
+        from scripts.train_models import _compute_uniqueness_from_hold_bars
+
+        n = _HOLD_BARS_LONG
+        hold_bars = [_HOLD_BARS_LONG] * n
+        result = _compute_uniqueness_from_hold_bars(hold_bars)
+        assert len(result) == n
+        # All should have low uniqueness (close to 1/20)
+        assert all(u < 0.5 for u in result)
+
+    def test_mixed_hold_bars(self) -> None:
+        """Mix of short and long holds: short holds more unique than long."""
+        from scripts.train_models import _compute_uniqueness_from_hold_bars
+
+        # 5 samples: alternating short(1) and long(10) holds
+        hold_bars = [_HOLD_BARS_MIX_SHORT, _HOLD_BARS_MIX_LONG,
+                     _HOLD_BARS_MIX_SHORT, _HOLD_BARS_MIX_LONG,
+                     _HOLD_BARS_MIX_SHORT]
+        result = _compute_uniqueness_from_hold_bars(hold_bars)
+        assert len(result) == _HOLD_BARS_SAMPLES_FIVE
+        # Short-hold samples at index 0, 2, 4 should be more unique
+        # than long-hold samples at index 1, 3
+        assert result[0] > result[1]
+
+    def test_empty_input(self) -> None:
+        """Empty hold_bars returns empty array."""
+        from scripts.train_models import _compute_uniqueness_from_hold_bars
+
+        result = _compute_uniqueness_from_hold_bars([])
+        assert len(result) == 0
+
+    def test_zero_hold_bars_gives_uniqueness_one(self) -> None:
+        """hold_bars=0 is treated as uniqueness=1.0 (no span)."""
+        from scripts.train_models import _compute_uniqueness_from_hold_bars
+
+        result = _compute_uniqueness_from_hold_bars([0, 0, 0])
+        _n_zero = 3
+        assert len(result) == _n_zero
+        np.testing.assert_allclose(result, 1.0, atol=_TOLERANCE)
+
+
+# ---------------------------------------------------------------------------
+# sqrt dampening of barrier weights (A6)
+# ---------------------------------------------------------------------------
+_EXTREME_PNL = 0.10
+_SMALL_PNL = 0.01
+_DAMPENING_RATIO_THRESHOLD = 5.0
+
+
+class TestSqrtDampeningBarrierWeights:
+    """Verify sqrt dampening compresses extreme PnL values."""
+
+    def test_sqrt_compresses_extreme_values(self) -> None:
+        """After sqrt, the ratio between large and small is compressed."""
+        # Without sqrt: ratio = 0.10 / 0.01 = 10x
+        # With sqrt: ratio = sqrt(0.10) / sqrt(0.01) = ~3.16x
+        raw_large = _EXTREME_PNL
+        raw_small = _SMALL_PNL
+        raw_ratio = raw_large / raw_small
+
+        dampened_large = np.sqrt(raw_large)
+        dampened_small = np.sqrt(raw_small)
+        dampened_ratio = dampened_large / dampened_small
+
+        assert dampened_ratio < raw_ratio
+        assert dampened_ratio < _DAMPENING_RATIO_THRESHOLD

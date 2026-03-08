@@ -76,3 +76,4 @@ credentials.json
 
 # Worktrees
 .worktrees/
+catboost_info/

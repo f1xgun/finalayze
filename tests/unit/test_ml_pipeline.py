@@ -18,29 +18,59 @@ from finalayze.ml.registry import MLModelRegistry
 
 # ── Feature computation ──────────────────────────────────────────────────────
 _FEATURE_NAMES = {
+    # Core 5
     "rsi_14",
     "macd_hist_pct",
     "bb_pct_b",
     "volume_ratio_20d",
     "atr_14_pct",
-    "sentiment",
+    # Extra indicators
     "roc_10",
     "willr_14",
     "adx_14",
-    "ma_slope_20",
     "hist_vol_20",
     "gk_vol_20",
-    "dow_sin",
-    "dow_cos",
     "obv_slope_10",
     "rsi_divergence",
-    "proximity_52wk",
+    # Predictive (lagged returns + distribution + short RSI)
+    "ret_1d",
+    "ret_5d",
+    "ret_21d",
+    "skew_20d",
+    "kurt_20d",
+    "max_ret_20d",
+    "min_ret_20d",
+    "rsi_2",
+    "rsi_5",
+    # Microstructure
+    "proximity_rolling_high",
     "amihud_20d",
     "corwin_schultz_spread",
+    # Wavelet
     "wavelet_approx_energy",
     "wavelet_detail1_energy",
     "wavelet_detail2_energy",
     "wavelet_detail3_energy",
+    # Z-score
+    "price_zscore_60d",
+    "volume_zscore_20d",
+    "rsi_zscore_60d",
+    "atr_zscore_60d",
+    # Calendar
+    "dow_sin",
+    "dow_cos",
+    "month_sin",
+    "month_cos",
+    # Regime / VIX
+    "vix_level",
+    "vix_percentile_252d",
+    "vix_change_5d",
+    "realized_vol_ratio",
+    # Cross-asset
+    "relative_strength_21d",
+    "rolling_beta_63d",
+    "rolling_corr_63d",
+    "excess_momentum_score",
 }
 _N_FEATURES = len(_FEATURE_NAMES)
 
@@ -55,9 +85,9 @@ class TestComputeFeatures:
         features = _make_features()
         assert all(isinstance(v, float) for v in features.values())
 
-    def test_sentiment_passed_through(self) -> None:
+    def test_sentiment_param_accepted_but_not_in_output(self) -> None:
         features = _make_features(sentiment=0.75)
-        assert features["sentiment"] == pytest.approx(0.75)
+        assert "sentiment" not in features
 
     def test_insufficient_candles_raises(self) -> None:
         base_date = datetime(2024, 1, 1, tzinfo=UTC)
@@ -73,7 +103,7 @@ class TestComputeFeatures:
                 close=Decimal(102),
                 volume=1000,
             )
-            for i in range(5)  # only 5, need at least 30
+            for i in range(5)  # only 5, need at least 80
         ]
         with pytest.raises(InsufficientDataError):
             compute_features(candles)
@@ -86,8 +116,9 @@ class TestComputeFeaturesNaNHandling:
         """compute_features must return no NaN values even at the minimum candle count."""
         import math
 
+        _min_count = 80
         rng = np.random.default_rng(7)
-        prices = 100.0 + rng.standard_normal(30).cumsum()
+        prices = 100.0 + rng.standard_normal(_min_count).cumsum()
         base_date = datetime(2024, 1, 1, tzinfo=UTC)
         candles = [
             Candle(
@@ -101,7 +132,7 @@ class TestComputeFeaturesNaNHandling:
                 close=Decimal(str(round(float(prices[i]), 2))),
                 volume=int(1000 + rng.integers(0, 500)),
             )
-            for i in range(30)  # exactly 30 — minimum — many indicators still have NaN
+            for i in range(_min_count)
         ]
         features = compute_features(candles)
         assert all(not math.isnan(v) for v in features.values()), (
@@ -109,11 +140,12 @@ class TestComputeFeaturesNaNHandling:
         )
 
     def test_volume_ratio_no_nan_at_boundary(self) -> None:
-        """volume_ratio_20d must not be NaN when there are fewer than 21 prior bars."""
+        """volume_ratio_20d must not be NaN at minimum candle count."""
         import math
 
+        _min_count = 80
         rng = np.random.default_rng(99)
-        prices = 100.0 + rng.standard_normal(30).cumsum()
+        prices = 100.0 + rng.standard_normal(_min_count).cumsum()
         base_date = datetime(2024, 1, 1, tzinfo=UTC)
         candles = [
             Candle(
@@ -127,7 +159,7 @@ class TestComputeFeaturesNaNHandling:
                 close=Decimal(str(round(float(prices[i]), 2))),
                 volume=int(1000 + rng.integers(0, 500)),
             )
-            for i in range(30)
+            for i in range(_min_count)
         ]
         features = compute_features(candles)
         assert not math.isnan(features["volume_ratio_20d"])
@@ -144,8 +176,9 @@ class TestVolumeRatioNoLookAhead:
         last_volume / mean_of_prior_20_volumes.
         """
         base_date = datetime(2024, 1, 1, tzinfo=UTC)
-        STANDARD_VOLUME = 1000
-        LAST_VOLUME = 3000  # 3x the standard
+        STANDARD_VOLUME = 1000  # noqa: N806
+        LAST_VOLUME = 3000  # noqa: N806  # 3x the standard
+        _VOL_TEST_COUNT = 80
 
         candles = [
             Candle(
@@ -157,13 +190,13 @@ class TestVolumeRatioNoLookAhead:
                 high=Decimal("105.00"),
                 low=Decimal("95.00"),
                 close=Decimal("102.00"),
-                volume=STANDARD_VOLUME if i < 39 else LAST_VOLUME,
+                volume=STANDARD_VOLUME if i < _VOL_TEST_COUNT - 1 else LAST_VOLUME,
             )
-            for i in range(40)
+            for i in range(_VOL_TEST_COUNT)
         ]
         features = compute_features(candles)
         # With no look-ahead: ratio = LAST_VOLUME / STANDARD_VOLUME = 3.0
-        # With look-ahead (bug): ratio = LAST_VOLUME / mean([...LAST_VOLUME...]) ≠ 3.0
+        # With look-ahead (bug): ratio = LAST_VOLUME / mean([...LAST_VOLUME...]) != 3.0
         assert features["volume_ratio_20d"] == pytest.approx(3.0, abs=0.01)
 
 
@@ -426,10 +459,13 @@ class TestLightGBMEarlyStopping:
 # ── Helper ───────────────────────────────────────────────────────────────────
 
 
+_MAKE_FEATURES_COUNT = 80
+
+
 def _make_features(sentiment: float = 0.0) -> dict[str, float]:
-    """Create a 40-candle set and return computed features."""
+    """Create an 80-candle set and return computed features."""
     rng = np.random.default_rng(42)
-    prices = 100.0 + rng.standard_normal(40).cumsum()
+    prices = 100.0 + rng.standard_normal(_MAKE_FEATURES_COUNT).cumsum()
     base_date = datetime(2024, 1, 1, tzinfo=UTC)
     candles = [
         Candle(
@@ -443,6 +479,6 @@ def _make_features(sentiment: float = 0.0) -> dict[str, float]:
             close=Decimal(str(round(float(prices[i]), 2))),
             volume=int(1000 + rng.integers(0, 500)),
         )
-        for i in range(40)
+        for i in range(_MAKE_FEATURES_COUNT)
     ]
     return compute_features(candles, sentiment_score=sentiment)

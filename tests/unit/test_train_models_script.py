@@ -15,9 +15,9 @@ import pytest
 from finalayze.core.schemas import Candle
 
 # Constants
-N_CANDLES = 120  # enough for 60-candle windows + max_hold for triple barrier
-WINDOW_SIZE = 60
-EXPECTED_MODEL_FILES = {"xgb.pkl", "lgbm.pkl", "lstm.pkl"}
+N_CANDLES = 200  # enough for 80-candle windows + max_hold for triple barrier
+WINDOW_SIZE = 80
+EXPECTED_MODEL_FILES = {"xgb.pkl", "lgbm.pkl", "catboost.pkl"}
 
 
 def _make_candles(n: int = N_CANDLES, symbol: str = "AAPL") -> list[Candle]:
@@ -77,7 +77,7 @@ class TestTrainModelsScript:
         """train_one_segment() produces model files with triple barrier labels."""
         mod = _load_script_module()
         # Need more candles for triple barrier (window_size + max_hold + margin)
-        candles = _make_candles(n=200)
+        candles = _make_candles(n=300)
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
             mod.train_one_segment(  # type: ignore[union-attr]
@@ -95,7 +95,7 @@ class TestTrainModelsScript:
     def test_script_handles_insufficient_candles_gracefully(self, tmp_path: Path) -> None:
         """train_one_segment() skips segments with too few candles without raising."""
         mod = _load_script_module()
-        short_candles = _make_candles(n=30)  # too few for 60-candle windows
+        short_candles = _make_candles(n=30)  # too few for 80-candle windows
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=short_candles):  # type: ignore[union-attr]
             # Should complete without raising
@@ -131,6 +131,14 @@ class TestTrainModelsScript:
         args = mod._parse_args(["--label-mode", "triple_barrier"])  # type: ignore[union-attr]
         assert args.label_mode == "triple_barrier"
 
+    def test_moex_segment_gets_fewer_max_features(self) -> None:
+        """MOEX segments use max_features=10, US segments use 15."""
+        mod = _load_script_module()
+        assert mod._get_max_features("us_tech") == 15  # type: ignore[union-attr]
+        assert mod._get_max_features("ru_blue_chips") == 10  # type: ignore[union-attr]
+        assert mod._get_max_features("ru_energy") == 10  # type: ignore[union-attr]
+        assert mod._get_max_features("us_broad") == 15  # type: ignore[union-attr]
+
     def test_moex_segment_uses_atr_uplift(self) -> None:
         """MOEX segments get 1.2x ATR uplift for triple barrier params."""
         mod = _load_script_module()
@@ -151,21 +159,22 @@ class TestTrainModelsScript:
         candles = _make_candles()
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
-            features, _labels, weights = mod._build_dataset(  # type: ignore[union-attr]
+            features, _labels, weights, hold_bars = mod._build_dataset(  # type: ignore[union-attr]
                 "us_tech",
                 ["AAPL"],
                 label_mode="direction",
             )
         assert len(features) > 0
         assert weights is None
+        assert hold_bars is None
 
     def test_build_dataset_triple_barrier_returns_weights(self) -> None:
         """Triple barrier mode returns non-None barrier_weights array."""
         mod = _load_script_module()
-        candles = _make_candles(n=200)
+        candles = _make_candles(n=300)
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
-            features, _labels, weights = mod._build_dataset(  # type: ignore[union-attr]
+            features, _labels, weights, hold_bars = mod._build_dataset(  # type: ignore[union-attr]
                 "us_tech",
                 ["AAPL"],
                 label_mode="triple_barrier",
@@ -176,3 +185,5 @@ class TestTrainModelsScript:
             assert weights is not None
             assert len(weights) == len(features)
             assert all(w >= 0 for w in weights)
+            assert hold_bars is not None
+            assert len(hold_bars) == len(features)

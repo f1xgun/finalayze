@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import structlog
 import xgboost as xgb
 from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
+
+logger = structlog.get_logger(__name__)
 
 
 def _deduplicate_correlated(
@@ -126,6 +129,7 @@ def select_features(
 
 _MI_RANDOM_STATE = 42
 _MI_N_NEIGHBORS = 3
+_MIN_FEATURE_COUNT = 8
 
 
 def compute_feature_mi(x: pd.DataFrame, y: pd.Series) -> pd.Series:
@@ -178,7 +182,8 @@ def select_features_mi(
     x: pd.DataFrame,
     y: pd.Series,
     max_features: int = 15,
-    mi_threshold: float = 0.05,
+    mi_threshold: float = 0.02,
+    min_features: int = _MIN_FEATURE_COUNT,
 ) -> list[str]:
     """Select features using Mutual Information with greedy deduplication.
 
@@ -187,27 +192,41 @@ def select_features_mi(
         2. Remove features with MI < mi_threshold (uninformative).
         3. Among remaining, greedily deduplicate: starting from the highest
            target-MI feature, add features one-by-one; skip a feature if its
-           pairwise MI with any already-selected feature exceeds the median
-           pairwise MI (i.e. it is redundant).
-        4. Return up to max_features by target MI.
+           pairwise MI with any already-selected feature exceeds the 75th
+           percentile of pairwise MI (i.e. it is redundant).
+        4. Apply minimum feature count floor: if fewer than ``min_features``
+           remain after filtering and dedup, take the top features by MI score.
+        5. Return up to max_features by target MI.
 
     Args:
         x: Feature matrix (n_samples, n_features).
         y: Binary target labels.
         max_features: Maximum number of features to return.
         mi_threshold: Minimum MI with target to keep a feature.
+        min_features: Minimum number of features to return (floor).
 
     Returns:
         List of selected feature names, ordered by descending target MI.
     """
-    if x.empty or x.shape[1] == 0:
+    total_features = x.shape[1] if not x.empty else 0
+    if x.empty or total_features == 0:
         return []
 
     # Step 1: compute MI with target
     mi_scores = compute_feature_mi(x, y)
 
+    # Sort all features by MI descending for fallback
+    all_sorted = mi_scores.sort_values(ascending=False)
+
     # Step 2: filter uninformative features
     informative = mi_scores[mi_scores >= mi_threshold]
+
+    # Apply minimum feature count floor before deduplication
+    effective_min = min(min_features, total_features)
+    if len(informative) < effective_min:
+        # Take top features by MI score regardless of threshold
+        informative = all_sorted.head(effective_min)
+
     if informative.empty:
         return []
 
@@ -216,18 +235,24 @@ def select_features_mi(
     candidates = list(informative.index)
 
     if len(candidates) <= 1:
-        return candidates[:max_features]
+        selected = candidates[:max_features]
+        logger.info(
+            "feature_selection_mi_complete",
+            selected_count=len(selected),
+            total_features=total_features,
+        )
+        return selected
 
     # Step 3: greedy deduplication via pairwise MI
     x_candidates = x[candidates]
     pairwise_mi = _pairwise_mi_matrix(x_candidates)
 
-    # Use median of off-diagonal pairwise MI as redundancy threshold
+    # Use 75th percentile of off-diagonal pairwise MI as redundancy threshold
     n_cand = len(candidates)
     off_diag = [pairwise_mi[i, j] for i in range(n_cand) for j in range(i + 1, n_cand)]
-    redundancy_threshold = float(np.median(off_diag)) if off_diag else 0.0
+    redundancy_threshold = float(np.percentile(off_diag, 75)) if off_diag else 0.0
 
-    selected: list[str] = [candidates[0]]  # best feature always selected
+    selected = [candidates[0]]  # best feature always selected
     selected_indices: list[int] = [0]
 
     for idx in range(1, n_cand):
@@ -243,7 +268,40 @@ def select_features_mi(
             selected.append(candidates[idx])
             selected_indices.append(idx)
 
-    return selected[:max_features]
+    selected = _apply_feature_floor(selected, candidates, effective_min)
+    selected = selected[:max_features]
+
+    logger.info(
+        "feature_selection_mi_complete",
+        selected_count=len(selected),
+        total_features=total_features,
+        mi_threshold=mi_threshold,
+        min_features_floor=effective_min,
+    )
+
+    return selected
+
+
+def _apply_feature_floor(
+    selected: list[str],
+    candidates: list[str],
+    min_count: int,
+) -> list[str]:
+    """Ensure at least ``min_count`` features are selected.
+
+    Fills from ``candidates`` (ordered by MI score) if the current selection
+    is below the floor.
+    """
+    if len(selected) >= min_count:
+        return selected
+    selected_set = set(selected)
+    for candidate in candidates:
+        if len(selected) >= min_count:
+            break
+        if candidate not in selected_set:
+            selected.append(candidate)
+            selected_set.add(candidate)
+    return selected
 
 
 def _build_importance_map(model: xgb.XGBClassifier, feature_names: list[str]) -> dict[str, float]:

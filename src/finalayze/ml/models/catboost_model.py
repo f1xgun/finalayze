@@ -1,14 +1,16 @@
-"""LightGBM per-segment model (Layer 3).
+"""CatBoost per-segment model (Layer 3).
 
 Returns raw (uncalibrated) probabilities. Calibration is applied at the
 ensemble level by ``EnsembleCalibrator`` (see ``calibration.py``).
+
+CatBoost's ordered boosting is specifically designed for small datasets,
+making it a better fit than LSTM for financial data with ~3500 samples.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import lightgbm as lgb
 import numpy as np
 
 if TYPE_CHECKING:
@@ -20,8 +22,8 @@ from finalayze.ml.models.base import BaseMLModel
 _UNTRAINED_PROB = 0.5
 
 
-class LightGBMModel(BaseMLModel):
-    """LightGBM classifier for directional prediction per segment.
+class CatBoostModel(BaseMLModel):
+    """CatBoost classifier with ordered boosting for small financial datasets.
 
     Returns raw probabilities; calibration is handled at the ensemble level.
     """
@@ -29,27 +31,21 @@ class LightGBMModel(BaseMLModel):
     def __init__(
         self,
         segment_id: str,
-        n_estimators: int = 200,
-        max_depth: int = 5,
-        learning_rate: float = 0.05,
-        num_leaves: int = 15,
-        subsample: float = 0.8,
-        colsample_bytree: float = 0.8,
-        min_child_samples: int = 20,
-        reg_alpha: float = 0.1,
-        reg_lambda: float = 1.0,
+        iterations: int = 300,
+        depth: int = 4,
+        learning_rate: float = 0.03,
+        l2_leaf_reg: float = 5.0,
+        random_strength: float = 2.0,
+        bagging_temperature: float = 1.0,
     ) -> None:
         self.segment_id = segment_id
-        self._n_estimators = n_estimators
-        self._max_depth = max_depth
+        self._iterations = iterations
+        self._depth = depth
         self._learning_rate = learning_rate
-        self._num_leaves = num_leaves
-        self._subsample = subsample
-        self._colsample_bytree = colsample_bytree
-        self._min_child_samples = min_child_samples
-        self._reg_alpha = reg_alpha
-        self._reg_lambda = reg_lambda
-        self._model: lgb.LGBMClassifier | None = None
+        self._l2_leaf_reg = l2_leaf_reg
+        self._random_strength = random_strength
+        self._bagging_temperature = bagging_temperature
+        self._model: object | None = None  # CatBoostClassifier (lazy import)
         self._feature_names: list[str] | None = None
 
     def predict_proba(self, features: dict[str, float]) -> float:
@@ -65,7 +61,8 @@ class LightGBMModel(BaseMLModel):
                 )
                 raise InsufficientDataError(msg)
         features_arr = np.array([[features[k] for k in sorted(features)]], dtype=float)
-        return float(self._model.predict_proba(features_arr)[0][1])
+        proba = self._model.predict_proba(features_arr)  # type: ignore[union-attr]
+        return float(proba[0][1])
 
     def fit(
         self,
@@ -76,8 +73,8 @@ class LightGBMModel(BaseMLModel):
     ) -> None:
         """Train the model on feature dicts and binary labels.
 
-        Trains on the full dataset. Calibration is handled at the ensemble
-        level by ``EnsembleCalibrator``.
+        Uses ordered boosting and early stopping on a temporal validation split
+        (last 10% of data).
 
         Args:
             X: Feature dictionaries.
@@ -85,14 +82,12 @@ class LightGBMModel(BaseMLModel):
             sample_weight: Optional per-sample weights (e.g. from uniqueness
                 weighting).
         """
+        from catboost import CatBoostClassifier  # noqa: PLC0415
+
         if X:
             self._feature_names = sorted(X[0])
         x_arr = np.array([[row[k] for k in sorted(row)] for row in X], dtype=float)
         y_arr = np.array(y, dtype=int)
-
-        n_pos = int(np.sum(y_arr == 1))
-        n_neg = int(np.sum(y_arr == 0))
-        spw = n_neg / n_pos if n_pos > 0 else 1.0
 
         # Temporal validation split: last 10% for early stopping monitoring
         n_val = max(int(len(x_arr) * 0.1), 1)
@@ -100,36 +95,36 @@ class LightGBMModel(BaseMLModel):
         y_train, y_val = y_arr[:-n_val], y_arr[-n_val:]
         sw_train = sample_weight[:-n_val] if sample_weight is not None else None
 
-        self._model = lgb.LGBMClassifier(
-            n_estimators=self._n_estimators,
-            max_depth=self._max_depth,
+        self._model = CatBoostClassifier(
+            iterations=self._iterations,
+            depth=self._depth,
             learning_rate=self._learning_rate,
-            num_leaves=self._num_leaves,
-            scale_pos_weight=spw,
-            reg_alpha=self._reg_alpha,
-            reg_lambda=self._reg_lambda,
-            subsample=self._subsample,
-            colsample_bytree=self._colsample_bytree,
-            min_child_samples=self._min_child_samples,
-            verbosity=-1,
+            l2_leaf_reg=self._l2_leaf_reg,
+            random_strength=self._random_strength,
+            bagging_temperature=self._bagging_temperature,
+            boosting_type="Ordered",
+            auto_class_weights="Balanced",
+            eval_metric="Logloss",
+            early_stopping_rounds=25,
+            verbose=0,
+            random_seed=42,
         )
-        self._model.fit(
+        self._model.fit(  # type: ignore[union-attr]
             x_train,
             y_train,
+            eval_set=(x_val, y_val),
             sample_weight=sw_train,
-            eval_set=[(x_val, y_val)],
-            callbacks=[lgb.early_stopping(20, verbose=False), lgb.log_evaluation(0)],
         )
 
     def save(self, path: Path) -> None:
-        """Persist model to disk using joblib."""
-        import joblib  # noqa: PLC0415, import-untyped
+        """Persist model to disk using joblib (atomic write)."""
+        from finalayze.ml.loader import _atomic_save  # noqa: PLC0415
 
-        joblib.dump(self, path)
+        _atomic_save(self, path)
 
     @classmethod
-    def load_from(cls, path: Path) -> LightGBMModel:
-        """Load a previously saved LightGBMModel.
+    def load_from(cls, path: Path) -> CatBoostModel:
+        """Load a previously saved CatBoostModel.
 
         If an HMAC key is configured, verifies file integrity before loading.
         """
