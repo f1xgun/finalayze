@@ -92,7 +92,7 @@ class TestRetrainCycle:
         registry = MLModelRegistry()
         loop = _make_trading_loop(ml_registry=registry, ml_min_train_samples=5)
 
-        candles = _make_candles(300)
+        candles = _make_candles(500)
         loop._fetchers["us"].fetch_candles.return_value = candles
 
         mock_ensemble = MagicMock()
@@ -134,7 +134,7 @@ class TestRetrainCycle:
         registry = MLModelRegistry()
         loop = _make_trading_loop(ml_registry=registry, ml_min_train_samples=5)
 
-        candles = _make_candles(300)
+        candles = _make_candles(500)
         loop._fetchers["us"].fetch_candles.return_value = candles
 
         # Model always predicts 0.5 → rounds to 0, all labels are 1 → 0% acc
@@ -156,7 +156,7 @@ class TestRetrainCycle:
         registry = MLModelRegistry()
         loop = _make_trading_loop(ml_registry=registry, ml_min_train_samples=5)
 
-        candles = _make_candles(300)
+        candles = _make_candles(500)
         loop._fetchers["us"].fetch_candles.return_value = candles
 
         mock_ensemble = MagicMock()

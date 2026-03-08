@@ -5,6 +5,8 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from datetime import datetime  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
 from enum import StrEnum
@@ -278,3 +280,15 @@ class IterationComparison(BaseModel):
     metric_deltas: dict[str, float]
     gate_results: list[GateResult]
     verdict: str
+
+
+@dataclass(frozen=True)
+class MarketContext:
+    """Ambient market data passed to strategies for cross-asset / regime features.
+
+    Both fields are optional: MOEX segments will have vix_candles=None,
+    and benchmark_candles may be absent if the benchmark fetch failed.
+    """
+
+    benchmark_candles: list[Candle] | None = dc_field(default=None)
+    vix_candles: list[Candle] | None = dc_field(default=None)

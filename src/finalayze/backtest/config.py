@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from finalayze.backtest.costs import TransactionCosts
     from finalayze.backtest.decision_journal import DecisionJournal
+    from finalayze.core.schemas import MarketContext
     from finalayze.risk.circuit_breaker import CircuitBreaker
     from finalayze.risk.kelly import RollingKelly
     from finalayze.risk.loss_limits import LossLimitTracker
@@ -135,3 +136,6 @@ class BacktestConfig:
     # EVT tail-risk sizing and copula correlation scaling (Sprint 3)
     use_evt_sizing: bool = False
     use_copula_scaling: bool = False
+
+    # Ambient market data for cross-asset / regime features (Phase E)
+    market_context: MarketContext | None = None

@@ -67,6 +67,7 @@ LABEL_MODE_DIRECTION = "direction"
 # Benchmark tickers for market-neutral (excess return) labels
 _US_BENCHMARK = "SPY"
 _MOEX_BENCHMARK = "IMOEX"  # Moscow Exchange index
+_VIX_TICKER = "^VIX"  # CBOE Volatility Index (US only)
 
 
 def _load_tuned_params(segment_id: str, model_type: str) -> dict | None:
@@ -315,6 +316,30 @@ def _fetch_us_benchmark(segment_id: str) -> list[Candle] | None:
             f"  [{segment_id}] Failed to fetch benchmark "
             f"({_US_BENCHMARK}): {exc}, skipping excess returns."
         )
+        return None
+
+
+def _fetch_vix_candles(segment_id: str) -> list[Candle] | None:
+    """Fetch VIX candles for regime features (US segments only).
+
+    MOEX segments return None since VIX is a US-specific index.
+    """
+    if _is_moex_segment(segment_id):
+        return None
+    lookback = _get_lookback_days(segment_id)
+    end = datetime.now(tz=UTC)
+    start = end - timedelta(days=lookback)
+    market_id = segment_id.split("_", maxsplit=1)[0]
+    fetcher = YFinanceFetcher(market_id=market_id)
+    try:
+        candles = fetcher.fetch_candles(_VIX_TICKER, start, end)
+        if candles:
+            print(f"  [{segment_id}] Fetched {len(candles)} VIX candles ({_VIX_TICKER}).")
+            return candles
+        print(f"  [{segment_id}] No VIX candles for {_VIX_TICKER}, skipping VIX features.")
+        return None
+    except Exception as exc:
+        print(f"  [{segment_id}] Failed to fetch VIX ({_VIX_TICKER}): {exc}, skipping.")
         return None
 
 
@@ -582,6 +607,7 @@ def _build_dataset_triple_barrier(
 
     When excess_returns=True, fetches benchmark candles (SPY for US, IMOEX
     for MOEX) and aligns them per-symbol to produce market-neutral labels.
+    Also fetches VIX candles for US segments to provide regime features.
     """
     import numpy as _np  # noqa: PLC0415
 
@@ -595,6 +621,9 @@ def _build_dataset_triple_barrier(
         raw_benchmark = _fetch_benchmark_candles(segment_id)
         if raw_benchmark is None:
             print(f"  [{segment_id}] Could not fetch benchmark, falling back to absolute returns.")
+
+    # Fetch VIX candles once for US segments (None for MOEX)
+    vix_candles = _fetch_vix_candles(segment_id)
 
     for symbol in symbols:
         candles = _fetch_symbol_candles(symbol, market_id, settings, segment_id=segment_id)
@@ -626,6 +655,7 @@ def _build_dataset_triple_barrier(
             atr_period=int(tb_params["atr_period"]),
             atr_scale=bool(tb_params["atr_scale"]),
             benchmark_candles=aligned_bench,
+            vix_candles=vix_candles,
         )
 
         label_type = "excess-return" if aligned_bench else "absolute"
@@ -1375,7 +1405,7 @@ def _apply_bh_across_segments(
     Converts accuracies to p-values using binomial test, then applies BH correction.
     Disables models in segments that fail the correction.
     """
-    from scipy.stats import binom_test  # noqa: PLC0415
+    from scipy.stats import binomtest  # noqa: PLC0415
 
     segment_ids = list(segment_accuracies.keys())
     p_values: list[float] = []
@@ -1392,8 +1422,8 @@ def _apply_bh_across_segments(
         # Approximate: accuracy > 0.5 is the null hypothesis test
         n_correct = int(acc * n_folds * 100)  # approximate
         n_total = n_folds * 100
-        p_val = float(binom_test(n_correct, n_total, 0.5, alternative="greater"))
-        p_values.append(p_val)
+        result = binomtest(n_correct, n_total, 0.5, alternative="greater")
+        p_values.append(float(result.pvalue))
 
     passes = _apply_bh_correction(p_values, fdr=_BH_FDR)
 

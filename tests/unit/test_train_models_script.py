@@ -15,8 +15,8 @@ import pytest
 from finalayze.core.schemas import Candle
 
 # Constants
-N_CANDLES = 120  # enough for 60-candle windows + max_hold for triple barrier
-WINDOW_SIZE = 60
+N_CANDLES = 200  # enough for 80-candle windows + max_hold for triple barrier
+WINDOW_SIZE = 80
 EXPECTED_MODEL_FILES = {"xgb.pkl", "lgbm.pkl", "catboost.pkl"}
 
 
@@ -77,7 +77,7 @@ class TestTrainModelsScript:
         """train_one_segment() produces model files with triple barrier labels."""
         mod = _load_script_module()
         # Need more candles for triple barrier (window_size + max_hold + margin)
-        candles = _make_candles(n=200)
+        candles = _make_candles(n=300)
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
             mod.train_one_segment(  # type: ignore[union-attr]
@@ -95,7 +95,7 @@ class TestTrainModelsScript:
     def test_script_handles_insufficient_candles_gracefully(self, tmp_path: Path) -> None:
         """train_one_segment() skips segments with too few candles without raising."""
         mod = _load_script_module()
-        short_candles = _make_candles(n=30)  # too few for 60-candle windows
+        short_candles = _make_candles(n=30)  # too few for 80-candle windows
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=short_candles):  # type: ignore[union-attr]
             # Should complete without raising
@@ -171,7 +171,7 @@ class TestTrainModelsScript:
     def test_build_dataset_triple_barrier_returns_weights(self) -> None:
         """Triple barrier mode returns non-None barrier_weights array."""
         mod = _load_script_module()
-        candles = _make_candles(n=200)
+        candles = _make_candles(n=300)
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
             features, _labels, weights, hold_bars = mod._build_dataset(  # type: ignore[union-attr]

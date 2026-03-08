@@ -90,13 +90,19 @@ class TestBuildWindowsSkipSplit:
         """Windows spanning a detected split are excluded."""
         from finalayze.ml.training import build_windows
 
-        # Create 70 normal candles + split at candle 35
-        candles = [_make_candle(i, 100.0 + i * 0.5) for i in range(35)]
-        # Split at index 35
-        candles.append(_make_candle(35, 60.0, high=61.0, low=59.0))
+        _window = 80
+        _split_at = 90
+        _total = 200
+        # Create normal candles + split at candle _split_at
+        candles = [_make_candle(i, 100.0 + i * 0.5) for i in range(_split_at)]
+        # Split at index _split_at
+        candles.append(_make_candle(_split_at, 60.0, high=61.0, low=59.0))
         # Continue post-split
-        candles.extend(_make_candle(i, 60.0 + (i - 35) * 0.5) for i in range(36, 100))
+        candles.extend(
+            _make_candle(i, 60.0 + (i - _split_at) * 0.5)
+            for i in range(_split_at + 1, _total)
+        )
 
-        features, _labels, _ = build_windows(candles, window_size=30)
+        features, _labels, _ = build_windows(candles, window_size=_window)
         # Should have some results, but not an error
         assert len(features) > 0

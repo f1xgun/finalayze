@@ -208,7 +208,12 @@ class TestGenerateSignal:
 
         with patch(_PATCH_TARGET, return_value=_FAKE_FEATURES) as mock_cf:
             strategy.generate_signal("AAPL", candles, "us_tech", sentiment_score=0.9)
-            mock_cf.assert_called_once_with(candles, sentiment_score=0.0)
+            mock_cf.assert_called_once_with(
+                candles,
+                sentiment_score=0.0,
+                benchmark_candles=None,
+                vix_candles=None,
+            )
 
 
 class TestFeatureFiltering:

@@ -22,10 +22,10 @@ class TestTrainGap:
         )
 
         # Need enough samples so purge gaps don't consume cal/test entirely.
-        # train_end = 0.70*n, cal_start = train_end + 80, cal_end = 0.85*n
-        # test_start = cal_end + 80. For test to be non-empty: cal_end + 80 < n
-        # -> 0.85n + 80 < n -> 80 < 0.15n -> n > 533
-        n_samples = 600
+        # train_end = 0.70*n, cal_start = train_end + 100, cal_end = 0.85*n
+        # test_start = cal_end + 100. For test to be non-empty: cal_end + 100 < n
+        # -> 0.85n + 100 < n -> 100 < 0.15n -> n > 667
+        n_samples = 800
 
         train_end = int(n_samples * _TRAIN_RATIO)
         cal_start = min(train_end + _PURGE_GAP, n_samples)
@@ -48,7 +48,7 @@ class TestTrainGap:
             _TRAIN_RATIO,
         )
 
-        n_samples = 600
+        n_samples = 800
 
         train_end = int(n_samples * _TRAIN_RATIO)
         cal_start = min(train_end + _PURGE_GAP, n_samples)
@@ -71,7 +71,7 @@ class TestTrainGap:
             _TRAIN_RATIO,
         )
 
-        n_samples = 600
+        n_samples = 800
 
         train_end = int(n_samples * _TRAIN_RATIO)
         cal_start = min(train_end + _PURGE_GAP, n_samples)
@@ -88,10 +88,10 @@ class TestTrainGap:
         assert len(cal_indices & test_indices) == 0, "Cal and test must not overlap"
 
     def test_purge_gap_equals_window_plus_max_hold(self) -> None:
-        """The purge gap should be _WINDOW_SIZE + _TB_MAX_HOLD = 80."""
+        """The purge gap should be _WINDOW_SIZE + _TB_MAX_HOLD = 100."""
         from scripts.train_models import _PURGE_GAP, _TB_MAX_HOLD, _WINDOW_SIZE
 
-        expected = _WINDOW_SIZE + _TB_MAX_HOLD  # 60 + 20 = 80
+        expected = _WINDOW_SIZE + _TB_MAX_HOLD  # 80 + 20 = 100
         assert expected == _PURGE_GAP
 
     def test_ratios_sum_to_one(self) -> None:
@@ -109,7 +109,7 @@ class TestTrainGap:
         """train_one_segment should apply a three-way split with purge gaps."""
         from scripts.train_models import train_one_segment
 
-        n_samples = 600
+        n_samples = 800
         features = [{"feat": float(i)} for i in range(n_samples)]
         labels = [i % 2 for i in range(n_samples)]
 
@@ -142,15 +142,15 @@ class TestTrainGap:
         ):
             train_one_segment("us_tech", ["AAPL"], Path("/tmp/test_models"))
 
-        # train_end = int(600 * 0.70) = 420
-        expected_train = 420
+        # train_end = int(800 * 0.70) = 560
+        expected_train = 560
         assert train_calls[0] == expected_train
 
-        # cal: cal_start = 420+80 = 500, cal_end = int(600*0.85) = 510 -> 10 samples
-        # test: test_start = 510+80 = 590, test_end = 600 -> 10 samples
-        # predict_proba called for: calibrator (10 cal * 3 models) + eval (10 test * 3 models)
-        expected_cal_size = 10
-        expected_test_size = 10
+        # cal: cal_start = 560+100 = 660, cal_end = int(800*0.85) = 680 -> 20 samples
+        # test: test_start = 680+100 = 780, test_end = 800 -> 20 samples
+        # predict_proba called for: calibrator (20 cal * 3 models) + eval (20 test * 3 models)
+        expected_cal_size = 20
+        expected_test_size = 20
         expected_total = (expected_cal_size + expected_test_size) * 3  # 3 models
         assert sum(test_calls) == expected_total
 
@@ -164,9 +164,9 @@ class TestTrainGap:
 
         n_samples = 100
         train_end = int(n_samples * _TRAIN_RATIO)  # 70
-        cal_start = min(train_end + _PURGE_GAP, n_samples)  # min(150, 100) = 100
+        cal_start = min(train_end + _PURGE_GAP, n_samples)  # min(170, 100) = 100
         cal_end = int(n_samples * (_TRAIN_RATIO + _CALIBRATION_RATIO))  # 85
-        test_start = min(cal_end + _PURGE_GAP, n_samples)  # min(165, 100) = 100
+        test_start = min(cal_end + _PURGE_GAP, n_samples)  # min(185, 100) = 100
 
         # cal_start (100) > cal_end (85) -> empty cal set
         cal_size = max(0, cal_end - cal_start)

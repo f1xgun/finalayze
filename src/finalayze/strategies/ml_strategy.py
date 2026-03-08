@@ -14,7 +14,7 @@ import structlog
 import yaml
 
 from finalayze.core.exceptions import InsufficientDataError
-from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.core.schemas import Candle, MarketContext, Signal, SignalDirection
 from finalayze.ml.features.technical import compute_features
 from finalayze.strategies.base import BaseStrategy
 
@@ -45,6 +45,11 @@ class MLStrategy(BaseStrategy):
     def __init__(self, registry: MLModelRegistry) -> None:
         self._registry = registry
         self._params_cache: dict[str, dict[str, object]] = {}
+        self._market_context: MarketContext | None = None
+
+    def set_market_context(self, ctx: MarketContext) -> None:
+        """Inject ambient market data (benchmark/VIX) for cross-asset features."""
+        self._market_context = ctx
 
     @property
     def name(self) -> str:
@@ -94,8 +99,19 @@ class MLStrategy(BaseStrategy):
         if ensemble is None:
             return None
 
+        benchmark = None
+        vix = None
+        if self._market_context is not None:
+            benchmark = self._market_context.benchmark_candles
+            vix = self._market_context.vix_candles
+
         try:
-            features = compute_features(candles, sentiment_score=0.0)
+            features = compute_features(
+                candles,
+                sentiment_score=0.0,
+                benchmark_candles=benchmark,
+                vix_candles=vix,
+            )
         except InsufficientDataError:
             return None
 

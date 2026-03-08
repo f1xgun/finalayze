@@ -13,9 +13,12 @@ import pandas_ta as ta
 from finalayze.core.exceptions import InsufficientDataError
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from finalayze.core.schemas import Candle
 
-_MIN_CANDLES = 30
+_MIN_CANDLES = 80
+_MAX_FEATURE_LOOKBACK = 252
 _SPLIT_WARNING_THRESHOLD = 0.40
 
 # Lookback lengths for indicators
@@ -36,6 +39,28 @@ _RET_21D_MIN = 22
 # Return distribution constants
 _RECENT_RETURN_WINDOW = 20
 _MIN_SKEW_BARS = 5
+
+# Z-score window lengths
+_ZSCORE_WINDOW = 60
+_VOLUME_ZSCORE_WINDOW = 20
+
+# Calendar cyclical encoding constants
+_TRADING_DAYS_PER_WEEK = 5
+_MONTHS_PER_YEAR = 12
+
+# Regime / VIX feature constants
+_VIX_PERCENTILE_WINDOW = 252
+_VIX_MIN_PERIODS = 63
+_VIX_CHANGE_WINDOW = 5
+_SHORT_VOL_WINDOW = 20
+_LONG_VOL_WINDOW = 60
+
+# Cross-asset feature constants
+_CROSS_ASSET_LOOKBACK = 63
+_RELATIVE_STRENGTH_WINDOW = 21
+_VOL_FLOOR = 0.01
+_DEFAULT_BETA = 1.0
+_DEFAULT_CORR = 0.5
 
 _log = logging.getLogger(__name__)
 
@@ -87,9 +112,184 @@ def _compute_wavelet_features(log_returns: list[float]) -> dict[str, float]:
     }
 
 
+def _compute_calendar_features(
+    last_timestamp: datetime,
+) -> dict[str, float]:
+    """Compute cyclical calendar encoding from the last candle's timestamp.
+
+    No look-ahead bias: uses only the timestamp of the most recent candle.
+    Encodes day-of-week and month as sin/cos pairs for cyclical continuity.
+    """
+    dow = last_timestamp.weekday()  # 0=Monday, 4=Friday
+    month = last_timestamp.month  # 1-12
+
+    two_pi = 2.0 * math.pi
+    return {
+        "dow_sin": math.sin(two_pi * dow / _TRADING_DAYS_PER_WEEK),
+        "dow_cos": math.cos(two_pi * dow / _TRADING_DAYS_PER_WEEK),
+        "month_sin": math.sin(two_pi * month / _MONTHS_PER_YEAR),
+        "month_cos": math.cos(two_pi * month / _MONTHS_PER_YEAR),
+    }
+
+
+def _compute_regime_features(
+    close_s: pd.Series,
+    vix_candles: list[Candle] | None,
+) -> dict[str, float]:
+    """Compute regime/VIX features and realized volatility ratio.
+
+    VIX features use lagged values (no look-ahead bias).
+    realized_vol_ratio uses the stock's own close prices (works for all markets).
+    When vix_candles is None (e.g., MOEX), VIX features default to 0.0.
+    """
+    # --- VIX features ---
+    vix_level = 0.0
+    vix_percentile = 0.0
+    vix_change = 0.0
+
+    if vix_candles and len(vix_candles) >= 2:  # noqa: PLR2004
+        # Lagged VIX: use [-2] to avoid look-ahead (current bar not yet closed)
+        vix_level = float(vix_candles[-2].close)
+
+        vix_closes = pd.Series(
+            [float(c.close) for c in vix_candles],
+            dtype=float,
+        )
+
+        # Percentile rank over 252 trading days (min 63 for warmup)
+        current_vix = float(vix_closes.iloc[-2])
+        window = min(_VIX_PERCENTILE_WINDOW, len(vix_closes) - 1)
+        if window >= 1:
+            # Use all bars except last (lagged) for the ranking window
+            lookback = vix_closes.iloc[:-1].iloc[-window:]
+            if len(lookback) >= _VIX_MIN_PERIODS:
+                vix_percentile = float((lookback <= current_vix).mean())
+
+        # 5-day VIX change (percentage)
+        lag_offset = _VIX_CHANGE_WINDOW + 1  # +1 for lag
+        if len(vix_closes) > lag_offset:
+            vix_prev = float(vix_closes.iloc[-lag_offset - 1])
+            if vix_prev > 0:
+                vix_change = (current_vix - vix_prev) / vix_prev
+
+    # --- Realized volatility ratio (works for all markets) ---
+    returns = close_s.pct_change()
+    short_vol = returns.rolling(_SHORT_VOL_WINDOW, min_periods=1).std()
+    long_vol = returns.rolling(_LONG_VOL_WINDOW, min_periods=1).std()
+
+    short_val = float(short_vol.iloc[-1])
+    long_val = float(long_vol.iloc[-1])
+
+    if long_val > 0 and math.isfinite(long_val) and math.isfinite(short_val):
+        realized_vol_ratio = short_val / long_val
+    else:
+        realized_vol_ratio = 0.0
+
+    return {
+        "vix_level": vix_level,
+        "vix_percentile_252d": vix_percentile,
+        "vix_change_5d": vix_change,
+        "realized_vol_ratio": realized_vol_ratio,
+    }
+
+
+def _compute_cross_asset_features(
+    close_s: pd.Series,
+    benchmark_close_s: pd.Series | None,
+) -> dict[str, float]:
+    """Compute cross-asset features: relative strength, beta, correlation, excess momentum.
+
+    All features compare the stock to a benchmark (e.g., SPY).
+    When benchmark_close_s is None or has insufficient data, returns domain-aware defaults.
+    No look-ahead bias: uses only past data via rolling windows.
+    """
+    defaults = {
+        "relative_strength_21d": 0.0,
+        "rolling_beta_63d": _DEFAULT_BETA,
+        "rolling_corr_63d": _DEFAULT_CORR,
+        "excess_momentum_score": 0.0,
+    }
+
+    if benchmark_close_s is None or len(benchmark_close_s) < _RELATIVE_STRENGTH_WINDOW:
+        return defaults
+
+    # Align lengths: use the shorter of the two series (from the end)
+    min_len = min(len(close_s), len(benchmark_close_s))
+    stock_close = close_s.iloc[-min_len:].reset_index(drop=True)
+    bench_close = benchmark_close_s.iloc[-min_len:].reset_index(drop=True)
+
+    stock_returns = stock_close.pct_change()
+    bench_returns = bench_close.pct_change()
+
+    # --- relative_strength_21d: stock 21d return minus benchmark 21d return ---
+    relative_strength = 0.0
+    if min_len >= _RELATIVE_STRENGTH_WINDOW + 1:
+        stock_ret_21d = float(
+            stock_close.iloc[-1] / stock_close.iloc[-_RELATIVE_STRENGTH_WINDOW - 1] - 1,
+        )
+        bench_ret_21d = float(
+            bench_close.iloc[-1] / bench_close.iloc[-_RELATIVE_STRENGTH_WINDOW - 1] - 1,
+        )
+        relative_strength = stock_ret_21d - bench_ret_21d
+
+    # --- rolling_beta_63d: cov(stock, bench) / var(bench) over 63d window ---
+    rolling_beta = _DEFAULT_BETA
+    if min_len >= _CROSS_ASSET_LOOKBACK + 1:
+        cov = stock_returns.rolling(_CROSS_ASSET_LOOKBACK, min_periods=_CROSS_ASSET_LOOKBACK).cov(
+            bench_returns,
+        )
+        var = bench_returns.rolling(
+            _CROSS_ASSET_LOOKBACK,
+            min_periods=_CROSS_ASSET_LOOKBACK,
+        ).var()
+        last_cov = float(cov.iloc[-1])
+        last_var = float(var.iloc[-1])
+        if last_var > 0 and math.isfinite(last_cov) and math.isfinite(last_var):
+            rolling_beta = last_cov / last_var
+        if not math.isfinite(rolling_beta):
+            rolling_beta = _DEFAULT_BETA
+
+    # --- rolling_corr_63d: rolling correlation over 63d window ---
+    rolling_corr = _DEFAULT_CORR
+    if min_len >= _CROSS_ASSET_LOOKBACK + 1:
+        corr = stock_returns.rolling(
+            _CROSS_ASSET_LOOKBACK,
+            min_periods=_CROSS_ASSET_LOOKBACK,
+        ).corr(bench_returns)
+        last_corr = float(corr.iloc[-1])
+        if math.isfinite(last_corr):
+            rolling_corr = last_corr
+
+    # --- excess_momentum_score: (stock_ret_63d - bench_ret_63d) / max(stock_vol_63d, floor) ---
+    excess_momentum = 0.0
+    if min_len >= _CROSS_ASSET_LOOKBACK + 1:
+        stock_ret_63d = float(
+            stock_close.iloc[-1] / stock_close.iloc[-_CROSS_ASSET_LOOKBACK - 1] - 1,
+        )
+        bench_ret_63d = float(
+            bench_close.iloc[-1] / bench_close.iloc[-_CROSS_ASSET_LOOKBACK - 1] - 1,
+        )
+        stock_vol_63d = float(
+            stock_returns.iloc[-_CROSS_ASSET_LOOKBACK:].std(),
+        )
+        denom = max(stock_vol_63d, _VOL_FLOOR) if math.isfinite(stock_vol_63d) else _VOL_FLOOR
+        excess_momentum = (stock_ret_63d - bench_ret_63d) / denom
+        if not math.isfinite(excess_momentum):
+            excess_momentum = 0.0
+
+    return {
+        "relative_strength_21d": relative_strength,
+        "rolling_beta_63d": rolling_beta,
+        "rolling_corr_63d": rolling_corr,
+        "excess_momentum_score": excess_momentum,
+    }
+
+
 def compute_features(
     candles: list[Candle],
     sentiment_score: float = 0.0,  # noqa: ARG001 — kept for backward compatibility
+    benchmark_candles: list[Candle] | None = None,
+    vix_candles: list[Candle] | None = None,
 ) -> dict[str, float]:
     """Compute technical features from a list of candles.
 
@@ -124,13 +324,47 @@ def compute_features(
     _warn_if_split_suspected(close_s)
 
     core = _compute_core_features(close_s, high_s, low_s, volume_s, last_close)
-    extra = _compute_extra_features(close_s, high_s, low_s, open_s, volume_s, candles, last_close)
+    extra = _compute_extra_features(
+        close_s,
+        high_s,
+        low_s,
+        open_s,
+        volume_s,
+        candles,
+        last_close,
+    )
 
     # Wavelet energy features from log returns (no look-ahead: uses only past data)
     log_returns = list(np.diff(np.log(np.array(closes, dtype=float))))
     wavelet = _compute_wavelet_features(log_returns)
 
-    all_features = {**core, **extra, **wavelet}
+    # Z-score features (relative strength / normalized indicators)
+    zscore = _compute_zscore_features(close_s, high_s, low_s, volume_s)
+
+    # Calendar features (cyclical encoding of day-of-week and month)
+    calendar = _compute_calendar_features(candles[-1].timestamp)
+
+    # Regime features (VIX + realized volatility ratio)
+    regime = _compute_regime_features(close_s, vix_candles)
+
+    # Cross-asset features (relative strength vs benchmark)
+    benchmark_close_s = None
+    if benchmark_candles:
+        benchmark_close_s = pd.Series(
+            [float(c.close) for c in benchmark_candles],
+            dtype=float,
+        )
+    cross_asset = _compute_cross_asset_features(close_s, benchmark_close_s)
+
+    all_features = {
+        **core,
+        **extra,
+        **wavelet,
+        **zscore,
+        **calendar,
+        **regime,
+        **cross_asset,
+    }
 
     feature_df = pd.DataFrame({k: [v] for k, v in all_features.items()})
     # Safety net: replace any remaining NaN/inf with 0 (feature-specific defaults above)
@@ -345,6 +579,63 @@ def _compute_microstructure_features(
         "proximity_rolling_high": proximity_52wk,
         "amihud_20d": amihud_20d,
         "corwin_schultz_spread": _corwin_schultz(high_s, low_s),
+    }
+
+
+def _safe_zscore(value: float, mean: float, std: float) -> float:
+    """Compute z-score, returning 0.0 when std is zero or non-finite."""
+    if std <= 0.0 or not math.isfinite(std):
+        return 0.0
+    z = (value - mean) / std
+    return z if math.isfinite(z) else 0.0
+
+
+def _compute_zscore_features(
+    close_s: pd.Series,
+    high_s: pd.Series,
+    low_s: pd.Series,
+    volume_s: pd.Series,
+) -> dict[str, float]:
+    """Compute z-score normalized features for relative strength analysis.
+
+    All windows use min_periods=1 so short series degrade gracefully.
+    No look-ahead bias: rolling windows use only past data.
+    """
+    # Price z-score: (close - SMA60) / std60
+    price_mean = float(close_s.rolling(_ZSCORE_WINDOW, min_periods=1).mean().iloc[-1])
+    price_std = float(close_s.rolling(_ZSCORE_WINDOW, min_periods=1).std().iloc[-1])
+    price_zscore = _safe_zscore(float(close_s.iloc[-1]), price_mean, price_std)
+
+    # Volume z-score: (volume - vol_mean_20) / vol_std_20
+    vol_mean = float(volume_s.rolling(_VOLUME_ZSCORE_WINDOW, min_periods=1).mean().iloc[-1])
+    vol_std = float(volume_s.rolling(_VOLUME_ZSCORE_WINDOW, min_periods=1).std().iloc[-1])
+    vol_zscore = _safe_zscore(float(volume_s.iloc[-1]), vol_mean, vol_std)
+
+    # RSI z-score: (RSI14 - mean_RSI14_60d) / std_RSI14_60d
+    rsi_series = ta.rsi(close_s, length=_RSI_LOOKBACK)
+    rsi_zscore = 0.0
+    if rsi_series is not None and not rsi_series.empty:
+        rsi_mean = float(rsi_series.rolling(_ZSCORE_WINDOW, min_periods=1).mean().iloc[-1])
+        rsi_std = float(rsi_series.rolling(_ZSCORE_WINDOW, min_periods=1).std().iloc[-1])
+        rsi_val = float(rsi_series.iloc[-1])
+        if math.isfinite(rsi_val):
+            rsi_zscore = _safe_zscore(rsi_val, rsi_mean, rsi_std)
+
+    # ATR z-score: (ATR14 - mean_ATR_60d) / std_ATR_60d
+    atr_series = ta.atr(high_s, low_s, close_s, length=_RSI_LOOKBACK)
+    atr_zscore = 0.0
+    if atr_series is not None and not atr_series.empty:
+        atr_mean = float(atr_series.rolling(_ZSCORE_WINDOW, min_periods=1).mean().iloc[-1])
+        atr_std = float(atr_series.rolling(_ZSCORE_WINDOW, min_periods=1).std().iloc[-1])
+        atr_val = float(atr_series.iloc[-1])
+        if math.isfinite(atr_val):
+            atr_zscore = _safe_zscore(atr_val, atr_mean, atr_std)
+
+    return {
+        "price_zscore_60d": price_zscore,
+        "volume_zscore_20d": vol_zscore,
+        "rsi_zscore_60d": rsi_zscore,
+        "atr_zscore_60d": atr_zscore,
     }
 
 

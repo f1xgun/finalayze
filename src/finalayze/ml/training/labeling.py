@@ -10,6 +10,7 @@ See docs/plans/2026-03-02-enhanced-improvement-plan.md, task B.3.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -17,12 +18,15 @@ import numpy as np
 import pandas as pd
 import pandas_ta as ta
 
+from finalayze.core.exceptions import InsufficientDataError
 from finalayze.ml.features.technical import compute_features
 
 if TYPE_CHECKING:
     from datetime import datetime
 
     from finalayze.core.schemas import Candle
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -252,6 +256,7 @@ def build_triple_barrier_dataset(
     lower_atr_mult: float = 2.0,
     upper_atr_mult: float = 2.0,
     benchmark_candles: list[Candle] | None = None,
+    vix_candles: list[Candle] | None = None,
 ) -> tuple[list[dict[str, float]], list[int], list[float], list[datetime], list[int]]:
     """Build a dataset using triple barrier labels.
 
@@ -266,6 +271,7 @@ def build_triple_barrier_dataset(
         lower_atr_mult: ATR multiplier for lower barrier.
         upper_atr_mult: ATR multiplier for upper barrier.
         benchmark_candles: Optional benchmark candles for market-neutral labels.
+        vix_candles: Optional VIX candles for regime features (US segments).
 
     Returns:
         Tuple of (features, labels, sample_weights, timestamps, hold_bars).
@@ -294,11 +300,23 @@ def build_triple_barrier_dataset(
         if any(si in label_range for si in split_indices):
             continue
 
-        window = sorted_candles[i : i + window_size]
+        # Pass full history up to entry bar (no look-ahead bias)
+        window = sorted_candles[: entry_index + 1]
 
         try:
-            row_features = compute_features(window)
-        except Exception:  # noqa: S112
+            row_features = compute_features(
+                window,
+                benchmark_candles=benchmark_candles,
+                vix_candles=vix_candles,
+            )
+        except (InsufficientDataError, ValueError):
+            continue
+        except Exception:
+            _log.warning(
+                "Unexpected error computing features at index %d",
+                entry_index,
+                exc_info=True,
+            )
             continue
 
         result = triple_barrier_label(

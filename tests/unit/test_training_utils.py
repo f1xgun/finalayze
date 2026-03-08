@@ -63,9 +63,10 @@ class TestBuildWindows:
 
     def test_custom_window_size(self) -> None:
         """build_windows should respect custom window_size parameter."""
-        small_window = 30
-        candles = _make_candles(small_window + 5)
-        features, labels, timestamps = build_windows(candles, small_window)
-        assert len(features) == 5
-        assert len(labels) == 5
-        assert len(timestamps) == 5
+        custom_window = 80
+        extra = 5
+        candles = _make_candles(custom_window + extra)
+        features, labels, timestamps = build_windows(candles, custom_window)
+        assert len(features) == extra
+        assert len(labels) == extra
+        assert len(timestamps) == extra
