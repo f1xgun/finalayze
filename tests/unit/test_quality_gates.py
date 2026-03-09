@@ -87,6 +87,37 @@ class TestBrierGate:
         assert result.passed is False
         assert result.value == 0.30  # noqa: PLR2004
 
+    def test_dynamic_threshold_with_high_overlap(self) -> None:
+        """With avg_hold_bars=20, n_eff is much smaller, so Brier threshold is stricter."""
+        _overlapping_hold_bars = 20.0
+        metrics_overlap = _make_metrics(
+            brier_score=0.22,
+            n_test=_LARGE_SAMPLE,
+            avg_hold_bars=_overlapping_hold_bars,
+        )
+        # n_eff = 1000 / 20 = 50 -> threshold ~ 0.185
+        result_overlap = check_brier_gate(metrics_overlap)
+        assert result_overlap.passed is False  # 0.22 > ~0.185
+
+        metrics_no_overlap = _make_metrics(
+            brier_score=0.22,
+            n_test=_LARGE_SAMPLE,
+            avg_hold_bars=1.0,
+        )
+        # n_eff = 1000 -> threshold = 0.25
+        result_no_overlap = check_brier_gate(metrics_no_overlap)
+        assert result_no_overlap.passed is True  # 0.22 < 0.25
+
+    def test_dynamic_threshold_stricter_for_small_n_eff(self) -> None:
+        """Smaller n_eff should give a lower (stricter) Brier threshold."""
+        _high_overlap = 40.0
+        _low_overlap = 2.0
+        small_n_eff_metrics = _make_metrics(n_test=_LARGE_SAMPLE, avg_hold_bars=_high_overlap)
+        large_n_eff_metrics = _make_metrics(n_test=_LARGE_SAMPLE, avg_hold_bars=_low_overlap)
+        small_result = check_brier_gate(small_n_eff_metrics)
+        large_result = check_brier_gate(large_n_eff_metrics)
+        assert small_result.threshold < large_result.threshold
+
 
 # --- Profit factor gate ---
 

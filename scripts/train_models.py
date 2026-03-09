@@ -6,6 +6,7 @@ Usage:
     uv run python scripts/train_models.py --segment us_tech --output-dir models/
     uv run python scripts/train_models.py --label-mode direction  # old next-bar labels
     uv run python scripts/train_models.py --label-mode triple_barrier  # default
+    uv run python scripts/train_models.py --walk-forward --force-save  # save despite gate failures
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import sys
 from datetime import UTC, datetime, timedelta
@@ -92,6 +94,62 @@ _MOEX_MAX_DEPTH = 3
 # MI feature selection: fewer features for MOEX (smaller dataset, 50:1 sample-to-feature ratio)
 _US_MAX_FEATURES = 15
 _MOEX_MAX_FEATURES = 10
+
+# --- Dynamic quality gates (AFML Ch.7) ---
+# Binomial test parameters for accuracy threshold
+_Z_ALPHA_95 = 1.645  # z-score for 95% confidence
+_Z_ALPHA_99 = 1.96  # z-score for 99% confidence (used when confidence != 0.95)
+_MAX_ACCURACY_THRESHOLD = 0.75  # cap to prevent impossible thresholds
+_MIN_N_EFF_FOR_NORMAL = 5  # below this, use conservative fallback
+_TINY_SAMPLE_ACCURACY = 0.90  # near-impossible for tiny samples
+_TINY_SAMPLE_BRIER = 0.15  # strict Brier for tiny samples
+_BRIER_COIN_FLIP = 0.25  # Brier score for random 50/50 predictions
+_BRIER_REFERENCE_N_EFF = 100  # reference n_eff for Brier improvement scaling
+_BRIER_IMPROVEMENT_RATE = 0.05  # max improvement at reference n_eff
+_MIN_BRIER_THRESHOLD = 0.15  # floor for Brier threshold
+
+
+def compute_n_eff(n_samples: int, avg_hold_bars: float) -> int:
+    """Effective sample size accounting for label overlap.
+
+    Per AFML Ch.7: n_eff = n_samples / avg_hold_bars.
+    With 20-bar hold and 1-bar step, ~95% of labels overlap,
+    so n_eff is roughly n/20.
+    """
+    if avg_hold_bars <= 1:
+        return n_samples
+    return max(1, int(n_samples / avg_hold_bars))
+
+
+def compute_accuracy_threshold(n_eff: int, confidence: float = 0.95) -> float:
+    """Dynamic accuracy gate based on effective sample size.
+
+    Uses binomial test: threshold = 0.5 + z_alpha / (2 * sqrt(n_eff)).
+    Larger n_eff -> lower threshold (easier to pass with more data).
+    Smaller n_eff -> higher threshold (need stronger signal to be significant).
+    """
+    z_alpha = _Z_ALPHA_95 if confidence == 0.95 else _Z_ALPHA_99  # noqa: PLR2004
+    if n_eff < _MIN_N_EFF_FOR_NORMAL:
+        return _TINY_SAMPLE_ACCURACY  # Near-impossible for tiny samples
+    threshold = 0.5 + z_alpha / (2 * math.sqrt(n_eff))
+    return min(threshold, _MAX_ACCURACY_THRESHOLD)  # Cap at 0.75
+
+
+def compute_brier_threshold(n_eff: int) -> float:
+    """Dynamic Brier score gate.
+
+    Baseline Brier for coin-flip = 0.25.  With small n_eff we demand a
+    very low Brier (strict) because we need strong evidence.  As n_eff
+    grows, even a modest improvement is significant, so the threshold
+    relaxes toward 0.25.
+
+    threshold = min(0.25, 0.15 + 0.05 * sqrt(n_eff / 100))
+    """
+    if n_eff < _MIN_N_EFF_FOR_NORMAL:
+        return _TINY_SAMPLE_BRIER
+    relaxation = _BRIER_IMPROVEMENT_RATE * math.sqrt(n_eff) / math.sqrt(_BRIER_REFERENCE_N_EFF)
+    return min(_BRIER_COIN_FLIP, _MIN_BRIER_THRESHOLD + relaxation)
+
 
 # Map segment_id -> representative symbols for training data
 _SEGMENT_SYMBOLS: dict[str, list[str]] = {
@@ -767,20 +825,34 @@ def _apply_bh_correction(
     return results
 
 
+_MODEL_KEY_NORMALIZE: dict[str, str] = {
+    "xgb": "xgboost",
+    "lgbm": "lightgbm",
+    "catboost": "catboost",
+}
+
+
 def _compute_model_weights(
-    results: dict[str, str],
+    results: dict[str, str | float],
 ) -> dict[str, float]:
     """Compute performance-weighted averaging weights from accuracy results.
 
     Weight = max(0, accuracy - 0.50)^2. Auto-excludes coin-flip models.
+
+    Accepts either pre-computed accuracy floats or formatted result strings
+    (e.g. ``"acc=0.620 brier=0.230 logloss=0.650"``).
     """
     weights: dict[str, float] = {}
-    for name, result_str in results.items():
-        acc = 0.5
-        for part in result_str.split():
-            if part.startswith("acc="):
-                acc = float(part.split("=")[1])
-        weights[name.lower()] = max(0.0, acc - 0.50) ** 2
+    for name, result in results.items():
+        if isinstance(result, (int, float)):
+            acc = float(result)
+        else:
+            acc = 0.5
+            for part in result.split():
+                if part.startswith("acc="):
+                    acc = float(part.split("=")[1])
+        normalized = _MODEL_KEY_NORMALIZE.get(name.lower(), name.lower())
+        weights[normalized] = max(0.0, acc - 0.50) ** 2
     return weights
 
 
@@ -789,6 +861,7 @@ def _evaluate_fold_metrics(
     test_features: list[dict[str, float]],
     test_labels: list[int],
     mean_uniqueness: float = 1.0,
+    avg_hold_bars: float = 1.0,
 ) -> FoldMetrics:
     """Evaluate models on a test fold and compute FoldMetrics for quality gates."""
     probas_all: list[float] = []
@@ -831,6 +904,7 @@ def _evaluate_fold_metrics(
         sensitivity=sensitivity,
         specificity=specificity,
         signal_count=n_test,
+        avg_hold_bars=avg_hold_bars,
     )
 
 
@@ -842,11 +916,15 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
     label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
     *,
     excess_returns: bool = False,
+    force_save: bool = False,
 ) -> dict[str, float] | None:
     """Train models using walk-forward validation (D1).
 
     Aligned with backtest walk-forward: 12mo train, 2mo cal, 4mo test, 3mo step.
     Returns per-gate pass rates, or None if insufficient data.
+
+    If quality gates fail and force_save is False, models are NOT saved (only
+    gate results are persisted for diagnostics). Use force_save=True to override.
     """
     import numpy as _np  # noqa: PLC0415
 
@@ -879,9 +957,12 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
     print(f"[{segment_id}] {len(folds)} walk-forward folds")
 
     all_fold_results = []
-    best_acc = 0.0
+    last_acc = 0.0
     best_models: list[XGBoostModel | LightGBMModel | CatBoostModel] | None = None
     best_selected_features: list[str] | None = None
+    best_test_f: list[dict[str, float]] = []
+    best_test_l: list[int] = []
+    best_train_l: list[int] = []
 
     for fold_idx, (train_idx, cal_idx, test_idx) in enumerate(folds):
         train_f = [features[i] for i in train_idx]
@@ -943,25 +1024,39 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         models = [xgb, lgbm, cat]
         mean_uniq = float(uniq.mean()) if len(uniq) > 0 else 1.0
 
+        # Compute avg hold bars for the test fold (for dynamic quality gates)
+        if hold_bars is not None:
+            test_hb = [hold_bars[i] for i in test_idx if i < len(hold_bars)]
+            fold_avg_hold = float(_np.mean(test_hb)) if test_hb else 1.0
+        else:
+            fold_avg_hold = 1.0
+
         # Evaluate on test fold
         if test_f:
-            fold_metrics = _evaluate_fold_metrics(models, test_f, test_l, mean_uniq)
+            fold_metrics = _evaluate_fold_metrics(
+                models, test_f, test_l, mean_uniq, avg_hold_bars=fold_avg_hold
+            )
             gate_results = evaluate_fold(fold_metrics)
             all_fold_results.append(gate_results)
 
             passed_count = sum(1 for r in gate_results if r.passed)
             total_gates = len(gate_results)
+            fold_n_eff = compute_n_eff(len(test_f), fold_avg_hold)
             print(
                 f"[{segment_id}] Fold {fold_idx}: acc={fold_metrics.accuracy:.3f}, "
                 f"brier={fold_metrics.brier_score:.3f}, "
+                f"n_eff={fold_n_eff}, "
                 f"gates={passed_count}/{total_gates}, "
                 f"train={len(train_f)}, cal={len(cal_f)}, test={len(test_f)}"
             )
 
-            if fold_metrics.accuracy > best_acc:
-                best_acc = fold_metrics.accuracy
-                best_models = models
-                best_selected_features = selected
+            # Always use the last fold (most temporally recent) -- no cherry-picking
+            last_acc = fold_metrics.accuracy
+            best_models = models
+            best_selected_features = selected
+            best_test_f = test_f
+            best_test_l = test_l
+            best_train_l = train_l
 
     if not all_fold_results:
         print(f"[{segment_id}] No folds produced results.")
@@ -975,10 +1070,39 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         status = "PASS" if rate >= 0.60 else "FAIL"  # noqa: PLR2004
         print(f"  {gate_name:>20s}: {rate:.1%} [{status}]")
 
+    # Always save gate results for diagnostics (even when models are not saved)
+    if best_models:
+        segment_dir = output_dir / segment_id
+        segment_dir.mkdir(parents=True, exist_ok=True)
+
+        gate_results_path = segment_dir / "wf_gate_results.json"
+        gate_results_path.write_text(
+            json.dumps(
+                {
+                    "overall_passed": overall_passed,
+                    "gate_pass_rates": gate_pass_rates,
+                    "n_folds": len(all_fold_results),
+                    "best_accuracy": last_acc,
+                },
+                indent=2,
+            )
+        )
+
+    # Quality gate enforcement: skip saving models if gates failed
+    if not overall_passed and not force_save:
+        print(
+            f"[{segment_id}] Quality gates FAILED -- models NOT saved. "
+            f"Use --force-save to override."
+        )
+        return gate_pass_rates
+
     # Save best models from walk-forward
     if best_models:
         segment_dir = output_dir / segment_id
         segment_dir.mkdir(parents=True, exist_ok=True)
+
+        if not overall_passed and force_save:
+            print(f"[{segment_id}] Quality gates FAILED but --force-save is set, saving anyway.")
 
         best_models[0].save(segment_dir / "xgb.pkl")
         best_models[1].save(segment_dir / "lgbm.pkl")
@@ -987,19 +1111,33 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         if best_selected_features:
             (segment_dir / "selected_features.json").write_text(json.dumps(best_selected_features))
 
-        # Save gate results for downstream BH correction
-        gate_results_path = segment_dir / "wf_gate_results.json"
-        gate_results_path.write_text(
-            json.dumps(
-                {
-                    "overall_passed": overall_passed,
-                    "gate_pass_rates": gate_pass_rates,
-                    "n_folds": len(all_fold_results),
-                    "best_accuracy": best_acc,
-                },
-                indent=2,
-            )
-        )
+        # Compute and save model weights from best fold's test evaluation
+        if best_test_f and best_test_l:
+            from sklearn.metrics import accuracy_score as _acc  # noqa: PLC0415
+
+            model_accs: dict[str, float] = {}
+            names = ["xgboost", "lightgbm", "catboost"]
+            for m, name in zip(best_models, names, strict=True):
+                probas = [m.predict_proba(f) for f in best_test_f]
+                preds = [round(p) for p in probas]
+                model_accs[name] = float(_acc(best_test_l, preds))
+            # Compute squared-edge weights: max(0, acc - 0.50)^2
+            model_weights: dict[str, float] = {}
+            for name, acc_val in model_accs.items():
+                model_weights[name] = max(0.0, acc_val - 0.50) ** 2
+        else:
+            model_weights = {"xgboost": 0.33, "lightgbm": 0.33, "catboost": 0.34}
+        weights_path = segment_dir / "model_weights.json"
+        weights_path.write_text(json.dumps(model_weights, indent=2))
+        print(f"[{segment_id}] Saved model_weights.json: {model_weights}")
+
+        # Compute base_rate from best fold's training labels only (no test data leakage)
+        positive_count = sum(1 for y in best_train_l if y > 0)
+        base_rate = positive_count / len(best_train_l) if len(best_train_l) > 0 else 0.50
+        meta = {"base_rate": round(base_rate, 4)}
+        meta_path = segment_dir / "segment_meta.json"
+        meta_path.write_text(json.dumps(meta, indent=2))
+        print(f"[{segment_id}] Saved segment_meta.json: base_rate={base_rate:.4f}")
 
     return gate_pass_rates
 
@@ -1132,6 +1270,14 @@ def train_one_segment(  # noqa: PLR0915
     weights_path = segment_dir / "model_weights.json"
     weights_path.write_text(json.dumps(model_weights, indent=2))
     print(f"[{segment_id}] Saved model_weights.json: {model_weights}")
+
+    # Compute and save base_rate from training label distribution
+    positive_count = sum(1 for y in train_labels if y > 0)
+    base_rate = positive_count / len(train_labels) if len(train_labels) > 0 else 0.50
+    meta = {"base_rate": round(base_rate, 4)}
+    meta_path = segment_dir / "segment_meta.json"
+    meta_path.write_text(json.dumps(meta, indent=2))
+    print(f"[{segment_id}] Saved segment_meta.json: base_rate={base_rate:.4f}")
 
 
 def _evaluate_model(
@@ -1339,6 +1485,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Only applies to triple_barrier label mode."
         ),
     )
+    parser.add_argument(
+        "--force-save",
+        action="store_true",
+        default=False,
+        help=(
+            "Save models even when quality gates fail. "
+            "For development use only -- production models should pass gates."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1349,6 +1504,7 @@ def main() -> None:
     label_mode: str = args.label_mode
     walk_forward: bool = args.walk_forward
     excess_returns: bool = args.excess_returns
+    force_save: bool = args.force_save
 
     if args.segment:
         segments = {args.segment: _SEGMENT_SYMBOLS.get(args.segment, [])}
@@ -1356,7 +1512,8 @@ def main() -> None:
         segments = _SEGMENT_SYMBOLS
 
     print(
-        f"Label mode: {label_mode}, Walk-forward: {walk_forward}, Excess returns: {excess_returns}"
+        f"Label mode: {label_mode}, Walk-forward: {walk_forward}, "
+        f"Excess returns: {excess_returns}, Force save: {force_save}"
     )
 
     # Collect p-values for BH correction (D3) across all segments
@@ -1371,6 +1528,7 @@ def main() -> None:
                     output_dir=output_dir,
                     label_mode=label_mode,
                     excess_returns=excess_returns,
+                    force_save=force_save,
                 )
                 if gate_rates and "accuracy" in gate_rates:
                     # Load best accuracy from saved results

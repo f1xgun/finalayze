@@ -301,6 +301,7 @@ class TestWalkForwardUsesLastFold:
             test_features: list[dict[str, float]],
             test_labels: list[int],
             mean_uniqueness: float = 1.0,
+            avg_hold_bars: float = 1.0,
         ) -> FoldMetrics:
             idx = eval_call_count["idx"]
             eval_call_count["idx"] += 1
@@ -370,3 +371,62 @@ class TestWalkForwardUsesLastFold:
         wf_data = json.loads(gate_results_path.read_text())
         last_fold_accuracy = 0.70
         assert wf_data["best_accuracy"] == pytest.approx(last_fold_accuracy)
+
+
+# --- Dynamic quality gates ---
+
+# Constants for readability (ruff PLR2004)
+_N_SAMPLES_2000 = 2000
+_N_SAMPLES_100 = 100
+_HOLD_BARS_20 = 20.0
+_HOLD_BARS_1 = 1.0
+_HOLD_BARS_100 = 100.0
+_N_EFF_100 = 100
+_N_EFF_2000 = 2000
+_N_EFF_5 = 5
+_N_EFF_25 = 25
+_N_EFF_400 = 400
+_ACCURACY_0_60 = 0.60
+_ACCURACY_0_56 = 0.56
+_ACCURACY_0_75 = 0.75
+
+
+@pytest.mark.unit
+class TestDynamicQualityGates:
+    """Quality gates should adjust thresholds based on effective sample size."""
+
+    def test_n_eff_with_overlap(self) -> None:
+        """n_eff should be n/hold_bars."""
+        mod = _load_script_module()
+        assert mod.compute_n_eff(_N_SAMPLES_2000, _HOLD_BARS_20) == _N_EFF_100  # type: ignore[union-attr]
+        assert mod.compute_n_eff(_N_SAMPLES_2000, _HOLD_BARS_1) == _N_EFF_2000  # type: ignore[union-attr]
+        assert mod.compute_n_eff(_N_SAMPLES_100, _HOLD_BARS_20) == _N_EFF_5  # type: ignore[union-attr]
+
+    def test_accuracy_gate_scales_with_n_eff(self) -> None:
+        """Smaller n_eff -> higher accuracy threshold."""
+        mod = _load_script_module()
+
+        threshold_small = mod.compute_accuracy_threshold(n_eff=_N_EFF_25)  # type: ignore[union-attr]
+        threshold_large = mod.compute_accuracy_threshold(n_eff=_N_EFF_400)  # type: ignore[union-attr]
+
+        assert threshold_small > _ACCURACY_0_60  # ~0.66 for n_eff=25
+        assert threshold_large < _ACCURACY_0_56  # ~0.54 for n_eff=400
+        assert threshold_small > threshold_large  # Monotonically decreasing
+
+    def test_brier_gate_scales_with_n_eff(self) -> None:
+        """Smaller n_eff -> tighter (lower) Brier threshold."""
+        mod = _load_script_module()
+
+        brier_small = mod.compute_brier_threshold(n_eff=_N_EFF_25)  # type: ignore[union-attr]
+        brier_large = mod.compute_brier_threshold(n_eff=_N_EFF_400)  # type: ignore[union-attr]
+        assert brier_small < brier_large
+
+    def test_accuracy_threshold_capped(self) -> None:
+        """Accuracy threshold should be capped at 0.75."""
+        mod = _load_script_module()
+        assert mod.compute_accuracy_threshold(n_eff=_N_EFF_5) <= _ACCURACY_0_75  # type: ignore[union-attr]
+
+    def test_n_eff_floor_at_one(self) -> None:
+        """n_eff should never be < 1."""
+        mod = _load_script_module()
+        assert mod.compute_n_eff(1, _HOLD_BARS_100) >= 1  # type: ignore[union-attr]

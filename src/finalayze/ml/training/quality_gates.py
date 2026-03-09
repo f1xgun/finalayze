@@ -31,6 +31,7 @@ class FoldMetrics:
     specificity: float = 0.5  # true negative rate
     profit_factor: float = 1.0
     signal_count: int = 0
+    avg_hold_bars: float = 1.0  # mean hold duration for n_eff calculation
 
 
 _ACCURACY_Z = 2.5
@@ -69,11 +70,44 @@ def check_accuracy_gate(metrics: FoldMetrics) -> QualityGateResult:
     )
 
 
+def _compute_n_eff(n_test: int, avg_hold_bars: float) -> int:
+    """Effective sample size: n_test / avg_hold_bars (AFML Ch.7)."""
+    if avg_hold_bars <= 1:
+        return n_test
+    return max(1, int(n_test / avg_hold_bars))
+
+
+def _dynamic_brier_threshold(n_eff: int) -> float:
+    """Dynamic Brier threshold: stricter for small n_eff, relaxes toward 0.25.
+
+    threshold = min(0.25, 0.15 + 0.05 * sqrt(n_eff / 100))
+    """
+    _min_n_eff = 5
+    _min_brier = 0.15
+    _improvement_rate = 0.05
+    _reference_n_eff = 100
+    if n_eff < _min_n_eff:
+        return _min_brier
+    relaxation = _improvement_rate * math.sqrt(n_eff) / math.sqrt(_reference_n_eff)
+    return min(_MAX_BRIER, _min_brier + relaxation)
+
+
 def check_brier_gate(metrics: FoldMetrics) -> QualityGateResult:
-    """Brier score must be below 0.25 (better than coin flip)."""
-    passed = metrics.brier_score < _MAX_BRIER
+    """Dynamic Brier score gate adjusted for effective sample size.
+
+    Was: fixed threshold < 0.25 (coin flip).
+    Now: threshold scales with n_eff = n_test / avg_hold_bars.
+    Smaller n_eff -> stricter (lower) threshold.
+    """
+    n_eff = _compute_n_eff(metrics.n_test, metrics.avg_hold_bars)
+    threshold = _dynamic_brier_threshold(n_eff)
+    passed = metrics.brier_score < threshold
     return QualityGateResult(
-        passed=passed, gate_name="brier_score", value=metrics.brier_score, threshold=_MAX_BRIER
+        passed=passed,
+        gate_name="brier_score",
+        value=metrics.brier_score,
+        threshold=threshold,
+        detail=f"n_eff={n_eff}",
     )
 
 
