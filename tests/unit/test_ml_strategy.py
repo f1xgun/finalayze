@@ -701,9 +701,9 @@ class TestBaseRateCorrectedDeadzone:
 
 class TestSupportedSegments:
     def test_supported_segments_from_yaml(self) -> None:
-        """ml_ensemble disabled in all presets (models not production-ready)."""
+        """ml_ensemble enabled in us_tech (pilot segment)."""
         registry = MLModelRegistry()
         strategy = MLStrategy(registry=registry)
         segments = strategy.supported_segments()
         assert isinstance(segments, list)
-        assert len(segments) == 0
+        assert "us_tech" in segments
