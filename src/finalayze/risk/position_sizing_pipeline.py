@@ -35,6 +35,8 @@ class SizingContext:
         target_vol: Target portfolio volatility.
         regime_scale: Regime-based position scale (floored at 0.15 by RegimeStep).
         correlation_scale: Correlation-based scale (0.30 to 1.0).
+        returns_history: Historical portfolio returns for EVT step.
+        ml_confidence: P(profitable) from MetaLabeler [0, 1], or None if ML unavailable.
     """
 
     equity: Decimal
@@ -46,6 +48,7 @@ class SizingContext:
     regime_scale: Decimal
     correlation_scale: Decimal
     returns_history: tuple[float, ...] = ()
+    ml_confidence: float | None = None  # P(profitable) from MetaLabeler [0, 1]
 
 
 class PositionSizingStep(Protocol):
@@ -112,6 +115,31 @@ class EVTStep:
         ):
             return (size * _EVT_SCALE_FACTOR).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
         return size
+
+
+_META_LABEL_THRESHOLD = Decimal("0.40")
+
+
+class MetaLabelStep:
+    """Scale position by ML-predicted P(profitable).
+
+    Maps [threshold, 1.0] -> [0.0, 1.0] linearly.
+    Below threshold -> zero position (ML vetoes the trade).
+    None -> pass-through (ML not available).
+    """
+
+    def __init__(self, threshold: Decimal = _META_LABEL_THRESHOLD) -> None:
+        self._threshold = threshold
+
+    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:
+        if context.ml_confidence is None:
+            return size  # No ML data -> pass through
+        confidence = Decimal(str(context.ml_confidence))
+        if confidence <= self._threshold:
+            return Decimal(0)  # ML vetoes trade
+        scaling_range = Decimal(1) - self._threshold
+        factor = (confidence - self._threshold) / scaling_range
+        return (size * factor).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
 
 
 class PositionSizingPipeline:

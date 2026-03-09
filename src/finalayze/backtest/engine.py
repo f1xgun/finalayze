@@ -45,6 +45,7 @@ from finalayze.risk.position_sizing_pipeline import (
     EVTStep,
     HardCapsStep,
     KellyStep,
+    MetaLabelStep,
     PositionSizingPipeline,
     RegimeStep,
     SizingContext,
@@ -141,15 +142,17 @@ class BacktestEngine:
         self._max_hold_bars = cfg.max_hold_bars
         self._stop_loss_mode = cfg.stop_loss_mode
         self._regime_provider = regime_provider
+        self._meta_labeler = cfg.meta_labeler
         # Propagate market context to strategy if it supports it (duck typing)
         if cfg.market_context is not None and hasattr(self._strategy, "set_market_context"):
             self._strategy.set_market_context(cfg.market_context)
-        # Build position sizing pipeline with optional EVT/Copula steps
+        # Build position sizing pipeline with optional EVT/Copula/MetaLabel steps
         pipeline_steps = [KellyStep(), VolTargetStep(), RegimeStep()]
         if self._config.use_copula_scaling:
             pipeline_steps.append(CopulaStep())
         if self._config.use_evt_sizing:
             pipeline_steps.append(EVTStep())
+        pipeline_steps.append(MetaLabelStep())
         pipeline_steps.append(HardCapsStep())
         self._sizing_pipeline = PositionSizingPipeline(steps=pipeline_steps)
         self._max_positions_per_segment = cfg.max_positions_per_segment
@@ -1172,6 +1175,12 @@ class BacktestEngine:
         asset_vol = compute_realized_vol(history) or Decimal("0.20")
         # Currency-aware min position: 5000 RUB floor for MOEX, $500 for US
         min_pos = Decimal(5000) if segment_id.startswith("ru_") else Decimal(500)
+
+        # Compute ML confidence from MetaLabeler if available
+        ml_confidence: float | None = None
+        if self._meta_labeler is not None and signal is not None:
+            ml_confidence = self._meta_labeler.predict(signal, signal.features)
+
         context = SizingContext(
             equity=portfolio.equity,
             base_position=base_position,
@@ -1182,6 +1191,7 @@ class BacktestEngine:
             regime_scale=Decimal(str(regime_position_scale or 1.0)),
             correlation_scale=Decimal("1.0"),
             returns_history=tuple(self._portfolio_returns),
+            ml_confidence=ml_confidence,
         )
         position_value = self._sizing_pipeline.compute(context)
 

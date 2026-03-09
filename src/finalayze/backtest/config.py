@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from finalayze.backtest.costs import TransactionCosts
     from finalayze.backtest.decision_journal import DecisionJournal
     from finalayze.core.schemas import MarketContext
+    from finalayze.ml.meta_labeler import MetaLabeler
     from finalayze.risk.circuit_breaker import CircuitBreaker
     from finalayze.risk.kelly import RollingKelly
     from finalayze.risk.loss_limits import LossLimitTracker
@@ -153,3 +154,6 @@ class BacktestConfig:
 
     # Ambient market data for cross-asset / regime features (Phase E)
     market_context: MarketContext | None = None
+
+    # MetaLabeler for ML-based position sizing (predicts P(profitable))
+    meta_labeler: MetaLabeler | None = None
