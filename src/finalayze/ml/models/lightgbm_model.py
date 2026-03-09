@@ -92,7 +92,9 @@ class LightGBMModel(BaseMLModel):
 
         n_pos = int(np.sum(y_arr == 1))
         n_neg = int(np.sum(y_arr == 0))
-        spw = n_neg / n_pos if n_pos > 0 else 1.0
+        # When sample_weight is provided, it already handles class balance;
+        # applying scale_pos_weight on top would double-count the reweighting.
+        spw = 1.0 if sample_weight is not None else (n_neg / n_pos if n_pos > 0 else 1.0)
 
         # Temporal validation split: last 10% for early stopping monitoring
         n_val = max(int(len(x_arr) * 0.1), 1)

@@ -154,6 +154,121 @@ class TestWeightedAveraging:
         assert result == pytest.approx(0.5)
 
 
+class TestModelWeightsKeyResolution:
+    """ML-1: Weight lookup works with all key formats produced by training scripts."""
+
+    def test_weight_resolved_from_training_style_keys(self) -> None:
+        """Model weights saved as 'xgboost' are found for class name 'XGBoostModel'."""
+        model = _make_model(proba=0.7)
+        type(model).__name__ = "XGBoostModel"
+
+        weights = {"xgboost": 0.5, "lightgbm": 0.3, "catboost": 0.2}
+        ensemble = EnsembleModel(models=[model], lstm_model=None, model_weights=weights)
+
+        w = ensemble._resolve_weight("XGBoostModel")
+        assert w == 0.5
+
+    def test_weight_resolved_from_short_keys(self) -> None:
+        """Model weights saved as 'xgb' (single-split) are found for 'XGBoostModel'."""
+        model = _make_model(proba=0.7)
+        type(model).__name__ = "XGBoostModel"
+
+        weights = {"xgb": 0.4, "lgbm": 0.3, "catboost": 0.3}
+        ensemble = EnsembleModel(models=[model], lstm_model=None, model_weights=weights)
+
+        w = ensemble._resolve_weight("XGBoostModel")
+        assert w == 0.4
+
+    def test_weight_resolved_for_lightgbm(self) -> None:
+        """LightGBMModel class name resolves to 'lightgbm' key."""
+        model = _make_model(proba=0.6)
+        type(model).__name__ = "LightGBMModel"
+
+        weights = {"xgboost": 0.5, "lightgbm": 0.3, "catboost": 0.2}
+        ensemble = EnsembleModel(models=[model], lstm_model=None, model_weights=weights)
+
+        w = ensemble._resolve_weight("LightGBMModel")
+        assert w == 0.3
+
+    def test_weight_resolved_for_catboost(self) -> None:
+        """CatBoostModel class name resolves to 'catboost' key."""
+        model = _make_model(proba=0.8)
+        type(model).__name__ = "CatBoostModel"
+
+        weights = {"xgboost": 0.5, "lightgbm": 0.3, "catboost": 0.2}
+        ensemble = EnsembleModel(models=[model], lstm_model=None, model_weights=weights)
+
+        w = ensemble._resolve_weight("CatBoostModel")
+        assert w == 0.2
+
+    def test_weight_exact_match_preferred(self) -> None:
+        """Exact class name match is preferred over alias resolution."""
+        model = _make_model(proba=0.7)
+        type(model).__name__ = "XGBoostModel"
+
+        weights = {"XGBoostModel": 0.9, "xgboost": 0.1}
+        ensemble = EnsembleModel(models=[model], lstm_model=None, model_weights=weights)
+
+        w = ensemble._resolve_weight("XGBoostModel")
+        assert w == 0.9
+
+    def test_weight_unknown_model_returns_zero(self) -> None:
+        """Unknown model class name returns 0.0 weight."""
+        model = _make_model(proba=0.7)
+        type(model).__name__ = "UnknownModel"
+
+        weights = {"xgboost": 0.5}
+        ensemble = EnsembleModel(models=[model], lstm_model=None, model_weights=weights)
+
+        w = ensemble._resolve_weight("UnknownModel")
+        assert w == 0.0
+
+    def test_weighted_predict_proba_with_training_keys(self) -> None:
+        """End-to-end: predict_proba uses correct weights with training-style keys."""
+        xgb = _make_model(proba=0.9)
+        type(xgb).__name__ = "XGBoostModel"
+        lgbm = _make_model(proba=0.3)
+        type(lgbm).__name__ = "LightGBMModel"
+
+        # Walk-forward style keys
+        weights = {"xgboost": 0.04, "lightgbm": 0.0025}
+        ensemble = EnsembleModel(models=[xgb, lgbm], lstm_model=None, model_weights=weights)
+
+        result = ensemble.predict_proba({"a": 1.0})
+        expected = (0.04 * 0.9 + 0.0025 * 0.3) / (0.04 + 0.0025)
+        assert result == pytest.approx(expected, abs=1e-6)
+
+
+class TestAllZeroWeightsFallback:
+    """ML-4: All-zero model weights fall back to default probability."""
+
+    def test_all_zero_weights_via_resolve(self) -> None:
+        """When all model weights are zero, _compute_raw_average returns _DEFAULT_PROB."""
+        from finalayze.ml.models.ensemble import _DEFAULT_PROB
+
+        model = _make_model(proba=0.8)
+        type(model).__name__ = "XGBoostModel"
+
+        weights = {"xgboost": 0.0, "lightgbm": 0.0, "catboost": 0.0}
+        ensemble = EnsembleModel(models=[model], lstm_model=None, model_weights=weights)
+
+        result = ensemble._compute_raw_average([0.8], {"XGBoostModel": 0.8})
+        assert result == _DEFAULT_PROB
+
+    def test_all_zero_weights_predict_proba(self) -> None:
+        """predict_proba returns default when all resolved weights are zero."""
+        from finalayze.ml.models.ensemble import _DEFAULT_PROB
+
+        model = _make_model(proba=0.8)
+        type(model).__name__ = "XGBoostModel"
+
+        weights = {"xgboost": 0.0, "lightgbm": 0.0, "catboost": 0.0}
+        ensemble = EnsembleModel(models=[model], lstm_model=None, model_weights=weights)
+
+        result = ensemble.predict_proba({"a": 1.0})
+        assert result == _DEFAULT_PROB
+
+
 class TestPredictionUncertainty:
     """C5: Ensemble disagreement tracking."""
 
@@ -376,3 +491,52 @@ class TestCalibratorQualityGating:
                 ensemble.predict_proba({"a": 1.0})
 
         assert any("calibrator_high_clamp_rate" in entry.get("event", "") for entry in captured)
+
+
+class TestLightGBMNoDoubleReweight:
+    """LightGBM must not apply scale_pos_weight when sample_weight is provided."""
+
+    _NEUTRAL_SPW = 1.0
+    _N_SAMPLES = 200
+    _N_FEATURES = 5
+    _N_NEGATIVE = 120
+    _N_POSITIVE = 80
+    _SPW_TOLERANCE = 0.01
+
+    def test_no_scale_pos_weight_when_sample_weights(self) -> None:
+        """When sample_weight is passed, scale_pos_weight must be 1.0 (neutral)."""
+        import numpy as np
+
+        from finalayze.ml.models.lightgbm_model import LightGBMModel
+
+        model = LightGBMModel(segment_id="test")
+        rng = np.random.default_rng(42)
+        X = [
+            {f"f{i}": float(v) for i, v in enumerate(row)}
+            for row in rng.standard_normal((self._N_SAMPLES, self._N_FEATURES))
+        ]
+        y = [int(v) for v in (rng.random(self._N_SAMPLES) > 0.5).astype(int)]
+        sw = rng.random(self._N_SAMPLES) + 0.5
+
+        model.fit(X, y, sample_weight=sw)
+        assert model._model is not None
+        assert model._model.scale_pos_weight == self._NEUTRAL_SPW
+
+    def test_scale_pos_weight_used_when_no_sample_weights(self) -> None:
+        """When sample_weight is None, scale_pos_weight should be n_neg/n_pos."""
+        import numpy as np
+
+        from finalayze.ml.models.lightgbm_model import LightGBMModel
+
+        model = LightGBMModel(segment_id="test")
+        rng = np.random.default_rng(42)
+        X = [
+            {f"f{i}": float(v) for i, v in enumerate(row)}
+            for row in rng.standard_normal((self._N_SAMPLES, self._N_FEATURES))
+        ]
+        y = [0] * self._N_NEGATIVE + [1] * self._N_POSITIVE
+
+        model.fit(X, y, sample_weight=None)
+        expected_spw = self._N_NEGATIVE / self._N_POSITIVE
+        assert model._model is not None
+        assert abs(model._model.scale_pos_weight - expected_spw) < self._SPW_TOLERANCE
