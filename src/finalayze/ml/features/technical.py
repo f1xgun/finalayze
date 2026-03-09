@@ -38,6 +38,11 @@ _MIN_WAVELET_SAMPLES = 16  # pywt.wavedec('db4', level=3) needs at least 2^level
 _RET_1D_MIN = 2
 _RET_5D_MIN = 6
 _RET_21D_MIN = 22
+_RET_63D_MIN = 64
+_RET_126D_MIN = 127
+
+# Momentum reversal ratio epsilon (avoid division by zero)
+_MOM_RATIO_EPSILON = 1e-8
 
 # Return distribution constants
 _RECENT_RETURN_WINDOW = 20
@@ -553,6 +558,11 @@ def _compute_predictive_features(
     ret_1d = closes[-1] / closes[-2] - 1 if len(closes) >= _RET_1D_MIN else 0.0
     ret_5d = closes[-1] / closes[-6] - 1 if len(closes) >= _RET_5D_MIN else 0.0
     ret_21d = closes[-1] / closes[-22] - 1 if len(closes) >= _RET_21D_MIN else 0.0
+    # Medium-term momentum (Gu, Kelly & Xiu 2020: top predictor class)
+    ret_63d = closes[-1] / closes[-63] - 1 if len(closes) >= _RET_63D_MIN else 0.0
+    ret_126d = closes[-1] / closes[-126] - 1 if len(closes) >= _RET_126D_MIN else 0.0
+    # Short-term reversal relative to monthly momentum (mean-reversion within trends)
+    mom_reversal_ratio = ret_5d / ret_21d if abs(ret_21d) > _MOM_RATIO_EPSILON else 0.0
 
     # Return distribution (Harvey & Siddique 2000)
     recent_returns = returns.iloc[-_RECENT_RETURN_WINDOW:].dropna()
@@ -579,6 +589,9 @@ def _compute_predictive_features(
         "ret_1d": ret_1d,
         "ret_5d": ret_5d,
         "ret_21d": ret_21d,
+        "ret_63d": ret_63d,
+        "ret_126d": ret_126d,
+        "mom_reversal_ratio": mom_reversal_ratio,
         "skew_20d": skew_20d,
         "kurt_20d": kurt_20d,
         "max_ret_20d": max_ret_20d,

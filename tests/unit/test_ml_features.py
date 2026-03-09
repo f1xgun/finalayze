@@ -17,7 +17,7 @@ from finalayze.ml.features.technical import (
 )
 
 _EXPECTED_MIN_FEATURES = 25
-_EXPECTED_TOTAL_FEATURES = 42  # 44 - 2 (removed dow_sin, dow_cos)
+_EXPECTED_TOTAL_FEATURES = 45  # 42 + 3 (ret_63d, ret_126d, mom_reversal_ratio)
 _NEW_MIN_CANDLES = 80
 
 
@@ -700,6 +700,116 @@ class TestTotalFeatureCount:
         candles = _make_candles(80)
         features = compute_features(candles)
         assert len(features) == _EXPECTED_TOTAL_FEATURES
+
+
+# Minimum bars needed for medium-term momentum features
+_RET_63D_MIN = 64
+_RET_126D_MIN = 127
+
+
+class TestLaggedMomentumFeatures:
+    """Verify medium-term momentum features per Gu et al. (2020)."""
+
+    def test_ret_63d_present_and_correct(self) -> None:
+        """63-day return should be computed correctly."""
+        import pandas as pd
+
+        from finalayze.ml.features.technical import _compute_predictive_features
+
+        closes = list(range(100, 300))  # 200 bars, monotonically increasing
+        close_s = pd.Series(closes, dtype=float)
+        returns = close_s.pct_change()
+
+        result = _compute_predictive_features(close_s, closes, returns)
+        assert "ret_63d" in result
+        expected = closes[-1] / closes[-63] - 1
+        assert abs(result["ret_63d"] - expected) < 1e-6
+
+    def test_ret_126d_present(self) -> None:
+        """126-day return should be present with enough data."""
+        import pandas as pd
+
+        from finalayze.ml.features.technical import _compute_predictive_features
+
+        closes = list(range(100, 400))  # 300 bars
+        close_s = pd.Series(closes, dtype=float)
+        returns = close_s.pct_change()
+
+        result = _compute_predictive_features(close_s, closes, returns)
+        assert "ret_126d" in result
+        assert result["ret_126d"] > 0  # Monotonically increasing -> positive return
+
+    def test_mom_reversal_ratio(self) -> None:
+        """Momentum-reversal ratio should be ret_5d / ret_21d."""
+        import pandas as pd
+
+        from finalayze.ml.features.technical import _compute_predictive_features
+
+        closes = list(range(100, 200))  # 100 bars
+        close_s = pd.Series(closes, dtype=float)
+        returns = close_s.pct_change()
+
+        result = _compute_predictive_features(close_s, closes, returns)
+        assert "mom_reversal_ratio" in result
+
+    def test_ret_63d_zero_on_insufficient_data(self) -> None:
+        """With < 64 bars, ret_63d should be 0.0."""
+        import pandas as pd
+
+        from finalayze.ml.features.technical import _compute_predictive_features
+
+        closes = list(range(100, 150))  # Only 50 bars
+        close_s = pd.Series(closes, dtype=float)
+        returns = close_s.pct_change()
+
+        result = _compute_predictive_features(close_s, closes, returns)
+        assert result["ret_63d"] == 0.0
+
+    def test_ret_126d_zero_on_insufficient_data(self) -> None:
+        """With < 127 bars, ret_126d should be 0.0."""
+        import pandas as pd
+
+        from finalayze.ml.features.technical import _compute_predictive_features
+
+        closes = list(range(100, 200))  # Only 100 bars
+        close_s = pd.Series(closes, dtype=float)
+        returns = close_s.pct_change()
+
+        result = _compute_predictive_features(close_s, closes, returns)
+        assert result["ret_126d"] == 0.0
+
+    def test_mom_reversal_ratio_zero_when_monthly_flat(self) -> None:
+        """When ret_21d ~ 0, mom_reversal_ratio should be 0.0 (avoid division by zero)."""
+        import pandas as pd
+
+        from finalayze.ml.features.technical import _compute_predictive_features
+
+        # Create data where 21-day return is near zero
+        closes_arr = [100.0] * 100  # Flat prices
+        close_s = pd.Series(closes_arr, dtype=float)
+        returns = close_s.pct_change()
+
+        result = _compute_predictive_features(close_s, closes_arr, returns)
+        assert result["mom_reversal_ratio"] == 0.0
+
+    def test_ret_63d_in_compute_features(self) -> None:
+        """ret_63d should appear in compute_features output with enough candles."""
+        candles = _make_candles(80)
+        features = compute_features(candles)
+        assert "ret_63d" in features
+
+    def test_ret_126d_in_compute_features(self) -> None:
+        """ret_126d should appear (defaulting to 0.0 with only 80 candles)."""
+        candles = _make_candles(80)
+        features = compute_features(candles)
+        assert "ret_126d" in features
+        assert features["ret_126d"] == 0.0  # 80 < 127
+
+    def test_mom_reversal_ratio_in_compute_features(self) -> None:
+        """mom_reversal_ratio should appear in compute_features output."""
+        candles = _make_candles(80)
+        features = compute_features(candles)
+        assert "mom_reversal_ratio" in features
 
 
 class TestMarketContext:
