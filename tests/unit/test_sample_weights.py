@@ -11,6 +11,7 @@ from finalayze.ml.training.sample_weights import (
     compute_decay_weights,
     compute_sample_uniqueness,
     compute_sample_weights,
+    sequential_bootstrap,
 )
 
 # ---------------------------------------------------------------------------
@@ -216,9 +217,13 @@ class TestComputeUniquenessFromHoldBars:
         from scripts.train_models import _compute_uniqueness_from_hold_bars
 
         # 5 samples: alternating short(1) and long(10) holds
-        hold_bars = [_HOLD_BARS_MIX_SHORT, _HOLD_BARS_MIX_LONG,
-                     _HOLD_BARS_MIX_SHORT, _HOLD_BARS_MIX_LONG,
-                     _HOLD_BARS_MIX_SHORT]
+        hold_bars = [
+            _HOLD_BARS_MIX_SHORT,
+            _HOLD_BARS_MIX_LONG,
+            _HOLD_BARS_MIX_SHORT,
+            _HOLD_BARS_MIX_LONG,
+            _HOLD_BARS_MIX_SHORT,
+        ]
         result = _compute_uniqueness_from_hold_bars(hold_bars)
         assert len(result) == _HOLD_BARS_SAMPLES_FIVE
         # Short-hold samples at index 0, 2, 4 should be more unique
@@ -267,3 +272,115 @@ class TestSqrtDampeningBarrierWeights:
 
         assert dampened_ratio < raw_ratio
         assert dampened_ratio < _DAMPENING_RATIO_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
+# sequential_bootstrap (AFML Ch. 4)
+# ---------------------------------------------------------------------------
+_SB_N_SAMPLES = 100
+_SB_N_DRAW = 50
+_SB_HOLD_BARS = 20
+_SB_NON_OVERLAP_COUNT = 10
+_SB_NON_OVERLAP_HOLD = 5
+_SB_NON_OVERLAP_STEP = 10
+_SB_SEED = 42
+_SB_SEED_REPRO = 123
+_SB_REPRO_DRAW = 20
+_SB_SINGLE_COUNT = 10
+_SB_SINGLE_HOLD = 5
+_SB_MIN_UNIQUE_NON_OVERLAP = 7  # at least 70% unique when no overlap
+_SB_MIN_UNIQUE_OVERLAP = 15  # at least 30% unique with heavy overlap
+_SB_SMALL_N = 50
+_SB_SMALL_HOLD = 10
+
+
+class TestSequentialBootstrap:
+    """Sequential bootstrapping should reduce redundancy in sampled indices."""
+
+    def test_output_length(self) -> None:
+        """Should return exactly n_samples indices."""
+        starts = np.arange(_SB_N_SAMPLES)
+        holds = np.full(_SB_N_SAMPLES, _SB_HOLD_BARS)
+        rng = np.random.default_rng(_SB_SEED)
+        indices = sequential_bootstrap(starts, holds, n_samples=_SB_N_DRAW, rng=rng)
+        assert len(indices) == _SB_N_DRAW
+
+    def test_non_overlapping_samples_uniform(self) -> None:
+        """When labels don't overlap, selection should be roughly uniform."""
+        # 10 non-overlapping labels, each 5 bars, starting every 10 bars
+        starts = np.arange(0, _SB_N_SAMPLES, _SB_NON_OVERLAP_STEP)  # [0, 10, 20, ..., 90]
+        holds = np.full(_SB_NON_OVERLAP_COUNT, _SB_NON_OVERLAP_HOLD)
+        rng = np.random.default_rng(_SB_SEED)
+        indices = sequential_bootstrap(starts, holds, n_samples=_SB_NON_OVERLAP_COUNT, rng=rng)
+        # Should select diverse samples (all unique because no overlap)
+        assert len(set(indices)) >= _SB_MIN_UNIQUE_NON_OVERLAP
+
+    def test_overlapping_favors_unique(self) -> None:
+        """With heavy overlap, sequential bootstrap should favor less-overlapping samples."""
+        # 100 samples, each spanning 20 bars, starting every 1 bar (95% overlap)
+        starts = np.arange(_SB_N_SAMPLES)
+        holds = np.full(_SB_N_SAMPLES, _SB_HOLD_BARS)
+        rng = np.random.default_rng(_SB_SEED)
+        indices = sequential_bootstrap(starts, holds, n_samples=_SB_N_DRAW, rng=rng)
+        # Should have reasonable diversity despite overlap
+        assert len(set(indices)) >= _SB_MIN_UNIQUE_OVERLAP
+
+    def test_reproducibility(self) -> None:
+        """Same seed should produce same indices."""
+        starts = np.arange(_SB_SMALL_N)
+        holds = np.full(_SB_SMALL_N, _SB_SMALL_HOLD)
+        idx1 = sequential_bootstrap(
+            starts, holds, _SB_REPRO_DRAW, rng=np.random.default_rng(_SB_SEED_REPRO)
+        )
+        idx2 = sequential_bootstrap(
+            starts, holds, _SB_REPRO_DRAW, rng=np.random.default_rng(_SB_SEED_REPRO)
+        )
+        assert idx1 == idx2
+
+    def test_single_sample(self) -> None:
+        """Drawing 1 sample should work."""
+        starts = np.arange(_SB_SINGLE_COUNT)
+        holds = np.full(_SB_SINGLE_COUNT, _SB_SINGLE_HOLD)
+        indices = sequential_bootstrap(starts, holds, 1, rng=np.random.default_rng(_SB_SEED))
+        assert len(indices) == 1
+        assert 0 <= indices[0] < _SB_SINGLE_COUNT
+
+    def test_zero_samples_returns_empty(self) -> None:
+        """Drawing 0 samples should return empty list."""
+        starts = np.arange(_SB_SINGLE_COUNT)
+        holds = np.full(_SB_SINGLE_COUNT, _SB_SINGLE_HOLD)
+        indices = sequential_bootstrap(starts, holds, 0, rng=np.random.default_rng(_SB_SEED))
+        assert indices == []
+
+    def test_empty_arrays_returns_empty(self) -> None:
+        """Empty input arrays should return empty list even with n_samples > 0."""
+        starts = np.array([], dtype=np.int64)
+        holds = np.array([], dtype=np.int64)
+        rng = np.random.default_rng(_SB_SEED)
+        indices = sequential_bootstrap(starts, holds, _SB_N_DRAW, rng=rng)
+        assert indices == []
+
+    def test_hold_zero_treated_as_no_overlap(self) -> None:
+        """Samples with hold=0 should be treated as non-overlapping (point events)."""
+        n = _SB_SINGLE_COUNT
+        starts = np.arange(n)
+        holds = np.zeros(n, dtype=np.int64)
+        indices = sequential_bootstrap(starts, holds, n, rng=np.random.default_rng(_SB_SEED))
+        assert len(indices) == n
+        # No overlap, so should be diverse
+        assert len(set(indices)) >= _SB_MIN_UNIQUE_NON_OVERLAP
+
+    def test_default_rng_when_none(self) -> None:
+        """When rng is None, should still work (non-deterministic)."""
+        starts = np.arange(_SB_SINGLE_COUNT)
+        holds = np.full(_SB_SINGLE_COUNT, _SB_SINGLE_HOLD)
+        indices = sequential_bootstrap(starts, holds, _SB_SINGLE_COUNT, rng=None)
+        assert len(indices) == _SB_SINGLE_COUNT
+
+    def test_indices_in_valid_range(self) -> None:
+        """All returned indices should be in [0, N)."""
+        starts = np.arange(_SB_N_SAMPLES)
+        holds = np.full(_SB_N_SAMPLES, _SB_HOLD_BARS)
+        rng = np.random.default_rng(_SB_SEED)
+        indices = sequential_bootstrap(starts, holds, _SB_N_DRAW, rng=rng)
+        assert all(0 <= idx < _SB_N_SAMPLES for idx in indices)

@@ -88,6 +88,77 @@ def compute_sample_weights(
     return uniqueness * (n / total)
 
 
+def sequential_bootstrap(
+    start_indices: np.ndarray,  # type: ignore[type-arg]
+    hold_bars: np.ndarray,  # type: ignore[type-arg]
+    n_samples: int,
+    rng: np.random.Generator | None = None,
+) -> list[int]:
+    """Sequential bootstrapping per Lopez de Prado (AFML Ch. 4).
+
+    Draws samples one at a time, adjusting probabilities to maximize
+    average uniqueness of the selected set. Samples that don't overlap
+    with already-selected samples get higher probability.
+
+    Args:
+        start_indices: Bar index where each label starts (1D array, length N).
+        hold_bars: Number of bars each label spans (1D array, length N).
+        n_samples: How many samples to draw.
+        rng: Random generator for reproducibility.
+
+    Returns:
+        List of selected sample indices (may contain duplicates).
+    """
+    n = len(start_indices)
+    if n == 0 or n_samples <= 0:
+        return []
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Precompute end bar for each sample: [start, start + hold)
+    # Treat hold <= 0 as point events (no span, no overlap contribution)
+    starts = np.asarray(start_indices, dtype=np.int64)
+    holds = np.asarray(hold_bars, dtype=np.int64)
+    ends = starts + np.maximum(holds, 0)  # end is exclusive
+
+    # Concurrency counter: how many already-selected labels are active at each bar
+    max_bar = int(np.max(ends)) + 1 if np.any(holds > 0) else int(np.max(starts)) + 1
+    concurrency = np.zeros(max_bar, dtype=np.float64)
+
+    selected: list[int] = []
+
+    for _ in range(n_samples):
+        # Compute average uniqueness for each candidate if it were added
+        avg_uniqueness = np.empty(n, dtype=np.float64)
+        for i in range(n):
+            s_i = int(starts[i])
+            e_i = int(ends[i])
+            if e_i <= s_i:
+                # Point event or zero-hold: uniqueness = 1 (no overlap possible)
+                avg_uniqueness[i] = 1.0
+            else:
+                # Average of 1 / (concurrency[t] + 1) over the sample's bar range
+                span = concurrency[s_i:e_i] + 1.0
+                avg_uniqueness[i] = float(np.mean(1.0 / span))
+
+        # Normalize to probability distribution
+        total = float(np.sum(avg_uniqueness))
+        probs = np.ones(n, dtype=np.float64) / n if total <= 0.0 else avg_uniqueness / total
+
+        # Draw one sample
+        chosen = int(rng.choice(n, p=probs))
+        selected.append(chosen)
+
+        # Update concurrency for the chosen sample's bar range
+        s_c = int(starts[chosen])
+        e_c = int(ends[chosen])
+        if e_c > s_c:
+            concurrency[s_c:e_c] += 1.0
+
+    return selected
+
+
 def compute_decay_weights(n_samples: int, decay: float = 0.5) -> np.ndarray:  # type: ignore[type-arg]
     """Exponential decay weights giving more importance to recent samples.
 

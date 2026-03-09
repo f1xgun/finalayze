@@ -47,7 +47,7 @@ from finalayze.ml.training import DEFAULT_WINDOW_SIZE, build_windows
 from finalayze.ml.training.feature_selection import select_features_mi
 from finalayze.ml.training.labeling import build_triple_barrier_dataset
 from finalayze.ml.training.quality_gates import FoldMetrics
-from finalayze.ml.training.sample_weights import compute_decay_weights
+from finalayze.ml.training.sample_weights import compute_decay_weights, sequential_bootstrap
 
 _WINDOW_SIZE = DEFAULT_WINDOW_SIZE
 _TRAIN_RATIO = 0.70
@@ -917,6 +917,7 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
     *,
     excess_returns: bool = False,
     force_save: bool = False,
+    seq_bootstrap: bool = True,
 ) -> dict[str, float] | None:
     """Train models using walk-forward validation (D1).
 
@@ -990,6 +991,7 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
 
         # Sample weights
         decay_w = compute_decay_weights(len(train_f))
+        train_hb: list[int] = []
         if hold_bars is not None:
             train_hb = [hold_bars[i] for i in train_idx if i < len(hold_bars)]
             if train_hb:
@@ -1011,6 +1013,20 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
             norm_bw = _np.ones(len(train_f), dtype=_np.float64)
 
         sw = decay_w * uniq[: len(decay_w)] * norm_bw[: len(decay_w)]
+
+        # Sequential bootstrapping: debias overlapping labels (AFML Ch. 4)
+        if seq_bootstrap and hold_bars is not None and train_hb:
+            sb_starts = _np.arange(len(train_f), dtype=_np.int64)
+            sb_holds = _np.array(train_hb[: len(train_f)], dtype=_np.int64)
+            sb_n = len(train_f)
+            sb_indices = sequential_bootstrap(sb_starts, sb_holds, sb_n)
+            train_f = [train_f[i] for i in sb_indices]
+            train_l = [train_l[i] for i in sb_indices]
+            sw = sw[sb_indices]
+            print(
+                f"[{segment_id}] Fold {fold_idx}: sequential bootstrap "
+                f"({sb_n} draws, {len(set(sb_indices))} unique)"
+            )
 
         # Train models
         xgb = XGBoostModel(segment_id=segment_id, max_depth=_get_xgboost_max_depth(segment_id))
@@ -1150,6 +1166,7 @@ def train_one_segment(  # noqa: PLR0915
     label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
     *,
     excess_returns: bool = False,
+    seq_bootstrap: bool = True,
 ) -> None:
     """Train and save models for a single segment."""
     import numpy as _np  # noqa: PLC0415
@@ -1241,6 +1258,18 @@ def train_one_segment(  # noqa: PLR0915
         normalized_bw = _np.ones(len(train_features), dtype=_np.float64)
 
     sample_weights = decay_weights * uniqueness * normalized_bw
+
+    # Sequential bootstrapping: debias overlapping labels (AFML Ch. 4)
+    if seq_bootstrap and hold_bars is not None and len(hold_bars) >= train_end:
+        train_hold_bars_sb = hold_bars[:train_end]
+        sb_starts = _np.arange(len(train_features), dtype=_np.int64)
+        sb_holds = _np.array(train_hold_bars_sb[: len(train_features)], dtype=_np.int64)
+        sb_n = len(train_features)
+        sb_indices = sequential_bootstrap(sb_starts, sb_holds, sb_n)
+        train_features = [train_features[i] for i in sb_indices]
+        train_labels = [train_labels[i] for i in sb_indices]
+        sample_weights = sample_weights[sb_indices]
+        print(f"[{segment_id}] Sequential bootstrap: {sb_n} draws, {len(set(sb_indices))} unique")
 
     segment_dir = output_dir / segment_id
     segment_dir.mkdir(parents=True, exist_ok=True)
@@ -1494,6 +1523,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "For development use only -- production models should pass gates."
         ),
     )
+    parser.add_argument(
+        "--sequential-bootstrap",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Use sequential bootstrapping (AFML Ch. 4) to debias training samples "
+            "by reducing overlap redundancy. Requires triple_barrier labels with hold_bars. "
+            "Default: enabled."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1505,6 +1544,7 @@ def main() -> None:
     walk_forward: bool = args.walk_forward
     excess_returns: bool = args.excess_returns
     force_save: bool = args.force_save
+    seq_bootstrap: bool = args.sequential_bootstrap
 
     if args.segment:
         segments = {args.segment: _SEGMENT_SYMBOLS.get(args.segment, [])}
@@ -1513,7 +1553,8 @@ def main() -> None:
 
     print(
         f"Label mode: {label_mode}, Walk-forward: {walk_forward}, "
-        f"Excess returns: {excess_returns}, Force save: {force_save}"
+        f"Excess returns: {excess_returns}, Force save: {force_save}, "
+        f"Sequential bootstrap: {seq_bootstrap}"
     )
 
     # Collect p-values for BH correction (D3) across all segments
@@ -1529,6 +1570,7 @@ def main() -> None:
                     label_mode=label_mode,
                     excess_returns=excess_returns,
                     force_save=force_save,
+                    seq_bootstrap=seq_bootstrap,
                 )
                 if gate_rates and "accuracy" in gate_rates:
                     # Load best accuracy from saved results
@@ -1543,6 +1585,7 @@ def main() -> None:
                     output_dir=output_dir,
                     label_mode=label_mode,
                     excess_returns=excess_returns,
+                    seq_bootstrap=seq_bootstrap,
                 )
         except FileNotFoundError as exc:
             print(f"[{segment_id}] FileNotFoundError -- {exc}, skipping.")
