@@ -56,9 +56,7 @@ _FEATURE_NAMES = {
     "volume_zscore_20d",
     "rsi_zscore_60d",
     "atr_zscore_60d",
-    # Calendar
-    "dow_sin",
-    "dow_cos",
+    # Calendar (dow_sin/dow_cos removed — negligible post-2000)
     "month_sin",
     "month_cos",
     # Regime / VIX

@@ -27,6 +27,9 @@ _OBV_SLOPE_LENGTH = 10
 _RSI_LOOKBACK = 14
 _PROXIMITY_WINDOW = 252
 _AMIHUD_WINDOW = 20
+_AMIHUD_RANK_LOOKBACK = 252
+_AMIHUD_MIN_RANK_PERIODS = 20
+_AMIHUD_NEUTRAL_DEFAULT = 0.5
 _MIN_CS_BARS = 2
 _WAVELET_LEVEL = 3
 _MIN_WAVELET_SAMPLES = 16  # pywt.wavedec('db4', level=3) needs at least 2^level samples
@@ -45,7 +48,6 @@ _ZSCORE_WINDOW = 60
 _VOLUME_ZSCORE_WINDOW = 20
 
 # Calendar cyclical encoding constants
-_TRADING_DAYS_PER_WEEK = 5
 _MONTHS_PER_YEAR = 12
 
 # Regime / VIX feature constants
@@ -138,15 +140,13 @@ def _compute_calendar_features(
     """Compute cyclical calendar encoding from the last candle's timestamp.
 
     No look-ahead bias: uses only the timestamp of the most recent candle.
-    Encodes day-of-week and month as sin/cos pairs for cyclical continuity.
+    Encodes month as sin/cos pair for cyclical continuity.
+    Day-of-week encoding removed (negligible effect post-2000, Sullivan et al. 2001).
     """
-    dow = last_timestamp.weekday()  # 0=Monday, 4=Friday
     month = last_timestamp.month  # 1-12
 
     two_pi = 2.0 * math.pi
     return {
-        "dow_sin": math.sin(two_pi * dow / _TRADING_DAYS_PER_WEEK),
-        "dow_cos": math.cos(two_pi * dow / _TRADING_DAYS_PER_WEEK),
         "month_sin": math.sin(two_pi * month / _MONTHS_PER_YEAR),
         "month_cos": math.cos(two_pi * month / _MONTHS_PER_YEAR),
     }
@@ -588,6 +588,23 @@ def _compute_predictive_features(
     }
 
 
+def _compute_amihud_series(
+    close_s: pd.Series,
+    volume_s: pd.Series,
+    window: int = _AMIHUD_WINDOW,
+) -> pd.Series:
+    """Compute rolling average Amihud illiquidity ratio.
+
+    Amihud = mean(|return| / dollar_volume) over *window* bars.
+    No look-ahead bias: uses only past data via rolling window.
+    """
+    abs_returns = close_s.pct_change().abs()
+    dollar_volume = (close_s * volume_s).replace(0, np.nan)
+    raw_amihud = abs_returns / dollar_volume
+    raw_amihud = raw_amihud.replace([np.inf, -np.inf], np.nan)
+    return raw_amihud.rolling(window, min_periods=max(1, window // 2)).mean()
+
+
 def _compute_microstructure_features(
     close_s: pd.Series,
     high_s: pd.Series,
@@ -601,14 +618,18 @@ def _compute_microstructure_features(
     rm_val = float(rolling_max_252.iloc[-1])
     proximity_52wk = last_close / rm_val if rm_val > 0 and math.isfinite(rm_val) else 1.0
 
-    # Amihud illiquidity ratio (20-day rolling mean), log-transformed for normalization
-    dollar_volume = close_s * volume_s
-    abs_returns = close_s.pct_change().abs()
-    illiq_per_bar = abs_returns / dollar_volume
-    illiq_per_bar = illiq_per_bar.replace([np.inf, -np.inf], np.nan)
-    amihud_rolling = illiq_per_bar.rolling(_AMIHUD_WINDOW, min_periods=1).mean()
-    amihud_val = float(amihud_rolling.iloc[-1])
-    amihud_20d = math.log1p(amihud_val * 1e6) if math.isfinite(amihud_val) else 0.0
+    # Amihud illiquidity: percentile rank over 252-bar lookback, producing [0, 1]
+    amihud_series = _compute_amihud_series(close_s, volume_s, window=_AMIHUD_WINDOW)
+    valid_amihud = amihud_series.dropna()
+    if len(valid_amihud) >= _AMIHUD_MIN_RANK_PERIODS:
+        current_val = float(amihud_series.iloc[-1])
+        if math.isfinite(current_val):
+            lookback = valid_amihud.iloc[-min(_AMIHUD_RANK_LOOKBACK, len(valid_amihud)) :]
+            amihud_20d = float((lookback < current_val).mean())
+        else:
+            amihud_20d = _AMIHUD_NEUTRAL_DEFAULT
+    else:
+        amihud_20d = _AMIHUD_NEUTRAL_DEFAULT
 
     return {
         "proximity_rolling_high": proximity_52wk,

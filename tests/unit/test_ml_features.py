@@ -17,7 +17,7 @@ from finalayze.ml.features.technical import (
 )
 
 _EXPECTED_MIN_FEATURES = 25
-_EXPECTED_TOTAL_FEATURES = 44
+_EXPECTED_TOTAL_FEATURES = 42  # 44 - 2 (removed dow_sin, dow_cos)
 _NEW_MIN_CANDLES = 80
 
 
@@ -160,17 +160,6 @@ class TestMicrostructureFeatures:
         features = compute_features(candles)
         assert "amihud_20d" in features
 
-    def test_amihud_log_transformed_positive(self) -> None:
-        """Amihud should be log-transformed: positive and reasonable for any stock."""
-        candles = _make_candles(80)
-        features = compute_features(candles)
-        # log1p(x * 1e6) for a small illiquidity value should be positive
-        assert features["amihud_20d"] >= 0.0
-        # Should be a reasonable log-scale value (not raw tiny float)
-        # For liquid stocks with volume ~1000, the raw amihud is very small,
-        # but log1p(val * 1e6) should produce a value > 0
-        assert features["amihud_20d"] > 0.0
-
     def test_corwin_schultz_present_in_features(self) -> None:
         candles = _make_candles(80)
         features = compute_features(candles)
@@ -180,6 +169,79 @@ class TestMicrostructureFeatures:
         candles = _make_candles(80)
         features = compute_features(candles)
         assert features["corwin_schultz_spread"] >= 0.0
+
+
+class TestAmihudNormalization:
+    """Amihud illiquidity should be normalized to [0, 1] percentile rank."""
+
+    def test_amihud_bounded_zero_one(self) -> None:
+        """amihud_20d must be in [0, 1]."""
+        candles = _make_candles(100)
+        features = compute_features(candles)
+        assert 0.0 <= features["amihud_20d"] <= 1.0
+
+    def test_amihud_high_illiquidity_near_one(self) -> None:
+        """Very illiquid bar (low volume spike) should have amihud near 1.0.
+
+        We create 252+ candles with normal volume, then make the last few
+        bars have extremely low volume to spike illiquidity.
+        """
+        base_ts = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+        n_candles = 300
+        candles: list[Candle] = []
+        for i in range(n_candles):
+            price = 100.0 + i * 0.1
+            # Last 20 bars: very low volume (high illiquidity)
+            vol = 10 if i >= n_candles - 20 else 100_000
+            ts = base_ts + timedelta(days=i)
+            candles.append(
+                Candle(
+                    symbol="ILLIQ",
+                    market_id="us",
+                    timeframe="1d",
+                    timestamp=ts,
+                    open=Decimal(str(price - 0.5)),
+                    high=Decimal(str(price + 1.0)),
+                    low=Decimal(str(price - 1.0)),
+                    close=Decimal(str(price)),
+                    volume=vol,
+                )
+            )
+        features = compute_features(candles)
+        # With very low volume at the end, amihud percentile rank should be high
+        high_illiq_threshold = 0.8
+        assert features["amihud_20d"] >= high_illiq_threshold
+
+    def test_amihud_default_on_insufficient_data(self) -> None:
+        """With exactly _MIN_CANDLES bars, amihud should still return a valid [0, 1] value."""
+        candles = _make_candles(80)
+        features = compute_features(candles)
+        # Even with limited data, result must be in [0, 1]
+        assert 0.0 <= features["amihud_20d"] <= 1.0
+
+
+class TestDeadFeaturesRemoved:
+    """Removed features should not appear in output."""
+
+    def test_no_sentiment_feature(self) -> None:
+        """sentiment should not be in compute_features output."""
+        candles = _make_candles(80)
+        features = compute_features(candles)
+        assert "sentiment" not in features
+
+    def test_no_dow_features(self) -> None:
+        """dow_sin/dow_cos should not be in output."""
+        candles = _make_candles(80)
+        features = compute_features(candles)
+        assert "dow_sin" not in features
+        assert "dow_cos" not in features
+
+    def test_month_features_still_present(self) -> None:
+        """month_sin/month_cos should still be present."""
+        candles = _make_candles(80)
+        features = compute_features(candles)
+        assert "month_sin" in features
+        assert "month_cos" in features
 
 
 class TestNewLaggedReturnFeatures:
@@ -340,9 +402,9 @@ class TestZScoreFeatures:
 
 
 class TestCalendarFeatures:
-    """Phase C: cyclical calendar encoding features."""
+    """Phase C: cyclical calendar encoding features (month only, dow removed)."""
 
-    _CALENDAR_KEYS = ("dow_sin", "dow_cos", "month_sin", "month_cos")
+    _CALENDAR_KEYS = ("month_sin", "month_cos")
 
     def test_calendar_features_present(self) -> None:
         candles = _make_candles(80)
@@ -366,16 +428,6 @@ class TestCalendarFeatures:
             assert lower_bound <= features[key] <= upper_bound, (
                 f"{key}={features[key]} out of [-1,1]"
             )
-
-    def test_monday_dow_encoding(self) -> None:
-        """Monday (dow=0): sin(0)=0.0, cos(0)=1.0."""
-        # _make_candles starts on 2025-01-06 (Mon), +84 days = 2025-03-31 (Mon)
-        candles = _make_candles(85)
-        last_ts = candles[-1].timestamp
-        assert last_ts.weekday() == 0, f"Expected Monday, got weekday={last_ts.weekday()}"
-        features = compute_features(candles)
-        assert features["dow_sin"] == pytest.approx(0.0, abs=1e-9)
-        assert features["dow_cos"] == pytest.approx(1.0, abs=1e-9)
 
     def test_january_month_encoding(self) -> None:
         """January (month=1): sin(2*pi*1/12), cos(2*pi*1/12)."""
