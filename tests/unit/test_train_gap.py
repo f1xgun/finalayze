@@ -148,10 +148,13 @@ class TestTrainGap:
 
         # cal: cal_start = 560+100 = 660, cal_end = int(800*0.85) = 680 -> 20 samples
         # test: test_start = 680+100 = 780, test_end = 800 -> 20 samples
-        # predict_proba called for: calibrator (20 cal * 3 models) + eval (20 test * 3 models)
+        # predict_proba called for:
+        #   calibrator fitting (20 cal * 3 models) +
+        #   evaluation (20 test * 3 models) +
+        #   meta-learner OOF predictions (20 test * 3 models)
         expected_cal_size = 20
         expected_test_size = 20
-        expected_total = (expected_cal_size + expected_test_size) * 3  # 3 models
+        expected_total = (expected_cal_size + expected_test_size * 2) * 3  # 3 models
         assert sum(test_calls) == expected_total
 
     def test_small_dataset_gap_clamps(self) -> None:

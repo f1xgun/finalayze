@@ -540,3 +540,145 @@ class TestLightGBMNoDoubleReweight:
         expected_spw = self._N_NEGATIVE / self._N_POSITIVE
         assert model._model is not None
         assert abs(model._model.scale_pos_weight - expected_spw) < self._SPW_TOLERANCE
+
+
+class TestStackingMetaLearner:
+    """Stacking with LogReg meta-learner should combine base models."""
+
+    _N_OOF_SAMPLES = 200
+    _N_MODELS = 3
+    _N_BIAS_SAMPLES = 500
+    _GOOD_PROBA = 0.7
+    _BAD_PROBA = 0.6
+    _MED_NOISE = 0.15
+    _GOOD_NOISE = 0.1
+    _PROBA_CLIP_MIN = 0.01
+    _PROBA_CLIP_MAX = 0.99
+    _BIAS_HALF = 250
+
+    def test_fit_meta_learner(self) -> None:
+        """fit_meta_learner should accept OOF predictions and labels."""
+        import numpy as np
+
+        ensemble = EnsembleModel(models=[])
+        rng = np.random.default_rng(42)
+        oof_probs = rng.random((self._N_OOF_SAMPLES, self._N_MODELS))
+        labels = (rng.random(self._N_OOF_SAMPLES) > 0.5).astype(int)
+
+        ensemble.fit_meta_learner(oof_probs, labels)
+        assert ensemble._meta_learner is not None
+
+    def test_predict_uses_meta_learner_when_fitted(self) -> None:
+        """When meta-learner is fitted, predict_proba should use it."""
+        import numpy as np
+
+        mock_models = []
+        for prob in [0.7, 0.3, 0.5]:
+            m = _make_model(proba=prob)
+            mock_models.append(m)
+
+        ensemble = EnsembleModel(models=mock_models)
+
+        # Fit meta-learner on synthetic data
+        rng = np.random.default_rng(42)
+        oof = rng.random((self._N_OOF_SAMPLES, self._N_MODELS))
+        labels = (rng.random(self._N_OOF_SAMPLES) > 0.5).astype(int)
+        ensemble.fit_meta_learner(oof, labels)
+
+        # Predict should use meta-learner
+        result = ensemble.predict_proba({"feat1": 1.0})
+        assert 0 <= result <= 1
+
+    def test_fallback_to_averaging_without_meta_learner(self) -> None:
+        """Without meta-learner, predict_proba should use weighted averaging."""
+        mock_models = []
+        for prob in [0.8, 0.6]:
+            m = _make_model(proba=prob)
+            mock_models.append(m)
+
+        ensemble = EnsembleModel(models=mock_models)
+        result = ensemble.predict_proba({"feat1": 1.0})
+        # Should be average of 0.8 and 0.6 = 0.7
+        assert abs(result - 0.7) < 0.05
+
+    def test_stacking_beats_averaging_on_biased_model(self) -> None:
+        """When one base model is biased, stacking should learn to downweight it."""
+        import numpy as np
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.metrics import brier_score_loss
+
+        rng = np.random.default_rng(42)
+        n = self._N_BIAS_SAMPLES
+        labels = (rng.random(n) > 0.5).astype(int)
+
+        # Model 0: good (~70% accuracy)
+        good_probs = (
+            labels * self._GOOD_PROBA + (1 - labels) * 0.3 + rng.normal(0, self._GOOD_NOISE, n)
+        )
+        good_probs = np.clip(good_probs, self._PROBA_CLIP_MIN, self._PROBA_CLIP_MAX)
+        # Model 1: terrible (always 0.6)
+        bad_probs = np.full(n, self._BAD_PROBA)
+        # Model 2: mediocre (~55%)
+        med_probs = labels * 0.55 + (1 - labels) * 0.45 + rng.normal(0, self._MED_NOISE, n)
+        med_probs = np.clip(med_probs, self._PROBA_CLIP_MIN, self._PROBA_CLIP_MAX)
+
+        base_matrix = np.column_stack([good_probs, bad_probs, med_probs])
+
+        # Simple average
+        avg_pred = base_matrix.mean(axis=1)
+        brier_avg = brier_score_loss(labels, avg_pred)
+
+        # Stacking
+        half = self._BIAS_HALF
+        meta = LogisticRegression(C=1.0, max_iter=300)
+        meta.fit(base_matrix[:half], labels[:half])
+        stack_pred = meta.predict_proba(base_matrix[half:])[:, 1]
+        brier_stack = brier_score_loss(labels[half:], stack_pred)
+
+        assert brier_stack < brier_avg
+
+    def test_meta_learner_save_load(self) -> None:
+        """Meta-learner should survive save/load cycle."""
+        import tempfile
+        from pathlib import Path
+
+        import numpy as np
+
+        ensemble = EnsembleModel(models=[])
+        rng = np.random.default_rng(42)
+        oof = rng.random((self._N_OOF_SAMPLES, self._N_MODELS))
+        labels = (rng.random(self._N_OOF_SAMPLES) > 0.5).astype(int)
+        ensemble.fit_meta_learner(oof, labels)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "meta_learner.pkl"
+            ensemble.save_meta_learner(path)
+            assert path.exists()
+
+            ensemble2 = EnsembleModel(models=[])
+            ensemble2.load_meta_learner(path)
+            assert ensemble2._meta_learner is not None
+
+    def test_meta_learner_default_none(self) -> None:
+        """Meta-learner should be None by default."""
+        ensemble = EnsembleModel(models=[])
+        assert ensemble._meta_learner is None
+
+    def test_meta_learner_predict_with_lstm(self) -> None:
+        """Meta-learner should include LSTM probabilities when available."""
+        import numpy as np
+
+        mock_model = _make_model(proba=0.7)
+        mock_lstm = _make_lstm(proba=0.6)
+
+        ensemble = EnsembleModel(models=[mock_model], lstm_model=mock_lstm)
+
+        # Fit meta-learner for 2 models (1 tree + 1 lstm)
+        n_base_models = 2
+        rng = np.random.default_rng(42)
+        oof = rng.random((self._N_OOF_SAMPLES, n_base_models))
+        labels = (rng.random(self._N_OOF_SAMPLES) > 0.5).astype(int)
+        ensemble.fit_meta_learner(oof, labels)
+
+        result = ensemble.predict_proba({"feat1": 1.0})
+        assert 0 <= result <= 1

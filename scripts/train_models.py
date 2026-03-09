@@ -1266,6 +1266,9 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         meta_path.write_text(json.dumps(meta, indent=2))
         print(f"[{segment_id}] Saved segment_meta.json: base_rate={base_rate:.4f}")
 
+        # Fit stacking meta-learner on OOF predictions from the best fold's test set
+        _fit_and_save_meta_learner(segment_id, segment_dir, best_models, best_test_f, best_test_l)
+
     return gate_pass_rates
 
 
@@ -1534,6 +1537,16 @@ def _train_and_evaluate_models(  # noqa: PLR0912
             cal_labels,
         )
 
+    # Fit stacking meta-learner on TEST set OOF predictions (out-of-sample)
+    if test_features and test_labels:
+        _fit_and_save_meta_learner(
+            segment_id,
+            segment_dir,
+            [xgb, lgbm, catboost],
+            test_features,
+            test_labels,
+        )
+
     return results
 
 
@@ -1584,6 +1597,69 @@ def _fit_and_save_calibrator(
         )
     else:
         print(f"[{segment_id}] Calibrator skipped (insufficient OOS data or single class)")
+
+
+_MIN_META_LEARNER_SAMPLES = 20
+
+
+def _fit_and_save_meta_learner(
+    segment_id: str,
+    segment_dir: Path,
+    models: list[XGBoostModel | LightGBMModel | CatBoostModel],
+    oof_features: list[dict[str, float]],
+    oof_labels: list[int],
+) -> None:
+    """Fit a stacking meta-learner on out-of-fold base model predictions and save it.
+
+    Generates per-model probability predictions on the OOF set (data the base models
+    were NOT trained on), stacks them into a matrix, and trains a LogisticRegression
+    meta-learner to learn optimal combination weights.
+    """
+    import numpy as _np  # noqa: PLC0415
+
+    from finalayze.ml.models.ensemble import EnsembleModel  # noqa: PLC0415
+
+    if len(oof_features) < _MIN_META_LEARNER_SAMPLES:
+        print(
+            f"[{segment_id}] Too few OOF samples ({len(oof_features)}) for meta-learner, skipping."
+        )
+        return
+
+    # Collect per-model OOF probabilities
+    model_proba_columns: list[list[float]] = []
+    model_names: list[str] = []
+
+    for m in models:
+        trained = getattr(m, "_trained", None) or getattr(m, "_model", None)
+        if trained is None:
+            continue
+        probas: list[float] = []
+        for feat in oof_features:
+            try:
+                probas.append(m.predict_proba(feat))
+            except Exception:
+                probas.append(0.5)
+        model_proba_columns.append(probas)
+        model_names.append(type(m).__name__)
+
+    if not model_proba_columns:
+        print(f"[{segment_id}] No trained models for meta-learner OOF predictions, skipping.")
+        return
+
+    oof_matrix = _np.column_stack(model_proba_columns)
+    labels_arr = _np.array(oof_labels, dtype=_np.int64)
+
+    # Fit meta-learner via EnsembleModel helper
+    ensemble = EnsembleModel(models=[])
+    ensemble.fit_meta_learner(oof_matrix, labels_arr)
+
+    meta_path = segment_dir / "meta_learner.pkl"
+    ensemble.save_meta_learner(meta_path)
+    print(
+        f"[{segment_id}] Saved meta_learner.pkl "
+        f"(trained on {len(oof_features)} OOF samples, {len(model_names)} models: "
+        f"{', '.join(model_names)})"
+    )
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

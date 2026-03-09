@@ -50,7 +50,7 @@ def load_registry(model_dir: Path, segments: list[str]) -> MLModelRegistry:
     return registry
 
 
-def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:
+def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:  # noqa: PLR0915
     """Load individual model files and assemble an EnsembleModel."""
     from finalayze.ml.models.catboost_model import CatBoostModel  # noqa: PLC0415
     from finalayze.ml.models.ensemble import EnsembleModel  # noqa: PLC0415
@@ -103,12 +103,37 @@ def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:
             calibrator = loaded_cal
             _log.debug("Loaded fitted calibrator for segment %s", segment_id)
 
-    return EnsembleModel(
+    # Load performance-weighted model weights if available
+    model_weights: dict[str, float] | None = None
+    weights_path = segment_dir / "model_weights.json"
+    if weights_path.exists():
+        model_weights = json.loads(weights_path.read_text())
+        _log.debug("Loaded model_weights for segment %s", segment_id)
+
+    # Load segment metadata (base_rate, etc.) if available
+    base_rate: float | None = None
+    meta_path = segment_dir / "segment_meta.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+        base_rate = meta.get("base_rate")
+        _log.debug("Loaded segment_meta for segment %s (base_rate=%s)", segment_id, base_rate)
+
+    ensemble = EnsembleModel(
         models=models,
         lstm_model=lstm_model,
         selected_features=selected_features,
         calibrator=calibrator,
+        model_weights=model_weights,
     )
+    ensemble.base_rate = base_rate
+
+    # Load stacking meta-learner if available
+    meta_learner_path = segment_dir / "meta_learner.pkl"
+    if meta_learner_path.exists():
+        ensemble.load_meta_learner(meta_learner_path)
+        _log.debug("Loaded meta-learner for segment %s", segment_id)
+
+    return ensemble
 
 
 def save_ensemble(model_dir: Path, segment_id: str, ensemble: EnsembleModel) -> None:
@@ -137,9 +162,24 @@ def save_ensemble(model_dir: Path, segment_id: str, ensemble: EnsembleModel) -> 
         features_path = segment_dir / "selected_features.json"
         features_path.write_text(json.dumps(ensemble.selected_features))
 
+    # Persist performance-weighted model weights alongside models
+    if ensemble._model_weights is not None:
+        weights_path = segment_dir / "model_weights.json"
+        weights_path.write_text(json.dumps(ensemble._model_weights, indent=2))
+
+    # Persist segment metadata (base_rate)
+    if getattr(ensemble, "base_rate", None) is not None:
+        meta = {"base_rate": ensemble.base_rate}
+        meta_path = segment_dir / "segment_meta.json"
+        meta_path.write_text(json.dumps(meta, indent=2))
+
     # Persist fitted EnsembleCalibrator alongside models
     if ensemble._calibrator is not None and getattr(ensemble._calibrator, "is_fitted", False):
         _atomic_save(ensemble._calibrator, segment_dir / "calibrator.pkl")
+
+    # Persist stacking meta-learner alongside models
+    if ensemble._meta_learner is not None:
+        ensemble.save_meta_learner(segment_dir / "meta_learner.pkl")
 
 
 def _get_hmac_key() -> str:

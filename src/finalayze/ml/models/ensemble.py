@@ -10,7 +10,10 @@ import structlog
 from finalayze.core.exceptions import InsufficientDataError, PredictionError
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import numpy as np
+    from sklearn.linear_model import LogisticRegression
 
     from finalayze.ml.calibration import EnsembleCalibrator
     from finalayze.ml.models.base import BaseMLModel
@@ -23,6 +26,15 @@ _BYPASS_CLAMP_UPPER = 0.70
 _CLAMP_RATE_WARNING_THRESHOLD = 0.50
 _MIN_PREDICTIONS_FOR_CLAMP_WARNING = 10
 _log = structlog.get_logger()
+
+# Mapping from normalized class name to all known aliases used by training scripts.
+# Walk-forward path saves "xgboost"/"lightgbm"/"catboost";
+# single-split path saves "xgb"/"lgbm"/"catboost" (after lowercasing).
+_KEY_MAP: dict[str, list[str]] = {
+    "xgboostmodel": ["xgboostmodel", "xgboost", "xgb"],
+    "lightgbmmodel": ["lightgbmmodel", "lightgbm", "lgbm"],
+    "catboostmodel": ["catboostmodel", "catboost"],
+}
 
 
 class EnsembleModel:
@@ -47,8 +59,10 @@ class EnsembleModel:
         self._lstm_model = lstm_model
         self._stacking = stacking
         self._calibrator = calibrator
+        self._meta_learner: LogisticRegression | None = None
         self.selected_features = selected_features
         self._model_weights = model_weights
+        self.base_rate: float | None = None
         self.last_model_probas: dict[str, float] = {}
         self._total_predictions: int = 0
         self._clamped_predictions: int = 0
@@ -106,9 +120,12 @@ class EnsembleModel:
                 raise PredictionError("All ensemble sub-models failed to produce a prediction")
             return _DEFAULT_PROB
 
-        # Use stacking XOR calibrator (not both — double-calibration risk)
+        # Use stacking XOR meta-learner XOR calibrator (not multiple — double-calibration risk)
         if self._stacking is not None and self._stacking.is_fitted:
             return self._stacking.predict_proba(probs)  # already calibrated
+
+        if self._meta_learner is not None:
+            return self._predict_via_meta_learner(probs)
 
         raw = self._compute_raw_average(probs, model_probas)
 
@@ -117,6 +134,34 @@ class EnsembleModel:
                 return self._clamp_bypassed_prob(raw)
             return self._calibrator.calibrate(raw)
         return raw
+
+    def _resolve_weight(self, class_name: str) -> float:
+        """Look up model weight, tolerating key format differences.
+
+        Training scripts save weights with keys like ``"xgboost"`` or ``"xgb"``,
+        but ``predict_proba`` keys results by ``type(m).__name__`` (e.g.
+        ``"XGBoostModel"``).  This method bridges the gap by trying exact match,
+        lowercase match, and known alias lookup via ``_KEY_MAP``.
+        """
+        if self._model_weights is None:
+            return 0.0
+        # Try exact match first
+        w = self._model_weights.get(class_name)
+        if w is not None:
+            return w
+        # Try lowercase
+        lower = class_name.lower()
+        w = self._model_weights.get(lower)
+        if w is not None:
+            return w
+        # Try known aliases
+        for aliases in _KEY_MAP.values():
+            if lower in aliases:
+                for alias in aliases:
+                    w = self._model_weights.get(alias)
+                    if w is not None:
+                        return w
+        return 0.0
 
     def _compute_raw_average(
         self,
@@ -129,7 +174,7 @@ class EnsembleModel:
             weighted_sum = 0.0
             weight_sum = 0.0
             for name, prob in zip(model_names, probs, strict=False):
-                w = self._model_weights.get(name, 0.0)
+                w = self._resolve_weight(name)
                 weighted_sum += w * prob
                 weight_sum += w
             return weighted_sum / weight_sum if weight_sum > 0 else _DEFAULT_PROB
@@ -165,6 +210,77 @@ class EnsembleModel:
                 ),
             )
         return clamped
+
+    def _predict_via_meta_learner(self, probs: list[float]) -> float:
+        """Stack base model probabilities and pass through the meta-learner.
+
+        Returns the class-1 (BUY) probability from the fitted LogisticRegression.
+        """
+        import numpy as np  # noqa: PLC0415
+
+        x = np.array([probs], dtype=np.float64)
+        return float(self._meta_learner.predict_proba(x)[0, 1])  # type: ignore[union-attr]
+
+    def fit_meta_learner(
+        self,
+        base_model_oof_probs: np.ndarray,  # type: ignore[type-arg]
+        labels: np.ndarray,  # type: ignore[type-arg]
+    ) -> None:
+        """Fit LogisticRegression meta-learner on out-of-fold base model predictions.
+
+        The meta-learner learns optimal combination weights from OOF predictions,
+        which prevents data leakage (base models never see the same data they predict on).
+
+        Parameters
+        ----------
+        base_model_oof_probs:
+            Shape (n_samples, n_models) -- out-of-fold probability predictions.
+        labels:
+            Shape (n_samples,) -- binary outcome labels.
+        """
+        import numpy as np  # noqa: PLC0415
+        from sklearn.linear_model import LogisticRegression  # noqa: PLC0415
+
+        x = np.asarray(base_model_oof_probs, dtype=np.float64)
+        y = np.asarray(labels, dtype=np.int64)
+
+        meta = LogisticRegression(C=1.0, solver="lbfgs", max_iter=300)
+        meta.fit(x, y)
+        self._meta_learner = meta
+        _log.info(
+            "meta_learner_fitted",
+            n_samples=len(y),
+            n_models=x.shape[1],
+        )
+
+    def save_meta_learner(self, path: Path) -> None:
+        """Persist the fitted meta-learner to disk using joblib.
+
+        Parameters
+        ----------
+        path:
+            Destination file path (e.g. ``segment_dir / "meta_learner.pkl"``).
+        """
+        import joblib  # noqa: PLC0415
+
+        if self._meta_learner is None:
+            _log.warning("save_meta_learner called but no meta-learner is fitted")
+            return
+        joblib.dump(self._meta_learner, path)
+        _log.info("meta_learner_saved", path=str(path))
+
+    def load_meta_learner(self, path: Path) -> None:
+        """Load a previously saved meta-learner from disk.
+
+        Parameters
+        ----------
+        path:
+            Source file path containing the joblib-serialized LogisticRegression.
+        """
+        import joblib  # noqa: PLC0415
+
+        self._meta_learner = joblib.load(path)
+        _log.info("meta_learner_loaded", path=str(path))
 
     @property
     def prediction_uncertainty(self) -> float:
