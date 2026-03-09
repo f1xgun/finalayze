@@ -6,6 +6,7 @@ Usage:
     uv run python scripts/train_models.py --segment us_tech --output-dir models/
     uv run python scripts/train_models.py --label-mode direction  # old next-bar labels
     uv run python scripts/train_models.py --label-mode triple_barrier  # default
+    uv run python scripts/train_models.py --label-mode trend_scanning  # Prado 2020
     uv run python scripts/train_models.py --walk-forward --force-save  # save despite gate failures
 """
 
@@ -39,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from finalayze.core.models import CandleModel
 from finalayze.core.schemas import Candle
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
-from finalayze.ml.features.technical import compute_features  # noqa: F401
+from finalayze.ml.features.technical import compute_features
 from finalayze.ml.models.catboost_model import CatBoostModel
 from finalayze.ml.models.lightgbm_model import LightGBMModel
 from finalayze.ml.models.xgboost_model import XGBoostModel
@@ -48,6 +49,7 @@ from finalayze.ml.training.feature_selection import select_features_mi
 from finalayze.ml.training.labeling import build_triple_barrier_dataset
 from finalayze.ml.training.quality_gates import FoldMetrics
 from finalayze.ml.training.sample_weights import compute_decay_weights, sequential_bootstrap
+from finalayze.ml.training.trend_scanning import trend_scan_labels
 
 _WINDOW_SIZE = DEFAULT_WINDOW_SIZE
 _TRAIN_RATIO = 0.70
@@ -65,6 +67,7 @@ _MOEX_ATR_UPLIFT = 1.2  # MOEX 1.2x uplift for wider barriers
 # Label mode choices
 LABEL_MODE_TRIPLE_BARRIER = "triple_barrier"
 LABEL_MODE_DIRECTION = "direction"
+LABEL_MODE_TREND_SCANNING = "trend_scanning"
 
 # Benchmark tickers for market-neutral (excess return) labels
 _US_BENCHMARK = "SPY"
@@ -628,6 +631,8 @@ def _build_dataset_with_timestamps(
             settings,
             excess_returns=excess_returns,
         )
+    if label_mode == LABEL_MODE_TREND_SCANNING:
+        return _build_dataset_trend_scanning(segment_id, symbols, market_id, settings)
     return _build_dataset_direction(segment_id, symbols, market_id, settings)
 
 
@@ -651,6 +656,112 @@ def _build_dataset_direction(
     labels_out = [r[2] for r in rows]
     timestamps_out = [r[0] for r in rows]
     return features_out, labels_out, None, None, timestamps_out
+
+
+def _build_dataset_trend_scanning(
+    segment_id: str,
+    symbols: list[str],
+    market_id: str,
+    settings: Settings,
+) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None, list[datetime]]:
+    """Build dataset with trend-scanning labels (Prado 2020).
+
+    For each symbol, computes features via the standard windowed approach, then
+    uses trend_scan_labels on close prices to assign labels and t-value weights.
+    The selected horizon L* for each bar is used as hold_bars (for n_eff).
+    """
+    import numpy as _np  # noqa: PLC0415
+
+    from finalayze.core.exceptions import InsufficientDataError  # noqa: PLC0415
+    from finalayze.ml.features.corporate_actions import detect_splits  # noqa: PLC0415
+
+    ts_max_horizon = _TB_MAX_HOLD  # reuse triple barrier max hold as scan horizon
+    ts_min_horizon = 3
+    min_candles_ts = _WINDOW_SIZE + ts_max_horizon + 1
+
+    rows: list[tuple[datetime, dict[str, float], int, float, int]] = []
+
+    for symbol in symbols:
+        candles = _fetch_symbol_candles(symbol, market_id, settings, segment_id=segment_id)
+        if len(candles) < min_candles_ts:
+            print(
+                f"  [{segment_id}] {symbol}: only {len(candles)} candles, "
+                f"need {min_candles_ts}+ for trend scanning -- skipping."
+            )
+            continue
+
+        sorted_candles = sorted(candles, key=lambda c: c.timestamp)
+        split_indices = set(detect_splits(sorted_candles))
+
+        # Extract close prices for trend scanning
+        close_prices = _np.array([float(c.close) for c in sorted_candles], dtype=_np.float64)
+        ts_labels, ts_t_values = trend_scan_labels(
+            close_prices, max_horizon=ts_max_horizon, min_horizon=ts_min_horizon
+        )
+
+        # Build features for each bar and pair with trend-scanning labels
+        for i in range(len(sorted_candles) - _WINDOW_SIZE - ts_max_horizon):
+            entry_index = i + _WINDOW_SIZE - 1
+
+            # Skip if a split occurs in the label horizon
+            label_range = range(entry_index, entry_index + ts_max_horizon + 1)
+            if any(si in label_range for si in split_indices):
+                continue
+
+            # Skip bars where trend scanning produced NaN
+            if _np.isnan(ts_labels[entry_index]) or _np.isnan(ts_t_values[entry_index]):
+                continue
+
+            # Compute features using history up to entry bar (no look-ahead)
+            window = sorted_candles[: entry_index + 1]
+            try:
+                row_features = compute_features(window)
+            except (InsufficientDataError, ValueError):
+                continue
+            except Exception:
+                continue
+
+            label = int(ts_labels[entry_index])
+            t_value_weight = float(ts_t_values[entry_index])
+            # Use a default hold estimate (the max_horizon / 2) since trend scanning
+            # selects variable horizons; the exact L* is internal to trend_scan_labels
+            hold_bars_est = ts_max_horizon // 2
+
+            rows.append(
+                (
+                    sorted_candles[entry_index].timestamp,
+                    row_features,
+                    label,
+                    t_value_weight,
+                    hold_bars_est,
+                )
+            )
+
+        pos_rate = "N/A"
+        sym_rows = [r for r in rows if True]  # all rows so far (accumulating)
+        if sym_rows:
+            sym_labels = [r[2] for r in sym_rows]
+            pos_rate = f"{sum(sym_labels) / len(sym_labels):.1%}"
+        print(
+            f"  [{segment_id}] {symbol}: {len(rows)} trend-scanning samples ({pos_rate} positive)"
+        )
+
+    rows.sort(key=lambda r: r[0])
+    features_out = [r[1] for r in rows]
+    labels_out = [r[2] for r in rows]
+    weights_out = _np.array([r[3] for r in rows], dtype=float) if rows else None
+    hold_bars_out = [r[4] for r in rows] if rows else None
+    timestamps_out = [r[0] for r in rows]
+
+    if labels_out:
+        pos_count = sum(labels_out)
+        total = len(labels_out)
+        print(
+            f"  [{segment_id}] Trend-scanning labels: "
+            f"{pos_count / total:.1%} positive ({pos_count}/{total})"
+        )
+
+    return features_out, labels_out, weights_out, hold_bars_out, timestamps_out
 
 
 def _build_dataset_triple_barrier(
@@ -1492,10 +1603,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--label-mode",
         default=LABEL_MODE_TRIPLE_BARRIER,
-        choices=[LABEL_MODE_TRIPLE_BARRIER, LABEL_MODE_DIRECTION],
+        choices=[LABEL_MODE_TRIPLE_BARRIER, LABEL_MODE_DIRECTION, LABEL_MODE_TREND_SCANNING],
         help=(
             f"Labeling mode: '{LABEL_MODE_TRIPLE_BARRIER}' uses ATR-scaled triple barrier "
-            f"labels (default), '{LABEL_MODE_DIRECTION}' uses simple next-bar direction labels."
+            f"labels (default), '{LABEL_MODE_DIRECTION}' uses simple next-bar direction labels, "
+            f"'{LABEL_MODE_TREND_SCANNING}' uses OLS trend-scanning labels (Prado 2020)."
         ),
     )
     parser.add_argument(
