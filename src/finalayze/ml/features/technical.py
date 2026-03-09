@@ -62,6 +62,8 @@ _VOL_FLOOR = 0.01
 _DEFAULT_BETA = 1.0
 _DEFAULT_CORR = 0.5
 
+_OLS_INDICES_DTYPE = float  # np.arange dtype for OLS slope computation
+
 _log = logging.getLogger(__name__)
 
 try:
@@ -71,6 +73,24 @@ try:
 except ImportError:  # pragma: no cover
     _pywt = None
     _HAS_PYWT = False
+
+
+def _compute_rsi_divergence(price_slope: float, rsi_slope: float) -> float:
+    """Compute RSI divergence from OLS slopes of price returns and RSI changes.
+
+    Divergence = price_slope - rsi_slope (both pre-normalized to z-scores).
+      - Positive => bearish divergence (price trending up, RSI trending down)
+      - Negative => bullish divergence (price trending down, RSI trending up)
+      - Near-zero => no divergence (price and RSI agree)
+
+    Args:
+        price_slope: z-score normalized OLS slope of price returns over lookback.
+        rsi_slope: z-score normalized OLS slope of RSI changes over lookback.
+
+    Returns:
+        Divergence score (float). Positive = bearish, negative = bullish.
+    """
+    return price_slope - rsi_slope
 
 
 def _compute_wavelet_features(log_returns: list[float]) -> dict[str, float]:
@@ -478,19 +498,34 @@ def _compute_extra_features(
         vol_mean = float(volume_s.mean())
         obv_slope_val = slope / vol_mean if vol_mean > 0 else 0.0
 
-    # RSI divergence: z-score normalized price vs RSI changes over 14 bars
+    # RSI divergence: OLS-slope based detection of price-RSI directional disagreement
     rsi = ta.rsi(close_s, length=14)
     rsi_divergence = 0.0
     if rsi is not None and len(rsi) >= _RSI_LOOKBACK and len(closes) >= _RSI_LOOKBACK:
-        price_returns = close_s.pct_change().iloc[-_RSI_LOOKBACK:]
-        rsi_changes = rsi.diff().iloc[-_RSI_LOOKBACK:]
-        # Z-score normalize
-        pr_std = float(price_returns.std())
-        rc_std = float(rsi_changes.std())
-        if pr_std > 0 and rc_std > 0 and math.isfinite(pr_std) and math.isfinite(rc_std):
-            price_z = float(price_returns.iloc[-1]) / pr_std
-            rsi_z = float(rsi_changes.iloc[-1]) / rc_std
-            rsi_divergence = price_z - rsi_z
+        price_returns = close_s.pct_change().iloc[-_RSI_LOOKBACK:].dropna()
+        rsi_changes = rsi.diff().iloc[-_RSI_LOOKBACK:].dropna()
+        if len(price_returns) >= 2 and len(rsi_changes) >= 2:  # noqa: PLR2004
+            # OLS slope via np.polyfit (degree=1) over the lookback window
+            pr_vals = price_returns.to_numpy(dtype=float)
+            rc_vals = rsi_changes.to_numpy(dtype=float)
+            pr_x = np.arange(len(pr_vals), dtype=_OLS_INDICES_DTYPE)
+            rc_x = np.arange(len(rc_vals), dtype=_OLS_INDICES_DTYPE)
+            price_slope = float(np.polyfit(pr_x, pr_vals, 1)[0])
+            rsi_slope_raw = float(np.polyfit(rc_x, rc_vals, 1)[0])
+            # Normalize slopes to z-scores for comparability
+            pr_std = float(price_returns.std())
+            rc_std = float(rsi_changes.std())
+            if (
+                pr_std > 0
+                and rc_std > 0
+                and math.isfinite(pr_std)
+                and math.isfinite(rc_std)
+                and math.isfinite(price_slope)
+                and math.isfinite(rsi_slope_raw)
+            ):
+                price_z = price_slope / pr_std
+                rsi_z = rsi_slope_raw / rc_std
+                rsi_divergence = _compute_rsi_divergence(price_z, rsi_z)
 
     predictive = _compute_predictive_features(close_s, closes, returns)
     microstructure = _compute_microstructure_features(close_s, high_s, low_s, volume_s, last_close)

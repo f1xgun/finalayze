@@ -594,6 +594,53 @@ class TestCrossAssetFeatures:
             assert math.isfinite(features[key])
 
 
+class TestRSIDivergence:
+    """RSI divergence should detect price-RSI directional disagreement via regression slopes."""
+
+    def test_bearish_divergence_positive(self) -> None:
+        """Price slope up + RSI slope down -> positive (bearish divergence)."""
+        from finalayze.ml.features.technical import _compute_rsi_divergence
+
+        result = _compute_rsi_divergence(price_slope=0.5, rsi_slope=-0.3)
+        assert result > 0, "Bearish divergence should be positive"
+
+    def test_bullish_divergence_negative(self) -> None:
+        """Price slope down + RSI slope up -> negative (bullish divergence)."""
+        from finalayze.ml.features.technical import _compute_rsi_divergence
+
+        result = _compute_rsi_divergence(price_slope=-0.5, rsi_slope=0.3)
+        assert result < 0, "Bullish divergence should be negative"
+
+    def test_no_divergence_near_zero(self) -> None:
+        """Same direction slopes -> near-zero."""
+        from finalayze.ml.features.technical import _compute_rsi_divergence
+
+        result = _compute_rsi_divergence(price_slope=0.5, rsi_slope=0.4)
+        assert abs(result) < 0.5, "No divergence should be near zero"
+
+    def test_zero_slopes_returns_zero(self) -> None:
+        """Both slopes zero -> exactly zero divergence."""
+        from finalayze.ml.features.technical import _compute_rsi_divergence
+
+        result = _compute_rsi_divergence(price_slope=0.0, rsi_slope=0.0)
+        assert result == 0.0
+
+    def test_symmetric_divergence(self) -> None:
+        """Swapping slope signs should flip divergence sign."""
+        from finalayze.ml.features.technical import _compute_rsi_divergence
+
+        bearish = _compute_rsi_divergence(price_slope=0.5, rsi_slope=-0.3)
+        bullish = _compute_rsi_divergence(price_slope=-0.5, rsi_slope=0.3)
+        assert bearish == pytest.approx(-bullish, abs=1e-9)
+
+    def test_rsi_divergence_in_compute_features_is_finite(self) -> None:
+        """rsi_divergence output from compute_features should be finite."""
+        candles = _make_candles(80)
+        features = compute_features(candles)
+        assert "rsi_divergence" in features
+        assert math.isfinite(features["rsi_divergence"])
+
+
 class TestTotalFeatureCount:
     """Verify total feature count after all phases."""
 
