@@ -175,14 +175,33 @@ class MLStrategy(BaseStrategy):
     ) -> tuple[SignalDirection, float] | None:
         """Map a BUY probability to direction + confidence, or None if in deadzone.
 
-        Uses ``base_rate`` from YAML params (default 0.50) as the neutral
-        center instead of hardcoded 0.50.  This enables base-rate correction:
-        if training labels have mean(y) != 0.50, the threshold shifts accordingly.
+        The deadzone is centered on ``base_rate`` — the empirical fraction of
+        positive labels in the training data.  Resolution order:
+
+        1. ``ensemble.base_rate`` — loaded from ``segment_meta.json`` during
+           model loading (see ``ml/loader.py``).  This is the authoritative
+           value from the most recent training run.
+        2. ``params["base_rate"]`` — from the YAML preset, used as a manual
+           override or when no trained model metadata exists.
+        3. ``_DEFAULT_BASE_RATE`` (0.50) — fallback when neither source
+           provides a value.
+
+        With ``base_rate=0.55`` and ``threshold=0.08``:
+        - BUY  when ``prob > 0.63`` (= 0.55 + 0.08)
+        - SELL when ``prob < 0.47`` (= 0.55 - 0.08)
+        - Deadzone (return None) otherwise
         """
         params = self.get_parameters(segment_id)
         threshold = float(params.get("threshold", _DEFAULT_THRESHOLD))  # type: ignore[arg-type]
         min_confidence = float(params.get("min_confidence", _DEFAULT_MIN_CONFIDENCE))  # type: ignore[arg-type]
-        base_rate = float(params.get("base_rate", _DEFAULT_BASE_RATE))  # type: ignore[arg-type]
+
+        # Prefer base_rate from trained model metadata over YAML preset
+        ensemble = self._registry.get(segment_id)
+        trained_base_rate = getattr(ensemble, "base_rate", None) if ensemble else None
+        if isinstance(trained_base_rate, (int, float)):
+            base_rate = float(trained_base_rate)
+        else:
+            base_rate = float(params.get("base_rate", _DEFAULT_BASE_RATE))  # type: ignore[arg-type]
 
         if prob > base_rate + threshold:
             direction = SignalDirection.BUY

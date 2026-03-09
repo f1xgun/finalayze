@@ -427,6 +427,278 @@ class TestBaseRateCorrection:
         assert abs(result.confidence - expected_confidence) < 1e-6
 
 
+class TestTrainedBaseRate:
+    """Task 10: MLStrategy prefers base_rate from trained model metadata."""
+
+    def test_trained_base_rate_overrides_yaml(self) -> None:
+        """When ensemble has base_rate set, it overrides YAML preset value."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.72
+        ensemble.selected_features = None
+        ensemble.base_rate = 0.55  # Set by loader from segment_meta.json
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        # YAML params would have base_rate: 0.50, but trained model says 0.55
+        yaml_params: dict[str, object] = {"base_rate": 0.50, "threshold": 0.08}
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value=yaml_params),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        assert result.direction == SignalDirection.BUY
+        # Uses trained base_rate=0.55, not YAML 0.50
+        # confidence = (0.72 - 0.55) * 2 = 0.34
+        expected_confidence = (0.72 - 0.55) * 2
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+    def test_none_base_rate_falls_back_to_yaml(self) -> None:
+        """When ensemble has base_rate=None, falls back to YAML preset value."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.72
+        ensemble.selected_features = None
+        ensemble.base_rate = None  # No trained metadata
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        yaml_params: dict[str, object] = {"base_rate": 0.45, "threshold": 0.08}
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value=yaml_params),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        assert result.direction == SignalDirection.BUY
+        # Uses YAML base_rate=0.45
+        # confidence = (0.72 - 0.45) * 2 = 0.54
+        expected_confidence = (0.72 - 0.45) * 2
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+    def test_no_base_rate_attr_falls_back_to_default(self) -> None:
+        """Legacy ensembles without base_rate attribute fall back to YAML/default."""
+        registry = MLModelRegistry()
+        ensemble = MagicMock(spec=[])
+        ensemble.predict_proba = MagicMock(return_value=0.7)
+        ensemble.selected_features = None
+        # No base_rate attribute at all -- getattr returns None
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        candles = _make_candles(60)
+
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value={}),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        assert result.direction == SignalDirection.BUY
+        # Uses default base_rate=0.50
+        expected_confidence = (0.7 - 0.5) * 2  # 0.4
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+
+class TestBaseRateCorrectedDeadzone:
+    """Deadzone must center on the trained base rate, not always 0.50.
+
+    When training data has 55% positive labels, a prediction of 0.56 is barely
+    above random -- it should NOT trigger BUY. Only predictions that exceed
+    ``base_rate + threshold`` are informative enough to act on.
+    """
+
+    _BASE_RATE = 0.55
+    _THRESHOLD = 0.08
+    _BUY_EDGE = _BASE_RATE + _THRESHOLD   # 0.63
+    _SELL_EDGE = _BASE_RATE - _THRESHOLD   # 0.47
+
+    def _make_strategy_and_ensemble(
+        self,
+        prob: float,
+        trained_base_rate: float | None = None,
+    ) -> tuple[MLStrategy, MagicMock]:
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = prob
+        ensemble.selected_features = None
+        if trained_base_rate is not None:
+            ensemble.base_rate = trained_base_rate
+        else:
+            # Simulate legacy ensemble without base_rate attribute
+            ensemble.base_rate = None
+        registry.register("us_tech", ensemble)
+        return MLStrategy(registry=registry), ensemble
+
+    def test_deadzone_centered_on_base_rate(self) -> None:
+        """With base_rate=0.55 and threshold=0.08:
+
+        - prob=0.56 -> HOLD (inside deadzone: 0.56 < 0.63)
+        - prob=0.64 -> BUY  (above buy edge: 0.64 > 0.63)
+        - prob=0.46 -> SELL (below sell edge: 0.46 < 0.47)
+        """
+        params: dict[str, object] = {"threshold": self._THRESHOLD}
+
+        # 0.56 is inside deadzone -> no signal
+        strategy_hold, _ = self._make_strategy_and_ensemble(0.56, self._BASE_RATE)
+        candles = _make_candles(60)
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy_hold, "get_parameters", return_value=params),
+        ):
+            result_hold = strategy_hold.generate_signal("AAPL", candles, "us_tech")
+        assert result_hold is None, "prob=0.56 should be in deadzone (< 0.63 buy edge)"
+
+        # 0.64 exceeds buy edge -> BUY
+        strategy_buy, _ = self._make_strategy_and_ensemble(0.64, self._BASE_RATE)
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy_buy, "get_parameters", return_value=params),
+        ):
+            result_buy = strategy_buy.generate_signal("AAPL", candles, "us_tech")
+        assert result_buy is not None
+        assert result_buy.direction == SignalDirection.BUY
+
+        # 0.46 below sell edge -> SELL
+        strategy_sell, _ = self._make_strategy_and_ensemble(0.46, self._BASE_RATE)
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy_sell, "get_parameters", return_value=params),
+        ):
+            result_sell = strategy_sell.generate_signal("AAPL", candles, "us_tech")
+        assert result_sell is not None
+        assert result_sell.direction == SignalDirection.SELL
+
+    def test_default_base_rate_is_050(self) -> None:
+        """When no trained model metadata exists, base_rate defaults to 0.50.
+
+        prob=0.59 with default base_rate=0.50 and threshold=0.08 -> BUY
+        (0.59 > 0.50 + 0.08 = 0.58).
+        """
+        strategy, ensemble = self._make_strategy_and_ensemble(0.59)
+        ensemble.base_rate = None  # no trained metadata
+        candles = _make_candles(60)
+
+        # No base_rate in params either -> falls back to _DEFAULT_BASE_RATE=0.50
+        params: dict[str, object] = {"threshold": self._THRESHOLD}
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value=params),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        assert result.direction == SignalDirection.BUY
+        default_base = 0.50
+        expected_confidence = (0.59 - default_base) * 2  # 0.18
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+    def test_base_rate_from_segment_meta(self) -> None:
+        """base_rate loaded from segment_meta.json via ensemble.base_rate
+        takes priority over YAML preset value.
+
+        ensemble.base_rate=0.55 (from segment_meta.json),
+        YAML base_rate=0.50 (should be ignored).
+        prob=0.56 -> HOLD with trained base_rate, would be BUY with YAML 0.50.
+        """
+        strategy, _ = self._make_strategy_and_ensemble(0.56, trained_base_rate=self._BASE_RATE)
+        candles = _make_candles(60)
+
+        # YAML says base_rate=0.50 but trained model says 0.55
+        yaml_params: dict[str, object] = {"base_rate": 0.50, "threshold": self._THRESHOLD}
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value=yaml_params),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        # With YAML base_rate=0.50, 0.56 > 0.58 is False -> deadzone.
+        # But also with trained base_rate=0.55, 0.56 < 0.63 -> deadzone.
+        # The key: trained base_rate=0.55 is used, not YAML 0.50.
+        assert result is None, (
+            "prob=0.56 must stay in deadzone when trained base_rate=0.55 "
+            "(buy edge=0.63), even though YAML base_rate=0.50 would also "
+            "put it in deadzone (buy edge=0.58)"
+        )
+
+    def test_base_rate_from_segment_meta_changes_outcome(self) -> None:
+        """Demonstrate that trained base_rate actually changes the signal
+        compared to the YAML fallback.
+
+        prob=0.59, YAML base_rate=0.50, trained base_rate=0.55.
+        With YAML: 0.59 > 0.50+0.08=0.58 -> BUY.
+        With trained: 0.59 < 0.55+0.08=0.63 -> HOLD (deadzone).
+        """
+        strategy, _ = self._make_strategy_and_ensemble(0.59, trained_base_rate=self._BASE_RATE)
+        candles = _make_candles(60)
+
+        yaml_params: dict[str, object] = {"base_rate": 0.50, "threshold": self._THRESHOLD}
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value=yaml_params),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        # Trained base_rate=0.55 wins: 0.59 < 0.63 -> deadzone
+        assert result is None, (
+            "prob=0.59 should be in deadzone with trained base_rate=0.55 "
+            "(buy edge=0.63), even though YAML base_rate=0.50 would produce BUY "
+            "(buy edge=0.58)"
+        )
+
+    def test_buy_confidence_uses_trained_base_rate(self) -> None:
+        """BUY confidence is computed as (prob - base_rate) * 2, using
+        the trained base_rate, not hardcoded 0.50.
+
+        prob=0.72, trained base_rate=0.55 -> confidence = (0.72-0.55)*2 = 0.34
+        (NOT (0.72-0.50)*2 = 0.44)
+        """
+        strategy, _ = self._make_strategy_and_ensemble(0.72, trained_base_rate=self._BASE_RATE)
+        candles = _make_candles(60)
+
+        params: dict[str, object] = {"threshold": self._THRESHOLD}
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value=params),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        assert result.direction == SignalDirection.BUY
+        expected_confidence = (0.72 - self._BASE_RATE) * 2  # 0.34
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+    def test_sell_confidence_uses_trained_base_rate(self) -> None:
+        """SELL confidence is computed as (base_rate - prob) * 2, using
+        the trained base_rate, not hardcoded 0.50.
+
+        prob=0.35, trained base_rate=0.55 -> confidence = (0.55-0.35)*2 = 0.40
+        (NOT (0.50-0.35)*2 = 0.30)
+        """
+        strategy, _ = self._make_strategy_and_ensemble(0.35, trained_base_rate=self._BASE_RATE)
+        candles = _make_candles(60)
+
+        params: dict[str, object] = {"threshold": self._THRESHOLD}
+        with (
+            patch(_PATCH_TARGET, return_value=_FAKE_FEATURES),
+            patch.object(strategy, "get_parameters", return_value=params),
+        ):
+            result = strategy.generate_signal("AAPL", candles, "us_tech")
+
+        assert result is not None
+        assert result.direction == SignalDirection.SELL
+        expected_confidence = (self._BASE_RATE - 0.35) * 2  # 0.40
+        assert abs(result.confidence - expected_confidence) < 1e-6
+
+
 class TestSupportedSegments:
     def test_supported_segments_from_yaml(self) -> None:
         """ml_ensemble disabled in all presets (models not production-ready)."""
