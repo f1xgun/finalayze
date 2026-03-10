@@ -26,6 +26,7 @@ class TestFXRate:
         )
         assert rate.pair == "USDRUB"
         assert rate.rate == Decimal("89.50")
+        assert rate.timestamp == datetime(2024, 1, 15, 0, 0, tzinfo=UTC)
 
     def test_frozen(self) -> None:
         rate = FXRate(
@@ -53,6 +54,14 @@ class TestKeyRateRecord:
         )
         assert rec.rate == Decimal("0.16")
 
+    def test_frozen(self) -> None:
+        rec = KeyRateRecord(
+            timestamp=datetime(2024, 1, 1, 0, 0, tzinfo=UTC),
+            rate=Decimal("0.16"),
+        )
+        with pytest.raises(ValidationError):
+            rec.rate = Decimal("0.21")  # type: ignore[misc]
+
     def test_naive_timestamp_rejected(self) -> None:
         with pytest.raises(ValueError, match="timezone-aware"):
             KeyRateRecord(
@@ -69,6 +78,14 @@ class TestTurnoverRecord:
         )
         assert rec.volume_rub == Decimal(1500000000000)
 
+    def test_frozen(self) -> None:
+        rec = TurnoverRecord(
+            timestamp=datetime(2024, 1, 15, 0, 0, tzinfo=UTC),
+            volume_rub=Decimal(1500000000000),
+        )
+        with pytest.raises(ValidationError):
+            rec.volume_rub = Decimal(0)  # type: ignore[misc]
+
     def test_naive_timestamp_rejected(self) -> None:
         with pytest.raises(ValueError, match="timezone-aware"):
             TurnoverRecord(
@@ -84,6 +101,13 @@ class TestMoexMarketData:
         assert data.key_rates is None
         assert data.commodity_candles is None
         assert data.turnover is None
+
+    def test_frozen(self) -> None:
+        from dataclasses import FrozenInstanceError
+
+        data = MoexMarketData()
+        with pytest.raises(FrozenInstanceError):
+            data.fx_rates = ()  # type: ignore[misc]
 
     def test_create_with_fx(self) -> None:
         fx = (

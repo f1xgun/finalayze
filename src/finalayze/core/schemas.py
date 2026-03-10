@@ -294,6 +294,7 @@ class FXRate(BaseModel):
     @field_validator("timestamp")
     @classmethod
     def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; all timestamps must be UTC-aware."""
         if v.tzinfo is None:
             msg = "timestamp must be timezone-aware (UTC)"
             raise ValueError(msg)
@@ -311,6 +312,7 @@ class KeyRateRecord(BaseModel):
     @field_validator("timestamp")
     @classmethod
     def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; all timestamps must be UTC-aware."""
         if v.tzinfo is None:
             msg = "timestamp must be timezone-aware (UTC)"
             raise ValueError(msg)
@@ -328,6 +330,7 @@ class TurnoverRecord(BaseModel):
     @field_validator("timestamp")
     @classmethod
     def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; all timestamps must be UTC-aware."""
         if v.tzinfo is None:
             msg = "timestamp must be timezone-aware (UTC)"
             raise ValueError(msg)
