@@ -15,10 +15,11 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo
 
 import httpx
+import structlog
 
 from finalayze.core.exceptions import DataFetchError
 from finalayze.core.schemas import Candle, TurnoverRecord
@@ -43,6 +44,11 @@ _INTERVAL_1D = 24
 
 # Minimum weekday index considered a weekend (Saturday=5, Sunday=6)
 _WEEKEND_WEEKDAY_MIN = 5
+
+# ISS VALTODAY is reported in millions of RUB; multiply by this to get raw RUB
+_VALTODAY_MULTIPLIER = Decimal(1000000)
+
+_log = structlog.get_logger()
 
 
 class MoexISSFetcher(BaseFetcher):
@@ -86,7 +92,7 @@ class MoexISSFetcher(BaseFetcher):
             timeframe: Bar size — only "1d" supported currently.
 
         Returns:
-            List of Candle objects sorted by timestamp ascending.
+            List of Candle objects in ISS-returned order (typically ascending).
 
         Raises:
             DataFetchError: On HTTP errors or timeouts.
@@ -176,8 +182,8 @@ class MoexISSFetcher(BaseFetcher):
                 current += timedelta(days=1)
                 continue
 
-            # §17-C1: VALTODAY is in millions of RUB → multiply by 1_000_000
-            volume_rub = Decimal(str(raw_val)) * Decimal(1000000)
+            # §17-C1: VALTODAY is in millions of RUB → multiply by _VALTODAY_MULTIPLIER
+            volume_rub = Decimal(str(raw_val)) * _VALTODAY_MULTIPLIER
 
             # §18-M4: Timestamp from current date (already UTC midnight)
             ts = current.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -231,7 +237,8 @@ class MoexISSFetcher(BaseFetcher):
         """Extract candle rows from an ISS response dict (defensive lookup)."""
         # §18-M3: Defensive key lookup
         block = data.get("candles") or data.get("history", {})
-        return block.get("data", [])
+        rows: list[list[Any]] = cast("list[list[Any]]", block.get("data", []))
+        return rows
 
     def _parse_candle_row(self, row: list[Any], symbol: str, timeframe: str) -> Candle | None:
         """Parse a single ISS candle row into a Candle schema object."""
@@ -278,6 +285,7 @@ class MoexISSFetcher(BaseFetcher):
             except httpx.TimeoutException as exc:
                 last_exc = exc
                 if attempt < _MAX_RETRIES - 1:
+                    _log.warning("moex_iss_retry", attempt=attempt + 1, url=url)
                     time.sleep(backoff)
                     backoff *= 2
             except httpx.HTTPStatusError as exc:
@@ -286,6 +294,7 @@ class MoexISSFetcher(BaseFetcher):
             except httpx.RequestError as exc:
                 last_exc = exc
                 if attempt < _MAX_RETRIES - 1:
+                    _log.warning("moex_iss_retry", attempt=attempt + 1, url=url)
                     time.sleep(backoff)
                     backoff *= 2
 
