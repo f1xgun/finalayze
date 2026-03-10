@@ -17,7 +17,7 @@ from finalayze.core.schemas import MarketContext, MoexMarketData
 from finalayze.ml.features.technical import compute_features
 
 if TYPE_CHECKING:
-    from finalayze.core.schemas import Candle, TurnoverRecord
+    from finalayze.core.schemas import Candle
     from finalayze.ml.models.ensemble import EnsembleModel
 
 DEFAULT_WINDOW_SIZE = 80

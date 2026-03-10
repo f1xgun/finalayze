@@ -516,17 +516,6 @@ def _fetch_candles(
     return candles
 
 
-def _build_windows(
-    candles: list[Candle],
-) -> tuple[list[dict[str, float]], list[int]]:
-    """Build (features, labels) from a single contiguous candle series.
-
-    Delegates to the shared ``build_windows`` utility in ``finalayze.ml.training``.
-    Discards timestamps (used only for multi-symbol temporal ordering).
-    """
-    features, labels, _ts = build_windows(candles, _WINDOW_SIZE)
-    return features, labels
-
 
 def _get_triple_barrier_params(segment_id: str) -> dict[str, float | int | bool]:
     """Return triple barrier parameters for a segment.
