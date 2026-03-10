@@ -30,6 +30,7 @@ load_dotenv()
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 # Ensure config/ at project root is importable
@@ -992,7 +993,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
 
             # Load all ambient market data (benchmark, VIX, MOEX-specific) via MarketDataLoader.
             # The loader routes by market: US → SPY + ^VIX; MOEX → IMOEX + CBR + turnover + Brent.
-            _seg_cfg = type("_S", (), {"market": market_id})()
+            _seg_cfg = SimpleNamespace(market=market_id)
             ml_market_context: MarketContext = _loader.load(_seg_cfg, start.date(), end.date())
             bench_candles = ml_market_context.benchmark_candles
             bench_label = "IMOEX" if segment.startswith("ru_") else "SPY"

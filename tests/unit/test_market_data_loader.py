@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from finalayze.core.exceptions import DataFetchError
 from finalayze.core.schemas import Candle, FXRate, KeyRateRecord, MarketContext, TurnoverRecord
