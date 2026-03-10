@@ -359,3 +359,93 @@ class TestCalibratorRoundTrip:
         # Calibrated should be less extreme than raw
         assert cal_low > 0.1  # pulled up from 0.1
         assert cal_high < 0.9  # pulled down from 0.9
+
+
+class TestFeatureSchemaVersion:
+    """Task 13: feature_schema_version field in segment_meta.json."""
+
+    def test_schema_version_mismatch_returns_none(self, tmp_path: Path) -> None:
+        """If saved feature_schema_version differs from current, load_registry skips the segment."""
+        from finalayze.ml.loader import FEATURE_SCHEMA_VERSION
+
+        segment_dir = tmp_path / "us_tech"
+        segment_dir.mkdir(parents=True)
+
+        # Write a real model so the segment directory is otherwise valid
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        # Write segment_meta with an outdated schema version
+        outdated_version = FEATURE_SCHEMA_VERSION - 1
+        meta = {"feature_schema_version": outdated_version, "base_rate": 0.5}
+        (segment_dir / "segment_meta.json").write_text(json.dumps(meta))
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        assert registry.get("us_tech") is None
+
+    def test_schema_version_match_loads_successfully(self, tmp_path: Path) -> None:
+        """If feature_schema_version matches current, loading proceeds normally."""
+        from finalayze.ml.loader import FEATURE_SCHEMA_VERSION
+
+        segment_dir = tmp_path / "us_tech"
+        segment_dir.mkdir(parents=True)
+
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        meta = {"feature_schema_version": FEATURE_SCHEMA_VERSION, "base_rate": 0.5}
+        (segment_dir / "segment_meta.json").write_text(json.dumps(meta))
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        ensemble = registry.get("us_tech")
+        assert ensemble is not None
+
+    def test_no_segment_meta_loads_without_version_check(self, tmp_path: Path) -> None:
+        """Legacy models with no segment_meta.json at all still load (no version field to mismatch)."""
+        segment_dir = tmp_path / "us_tech"
+        segment_dir.mkdir(parents=True)
+
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        # No segment_meta.json at all
+        assert not (segment_dir / "segment_meta.json").exists()
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        ensemble = registry.get("us_tech")
+        assert ensemble is not None
+
+    def test_save_ensemble_writes_feature_schema_version(self, tmp_path: Path) -> None:
+        """save_ensemble writes feature_schema_version into segment_meta.json."""
+        from finalayze.ml.loader import FEATURE_SCHEMA_VERSION
+
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None)
+        ensemble.base_rate = 0.5  # ensure segment_meta.json is written
+
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        meta_path = tmp_path / "us_tech" / "segment_meta.json"
+        assert meta_path.exists()
+        meta = json.loads(meta_path.read_text())
+        assert meta["feature_schema_version"] == FEATURE_SCHEMA_VERSION
+
+    def test_save_ensemble_writes_version_even_without_base_rate(self, tmp_path: Path) -> None:
+        """save_ensemble always writes segment_meta.json with version, even when base_rate is None."""
+        from finalayze.ml.loader import FEATURE_SCHEMA_VERSION
+
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None)
+        # base_rate is None (default)
+
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        meta_path = tmp_path / "us_tech" / "segment_meta.json"
+        assert meta_path.exists()
+        meta = json.loads(meta_path.read_text())
+        assert meta["feature_schema_version"] == FEATURE_SCHEMA_VERSION

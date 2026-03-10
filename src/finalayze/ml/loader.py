@@ -18,6 +18,13 @@ if TYPE_CHECKING:
 
 _log = structlog.get_logger()
 
+# Increment this whenever the feature set changes in an incompatible way.
+# Saved models whose feature_schema_version differs from this value will be
+# rejected at load time (graceful degradation — registry returns None for
+# that segment rather than producing silently wrong predictions).
+# History: 1 = original feature set; 2 = +4 MOEX features (moex-data-sources).
+FEATURE_SCHEMA_VERSION: int = 2
+
 
 def load_registry(model_dir: Path, segments: list[str]) -> MLModelRegistry:
     """Load saved models for each segment, returning a populated registry.
@@ -110,11 +117,29 @@ def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:  # noqa:
         model_weights = json.loads(weights_path.read_text())
         _log.debug("Loaded model_weights for segment %s", segment_id)
 
-    # Load segment metadata (base_rate, etc.) if available
+    # Load segment metadata (base_rate, feature_schema_version, etc.) if available
     base_rate: float | None = None
     meta_path = segment_dir / "segment_meta.json"
     if meta_path.exists():
         meta = json.loads(meta_path.read_text())
+
+        # Version guard: reject models trained with a different feature schema.
+        # Default to 1 (pre-MOEX) when the field is absent (legacy models).
+        saved_version: int = meta.get("feature_schema_version", 1)
+        if saved_version != FEATURE_SCHEMA_VERSION:
+            _log.warning(
+                "feature_schema_version_mismatch",
+                segment_id=segment_id,
+                saved=saved_version,
+                current=FEATURE_SCHEMA_VERSION,
+            )
+            msg = (
+                f"Feature schema version mismatch for segment '{segment_id}': "
+                f"saved={saved_version}, current={FEATURE_SCHEMA_VERSION}. "
+                "Retrain models to resolve."
+            )
+            raise ValueError(msg)
+
         base_rate = meta.get("base_rate")
         _log.debug("Loaded segment_meta for segment %s (base_rate=%s)", segment_id, base_rate)
 
@@ -167,11 +192,14 @@ def save_ensemble(model_dir: Path, segment_id: str, ensemble: EnsembleModel) -> 
         weights_path = segment_dir / "model_weights.json"
         weights_path.write_text(json.dumps(ensemble._model_weights, indent=2))
 
-    # Persist segment metadata (base_rate)
+    # Persist segment metadata (feature_schema_version + base_rate).
+    # Always written so that the version guard in _load_segment can reject
+    # stale models after a feature-set change.
+    meta: dict[str, object] = {"feature_schema_version": FEATURE_SCHEMA_VERSION}
     if getattr(ensemble, "base_rate", None) is not None:
-        meta = {"base_rate": ensemble.base_rate}
-        meta_path = segment_dir / "segment_meta.json"
-        meta_path.write_text(json.dumps(meta, indent=2))
+        meta["base_rate"] = ensemble.base_rate
+    meta_path = segment_dir / "segment_meta.json"
+    meta_path.write_text(json.dumps(meta, indent=2))
 
     # Persist fitted EnsembleCalibrator alongside models
     if ensemble._calibrator is not None and getattr(ensemble._calibrator, "is_fitted", False):
