@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from datetime import date
 
 import structlog
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 _T = TypeVar("_T", bound=BaseModel)
 _log = structlog.get_logger()
@@ -56,7 +56,11 @@ class GenericFileCache:
 
         if not raw:
             return None
-        return [model_class.model_validate(item) for item in raw]
+        try:
+            return [model_class.model_validate(item) for item in raw]
+        except ValidationError:
+            _log.warning("cache_schema_mismatch", key=key)
+            return None
 
     def set(self, key: str, data: list[BaseModel]) -> None:
         """Write to cache as JSON via model_dump(). Skips empty data."""
