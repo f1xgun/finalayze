@@ -38,13 +38,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from finalayze.core.models import CandleModel
-from finalayze.core.schemas import Candle
+from finalayze.core.schemas import Candle, MarketContext
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
+from finalayze.data.loader import MarketDataLoader
 from finalayze.ml.features.technical import compute_features
 from finalayze.ml.models.catboost_model import CatBoostModel
 from finalayze.ml.models.lightgbm_model import LightGBMModel
 from finalayze.ml.models.xgboost_model import XGBoostModel
-from finalayze.ml.training import DEFAULT_WINDOW_SIZE, build_windows
+from finalayze.ml.training import DEFAULT_WINDOW_SIZE, _slice_market_context, build_windows
 from finalayze.ml.training.feature_selection import select_features_mi
 from finalayze.ml.training.labeling import build_triple_barrier_dataset
 from finalayze.ml.training.quality_gates import FoldMetrics
@@ -589,6 +590,7 @@ def _build_dataset(
     label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
     *,
     excess_returns: bool = False,
+    market_context: MarketContext | None = None,
 ) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None]:
     """Build (features, labels, barrier_weights, hold_bars) per symbol.
 
@@ -601,7 +603,12 @@ def _build_dataset(
         hold_bars is non-None only in triple_barrier mode.
     """
     features, labels, weights, hold_bars, _timestamps = _build_dataset_with_timestamps(
-        segment_id, symbols, settings, label_mode, excess_returns=excess_returns
+        segment_id,
+        symbols,
+        settings,
+        label_mode,
+        excess_returns=excess_returns,
+        market_context=market_context,
     )
     return features, labels, weights, hold_bars
 
@@ -613,6 +620,7 @@ def _build_dataset_with_timestamps(
     label_mode: str = LABEL_MODE_TRIPLE_BARRIER,
     *,
     excess_returns: bool = False,
+    market_context: MarketContext | None = None,
 ) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None, list[datetime]]:
     """Build dataset with timestamps for calendar-date splitting (D4).
 
@@ -630,10 +638,15 @@ def _build_dataset_with_timestamps(
             market_id,
             settings,
             excess_returns=excess_returns,
+            market_context=market_context,
         )
     if label_mode == LABEL_MODE_TREND_SCANNING:
-        return _build_dataset_trend_scanning(segment_id, symbols, market_id, settings)
-    return _build_dataset_direction(segment_id, symbols, market_id, settings)
+        return _build_dataset_trend_scanning(
+            segment_id, symbols, market_id, settings, market_context=market_context
+        )
+    return _build_dataset_direction(
+        segment_id, symbols, market_id, settings, market_context=market_context
+    )
 
 
 def _build_dataset_direction(
@@ -641,6 +654,7 @@ def _build_dataset_direction(
     symbols: list[str],
     market_id: str,
     settings: Settings,
+    market_context: MarketContext | None = None,
 ) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None, list[datetime]]:
     """Build dataset with simple next-bar direction labels (old behavior)."""
     rows: list[tuple[datetime, dict[str, float], int]] = []
@@ -648,7 +662,7 @@ def _build_dataset_direction(
         candles = _fetch_symbol_candles(symbol, market_id, settings, segment_id=segment_id)
         if len(candles) < _MIN_CANDLES:
             continue
-        x_sym, y_sym, ts_sym = build_windows(candles, _WINDOW_SIZE)
+        x_sym, y_sym, ts_sym = build_windows(candles, _WINDOW_SIZE, market_context=market_context)
         for ts, feat, lbl in zip(ts_sym, x_sym, y_sym, strict=True):
             rows.append((ts, feat, lbl))
     rows.sort(key=lambda r: r[0])
@@ -658,11 +672,12 @@ def _build_dataset_direction(
     return features_out, labels_out, None, None, timestamps_out
 
 
-def _build_dataset_trend_scanning(
+def _build_dataset_trend_scanning(  # noqa: PLR0915
     segment_id: str,
     symbols: list[str],
     market_id: str,
     settings: Settings,
+    market_context: MarketContext | None = None,
 ) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None, list[datetime]]:
     """Build dataset with trend-scanning labels (Prado 2020).
 
@@ -714,8 +729,13 @@ def _build_dataset_trend_scanning(
 
             # Compute features using history up to entry bar (no look-ahead)
             window = sorted_candles[: entry_index + 1]
+            entry_ctx: MarketContext | None = None
+            if market_context is not None:
+                entry_ctx = _slice_market_context(
+                    market_context, sorted_candles[entry_index].timestamp
+                )
             try:
-                row_features = compute_features(window)
+                row_features = compute_features(window, market_context=entry_ctx)
             except (InsufficientDataError, ValueError):
                 continue
             except Exception:
@@ -771,12 +791,15 @@ def _build_dataset_triple_barrier(
     settings: Settings,
     *,
     excess_returns: bool = False,
+    market_context: MarketContext | None = None,
 ) -> tuple[list[dict[str, float]], list[int], np.ndarray | None, list[int] | None, list[datetime]]:
     """Build dataset with triple barrier labels.
 
     When excess_returns=True, fetches benchmark candles (SPY for US, IMOEX
     for MOEX) and aligns them per-symbol to produce market-neutral labels.
     Also fetches VIX candles for US segments to provide regime features.
+    When market_context is provided, it is threaded into build_triple_barrier_dataset
+    so that MOEX/cross-asset features are sliced per entry bar (no look-ahead).
     """
     import numpy as _np  # noqa: PLC0415
 
@@ -825,6 +848,7 @@ def _build_dataset_triple_barrier(
             atr_scale=bool(tb_params["atr_scale"]),
             benchmark_candles=aligned_bench,
             vix_candles=vix_candles,
+            market_context=market_context,
         )
 
         label_type = "excess-return" if aligned_bench else "absolute"
@@ -1029,6 +1053,7 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
     excess_returns: bool = False,
     force_save: bool = False,
     seq_bootstrap: bool = True,
+    market_context: MarketContext | None = None,
 ) -> dict[str, float] | None:
     """Train models using walk-forward validation (D1).
 
@@ -1037,6 +1062,8 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
 
     If quality gates fail and force_save is False, models are NOT saved (only
     gate results are persisted for diagnostics). Use force_save=True to override.
+    When market_context is provided, ambient MOEX/cross-asset data is sliced per
+    training window to prevent look-ahead bias.
     """
     import numpy as _np  # noqa: PLC0415
 
@@ -1055,6 +1082,7 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         settings,
         label_mode,
         excess_returns=excess_returns,
+        market_context=market_context,
     )
     if not features:
         print(f"[{segment_id}] No samples -- skipping.")
@@ -1281,8 +1309,13 @@ def train_one_segment(  # noqa: PLR0915
     *,
     excess_returns: bool = False,
     seq_bootstrap: bool = True,
+    market_context: MarketContext | None = None,
 ) -> None:
-    """Train and save models for a single segment."""
+    """Train and save models for a single segment.
+
+    When market_context is provided, ambient MOEX/cross-asset data is sliced per
+    training window to prevent look-ahead bias.
+    """
     import numpy as _np  # noqa: PLC0415
 
     if settings is None:
@@ -1295,6 +1328,7 @@ def train_one_segment(  # noqa: PLR0915
         settings,
         label_mode=label_mode,
         excess_returns=excess_returns,
+        market_context=market_context,
     )
     if not features_list:
         print(f"[{segment_id}] No samples -- skipping.")
@@ -1724,8 +1758,39 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main() -> None:
+def _build_market_data_loader(segment_ids: list[str]) -> MarketDataLoader:
+    """Create a MarketDataLoader appropriate for the given set of segments.
+
+    MOEX-specific fetchers (ISS + CBR) are only instantiated when at least one
+    segment is MOEX, to avoid importing heavy gRPC deps unnecessarily.
+    """
+    from finalayze.data.fetchers._cache_utils import GenericFileCache  # noqa: PLC0415
+    from finalayze.data.fetchers.caching import CachingFetcher  # noqa: PLC0415
+    from finalayze.data.rate_limiter import RateLimiter  # noqa: PLC0415
+
+    has_moex = any(sid.startswith("ru_") for sid in segment_ids)
+    if has_moex:
+        from finalayze.data.fetchers.cbr import CBRFetcher  # noqa: PLC0415
+        from finalayze.data.fetchers.moex_iss import MoexISSFetcher  # noqa: PLC0415
+
+        _moex_iss = MoexISSFetcher(rate_limiter=RateLimiter("moex_iss", rate=0.5, capacity=5))
+        return MarketDataLoader(
+            moex_iss_candles=CachingFetcher(_moex_iss, cache_dir=Path(".cache/moex_iss")),
+            moex_iss_raw=_moex_iss,
+            cbr=CBRFetcher(rate_limiter=RateLimiter("cbr", rate=0.2, capacity=3)),
+            yfinance_fetcher=CachingFetcher(YFinanceFetcher(market_id="us")),
+            turnover_cache=GenericFileCache(Path(".cache/turnover")),
+            cbr_cache=GenericFileCache(Path(".cache/cbr")),
+        )
+    return MarketDataLoader(
+        yfinance_fetcher=CachingFetcher(YFinanceFetcher(market_id="us")),
+    )
+
+
+def main() -> None:  # noqa: PLR0912
     """Entry point."""
+    from types import SimpleNamespace  # noqa: PLC0415
+
     args = _parse_args()
     output_dir = Path(args.output_dir)
     label_mode: str = args.label_mode
@@ -1745,40 +1810,66 @@ def main() -> None:
         f"Sequential bootstrap: {seq_bootstrap}"
     )
 
+    # Build MarketDataLoader — single instance reused across all segments.
+    segment_ids = list(segments.keys())
+    loader = _build_market_data_loader(segment_ids)
+
     # Collect p-values for BH correction (D3) across all segments
     segment_accuracies: dict[str, float] = {}
 
-    for segment_id, symbols in segments.items():
-        try:
-            if walk_forward:
-                gate_rates = train_walk_forward(
-                    segment_id=segment_id,
-                    symbols=symbols,
-                    output_dir=output_dir,
-                    label_mode=label_mode,
-                    excess_returns=excess_returns,
-                    force_save=force_save,
-                    seq_bootstrap=seq_bootstrap,
-                )
-                if gate_rates and "accuracy" in gate_rates:
-                    # Load best accuracy from saved results
-                    results_path = output_dir / segment_id / "wf_gate_results.json"
-                    if results_path.exists():
-                        wf_data = json.loads(results_path.read_text())
-                        segment_accuracies[segment_id] = wf_data.get("best_accuracy", 0.5)
-            else:
-                train_one_segment(
-                    segment_id=segment_id,
-                    symbols=symbols,
-                    output_dir=output_dir,
-                    label_mode=label_mode,
-                    excess_returns=excess_returns,
-                    seq_bootstrap=seq_bootstrap,
-                )
-        except FileNotFoundError as exc:
-            print(f"[{segment_id}] FileNotFoundError -- {exc}, skipping.")
-        except Exception as exc:
-            print(f"[{segment_id}] Unexpected error -- {exc}, skipping.")
+    try:
+        for segment_id, symbols in segments.items():
+            # Load ambient market data for this segment's full training window.
+            # The loader routes by market: US → SPY + ^VIX; MOEX → IMOEX + CBR + turnover + Brent.
+            market_id = "moex" if segment_id.startswith("ru_") else "us"
+            lookback_days = _get_lookback_days(segment_id)
+            end_date = datetime.now(tz=UTC).date()
+            start_date = (datetime.now(tz=UTC) - timedelta(days=lookback_days)).date()
+            _seg_cfg = SimpleNamespace(market=market_id)
+            try:
+                market_context: MarketContext | None = loader.load(_seg_cfg, start_date, end_date)
+                if loader.fetch_failures:
+                    print(
+                        f"[{segment_id}] Market data warnings: {', '.join(loader.fetch_failures)}"
+                    )
+            except Exception as exc:
+                print(f"[{segment_id}] Could not load market context ({exc}), proceeding without.")
+                market_context = None
+
+            try:
+                if walk_forward:
+                    gate_rates = train_walk_forward(
+                        segment_id=segment_id,
+                        symbols=symbols,
+                        output_dir=output_dir,
+                        label_mode=label_mode,
+                        excess_returns=excess_returns,
+                        force_save=force_save,
+                        seq_bootstrap=seq_bootstrap,
+                        market_context=market_context,
+                    )
+                    if gate_rates and "accuracy" in gate_rates:
+                        # Load best accuracy from saved results
+                        results_path = output_dir / segment_id / "wf_gate_results.json"
+                        if results_path.exists():
+                            wf_data = json.loads(results_path.read_text())
+                            segment_accuracies[segment_id] = wf_data.get("best_accuracy", 0.5)
+                else:
+                    train_one_segment(
+                        segment_id=segment_id,
+                        symbols=symbols,
+                        output_dir=output_dir,
+                        label_mode=label_mode,
+                        excess_returns=excess_returns,
+                        seq_bootstrap=seq_bootstrap,
+                        market_context=market_context,
+                    )
+            except FileNotFoundError as exc:
+                print(f"[{segment_id}] FileNotFoundError -- {exc}, skipping.")
+            except Exception as exc:
+                print(f"[{segment_id}] Unexpected error -- {exc}, skipping.")
+    finally:
+        loader.close()
 
     # BH correction across all segments (D3)
     if walk_forward and segment_accuracies:
