@@ -68,7 +68,7 @@ class JournalingStrategyCombiner(StrategyCombiner):
 
     # ── Hook overrides ──────────────────────────────────────────────────
 
-    def _on_generate_start(self, symbol: str, segment_id: str) -> None:
+    def _on_generate_start(self, symbol: str, segment_id: str) -> None:  # noqa: ARG002
         """Reset tracking state at the start of each generate_signal() call."""
         self._last_signals = {}
         self._last_weights = {}

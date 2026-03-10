@@ -44,7 +44,7 @@ _KEY_RATE_SOAP = """<?xml version="1.0" encoding="utf-8"?>
   </soap:Body>
 </soap:Envelope>"""
 
-_KEY_RATE_PERCENT_DIVISOR = Decimal("100")  # CBR returns percentage points
+_KEY_RATE_PERCENT_DIVISOR = Decimal(100)  # CBR returns percentage points
 
 
 class CBRFetcher:
