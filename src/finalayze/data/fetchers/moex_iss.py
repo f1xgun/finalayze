@@ -283,8 +283,16 @@ class MoexISSFetcher(BaseFetcher):
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
                 raise DataFetchError(f"http_error: {status} fetching {url}") from exc
+            except httpx.RequestError as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRIES - 1:
+                    time.sleep(backoff)
+                    backoff *= 2
 
-        raise DataFetchError(f"timeout after {_MAX_RETRIES} attempts fetching {url}") from last_exc
+        cause = "network_error"
+        if isinstance(last_exc, httpx.TimeoutException):
+            cause = "timeout"
+        raise DataFetchError(f"{cause} after {_MAX_RETRIES} attempts fetching {url}") from last_exc
 
     @staticmethod
     def _resolve_interval(timeframe: str) -> int:

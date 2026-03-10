@@ -168,6 +168,17 @@ class TestMoexISSFetcherCandles:
                     datetime(2024, 1, 17, 0, 0, tzinfo=UTC),
                 )
 
+    @patch("time.sleep")
+    def test_fetch_candles_network_error(self, _sleep: MagicMock, fetcher: MoexISSFetcher) -> None:
+        with patch.object(fetcher, "_client") as mock_client:
+            mock_client.get.side_effect = httpx.ConnectError("connection refused")
+            with pytest.raises(DataFetchError, match="network_error"):
+                fetcher.fetch_candles(
+                    "IMOEX",
+                    datetime(2024, 1, 15, 0, 0, tzinfo=UTC),
+                    datetime(2024, 1, 17, 0, 0, tzinfo=UTC),
+                )
+
 
 class TestMoexISSFetcherTurnover:
     @patch("time.sleep")
