@@ -17,7 +17,7 @@ from finalayze.ml.features.technical import (
 )
 
 _EXPECTED_MIN_FEATURES = 25
-_EXPECTED_TOTAL_FEATURES = 45  # 42 + 3 (ret_63d, ret_126d, mom_reversal_ratio)
+_EXPECTED_TOTAL_FEATURES = 49  # 45 + 4 MOEX features (usdrub, brent, real_rate, turnover)
 _NEW_MIN_CANDLES = 80
 
 
