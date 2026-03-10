@@ -56,9 +56,12 @@ from finalayze.core.schemas import (
     PortfolioState,
     TradeResult,
 )
+from finalayze.data.fetchers._cache_utils import GenericFileCache
 from finalayze.data.fetchers.base import BaseFetcher
 from finalayze.data.fetchers.caching import CachingFetcher
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
+from finalayze.data.loader import MarketDataLoader
+from finalayze.data.rate_limiter import RateLimiter
 from finalayze.markets.instruments import build_default_registry
 from finalayze.risk.kelly import RollingKelly
 from finalayze.risk.regime import (
@@ -942,10 +945,27 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     }
     config_hash = tracker.compute_config_hash(backtest_config_dict, strategy_configs)
 
-    # Cache benchmark candles per market
-    benchmark_cache: dict[str, list[Any] | None] = {}
-    # Cache VIX candles (shared across US segments, None for MOEX)
-    vix_cache: dict[str, list[Any] | None] = {}
+    # Build MarketDataLoader — single instance reused across all segments.
+    # MOEX-specific fetchers (ISS + CBR) are only created when at least one segment
+    # is MOEX, to avoid importing heavy gRPC deps unnecessarily.
+    has_moex = any(seg.startswith("ru_") for seg in segments)
+    if has_moex:
+        from finalayze.data.fetchers.cbr import CBRFetcher  # noqa: PLC0415
+        from finalayze.data.fetchers.moex_iss import MoexISSFetcher  # noqa: PLC0415
+
+        _moex_iss = MoexISSFetcher(rate_limiter=RateLimiter("moex_iss", rate=0.5, capacity=5))
+        _loader = MarketDataLoader(
+            moex_iss_candles=CachingFetcher(_moex_iss, cache_dir=Path(".cache/moex_iss")),
+            moex_iss_raw=_moex_iss,
+            cbr=CBRFetcher(rate_limiter=RateLimiter("cbr", rate=0.2, capacity=3)),
+            yfinance_fetcher=CachingFetcher(YFinanceFetcher(market_id="us")),
+            turnover_cache=GenericFileCache(Path(".cache/turnover")),
+            cbr_cache=GenericFileCache(Path(".cache/cbr")),
+        )
+    else:
+        _loader = MarketDataLoader(
+            yfinance_fetcher=CachingFetcher(YFinanceFetcher(market_id="us")),
+        )
 
     all_trades: list[TradeResult] = []
     all_snapshots: list[PortfolioState] = []
@@ -958,120 +978,102 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     print(f"  Cash: ${cash:,.0f} (MOEX: ₽{cash * _FALLBACK_USDRUB:,.0f})")
     print()
 
-    for segment in segments:
-        symbols = UNIVERSE.get(segment, [])
-        if not symbols:
-            print(f"  Segment '{segment}' not found in universe, skipping")
-            continue
-
-        market_id = "moex" if segment.startswith("ru_") else "us"
-        print(f"{'=' * 72}")
-        print(f"  SEGMENT: {segment} ({len(symbols)} symbols, market={market_id})")
-        print(f"{'=' * 72}")
-
-        # Fetch benchmark
-        bench_symbol = "IMOEX.ME" if segment.startswith("ru_") else "SPY"
-        if bench_symbol not in benchmark_cache:
-            try:
-                bench_fetcher = CachingFetcher(YFinanceFetcher(market_id="us"))
-                benchmark_cache[bench_symbol] = bench_fetcher.fetch_candles(
-                    bench_symbol, start, end
-                )
-                n_bars = len(benchmark_cache[bench_symbol] or [])
-                print(f"  Benchmark: {bench_symbol} ({n_bars} bars)")
-            except Exception:
-                benchmark_cache[bench_symbol] = None
-                print(f"  Benchmark: {bench_symbol} (fetch failed)")
-        bench_candles = benchmark_cache[bench_symbol]
-
-        # Fetch VIX candles for US segments (used by MarketContext for ML features)
-        vix_symbol = "^VIX"
-        vix_candles: list[Any] | None = None
-        if not segment.startswith("ru_"):
-            if vix_symbol not in vix_cache:
-                try:
-                    vix_fetcher = CachingFetcher(YFinanceFetcher(market_id="us"))
-                    vix_cache[vix_symbol] = vix_fetcher.fetch_candles(vix_symbol, start, end)
-                    n_vix = len(vix_cache[vix_symbol] or [])
-                    print(f"  VIX: {vix_symbol} ({n_vix} bars)")
-                except Exception:
-                    vix_cache[vix_symbol] = None
-                    print(f"  VIX: {vix_symbol} (fetch failed)")
-            vix_candles = vix_cache[vix_symbol]
-
-        # Build MarketContext for cross-asset ML features
-        ml_market_context: MarketContext | None = None
-        if bench_candles or vix_candles:
-            ml_market_context = MarketContext(
-                benchmark_candles=bench_candles,
-                vix_candles=vix_candles,
-            )
-
-        # Create appropriate fetcher for the market
-        is_moex = segment.startswith("ru_")
-        base_fetcher = _make_moex_fetcher() if is_moex else YFinanceFetcher(market_id=market_id)
-
-        # Build strategies once per segment
-        seg_fetcher = CachingFetcher(base_fetcher)
-        strategies = _build_strategies(
-            segment,
-            seg_fetcher,
-            start,
-            end,
-            models_dir,
-            symbols=symbols,
-            event_data=event_data,
-        )
-        strat_names = [s.name for s in strategies]
-        print(f"  Strategies: {', '.join(strat_names)}")
-
-        # Build regime provider once per segment
-        regime_provider = _build_regime_provider(args.regime_provider, segment, start, end)
-        if regime_provider is not None:
-            print(f"  Regime provider: {type(regime_provider).__name__}")
-        print()
-
-        segment_trades[segment] = []
-        # Convert cash to RUB for MOEX segments so portfolio is ~$100K equivalent
-        segment_cash = cash * _FALLBACK_USDRUB if segment.startswith("ru_") else cash
-
-        for symbol in symbols:
-            # Fetch candles
-            try:
-                fetcher = CachingFetcher(base_fetcher)
-                candles = fetcher.fetch_candles(symbol, start, end)
-                if not candles:
-                    print(f"    {symbol:12s} | no data")
-                    continue
-            except Exception:
-                print(f"    {symbol:12s} | fetch failed")
+    try:
+        for segment in segments:
+            symbols = UNIVERSE.get(segment, [])
+            if not symbols:
+                print(f"  Segment '{segment}' not found in universe, skipping")
                 continue
 
-            iter_dir = output_root / args.name
-            trades, snapshots, summary = _run_symbol(
-                symbol=symbol,
-                segment=segment,
-                candles=candles,
-                strategies=strategies,
-                cash=segment_cash,
-                output_dir=iter_dir,
-                benchmark_candles=bench_candles,
-                use_evt_sizing=use_evt_sizing,
-                use_copula_scaling=use_copula_scaling,
-                regime_provider=regime_provider,
-                stop_loss_mode=args.stop_loss_mode,
-                market_context=ml_market_context,
+            market_id = "moex" if segment.startswith("ru_") else "us"
+            print(f"{'=' * 72}")
+            print(f"  SEGMENT: {segment} ({len(symbols)} symbols, market={market_id})")
+            print(f"{'=' * 72}")
+
+            # Load all ambient market data (benchmark, VIX, MOEX-specific) via MarketDataLoader.
+            # The loader routes by market: US → SPY + ^VIX; MOEX → IMOEX + CBR + turnover + Brent.
+            _seg_cfg = type("_S", (), {"market": market_id})()
+            ml_market_context: MarketContext = _loader.load(_seg_cfg, start.date(), end.date())
+            bench_candles = ml_market_context.benchmark_candles
+            bench_label = "IMOEX" if segment.startswith("ru_") else "SPY"
+            n_bars = len(bench_candles) if bench_candles else 0
+            if bench_candles:
+                print(f"  Benchmark: {bench_label} ({n_bars} bars)")
+            else:
+                print(f"  Benchmark: {bench_label} (fetch failed)")
+            if ml_market_context.vix_candles is not None:
+                print(f"  VIX: ^VIX ({len(ml_market_context.vix_candles)} bars)")
+            if _loader.fetch_failures:
+                print(f"  Market data warnings: {', '.join(_loader.fetch_failures)}")
+
+            # Create appropriate fetcher for the market
+            is_moex = segment.startswith("ru_")
+            base_fetcher = _make_moex_fetcher() if is_moex else YFinanceFetcher(market_id=market_id)
+
+            # Build strategies once per segment
+            seg_fetcher = CachingFetcher(base_fetcher)
+            strategies = _build_strategies(
+                segment,
+                seg_fetcher,
+                start,
+                end,
+                models_dir,
+                symbols=symbols,
+                event_data=event_data,
             )
+            strat_names = [s.name for s in strategies]
+            print(f"  Strategies: {', '.join(strat_names)}")
 
-            normalized_trades = _normalize_trades_to_usd(trades, segment)
-            all_trades.extend(normalized_trades)
-            segment_trades[segment].extend(trades)  # keep raw for per-segment metrics
-            if snapshots:
-                all_snapshots.extend(_normalize_snapshots_to_usd(snapshots, segment))
-            if summary:
-                all_summaries.append(summary)
+            # Build regime provider once per segment
+            regime_provider = _build_regime_provider(args.regime_provider, segment, start, end)
+            if regime_provider is not None:
+                print(f"  Regime provider: {type(regime_provider).__name__}")
+            print()
 
-        print()
+            segment_trades[segment] = []
+            # Convert cash to RUB for MOEX segments so portfolio is ~$100K equivalent
+            segment_cash = cash * _FALLBACK_USDRUB if segment.startswith("ru_") else cash
+
+            for symbol in symbols:
+                # Fetch candles
+                try:
+                    fetcher = CachingFetcher(base_fetcher)
+                    candles = fetcher.fetch_candles(symbol, start, end)
+                    if not candles:
+                        print(f"    {symbol:12s} | no data")
+                        continue
+                except Exception:
+                    print(f"    {symbol:12s} | fetch failed")
+                    continue
+
+                iter_dir = output_root / args.name
+                trades, snapshots, summary = _run_symbol(
+                    symbol=symbol,
+                    segment=segment,
+                    candles=candles,
+                    strategies=strategies,
+                    cash=segment_cash,
+                    output_dir=iter_dir,
+                    benchmark_candles=bench_candles,
+                    use_evt_sizing=use_evt_sizing,
+                    use_copula_scaling=use_copula_scaling,
+                    regime_provider=regime_provider,
+                    stop_loss_mode=args.stop_loss_mode,
+                    market_context=ml_market_context,
+                )
+
+                normalized_trades = _normalize_trades_to_usd(trades, segment)
+                all_trades.extend(normalized_trades)
+                segment_trades[segment].extend(trades)  # keep raw for per-segment metrics
+                if snapshots:
+                    all_snapshots.extend(_normalize_snapshots_to_usd(snapshots, segment))
+                if summary:
+                    all_summaries.append(summary)
+
+            print()
+
+    finally:
+        _loader.close()
 
     if not all_trades:
         print("\n  No trades generated across all segments.")
