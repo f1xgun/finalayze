@@ -249,3 +249,93 @@ class TestComputeFeaturesMarketContext:
         )
         for feat in moex_keys:
             assert features.get(feat, 0.0) == 0.0
+
+
+class TestBrentHolidaySuppression:
+    # Base date 2024-02-01 (Thursday) — no Russian holidays in the 80-day range
+    _BASE = datetime(2024, 2, 1, 14, 30, tzinfo=UTC)
+    # 16 extra calendar days from a weekday gives gap=5 non-trading days (> 3 threshold)
+    _HOLIDAY_EXTRA_DAYS = 16
+    # 2 extra calendar days from a weekday gives gap=0 non-trading days (< threshold)
+    _WEEKEND_EXTRA_DAYS = 2
+
+    def _make_brent_candles_with_gap(
+        self,
+        n: int = 80,
+        gap_start_idx: int = 77,
+        extra_calendar_days: int = 16,
+        vary_prices: bool = False,
+    ) -> tuple[Candle, ...]:
+        """Make Brent candles with an artificial date gap at gap_start_idx.
+
+        Candles 0..gap_start_idx-1 are spaced 1 day apart.
+        Candle gap_start_idx onward is shifted by extra_calendar_days to simulate
+        MOEX returning from an extended closure.
+        When vary_prices=True, close prices follow a trend so z-score != 0.
+        """
+        candles: list[Candle] = []
+        offset = 0
+        for i in range(n):
+            if i == gap_start_idx:
+                offset += extra_calendar_days
+            close = Decimal(str(70 + i * 0.5)) if vary_prices else Decimal(81)
+            candles.append(
+                Candle(
+                    symbol="BZ=F",
+                    market_id="us",
+                    timeframe="1d",
+                    timestamp=self._BASE + timedelta(days=i + offset),
+                    open=close - Decimal(1),
+                    high=close + Decimal(1),
+                    low=close - Decimal(1),
+                    close=close,
+                    volume=1000,
+                )
+            )
+        return tuple(candles)
+
+    def test_suppressed_when_last_pair_in_lagged_has_extended_gap(self) -> None:
+        """Gap at lagged[-1] position (last pair) → brent_zscore_60d=0.0."""
+        # brent has 80 candles; lagged = brent[:-2] has 78 (indices 0..77).
+        # gap_start_idx=77: gap is between lagged[76] and lagged[77] (i=-1 in check loop).
+        # With _HOLIDAY_EXTRA_DAYS=16 from a Wednesday (2024-04-17), gap=5 > 3 → suppressed.
+        # vary_prices ensures z-score would be non-zero absent suppression.
+        brent = self._make_brent_candles_with_gap(
+            n=80, gap_start_idx=77, extra_calendar_days=self._HOLIDAY_EXTRA_DAYS, vary_prices=True
+        )
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_commodity_features(moex)
+        assert result["brent_zscore_60d"] == 0.0
+
+    def test_suppressed_when_second_to_last_pair_in_lagged_has_extended_gap(self) -> None:
+        """Gap at lagged[-2] position → brent_zscore_60d=0.0 (2-bar suppression window)."""
+        # gap_start_idx=76: gap is between lagged[75] and lagged[76] (i=-2 in check loop).
+        # With _HOLIDAY_EXTRA_DAYS=16 from a Tuesday (2024-04-16), gap=5 > 3 → suppressed.
+        brent = self._make_brent_candles_with_gap(
+            n=80, gap_start_idx=76, extra_calendar_days=self._HOLIDAY_EXTRA_DAYS, vary_prices=True
+        )
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_commodity_features(moex)
+        assert result["brent_zscore_60d"] == 0.0
+
+    def test_not_suppressed_when_gap_is_far_from_end(self) -> None:
+        """Gap at index 10 (far from lagged window end) → suppression does NOT fire."""
+        # Neither pair (75,76) nor (76,77) has the holiday gap → z-score is non-zero
+        brent = self._make_brent_candles_with_gap(
+            n=80, gap_start_idx=10, extra_calendar_days=self._HOLIDAY_EXTRA_DAYS, vary_prices=True
+        )
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_commodity_features(moex)
+        # With trending prices, z-score should be non-zero (not suppressed to 0.0)
+        assert result["brent_zscore_60d"] != 0.0
+
+    def test_not_suppressed_for_regular_two_day_gap(self) -> None:
+        """A 2-day calendar gap (0 non-trading days) never triggers suppression."""
+        # extra_calendar_days=2 → gap=0 non-trading days → below threshold of 3 → not suppressed
+        brent = self._make_brent_candles_with_gap(
+            n=80, gap_start_idx=77, extra_calendar_days=self._WEEKEND_EXTRA_DAYS, vary_prices=True
+        )
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_commodity_features(moex)
+        # With a 2-day gap the signal is not suppressed → non-zero z-score
+        assert result["brent_zscore_60d"] != 0.0

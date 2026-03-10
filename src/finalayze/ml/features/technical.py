@@ -13,6 +13,7 @@ import pandas_ta as ta
 
 from finalayze.core.exceptions import InsufficientDataError
 from finalayze.core.schemas import MarketContext, MoexMarketData
+from finalayze.data.moex_calendar import trading_days_gap
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -80,6 +81,8 @@ _MOEX_MACRO_ZSCORE_WINDOW = 252  # 252 trading days (~1 year)
 _MOEX_ZSCORE_CLIP = 3.0
 _FX_STD_BREAKPOINT_PCT = 0.20  # If std > 20% of mean, suppress (structural break)
 _MIN_ZSCORE_OBSERVATIONS = 20  # Minimum for meaningful z-score
+_BRENT_HOLIDAY_SUPPRESS_BARS = 2  # Suppress z-score for this many bars after MOEX reopening
+_BRENT_HOLIDAY_MIN_GAP = 3  # Trigger only if gap > this many non-trading days (>weekend)
 
 # Trailing 12-month CPI (Росстат), annualized as decimal fraction.
 # 6-month fallback in _compute_macro_features if exact month missing.
@@ -417,10 +420,15 @@ def _compute_fx_features(moex_data: MoexMarketData | None) -> dict[str, float]:
 
 
 def _compute_commodity_features(moex_data: MoexMarketData | None) -> dict[str, float]:
-    """Compute Brent crude z-score feature.
+    """Compute Brent crude z-score feature with 2-bar holiday suppression.
 
     Returns brent_zscore_60d: z-score of lagged 60d rolling window of Brent close prices.
     Lag of _EXTERNAL_DATA_LAG_BARS is applied to avoid look-ahead bias.
+
+    Suppression: if any of the last _BRENT_HOLIDAY_SUPPRESS_BARS consecutive pairs in the
+    lagged sequence have a gap > _BRENT_HOLIDAY_MIN_GAP non-trading days, the z-score is
+    suppressed to 0.0.  This prevents catch-up moves after MOEX extended closures (e.g.
+    New Year Jan 1-8 or May holidays) from polluting the feature signal.
     """
     _default: dict[str, float] = {"brent_zscore_60d": 0.0}
 
@@ -437,8 +445,18 @@ def _compute_commodity_features(moex_data: MoexMarketData | None) -> dict[str, f
 
     # Apply lag: exclude the last _EXTERNAL_DATA_LAG_BARS candles
     lagged = brent[:-_EXTERNAL_DATA_LAG_BARS]
-    values = pd.Series([float(c.close) for c in lagged], dtype=float)
 
+    # Holiday suppression: check the last _BRENT_HOLIDAY_SUPPRESS_BARS pairs for extended gaps
+    if len(lagged) >= _BRENT_HOLIDAY_SUPPRESS_BARS + 1:
+        for i in range(-_BRENT_HOLIDAY_SUPPRESS_BARS, 0):
+            gap = trading_days_gap(
+                lagged[i - 1].timestamp.date(),
+                lagged[i].timestamp.date(),
+            )
+            if gap > _BRENT_HOLIDAY_MIN_GAP:
+                return _default
+
+    values = pd.Series([float(c.close) for c in lagged], dtype=float)
     return {"brent_zscore_60d": _rolling_zscore_clipped(values, _MOEX_ZSCORE_WINDOW)}
 
 
