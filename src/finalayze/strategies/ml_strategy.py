@@ -99,18 +99,11 @@ class MLStrategy(BaseStrategy):
         if ensemble is None:
             return None
 
-        benchmark = None
-        vix = None
-        if self._market_context is not None:
-            benchmark = self._market_context.benchmark_candles
-            vix = self._market_context.vix_candles
-
         try:
             features = compute_features(
                 candles,
                 sentiment_score=0.0,
-                benchmark_candles=benchmark,
-                vix_candles=vix,
+                market_context=self._market_context,
             )
         except InsufficientDataError:
             return None
