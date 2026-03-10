@@ -215,6 +215,7 @@ markers = [
 
 [dependency-groups]
 dev = [
+    "lxml-stubs>=0.5.1",
     "respx>=0.22.0",
 ]
 
