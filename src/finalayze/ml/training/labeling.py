@@ -19,7 +19,9 @@ import pandas as pd
 import pandas_ta as ta
 
 from finalayze.core.exceptions import InsufficientDataError
+from finalayze.core.schemas import MarketContext  # noqa: TC001  — used at runtime in signatures
 from finalayze.ml.features.technical import compute_features
+from finalayze.ml.training import _slice_market_context
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -257,6 +259,7 @@ def build_triple_barrier_dataset(
     upper_atr_mult: float = 2.0,
     benchmark_candles: list[Candle] | None = None,
     vix_candles: list[Candle] | None = None,
+    market_context: MarketContext | None = None,
 ) -> tuple[list[dict[str, float]], list[int], list[float], list[datetime], list[int]]:
     """Build a dataset using triple barrier labels.
 
@@ -272,6 +275,9 @@ def build_triple_barrier_dataset(
         upper_atr_mult: ATR multiplier for upper barrier.
         benchmark_candles: Optional benchmark candles for market-neutral labels.
         vix_candles: Optional VIX candles for regime features (US segments).
+        market_context: Optional full-period ambient market data. Each entry point
+            receives a time-sliced copy (via ``_slice_market_context``) so that no
+            future MOEX/cross-asset data leaks into feature computation.
 
     Returns:
         Tuple of (features, labels, sample_weights, timestamps, hold_bars).
@@ -303,11 +309,18 @@ def build_triple_barrier_dataset(
         # Pass full history up to entry bar (no look-ahead bias)
         window = sorted_candles[: entry_index + 1]
 
+        # Slice ambient market context to entry bar timestamp (no look-ahead)
+        entry_ctx: MarketContext | None = None
+        if market_context is not None:
+            entry_max_ts = sorted_candles[entry_index].timestamp
+            entry_ctx = _slice_market_context(market_context, entry_max_ts)
+
         try:
             row_features = compute_features(
                 window,
                 benchmark_candles=benchmark_candles,
                 vix_candles=vix_candles,
+                market_context=entry_ctx,
             )
         except (InsufficientDataError, ValueError):
             continue

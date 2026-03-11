@@ -10,6 +10,7 @@ from collections import deque
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import structlog
 import torch
 from sklearn.preprocessing import StandardScaler
 from torch import nn
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
 
 from finalayze.core.exceptions import InsufficientDataError
 from finalayze.ml.models.base import BaseMLModel
+
+_log = structlog.get_logger()
 
 _UNTRAINED_PROB = 0.5
 _TRAIN_EPOCHS = 50
@@ -106,6 +109,17 @@ class LSTMModel(BaseMLModel):
         # --- Per-symbol buffer: avoids cross-contamination (issue 5.6) ---
         with self._lock:
             buf = self._feature_buffers.setdefault(symbol, deque(maxlen=self._sequence_length))
+            # Clear stale buffer when feature dimension changes (retrain with new features).
+            if buf and len(buf[0]) != len(sorted_vals):
+                old_dim = len(buf[0])
+                new_dim = len(sorted_vals)
+                buf.clear()
+                _log.warning(
+                    "lstm_buffer_cleared_dimension_mismatch",
+                    symbol=symbol,
+                    old=old_dim,
+                    new=new_dim,
+                )
             buf.append(sorted_vals)
             buffer_copy = list(buf)  # snapshot under lock
 

@@ -211,9 +211,34 @@ class TestGenerateSignal:
             mock_cf.assert_called_once_with(
                 candles,
                 sentiment_score=0.0,
-                benchmark_candles=None,
-                vix_candles=None,
+                market_context=None,
             )
+
+    def test_uses_market_context_not_legacy_kwargs(self) -> None:
+        """MLStrategy passes full MarketContext to compute_features (not legacy kwargs)."""
+        from finalayze.core.schemas import MarketContext, MoexMarketData
+
+        registry = MLModelRegistry()
+        ensemble = MagicMock()
+        ensemble.predict_proba.return_value = 0.8
+        ensemble.selected_features = None
+        ensemble.last_model_probas = None
+        ensemble.base_rate = 0.5
+        registry.register("us_tech", ensemble)
+
+        strategy = MLStrategy(registry=registry)
+        ctx = MarketContext(moex_data=MoexMarketData())
+        strategy.set_market_context(ctx)
+        candles = _make_candles(60)
+
+        with patch(_PATCH_TARGET, return_value=_FAKE_FEATURES) as mock_cf:
+            strategy.generate_signal("AAPL", candles, "us_tech")
+            call_kwargs = mock_cf.call_args.kwargs
+            # Must use market_context kwarg, not the old benchmark_candles / vix_candles
+            assert "market_context" in call_kwargs
+            assert call_kwargs["market_context"] is ctx
+            assert "benchmark_candles" not in call_kwargs
+            assert "vix_candles" not in call_kwargs
 
 
 class TestFeatureFiltering:
@@ -518,8 +543,8 @@ class TestBaseRateCorrectedDeadzone:
 
     _BASE_RATE = 0.55
     _THRESHOLD = 0.08
-    _BUY_EDGE = _BASE_RATE + _THRESHOLD   # 0.63
-    _SELL_EDGE = _BASE_RATE - _THRESHOLD   # 0.47
+    _BUY_EDGE = _BASE_RATE + _THRESHOLD  # 0.63
+    _SELL_EDGE = _BASE_RATE - _THRESHOLD  # 0.47
 
     def _make_strategy_and_ensemble(
         self,

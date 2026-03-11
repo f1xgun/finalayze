@@ -282,6 +282,71 @@ class IterationComparison(BaseModel):
     verdict: str
 
 
+class FXRate(BaseModel):
+    """Daily official FX rate from CBR."""
+
+    model_config = ConfigDict(frozen=True)
+
+    timestamp: datetime  # UTC midnight for the date
+    pair: str  # "USDRUB", "EURRUB"
+    rate: Decimal
+
+    @field_validator("timestamp")
+    @classmethod
+    def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; all timestamps must be UTC-aware."""
+        if v.tzinfo is None:
+            msg = "timestamp must be timezone-aware (UTC)"
+            raise ValueError(msg)
+        return v
+
+
+class KeyRateRecord(BaseModel):
+    """CBR key rate effective from a given date."""
+
+    model_config = ConfigDict(frozen=True)
+
+    timestamp: datetime  # UTC midnight of effective date
+    rate: Decimal  # Annual rate as decimal fraction: 0.16 = 16%
+
+    @field_validator("timestamp")
+    @classmethod
+    def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; all timestamps must be UTC-aware."""
+        if v.tzinfo is None:
+            msg = "timestamp must be timezone-aware (UTC)"
+            raise ValueError(msg)
+        return v
+
+
+class TurnoverRecord(BaseModel):
+    """Aggregate MOEX market turnover for a trading day."""
+
+    model_config = ConfigDict(frozen=True)
+
+    timestamp: datetime  # UTC midnight for the date
+    volume_rub: Decimal
+
+    @field_validator("timestamp")
+    @classmethod
+    def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; all timestamps must be UTC-aware."""
+        if v.tzinfo is None:
+            msg = "timestamp must be timezone-aware (UTC)"
+            raise ValueError(msg)
+        return v
+
+
+@dataclass(frozen=True)
+class MoexMarketData:
+    """MOEX-specific ambient data. None = unavailable."""
+
+    fx_rates: tuple[FXRate, ...] | None = dc_field(default=None)
+    key_rates: tuple[KeyRateRecord, ...] | None = dc_field(default=None)
+    commodity_candles: dict[str, tuple[Candle, ...]] | None = dc_field(default=None)
+    turnover: tuple[TurnoverRecord, ...] | None = dc_field(default=None)
+
+
 @dataclass(frozen=True)
 class MarketContext:
     """Ambient market data passed to strategies for cross-asset / regime features.
@@ -290,5 +355,8 @@ class MarketContext:
     and benchmark_candles may be absent if the benchmark fetch failed.
     """
 
+    # TODO: Design specifies tuple[Candle, ...] for immutability. Kept as list
+    # for backward compatibility with existing consumers. Migrate to tuple in v0.2.0.
     benchmark_candles: list[Candle] | None = dc_field(default=None)
     vix_candles: list[Candle] | None = dc_field(default=None)
+    moex_data: MoexMarketData | None = dc_field(default=None)

@@ -41,7 +41,11 @@ def _make_candles(
     return candles
 
 
-def _mock_features(candles: list[Candle], sentiment_score: float = 0.0) -> dict[str, float]:
+def _mock_features(
+    candles: list[Candle],
+    sentiment_score: float = 0.0,
+    **_kwargs: object,
+) -> dict[str, float]:
     """Fake compute_features that always works."""
     return {"close": float(candles[-1].close), "vol": float(candles[-1].volume)}
 

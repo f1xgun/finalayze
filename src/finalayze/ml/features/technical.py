@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import warnings
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -11,6 +12,8 @@ import pandas as pd
 import pandas_ta as ta
 
 from finalayze.core.exceptions import InsufficientDataError
+from finalayze.core.schemas import MarketContext, MoexMarketData
+from finalayze.data.moex_calendar import trading_days_gap
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -70,6 +73,48 @@ _DEFAULT_BETA = 1.0
 _DEFAULT_CORR = 0.5
 
 _OLS_INDICES_DTYPE = float  # np.arange dtype for OLS slope computation
+
+# MOEX-specific feature constants
+_EXTERNAL_DATA_LAG_BARS = 2  # All external data lagged by 2 bars to avoid look-ahead
+_MOEX_ZSCORE_WINDOW = 60
+_MOEX_MACRO_ZSCORE_WINDOW = 252  # 252 trading days (~1 year)
+_MOEX_ZSCORE_CLIP = 3.0
+_FX_STD_BREAKPOINT_PCT = 0.20  # If std > 20% of mean, suppress (structural break)
+_MIN_ZSCORE_OBSERVATIONS = 20  # Minimum for meaningful z-score
+_BRENT_HOLIDAY_SUPPRESS_BARS = 2  # Suppress z-score for this many bars after MOEX reopening
+_BRENT_HOLIDAY_MIN_GAP = 3  # Trigger only if gap > this many non-trading days (>weekend)
+
+# Trailing 12-month CPI (Росстат), annualized as decimal fraction.
+# 6-month fallback in _compute_macro_features if exact month missing.
+_TRAILING_CPI: dict[tuple[int, int], float] = {
+    (2023, 1): 0.1184,
+    (2023, 2): 0.1002,
+    (2023, 3): 0.0360,
+    (2023, 4): 0.0253,
+    (2023, 5): 0.0234,
+    (2023, 6): 0.0329,
+    (2023, 7): 0.0400,
+    (2023, 8): 0.0513,
+    (2023, 9): 0.0600,
+    (2023, 10): 0.0672,
+    (2023, 11): 0.0748,
+    (2023, 12): 0.0736,
+    (2024, 1): 0.0744,
+    (2024, 2): 0.0769,
+    (2024, 3): 0.0772,
+    (2024, 4): 0.0784,
+    (2024, 5): 0.0824,
+    (2024, 6): 0.0858,
+    (2024, 7): 0.0913,
+    (2024, 8): 0.0909,
+    (2024, 9): 0.0863,
+    (2024, 10): 0.0834,
+    (2024, 11): 0.0874,
+    (2024, 12): 0.0972,
+    (2025, 1): 0.1001,
+    (2025, 2): 0.1003,
+    (2025, 3): 0.1005,
+}
 
 _log = logging.getLogger(__name__)
 
@@ -310,9 +355,212 @@ def _compute_cross_asset_features(
     }
 
 
+def _rolling_zscore_clipped(
+    values: pd.Series,
+    window: int,
+    clip: float = _MOEX_ZSCORE_CLIP,
+) -> float:
+    """Compute z-score of the last value in *values* using a rolling window.
+
+    Returns 0.0 when:
+    - Fewer than max(window, _MIN_ZSCORE_OBSERVATIONS) data points are available.
+    - Standard deviation is zero or non-finite.
+
+    The result is clipped to [-clip, clip].
+    """
+    required = max(window, _MIN_ZSCORE_OBSERVATIONS)
+    if len(values) < required:
+        return 0.0
+
+    windowed = values.iloc[-window:]
+    mean = float(windowed.mean())
+    std = float(windowed.std())
+
+    if std <= 0.0 or not math.isfinite(std):
+        return 0.0
+
+    last = float(values.iloc[-1])
+    z = (last - mean) / std
+
+    if not math.isfinite(z):
+        return 0.0
+
+    return float(np.clip(z, -clip, clip))
+
+
+def _compute_fx_features(moex_data: MoexMarketData | None) -> dict[str, float]:
+    """Compute FX z-score feature from USD/RUB daily rates.
+
+    Returns usdrub_zscore_60d: z-score of lagged 60d rolling window.
+    Lag of _EXTERNAL_DATA_LAG_BARS is applied to avoid look-ahead bias.
+    Circuit-breaker: if rolling std > 20% of mean, returns 0.0 (structural break).
+    """
+    _default: dict[str, float] = {"usdrub_zscore_60d": 0.0}
+
+    if moex_data is None or not moex_data.fx_rates:
+        return _default
+
+    rates = moex_data.fx_rates
+    min_required = _MOEX_ZSCORE_WINDOW + _EXTERNAL_DATA_LAG_BARS
+    if len(rates) < min_required:
+        return _default
+
+    # Apply lag: exclude the last _EXTERNAL_DATA_LAG_BARS records
+    lagged = rates[:-_EXTERNAL_DATA_LAG_BARS]
+    values = pd.Series([float(r.rate) for r in lagged], dtype=float)
+
+    # Circuit-breaker: structural break if std > 20% of mean in 60d window
+    window_vals = values.iloc[-_MOEX_ZSCORE_WINDOW:]
+    mean_val = float(window_vals.mean())
+    std_val = float(window_vals.std())
+    if mean_val > 0 and std_val / mean_val > _FX_STD_BREAKPOINT_PCT:
+        return _default
+
+    return {"usdrub_zscore_60d": _rolling_zscore_clipped(values, _MOEX_ZSCORE_WINDOW)}
+
+
+def _compute_commodity_features(moex_data: MoexMarketData | None) -> dict[str, float]:
+    """Compute Brent crude z-score feature with 2-bar holiday suppression.
+
+    Returns brent_zscore_60d: z-score of lagged 60d rolling window of Brent close prices.
+    Lag of _EXTERNAL_DATA_LAG_BARS is applied to avoid look-ahead bias.
+
+    Suppression: if any of the last _BRENT_HOLIDAY_SUPPRESS_BARS consecutive pairs in the
+    lagged sequence have a gap > _BRENT_HOLIDAY_MIN_GAP non-trading days, the z-score is
+    suppressed to 0.0.  This prevents catch-up moves after MOEX extended closures (e.g.
+    New Year Jan 1-8 or May holidays) from polluting the feature signal.
+    """
+    _default: dict[str, float] = {"brent_zscore_60d": 0.0}
+
+    if moex_data is None or not moex_data.commodity_candles:
+        return _default
+
+    brent = moex_data.commodity_candles.get("BZ=F")
+    if not brent:
+        return _default
+
+    min_required = _MOEX_ZSCORE_WINDOW + _EXTERNAL_DATA_LAG_BARS
+    if len(brent) < min_required:
+        return _default
+
+    # Apply lag: exclude the last _EXTERNAL_DATA_LAG_BARS candles
+    lagged = brent[:-_EXTERNAL_DATA_LAG_BARS]
+
+    # Holiday suppression: check the last _BRENT_HOLIDAY_SUPPRESS_BARS pairs for extended gaps
+    if len(lagged) >= _BRENT_HOLIDAY_SUPPRESS_BARS + 1:
+        for i in range(-_BRENT_HOLIDAY_SUPPRESS_BARS, 0):
+            gap = trading_days_gap(
+                lagged[i - 1].timestamp.date(),
+                lagged[i].timestamp.date(),
+            )
+            if gap > _BRENT_HOLIDAY_MIN_GAP:
+                return _default
+
+    values = pd.Series([float(c.close) for c in lagged], dtype=float)
+    return {"brent_zscore_60d": _rolling_zscore_clipped(values, _MOEX_ZSCORE_WINDOW)}
+
+
+def _compute_macro_features(
+    moex_data: MoexMarketData | None,
+    candle_timestamps: list[datetime] | None = None,
+) -> dict[str, float]:
+    """Compute real interest rate z-score (key_rate - CPI).
+
+    Builds a sparse real_rate series, forward-fills to daily, applies lag,
+    then z-scores over 252d window. Uses a 6-month CPI fallback if exact month
+    is missing from the static table.
+
+    Per §19-H1: daily_index is the union of candle_timestamps and sparse_dates
+    so pre-window key rates survive forward-fill reindex.
+    """
+    _default: dict[str, float] = {"real_rate_zscore": 0.0}
+
+    if moex_data is None or not moex_data.key_rates:
+        return _default
+
+    # Build sparse real_rate series: key_rate - CPI
+    sparse: dict[datetime, float] = {}
+    for record in moex_data.key_rates:
+        yr = record.timestamp.year
+        mo = record.timestamp.month
+
+        # 6-month fallback: try exact month, then up to 6 months back
+        cpi: float | None = None
+        for offset in range(7):  # 0 = exact, 1-6 = fallback months back
+            cpi_mo = mo - offset
+            cpi_yr = yr
+            while cpi_mo < 1:
+                cpi_mo += 12
+                cpi_yr -= 1
+            cpi = _TRAILING_CPI.get((cpi_yr, cpi_mo))
+            if cpi is not None:
+                break
+
+        if cpi is None:
+            continue
+
+        real_rate = float(record.rate) - cpi
+        sparse[record.timestamp] = real_rate
+
+    if not sparse:
+        return _default
+
+    sparse_dates = list(sparse.keys())
+
+    # §19-H1: union of candle_timestamps and sparse_dates ensures pre-window
+    # key rates survive reindex (forward-fill reaches candle window start)
+    all_timestamps = set(candle_timestamps or []) | set(sparse_dates)
+    daily_index = pd.DatetimeIndex(sorted(all_timestamps))
+
+    sparse_series = pd.Series(sparse)
+    # Forward-fill to daily granularity (handles gaps between rate changes)
+    daily = sparse_series.reindex(daily_index).ffill().dropna()
+
+    if daily.empty:
+        return _default
+
+    min_required = _EXTERNAL_DATA_LAG_BARS + 1
+    if len(daily) < min_required:
+        return _default
+
+    # Apply lag on the daily series
+    lagged = daily.iloc[:-_EXTERNAL_DATA_LAG_BARS]
+
+    if lagged.empty:
+        return _default
+
+    window = min(len(lagged), _MOEX_MACRO_ZSCORE_WINDOW)
+    return {"real_rate_zscore": _rolling_zscore_clipped(lagged, window)}
+
+
+def _compute_turnover_features(moex_data: MoexMarketData | None) -> dict[str, float]:
+    """Compute MOEX aggregate market turnover z-score.
+
+    Returns market_turnover_zscore: z-score of lagged 60d rolling window.
+    Lag of _EXTERNAL_DATA_LAG_BARS is applied to avoid look-ahead bias.
+    """
+    _default: dict[str, float] = {"market_turnover_zscore": 0.0}
+
+    if moex_data is None or not moex_data.turnover:
+        return _default
+
+    records = moex_data.turnover
+    min_required = _MOEX_ZSCORE_WINDOW + _EXTERNAL_DATA_LAG_BARS
+    if len(records) < min_required:
+        return _default
+
+    # Apply lag: exclude the last _EXTERNAL_DATA_LAG_BARS records
+    lagged = records[:-_EXTERNAL_DATA_LAG_BARS]
+    values = pd.Series([float(r.volume_rub) for r in lagged], dtype=float).ffill()
+
+    return {"market_turnover_zscore": _rolling_zscore_clipped(values, _MOEX_ZSCORE_WINDOW)}
+
+
 def compute_features(
     candles: list[Candle],
     sentiment_score: float = 0.0,  # noqa: ARG001 — kept for backward compatibility
+    market_context: MarketContext | None = None,
+    # Deprecated: pass market_context=MarketContext(benchmark_candles=...) instead
     benchmark_candles: list[Candle] | None = None,
     vix_candles: list[Candle] | None = None,
 ) -> dict[str, float]:
@@ -321,13 +569,35 @@ def compute_features(
     Args:
         candles: OHLCV candles sorted ascending by timestamp.
         sentiment_score: External sentiment score in [-1.0, 1.0].
+        market_context: Optional ambient market data (benchmark, VIX, MOEX).
+        benchmark_candles: Deprecated. Use market_context instead.
+        vix_candles: Deprecated. Use market_context instead.
 
     Returns:
         Dict of feature name -> float value.
 
     Raises:
-        InsufficientDataError: When fewer than 30 candles are provided.
+        InsufficientDataError: When fewer than _MIN_CANDLES candles are provided.
     """
+    # Deprecation shim: convert old kwargs to MarketContext
+    if benchmark_candles is not None or vix_candles is not None:
+        warnings.warn(
+            "benchmark_candles/vix_candles kwargs are deprecated. "
+            "Use market_context=MarketContext(benchmark_candles=..., vix_candles=...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if market_context is None:
+            market_context = MarketContext(
+                benchmark_candles=benchmark_candles,
+                vix_candles=vix_candles,
+            )
+
+    # Extract components from market_context
+    _benchmark = market_context.benchmark_candles if market_context else None
+    _vix = market_context.vix_candles if market_context else None
+    _moex = market_context.moex_data if market_context else None
+
     if len(candles) < _MIN_CANDLES:
         msg = f"Need at least {_MIN_CANDLES} candles, got {len(candles)}"
         raise InsufficientDataError(msg)
@@ -370,16 +640,23 @@ def compute_features(
     calendar = _compute_calendar_features(candles[-1].timestamp)
 
     # Regime features (VIX + realized volatility ratio)
-    regime = _compute_regime_features(close_s, vix_candles)
+    regime = _compute_regime_features(close_s, _vix)
 
     # Cross-asset features (relative strength vs benchmark)
     benchmark_close_s = None
-    if benchmark_candles:
+    if _benchmark:
         benchmark_close_s = pd.Series(
-            [float(c.close) for c in benchmark_candles],
+            [float(c.close) for c in _benchmark],
             dtype=float,
         )
     cross_asset = _compute_cross_asset_features(close_s, benchmark_close_s)
+
+    # MOEX-specific features (FX, commodity, macro, turnover)
+    candle_timestamps = [c.timestamp for c in candles]
+    fx_features = _compute_fx_features(_moex)
+    commodity_features = _compute_commodity_features(_moex)
+    macro_features = _compute_macro_features(_moex, candle_timestamps=candle_timestamps)
+    turnover_features = _compute_turnover_features(_moex)
 
     all_features = {
         **core,
@@ -389,6 +666,10 @@ def compute_features(
         **calendar,
         **regime,
         **cross_asset,
+        **fx_features,
+        **commodity_features,
+        **macro_features,
+        **turnover_features,
     }
 
     feature_df = pd.DataFrame({k: [v] for k, v in all_features.items()})

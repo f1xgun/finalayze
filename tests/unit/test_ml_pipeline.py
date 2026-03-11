@@ -72,6 +72,11 @@ _FEATURE_NAMES = {
     "rolling_beta_63d",
     "rolling_corr_63d",
     "excess_momentum_score",
+    # MOEX-specific (default 0.0 when no MOEX data provided)
+    "usdrub_zscore_60d",
+    "brent_zscore_60d",
+    "real_rate_zscore",
+    "market_turnover_zscore",
 }
 _N_FEATURES = len(_FEATURE_NAMES)
 

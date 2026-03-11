@@ -682,3 +682,163 @@ class TestStackingMetaLearner:
 
         result = ensemble.predict_proba({"feat1": 1.0})
         assert 0 <= result <= 1
+
+
+class TestLSTMBufferDimensionMismatch:
+    """Task 14: LSTM buffer must be cleared on feature dimension change."""
+
+    _SEQ_LEN = 5
+    _N_TRAIN = 30
+    _N_FEATURES_OLD = 3
+    _N_FEATURES_NEW = 5
+
+    def _make_trained_lstm(self, n_features: int) -> object:
+        """Return a trained LSTMModel with n_features-dimensional inputs."""
+        from finalayze.ml.models.lstm_model import LSTMModel
+
+        rng = __import__("numpy").random.default_rng(42)
+        model = LSTMModel(segment_id="test", sequence_length=self._SEQ_LEN)
+        X = [
+            {f"f{i}": float(v) for i, v in enumerate(row)}
+            for row in rng.standard_normal((self._N_TRAIN, n_features))
+        ]
+        y = [int(v) for v in (rng.random(self._N_TRAIN) > 0.5).astype(int)]
+        model.fit(X, y)
+        return model
+
+    def test_buffer_cleared_on_dimension_mismatch(self) -> None:
+        """Buffer entries with old feature count are cleared when new count arrives."""
+        import numpy as np
+
+        from finalayze.ml.models.lstm_model import LSTMModel
+
+        # Train with 3 features
+        rng = np.random.default_rng(0)
+        model = LSTMModel(segment_id="seg", sequence_length=self._SEQ_LEN)
+        X_old = [
+            {f"f{i}": float(v) for i, v in enumerate(row)}
+            for row in rng.standard_normal((self._N_TRAIN, self._N_FEATURES_OLD))
+        ]
+        y = [int(v) for v in (rng.random(self._N_TRAIN) > 0.5).astype(int)]
+        model.fit(X_old, y)
+
+        # Pump a few old-dimension frames into the buffer for symbol "A"
+        old_feat = {f"f{i}": float(i) for i in range(self._N_FEATURES_OLD)}
+        from collections import deque
+
+        buf = model._feature_buffers.setdefault("A", deque(maxlen=self._SEQ_LEN))
+        for _ in range(self._SEQ_LEN - 1):
+            buf.append(list(old_feat.values()))
+
+        assert len(model._feature_buffers["A"]) == self._SEQ_LEN - 1
+
+        # Now retrain with 5 features (simulates "new features added")
+        X_new = [
+            {f"f{i}": float(v) for i, v in enumerate(row)}
+            for row in rng.standard_normal((self._N_TRAIN, self._N_FEATURES_NEW))
+        ]
+        y2 = [int(v) for v in (rng.random(self._N_TRAIN) > 0.5).astype(int)]
+        model.fit(X_new, y2)
+
+        # After retraining, _feature_buffers must have been cleared by fit()
+        assert model._feature_buffers == {}
+
+    def test_predict_proba_clears_buffer_on_dimension_change(self) -> None:
+        """predict_proba clears stale buffer when incoming feature dim differs from buffer."""
+        from collections import deque
+
+        import numpy as np
+
+        from finalayze.ml.models.lstm_model import LSTMModel
+
+        rng = np.random.default_rng(1)
+        model = LSTMModel(segment_id="seg2", sequence_length=self._SEQ_LEN)
+        n_feat = self._N_FEATURES_OLD
+        X = [
+            {f"f{i}": float(v) for i, v in enumerate(row)}
+            for row in rng.standard_normal((self._N_TRAIN, n_feat))
+        ]
+        y = [int(v) for v in (rng.random(self._N_TRAIN) > 0.5).astype(int)]
+        model.fit(X, y)
+
+        # Manually inject stale entries with wrong dimension (n_feat - 1) into buffer
+        stale_dim = n_feat - 1
+        sym = "SYM"
+        buf = model._feature_buffers.setdefault(sym, deque(maxlen=self._SEQ_LEN))
+        for _ in range(self._SEQ_LEN - 1):
+            buf.append([0.0] * stale_dim)
+
+        assert len(model._feature_buffers[sym]) == self._SEQ_LEN - 1
+
+        # Now call predict_proba with correct n_feat features.
+        # With stale entries the tensor would be jagged -> must NOT raise ValueError.
+        features = {f"f{i}": 0.5 for i in range(n_feat)}
+        result = model.predict_proba(features, symbol=sym)
+
+        # Buffer should have been cleared and contain only the 1 new entry
+        assert len(model._feature_buffers[sym]) == 1
+        # Prediction should be a valid probability
+        assert 0.0 <= result <= 1.0
+
+    def test_predict_proba_no_crash_on_mismatch_without_fix(self) -> None:
+        """Without the fix a jagged buffer causes a crash; with it returns a float."""
+        from collections import deque
+
+        import numpy as np
+
+        from finalayze.ml.models.lstm_model import LSTMModel
+
+        rng = np.random.default_rng(2)
+        model = LSTMModel(segment_id="seg3", sequence_length=self._SEQ_LEN)
+        n_feat = self._N_FEATURES_OLD
+        X = [
+            {f"f{i}": float(v) for i, v in enumerate(row)}
+            for row in rng.standard_normal((self._N_TRAIN, n_feat))
+        ]
+        y = [int(v) for v in (rng.random(self._N_TRAIN) > 0.5).astype(int)]
+        model.fit(X, y)
+
+        # Inject wrong-dimension entries (n_feat + 2) to represent an older model's buffer
+        sym = "CRASH"
+        wrong_dim = n_feat + 2
+        buf = model._feature_buffers.setdefault(sym, deque(maxlen=self._SEQ_LEN))
+        for _ in range(self._SEQ_LEN - 1):
+            buf.append([1.0] * wrong_dim)
+
+        # predict_proba must clear the stale buffer and return a valid float
+        features = {f"f{i}": 1.0 for i in range(n_feat)}
+        result = model.predict_proba(features, symbol=sym)
+        assert isinstance(result, float)
+        assert 0.0 <= result <= 1.0
+
+    def test_buffer_clear_logged_on_mismatch(self) -> None:
+        """A structlog warning is emitted when the buffer is cleared due to mismatch."""
+        from collections import deque
+
+        import numpy as np
+        import structlog
+
+        from finalayze.ml.models.lstm_model import LSTMModel
+
+        rng = np.random.default_rng(3)
+        model = LSTMModel(segment_id="seg4", sequence_length=self._SEQ_LEN)
+        n_feat = self._N_FEATURES_OLD
+        X = [
+            {f"f{i}": float(v) for i, v in enumerate(row)}
+            for row in rng.standard_normal((self._N_TRAIN, n_feat))
+        ]
+        y = [int(v) for v in (rng.random(self._N_TRAIN) > 0.5).astype(int)]
+        model.fit(X, y)
+
+        sym = "LOG"
+        wrong_dim = n_feat - 1
+        buf = model._feature_buffers.setdefault(sym, deque(maxlen=self._SEQ_LEN))
+        for _ in range(self._SEQ_LEN - 1):
+            buf.append([0.0] * wrong_dim)
+
+        features = {f"f{i}": 0.0 for i in range(n_feat)}
+        with structlog.testing.capture_logs() as captured:
+            model.predict_proba(features, symbol=sym)
+
+        events = [e.get("event", "") for e in captured]
+        assert any("lstm_buffer_cleared_dimension_mismatch" in ev for ev in events)
