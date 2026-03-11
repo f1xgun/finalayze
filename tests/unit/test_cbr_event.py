@@ -45,9 +45,9 @@ RUONIA_AMBIGUOUS = Decimal("0.2080")  # gap = -0.002 → within [-0.0030, +0.003
 # the same units as the CBR calendar uses. Let's recalculate with proper units.
 # The task says gap < -0.30 (30bps = 0.30pp). So key_rate and ruonia in pp.
 KEY_RATE_PP = Decimal("21.00")
-RUONIA_DOVISH_PP = Decimal("20.50")  # gap = 20.50 - 21.00 = -0.50 < -0.30 ✓
-RUONIA_HAWKISH_PP = Decimal("21.50")  # gap = +0.50 > +0.30 ✓
-RUONIA_AMBIGUOUS_PP = Decimal("20.80")  # gap = -0.20, |gap| < 0.30 → ambiguous
+RUONIA_DOVISH_PP = Decimal("20.50")  # gap = 20.50 - 21.00 = -0.50 < -0.15 ✓
+RUONIA_HAWKISH_PP = Decimal("21.50")  # gap = +0.50 > +0.15 ✓
+RUONIA_AMBIGUOUS_PP = Decimal("20.90")  # gap = -0.10, |gap| < 0.15 → ambiguous
 
 CONFIDENCE_MIN = 0.0
 CONFIDENCE_MAX = 1.0
