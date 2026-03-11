@@ -61,8 +61,9 @@ from finalayze.risk.yield_stop import YieldStop
 
 _DEFAULT_TOTAL_CASH = Decimal(1_500_000)  # 1.5M RUB default
 
-# Short-layer equity universe (MOEX blue chips for MR + dividend gap)
-_SHORT_EQUITY_SYMBOLS = ["SBER", "GAZP", "LKOH", "GMKN", "YNDX", "MGNT"]
+# Short-layer equity universe (top-3 MOEX blue chips by liquidity)
+# Concentrated to ensure viable position sizing (150K / 3 = 50K per symbol)
+_SHORT_EQUITY_SYMBOLS = ["SBER", "GAZP", "LKOH"]
 
 
 def _allocate_cash(
@@ -293,7 +294,7 @@ def _run_short_symbol(
     segment: str,
     candles: list[Any],
     strategies: list[Any],
-    cash: Decimal,
+    cash_per_symbol: Decimal,
     max_positions: int,
 ) -> tuple[list[Any], list[Any]]:
     """Run equity backtest for one symbol. Returns (trades, snapshots)."""
@@ -314,7 +315,7 @@ def _run_short_symbol(
     engine = BacktestEngine(
         strategy=combiner,
         config=BacktestConfig(
-            initial_cash=cash,
+            initial_cash=cash_per_symbol,
             max_positions=max_positions,
             stop_loss_mode="chandelier",
             max_hold_bars=DEFAULT_STRATEGY_HOLD_BARS,
@@ -385,6 +386,10 @@ def _run_short_layer(
     all_snapshots: list[PortfolioState] = []
     layer_cfg = DEFAULT_LAYER_CONFIGS[PortfolioLayer.SHORT]
 
+    # Split cash equally across symbols so combined equity matches total allocation
+    n_symbols = len(symbols)
+    cash_per_symbol = cash / Decimal(n_symbols) if n_symbols > 0 else cash
+
     for symbol in symbols:
         try:
             candles = fetcher.fetch_candles(symbol, start, end)
@@ -401,7 +406,7 @@ def _run_short_layer(
                 segment,
                 candles,
                 strategies,
-                cash,
+                cash_per_symbol,
                 layer_cfg.max_positions,
             )
             all_trades.extend(trades)

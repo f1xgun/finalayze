@@ -11,12 +11,13 @@ import pytest
 from finalayze.core.exceptions import DataFetchError
 from finalayze.core.schemas import AccruedInterest, BondInfo, CouponPayment
 from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
-from finalayze.markets.instruments import DEFAULT_MOEX_INSTRUMENTS, InstrumentRegistry
+from finalayze.markets.instruments import DEFAULT_MOEX_INSTRUMENTS, Instrument, InstrumentRegistry
 
 # ---------- constants ----------
 
 FAKE_TOKEN = "fake_token"  # noqa: S105
 FAKE_FIGI = "BBG00T22WKV5"
+FAKE_BOND_SYMBOL = "SU99999RMFS0"
 NANO_HALF = 500_000_000
 FACE_VALUE_UNITS = 1000
 COUPON_AMOUNT_UNITS = 35
@@ -34,6 +35,17 @@ def _make_registry() -> InstrumentRegistry:
     registry = InstrumentRegistry()
     for inst in DEFAULT_MOEX_INSTRUMENTS:
         registry.register(inst)
+    # Register a fake bond so fetch_bond_info/coupons/NKD can resolve symbol → FIGI
+    registry.register(
+        Instrument(
+            symbol=FAKE_BOND_SYMBOL,
+            market_id="moex",
+            name="Fake OFZ",
+            instrument_type="bond",
+            figi=FAKE_FIGI,
+            currency="RUB",
+        )
+    )
     return registry
 
 
@@ -130,7 +142,7 @@ class TestFetchBondInfo:
             ),
             pytest.raises(DataFetchError, match="gRPC error fetching bond info"),
         ):
-            fetcher.fetch_bond_info(FAKE_FIGI)
+            fetcher.fetch_bond_info(FAKE_BOND_SYMBOL)
 
     def test_returns_bond_info(self) -> None:
         """Mocked async method returns correct BondInfo."""
@@ -154,7 +166,7 @@ class TestFetchBondInfo:
             "finalayze.data.fetchers.tinkoff_data.asyncio.run",
             return_value=expected,
         ):
-            result = fetcher.fetch_bond_info(FAKE_FIGI)
+            result = fetcher.fetch_bond_info(FAKE_BOND_SYMBOL)
 
         assert isinstance(result, BondInfo)
         assert result.figi == FAKE_FIGI
@@ -191,7 +203,7 @@ class TestFetchBondInfo:
             "finalayze.data.fetchers.tinkoff_data.asyncio.run",
             return_value=expected,
         ):
-            fetcher.fetch_bond_info(FAKE_FIGI)
+            fetcher.fetch_bond_info(FAKE_BOND_SYMBOL)
 
         mock_limiter.acquire.assert_called_once()
 
@@ -211,7 +223,7 @@ class TestFetchBondCoupons:
             ),
             pytest.raises(DataFetchError, match="gRPC error fetching coupons"),
         ):
-            fetcher.fetch_bond_coupons(FAKE_FIGI, start, end)
+            fetcher.fetch_bond_coupons(FAKE_BOND_SYMBOL, start, end)
 
     def test_returns_coupon_payments(self) -> None:
         """Mocked async method returns list of CouponPayment."""
@@ -240,7 +252,7 @@ class TestFetchBondCoupons:
             "finalayze.data.fetchers.tinkoff_data.asyncio.run",
             return_value=expected,
         ):
-            result = fetcher.fetch_bond_coupons(FAKE_FIGI, start, end)
+            result = fetcher.fetch_bond_coupons(FAKE_BOND_SYMBOL, start, end)
 
         assert len(result) == 2
         assert all(isinstance(c, CouponPayment) for c in result)
@@ -265,7 +277,7 @@ class TestFetchAccruedInterest:
             ),
             pytest.raises(DataFetchError, match="gRPC error fetching NKD"),
         ):
-            fetcher.fetch_accrued_interest(FAKE_FIGI, start, end)
+            fetcher.fetch_accrued_interest(FAKE_BOND_SYMBOL, start, end)
 
     def test_returns_accrued_interest_list(self) -> None:
         """Mocked async method returns list of AccruedInterest."""
@@ -292,7 +304,7 @@ class TestFetchAccruedInterest:
             "finalayze.data.fetchers.tinkoff_data.asyncio.run",
             return_value=expected,
         ):
-            result = fetcher.fetch_accrued_interest(FAKE_FIGI, start, end)
+            result = fetcher.fetch_accrued_interest(FAKE_BOND_SYMBOL, start, end)
 
         assert len(result) == 2
         assert all(isinstance(ai, AccruedInterest) for ai in result)

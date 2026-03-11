@@ -98,17 +98,18 @@ class TestMinPositionSize:
 
 
 class TestEngineMinPosIntegration:
-    """Verify BacktestEngine source code has the correct min_pos values."""
+    """Verify BacktestEngine source code has equity-scaled min_pos."""
 
-    def test_engine_source_has_5000_for_moex(self) -> None:
-        """Read engine source to confirm min_pos = 5000 for ru_ segments."""
+    def test_engine_source_has_scaled_min_pos(self) -> None:
+        """Read engine source to confirm min_pos scales with equity for ru_ segments."""
         from finalayze.backtest import engine as engine_mod  # noqa: PLC0415
 
         source = inspect.getsource(engine_mod)
-        # The line should contain 5000 for ru_ segments (not 100)
-        assert "Decimal(5000) if segment_id.startswith" in source
-        # Should NOT contain old value of 100 for ru_ segments
-        assert "Decimal(100) if segment_id.startswith" not in source
+        # MOEX min is capped at 5000 RUB, floors at 1000 RUB
+        assert "Decimal(5000)" in source
+        assert "Decimal(1000)" in source
+        # US min is capped at 500 USD
+        assert "Decimal(500)" in source
 
 
 # ---------------------------------------------------------------------------

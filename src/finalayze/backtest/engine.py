@@ -1173,8 +1173,11 @@ class BacktestEngine:
             )
 
         asset_vol = compute_realized_vol(history) or Decimal("0.20")
-        # Currency-aware min position: 5000 RUB floor for MOEX, $500 for US
-        min_pos = Decimal(5000) if segment_id.startswith("ru_") else Decimal(500)
+        # Currency-aware min position: original thresholds scaled down for small portfolios
+        if segment_id.startswith("ru_"):
+            min_pos = min(Decimal(5000), max(Decimal(1000), portfolio.equity * Decimal("0.02")))
+        else:
+            min_pos = min(Decimal(500), max(Decimal(100), portfolio.equity * Decimal("0.005")))
 
         # Compute ML confidence from MetaLabeler if available
         ml_confidence: float | None = None

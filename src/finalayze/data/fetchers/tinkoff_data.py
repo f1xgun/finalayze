@@ -211,21 +211,22 @@ class TinkoffFetcher(BaseFetcher):
 
     # ── Bond data methods ──────────────────────────────────────────────────
 
-    def fetch_bond_info(self, figi: str) -> BondInfo:
+    def fetch_bond_info(self, symbol: str) -> BondInfo:
         """Fetch bond metadata from T-Bank API.
 
         Args:
-            figi: FIGI identifier for the bond.
+            symbol: Bond symbol (e.g. SU26244RMFS2). Resolved to FIGI via registry.
 
         Returns:
             BondInfo with static bond metadata.
         """
+        figi = self._symbol_to_figi(symbol)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
         try:
             result = asyncio.run(self._fetch_bond_info_async(figi))
         except Exception as exc:
-            msg = f"Tinkoff gRPC error fetching bond info for {figi}: {exc}"
+            msg = f"Tinkoff gRPC error fetching bond info for {symbol} (FIGI={figi}): {exc}"
             raise DataFetchError(msg) from exc
         return result
 
@@ -268,26 +269,27 @@ class TinkoffFetcher(BaseFetcher):
 
     def fetch_bond_coupons(
         self,
-        figi: str,
+        symbol: str,
         start: datetime,
         end: datetime,
     ) -> list[CouponPayment]:
         """Fetch coupon payment schedule for a bond.
 
         Args:
-            figi: FIGI identifier for the bond.
+            symbol: Bond symbol (e.g. SU26244RMFS2). Resolved to FIGI via registry.
             start: Start date (inclusive).
             end: End date (inclusive).
 
         Returns:
             List of CouponPayment events within the date range.
         """
+        figi = self._symbol_to_figi(symbol)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
         try:
             result = asyncio.run(self._fetch_bond_coupons_async(figi, start, end))
         except Exception as exc:
-            msg = f"Tinkoff gRPC error fetching coupons for {figi}: {exc}"
+            msg = f"Tinkoff gRPC error fetching coupons for {symbol} (FIGI={figi}): {exc}"
             raise DataFetchError(msg) from exc
         return result
 
@@ -324,26 +326,27 @@ class TinkoffFetcher(BaseFetcher):
 
     def fetch_accrued_interest(
         self,
-        figi: str,
+        symbol: str,
         start: datetime,
         end: datetime,
     ) -> list[AccruedInterest]:
         """Fetch daily accrued interest (NKD) for a bond.
 
         Args:
-            figi: FIGI identifier for the bond.
+            symbol: Bond symbol (e.g. SU26244RMFS2). Resolved to FIGI via registry.
             start: Start date (inclusive).
             end: End date (inclusive).
 
         Returns:
             List of daily AccruedInterest records.
         """
+        figi = self._symbol_to_figi(symbol)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
         try:
             result = asyncio.run(self._fetch_accrued_interest_async(figi, start, end))
         except Exception as exc:
-            msg = f"Tinkoff gRPC error fetching NKD for {figi}: {exc}"
+            msg = f"Tinkoff gRPC error fetching NKD for {symbol} (FIGI={figi}): {exc}"
             raise DataFetchError(msg) from exc
         return result
 
