@@ -45,6 +45,9 @@ class YieldStop:
             True if yield has risen strictly above the threshold
             (meaning price has dropped enough to trigger the stop).
         """
+        # threshold_bps=0 means no yield stop (used by Core carry layer)
+        if self._threshold_bps <= 0:
+            return False
         # YTM rising = price falling = bad for long bond position
         yield_change_bps = (current_ytm_pct - entry_ytm_pct) * Decimal(100)
         return yield_change_bps > self._threshold_bps

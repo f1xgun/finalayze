@@ -48,6 +48,7 @@ class BondCarryStrategy:
         candles: list[Candle],
         open_positions: dict[str, Any],
         bar_idx: int,
+        **kwargs: Any,  # noqa: ARG002 — macro kwargs forwarded by engine
     ) -> Signal | None:
         """Generate signal for a single OFZ-PK bond.
 
@@ -56,6 +57,8 @@ class BondCarryStrategy:
             candles: Candles up to current bar.
             open_positions: Currently open positions (all symbols).
             bar_idx: Current bar index.
+            **kwargs: Accepted for protocol compatibility (macro data).
+                Carry strategy does not use macro context.
 
         Returns:
             Signal or None.

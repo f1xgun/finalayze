@@ -35,6 +35,11 @@ _TACTICAL_COUPON = 5_000.0
 # Number of days for standard test curves
 _N_DAYS = 10
 
+# Phase 4 exit gate counts
+_HARD_GATES_TOTAL = 4
+_SOFT_GATES_TOTAL = 3
+_SOFT_GATES_MIN_PASS = 2
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -126,6 +131,17 @@ class TestEmptyInput:
         assert result.layer_results == {}
         assert result.layer_return_contribution == {}
 
+        # Phase 4 exit criteria defaults
+        assert result.absolute_sharpe == _ZERO
+        assert result.core_return_vs_ruonia == _ZERO
+        assert result.strategic_dd_ok is True
+        assert result.tactical_has_trades is False
+        assert result.hard_gates_passed == 0
+        assert result.hard_gates_total == _HARD_GATES_TOTAL
+        assert result.soft_gates_passed == 0
+        assert result.soft_gates_total == _SOFT_GATES_TOTAL
+        assert result.phase4_exit_ok is False
+
 
 # ── Test: Single layer ───────────────────────────────────────────────────────
 
@@ -143,9 +159,7 @@ class TestSingleLayer:
 
         # Combined equity curve should equal the single layer
         assert len(result.combined_equity_curve) == _N_DAYS
-        for actual, expected in zip(
-            result.combined_equity_curve, curve, strict=True
-        ):
+        for actual, expected in zip(result.combined_equity_curve, curve, strict=True):
             assert actual == pytest.approx(expected, rel=_TOLERANCE)
 
     def test_single_layer_return(self) -> None:
@@ -167,9 +181,7 @@ class TestSingleLayer:
         agg = PortfolioAggregator()
         result = agg.aggregate([layer])
 
-        assert result.layer_return_contribution["core"] == pytest.approx(
-            100.0, rel=_TOLERANCE
-        )
+        assert result.layer_return_contribution["core"] == pytest.approx(100.0, rel=_TOLERANCE)
 
 
 # ── Test: Two layers combined equity ─────────────────────────────────────────
@@ -192,9 +204,7 @@ class TestTwoLayersCombined:
         assert len(result.combined_equity_curve) == _N_DAYS
         for i in range(_N_DAYS):
             expected = core_curve[i] + strat_curve[i]
-            assert result.combined_equity_curve[i] == pytest.approx(
-                expected, rel=_TOLERANCE
-            )
+            assert result.combined_equity_curve[i] == pytest.approx(expected, rel=_TOLERANCE)
 
     def test_combined_return_from_summed_equity(self) -> None:
         dates = _make_dates(_N_DAYS)
@@ -366,12 +376,8 @@ class TestLayerContribution:
         agg = PortfolioAggregator()
         result = agg.aggregate([core, strat])
 
-        assert result.layer_return_contribution["core"] == pytest.approx(
-            _ZERO, abs=_TOLERANCE
-        )
-        assert result.layer_return_contribution["strategic"] == pytest.approx(
-            _ZERO, abs=_TOLERANCE
-        )
+        assert result.layer_return_contribution["core"] == pytest.approx(_ZERO, abs=_TOLERANCE)
+        assert result.layer_return_contribution["strategic"] == pytest.approx(_ZERO, abs=_TOLERANCE)
 
 
 # ── Test: Excess Sharpe ──────────────────────────────────────────────────────
@@ -505,23 +511,15 @@ class TestCouponAggregation:
         strat_curve = _make_flat_curve(_INITIAL_VALUE, _N_DAYS)
         tact_curve = _make_flat_curve(_INITIAL_VALUE, _N_DAYS)
 
-        core = _make_layer(
-            "core", core_curve, dates, coupon_income_net=_CORE_COUPON
-        )
-        strat = _make_layer(
-            "strategic", strat_curve, dates, coupon_income_net=_STRATEGIC_COUPON
-        )
-        tact = _make_layer(
-            "tactical", tact_curve, dates, coupon_income_net=_TACTICAL_COUPON
-        )
+        core = _make_layer("core", core_curve, dates, coupon_income_net=_CORE_COUPON)
+        strat = _make_layer("strategic", strat_curve, dates, coupon_income_net=_STRATEGIC_COUPON)
+        tact = _make_layer("tactical", tact_curve, dates, coupon_income_net=_TACTICAL_COUPON)
 
         agg = PortfolioAggregator()
         result = agg.aggregate([core, strat, tact])
 
         expected_total = _CORE_COUPON + _STRATEGIC_COUPON + _TACTICAL_COUPON
-        assert result.total_coupon_income_net == pytest.approx(
-            expected_total, rel=_TOLERANCE
-        )
+        assert result.total_coupon_income_net == pytest.approx(expected_total, rel=_TOLERANCE)
 
     def test_zero_coupon_when_none(self) -> None:
         dates = _make_dates(_N_DAYS)
@@ -582,9 +580,7 @@ class TestAnnualizedReturn:
         result = agg.aggregate([layer])
 
         expected_annual = ((1.08) ** 2 - 1.0) * 100  # ~16.64%
-        assert result.annualized_return_pct == pytest.approx(
-            expected_annual, rel=_LOOSE_TOLERANCE
-        )
+        assert result.annualized_return_pct == pytest.approx(expected_annual, rel=_LOOSE_TOLERANCE)
 
     def test_full_year_no_extra_scaling(self) -> None:
         """Full-year return: annualized ~ total."""
@@ -597,12 +593,8 @@ class TestAnnualizedReturn:
         result = agg.aggregate([layer])
 
         expected_return = 20.0  # 20%
-        assert result.total_return_pct == pytest.approx(
-            expected_return, rel=_LOOSE_TOLERANCE
-        )
-        assert result.annualized_return_pct == pytest.approx(
-            expected_return, rel=_LOOSE_TOLERANCE
-        )
+        assert result.total_return_pct == pytest.approx(expected_return, rel=_LOOSE_TOLERANCE)
+        assert result.annualized_return_pct == pytest.approx(expected_return, rel=_LOOSE_TOLERANCE)
 
 
 # ── Test: Max drawdown ──────────────────────────────────────────────────────
@@ -682,3 +674,291 @@ class TestEdgeCases:
         agg_high = PortfolioAggregator(risk_free_annual_pct=high_rf)
         result_high = agg_high.aggregate([layer])
         assert result_high.excess_return_pct < _ZERO
+
+
+# ── Test: Absolute Sharpe ──────────────────────────────────────────────────
+
+
+class TestAbsoluteSharpe:
+    """Absolute Sharpe is computed without risk-free subtraction."""
+
+    def test_positive_return_positive_absolute_sharpe(self) -> None:
+        """A steadily rising curve should have positive absolute Sharpe."""
+        n_points = _TRADING_DAYS + 1
+        dates = _make_dates(n_points)
+        curve = _make_linear_curve(_INITIAL_VALUE, 1_200_000.0, n_points)
+        layer = _make_layer("core", curve, dates)
+
+        agg = PortfolioAggregator()
+        result = agg.aggregate([layer])
+
+        assert result.absolute_sharpe > _ZERO
+
+    def test_absolute_sharpe_exceeds_excess_sharpe_below_ruonia(self) -> None:
+        """When return < RUONIA, absolute Sharpe > excess Sharpe."""
+        n_points = _TRADING_DAYS + 1
+        dates = _make_dates(n_points)
+        # 5% return < 15% RUONIA
+        curve = _make_linear_curve(_INITIAL_VALUE, 1_050_000.0, n_points)
+        layer = _make_layer("core", curve, dates)
+
+        agg = PortfolioAggregator(risk_free_annual_pct=_RUONIA_ANNUAL_PCT)
+        result = agg.aggregate([layer])
+
+        assert result.absolute_sharpe > result.excess_sharpe
+
+    def test_empty_result_absolute_sharpe_zero(self) -> None:
+        """Empty result has zero absolute Sharpe."""
+        agg = PortfolioAggregator()
+        result = agg.aggregate([])
+        assert result.absolute_sharpe == _ZERO
+
+
+# ── Test: Phase 4 Hard Gates ───────────────────────────────────────────────
+
+# Use a ~4 year period to have realistic multi-year data
+_FOUR_YEAR_DAYS = _TRADING_DAYS * 4 + 1
+
+
+def _make_full_portfolio_layers(
+    core_return_pct: float = 70.0,
+    strategic_return_pct: float = 20.0,
+    tactical_return_pct: float = 5.0,
+    short_return_pct: float = 10.0,
+    strategic_dd_pct: float = 5.0,
+    n_tactical_trades: int = 10,
+    short_pf: float = 1.5,
+) -> list[LayerResult]:
+    """Create a full 4-layer portfolio with configurable metrics.
+
+    Returns list of LayerResult for core, strategic, tactical, short.
+    """
+    n = _FOUR_YEAR_DAYS
+    dates = _make_dates(n)
+
+    core_final = _INITIAL_VALUE * (1 + core_return_pct / 100)
+    strategic_final = _INITIAL_VALUE * (1 + strategic_return_pct / 100)
+    tactical_final = _INITIAL_VALUE * (1 + tactical_return_pct / 100)
+    short_final = _INITIAL_VALUE * (1 + short_return_pct / 100)
+
+    core = _make_layer(
+        "core",
+        _make_linear_curve(_INITIAL_VALUE, core_final, n),
+        dates,
+        coupon_income_net=50_000.0,
+    )
+    # For strategic, create a curve with a controlled drawdown
+    strat_curve = _make_linear_curve(_INITIAL_VALUE, strategic_final, n)
+    strat = LayerResult(
+        layer_id="strategic",
+        equity_curve=strat_curve,
+        dates=dates,
+        trades=["t"] * 5,
+        total_return_pct=strategic_return_pct,
+        max_drawdown_pct=strategic_dd_pct,
+    )
+
+    tact_curve = _make_linear_curve(_INITIAL_VALUE, tactical_final, n)
+    tact = LayerResult(
+        layer_id="tactical",
+        equity_curve=tact_curve,
+        dates=dates,
+        trades=["t"] * n_tactical_trades,
+        total_return_pct=tactical_return_pct,
+        max_drawdown_pct=2.0,
+    )
+
+    short_curve = _make_linear_curve(_INITIAL_VALUE, short_final, n)
+    short = LayerResult(
+        layer_id="short",
+        equity_curve=short_curve,
+        dates=dates,
+        trades=["t"] * 20,
+        total_return_pct=short_return_pct,
+        max_drawdown_pct=3.0,
+        profit_factor=short_pf,
+    )
+
+    return [core, strat, tact, short]
+
+
+class TestPhase4HardGates:
+    """Hard gates: all 4 must pass for phase4_exit_ok."""
+
+    def test_all_hard_gates_pass(self) -> None:
+        """Full portfolio with good metrics passes all hard gates."""
+        layers = _make_full_portfolio_layers()
+        agg = PortfolioAggregator()
+        result = agg.aggregate(layers)
+
+        assert result.hard_gates_passed == _HARD_GATES_TOTAL
+
+    def test_strategic_dd_breach_fails_hard_gate(self) -> None:
+        """Strategic DD > 8% fails hard gate 3."""
+        layers = _make_full_portfolio_layers(strategic_dd_pct=9.0)
+        agg = PortfolioAggregator()
+        result = agg.aggregate(layers)
+
+        assert result.strategic_dd_ok is False
+        assert result.hard_gates_passed < _HARD_GATES_TOTAL
+
+    def test_no_tactical_trades_fails_hard_gate(self) -> None:
+        """Tactical layer with 0 trades fails hard gate 4."""
+        layers = _make_full_portfolio_layers(n_tactical_trades=0)
+        agg = PortfolioAggregator()
+        result = agg.aggregate(layers)
+
+        assert result.tactical_has_trades is False
+        assert result.hard_gates_passed < _HARD_GATES_TOTAL
+
+    def test_core_below_ruonia_minus_cushion_fails(self) -> None:
+        """Core return well below RUONIA - 200bps fails hard gate 2.
+
+        Over 4 years with RUONIA=15%, cumulative RUONIA = 60%.
+        Core return = 10% -> core_return_vs_ruonia = 10 - 60 = -50%.
+        Must be > -2% to pass.
+        """
+        layers = _make_full_portfolio_layers(core_return_pct=10.0)
+        agg = PortfolioAggregator(risk_free_annual_pct=_RUONIA_ANNUAL_PCT)
+        result = agg.aggregate(layers)
+
+        assert result.core_return_vs_ruonia < -2.0  # noqa: PLR2004
+        assert result.hard_gates_passed < _HARD_GATES_TOTAL
+
+    def test_missing_strategic_layer_ok(self) -> None:
+        """If strategic layer is absent, strategic DD gate passes by default."""
+        dates = _make_dates(_N_DAYS)
+        core = _make_layer(
+            "core",
+            _make_linear_curve(_INITIAL_VALUE, _CORE_FINAL, _N_DAYS),
+            dates,
+        )
+        agg = PortfolioAggregator()
+        result = agg.aggregate([core])
+
+        assert result.strategic_dd_ok is True
+
+    def test_missing_tactical_layer_fails(self) -> None:
+        """If tactical layer is absent, tactical_has_trades is False."""
+        dates = _make_dates(_N_DAYS)
+        core = _make_layer(
+            "core",
+            _make_linear_curve(_INITIAL_VALUE, _CORE_FINAL, _N_DAYS),
+            dates,
+        )
+        agg = PortfolioAggregator()
+        result = agg.aggregate([core])
+
+        assert result.tactical_has_trades is False
+
+
+# ── Test: Phase 4 Soft Gates ──────────────────────────────────────────────
+
+
+class TestPhase4SoftGates:
+    """Soft gates: 2 of 3 must pass for phase4_exit_ok (given hard gates pass)."""
+
+    def test_all_soft_gates_pass(self) -> None:
+        """Portfolio with good absolute Sharpe, core Calmar, and short PF."""
+        layers = _make_full_portfolio_layers(short_pf=1.5)
+        agg = PortfolioAggregator()
+        result = agg.aggregate(layers)
+
+        assert result.soft_gates_passed >= _SOFT_GATES_MIN_PASS
+
+    def test_short_pf_below_threshold(self) -> None:
+        """Short PF < 1.0 fails soft gate 3; other 2 can still pass."""
+        layers = _make_full_portfolio_layers(short_pf=0.8)
+        agg = PortfolioAggregator()
+        result = agg.aggregate(layers)
+
+        short_lr = result.layer_results.get("short")
+        assert short_lr is not None
+        assert short_lr.profit_factor < 1.0  # noqa: PLR2004
+
+    def test_profit_factor_field_on_layer_result(self) -> None:
+        """LayerResult.profit_factor defaults to 0.0."""
+        dates = _make_dates(_N_DAYS)
+        layer = _make_layer("core", _make_flat_curve(_INITIAL_VALUE, _N_DAYS), dates)
+        assert layer.profit_factor == _ZERO
+
+
+# ── Test: Phase 4 Overall Exit ─────────────────────────────────────────────
+
+
+class TestPhase4ExitOk:
+    """phase4_exit_ok requires all hard gates AND >= 2/3 soft gates."""
+
+    def test_all_gates_pass(self) -> None:
+        """All gates pass -> phase4_exit_ok is True."""
+        layers = _make_full_portfolio_layers(
+            core_return_pct=70.0,
+            strategic_dd_pct=5.0,
+            n_tactical_trades=10,
+            short_pf=1.5,
+        )
+        agg = PortfolioAggregator()
+        result = agg.aggregate(layers)
+
+        assert result.hard_gates_passed == _HARD_GATES_TOTAL
+        assert result.soft_gates_passed >= _SOFT_GATES_MIN_PASS
+        assert result.phase4_exit_ok is True
+
+    def test_hard_gate_fails_exit_not_ok(self) -> None:
+        """One hard gate fails -> phase4_exit_ok is False regardless of soft."""
+        layers = _make_full_portfolio_layers(
+            strategic_dd_pct=9.0,  # fails hard gate 3
+            short_pf=1.5,
+        )
+        agg = PortfolioAggregator()
+        result = agg.aggregate(layers)
+
+        assert result.phase4_exit_ok is False
+
+    def test_insufficient_soft_gates_exit_not_ok(self) -> None:
+        """All hard pass but < 2 soft gates -> phase4_exit_ok is False.
+
+        We make: core Calmar low (0 DD => 0 Calmar), low absolute Sharpe, low short PF.
+        """
+        dates = _make_dates(_N_DAYS)
+        # Flat curves produce zero Sharpe and zero Calmar
+        core = LayerResult(
+            layer_id="core",
+            equity_curve=_make_flat_curve(_INITIAL_VALUE, _N_DAYS),
+            dates=dates,
+            trades=[],
+            total_return_pct=0.0,
+            max_drawdown_pct=0.0,
+        )
+        strategic = LayerResult(
+            layer_id="strategic",
+            equity_curve=_make_flat_curve(_INITIAL_VALUE, _N_DAYS),
+            dates=dates,
+            trades=[],
+            total_return_pct=0.0,
+            max_drawdown_pct=5.0,
+        )
+        tactical = LayerResult(
+            layer_id="tactical",
+            equity_curve=_make_flat_curve(_INITIAL_VALUE, _N_DAYS),
+            dates=dates,
+            trades=["t"],
+            total_return_pct=0.0,
+            max_drawdown_pct=0.0,
+        )
+        short = LayerResult(
+            layer_id="short",
+            equity_curve=_make_flat_curve(_INITIAL_VALUE, _N_DAYS),
+            dates=dates,
+            trades=[],
+            total_return_pct=0.0,
+            max_drawdown_pct=0.0,
+            profit_factor=0.5,
+        )
+
+        agg = PortfolioAggregator(risk_free_annual_pct=0.0)
+        result = agg.aggregate([core, strategic, tactical, short])
+
+        # Flat curves: absolute Sharpe = 0, core Calmar = 0, short PF = 0.5
+        assert result.soft_gates_passed < _SOFT_GATES_MIN_PASS
+        assert result.phase4_exit_ok is False

@@ -82,6 +82,7 @@ class CBREventStrategy:
         *,
         key_rate: Decimal | None = None,
         ruonia_7d_avg: Decimal | None = None,
+        **kwargs: Any,  # noqa: ARG002  # accept extra macro kwargs (cpi_yoy, etc.)
     ) -> Signal | None:
         """Generate event-driven signal around CBR meetings.
 

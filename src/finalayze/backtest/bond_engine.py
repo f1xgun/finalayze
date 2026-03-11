@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
     from finalayze.backtest.costs import TransactionCosts
     from finalayze.core.schemas import BondInfo
+    from finalayze.data.fetchers.cbr import MacroContextProvider
 
 logger = structlog.get_logger(__name__)
 
@@ -48,7 +49,11 @@ _STD_EPSILON = 1e-12
 
 
 class BondStrategyFn(Protocol):
-    """Protocol for bond strategy callables."""
+    """Protocol for bond strategy callables.
+
+    Strategies that need macro context accept keyword-only arguments
+    (key_rate, ruonia_7d_avg, etc.) via **kwargs.
+    """
 
     def __call__(
         self,
@@ -56,6 +61,7 @@ class BondStrategyFn(Protocol):
         candles: list[Candle],
         positions: dict[str, BondPosition],
         bar_idx: int,
+        **kwargs: Any,
     ) -> Signal | None: ...
 
 
@@ -125,6 +131,7 @@ class BondBacktestEngine:
         coupon_schedule: dict[str, list[CouponPayment]],
         strategy_fn: Any,  # BondStrategyFn -- use Any to accept plain callables
         nkd_series: dict[str, dict[date, Decimal]] | None = None,
+        macro_provider: MacroContextProvider | None = None,
     ) -> BondBacktestResult:
         """Run bond backtest.
 
@@ -136,6 +143,9 @@ class BondBacktestEngine:
                 Signature: (symbol, candles[:bar_idx+1], open_positions, bar_idx) -> Signal | None
             nkd_series: Optional pre-computed NKD per symbol per date.
                 If None, NKD is estimated from coupon schedule.
+            macro_provider: Optional macro context provider. When supplied,
+                key_rate, ruonia_7d_avg, cpi_yoy, and last_cbr_decision are
+                forwarded to strategy_fn as keyword arguments.
 
         Returns:
             BondBacktestResult with trades, equity curve, and metrics.
@@ -198,6 +208,7 @@ class BondBacktestEngine:
                     coupon_schedule,
                     broker,
                     strategy_fn,
+                    macro_provider,
                 )
 
             # 4. Record equity curve (dirty price valuation)
@@ -332,9 +343,21 @@ class BondBacktestEngine:
         coupon_schedule: dict[str, list[CouponPayment]],
         broker: BondSimulatedBroker,
         strategy_fn: Any,
+        macro_provider: MacroContextProvider | None = None,
     ) -> None:
         """Generate signals and open new positions."""
         cfg = self._config
+
+        # Build macro kwargs once per bar (same snapshot for all symbols)
+        macro_kwargs: dict[str, Any] = {}
+        if macro_provider is not None:
+            snapshot = macro_provider.get_snapshot(current_date)
+            macro_kwargs = {
+                "key_rate": snapshot.key_rate,
+                "ruonia_7d_avg": snapshot.ruonia_7d_avg,
+                "cpi_yoy": snapshot.cpi_yoy,
+                "last_cbr_decision": snapshot.last_cbr_decision,
+            }
 
         portfolio_dv01 = self._compute_portfolio_dv01(
             positions,
@@ -359,7 +382,7 @@ class BondBacktestEngine:
                 if d in candle_lookup.get(sym, {})
             ]
 
-            signal = strategy_fn(sym, sym_candles, positions, bar_idx)
+            signal = strategy_fn(sym, sym_candles, positions, bar_idx, **macro_kwargs)
             if signal is None or signal.direction != SignalDirection.BUY:
                 continue
 

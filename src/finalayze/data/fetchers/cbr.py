@@ -324,3 +324,117 @@ def get_latest_published_cpi_month(as_of: date) -> str | None:
     """
     published = [month for month, pub_date in CPI_PUBLICATION_DATES.items() if pub_date <= as_of]
     return max(published) if published else None
+
+
+# ── Macro Context (backtest-safe aggregation layer) ──────────────────────────
+
+
+@dataclass(frozen=True)
+class MacroSnapshot:
+    """Point-in-time macro context for bond strategy decisions.
+
+    All values use **percentage-point** convention (e.g. ``21.00`` means 21%).
+    ``None`` indicates data unavailable for the given date.
+    """
+
+    key_rate: Decimal | None = None
+    ruonia_7d_avg: Decimal | None = None
+    cpi_yoy: Decimal | None = None
+    last_cbr_decision: str | None = None  # "cut", "hold", "hike"
+
+
+# RUONIA proxy: key_rate minus 50bps (RUONIA typically tracks 30-80bps below).
+_RUONIA_PROXY_OFFSET = Decimal("0.50")
+
+# Rosstat YoY CPI data (approximate monthly values, percentage points).
+# Coverage: 2022-01 through 2025-06.
+_CPI_DATA: dict[str, Decimal] = {
+    # 2022
+    "2022-01": Decimal("8.7"),
+    "2022-02": Decimal("9.2"),
+    "2022-03": Decimal("16.7"),
+    "2022-04": Decimal("17.8"),
+    "2022-05": Decimal("17.1"),
+    "2022-06": Decimal("15.9"),
+    "2022-07": Decimal("15.1"),
+    "2022-08": Decimal("14.3"),
+    "2022-09": Decimal("13.7"),
+    "2022-10": Decimal("12.6"),
+    "2022-11": Decimal("12.0"),
+    "2022-12": Decimal("11.9"),
+    # 2023
+    "2023-01": Decimal("11.8"),
+    "2023-02": Decimal("11.0"),
+    "2023-03": Decimal("3.5"),
+    "2023-04": Decimal("2.3"),
+    "2023-05": Decimal("2.5"),
+    "2023-06": Decimal("3.2"),
+    "2023-07": Decimal("4.3"),
+    "2023-08": Decimal("5.1"),
+    "2023-09": Decimal("6.0"),
+    "2023-10": Decimal("6.7"),
+    "2023-11": Decimal("7.5"),
+    "2023-12": Decimal("7.4"),
+    # 2024
+    "2024-01": Decimal("7.4"),
+    "2024-02": Decimal("7.7"),
+    "2024-03": Decimal("7.7"),
+    "2024-04": Decimal("7.8"),
+    "2024-05": Decimal("8.3"),
+    "2024-06": Decimal("8.6"),
+    "2024-07": Decimal("9.1"),
+    "2024-08": Decimal("9.1"),
+    "2024-09": Decimal("8.6"),
+    "2024-10": Decimal("8.5"),
+    "2024-11": Decimal("8.9"),
+    "2024-12": Decimal("9.5"),
+    # 2025
+    "2025-01": Decimal("10.0"),
+    "2025-02": Decimal("10.0"),
+    "2025-03": Decimal("9.9"),
+    "2025-04": Decimal("9.7"),
+    "2025-05": Decimal("9.4"),
+    "2025-06": Decimal("9.1"),
+}
+
+
+class MacroContextProvider:
+    """Provides point-in-time macro data for bond strategy backtests.
+
+    Uses static CBR meeting calendar and CPI data.  All lookups respect
+    publication dates to avoid look-ahead bias.
+
+    RUONIA is approximated as ``key_rate - 50bps`` (RUONIA typically tracks
+    30-80bps below key rate). This is a backtest-only proxy.
+    """
+
+    def get_snapshot(self, as_of: date) -> MacroSnapshot:
+        """Return macro data available as of *as_of* (no look-ahead).
+
+        Args:
+            as_of: The date to query. Only information published on or
+                before this date is included.
+
+        Returns:
+            MacroSnapshot with available fields populated.
+        """
+        # key_rate from most recent CBR decision
+        last_meeting = get_last_cbr_decision(as_of)
+        key_rate = last_meeting.rate_after if last_meeting else None
+
+        # RUONIA proxy: key_rate - 50bps
+        ruonia = key_rate - _RUONIA_PROXY_OFFSET if key_rate is not None else None
+
+        # CPI: latest published month (respects Rosstat publication lag)
+        cpi_month = get_latest_published_cpi_month(as_of)
+        cpi_yoy = _CPI_DATA.get(cpi_month) if cpi_month else None
+
+        # Last CBR decision
+        last_decision = last_meeting.decision if last_meeting else None
+
+        return MacroSnapshot(
+            key_rate=key_rate,
+            ruonia_7d_avg=ruonia,
+            cpi_yoy=cpi_yoy,
+            last_cbr_decision=last_decision,
+        )

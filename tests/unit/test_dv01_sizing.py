@@ -118,11 +118,11 @@ class TestDV01BudgetStep:
     def test_custom_face_value(self) -> None:
         """Bonds with non-standard face value (e.g. 10_000 RUB OFZ).
 
-        max_dv01 = 2_000_000 * 0.05 / 200 = 500
-        remaining_dv01 = 500 - 0 = 500
-        max_by_dv01 = 500 / 50 = 10 bonds
+        max_dv01 = 2_000_000 * 0.05 / 500 = 200
+        remaining_dv01 = 200 - 0 = 200
+        max_by_dv01 = 200 / 50 = 4 bonds
         max_by_position = 2_000_000 * 0.30 / 10_000 = 60 bonds
-        Result = min(10, 60) = 10
+        Result = min(4, 60) = 4
         """
         step = DV01BudgetStep()
         result = step.compute_position_size(
@@ -131,16 +131,16 @@ class TestDV01BudgetStep:
             current_portfolio_dv01=Decimal(0),
             face_value=Decimal(10000),
         )
-        assert result == 10
+        assert result == 4
 
     def test_default_parameters(self) -> None:
-        """Default parameters: 5% DD, 200bps, 30% single position.
+        """Default parameters: 5% DD, 500bps, 30% single position.
 
-        max_dv01 = 1_000_000 * 0.05 / 200 = 250
-        remaining_dv01 = 250
-        max_by_dv01 = 250 / 5 = 50
+        max_dv01 = 1_000_000 * 0.05 / 500 = 100
+        remaining_dv01 = 100
+        max_by_dv01 = 100 / 5 = 20
         max_by_position = 1_000_000 * 0.30 / 1000 = 300
-        Result = 50
+        Result = 20
         """
         step = DV01BudgetStep()
         result = step.compute_position_size(
@@ -148,4 +148,4 @@ class TestDV01BudgetStep:
             bond_dv01_per_unit=Decimal(5),
             current_portfolio_dv01=Decimal(0),
         )
-        assert result == 50
+        assert result == 20

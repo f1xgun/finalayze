@@ -5,8 +5,8 @@ DV01 stays within a budget derived from:
 
     max_dv01 = layer_equity * max_dd_pct / expected_max_rate_move_bps
 
-Example: 1.5M equity, 5% DD limit, expect max 200bps move:
-    max_dv01 = 1_500_000 * 0.05 / 200 = 375 RUB per basis point
+Example: 1.5M equity, 5% DD limit, expect max 500bps move:
+    max_dv01 = 1_500_000 * 0.05 / 500 = 150 RUB per basis point
 
 Each bond position is sized proportional to available DV01 budget,
 capped by a single-position limit as fraction of equity.
@@ -32,7 +32,7 @@ class DV01BudgetStep:
     def __init__(
         self,
         max_dd_pct: Decimal = Decimal("0.05"),
-        expected_max_rate_move_bps: int = 200,
+        expected_max_rate_move_bps: int = 500,
         max_single_position_pct: Decimal = Decimal("0.30"),
     ) -> None:
         self._max_dd_pct = max_dd_pct

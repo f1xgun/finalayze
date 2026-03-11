@@ -57,6 +57,7 @@ from finalayze.backtest.portfolio_aggregator import (
     PortfolioResult,
 )
 from finalayze.core.schemas import DEFAULT_LAYER_CONFIGS, PortfolioLayer
+from finalayze.data.fetchers.cbr import MacroContextProvider
 from finalayze.risk.yield_stop import YieldStop
 
 _DEFAULT_TOTAL_CASH = Decimal(1_500_000)  # 1.5M RUB default
@@ -182,12 +183,14 @@ def _run_strategic_layer(
         max_hold_bars=120,  # ~6 months
     )
 
+    macro_provider = MacroContextProvider()
     engine = BondBacktestEngine(config=config)
     result = engine.run(
         candles_by_symbol=candles_by_symbol,
         bond_info=bond_info,
         coupon_schedule=coupon_schedule,
         strategy_fn=strategy.generate_signal,
+        macro_provider=macro_provider,
     )
 
     equity_float = [float(v) for v in result.equity_curve]
@@ -252,12 +255,14 @@ def _run_tactical_layer(
         max_hold_bars=20,  # short-term event trades
     )
 
+    macro_provider = MacroContextProvider()
     engine = BondBacktestEngine(config=config)
     result = engine.run(
         candles_by_symbol=candles_by_symbol,
         bond_info=bond_info,
         coupon_schedule=coupon_schedule,
         strategy_fn=strategy.generate_signal,
+        macro_provider=macro_provider,
     )
 
     equity_float = [float(v) for v in result.equity_curve]
@@ -423,7 +428,13 @@ def _run_short_layer(
     total_return = (equity_curve[-1] / equity_curve[0] - 1.0) * 100 if equity_curve else 0.0
     max_dd = _compute_max_dd(equity_curve) * 100
 
-    print(f"  Short: {len(all_trades)} trades | Return {total_return:+.2f}% | DD {max_dd:.2f}%")
+    # Compute profit factor from trade PnL
+    short_pf = _compute_profit_factor(all_trades)
+
+    print(
+        f"  Short: {len(all_trades)} trades | Return {total_return:+.2f}% | "
+        f"DD {max_dd:.2f}% | PF {short_pf:.2f}"
+    )
 
     return LayerResult(
         layer_id="short",
@@ -432,7 +443,23 @@ def _run_short_layer(
         trades=all_trades,
         total_return_pct=total_return,
         max_drawdown_pct=max_dd,
+        profit_factor=short_pf,
     )
+
+
+def _compute_profit_factor(trades: list[Any]) -> float:
+    """Compute profit factor from trade list (gross_profit / gross_loss)."""
+    gross_profit = 0.0
+    gross_loss = 0.0
+    for t in trades:
+        pnl = float(getattr(t, "pnl", 0))
+        if pnl > 0:
+            gross_profit += pnl
+        elif pnl < 0:
+            gross_loss += abs(pnl)
+    if gross_loss <= 0:
+        return 999.0 if gross_profit > 0 else 0.0
+    return gross_profit / gross_loss
 
 
 def _compute_max_dd(equity_curve: list[float]) -> float:
@@ -448,6 +475,80 @@ def _compute_max_dd(equity_curve: list[float]) -> float:
     return max_dd
 
 
+def _format_gate(passed: bool) -> str:
+    """Return [PASS] or [FAIL] label for a gate check."""
+    return "[PASS]" if passed else "[FAIL]"
+
+
+def _print_phase4_exit_criteria(result: PortfolioResult) -> None:
+    """Print the Phase 4 multi-tier exit criteria evaluation."""
+    print("\n  Phase 4 Exit Criteria (revised):")
+
+    # Hard gates
+    hard_1 = result.max_drawdown_pct < 10.0  # noqa: PLR2004
+    hard_2 = result.core_return_vs_ruonia > -2.0  # noqa: PLR2004
+    hard_3 = result.strategic_dd_ok
+    hard_4 = result.tactical_has_trades
+
+    print("  Hard Gates (all must pass):")
+    print(f"    {_format_gate(hard_1)} Portfolio DD < 10%: {result.max_drawdown_pct:.2f}%")
+    print(
+        f"    {_format_gate(hard_2)} Core return vs RUONIA: "
+        f"{result.core_return_vs_ruonia:+.2f}% above RUONIA - 200bps"
+    )
+
+    # Get strategic DD for display
+    strategic_lr = result.layer_results.get("strategic")
+    strategic_dd_str = f"{strategic_lr.max_drawdown_pct:.2f}%" if strategic_lr else "N/A"
+    print(f"    {_format_gate(hard_3)} Strategic DD < 8%: {strategic_dd_str}")
+
+    # Get tactical trade count for display
+    tactical_lr = result.layer_results.get("tactical")
+    tactical_trades_str = f"{len(tactical_lr.trades)} trades" if tactical_lr else "N/A"
+    print(f"    {_format_gate(hard_4)} Tactical has trades: {tactical_trades_str}")
+
+    # Soft gates
+    # Recompute display values for soft gates
+    core_lr = result.layer_results.get("core")
+    if core_lr and core_lr.max_drawdown_pct > 0:
+        # Approximate core Calmar from available data
+        # (aggregator computed it, but we display from layer data)
+        n_years = len(result.combined_dates) / 252 if result.combined_dates else 0
+        if n_years > 0:
+            core_ann = ((1 + core_lr.total_return_pct / 100) ** (1.0 / n_years) - 1.0) * 100
+            core_calmar = core_ann / core_lr.max_drawdown_pct
+        else:
+            core_calmar = 0.0
+    else:
+        core_calmar = 0.0
+
+    short_lr = result.layer_results.get("short")
+    short_pf = short_lr.profit_factor if short_lr else 0.0
+
+    soft_1 = core_calmar > 2.0  # noqa: PLR2004
+    soft_2 = result.absolute_sharpe > 0.3  # noqa: PLR2004
+    soft_3 = short_pf > 1.0
+
+    print("  Soft Gates (2 of 3 must pass):")
+    print(f"    {_format_gate(soft_1)} Core Calmar > 2.0: {core_calmar:.2f}")
+    print(f"    {_format_gate(soft_2)} Absolute Sharpe > 0.3: {result.absolute_sharpe:.2f}")
+    print(f"    {_format_gate(soft_3)} Short equity PF > 1.0: {short_pf:.2f}")
+
+    # Overall result
+    if result.phase4_exit_ok:
+        verdict = "PASS"
+    elif result.hard_gates_passed == result.hard_gates_total:
+        verdict = "CONDITIONAL PASS (soft gates insufficient)"
+    elif result.soft_gates_passed >= 2:  # noqa: PLR2004
+        verdict = "CONDITIONAL PASS (hard gates failed)"
+    else:
+        verdict = "FAIL"
+    print(
+        f"  Result: {result.hard_gates_passed}/{result.hard_gates_total} hard, "
+        f"{result.soft_gates_passed}/{result.soft_gates_total} soft -> {verdict}"
+    )
+
+
 def _print_portfolio_result(result: PortfolioResult) -> None:
     """Print formatted portfolio-level results."""
     print(f"\n{'=' * 72}")
@@ -457,6 +558,7 @@ def _print_portfolio_result(result: PortfolioResult) -> None:
     print(f"  {'Annualized Return:':<30} {result.annualized_return_pct:>+8.2f}%")
     print(f"  {'Excess Return (vs RUONIA):':<30} {result.excess_return_pct:>+8.2f}%")
     print(f"  {'Excess Sharpe:':<30} {result.excess_sharpe:>+8.4f}")
+    print(f"  {'Absolute Sharpe:':<30} {result.absolute_sharpe:>+8.4f}")
     print(f"  {'Max Drawdown:':<30} {result.max_drawdown_pct:>8.2f}%")
     print(f"  {'DD Breach (>10%):':<30} {'YES' if result.portfolio_dd_breach else 'NO':>8}")
     if result.portfolio_dd_breach_date:
@@ -480,6 +582,9 @@ def _print_portfolio_result(result: PortfolioResult) -> None:
                 f"{len(lr.trades):>8d} "
                 f"{lr.sharpe:>+10.4f}"
             )
+
+    # ── Phase 4 Exit Criteria (revised) ─────────────────────────────────
+    _print_phase4_exit_criteria(result)
     print()
 
 
@@ -499,10 +604,21 @@ def _save_portfolio_result(
             "annualized_return_pct": result.annualized_return_pct,
             "excess_return_pct": result.excess_return_pct,
             "excess_sharpe": result.excess_sharpe,
+            "absolute_sharpe": result.absolute_sharpe,
             "max_drawdown_pct": result.max_drawdown_pct,
             "portfolio_dd_breach": result.portfolio_dd_breach,
             "total_trades": result.total_trades,
             "total_coupon_income_net": result.total_coupon_income_net,
+        },
+        "phase4_exit_criteria": {
+            "core_return_vs_ruonia": result.core_return_vs_ruonia,
+            "strategic_dd_ok": result.strategic_dd_ok,
+            "tactical_has_trades": result.tactical_has_trades,
+            "hard_gates_passed": result.hard_gates_passed,
+            "hard_gates_total": result.hard_gates_total,
+            "soft_gates_passed": result.soft_gates_passed,
+            "soft_gates_total": result.soft_gates_total,
+            "phase4_exit_ok": result.phase4_exit_ok,
         },
         "layer_contributions": result.layer_return_contribution,
         "layers": {},

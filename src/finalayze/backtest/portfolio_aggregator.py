@@ -22,6 +22,14 @@ _DEFAULT_RUONIA_ANNUAL_PCT = 15.0
 _DEFAULT_TRADING_DAYS = 252
 _MIN_RETURNS_FOR_SHARPE = 1  # ddof=1 requires at least 2 values
 
+# Phase 4 exit criteria thresholds
+_STRATEGIC_DD_LIMIT_PCT = 8.0  # strategic layer DD must be < 8%
+_CORE_RUONIA_CUSHION_BPS = 200  # core return must exceed RUONIA - 200bps
+_CORE_CALMAR_THRESHOLD = 2.0  # core Calmar ratio > 2.0
+_ABSOLUTE_SHARPE_THRESHOLD = 0.3  # portfolio absolute Sharpe > 0.3
+_SHORT_PF_THRESHOLD = 1.0  # short equity profit factor > 1.0
+_SOFT_GATES_MIN_PASS = 2  # minimum soft gates to pass (out of 3)
+
 
 @dataclass(frozen=True)
 class LayerResult:
@@ -35,6 +43,7 @@ class LayerResult:
     max_drawdown_pct: float
     coupon_income_net: float = 0.0
     sharpe: float = 0.0
+    profit_factor: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -63,6 +72,22 @@ class PortfolioResult:
 
     # Per-layer contribution
     layer_return_contribution: dict[str, float]  # layer_id -> % contribution to total
+
+    # ── Phase 4 multi-tier exit criteria ─────────────────────────────────
+    # Absolute Sharpe (risk-free=0, measures raw risk-adjusted return)
+    absolute_sharpe: float = 0.0
+
+    # Per-layer tier validation
+    core_return_vs_ruonia: float = 0.0  # core return minus cumulative RUONIA (in %)
+    strategic_dd_ok: bool = True  # True if strategic layer DD < 8%
+    tactical_has_trades: bool = False  # True if tactical layer has >= 1 trade
+
+    # Tier results
+    hard_gates_passed: int = 0  # out of 4
+    hard_gates_total: int = 4
+    soft_gates_passed: int = 0  # out of 3
+    soft_gates_total: int = 3
+    phase4_exit_ok: bool = False  # True if all hard gates pass AND >= 2/3 soft gates
 
 
 class PortfolioAggregator:
@@ -120,6 +145,9 @@ class PortfolioAggregator:
         # Excess Sharpe from daily returns
         excess_sharpe = self._compute_excess_sharpe(combined)
 
+        # Absolute Sharpe (no risk-free subtraction)
+        absolute_sharpe = self._compute_absolute_sharpe(combined)
+
         # Max drawdown and DD breach
         max_dd, dd_breach, dd_breach_date = self._compute_drawdown(combined, common_dates)
 
@@ -132,8 +160,42 @@ class PortfolioAggregator:
         total_trades = sum(len(lr.trades) for lr in layer_results)
         total_coupon = sum(lr.coupon_income_net for lr in layer_results)
 
+        # Build layer lookup for tier checks
+        layer_map = {lr.layer_id: lr for lr in layer_results}
+
+        # ── Phase 4 multi-tier exit criteria ────────────────────────────
+        # Per-layer tier metrics
+        core_return_vs_ruonia = self._compute_core_return_vs_ruonia(
+            layer_map,
+            n_years,
+        )
+        strategic_dd_ok = self._check_strategic_dd(layer_map)
+        tactical_has_trades = self._check_tactical_has_trades(layer_map)
+
+        # Hard gates (all 4 must pass)
+        hard_1_dd = max_dd * 100 < self._dd_limit * 100  # portfolio DD < 10%
+        hard_2_core = core_return_vs_ruonia > -(_CORE_RUONIA_CUSHION_BPS / 100)
+        hard_3_strategic_dd = strategic_dd_ok
+        hard_4_tactical_trades = tactical_has_trades
+        hard_gates = [hard_1_dd, hard_2_core, hard_3_strategic_dd, hard_4_tactical_trades]
+        hard_gates_passed = sum(hard_gates)
+
+        # Soft gates (2 of 3 must pass)
+        core_calmar = self._compute_core_calmar(layer_map, n_years)
+        short_pf = self._get_short_profit_factor(layer_map)
+
+        soft_1_calmar = core_calmar > _CORE_CALMAR_THRESHOLD
+        soft_2_sharpe = absolute_sharpe > _ABSOLUTE_SHARPE_THRESHOLD
+        soft_3_short_pf = short_pf > _SHORT_PF_THRESHOLD
+        soft_gates = [soft_1_calmar, soft_2_sharpe, soft_3_short_pf]
+        soft_gates_passed = sum(soft_gates)
+
+        phase4_exit_ok = (
+            hard_gates_passed == len(hard_gates) and soft_gates_passed >= _SOFT_GATES_MIN_PASS
+        )
+
         return PortfolioResult(
-            layer_results={lr.layer_id: lr for lr in layer_results},
+            layer_results=layer_map,
             combined_equity_curve=combined,
             combined_dates=common_dates,
             total_return_pct=total_return * 100,
@@ -146,6 +208,15 @@ class PortfolioAggregator:
             total_trades=total_trades,
             total_coupon_income_net=total_coupon,
             layer_return_contribution=layer_contribution,
+            absolute_sharpe=absolute_sharpe,
+            core_return_vs_ruonia=core_return_vs_ruonia,
+            strategic_dd_ok=strategic_dd_ok,
+            tactical_has_trades=tactical_has_trades,
+            hard_gates_passed=hard_gates_passed,
+            hard_gates_total=len(hard_gates),
+            soft_gates_passed=soft_gates_passed,
+            soft_gates_total=len(soft_gates),
+            phase4_exit_ok=phase4_exit_ok,
         )
 
     # ------------------------------------------------------------------
@@ -194,6 +265,83 @@ class PortfolioAggregator:
 
         return mean_excess / std * math.sqrt(self._tdays)
 
+    def _compute_absolute_sharpe(self, combined: list[float]) -> float:
+        """Compute annualised absolute Sharpe (no risk-free subtraction)."""
+        daily_returns: list[float] = []
+        for i in range(1, len(combined)):
+            if combined[i - 1] > 0:
+                daily_returns.append(combined[i] / combined[i - 1] - 1.0)
+            else:
+                daily_returns.append(0.0)
+
+        if len(daily_returns) <= _MIN_RETURNS_FOR_SHARPE:
+            return 0.0
+
+        mean_ret = sum(daily_returns) / len(daily_returns)
+        var = sum((r - mean_ret) ** 2 for r in daily_returns) / (len(daily_returns) - 1)
+        std = math.sqrt(var)
+
+        if std <= 0:
+            return 0.0
+
+        return mean_ret / std * math.sqrt(self._tdays)
+
+    def _compute_core_return_vs_ruonia(
+        self,
+        layer_map: dict[str, LayerResult],
+        n_years: float,
+    ) -> float:
+        """Compute core layer return minus cumulative RUONIA (in %).
+
+        Returns the difference: core_return_pct - cumulative_ruonia_pct.
+        If no core layer exists, returns 0.0.
+        """
+        core = layer_map.get("core")
+        if core is None:
+            return 0.0
+        cumulative_ruonia = self._rf * n_years  # already in %
+        return core.total_return_pct - cumulative_ruonia
+
+    @staticmethod
+    def _check_strategic_dd(layer_map: dict[str, LayerResult]) -> bool:
+        """Check that strategic layer DD is below 8%. True if OK or layer absent."""
+        strategic = layer_map.get("strategic")
+        if strategic is None:
+            return True
+        return strategic.max_drawdown_pct < _STRATEGIC_DD_LIMIT_PCT
+
+    @staticmethod
+    def _check_tactical_has_trades(layer_map: dict[str, LayerResult]) -> bool:
+        """Check that tactical layer has at least 1 trade."""
+        tactical = layer_map.get("tactical")
+        if tactical is None:
+            return False
+        return len(tactical.trades) >= 1
+
+    def _compute_core_calmar(
+        self,
+        layer_map: dict[str, LayerResult],
+        n_years: float,
+    ) -> float:
+        """Compute Core Calmar ratio: annualised return / max DD.
+
+        Uses total return over the period divided by max DD.
+        Returns 0.0 if no core layer or DD is zero.
+        """
+        core = layer_map.get("core")
+        if core is None or core.max_drawdown_pct <= 0 or n_years <= 0:
+            return 0.0
+        ann_return: float = ((1 + core.total_return_pct / 100) ** (1.0 / n_years) - 1.0) * 100
+        return ann_return / core.max_drawdown_pct
+
+    @staticmethod
+    def _get_short_profit_factor(layer_map: dict[str, LayerResult]) -> float:
+        """Get profit factor from short layer. Returns 0.0 if absent."""
+        short = layer_map.get("short")
+        if short is None:
+            return 0.0
+        return short.profit_factor
+
     def _compute_drawdown(
         self,
         combined: list[float],
@@ -236,9 +384,7 @@ class PortfolioAggregator:
         )
         for lr in layer_results:
             lr_pnl = (lr.equity_curve[-1] - lr.equity_curve[0]) if lr.equity_curve else 0.0
-            layer_contribution[lr.layer_id] = (
-                (lr_pnl / total_pnl * 100) if total_pnl != 0 else 0.0
-            )
+            layer_contribution[lr.layer_id] = (lr_pnl / total_pnl * 100) if total_pnl != 0 else 0.0
         return layer_contribution
 
     def _empty_result(self) -> PortfolioResult:
@@ -257,4 +403,13 @@ class PortfolioAggregator:
             total_trades=0,
             total_coupon_income_net=0.0,
             layer_return_contribution={},
+            absolute_sharpe=0.0,
+            core_return_vs_ruonia=0.0,
+            strategic_dd_ok=True,
+            tactical_has_trades=False,
+            hard_gates_passed=0,
+            hard_gates_total=4,
+            soft_gates_passed=0,
+            soft_gates_total=3,
+            phase4_exit_ok=False,
         )

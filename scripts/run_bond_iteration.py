@@ -45,6 +45,7 @@ from finalayze.backtest.bond_engine import (
 from finalayze.backtest.bond_metrics import BondPerformanceMetrics, compute_bond_metrics
 from finalayze.backtest.costs import MOEX_BOND_COSTS
 from finalayze.core.schemas import BondInfo, Candle, CouponPayment
+from finalayze.data.fetchers.cbr import MacroContextProvider
 from finalayze.risk.yield_stop import YieldStop
 from finalayze.strategies.bond_carry import BondCarryStrategy
 from finalayze.strategies.bond_duration_rotation import BondDurationRotationStrategy
@@ -261,6 +262,7 @@ def _run_bond_segment(
         return None
 
     # Build strategy
+    macro_provider: MacroContextProvider | None = None
     if segment == "ru_ofz_pk":
         carry_strategy = _build_carry_strategy(symbols, bond_info, preset)
         strategy_fn = carry_strategy.generate_signal
@@ -269,6 +271,7 @@ def _run_bond_segment(
         dur_strategy = _build_duration_rotation_strategy(symbols, bond_info)
         strategy_fn = dur_strategy.generate_signal
         strategy_name = "bond_duration_rotation"
+        macro_provider = MacroContextProvider()
     else:
         print(f"  Unknown bond segment '{segment}', skipping")
         return None
@@ -285,6 +288,7 @@ def _run_bond_segment(
             bond_info=bond_info,
             coupon_schedule=coupon_schedule,
             strategy_fn=strategy_fn,
+            macro_provider=macro_provider,
         )
     except Exception:
         print(f"  ERROR running bond backtest: {traceback.format_exc().splitlines()[-1]}")

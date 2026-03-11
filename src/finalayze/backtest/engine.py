@@ -133,8 +133,10 @@ class BacktestEngine:
         self._trail_activation_atr = cfg.trail_activation_atr
         self._trail_distance_atr = cfg.trail_distance_atr
         self._circuit_breaker = cfg.circuit_breaker
-        # Always use RollingKelly for graduated warm-up (1% fixed-fractional → pure Kelly)
-        self._rolling_kelly = cfg.rolling_kelly or RollingKelly()
+        # Use RollingKelly only when explicitly provided.  Default 1% cold-start
+        # is too small for small per-symbol allocations (e.g. 50K RUB), causing the
+        # sizing pipeline to zero all positions and creating a permanent deadlock.
+        self._rolling_kelly = cfg.rolling_kelly
         self._loss_limits = cfg.loss_limits
         self._target_vol = cfg.target_vol
         self._decision_journal = cfg.decision_journal

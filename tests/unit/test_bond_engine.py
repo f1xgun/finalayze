@@ -7,12 +7,14 @@ and simple strategy functions to verify core bond mechanics:
 - DV01-based position sizing
 - Yield-based stop-loss
 - Duration monitoring
+- Macro context wiring to strategies
 """
 
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from finalayze.backtest.bond_engine import (
     BondBacktestConfig,
@@ -28,6 +30,7 @@ from finalayze.core.schemas import (
     Signal,
     SignalDirection,
 )
+from finalayze.data.fetchers.cbr import MacroContextProvider, MacroSnapshot
 from finalayze.risk.dv01_sizing import DV01BudgetStep
 from finalayze.risk.yield_stop import YieldStop
 
@@ -729,3 +732,149 @@ class TestBondEngineNKDEstimation:
 
         # Engine ran without error; we got a trade
         assert result.trade_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 13: Macro kwargs forwarded to strategy_fn
+# ---------------------------------------------------------------------------
+
+
+class TestBondEngineMacroWiring:
+    """When macro_provider is supplied, macro kwargs reach the strategy."""
+
+    def test_strategy_receives_macro_kwargs(self) -> None:
+        """Strategy is called with key_rate, ruonia_7d_avg, cpi_yoy, last_cbr_decision."""
+        received_kwargs: list[dict[str, Any]] = []
+
+        def capturing_strategy(
+            symbol: str,
+            candles: list[Candle],
+            positions: dict[str, BondPosition],
+            bar_idx: int,
+            **kwargs: Any,
+        ) -> Signal | None:
+            if kwargs:
+                received_kwargs.append(dict(kwargs))
+            if bar_idx == 2 and symbol not in positions:
+                return Signal(
+                    strategy_name="test",
+                    symbol=symbol,
+                    market_id="moex",
+                    segment_id="ru_ofz_pd",
+                    direction=SignalDirection.BUY,
+                    confidence=0.8,
+                    features={},
+                    reasoning="test",
+                    instrument_type="bond",
+                )
+            return None
+
+        initial_cash = Decimal(1_000_000)
+        config = BondBacktestConfig(
+            initial_cash=initial_cash,
+            dv01_sizer=DV01BudgetStep(
+                max_dd_pct=Decimal("0.05"),
+                expected_max_rate_move_bps=200,
+                max_single_position_pct=Decimal("0.50"),
+            ),
+            yield_stop=YieldStop(threshold_bps=500),
+            max_hold_bars=200,
+        )
+        engine = BondBacktestEngine(config=config)
+
+        # Use dates in 2024 where macro data is available
+        prices = [85.0] * 10
+        candles = _make_bond_candles(_SYMBOL, prices, date(2024, 6, 10))
+        coupons = _make_coupon_schedule(_FIGI, [date(2024, 12, 11)])
+
+        macro_provider = MacroContextProvider()
+        engine.run(
+            candles_by_symbol={_SYMBOL: candles},
+            bond_info={_SYMBOL: _BOND_INFO},
+            coupon_schedule={_SYMBOL: coupons},
+            strategy_fn=capturing_strategy,
+            macro_provider=macro_provider,
+        )
+
+        # Strategy should have received kwargs on every call
+        assert len(received_kwargs) > 0
+        sample = received_kwargs[0]
+        assert "key_rate" in sample
+        assert "ruonia_7d_avg" in sample
+        assert "cpi_yoy" in sample
+        assert "last_cbr_decision" in sample
+        # key_rate should be a Decimal or None (we know 2024-06 has data)
+        assert isinstance(sample["key_rate"], Decimal)
+
+    def test_no_macro_kwargs_without_provider(self) -> None:
+        """Without macro_provider, strategy receives no extra kwargs."""
+        received_kwargs: list[dict[str, Any]] = []
+
+        def capturing_strategy(
+            symbol: str,
+            candles: list[Candle],
+            positions: dict[str, BondPosition],
+            bar_idx: int,
+            **kwargs: Any,
+        ) -> Signal | None:
+            received_kwargs.append(dict(kwargs))
+            return None
+
+        engine = BondBacktestEngine()
+        prices = [85.0] * 5
+        candles = _make_bond_candles(_SYMBOL, prices, date(2024, 6, 10))
+
+        engine.run(
+            candles_by_symbol={_SYMBOL: candles},
+            bond_info={_SYMBOL: _BOND_INFO},
+            coupon_schedule={_SYMBOL: []},
+            strategy_fn=capturing_strategy,
+            # No macro_provider
+        )
+
+        # All calls should have empty kwargs
+        for kw in received_kwargs:
+            assert kw == {}
+
+    def test_macro_snapshot_no_look_ahead(self) -> None:
+        """Macro data at bar T must reflect only information available at T."""
+        snapshots_by_date: dict[date, dict[str, Any]] = {}
+
+        def capturing_strategy(
+            symbol: str,
+            candles: list[Candle],
+            positions: dict[str, BondPosition],
+            bar_idx: int,
+            **kwargs: Any,
+        ) -> Signal | None:
+            if candles:
+                d = candles[-1].timestamp.date()
+                snapshots_by_date[d] = dict(kwargs)
+            return None
+
+        engine = BondBacktestEngine()
+
+        # Span across Oct 2024 hike: before = 19.00, after = 21.00
+        # Meeting: 2024-10-25
+        prices = [85.0] * 15
+        # Start from 2024-10-20 to span the meeting
+        candles = _make_bond_candles(_SYMBOL, prices, date(2024, 10, 20))
+
+        macro_provider = MacroContextProvider()
+        engine.run(
+            candles_by_symbol={_SYMBOL: candles},
+            bond_info={_SYMBOL: _BOND_INFO},
+            coupon_schedule={_SYMBOL: []},
+            strategy_fn=capturing_strategy,
+            macro_provider=macro_provider,
+        )
+
+        # Before meeting (2024-10-24): rate should be 19.00 (from Sep 13 hike)
+        pre_meeting = date(2024, 10, 24)
+        if pre_meeting in snapshots_by_date:
+            assert snapshots_by_date[pre_meeting]["key_rate"] == Decimal("19.00")
+
+        # After meeting (2024-10-25 or later): rate should be 21.00
+        post_meeting = date(2024, 10, 25)
+        if post_meeting in snapshots_by_date:
+            assert snapshots_by_date[post_meeting]["key_rate"] == Decimal("21.00")

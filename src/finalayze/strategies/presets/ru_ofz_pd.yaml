@@ -34,7 +34,7 @@ risk:
   max_drawdown_pct: 5.0
   yield_stop_bps: 50
   dv01_max_dd_pct: 5.0
-  dv01_max_rate_move_bps: 200
+  dv01_max_rate_move_bps: 500
   max_single_position_pct: 30.0
 
 # Transaction costs
