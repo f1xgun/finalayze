@@ -651,9 +651,8 @@ def _run_symbol(
         combiner = JournalingStrategyCombiner(
             strategies=strategies,
             allocation_mode="hrp",
+            market_context=market_context,
         )
-        if market_context is not None:
-            combiner.set_market_context(market_context)
         journal = DecisionJournal(output_path=sym_dir / "decision_journal.jsonl")
 
         engine = BacktestEngine(
