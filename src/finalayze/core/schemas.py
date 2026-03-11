@@ -26,6 +26,15 @@ class SignalDirection(StrEnum):
     HOLD = "HOLD"
 
 
+class PortfolioLayer(StrEnum):
+    """Portfolio layer in the multi-asset multi-timeframe system."""
+
+    CORE = "core"  # 40-50%, OFZ-PK floaters, 6-12+ months
+    STRATEGIC = "strategic"  # 25-30%, OFZ-PD duration rotation, 1-6 months
+    TACTICAL = "tactical"  # 15-20%, OFZ-PD + stocks, 1-4 weeks
+    SHORT = "short"  # 10-15%, stocks only, 1-5 days
+
+
 class Candle(BaseModel):
     """OHLCV candle for a single timeframe bar."""
 
@@ -406,3 +415,57 @@ class MarketContext:
     benchmark_candles: list[Candle] | None = dc_field(default=None)
     vix_candles: list[Candle] | None = dc_field(default=None)
     moex_data: MoexMarketData | None = dc_field(default=None)
+
+
+@dataclass(frozen=True)
+class LayerConfig:
+    """Configuration for a portfolio layer."""
+
+    layer: PortfolioLayer
+    capital_pct: Decimal  # target allocation (e.g. 0.40 for 40%)
+    max_drawdown_pct: Decimal  # max peak-to-trough DD (e.g. 0.03 for 3%)
+    max_positions: int
+    rebalance_interval: str  # "daily", "weekly", "monthly", "quarterly", "event"
+    allowed_instrument_types: tuple[str, ...] = ("stock",)
+    yield_stop_bps: int = 0  # 0 = no yield stop (for Core)
+
+
+# Default layer configurations per plan
+DEFAULT_LAYER_CONFIGS: dict[PortfolioLayer, LayerConfig] = {
+    PortfolioLayer.CORE: LayerConfig(
+        layer=PortfolioLayer.CORE,
+        capital_pct=Decimal("0.45"),
+        max_drawdown_pct=Decimal("0.03"),
+        max_positions=4,
+        rebalance_interval="quarterly",
+        allowed_instrument_types=("bond",),
+        yield_stop_bps=0,
+    ),
+    PortfolioLayer.STRATEGIC: LayerConfig(
+        layer=PortfolioLayer.STRATEGIC,
+        capital_pct=Decimal("0.275"),
+        max_drawdown_pct=Decimal("0.05"),
+        max_positions=5,
+        rebalance_interval="monthly",
+        allowed_instrument_types=("bond",),
+        yield_stop_bps=50,
+    ),
+    PortfolioLayer.TACTICAL: LayerConfig(
+        layer=PortfolioLayer.TACTICAL,
+        capital_pct=Decimal("0.175"),
+        max_drawdown_pct=Decimal("0.05"),
+        max_positions=5,
+        rebalance_interval="weekly",
+        allowed_instrument_types=("bond", "stock"),
+        yield_stop_bps=30,
+    ),
+    PortfolioLayer.SHORT: LayerConfig(
+        layer=PortfolioLayer.SHORT,
+        capital_pct=Decimal("0.10"),
+        max_drawdown_pct=Decimal("0.05"),
+        max_positions=6,
+        rebalance_interval="daily",
+        allowed_instrument_types=("stock",),
+        yield_stop_bps=0,
+    ),
+}
