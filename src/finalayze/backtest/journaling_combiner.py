@@ -16,7 +16,7 @@ from finalayze.strategies.combiner import StrategyCombiner
 if TYPE_CHECKING:
     from decimal import Decimal
 
-    from finalayze.core.schemas import Signal
+    from finalayze.core.schemas import MarketContext, Signal
     from finalayze.strategies.base import BaseStrategy
 
 
@@ -32,8 +32,9 @@ class JournalingStrategyCombiner(StrategyCombiner):
         strategies: list[BaseStrategy],
         normalize_mode: str = "firing",
         allocation_mode: str = "static",
+        market_context: MarketContext | None = None,
     ) -> None:
-        super().__init__(strategies, normalize_mode, allocation_mode)
+        super().__init__(strategies, normalize_mode, allocation_mode, market_context)
         self._last_signals: dict[str, Signal | None] = {}
         self._last_weights: dict[str, Decimal] = {}
         self._last_net_score: float | None = None
