@@ -20,16 +20,18 @@ from finalayze.data.fetchers.cbr import days_to_next_cbr, get_next_cbr_meeting
 if TYPE_CHECKING:
     from finalayze.core.schemas import Candle
 
-# Entry window: 3-5 trading days before meeting
-_ENTRY_WINDOW_MIN_DAYS = 3
-_ENTRY_WINDOW_MAX_DAYS = 5
+# Entry window: 2-7 calendar days before meeting
+# Wider than original 3-5 to capture more meeting events
+_ENTRY_WINDOW_MIN_DAYS = 2
+_ENTRY_WINDOW_MAX_DAYS = 7
 
 # Exit window: 1-2 trading days after meeting
 _EXIT_WINDOW_MAX_DAYS = 2
 
 # RUONIA-key rate gap threshold for entry (percentage points).
-# gap < -0.30pp means market is pricing in cuts (dovish).
-_GAP_THRESHOLD = Decimal("0.30")
+# gap < -0.15pp means market is pricing in easing (dovish).
+# Relaxed from 0.30 to capture more CBR event trades.
+_GAP_THRESHOLD = Decimal("0.15")
 
 _STRATEGY_NAME = "cbr_event"
 _MARKET_ID = "moex"

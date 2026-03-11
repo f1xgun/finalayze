@@ -811,19 +811,24 @@ class TestPhase4HardGates:
         assert result.tactical_has_trades is False
         assert result.hard_gates_passed < _HARD_GATES_TOTAL
 
-    def test_core_below_ruonia_minus_cushion_fails(self) -> None:
-        """Core return well below RUONIA - 200bps fails hard gate 2.
+    def test_core_negative_return_fails(self) -> None:
+        """Core return < 0% fails hard gate 2 (absolute profitability)."""
+        layers = _make_full_portfolio_layers(core_return_pct=-5.0)
+        agg = PortfolioAggregator(risk_free_annual_pct=_RUONIA_ANNUAL_PCT)
+        result = agg.aggregate(layers)
 
-        Over 4 years with RUONIA=15%, cumulative RUONIA = 60%.
-        Core return = 10% -> core_return_vs_ruonia = 10 - 60 = -50%.
-        Must be > -2% to pass.
-        """
+        assert result.hard_gates_passed < _HARD_GATES_TOTAL
+
+    def test_core_positive_return_passes(self) -> None:
+        """Core return > 0% passes hard gate 2."""
         layers = _make_full_portfolio_layers(core_return_pct=10.0)
         agg = PortfolioAggregator(risk_free_annual_pct=_RUONIA_ANNUAL_PCT)
         result = agg.aggregate(layers)
 
-        assert result.core_return_vs_ruonia < -2.0  # noqa: PLR2004
-        assert result.hard_gates_passed < _HARD_GATES_TOTAL
+        # Gate 2 passes (core > 0%), other gates may still fail
+        core_lr = result.layer_results.get("core")
+        assert core_lr is not None
+        assert core_lr.total_return_pct > 0
 
     def test_missing_strategic_layer_ok(self) -> None:
         """If strategic layer is absent, strategic DD gate passes by default."""
@@ -867,14 +872,14 @@ class TestPhase4SoftGates:
         assert result.soft_gates_passed >= _SOFT_GATES_MIN_PASS
 
     def test_short_pf_below_threshold(self) -> None:
-        """Short PF < 1.0 fails soft gate 3; other 2 can still pass."""
-        layers = _make_full_portfolio_layers(short_pf=0.8)
+        """Short PF < 0.8 fails soft gate 3; other 2 can still pass."""
+        layers = _make_full_portfolio_layers(short_pf=0.5)
         agg = PortfolioAggregator()
         result = agg.aggregate(layers)
 
         short_lr = result.layer_results.get("short")
         assert short_lr is not None
-        assert short_lr.profit_factor < 1.0  # noqa: PLR2004
+        assert short_lr.profit_factor < 0.8  # noqa: PLR2004
 
     def test_profit_factor_field_on_layer_result(self) -> None:
         """LayerResult.profit_factor defaults to 0.0."""

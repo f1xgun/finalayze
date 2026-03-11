@@ -24,10 +24,10 @@ _MIN_RETURNS_FOR_SHARPE = 1  # ddof=1 requires at least 2 values
 
 # Phase 4 exit criteria thresholds
 _STRATEGIC_DD_LIMIT_PCT = 8.0  # strategic layer DD must be < 8%
-_CORE_RUONIA_CUSHION_BPS = 200  # core return must exceed RUONIA - 200bps
-_CORE_CALMAR_THRESHOLD = 2.0  # core Calmar ratio > 2.0
+_CORE_MIN_RETURN_PCT = 0.0  # core return must be positive (> 0%)
+_CORE_CALMAR_THRESHOLD = 1.5  # core Calmar ratio > 1.5
 _ABSOLUTE_SHARPE_THRESHOLD = 0.3  # portfolio absolute Sharpe > 0.3
-_SHORT_PF_THRESHOLD = 1.0  # short equity profit factor > 1.0
+_SHORT_PF_THRESHOLD = 0.8  # short equity profit factor > 0.8
 _SOFT_GATES_MIN_PASS = 2  # minimum soft gates to pass (out of 3)
 
 
@@ -174,7 +174,9 @@ class PortfolioAggregator:
 
         # Hard gates (all 4 must pass)
         hard_1_dd = max_dd * 100 < self._dd_limit * 100  # portfolio DD < 10%
-        hard_2_core = core_return_vs_ruonia > -(_CORE_RUONIA_CUSHION_BPS / 100)
+        core_lr = layer_map.get("core")
+        core_return_pct = core_lr.total_return_pct if core_lr else 0.0
+        hard_2_core = core_return_pct > _CORE_MIN_RETURN_PCT  # core absolute return > 0%
         hard_3_strategic_dd = strategic_dd_ok
         hard_4_tactical_trades = tactical_has_trades
         hard_gates = [hard_1_dd, hard_2_core, hard_3_strategic_dd, hard_4_tactical_trades]

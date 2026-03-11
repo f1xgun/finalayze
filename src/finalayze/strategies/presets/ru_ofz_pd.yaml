@@ -21,9 +21,9 @@ strategies:
     enabled: true
     weight: 0.30
     params:
-      entry_window_days: [3, 5]
+      entry_window_days: [2, 7]
       exit_days_after: 2
-      gap_threshold: 0.30
+      gap_threshold: 0.15
       preferred_symbols:
         - SU26244RMFS2
         - SU26241RMFS8

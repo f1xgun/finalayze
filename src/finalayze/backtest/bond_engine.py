@@ -28,7 +28,7 @@ from finalayze.core.schemas import (
     TradeResult,
 )
 from finalayze.execution.bond_simulated_broker import BondSimulatedBroker
-from finalayze.risk.dv01_sizing import DV01BudgetStep
+from finalayze.risk.dv01_sizing import DV01BudgetStep, EqualWeightBondSizer
 from finalayze.risk.yield_stop import YieldStop
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ class BondBacktestConfig:
 
     initial_cash: Decimal = Decimal(1_000_000)
     max_positions: int = 5
-    dv01_sizer: DV01BudgetStep = field(default_factory=DV01BudgetStep)
+    dv01_sizer: DV01BudgetStep | EqualWeightBondSizer = field(default_factory=DV01BudgetStep)
     yield_stop: YieldStop = field(default_factory=lambda: YieldStop(threshold_bps=50))
     transaction_costs: TransactionCosts = field(default_factory=lambda: MOEX_BOND_COSTS)
     face_value: Decimal = _OFZ_FACE_VALUE

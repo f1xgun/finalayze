@@ -1,15 +1,11 @@
-"""DV01-based bond position sizing (Layer 4).
+"""Bond position sizing: DV01-budget and equal-weight approaches (Layer 4).
 
-Instead of Kelly (equity-oriented), bonds are sized so aggregate portfolio
-DV01 stays within a budget derived from:
+DV01BudgetStep: for fixed-rate bonds (OFZ-PD).  Sizes so aggregate portfolio
+DV01 stays within a risk budget.
 
-    max_dv01 = layer_equity * max_dd_pct / expected_max_rate_move_bps
-
-Example: 1.5M equity, 5% DD limit, expect max 500bps move:
-    max_dv01 = 1_500_000 * 0.05 / 500 = 150 RUB per basis point
-
-Each bond position is sized proportional to available DV01 budget,
-capped by a single-position limit as fraction of equity.
+EqualWeightBondSizer: for floating-rate bonds (OFZ-PK).  Divides capital equally
+across N symbols by nominal value.  DV01 doesn't apply to floaters because their
+duration is near-zero (coupon resets track RUONIA).
 """
 
 from __future__ import annotations
@@ -70,3 +66,31 @@ class DV01BudgetStep:
         max_by_position = int(layer_equity * self._max_single_position_pct / face_value)
 
         return min(max_by_dv01, max_by_position)
+
+
+class EqualWeightBondSizer:
+    """Equal-weight position sizing for floating-rate bonds.
+
+    Allocates capital equally across *n_symbols*.  Ignores DV01 arguments
+    (floaters have near-zero duration, so DV01 budget is meaningless).
+    """
+
+    def __init__(
+        self,
+        n_symbols: int,
+        max_single_position_pct: Decimal = Decimal("0.25"),
+    ) -> None:
+        self._n_symbols = max(n_symbols, 1)
+        self._max_single_position_pct = max_single_position_pct
+
+    def compute_position_size(
+        self,
+        layer_equity: Decimal,
+        bond_dv01_per_unit: Decimal,  # noqa: ARG002
+        current_portfolio_dv01: Decimal,  # noqa: ARG002
+        face_value: Decimal = Decimal(1000),
+    ) -> int:
+        """Compute number of bonds for an equal-weight allocation."""
+        target = layer_equity / Decimal(self._n_symbols)
+        cap = layer_equity * self._max_single_position_pct
+        return int(min(target, cap) / face_value)

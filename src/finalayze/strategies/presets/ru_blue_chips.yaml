@@ -84,7 +84,7 @@ strategies:
       rsi_sell_threshold: 90.0
       sma_trend_period: 100
       sma_exit_period: 5
-      min_confidence: 0.45
+      min_confidence: 0.35
   dual_momentum:
     enabled: false
     weight: 0.00

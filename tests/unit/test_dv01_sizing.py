@@ -1,10 +1,10 @@
-"""Unit tests for DV01-based bond position sizing."""
+"""Unit tests for bond position sizing (DV01 + equal-weight)."""
 
 from __future__ import annotations
 
 from decimal import Decimal
 
-from finalayze.risk.dv01_sizing import DV01BudgetStep
+from finalayze.risk.dv01_sizing import DV01BudgetStep, EqualWeightBondSizer
 
 
 class TestDV01BudgetStep:
@@ -149,3 +149,53 @@ class TestDV01BudgetStep:
             current_portfolio_dv01=Decimal(0),
         )
         assert result == 20
+
+
+class TestEqualWeightBondSizer:
+    """Tests for EqualWeightBondSizer."""
+
+    def test_equal_weight_4_symbols(self) -> None:
+        """675K equity / 4 symbols = 168.75K each → 168 bonds."""
+        sizer = EqualWeightBondSizer(n_symbols=4)
+        result = sizer.compute_position_size(
+            layer_equity=Decimal(675000),
+            bond_dv01_per_unit=Decimal(5),  # ignored
+            current_portfolio_dv01=Decimal(100),  # ignored
+        )
+        assert result == 168
+
+    def test_cap_limits_size(self) -> None:
+        """With 10% cap: 1M * 0.10 = 100K → 100 bonds < 1M/4=250K."""
+        sizer = EqualWeightBondSizer(n_symbols=4, max_single_position_pct=Decimal("0.10"))
+        result = sizer.compute_position_size(
+            layer_equity=Decimal(1000000),
+            bond_dv01_per_unit=Decimal(5),
+            current_portfolio_dv01=Decimal(0),
+        )
+        assert result == 100
+
+    def test_single_symbol(self) -> None:
+        """One symbol gets full allocation (capped at 25%)."""
+        sizer = EqualWeightBondSizer(n_symbols=1)
+        result = sizer.compute_position_size(
+            layer_equity=Decimal(500000),
+            bond_dv01_per_unit=Decimal(0),
+            current_portfolio_dv01=Decimal(0),
+        )
+        # min(500K/1, 500K*0.25) = 125K → 125 bonds
+        assert result == 125
+
+    def test_ignores_dv01_arguments(self) -> None:
+        """DV01 args should be ignored — same result regardless of DV01 values."""
+        sizer = EqualWeightBondSizer(n_symbols=4)
+        r1 = sizer.compute_position_size(
+            layer_equity=Decimal(400000),
+            bond_dv01_per_unit=Decimal(0),
+            current_portfolio_dv01=Decimal(0),
+        )
+        r2 = sizer.compute_position_size(
+            layer_equity=Decimal(400000),
+            bond_dv01_per_unit=Decimal(999),
+            current_portfolio_dv01=Decimal(9999),
+        )
+        assert r1 == r2 == 100

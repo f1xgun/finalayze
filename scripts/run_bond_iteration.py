@@ -129,10 +129,18 @@ def _fetch_bond_data(
             candles_by_symbol[symbol] = candles
 
             info = fetcher.fetch_bond_info(symbol)
-            bond_info[symbol] = info
 
             coupons = fetcher.fetch_bond_coupons(symbol, start, end)
             coupon_schedule[symbol] = coupons
+
+            # Compute effective coupon_rate from actual coupon payments.
+            # T-Bank API returns coupon_rate=0 for floaters, and sometimes
+            # omits it for fixed-rate bonds.  Deriving from real payments
+            # ensures correct YTM / DV01 calculations.
+            effective_rate = _compute_effective_coupon_rate(info, coupons)
+            if effective_rate != info.coupon_rate:
+                info = info.model_copy(update={"coupon_rate": effective_rate})
+            bond_info[symbol] = info
 
             print(
                 f"    {symbol:20s} | {len(candles):4d} bars | "
@@ -145,6 +153,24 @@ def _fetch_bond_data(
             continue
 
     return candles_by_symbol, bond_info, coupon_schedule
+
+
+def _compute_effective_coupon_rate(
+    info: BondInfo,
+    coupons: list[CouponPayment],
+) -> Decimal:
+    """Compute annualized coupon rate from actual coupon payments.
+
+    For floaters (OFZ-PK): API returns coupon_rate=0, so we derive
+    avg_coupon * frequency / face_value as an effective annual rate.
+    For fixed-rate (OFZ-PD): verify/correct against actual payment amounts.
+    """
+    if not coupons or info.face_value <= 0 or info.coupon_frequency <= 0:
+        return info.coupon_rate
+
+    avg_coupon = sum(c.amount_per_bond for c in coupons) / len(coupons)
+    annualized = avg_coupon * info.coupon_frequency / info.face_value * Decimal(100)
+    return annualized.quantize(Decimal("0.01"))
 
 
 def _build_carry_strategy(
