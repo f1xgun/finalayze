@@ -9,6 +9,7 @@
 | 2 | MOEX + Tinkoff, Intelligence & Test Mode | Weeks 6-10 | COMPLETE |
 | 3 | Hardening & Advanced | Weeks 11-14 | COMPLETE |
 | 4 | Real Trading & Optimization | Weeks 15-18 | COMPLETE |
+| 5 | Strategy Tuning & ML Pipeline | Weeks 19-23 | IN PROGRESS |
 
 ## Phase 0: Code Quality Foundation (COMPLETE)
 
@@ -123,3 +124,38 @@ PR: #205. 949 tests, 86% coverage.
 - [x] Real DB/Redis health probes with 30s cache
 - [x] Ops documentation (DEPLOYMENT.md, MONITORING.md, RUNBOOK.md)
 - [x] Alembic env.py DB URL override for production
+
+## Phase 5: Strategy Tuning & ML Pipeline -- IN PROGRESS (2026-03-01 →)
+
+2325 tests. Active development across strategy optimization and ML feature engineering.
+
+### Week 1-2: Strategy Structural Fixes (COMPLETE)
+
+- [x] ADX(14) regime routing: trend pool (momentum, dual_momentum) vs MR pool (mean_reversion, rsi2, OU, pairs)
+- [x] DRY JournalingStrategyCombiner: 4-hook architecture, no code duplication
+- [x] Strategy-specific ATR stops (momentum=2.5, dual_momentum=3.0, mean_reversion=3.5, rsi2=2.5, MOEX 1.2x uplift)
+- [x] Pipeline floor (15% of base_position prevents cascading reduction)
+- [x] Walk-forward months (12mo train + 6mo test + 6mo step)
+- [x] Grace bar (skip stop-loss on fill candle)
+- [x] Exit confidence 0.38, dual_momentum SELL at score <= -0.05
+
+Results: Win rate 15%→50%, PF 1.05→1.22, Max DD 0.46%→0.25%.
+
+### Week 3: Backtest Validation & Tuning (COMPLETE)
+
+- [x] Optuna overfitting guardrails (DSR haircut, holdout validation, perturbation check)
+- [x] Strategy isolation testing (per-strategy Sharpe/PF/trade count)
+- [x] YAML parameter tuning across all 9 segments
+
+### Week 4-5: ML Deep Overhaul (COMPLETE)
+
+See [2026-03-07-ml-training-plan.md](2026-03-07-ml-training-plan.md),
+    [2026-03-07-ml-ensemble-fix-plan.md](2026-03-07-ml-ensemble-fix-plan.md),
+    [2026-03-07-week4-design.md](2026-03-07-week4-design.md).
+
+- [x] Market-neutral labels via benchmark alignment
+- [x] 16 new features: cross-asset correlations, regime indicators, calendar effects, z-scores
+- [x] Feature selection pipeline + feature importance budget
+- [x] Calibrator gating + Brier score validation
+- [ ] ML model training with acceptable accuracy (target: >60% directional accuracy)
+- [ ] Enable `ml_ensemble` in production presets

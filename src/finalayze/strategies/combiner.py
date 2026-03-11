@@ -246,6 +246,17 @@ class StrategyCombiner:
             threshold = min(min_confidence, exit_conf)
         return threshold
 
+    def set_market_context(self, ctx: MarketContext) -> None:
+        """Propagate MarketContext to strategies that support it (duck typing).
+
+        This allows post-construction injection of benchmark/VIX data for
+        cross-asset features — called by the backtest harness after the combiner
+        is created but before ``generate_signal()`` runs.
+        """
+        for strategy in self._strategies.values():
+            if hasattr(strategy, "set_market_context"):
+                strategy.set_market_context(ctx)
+
     # ── Hooks for subclass extension (JournalingStrategyCombiner) ──────────
 
     def _on_generate_start(self, symbol: str, segment_id: str) -> None:

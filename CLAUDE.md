@@ -14,7 +14,22 @@ Follow this sequence for ALL work. Skills trigger automatically -- invoke them.
 4. **Execute plan** via subagent-driven-development or executing-plans
 5. **TDD** -- RED-GREEN-REFACTOR for all implementations
 6. **Verify** before claiming completion (run tests, read output)
-7. **Finish branch** -- merge, PR, or keep
+7. **Backtest validate** -- run `backtest-iteration` skill for strategy/risk/backtest/ML changes
+8. **Finish branch** -- merge, PR, or keep
+
+## Trading Skills (`.claude/skills/`)
+
+| Skill | When to Use |
+|---|---|
+| `backtest-iteration` | After strategy/risk/backtest/ML changes -- run & compare metrics |
+| `strategy-diagnose` | Debug why a strategy underperforms or fires rarely |
+| `iteration-history` | Review metrics trajectory across iterations |
+| `data-quality-check` | Validate market data integrity before backtests |
+| `ml-experiment` | Train ML models, evaluate impact, gate enablement |
+| `preset-tuner` | Structured parameter tuning with sensitivity checks |
+
+External: `quantitative-research` (quant methodology), `risk-metrics-calculation` (risk math).
+See [WORKFLOW.md §9](WORKFLOW.md) for full dispatch rules.
 
 ## Documentation Map
 
@@ -31,7 +46,7 @@ Follow this sequence for ALL work. Skills trigger automatically -- invoke them.
 | [docs/plans/ROADMAP.md](docs/plans/ROADMAP.md) | Phase overview with status |
 | [docs/plans/PHASE_1.md](docs/plans/PHASE_1.md) | Phase 1 execution plan |
 | [WORKFLOW.md](WORKFLOW.md) | Development process conventions |
-| [.claude/agents/](/.claude/agents/) | 16 sub-agent definitions (4 domain experts + 12 module agents) |
+| [.claude/agents/](/.claude/agents/) | 18 sub-agent definitions (4 domain experts + 14 module/specialized agents) |
 
 ## Dependency Layering Rules
 
@@ -59,60 +74,77 @@ Layer 6: API / Dashboard        api/, dashboard/
 
 ## Agent System
 
-16 Claude Code sub-agents in `.claude/agents/`. See §8 in [WORKFLOW.md](WORKFLOW.md) for dispatch rules.
+18 Claude Code sub-agents in `.claude/agents/`. See §8 in [WORKFLOW.md](WORKFLOW.md) for dispatch rules.
 
 **Domain experts (audit + design review):** `quant-analyst`, `risk-officer`, `ml-engineer`, `systems-architect`
 
 **Module agents (implementers):** `core-agent`, `config-agent`, `data-agent`, `markets-agent`, `analysis-agent`, `ml-agent`, `strategies-agent`, `risk-agent`, `execution-agent`, `backtest-agent`, `api-agent`, `infra-agent`
 
-## Current Status (2026-03-05)
+**Specialized agents:** `evaluation-agent`, `data-quality-agent`
 
-**Sprint state:** Week 2 structural fixes complete. 1995 tests passing.
+## Current Status (2026-03-08)
+
+**Sprint state:** Week 5 — ML deep overhaul merged. 2325 tests.
 
 ### Domain Health
 
 | Domain | Grade | Key Issue |
 |---|---|---|
-| **Strategies** | B- | ADX regime routing separates trend/MR pools. Win rate 42-54%, PF 1.22. `event_driven`, `ml_ensemble`, `pead` disabled. Trade count still low (626). |
-| **Data** | B | US (yfinance) works. MOEX requires `FINALAYZE_TINKOFF_TOKEN`; yfinance .ME tickers return 0 data. Dividend pipeline wired (TinkoffFetcher + static YAML fallback). |
-| **Risk** | B | Pipeline floor (15% of base) prevents cascade. Strategy-specific ATR stops. Currency-aware sizing (RUB 5000 / USD 500). Half-Kelly + 11-check pre-trade pipeline. |
-| **ML** | D | Models untrained, `ml_ensemble` disabled in all presets. Feature engineering + training pipeline exist but unused. |
-| **Backtest** | B+ | Engine works. Grace bar prevents same-candle stop-outs. Walk-forward uses months (12mo train + 6mo test). Strategy-specific max hold bars. |
+| **Strategies** | B- | 8 strategies (5 enabled). ADX regime routing separates trend/MR pools. Win rate 42-54%, PF 1.22. `event_driven`, `ml_ensemble`, `pead` disabled. |
+| **Data** | B | US (yfinance) works. MOEX requires `FINALAYZE_TINKOFF_TOKEN`. Dividend pipeline wired (TinkoffFetcher + static YAML fallback). |
+| **Risk** | B | Pipeline floor (15% of base). Strategy-specific ATR stops. Currency-aware sizing. Half-Kelly + 11-check pre-trade pipeline. |
+| **ML** | C- | 16 new features (cross-asset, regime, calendar, z-scores). Training pipeline exists. Models accuracy suboptimal (~57% best fold). `ml_ensemble` disabled. |
+| **Backtest** | B+ | Engine works. Grace bar. Walk-forward months (12mo train + 6mo test). Strategy-specific max hold bars. Optuna overfitting guardrails. |
 | **Execution** | B+ | Alpaca + Tinkoff brokers wired. RetryPolicy with backoff. Simulated broker for backtests. |
 | **Analysis** | D | LLM client + NewsAnalyzer exist but `event_driven` disabled (no real-time news feed). |
 | **API/Dashboard** | B+ | 20+ REST endpoints, Prometheus metrics, Streamlit dashboard. All operational. |
 
-### Week 3 Structural Fixes
+### Recent Changes (Weeks 3-5)
 
-**Completed:**
-- **ADX(14) regime routing**: trend pool (ADX>30, momentum/dual_momentum), MR pool (ADX<20, mean_reversion/rsi2/OU/pairs), ambiguous zone (20-30, dominant-pool-wins)
-- **DRY JournalingStrategyCombiner**: 4-hook architecture, no more code duplication
-- **Strategy-specific ATR stops**: momentum=2.5, dual_momentum=3.0, mean_reversion=3.5, rsi2=2.5, MOEX 1.2x uplift
-- **Pipeline floor**: 15% of base_position prevents cascading reduction
-- **Walk-forward months**: 12mo train + 6mo test + 6mo step (was 3yr+1yr years which produced 0 OOS windows)
-- **YAML params wired**: DualMomentum and OU now read YAML configs
-- **Grace bar**: Skip stop-loss check on fill candle (prevents same-candle stop-outs)
-- **Exit confidence 0.38**: Matches entry threshold, prevents weak SELL signal churn
-- **dual_momentum SELL**: Score <= -0.05 triggers SELL signal with deduplication
+**Week 3 — Structural fixes:**
+- ADX(14) regime routing, DRY combiner hooks, strategy-specific ATR stops
+- Pipeline floor (15%), grace bar, exit confidence 0.38, dual_momentum SELL
+- Results: Win rate 15%→50%, PF 1.05→1.22, Max DD 0.46%→0.25%
 
-**Results**: Win rate 15%→50%, PF 1.05→1.22, Max DD 0.46%→0.25%. Trade count dropped 1198→626 (fewer noise trades). WF Sharpe still negative (-0.004).
+**Week 4 — Optimization:**
+- Optuna overfitting guardrails (DSR haircut, holdout validation, perturbation check)
+- Market-neutral labels via benchmark alignment
 
-**Remaining bottleneck**: Trade count (626 vs 1300 target). Individual strategies fire rarely; ADX routing + 0.30 threshold filter most signals. Need more signal sources or lower-latency signals.
+**Week 5 — ML deep overhaul:**
+- 16 new features: cross-asset correlations, regime indicators, calendar effects, z-scores
+- Feature selection pipeline, calibrator gating, quality gates
+- Phase 1+3 fixes: Brier validation, feature importance budget
 
 ### Isolated Strategy Performance (us_tech, 2022-2025)
 
 | Strategy | Sharpe | PF | Trades | Status |
 |---|---|---|---|---|
-| dual_momentum | +0.137 | 1.29 | 414 | Enabled (us_tech), SELL at -0.05 |
+| dual_momentum | +0.137 | 1.29 | 414 | Enabled |
 | mean_reversion | +0.034 | 1.98 | 27 | Enabled |
 | rsi2_connors | +0.020 | 0.94 | 73 | Enabled |
 | momentum | -0.014 | 1.46 | 27 | Enabled (reduced weight) |
-| ou_mean_reversion | -0.038 | 0.91 | 67 | Disabled (us_tech) |
+| ou_mean_reversion | -0.038 | 0.91 | 67 | Enabled (us_tech) |
 
 ### MOEX Data Requirement
 
 All MOEX data (candles, dividends, instruments) **must** use T-Bank (Tinkoff Invest) gRPC API.
 yfinance cannot fetch MOEX tickers. Set `FINALAYZE_TINKOFF_TOKEN` env var.
+
+## AST Index (ast-index)
+
+`ast-index` is installed for fast codebase navigation. Use it FIRST for symbol/class lookups instead of grep:
+
+```bash
+ast-index class StrategyCombiner     # find class definition
+ast-index symbol generate_signal     # find symbol across codebase
+ast-index search "EnsembleModel"     # universal search (files + symbols)
+ast-index outline src/finalayze/strategies/combiner.py  # show file structure
+ast-index hierarchy BaseStrategy     # class hierarchy
+ast-index usages StrategyCombiner    # find all usages
+ast-index deps src/finalayze/strategies/  # module dependencies
+ast-index map                        # compact project map
+ast-index rebuild                    # rebuild index after code changes
+```
 
 ## Quick Commands
 

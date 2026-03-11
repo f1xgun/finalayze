@@ -241,10 +241,10 @@ class TestOUStrategy:
         assert strategy._cached_params == {}
 
     def test_ou_ru_wider_thresholds(self) -> None:
-        """RU segments use 2.0 entry threshold in default segment params."""
+        """RU segments use 1.8 entry threshold (relaxed for MOEX volatility)."""
         strategy = OUMeanReversionStrategy()
         params = strategy.get_parameters("ru_blue_chips")
-        assert params.get("entry_threshold") == 2.0  # noqa: PLR2004
+        assert params.get("entry_threshold") == 1.8  # noqa: PLR2004
 
     def test_ou_insufficient_data(self) -> None:
         """Returns None when not enough candles for OU window."""

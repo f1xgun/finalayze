@@ -83,9 +83,7 @@ class TestUpperAtrMultAffectsBarrier:
         """
         candles = _make_volatile_candles(20, price=100.0)
         # Spike bar: high reaches 107 (7% above entry)
-        candles.append(
-            _make_candle(20, close=106.0, high=107.0, low=100.0, open_=100.0)
-        )
+        candles.append(_make_candle(20, close=106.0, high=107.0, low=100.0, open_=100.0))
         for i in range(21, 45):
             candles.append(_make_candle(i, 106.0))
 
@@ -133,9 +131,7 @@ class TestLowerAtrMultAffectsBarrier:
         """
         candles = _make_volatile_candles(20, price=100.0)
         # Drop bar: low reaches 93 (7% below entry)
-        candles.append(
-            _make_candle(20, close=94.0, high=100.0, low=93.0, open_=100.0)
-        )
+        candles.append(_make_candle(20, close=94.0, high=100.0, low=93.0, open_=100.0))
         for i in range(21, 45):
             candles.append(_make_candle(i, 94.0))
 
@@ -182,9 +178,7 @@ class TestAsymmetricMultipliers:
         """
         candles = _make_volatile_candles(20, price=100.0)
         # Move up: high=107 (hits upper at 106), low=93 (does NOT hit lower at 70)
-        candles.append(
-            _make_candle(20, close=106.0, high=107.0, low=93.0, open_=100.0)
-        )
+        candles.append(_make_candle(20, close=106.0, high=107.0, low=93.0, open_=100.0))
         for i in range(21, 45):
             candles.append(_make_candle(i, 106.0))
 
@@ -210,9 +204,7 @@ class TestDefaultMultsMatchOldBehavior:
     def test_defaults_unchanged(self) -> None:
         """Calling with explicit defaults matches calling without them."""
         candles = _make_volatile_candles(20, price=100.0)
-        candles.append(
-            _make_candle(20, close=106.0, high=106.0, low=100.0, open_=100.0)
-        )
+        candles.append(_make_candle(20, close=106.0, high=106.0, low=100.0, open_=100.0))
         for i in range(21, 45):
             candles.append(_make_candle(i, 106.0))
 
@@ -242,9 +234,7 @@ class TestMultsIgnoredWhenAtrScaleOff:
 
     def test_atr_scale_false_ignores_mults(self) -> None:
         candles = _make_volatile_candles(20, price=100.0)
-        candles.append(
-            _make_candle(20, close=104.0, high=104.0, low=100.0, open_=100.0)
-        )
+        candles.append(_make_candle(20, close=104.0, high=104.0, low=100.0, open_=100.0))
         for i in range(21, 45):
             candles.append(_make_candle(i, 104.0))
 
@@ -281,9 +271,7 @@ class TestPnlReflectsMultiplier:
         """Tighter upper_atr_mult produces smaller pnl_pct on upper barrier hit."""
         candles = _make_volatile_candles(20, price=100.0)
         # Big spike so both mults hit upper
-        candles.append(
-            _make_candle(20, close=120.0, high=120.0, low=100.0, open_=100.0)
-        )
+        candles.append(_make_candle(20, close=120.0, high=120.0, low=100.0, open_=100.0))
         for i in range(21, 45):
             candles.append(_make_candle(i, 120.0))
 

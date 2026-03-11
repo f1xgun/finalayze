@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -217,3 +219,256 @@ class TestWalkForwardParams:
 
         args = _parse_args(["--walk-forward"])
         assert args.walk_forward is True
+
+    def test_parse_args_force_save_default_false(self) -> None:
+        """--force-save defaults to False."""
+        from scripts.train_models import _parse_args
+
+        args = _parse_args([])
+        assert args.force_save is False
+
+    def test_parse_args_force_save_flag(self) -> None:
+        """--force-save flag sets True."""
+        from scripts.train_models import _parse_args
+
+        args = _parse_args(["--force-save"])
+        assert args.force_save is True
+
+
+class TestQualityGateEnforcement:
+    """Models must not be saved when quality gates fail (unless --force-save)."""
+
+    @staticmethod
+    def _make_fake_dataset(n: int = 200) -> tuple:
+        """Build a fake dataset with timestamps spanning 3+ years for WF folds."""
+        base = datetime(2020, 1, 1, tzinfo=UTC)
+        features = [{"feat_a": float(i), "feat_b": float(i * 2)} for i in range(n)]
+        labels = [i % 2 for i in range(n)]
+        timestamps = [base + timedelta(days=i * 5) for i in range(n)]
+        return features, labels, None, None, timestamps
+
+    @staticmethod
+    def _make_fake_fold_results(passed: bool) -> list:
+        """Create fake fold results that either all pass or all fail."""
+        from finalayze.ml.training.quality_gates import QualityGateResult
+
+        gates = [
+            "accuracy",
+            "brier",
+            "profit_factor",
+            "signal_count",
+            "class_balance",
+            "sensitivity",
+            "specificity",
+        ]
+        fold = [
+            QualityGateResult(gate_name=g, passed=passed, value=0.5, threshold=0.5) for g in gates
+        ]
+        return [fold, fold]  # Two folds
+
+    def test_models_not_saved_when_gates_fail(self, tmp_path: Path) -> None:
+        """When quality gates fail and force_save=False, model files must not exist."""
+        from finalayze.ml.training.quality_gates import FoldMetrics
+
+        from scripts.train_models import train_walk_forward
+
+        features, labels, bw, hb, timestamps = self._make_fake_dataset()
+        failing_folds = self._make_fake_fold_results(passed=False)
+        fake_fold_metrics = FoldMetrics(accuracy=0.48, brier_score=0.26, log_loss=0.70, n_test=60)
+
+        with (
+            patch(
+                "scripts.train_models._build_dataset_with_timestamps",
+                return_value=(features, labels, bw, hb, timestamps),
+            ),
+            patch(
+                "scripts.train_models._generate_walk_forward_folds",
+                return_value=[
+                    (list(range(100)), list(range(100, 140)), list(range(140, 200))),
+                ],
+            ),
+            patch("scripts.train_models.select_features_mi", return_value=["feat_a", "feat_b"]),
+            patch("scripts.train_models.compute_decay_weights") as mock_decay,
+            patch(
+                "scripts.train_models._evaluate_fold_metrics",
+                return_value=fake_fold_metrics,
+            ),
+            patch(
+                "finalayze.ml.training.quality_gates.evaluate_fold",
+                return_value=failing_folds[0],
+            ),
+            patch(
+                "finalayze.ml.training.quality_gates.evaluate_walk_forward",
+                return_value=(False, {"accuracy": 0.3, "brier": 0.4}),
+            ),
+            patch("scripts.train_models.XGBoostModel") as mock_xgb_cls,
+            patch("scripts.train_models.LightGBMModel") as mock_lgbm_cls,
+            patch("scripts.train_models.CatBoostModel") as mock_cat_cls,
+        ):
+            import numpy as np
+
+            mock_decay.return_value = np.ones(100)
+
+            mock_xgb = MagicMock()
+            mock_lgbm = MagicMock()
+            mock_cat = MagicMock()
+            mock_xgb_cls.return_value = mock_xgb
+            mock_lgbm_cls.return_value = mock_lgbm
+            mock_cat_cls.return_value = mock_cat
+
+            result = train_walk_forward(
+                segment_id="us_tech",
+                symbols=["AAPL"],
+                output_dir=tmp_path,
+                force_save=False,
+            )
+
+        # Gate pass rates should still be returned
+        assert result is not None
+        assert "accuracy" in result
+
+        # Gate results JSON should be saved for diagnostics
+        gate_results_path = tmp_path / "us_tech" / "wf_gate_results.json"
+        assert gate_results_path.exists()
+        gate_data = json.loads(gate_results_path.read_text())
+        assert gate_data["overall_passed"] is False
+
+        # Model files must NOT be saved
+        mock_xgb.save.assert_not_called()
+        mock_lgbm.save.assert_not_called()
+        mock_cat.save.assert_not_called()
+
+    def test_models_saved_when_gates_fail_with_force_save(self, tmp_path: Path) -> None:
+        """When quality gates fail but force_save=True, model files must be saved."""
+        from finalayze.ml.training.quality_gates import FoldMetrics
+
+        from scripts.train_models import train_walk_forward
+
+        features, labels, bw, hb, timestamps = self._make_fake_dataset()
+        failing_folds = self._make_fake_fold_results(passed=False)
+        fake_fold_metrics = FoldMetrics(accuracy=0.48, brier_score=0.26, log_loss=0.70, n_test=60)
+
+        with (
+            patch(
+                "scripts.train_models._build_dataset_with_timestamps",
+                return_value=(features, labels, bw, hb, timestamps),
+            ),
+            patch(
+                "scripts.train_models._generate_walk_forward_folds",
+                return_value=[
+                    (list(range(100)), list(range(100, 140)), list(range(140, 200))),
+                ],
+            ),
+            patch("scripts.train_models.select_features_mi", return_value=["feat_a", "feat_b"]),
+            patch("scripts.train_models.compute_decay_weights") as mock_decay,
+            patch(
+                "scripts.train_models._evaluate_fold_metrics",
+                return_value=fake_fold_metrics,
+            ),
+            patch(
+                "finalayze.ml.training.quality_gates.evaluate_fold",
+                return_value=failing_folds[0],
+            ),
+            patch(
+                "finalayze.ml.training.quality_gates.evaluate_walk_forward",
+                return_value=(False, {"accuracy": 0.3, "brier": 0.4}),
+            ),
+            patch("scripts.train_models.XGBoostModel") as mock_xgb_cls,
+            patch("scripts.train_models.LightGBMModel") as mock_lgbm_cls,
+            patch("scripts.train_models.CatBoostModel") as mock_cat_cls,
+        ):
+            import numpy as np
+
+            mock_decay.return_value = np.ones(100)
+
+            mock_xgb = MagicMock()
+            mock_lgbm = MagicMock()
+            mock_cat = MagicMock()
+            mock_xgb.predict_proba.return_value = 0.6
+            mock_lgbm.predict_proba.return_value = 0.6
+            mock_cat.predict_proba.return_value = 0.6
+            mock_xgb_cls.return_value = mock_xgb
+            mock_lgbm_cls.return_value = mock_lgbm
+            mock_cat_cls.return_value = mock_cat
+
+            result = train_walk_forward(
+                segment_id="us_tech",
+                symbols=["AAPL"],
+                output_dir=tmp_path,
+                force_save=True,
+            )
+
+        # Gate pass rates should still be returned
+        assert result is not None
+
+        # Model files MUST be saved because force_save=True
+        mock_xgb.save.assert_called_once()
+        mock_lgbm.save.assert_called_once()
+        mock_cat.save.assert_called_once()
+
+    def test_models_saved_when_gates_pass(self, tmp_path: Path) -> None:
+        """When quality gates pass, model files must be saved (force_save irrelevant)."""
+        from finalayze.ml.training.quality_gates import FoldMetrics
+
+        from scripts.train_models import train_walk_forward
+
+        features, labels, bw, hb, timestamps = self._make_fake_dataset()
+        passing_folds = self._make_fake_fold_results(passed=True)
+        fake_fold_metrics = FoldMetrics(accuracy=0.65, brier_score=0.20, log_loss=0.60, n_test=60)
+
+        with (
+            patch(
+                "scripts.train_models._build_dataset_with_timestamps",
+                return_value=(features, labels, bw, hb, timestamps),
+            ),
+            patch(
+                "scripts.train_models._generate_walk_forward_folds",
+                return_value=[
+                    (list(range(100)), list(range(100, 140)), list(range(140, 200))),
+                ],
+            ),
+            patch("scripts.train_models.select_features_mi", return_value=["feat_a", "feat_b"]),
+            patch("scripts.train_models.compute_decay_weights") as mock_decay,
+            patch(
+                "scripts.train_models._evaluate_fold_metrics",
+                return_value=fake_fold_metrics,
+            ),
+            patch(
+                "finalayze.ml.training.quality_gates.evaluate_fold",
+                return_value=passing_folds[0],
+            ),
+            patch(
+                "finalayze.ml.training.quality_gates.evaluate_walk_forward",
+                return_value=(True, {"accuracy": 0.8, "brier": 0.9}),
+            ),
+            patch("scripts.train_models.XGBoostModel") as mock_xgb_cls,
+            patch("scripts.train_models.LightGBMModel") as mock_lgbm_cls,
+            patch("scripts.train_models.CatBoostModel") as mock_cat_cls,
+        ):
+            import numpy as np
+
+            mock_decay.return_value = np.ones(100)
+
+            mock_xgb = MagicMock()
+            mock_lgbm = MagicMock()
+            mock_cat = MagicMock()
+            mock_xgb.predict_proba.return_value = 0.7
+            mock_lgbm.predict_proba.return_value = 0.7
+            mock_cat.predict_proba.return_value = 0.7
+            mock_xgb_cls.return_value = mock_xgb
+            mock_lgbm_cls.return_value = mock_lgbm
+            mock_cat_cls.return_value = mock_cat
+
+            result = train_walk_forward(
+                segment_id="us_tech",
+                symbols=["AAPL"],
+                output_dir=tmp_path,
+                force_save=False,
+            )
+
+        assert result is not None
+
+        # Model files MUST be saved because gates passed
+        mock_xgb.save.assert_called_once()
+        mock_lgbm.save.assert_called_once()
+        mock_cat.save.assert_called_once()

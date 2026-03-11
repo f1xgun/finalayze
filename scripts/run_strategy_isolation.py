@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 import traceback
@@ -25,6 +26,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import yaml
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from finalayze.backtest.config import BacktestConfig
 from finalayze.backtest.costs import MOEX_COSTS, US_COSTS
@@ -32,7 +36,9 @@ from finalayze.backtest.engine import BacktestEngine
 from finalayze.backtest.performance import PerformanceAnalyzer
 from finalayze.core.schemas import PortfolioState, TradeResult
 from finalayze.data.fetchers.caching import CachingFetcher
+from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
+from finalayze.markets.instruments import build_default_registry
 from finalayze.risk.kelly import RollingKelly
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.combiner import StrategyCombiner
@@ -94,7 +100,12 @@ def _create_isolation_preset(strategy_name: str, tmp_dir: Path) -> Path:
 
 
 def _make_fetcher(segment: str) -> CachingFetcher:
-    """Build a yfinance-based fetcher for isolation tests."""
+    """Build a fetcher for isolation tests (TinkoffFetcher for MOEX, yfinance for US)."""
+    if segment.startswith("ru_"):
+        token = os.environ.get("FINALAYZE_TINKOFF_TOKEN", "")
+        if token:
+            registry = build_default_registry()
+            return CachingFetcher(TinkoffFetcher(token=token, registry=registry, sandbox=False))
     market_id = "moex" if segment.startswith("ru_") else "us"
     return CachingFetcher(YFinanceFetcher(market_id=market_id))
 

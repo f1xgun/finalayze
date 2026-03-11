@@ -99,8 +99,7 @@ class TestBuildWindowsSkipSplit:
         candles.append(_make_candle(_split_at, 60.0, high=61.0, low=59.0))
         # Continue post-split
         candles.extend(
-            _make_candle(i, 60.0 + (i - _split_at) * 0.5)
-            for i in range(_split_at + 1, _total)
+            _make_candle(i, 60.0 + (i - _split_at) * 0.5) for i in range(_split_at + 1, _total)
         )
 
         features, _labels, _ = build_windows(candles, window_size=_window)

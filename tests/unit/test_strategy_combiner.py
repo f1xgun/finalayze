@@ -808,9 +808,7 @@ class TestMLSoloFireActiveMode:
             },
         }
         # Only ml_ensemble fires; all others return None
-        ml_signal = _make_signal(
-            SignalDirection.BUY, self.ML_CONFIDENCE, "ml_ensemble"
-        )
+        ml_signal = _make_signal(SignalDirection.BUY, self.ML_CONFIDENCE, "ml_ensemble")
         strategies: list[BaseStrategy] = [
             MockStrategy("momentum", None),
             MockStrategy("mean_reversion", None),
@@ -845,9 +843,7 @@ class TestMLSoloFireActiveMode:
                 "ml_ensemble": {"enabled": True, "weight": self.ML_WEIGHT},
             },
         }
-        ml_signal = _make_signal(
-            SignalDirection.BUY, self.ML_CONFIDENCE, "ml_ensemble"
-        )
+        ml_signal = _make_signal(SignalDirection.BUY, self.ML_CONFIDENCE, "ml_ensemble")
         strategies: list[BaseStrategy] = [
             MockStrategy("momentum", None),
             MockStrategy("mean_reversion", None),
@@ -878,12 +874,8 @@ class TestMLSoloFireActiveMode:
                 "ml_ensemble": {"enabled": True, "weight": self.ML_WEIGHT},
             },
         }
-        ml_signal = _make_signal(
-            SignalDirection.BUY, self.ML_CONFIDENCE, "ml_ensemble"
-        )
-        mom_signal = _make_signal(
-            SignalDirection.BUY, 0.50, "momentum"
-        )
+        ml_signal = _make_signal(SignalDirection.BUY, self.ML_CONFIDENCE, "ml_ensemble")
+        mom_signal = _make_signal(SignalDirection.BUY, 0.50, "momentum")
         strategies: list[BaseStrategy] = [
             MockStrategy("momentum", mom_signal),
             MockStrategy("mean_reversion", None),
@@ -1028,3 +1020,101 @@ class TestExitConfidence:
                 "AAPL", candles, "us_broad", has_open_position=False
             )
         assert signal_no_pos is None
+
+
+class TestCombinerMarketContext:
+    """Tests for StrategyCombiner.set_market_context propagation."""
+
+    def test_set_market_context_propagates_to_ml_strategy(self) -> None:
+        """Calling combiner.set_market_context() should forward to MLStrategy."""
+        from finalayze.core.schemas import MarketContext
+
+        class _MockMLStrategy(BaseStrategy):
+            """Minimal strategy with set_market_context support."""
+
+            def __init__(self) -> None:
+                self.received_context: MarketContext | None = None
+
+            @property
+            def name(self) -> str:
+                return "ml_ensemble"
+
+            def supported_segments(self) -> list[str]:
+                return ["us_tech"]
+
+            def get_parameters(self, segment_id: str) -> dict[str, object]:
+                return {}
+
+            def generate_signal(
+                self,
+                symbol: str,
+                candles: list[Candle],
+                segment_id: str,
+                sentiment_score: float = 0.0,
+                has_open_position: bool = False,
+            ) -> Signal | None:
+                return None
+
+            def set_market_context(self, ctx: MarketContext) -> None:
+                self.received_context = ctx
+
+        ml_strategy = _MockMLStrategy()
+        plain_strategy = MockStrategy("momentum", None)
+        combiner = StrategyCombiner([ml_strategy, plain_strategy])
+
+        ctx = MarketContext(benchmark_candles=_make_candles(), vix_candles=None)
+        combiner.set_market_context(ctx)
+
+        assert ml_strategy.received_context is ctx, (
+            "set_market_context must propagate MarketContext to strategies that support it"
+        )
+
+    def test_set_market_context_skips_strategies_without_method(self) -> None:
+        """Strategies without set_market_context should not cause errors."""
+        from finalayze.core.schemas import MarketContext
+
+        plain_strategy = MockStrategy("momentum", None)
+        combiner = StrategyCombiner([plain_strategy])
+
+        ctx = MarketContext(benchmark_candles=None, vix_candles=None)
+        # Should not raise
+        combiner.set_market_context(ctx)
+
+    def test_constructor_market_context_propagates(self) -> None:
+        """Passing market_context at construction time should also propagate."""
+        from finalayze.core.schemas import MarketContext
+
+        class _TrackingStrategy(BaseStrategy):
+            def __init__(self) -> None:
+                self.received_context: MarketContext | None = None
+
+            @property
+            def name(self) -> str:
+                return "tracker"
+
+            def supported_segments(self) -> list[str]:
+                return []
+
+            def get_parameters(self, segment_id: str) -> dict[str, object]:
+                return {}
+
+            def generate_signal(
+                self,
+                symbol: str,
+                candles: list[Candle],
+                segment_id: str,
+                sentiment_score: float = 0.0,
+                has_open_position: bool = False,
+            ) -> Signal | None:
+                return None
+
+            def set_market_context(self, ctx: MarketContext) -> None:
+                self.received_context = ctx
+
+        tracker = _TrackingStrategy()
+        ctx = MarketContext(benchmark_candles=_make_candles(), vix_candles=None)
+        StrategyCombiner([tracker], market_context=ctx)
+
+        assert tracker.received_context is ctx, (
+            "Constructor should propagate MarketContext to strategies"
+        )

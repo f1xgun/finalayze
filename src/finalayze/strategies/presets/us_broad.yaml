@@ -10,7 +10,7 @@ regime_routing:
 strategies:
   momentum:
     enabled: true
-    weight: 0.30
+    weight: 0.25
     params:
       rsi_period: 14
       rsi_oversold: 35
@@ -37,7 +37,7 @@ strategies:
       vol_target: 0.20
   mean_reversion:
     enabled: true
-    weight: 0.35
+    weight: 0.30
     params:
       bb_period: 20
       bb_std_dev: 1.8
@@ -69,7 +69,7 @@ strategies:
       vol_target: 0.20
   ou_mean_reversion:
     enabled: true
-    weight: 0.20
+    weight: 0.15
     params:
       ou_window: 126
       entry_threshold: 2.0
@@ -78,7 +78,7 @@ strategies:
       min_confidence: 0.50
   rsi2_connors:
     enabled: true
-    weight: 0.15
+    weight: 0.10
     params:
       rsi_period: 2
       rsi_buy_threshold: 10.0
@@ -86,6 +86,14 @@ strategies:
       sma_trend_period: 200
       sma_exit_period: 5
       min_confidence: 0.45
+  pairs:
+    enabled: true
+    weight: 0.10
+    params:
+      pairs: [[SPY, IWM], [XOM, CVX]]
+      z_entry: 1.5
+      z_exit: 0.0
+      min_confidence: 0.40
   pead:
     enabled: false
     weight: 0.00

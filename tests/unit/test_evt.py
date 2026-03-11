@@ -52,8 +52,11 @@ class TestEVTFit:
     def test_evtfit_fields(self) -> None:
         n_total = 1000
         fit = EVTFit(
-            shape=GPD_SHAPE, scale=GPD_SCALE, threshold=0.01,
-            n_exceedances=50, n_total=n_total,
+            shape=GPD_SHAPE,
+            scale=GPD_SCALE,
+            threshold=0.01,
+            n_exceedances=50,
+            n_total=n_total,
         )
         assert fit.shape == GPD_SHAPE
         assert fit.scale == GPD_SCALE
@@ -235,8 +238,11 @@ class TestEdgeCases:
         n_exc = 50
         n_total = 1000
         fit = EVTFit(
-            shape=xi_zero, scale=scale, threshold=threshold,
-            n_exceedances=n_exc, n_total=n_total,
+            shape=xi_zero,
+            scale=scale,
+            threshold=threshold,
+            n_exceedances=n_exc,
+            n_total=n_total,
         )
         estimator = EVTRiskEstimator()
         var = estimator.var_evt(fit, confidence=CONFIDENCE_99)
@@ -253,8 +259,11 @@ class TestEdgeCases:
         n_exc = 50
         n_total = 1000
         fit = EVTFit(
-            shape=xi_zero, scale=scale, threshold=threshold,
-            n_exceedances=n_exc, n_total=n_total,
+            shape=xi_zero,
+            scale=scale,
+            threshold=threshold,
+            n_exceedances=n_exc,
+            n_total=n_total,
         )
         estimator = EVTRiskEstimator()
         es = estimator.es_evt(fit, confidence=CONFIDENCE_99)
@@ -271,8 +280,11 @@ class TestEdgeCases:
         n_exc = 50
         n_total = 1000
         fit = EVTFit(
-            shape=xi_extreme, scale=scale, threshold=threshold,
-            n_exceedances=n_exc, n_total=n_total,
+            shape=xi_extreme,
+            scale=scale,
+            threshold=threshold,
+            n_exceedances=n_exc,
+            n_total=n_total,
         )
         estimator = EVTRiskEstimator()
         var = estimator.var_evt(fit, confidence=CONFIDENCE_99)

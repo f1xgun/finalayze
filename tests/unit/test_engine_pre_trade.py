@@ -76,7 +76,7 @@ class TestPreTradeCheckerWiring:
         portfolio.cash = Decimal(50000)
         portfolio.positions = {}
         broker.get_portfolio.return_value = portfolio
-        broker.get_positions.return_value = {s: MagicMock() for s in (open_position_symbols or [])}
+        broker.get_positions.return_value = {s: Decimal(10) for s in (open_position_symbols or [])}
 
         checker = MagicMock(spec=PreTradeChecker)
         result_mock = MagicMock(spec=PreTradeResult)
@@ -145,3 +145,23 @@ class TestPreTradeCheckerWiring:
         # The code does: signal.strategy_name if signal is not None else None
         # This is tested indirectly — just verify the code path exists.
         pass
+
+    def test_passes_sector_id_to_checker(self) -> None:
+        """Engine passes segment_id as sector_id to PreTradeChecker."""
+        checker = self._run_handle_buy(segment_id="us_tech")
+        call_kwargs = checker.check.call_args.kwargs
+        assert call_kwargs["sector_id"] == "us_tech"
+
+    def test_passes_sector_exposure_value(self) -> None:
+        """Engine passes sector_exposure_value (position value) to PreTradeChecker."""
+        checker = self._run_handle_buy(segment_id="us_tech")
+        call_kwargs = checker.check.call_args.kwargs
+        assert "sector_exposure_value" in call_kwargs
+        assert call_kwargs["sector_exposure_value"] >= Decimal(0)
+
+    def test_passes_correlations_to_checker(self) -> None:
+        """Engine passes correlations dict (possibly None) to PreTradeChecker."""
+        checker = self._run_handle_buy(segment_id="us_tech")
+        call_kwargs = checker.check.call_args.kwargs
+        # In single-symbol mode, correlations should be None (empty cache)
+        assert "correlations" in call_kwargs

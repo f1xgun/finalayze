@@ -74,14 +74,14 @@ class TestPairsStrategyWiring:
 
     def test_pairs_strategy_skipped_when_no_pairs_in_preset(self) -> None:
         """_setup_pairs_strategy returns None when preset has no pairs config."""
-        # us_broad has no pairs section in the YAML
+        # us_industrial has no pairs section in the YAML
         from run_evaluation import _setup_pairs_strategy
 
         mock_fetcher = MagicMock()
         start = _BASE_TS
         end = _BASE_TS + timedelta(days=365)
 
-        result = _setup_pairs_strategy("us_broad", mock_fetcher, start, end)
+        result = _setup_pairs_strategy("us_industrial", mock_fetcher, start, end)
         assert result is None
 
     def test_pairs_strategy_created_for_us_tech(self) -> None:

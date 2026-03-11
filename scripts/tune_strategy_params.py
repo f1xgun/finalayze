@@ -18,6 +18,7 @@ import argparse
 import copy
 import json
 import math
+import random
 import re
 import sys
 import tempfile
@@ -41,7 +42,7 @@ _DEFAULT_OUTPUT_DIR = "results/tuned_params"
 _TRADE_SUFFICIENCY_TARGET = 200
 
 # Max drawdown threshold beyond which we start penalising
-_DD_PENALTY_THRESHOLD = 0.10
+_DD_PENALTY_THRESHOLD = 0.02
 
 # DD penalty multiplier
 _DD_PENALTY_COEFF = 2.0
@@ -85,12 +86,12 @@ def composite_objective(wf_sharpe: float, trades: int, max_dd: float) -> float:
 
     The formula is::
 
-        score = wf_sharpe * min(1.0, trades / 200) - 2.0 * max(0, max_dd - 0.10)
+        score = wf_sharpe * min(1.0, trades / 200) - 2.0 * max(0, max_dd - 0.02)
 
     This rewards:
     - Higher Sharpe
     - At least 200 trades (linear ramp-up below that)
-    - Drawdown below 10% (penalty above that)
+    - Drawdown below 2% (penalty above that)
     """
     trade_scale = min(1.0, trades / _TRADE_SUFFICIENCY_TARGET)
     dd_penalty = _DD_PENALTY_COEFF * max(0.0, max_dd - _DD_PENALTY_THRESHOLD)
@@ -103,8 +104,13 @@ def create_search_space(trial: optuna.Trial) -> dict[str, Any]:
     Returns a dict of parameter names to suggested values.  These parameters
     map to YAML preset keys that control signal filtering and regime routing.
     """
+    min_combined = trial.suggest_float("min_combined_confidence", 0.20, 0.40)
+    min_exit = trial.suggest_float("min_exit_confidence", 0.15, 0.35)
+    # Clamp: exit confidence must not exceed combined confidence
+    min_exit = min(min_exit, min_combined)
     return {
-        "min_combined_confidence": trial.suggest_float("min_combined_confidence", 0.20, 0.40),
+        "min_combined_confidence": min_combined,
+        "min_exit_confidence": min_exit,
         "vol_target": trial.suggest_float("vol_target", 0.15, 0.30),
         "trend_threshold": trial.suggest_int("trend_threshold", 28, 40),
         "mr_threshold": trial.suggest_int("mr_threshold", 10, 22),
@@ -131,6 +137,14 @@ def apply_params_to_yaml(segment_id: str, params: dict[str, Any]) -> None:
         val = round(float(params["min_combined_confidence"]), 2)
         text = re.sub(
             r"(min_combined_confidence:\s*)\S+",
+            rf"\g<1>{val}",
+            text,
+        )
+
+    if "min_exit_confidence" in params:
+        val = round(float(params["min_exit_confidence"]), 2)
+        text = re.sub(
+            r"(min_exit_confidence:\s*)\S+",
             rf"\g<1>{val}",
             text,
         )
@@ -189,6 +203,9 @@ def _apply_params_to_config(config: dict[str, Any], params: dict[str, Any]) -> d
 
     if "min_combined_confidence" in params:
         config["min_combined_confidence"] = round(float(params["min_combined_confidence"]), 2)
+
+    if "min_exit_confidence" in params:
+        config["min_exit_confidence"] = round(float(params["min_exit_confidence"]), 2)
 
     if "vol_target" in params:
         for strat_cfg in config.get("strategies", {}).values():
@@ -290,7 +307,9 @@ def run_backtest_for_trial(
         all_trades = []
         all_snapshots = []
 
-        for symbol in symbols[:5]:  # Limit to first 5 symbols for speed
+        random.seed(42)
+        sample_symbols = random.sample(symbols, min(5, len(symbols)))
+        for symbol in sample_symbols:  # Random sample of 5 symbols for speed
             try:
                 candles = fetcher.fetch_candles(symbol, start, end)
                 if not candles:
@@ -411,6 +430,19 @@ def run_perturbation_check(
     }
 
 
+def _clamp_exit_confidence(params: dict[str, Any]) -> None:
+    """Ensure min_exit_confidence <= min_combined_confidence in-place.
+
+    ``study.best_params`` returns the raw values from ``trial.suggest_float``,
+    bypassing the clamp applied inside ``create_search_space``.  This helper
+    re-applies the constraint after retrieving the best trial.
+    """
+    if "min_exit_confidence" in params and "min_combined_confidence" in params:
+        params["min_exit_confidence"] = min(
+            params["min_exit_confidence"], params["min_combined_confidence"]
+        )
+
+
 def _parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Optuna strategy parameter tuning")
@@ -463,6 +495,7 @@ def main() -> None:
     study.optimize(objective, n_trials=args.n_trials, show_progress_bar=True)
 
     best = study.best_params
+    _clamp_exit_confidence(best)
     best_score = study.best_value
     best_metrics = study.best_trial.user_attrs.get("metrics", {})
 

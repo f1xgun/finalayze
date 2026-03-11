@@ -111,9 +111,24 @@ def test_len() -> None:
 
 EXPECTED_MOEX_INSTRUMENT_COUNT = 18
 EXPECTED_MOEX_SYMBOLS = {
-    "SBER", "SBERP", "GAZP", "LKOH", "GMKN", "YNDX", "NVTK", "ROSN",
-    "VTBR", "TATN", "SNGS", "ALRS", "MGNT", "POLY", "IRAO", "TRNFP",
-    "OZON", "MOEX",
+    "SBER",
+    "SBERP",
+    "GAZP",
+    "LKOH",
+    "GMKN",
+    "YNDX",
+    "NVTK",
+    "ROSN",
+    "VTBR",
+    "TATN",
+    "SNGS",
+    "ALRS",
+    "MGNT",
+    "POLY",
+    "IRAO",
+    "TRNFP",
+    "OZON",
+    "MOEX",
 }
 
 

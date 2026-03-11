@@ -149,8 +149,7 @@ class TestSelectFeaturesMI:
                 # Mix of signal and noise so MI varies
                 noise_ratio = 0.3 + 0.7 * (i / max(n_features - 1, 1))
                 data[f"feat_{i:02d}"] = (
-                    signal * (1 - noise_ratio)
-                    + rng.standard_normal(n_samples) * noise_ratio
+                    signal * (1 - noise_ratio) + rng.standard_normal(n_samples) * noise_ratio
                 )
 
         return pd.DataFrame(data), y
@@ -194,9 +193,7 @@ class TestSelectFeaturesMI:
         n_correlated = 10
         for i in range(n_correlated):
             # Correlated with signal but also with each other
-            data[f"corr_{i:02d}"] = (
-                signal + rng.standard_normal(n_samples) * (0.5 + i * 0.1)
-            )
+            data[f"corr_{i:02d}"] = signal + rng.standard_normal(n_samples) * (0.5 + i * 0.1)
         # A few uncorrelated noise features
         for i in range(5):
             data[f"noise_{i:02d}"] = rng.standard_normal(n_samples)

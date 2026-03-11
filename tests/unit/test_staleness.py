@@ -181,17 +181,21 @@ class TestPerFeatureDrift:
         detector = StalenessDetector(min_samples=MIN_SAMPLES)
 
         # Train: feature_a stable, feature_b stable
-        detector.set_feature_training({
-            "feature_a": rng.standard_normal(N_SAMPLES).tolist(),
-            "feature_b": rng.standard_normal(N_SAMPLES).tolist(),
-        })
+        detector.set_feature_training(
+            {
+                "feature_a": rng.standard_normal(N_SAMPLES).tolist(),
+                "feature_b": rng.standard_normal(N_SAMPLES).tolist(),
+            }
+        )
 
         # Recent: feature_a shifts, feature_b stays
         for _ in range(N_RECENT):
-            detector.update_features({
-                "feature_a": float(rng.standard_normal() + SHIFTED_MEAN),
-                "feature_b": float(rng.standard_normal()),
-            })
+            detector.update_features(
+                {
+                    "feature_a": float(rng.standard_normal() + SHIFTED_MEAN),
+                    "feature_b": float(rng.standard_normal()),
+                }
+            )
 
         top = detector.get_top_drifting_features(n=2)
         assert len(top) > 0

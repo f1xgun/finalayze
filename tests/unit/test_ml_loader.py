@@ -73,6 +73,8 @@ class TestSaveEnsemble:
         ensemble._lstm_model = None
         ensemble.selected_features = None
         ensemble._calibrator = None
+        ensemble._model_weights = None
+        ensemble.base_rate = None
 
         with patch("finalayze.ml.loader._atomic_save") as mock_save:
             save_ensemble(tmp_path, "us_tech", ensemble)
@@ -361,6 +363,144 @@ class TestCalibratorRoundTrip:
         assert cal_high < 0.9  # pulled down from 0.9
 
 
+# ---------------------------------------------------------------------------
+# Task 9: model_weights.json loading round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestModelWeightsRoundTrip:
+    """model_weights.json persistence in loader (Task 9)."""
+
+    def test_load_model_weights_when_file_exists(self, tmp_path: Path) -> None:
+        """Loader reads model_weights.json and passes it to EnsembleModel."""
+        segment_dir = tmp_path / "us_tech"
+        segment_dir.mkdir(parents=True)
+
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        weights = {"xgboostmodel": 0.04, "lightgbmmodel": 0.01}
+        (segment_dir / "model_weights.json").write_text(json.dumps(weights))
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        ensemble = registry.get("us_tech")
+        assert ensemble is not None
+        assert ensemble._model_weights == weights
+
+    def test_load_without_model_weights_file(self, tmp_path: Path) -> None:
+        """Legacy models without model_weights.json get None (equal averaging)."""
+        segment_dir = tmp_path / "us_tech"
+        segment_dir.mkdir(parents=True)
+
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        ensemble = registry.get("us_tech")
+        assert ensemble is not None
+        assert ensemble._model_weights is None
+
+    def test_save_ensemble_writes_model_weights(self, tmp_path: Path) -> None:
+        """save_ensemble persists model_weights.json when set on ensemble."""
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        weights = {"xgboostmodel": 0.04}
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None, model_weights=weights)
+
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        weights_path = tmp_path / "us_tech" / "model_weights.json"
+        assert weights_path.exists()
+        loaded = json.loads(weights_path.read_text())
+        assert loaded == weights
+
+    def test_save_ensemble_no_model_weights_no_file(self, tmp_path: Path) -> None:
+        """save_ensemble does not write model_weights.json when None."""
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None)
+
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        weights_path = tmp_path / "us_tech" / "model_weights.json"
+        assert not weights_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Task 10: segment_meta.json loading (base_rate)
+# ---------------------------------------------------------------------------
+
+
+class TestSegmentMetaRoundTrip:
+    """segment_meta.json persistence for base_rate (Task 10)."""
+
+    def test_load_base_rate_when_meta_exists(self, tmp_path: Path) -> None:
+        """Loader reads segment_meta.json and sets base_rate on EnsembleModel."""
+        from finalayze.ml.loader import FEATURE_SCHEMA_VERSION
+
+        segment_dir = tmp_path / "us_tech"
+        segment_dir.mkdir(parents=True)
+
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        meta = {"base_rate": 0.5312, "feature_schema_version": FEATURE_SCHEMA_VERSION}
+        (segment_dir / "segment_meta.json").write_text(json.dumps(meta))
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        ensemble = registry.get("us_tech")
+        assert ensemble is not None
+        assert ensemble.base_rate == pytest.approx(0.5312)
+
+    def test_load_without_meta_file_gives_none(self, tmp_path: Path) -> None:
+        """Legacy models without segment_meta.json get base_rate=None."""
+        segment_dir = tmp_path / "us_tech"
+        segment_dir.mkdir(parents=True)
+
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        registry = load_registry(tmp_path, ["us_tech"])
+        ensemble = registry.get("us_tech")
+        assert ensemble is not None
+        assert ensemble.base_rate is None
+
+    def test_save_ensemble_writes_meta(self, tmp_path: Path) -> None:
+        """save_ensemble persists segment_meta.json when base_rate is set."""
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None)
+        ensemble.base_rate = 0.5312
+
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        meta_path = tmp_path / "us_tech" / "segment_meta.json"
+        assert meta_path.exists()
+        loaded = json.loads(meta_path.read_text())
+        assert loaded["base_rate"] == pytest.approx(0.5312)
+
+    def test_save_ensemble_always_writes_meta(self, tmp_path: Path) -> None:
+        """save_ensemble always writes segment_meta.json (even when base_rate is None) for feature_schema_version."""
+        xgb = XGBoostModel(segment_id="us_tech")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        ensemble = EnsembleModel(models=[xgb], lstm_model=None)
+        # base_rate is None (default)
+
+        save_ensemble(tmp_path, "us_tech", ensemble)
+
+        meta_path = tmp_path / "us_tech" / "segment_meta.json"
+        assert meta_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Task 13: feature_schema_version field in segment_meta.json
+# ---------------------------------------------------------------------------
+
+
 class TestFeatureSchemaVersion:
     """Task 13: feature_schema_version field in segment_meta.json."""
 
@@ -371,7 +511,6 @@ class TestFeatureSchemaVersion:
         segment_dir = tmp_path / "us_tech"
         segment_dir.mkdir(parents=True)
 
-        # Write a real model so the segment directory is otherwise valid
         xgb = XGBoostModel(segment_id="us_tech")
         xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
         joblib.dump(xgb, segment_dir / "xgb.pkl")

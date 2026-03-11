@@ -41,6 +41,15 @@ Every feature, bugfix, or refactor follows this mandatory sequence:
 - Run full test suite fresh, read output, check exit code
 - Never claim "done" without evidence
 
+### 5b. Backtest Validation (mandatory for strategy/risk/backtest/ML changes)
+- **Skill:** `backtest-iteration` (custom, `.claude/skills/backtest-iteration.md`)
+- Run iteration: `uv run python scripts/run_iteration.py --name <name> --segments us_tech,us_broad`
+- Compare metrics against previous iteration (PF, DD, Trades, WF Sharpe)
+- PASS/FAIL/REVIEW gate — do NOT merge if metrics regressed without explanation
+- Use `strategy-diagnose` if a specific strategy underperforms
+- Use `iteration-history` to understand metrics trajectory before tuning
+- Use `preset-tuner` for structured parameter optimization (max 15 grid points)
+
 ### 6. Finish (merge or PR)
 - **Skill:** `finishing-a-development-branch`
 - Options: merge locally, create PR, keep branch, or discard
@@ -261,3 +270,29 @@ Use as the **implementer** in `subagent-driven-development`. The controller iden
 | `docker/`, `alembic/`, `pyproject.toml`, CI | `infra-agent` |
 
 **Task touches multiple modules?** Dispatch one agent per module sequentially (not parallel — they may edit overlapping files).
+
+## §9 Trading-Specific Skills
+
+Custom skills in `.claude/skills/` provide domain-specific workflows for this trading system.
+Agents and the main controller MUST use these skills when their trigger conditions match.
+
+| Skill | Trigger | Purpose |
+|---|---|---|
+| `backtest-iteration` | After ANY change to strategies/risk/backtest/ML | Run iteration, compare metrics, PASS/FAIL gate |
+| `strategy-diagnose` | Strategy underperforms or fires rarely | Cross-file investigation: YAML + ADX + stops + sizing |
+| `iteration-history` | Need metrics trend or sprint retrospective | Analyze trajectory across all iterations |
+| `data-quality-check` | Before major backtest or when data issues suspected | Validate OHLCV integrity, completeness, dividends |
+| `ml-experiment` | Training models or deciding to enable ML | Train, evaluate, gate ML with overfitting checks |
+| `preset-tuner` | Tuning strategy parameters | Structured grid search with sensitivity testing |
+
+### Installed External Skills (global)
+
+| Skill | Source | Purpose |
+|---|---|---|
+| `quantitative-research` | `omer-metin/skills-for-antigravity` | Quant methodology: walk-forward, alpha signals, stat arb, regime detection, anti-patterns (overfitting, look-ahead bias, survivorship bias) |
+| `risk-metrics-calculation` | `sickn33/antigravity-awesome-skills` | Risk metrics reference: VaR, CVaR, Sharpe, Sortino, drawdown analysis, stress testing, rolling metrics |
+
+**Usage rules:**
+- `quantitative-research` — consult when designing new strategies, reviewing backtest methodology, or evaluating ML approaches. Its `sharp_edges.md` lists critical pitfalls.
+- `risk-metrics-calculation` — consult when implementing or auditing risk calculations, building dashboards, or computing portfolio-level metrics.
+- Custom skills take precedence over external skills for project-specific workflows.

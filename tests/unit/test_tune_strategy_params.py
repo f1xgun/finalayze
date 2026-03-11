@@ -17,6 +17,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from tune_strategy_params import (  # noqa: E402
     _apply_params_to_config,
+    _clamp_exit_confidence,
     apply_params_to_yaml,
     composite_objective,
     create_search_space,
@@ -36,9 +37,12 @@ HIGH_DD = 0.20
 SHARPE_POSITIVE = 1.0
 SHARPE_NEGATIVE = -0.5
 
-# Expected scores
+# Expected scores — DD threshold is 0.02
 LOW_TRADES_SCALE = LOW_TRADES / TARGET_TRADES  # 0.25
-DD_PENALTY_FOR_HIGH = 2.0 * (HIGH_DD - 0.10)  # 0.20
+DD_THRESHOLD = 0.02
+NO_DD = 0.01  # Below threshold — no penalty
+DD_PENALTY_FOR_LOW = 2.0 * (LOW_DD - DD_THRESHOLD)  # 2.0 * 0.03 = 0.06
+DD_PENALTY_FOR_HIGH = 2.0 * (HIGH_DD - DD_THRESHOLD)  # 2.0 * 0.18 = 0.36
 
 
 class TestCompositeObjective:
@@ -46,51 +50,50 @@ class TestCompositeObjective:
 
     def test_penalizes_low_trade_count(self) -> None:
         """With low trades, Sharpe is scaled down by trades/200."""
-        score = composite_objective(wf_sharpe=SHARPE_POSITIVE, trades=LOW_TRADES, max_dd=LOW_DD)
-        # trade_scale = 50/200 = 0.25, dd_penalty = 0 (0.05 < 0.10)
+        score = composite_objective(wf_sharpe=SHARPE_POSITIVE, trades=LOW_TRADES, max_dd=NO_DD)
+        # trade_scale = 50/200 = 0.25, dd_penalty = 0 (0.01 < 0.02)
         expected = SHARPE_POSITIVE * LOW_TRADES_SCALE
         assert score == pytest.approx(expected)
 
     def test_full_score_with_enough_trades(self) -> None:
-        """Enough trades + low DD gives full Sharpe score."""
-        score = composite_objective(wf_sharpe=SHARPE_POSITIVE, trades=ENOUGH_TRADES, max_dd=LOW_DD)
+        """Enough trades + no DD penalty gives full Sharpe score."""
+        score = composite_objective(wf_sharpe=SHARPE_POSITIVE, trades=ENOUGH_TRADES, max_dd=NO_DD)
         # trade_scale = min(1.0, 300/200) = 1.0, dd_penalty = 0
         assert score == pytest.approx(SHARPE_POSITIVE)
 
     def test_dd_penalty_applied(self) -> None:
         """High drawdown reduces the score."""
         score_low_dd = composite_objective(
-            wf_sharpe=SHARPE_POSITIVE, trades=ENOUGH_TRADES, max_dd=LOW_DD
+            wf_sharpe=SHARPE_POSITIVE, trades=ENOUGH_TRADES, max_dd=NO_DD
         )
         score_high_dd = composite_objective(
             wf_sharpe=SHARPE_POSITIVE, trades=ENOUGH_TRADES, max_dd=HIGH_DD
         )
-        # dd_penalty = 2.0 * max(0, 0.20 - 0.10) = 0.20
+        # dd_penalty = 2.0 * max(0, 0.20 - 0.02) = 0.36
         assert score_high_dd < score_low_dd
         assert score_high_dd == pytest.approx(SHARPE_POSITIVE - DD_PENALTY_FOR_HIGH)
 
     def test_zero_trades_produces_zero_score(self) -> None:
         """Zero trades makes trade_scale=0, so score is 0 (minus any DD penalty)."""
-        score = composite_objective(wf_sharpe=SHARPE_POSITIVE, trades=ZERO_TRADES, max_dd=LOW_DD)
+        score = composite_objective(wf_sharpe=SHARPE_POSITIVE, trades=ZERO_TRADES, max_dd=NO_DD)
         assert score == pytest.approx(0.0)
 
     def test_negative_sharpe_passes_through(self) -> None:
         """Negative Sharpe is not floored -- it scales with trade count."""
-        score = composite_objective(wf_sharpe=SHARPE_NEGATIVE, trades=TARGET_TRADES, max_dd=LOW_DD)
+        score = composite_objective(wf_sharpe=SHARPE_NEGATIVE, trades=TARGET_TRADES, max_dd=NO_DD)
         # trade_scale = 1.0, dd_penalty = 0
         assert score == pytest.approx(SHARPE_NEGATIVE)
 
     def test_dd_at_threshold_no_penalty(self) -> None:
-        """Drawdown exactly at 10% produces zero penalty."""
-        threshold_dd = 0.10
+        """Drawdown exactly at 2% threshold produces zero penalty."""
         score = composite_objective(
-            wf_sharpe=SHARPE_POSITIVE, trades=ENOUGH_TRADES, max_dd=threshold_dd
+            wf_sharpe=SHARPE_POSITIVE, trades=ENOUGH_TRADES, max_dd=DD_THRESHOLD
         )
         assert score == pytest.approx(SHARPE_POSITIVE)
 
     def test_trades_at_target_gives_scale_one(self) -> None:
         """Exactly 200 trades gives trade_scale=1.0."""
-        score = composite_objective(wf_sharpe=SHARPE_POSITIVE, trades=TARGET_TRADES, max_dd=LOW_DD)
+        score = composite_objective(wf_sharpe=SHARPE_POSITIVE, trades=TARGET_TRADES, max_dd=NO_DD)
         assert score == pytest.approx(SHARPE_POSITIVE)
 
 
@@ -107,6 +110,7 @@ class TestCreateSearchSpace:
 
         expected_keys = {
             "min_combined_confidence",
+            "min_exit_confidence",
             "vol_target",
             "trend_threshold",
             "mr_threshold",
@@ -114,6 +118,16 @@ class TestCreateSearchSpace:
             "rsi_sell_threshold",
         }
         assert set(params.keys()) == expected_keys
+
+    def test_min_exit_confidence_within_bounds(self) -> None:
+        """min_exit_confidence is clamped to be <= min_combined_confidence."""
+        import optuna
+
+        study = optuna.create_study()
+        trial = study.ask()
+        params = create_search_space(trial)
+
+        assert params["min_exit_confidence"] <= params["min_combined_confidence"]
 
     def test_values_are_within_bounds(self) -> None:
         """All suggested values fall within their defined ranges."""
@@ -142,6 +156,35 @@ class TestCreateSearchSpace:
         assert mr_low <= params["mr_threshold"] <= mr_high
         assert rsi_buy_low <= params["rsi_buy_threshold"] <= rsi_buy_high
         assert rsi_sell_low <= params["rsi_sell_threshold"] <= rsi_sell_high
+
+
+class TestClampExitConfidence:
+    """Tests for _clamp_exit_confidence (re-clamping after study.best_params)."""
+
+    def test_clamps_exit_to_combined(self) -> None:
+        """min_exit_confidence is clamped to min_combined_confidence when higher."""
+        params: dict[str, Any] = {
+            "min_combined_confidence": 0.25,
+            "min_exit_confidence": 0.35,
+        }
+        _clamp_exit_confidence(params)
+        assert params["min_exit_confidence"] == params["min_combined_confidence"]
+
+    def test_no_clamp_when_exit_already_lower(self) -> None:
+        """No change when min_exit_confidence is already <= min_combined_confidence."""
+        exit_val = 0.20
+        params: dict[str, Any] = {
+            "min_combined_confidence": 0.30,
+            "min_exit_confidence": exit_val,
+        }
+        _clamp_exit_confidence(params)
+        assert params["min_exit_confidence"] == exit_val
+
+    def test_noop_when_keys_missing(self) -> None:
+        """No error when the keys are absent from the dict."""
+        params: dict[str, Any] = {"vol_target": 0.20}
+        _clamp_exit_confidence(params)
+        assert "min_exit_confidence" not in params
 
 
 class TestApplyParamsToConfig:
@@ -312,6 +355,7 @@ _HOLDOUT_SHARPE_BAD = 0.02  # 20% of opt → fail
 
 _BEST_PARAMS: dict[str, Any] = {
     "min_combined_confidence": 0.30,
+    "min_exit_confidence": 0.25,
     "vol_target": 0.20,
     "trend_threshold": 35,
     "mr_threshold": 15,
