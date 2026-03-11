@@ -198,12 +198,14 @@ class TestMoexMinPositionSize:
 
         return captured_context["min_position_size"]
 
-    def test_moex_segment_uses_5000_rub_min_pos(self) -> None:
-        """MOEX segments should use 5000 RUB min_pos."""
+    def test_moex_segment_scales_min_pos_with_equity(self) -> None:
+        """MOEX min_pos scales with equity: min(5000, max(1000, equity * 0.02))."""
         min_pos = self._run_handle_buy_and_get_min_pos("ru_blue_chips")
-        assert min_pos == Decimal(5000)
+        # With 100K equity: min(5000, max(1000, 2000)) = 2000
+        expected = Decimal(2000)
+        assert min_pos == expected
 
     def test_us_segment_uses_500_usd_min_pos(self) -> None:
-        """US segments should use $500 min_pos."""
+        """US segments should use $500 min_pos (capped)."""
         min_pos = self._run_handle_buy_and_get_min_pos("us_tech")
         assert min_pos == Decimal(500)

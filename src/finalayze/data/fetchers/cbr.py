@@ -9,7 +9,8 @@ Does NOT extend BaseFetcher — CBR API structure is fundamentally different.
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -184,3 +185,256 @@ class CBRFetcher:
                     rate = Decimal(rate_el.text) / _KEY_RATE_PERCENT_DIVISOR
                     records.append(KeyRateRecord(timestamp=dt, rate=rate))
         return sorted(records, key=lambda r: r.timestamp)
+
+
+# ── CBR Meeting Calendar (static data for backtesting) ──────────────────────
+
+
+@dataclass(frozen=True)
+class CBRMeeting:
+    """CBR Board of Directors rate meeting."""
+
+    date: date
+    meeting_type: str  # "core", "interim", or "emergency"
+    decision: str | None = None  # "cut", "hold", "hike", None (future/unknown)
+    rate_after: Decimal | None = None  # key rate (%) after decision
+
+
+# Historical + scheduled meetings for backtesting (2022-2026).
+# Sources: CBR press releases, official schedule.
+# Future meetings (decision=None) use the published CBR schedule.
+CBR_MEETINGS: tuple[CBRMeeting, ...] = (
+    # 2022
+    CBRMeeting(date(2022, 2, 28), "emergency", "hike", Decimal("20.00")),
+    CBRMeeting(date(2022, 4, 8), "interim", "cut", Decimal("17.00")),
+    CBRMeeting(date(2022, 4, 29), "core", "cut", Decimal("14.00")),
+    CBRMeeting(date(2022, 6, 10), "interim", "cut", Decimal("9.50")),
+    CBRMeeting(date(2022, 7, 22), "core", "cut", Decimal("8.00")),
+    CBRMeeting(date(2022, 9, 16), "interim", "hold", Decimal("7.50")),
+    CBRMeeting(date(2022, 10, 28), "core", "hold", Decimal("7.50")),
+    CBRMeeting(date(2022, 12, 16), "interim", "hold", Decimal("7.50")),
+    # 2023
+    CBRMeeting(date(2023, 2, 10), "core", "hold", Decimal("7.50")),
+    CBRMeeting(date(2023, 3, 17), "interim", "hold", Decimal("7.50")),
+    CBRMeeting(date(2023, 4, 28), "core", "hold", Decimal("7.50")),
+    CBRMeeting(date(2023, 6, 9), "interim", "hold", Decimal("7.50")),
+    CBRMeeting(date(2023, 7, 21), "core", "hike", Decimal("8.50")),
+    CBRMeeting(date(2023, 8, 15), "emergency", "hike", Decimal("12.00")),
+    CBRMeeting(date(2023, 9, 15), "interim", "hike", Decimal("13.00")),
+    CBRMeeting(date(2023, 10, 27), "core", "hike", Decimal("15.00")),
+    CBRMeeting(date(2023, 12, 15), "interim", "hike", Decimal("16.00")),
+    # 2024
+    CBRMeeting(date(2024, 2, 16), "core", "hold", Decimal("16.00")),
+    CBRMeeting(date(2024, 3, 22), "interim", "hold", Decimal("16.00")),
+    CBRMeeting(date(2024, 4, 26), "core", "hold", Decimal("16.00")),
+    CBRMeeting(date(2024, 6, 7), "interim", "hold", Decimal("16.00")),
+    CBRMeeting(date(2024, 7, 26), "core", "hike", Decimal("18.00")),
+    CBRMeeting(date(2024, 9, 13), "interim", "hike", Decimal("19.00")),
+    CBRMeeting(date(2024, 10, 25), "core", "hike", Decimal("21.00")),
+    CBRMeeting(date(2024, 12, 20), "interim", "hold", Decimal("21.00")),
+    # 2025
+    CBRMeeting(date(2025, 2, 14), "core", "hold", Decimal("21.00")),
+    CBRMeeting(date(2025, 3, 21), "interim", "hold", Decimal("21.00")),
+    CBRMeeting(date(2025, 4, 25), "core", "hold", Decimal("21.00")),
+    CBRMeeting(date(2025, 6, 6), "interim", "hold", Decimal("21.00")),  # verify
+    CBRMeeting(date(2025, 7, 25), "core", "cut", Decimal("20.00")),  # verify
+    CBRMeeting(date(2025, 9, 12), "interim", "cut", Decimal("19.00")),  # verify
+    CBRMeeting(date(2025, 10, 24), "core", "cut", Decimal("18.00")),  # verify
+    CBRMeeting(date(2025, 12, 19), "interim", "cut", Decimal("17.00")),  # verify
+    # 2026
+    CBRMeeting(date(2026, 2, 13), "core", "cut", Decimal("16.00")),  # verify
+    CBRMeeting(date(2026, 3, 20), "interim", None, None),  # scheduled
+    CBRMeeting(date(2026, 4, 24), "core", None, None),
+    CBRMeeting(date(2026, 6, 19), "interim", None, None),
+    CBRMeeting(date(2026, 7, 24), "core", None, None),
+    CBRMeeting(date(2026, 9, 11), "interim", None, None),
+    CBRMeeting(date(2026, 10, 23), "core", None, None),
+    CBRMeeting(date(2026, 12, 18), "interim", None, None),
+)
+
+
+# ── CPI Publication Dates (Rosstat) ─────────────────────────────────────────
+# Rosstat publishes monthly CPI approximately 2 weeks after month end.
+# Format: month_covered (YYYY-MM) -> publication_date.
+# Only dates BEFORE publication_date can use that month's CPI in backtest
+# (prevents look-ahead bias).
+
+CPI_PUBLICATION_DATES: dict[str, date] = {
+    # 2024
+    "2024-01": date(2024, 2, 9),
+    "2024-02": date(2024, 3, 13),
+    "2024-03": date(2024, 4, 12),
+    "2024-04": date(2024, 5, 17),
+    "2024-05": date(2024, 6, 14),
+    "2024-06": date(2024, 7, 12),
+    "2024-07": date(2024, 8, 9),
+    "2024-08": date(2024, 9, 13),
+    "2024-09": date(2024, 10, 11),
+    "2024-10": date(2024, 11, 13),
+    "2024-11": date(2024, 12, 13),
+    "2024-12": date(2025, 1, 15),
+    # 2025
+    "2025-01": date(2025, 2, 12),
+    "2025-02": date(2025, 3, 12),
+    "2025-03": date(2025, 4, 11),
+    "2025-04": date(2025, 5, 16),
+    "2025-05": date(2025, 6, 13),
+    "2025-06": date(2025, 7, 11),
+    "2025-07": date(2025, 8, 8),
+    "2025-08": date(2025, 9, 12),
+    "2025-09": date(2025, 10, 10),
+    "2025-10": date(2025, 11, 14),
+    "2025-11": date(2025, 12, 12),
+    "2025-12": date(2026, 1, 16),
+}
+
+
+# ── Helper functions (no look-ahead, safe for backtesting) ──────────────────
+
+
+def get_last_cbr_decision(as_of: date) -> CBRMeeting | None:
+    """Return the most recent CBR meeting with a decision, on or before *as_of*.
+
+    For backtesting: never returns meetings after *as_of* (no look-ahead).
+    Meetings with ``decision is None`` (future/unknown) are skipped.
+    """
+    past = [m for m in CBR_MEETINGS if m.date <= as_of and m.decision is not None]
+    return past[-1] if past else None
+
+
+def get_next_cbr_meeting(as_of: date) -> CBRMeeting | None:
+    """Return the next CBR meeting strictly after *as_of*.
+
+    Returns both decided and future (undecided) meetings.
+    """
+    future = [m for m in CBR_MEETINGS if m.date > as_of]
+    return future[0] if future else None
+
+
+def days_to_next_cbr(as_of: date) -> int | None:
+    """Days until the next CBR meeting. ``None`` if no future meetings in calendar."""
+    nxt = get_next_cbr_meeting(as_of)
+    return (nxt.date - as_of).days if nxt else None
+
+
+def get_latest_published_cpi_month(as_of: date) -> str | None:
+    """Return the latest CPI month whose publication date is on or before *as_of*.
+
+    For backtesting: ensures no CPI look-ahead. Returns ``YYYY-MM`` string.
+    """
+    published = [month for month, pub_date in CPI_PUBLICATION_DATES.items() if pub_date <= as_of]
+    return max(published) if published else None
+
+
+# ── Macro Context (backtest-safe aggregation layer) ──────────────────────────
+
+
+@dataclass(frozen=True)
+class MacroSnapshot:
+    """Point-in-time macro context for bond strategy decisions.
+
+    All values use **percentage-point** convention (e.g. ``21.00`` means 21%).
+    ``None`` indicates data unavailable for the given date.
+    """
+
+    key_rate: Decimal | None = None
+    ruonia_7d_avg: Decimal | None = None
+    cpi_yoy: Decimal | None = None
+    last_cbr_decision: str | None = None  # "cut", "hold", "hike"
+
+
+# RUONIA proxy: key_rate minus 50bps (RUONIA typically tracks 30-80bps below).
+_RUONIA_PROXY_OFFSET = Decimal("0.50")
+
+# Rosstat YoY CPI data (approximate monthly values, percentage points).
+# Coverage: 2022-01 through 2025-06.
+_CPI_DATA: dict[str, Decimal] = {
+    # 2022
+    "2022-01": Decimal("8.7"),
+    "2022-02": Decimal("9.2"),
+    "2022-03": Decimal("16.7"),
+    "2022-04": Decimal("17.8"),
+    "2022-05": Decimal("17.1"),
+    "2022-06": Decimal("15.9"),
+    "2022-07": Decimal("15.1"),
+    "2022-08": Decimal("14.3"),
+    "2022-09": Decimal("13.7"),
+    "2022-10": Decimal("12.6"),
+    "2022-11": Decimal("12.0"),
+    "2022-12": Decimal("11.9"),
+    # 2023
+    "2023-01": Decimal("11.8"),
+    "2023-02": Decimal("11.0"),
+    "2023-03": Decimal("3.5"),
+    "2023-04": Decimal("2.3"),
+    "2023-05": Decimal("2.5"),
+    "2023-06": Decimal("3.2"),
+    "2023-07": Decimal("4.3"),
+    "2023-08": Decimal("5.1"),
+    "2023-09": Decimal("6.0"),
+    "2023-10": Decimal("6.7"),
+    "2023-11": Decimal("7.5"),
+    "2023-12": Decimal("7.4"),
+    # 2024
+    "2024-01": Decimal("7.4"),
+    "2024-02": Decimal("7.7"),
+    "2024-03": Decimal("7.7"),
+    "2024-04": Decimal("7.8"),
+    "2024-05": Decimal("8.3"),
+    "2024-06": Decimal("8.6"),
+    "2024-07": Decimal("9.1"),
+    "2024-08": Decimal("9.1"),
+    "2024-09": Decimal("8.6"),
+    "2024-10": Decimal("8.5"),
+    "2024-11": Decimal("8.9"),
+    "2024-12": Decimal("9.5"),
+    # 2025
+    "2025-01": Decimal("10.0"),
+    "2025-02": Decimal("10.0"),
+    "2025-03": Decimal("9.9"),
+    "2025-04": Decimal("9.7"),
+    "2025-05": Decimal("9.4"),
+    "2025-06": Decimal("9.1"),
+}
+
+
+class MacroContextProvider:
+    """Provides point-in-time macro data for bond strategy backtests.
+
+    Uses static CBR meeting calendar and CPI data.  All lookups respect
+    publication dates to avoid look-ahead bias.
+
+    RUONIA is approximated as ``key_rate - 50bps`` (RUONIA typically tracks
+    30-80bps below key rate). This is a backtest-only proxy.
+    """
+
+    def get_snapshot(self, as_of: date) -> MacroSnapshot:
+        """Return macro data available as of *as_of* (no look-ahead).
+
+        Args:
+            as_of: The date to query. Only information published on or
+                before this date is included.
+
+        Returns:
+            MacroSnapshot with available fields populated.
+        """
+        # key_rate from most recent CBR decision
+        last_meeting = get_last_cbr_decision(as_of)
+        key_rate = last_meeting.rate_after if last_meeting else None
+
+        # RUONIA proxy: key_rate - 50bps
+        ruonia = key_rate - _RUONIA_PROXY_OFFSET if key_rate is not None else None
+
+        # CPI: latest published month (respects Rosstat publication lag)
+        cpi_month = get_latest_published_cpi_month(as_of)
+        cpi_yoy = _CPI_DATA.get(cpi_month) if cpi_month else None
+
+        # Last CBR decision
+        last_decision = last_meeting.decision if last_meeting else None
+
+        return MacroSnapshot(
+            key_rate=key_rate,
+            ruonia_7d_avg=ruonia,
+            cpi_yoy=cpi_yoy,
+            last_cbr_decision=last_decision,
+        )

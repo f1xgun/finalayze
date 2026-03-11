@@ -1,0 +1,43 @@
+# OFZ-PD (Fixed Coupon) — Strategic + Tactical layers
+# Duration rotation + CBR event trading
+
+segment_id: ru_ofz_pd
+market: moex
+instrument_type: bond
+
+strategies:
+  bond_duration_rotation:
+    enabled: true
+    weight: 0.70
+    params:
+      rebalance_interval: monthly
+      duration_cap_years: 5.0
+      # Regime thresholds
+      ruonia_gap_dovish: -0.50
+      ruonia_gap_hawkish: 0.50
+      cpi_override_threshold: 8.0
+
+  cbr_event:
+    enabled: true
+    weight: 0.30
+    params:
+      entry_window_days: [2, 7]
+      exit_days_after: 2
+      gap_threshold: 0.15
+      preferred_symbols:
+        - SU26244RMFS2
+        - SU26241RMFS8
+
+# Risk parameters
+risk:
+  max_positions: 5
+  max_drawdown_pct: 5.0
+  yield_stop_bps: 50
+  dv01_max_dd_pct: 5.0
+  dv01_max_rate_move_bps: 500
+  max_single_position_pct: 30.0
+
+# Transaction costs
+costs:
+  normal: moex_bond
+  event: moex_bond_event

@@ -41,6 +41,7 @@ if PROJECT_ROOT not in sys.path:
 import yaml
 
 from finalayze.backtest.config import DEFAULT_STRATEGY_HOLD_BARS, BacktestConfig
+from finalayze.backtest.costs import MOEX_COSTS, US_COSTS
 from finalayze.backtest.decision_journal import DecisionJournal
 from finalayze.backtest.engine import BacktestEngine
 from finalayze.backtest.iteration_tracker import IterationTracker
@@ -503,14 +504,31 @@ def _build_strategies(
     symbols: list[str] | None = None,
     event_data: dict[str, Any] | None = None,
 ) -> list[BaseStrategy]:
-    """Build the full strategy list for a segment."""
-    strategies: list[BaseStrategy] = [
-        MomentumStrategy(),
-        DualMomentumStrategy(vol_target_enabled=True),
-        MeanReversionStrategy(),
-        OUMeanReversionStrategy(use_mle=True),
-        RSI2ConnorsStrategy(),
-    ]
+    """Build the full strategy list for a segment.
+
+    Reads the preset YAML to check which strategies are enabled.
+    Momentum and dual_momentum are skipped when ``enabled: false``
+    in the preset (e.g. MOEX equity segments are mean-reverting).
+    """
+    preset = _load_preset(segment)
+    strategies_cfg = preset.get("strategies", {})
+
+    strategies: list[BaseStrategy] = []
+
+    # Momentum — only include if enabled in preset (default: true for backward compat)
+    mom_cfg = strategies_cfg.get("momentum", {})
+    if mom_cfg.get("enabled", True):
+        strategies.append(MomentumStrategy())
+
+    # Dual momentum — only include if enabled in preset (default: true for backward compat)
+    dual_cfg = strategies_cfg.get("dual_momentum", {})
+    if dual_cfg.get("enabled", True):
+        strategies.append(DualMomentumStrategy(vol_target_enabled=True))
+
+    # MR strategies — always include (core strategies)
+    strategies.append(MeanReversionStrategy())
+    strategies.append(OUMeanReversionStrategy(use_mle=True))
+    strategies.append(RSI2ConnorsStrategy())
 
     pairs = _setup_pairs_strategy(segment, fetcher, start, end)
     if pairs is not None:
@@ -666,6 +684,7 @@ def _run_symbol(
                 use_copula_scaling=use_copula_scaling,
                 stop_loss_mode=stop_loss_mode,
                 max_hold_bars=DEFAULT_STRATEGY_HOLD_BARS,
+                transaction_costs=MOEX_COSTS if segment.startswith("ru_") else US_COSTS,
             ),
             regime_provider=regime_provider,
         )

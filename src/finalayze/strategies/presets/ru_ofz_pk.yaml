@@ -1,0 +1,25 @@
+# OFZ-PK (Floating Coupon) — Core layer
+# Buy-and-hold maturity ladder with quarterly rebalancing
+
+segment_id: ru_ofz_pk
+market: moex
+instrument_type: bond
+
+strategies:
+  bond_carry:
+    enabled: true
+    weight: 1.00
+    params:
+      rebalance_interval_bars: 63  # quarterly
+      maturity_rotation_months: 6
+      tax_rate: 0.13  # NDFL
+
+# Risk parameters
+risk:
+  max_positions: 4
+  max_drawdown_pct: 3.0  # Core layer: conservative
+  yield_stop_bps: 0  # No yield stop (hold to maturity)
+  # No DV01 budgeting — equal weight ladder
+
+costs:
+  normal: moex_bond

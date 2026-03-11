@@ -10,7 +10,7 @@ regime_routing:
 strategies:
   mean_reversion:
     enabled: true
-    weight: 0.25
+    weight: 0.30
     params:
       bb_period: 20
       bb_std_dev: 2.5
@@ -28,8 +28,8 @@ strategies:
       min_sentiment: 0.6
       event_types: [cbr_rate, regulatory, sanctions, earnings, macro]
   momentum:
-    enabled: true
-    weight: 0.15
+    enabled: false
+    weight: 0.00
     params:
       rsi_period: 14
       rsi_oversold: 28
@@ -62,7 +62,7 @@ strategies:
       min_confidence: 0.30
   dividend_gap:
     enabled: true
-    weight: 0.10
+    weight: 0.20
     params:
       min_gap_pct: 3.0
       max_hold_bars: 60
@@ -74,7 +74,7 @@ strategies:
       min_confidence: 0.30
   rsi2_connors:
     enabled: true
-    weight: 0.10
+    weight: 0.15
     params:
       rsi_period: 2
       rsi_buy_threshold: 10.0
@@ -83,8 +83,8 @@ strategies:
       sma_exit_period: 5
       min_confidence: 0.45
   dual_momentum:
-    enabled: true
-    weight: 0.15
+    enabled: false
+    weight: 0.00
     params:
       lookback_1m: 21
       lookback_3m: 63
@@ -94,7 +94,7 @@ strategies:
       vol_target: 0.20
   ou_mean_reversion:
     enabled: true
-    weight: 0.10
+    weight: 0.15
     params:
       ou_window: 60
       entry_threshold: 1.8

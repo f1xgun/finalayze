@@ -143,18 +143,21 @@ class TestMLEnsemblePresets:
     """Test that ml_ensemble section exists in all YAML presets (disabled until trained)."""
 
     def test_ml_ensemble_present_in_all_presets(self) -> None:
-        """All segment YAML presets should have ml_ensemble section."""
+        """All equity segment YAML presets should have ml_ensemble section."""
         expected_preset_count = 9
-        # Filter to segment presets only (have segment_id key), skip data files like moex_dividends
+        # Filter to equity segment presets (have segment_id key, instrument_type != bond)
         preset_files = sorted(_PRESETS_DIR.glob("*.yaml"))
         segment_presets = []
         for p in preset_files:
             with p.open() as f:
                 data = yaml.safe_load(f)
             if isinstance(data, dict) and "segment_id" in data:
+                # Bond presets don't use ml_ensemble
+                if data.get("instrument_type") == "bond":
+                    continue
                 segment_presets.append((p, data))
         assert len(segment_presets) == expected_preset_count, (
-            f"Expected {expected_preset_count} segment presets, found {len(segment_presets)}"
+            f"Expected {expected_preset_count} equity segment presets, found {len(segment_presets)}"
         )
 
         for preset_path, data in segment_presets:

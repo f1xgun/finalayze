@@ -9,11 +9,14 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from datetime import date
+from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from finalayze.core.exceptions import InstrumentNotFoundError
 
-type InstrumentType = Literal["stock", "etf", "bond"]
+if TYPE_CHECKING:
+    from finalayze.core.schemas import InstrumentType
 
 
 @dataclass(frozen=True)
@@ -29,6 +32,12 @@ class Instrument:
     currency: str = "USD"
     is_active: bool = True
     segment_id: str = ""  # optional segment the instrument belongs to
+    # Bond-specific fields (None for stocks/ETFs)
+    face_value: Decimal | None = None
+    coupon_rate: Decimal | None = None  # annual % (e.g. 7.10)
+    coupon_frequency: int | None = None  # payments per year
+    maturity_date: date | None = None
+    floating_coupon: bool = False
 
 
 class InstrumentRegistry:
@@ -54,6 +63,17 @@ class InstrumentRegistry:
         """Return all active instruments for a given market, sorted by symbol."""
         return sorted(
             [i for i in self._instruments.values() if i.market_id == market_id and i.is_active],
+            key=lambda i: i.symbol,
+        )
+
+    def list_by_type(self, market_id: str, instrument_type: str) -> list[Instrument]:
+        """Return active instruments of a given type in a market, sorted by symbol."""
+        return sorted(
+            [
+                i
+                for i in self._instruments.values()
+                if i.market_id == market_id and i.instrument_type == instrument_type and i.is_active
+            ],
             key=lambda i: i.symbol,
         )
 
@@ -283,11 +303,181 @@ DEFAULT_MOEX_INSTRUMENTS: list[Instrument] = [
 ]
 
 
+# Default OFZ bond instruments (Phase 0 validated via T-Bank API 2026-03-11)
+# FIGIs confirmed via services.instruments.bond_by()
+DEFAULT_MOEX_OFZ_INSTRUMENTS: list[Instrument] = [
+    # OFZ-PD (Fixed Coupon) — Strategic/Tactical layers
+    Instrument(
+        symbol="SU26238RMFS4",
+        market_id="moex",
+        name="ОФЗ 26238",
+        instrument_type="bond",
+        figi="BBG011FJ4HS6",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("7.10"),
+        coupon_frequency=2,
+        maturity_date=date(2041, 5, 15),
+    ),
+    Instrument(
+        symbol="SU26239RMFS2",
+        market_id="moex",
+        name="ОФЗ 26239",
+        instrument_type="bond",
+        figi="BBG011FHF1F7",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("6.90"),
+        coupon_frequency=2,
+        maturity_date=date(2031, 7, 23),
+    ),
+    Instrument(
+        symbol="SU26241RMFS8",
+        market_id="moex",
+        name="ОФЗ 26241",
+        instrument_type="bond",
+        figi="BBG01BJBR2W0",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("9.50"),
+        coupon_frequency=2,
+        maturity_date=date(2032, 11, 17),
+    ),
+    Instrument(
+        symbol="SU26243RMFS4",
+        market_id="moex",
+        name="ОФЗ 26243",
+        instrument_type="bond",
+        figi="TCS00A106E90",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("9.80"),
+        coupon_frequency=2,
+        maturity_date=date(2038, 5, 19),
+    ),
+    Instrument(
+        symbol="SU26244RMFS2",
+        market_id="moex",
+        name="ОФЗ 26244",
+        instrument_type="bond",
+        figi="TCS00A1074G2",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("11.25"),
+        coupon_frequency=2,
+        maturity_date=date(2034, 3, 15),
+    ),
+    Instrument(
+        symbol="SU26246RMFS7",
+        market_id="moex",
+        name="ОФЗ 26246",
+        instrument_type="bond",
+        figi="BBG01N0CVG83",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("12.00"),
+        coupon_frequency=2,
+        maturity_date=date(2036, 3, 12),
+    ),
+    Instrument(
+        symbol="SU26252RMFS5",
+        market_id="moex",
+        name="ОФЗ 26252",
+        instrument_type="bond",
+        figi="TCS00A10D4Y2",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("12.50"),
+        coupon_frequency=2,
+        maturity_date=date(2033, 10, 12),
+    ),
+    Instrument(
+        symbol="SU26253RMFS3",
+        market_id="moex",
+        name="ОФЗ 26253",
+        instrument_type="bond",
+        figi="TCS00A10D517",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("13.00"),
+        coupon_frequency=2,
+        maturity_date=date(2038, 10, 6),
+    ),
+    # OFZ-PK (Floating Coupon) — Core layer
+    Instrument(
+        symbol="SU29007RMFS0",
+        market_id="moex",
+        name="ОФЗ 29007",
+        instrument_type="bond",
+        figi="BBG007Z5DF79",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("1.30"),  # spread over RUONIA
+        coupon_frequency=2,
+        maturity_date=date(2027, 3, 3),
+        floating_coupon=True,
+    ),
+    Instrument(
+        symbol="SU29008RMFS8",
+        market_id="moex",
+        name="ОФЗ 29008",
+        instrument_type="bond",
+        figi="BBG007Z5DZS2",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("1.40"),
+        coupon_frequency=2,
+        maturity_date=date(2029, 10, 3),
+        floating_coupon=True,
+    ),
+    Instrument(
+        symbol="SU29009RMFS6",
+        market_id="moex",
+        name="ОФЗ 29009",
+        instrument_type="bond",
+        figi="BBG007Z5F748",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("1.50"),
+        coupon_frequency=2,
+        maturity_date=date(2032, 5, 5),
+        floating_coupon=True,
+    ),
+    Instrument(
+        symbol="SU29010RMFS4",
+        market_id="moex",
+        name="ОФЗ 29010",
+        instrument_type="bond",
+        figi="BBG007Z5FFL1",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        coupon_rate=Decimal("1.60"),
+        coupon_frequency=2,
+        maturity_date=date(2034, 12, 6),
+        floating_coupon=True,
+    ),
+]
+
+
 def build_default_registry() -> InstrumentRegistry:
     """Build and return a registry pre-populated with default instruments."""
     registry = InstrumentRegistry()
     for instrument in DEFAULT_US_INSTRUMENTS:
         registry.register(instrument)
     for instrument in DEFAULT_MOEX_INSTRUMENTS:
+        registry.register(instrument)
+    for instrument in DEFAULT_MOEX_OFZ_INSTRUMENTS:
         registry.register(instrument)
     return registry

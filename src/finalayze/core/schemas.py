@@ -7,13 +7,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field as dc_field
-from datetime import datetime  # noqa: TC003
-from decimal import Decimal  # noqa: TC003
+from datetime import date, datetime  # noqa: TC003
+from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID  # noqa: TC003
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+type InstrumentType = Literal["stock", "etf", "bond"]
 
 
 class SignalDirection(StrEnum):
@@ -22,6 +24,15 @@ class SignalDirection(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
     HOLD = "HOLD"
+
+
+class PortfolioLayer(StrEnum):
+    """Portfolio layer in the multi-asset multi-timeframe system."""
+
+    CORE = "core"  # 40-50%, OFZ-PK floaters, 6-12+ months
+    STRATEGIC = "strategic"  # 25-30%, OFZ-PD duration rotation, 1-6 months
+    TACTICAL = "tactical"  # 15-20%, OFZ-PD + stocks, 1-4 weeks
+    SHORT = "short"  # 10-15%, stocks only, 1-5 days
 
 
 class Candle(BaseModel):
@@ -69,6 +80,7 @@ class Signal(BaseModel):
     confidence: float
     features: dict[str, float]
     reasoning: str
+    instrument_type: str = "stock"  # "stock" or "bond"
 
     @field_validator("confidence")
     @classmethod
@@ -94,6 +106,8 @@ class TradeResult(BaseModel):
     pnl: Decimal
     pnl_pct: Decimal
     hold_bars: int | None = None
+    coupon_income: Decimal = Decimal(0)  # bond coupon income during hold
+    instrument_type: str = "stock"  # "stock" or "bond"
 
 
 class PortfolioState(BaseModel):
@@ -337,6 +351,64 @@ class TurnoverRecord(BaseModel):
         return v
 
 
+class BondInfo(BaseModel):
+    """Static metadata for an OFZ bond."""
+
+    model_config = ConfigDict(frozen=True)
+
+    figi: str
+    ticker: str
+    isin: str
+    name: str
+    face_value: Decimal
+    coupon_rate: Decimal  # annual % (e.g. 7.10 for 7.10%)
+    coupon_frequency: int  # payments per year (2 for semiannual)
+    maturity_date: date
+    floating_coupon: bool = False
+    class_code: str = "TQOB"
+    currency: str = "RUB"
+
+
+class CouponPayment(BaseModel):
+    """A single coupon payment event."""
+
+    model_config = ConfigDict(frozen=True)
+
+    bond_figi: str
+    coupon_date: date  # payment date
+    record_date: date  # T-2 business days before payment
+    amount_per_bond: Decimal  # gross RUB per bond
+    coupon_number: int
+
+
+class AccruedInterest(BaseModel):
+    """Daily accrued interest (NKD) for a bond."""
+
+    model_config = ConfigDict(frozen=True)
+
+    bond_figi: str
+    date: date
+    value: Decimal  # RUB per bond
+    value_percent: Decimal  # % of face value
+
+
+@dataclass(frozen=True)
+class MultiTimeframeContext:
+    """Higher-timeframe context derived from daily candles.
+
+    All values use COMPLETED periods only (no partial bars).
+    Weekly: last completed Mon-Fri week. Monthly: last completed calendar month.
+    A 2-bar lag (_EXTERNAL_DATA_LAG_BARS) is applied on top.
+    """
+
+    weekly_completed: Candle | None = dc_field(default=None)
+    monthly_completed: Candle | None = dc_field(default=None)
+    # Derived features
+    weekly_rsi_14: float | None = dc_field(default=None)
+    weekly_sma_50_ratio: float | None = dc_field(default=None)  # close / SMA50 ratio
+    monthly_trend_direction: int | None = dc_field(default=None)  # +1, 0, -1
+
+
 @dataclass(frozen=True)
 class MoexMarketData:
     """MOEX-specific ambient data. None = unavailable."""
@@ -360,3 +432,57 @@ class MarketContext:
     benchmark_candles: list[Candle] | None = dc_field(default=None)
     vix_candles: list[Candle] | None = dc_field(default=None)
     moex_data: MoexMarketData | None = dc_field(default=None)
+
+
+@dataclass(frozen=True)
+class LayerConfig:
+    """Configuration for a portfolio layer."""
+
+    layer: PortfolioLayer
+    capital_pct: Decimal  # target allocation (e.g. 0.40 for 40%)
+    max_drawdown_pct: Decimal  # max peak-to-trough DD (e.g. 0.03 for 3%)
+    max_positions: int
+    rebalance_interval: str  # "daily", "weekly", "monthly", "quarterly", "event"
+    allowed_instrument_types: tuple[str, ...] = ("stock",)
+    yield_stop_bps: int = 0  # 0 = no yield stop (for Core)
+
+
+# Default layer configurations per plan
+DEFAULT_LAYER_CONFIGS: dict[PortfolioLayer, LayerConfig] = {
+    PortfolioLayer.CORE: LayerConfig(
+        layer=PortfolioLayer.CORE,
+        capital_pct=Decimal("0.45"),
+        max_drawdown_pct=Decimal("0.03"),
+        max_positions=4,
+        rebalance_interval="quarterly",
+        allowed_instrument_types=("bond",),
+        yield_stop_bps=0,
+    ),
+    PortfolioLayer.STRATEGIC: LayerConfig(
+        layer=PortfolioLayer.STRATEGIC,
+        capital_pct=Decimal("0.275"),
+        max_drawdown_pct=Decimal("0.05"),
+        max_positions=5,
+        rebalance_interval="monthly",
+        allowed_instrument_types=("bond",),
+        yield_stop_bps=50,
+    ),
+    PortfolioLayer.TACTICAL: LayerConfig(
+        layer=PortfolioLayer.TACTICAL,
+        capital_pct=Decimal("0.175"),
+        max_drawdown_pct=Decimal("0.05"),
+        max_positions=5,
+        rebalance_interval="weekly",
+        allowed_instrument_types=("bond", "stock"),
+        yield_stop_bps=30,
+    ),
+    PortfolioLayer.SHORT: LayerConfig(
+        layer=PortfolioLayer.SHORT,
+        capital_pct=Decimal("0.10"),
+        max_drawdown_pct=Decimal("0.05"),
+        max_positions=6,
+        rebalance_interval="daily",
+        allowed_instrument_types=("stock",),
+        yield_stop_bps=0,
+    ),
+}

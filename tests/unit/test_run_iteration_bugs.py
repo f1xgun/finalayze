@@ -129,7 +129,8 @@ class TestBuildStrategiesExpanded:
         types = [type(s) for s in strategies]
         assert DualMomentumStrategy in types
 
-    def test_ru_segment_has_at_least_6_strategies(self) -> None:
-        """RU segments get DividendGap extra, so >= 6."""
+    def test_ru_segment_has_at_least_4_strategies(self) -> None:
+        """RU segments: MR+OU+RSI2 (no momentum/dual_mom) + DividendGap = 4."""
+        _min_ru_strategies = 4
         strategies = self._build("ru_blue_chips")
-        assert len(strategies) >= _MIN_BASE_STRATEGIES + 1
+        assert len(strategies) >= _min_ru_strategies

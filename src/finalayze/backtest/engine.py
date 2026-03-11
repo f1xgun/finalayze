@@ -133,8 +133,10 @@ class BacktestEngine:
         self._trail_activation_atr = cfg.trail_activation_atr
         self._trail_distance_atr = cfg.trail_distance_atr
         self._circuit_breaker = cfg.circuit_breaker
-        # Always use RollingKelly for graduated warm-up (1% fixed-fractional → pure Kelly)
-        self._rolling_kelly = cfg.rolling_kelly or RollingKelly()
+        # Use RollingKelly only when explicitly provided.  Default 1% cold-start
+        # is too small for small per-symbol allocations (e.g. 50K RUB), causing the
+        # sizing pipeline to zero all positions and creating a permanent deadlock.
+        self._rolling_kelly = cfg.rolling_kelly
         self._loss_limits = cfg.loss_limits
         self._target_vol = cfg.target_vol
         self._decision_journal = cfg.decision_journal
@@ -1173,8 +1175,11 @@ class BacktestEngine:
             )
 
         asset_vol = compute_realized_vol(history) or Decimal("0.20")
-        # Currency-aware min position: 5000 RUB floor for MOEX, $500 for US
-        min_pos = Decimal(5000) if segment_id.startswith("ru_") else Decimal(500)
+        # Currency-aware min position: original thresholds scaled down for small portfolios
+        if segment_id.startswith("ru_"):
+            min_pos = min(Decimal(5000), max(Decimal(1000), portfolio.equity * Decimal("0.02")))
+        else:
+            min_pos = min(Decimal(500), max(Decimal(100), portfolio.equity * Decimal("0.005")))
 
         # Compute ML confidence from MetaLabeler if available
         ml_confidence: float | None = None
