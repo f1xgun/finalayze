@@ -6,9 +6,9 @@ from config.modes import WorkMode
 from config.segments import DEFAULT_SEGMENTS, SegmentConfig
 
 EXPECTED_MODE_COUNT = 4
-EXPECTED_SEGMENT_COUNT = 8
+EXPECTED_SEGMENT_COUNT = 10  # 8 stock + 2 OFZ bond segments
 EXPECTED_US_SEGMENT_COUNT = 4
-EXPECTED_MOEX_SEGMENT_COUNT = 4
+EXPECTED_MOEX_SEGMENT_COUNT = 6  # 4 stock + 2 OFZ bond
 
 
 class TestWorkMode:

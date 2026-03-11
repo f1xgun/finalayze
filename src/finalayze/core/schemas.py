@@ -7,13 +7,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field as dc_field
-from datetime import datetime  # noqa: TC003
-from decimal import Decimal  # noqa: TC003
+from datetime import date, datetime  # noqa: TC003
+from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID  # noqa: TC003
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+type InstrumentType = Literal["stock", "etf", "bond"]
 
 
 class SignalDirection(StrEnum):
@@ -69,6 +71,7 @@ class Signal(BaseModel):
     confidence: float
     features: dict[str, float]
     reasoning: str
+    instrument_type: str = "stock"  # "stock" or "bond"
 
     @field_validator("confidence")
     @classmethod
@@ -94,6 +97,8 @@ class TradeResult(BaseModel):
     pnl: Decimal
     pnl_pct: Decimal
     hold_bars: int | None = None
+    coupon_income: Decimal = Decimal(0)  # bond coupon income during hold
+    instrument_type: str = "stock"  # "stock" or "bond"
 
 
 class PortfolioState(BaseModel):
@@ -335,6 +340,47 @@ class TurnoverRecord(BaseModel):
             msg = "timestamp must be timezone-aware (UTC)"
             raise ValueError(msg)
         return v
+
+
+class BondInfo(BaseModel):
+    """Static metadata for an OFZ bond."""
+
+    model_config = ConfigDict(frozen=True)
+
+    figi: str
+    ticker: str
+    isin: str
+    name: str
+    face_value: Decimal
+    coupon_rate: Decimal  # annual % (e.g. 7.10 for 7.10%)
+    coupon_frequency: int  # payments per year (2 for semiannual)
+    maturity_date: date
+    floating_coupon: bool = False
+    class_code: str = "TQOB"
+    currency: str = "RUB"
+
+
+class CouponPayment(BaseModel):
+    """A single coupon payment event."""
+
+    model_config = ConfigDict(frozen=True)
+
+    bond_figi: str
+    coupon_date: date  # payment date
+    record_date: date  # T-2 business days before payment
+    amount_per_bond: Decimal  # gross RUB per bond
+    coupon_number: int
+
+
+class AccruedInterest(BaseModel):
+    """Daily accrued interest (NKD) for a bond."""
+
+    model_config = ConfigDict(frozen=True)
+
+    bond_figi: str
+    date: date
+    value: Decimal  # RUB per bond
+    value_percent: Decimal  # % of face value
 
 
 @dataclass(frozen=True)

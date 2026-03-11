@@ -22,7 +22,7 @@ _GRPC_ROOTS = _PROJECT_ROOT / "certs" / "grpc_roots.pem"
 if _GRPC_ROOTS.exists():
     os.environ.setdefault("GRPC_DEFAULT_SSL_ROOTS_FILE_PATH", str(_GRPC_ROOTS))
 
-from datetime import UTC, datetime  # noqa: E402
+from datetime import UTC, date, datetime  # noqa: E402
 from decimal import Decimal  # noqa: E402
 from typing import TYPE_CHECKING, Any  # noqa: E402
 
@@ -30,7 +30,7 @@ from t_tech.invest import AsyncClient, CandleInterval  # noqa: E402
 from t_tech.invest.sandbox.async_client import AsyncSandboxClient  # noqa: E402
 
 from finalayze.core.exceptions import DataFetchError, InstrumentNotFoundError  # noqa: E402
-from finalayze.core.schemas import Candle  # noqa: E402
+from finalayze.core.schemas import AccruedInterest, BondInfo, Candle, CouponPayment  # noqa: E402
 from finalayze.data.fetchers.base import BaseFetcher  # noqa: E402
 
 if TYPE_CHECKING:
@@ -150,6 +150,23 @@ class TinkoffFetcher(BaseFetcher):
         """
         return Decimal(q.units) + Decimal(q.nano) / _NANO_DIVISOR
 
+    def _money_to_decimal(self, m: Any) -> Decimal:
+        """Convert Tinkoff MoneyValue(units, nano, currency) to Decimal."""
+        return Decimal(m.units) + Decimal(m.nano) / _NANO_DIVISOR
+
+    @staticmethod
+    def _business_days_before(d: date, n: int) -> date:
+        """Go back *n* business days from date *d* (skip weekends)."""
+        from datetime import timedelta  # noqa: PLC0415
+
+        current = d
+        count = 0
+        while count < n:
+            current -= timedelta(days=1)
+            if current.weekday() < 5:  # noqa: PLR2004  # Monday-Friday
+                count += 1
+        return current
+
     def fetch_dividends(
         self,
         symbol: str,
@@ -191,6 +208,170 @@ class TinkoffFetcher(BaseFetcher):
                 to=end,
             )
             return list(response.dividends)
+
+    # ── Bond data methods ──────────────────────────────────────────────────
+
+    def fetch_bond_info(self, figi: str) -> BondInfo:
+        """Fetch bond metadata from T-Bank API.
+
+        Args:
+            figi: FIGI identifier for the bond.
+
+        Returns:
+            BondInfo with static bond metadata.
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            result = asyncio.run(self._fetch_bond_info_async(figi))
+        except Exception as exc:
+            msg = f"Tinkoff gRPC error fetching bond info for {figi}: {exc}"
+            raise DataFetchError(msg) from exc
+        return result
+
+    async def _fetch_bond_info_async(self, figi: str) -> BondInfo:
+        """Async call to T-Bank SDK bond_by."""
+        from t_tech.invest.schemas import InstrumentIdType  # noqa: PLC0415
+
+        client = self._make_client()
+        async with client as services:
+            resp = await services.instruments.bond_by(
+                id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_FIGI,
+                id=figi,
+            )
+            bond = resp.instrument
+            nominal = self._money_to_decimal(bond.nominal)
+
+            # For floating-coupon bonds, coupon_rate stores the spread over RUONIA.
+            # Will be populated from coupon data when available.
+            coupon_rate_val = Decimal(0)
+
+            maturity = (
+                bond.maturity_date.date()
+                if hasattr(bond.maturity_date, "date")
+                else bond.maturity_date
+            )
+
+            return BondInfo(
+                figi=bond.figi,
+                ticker=bond.ticker,
+                isin=bond.isin,
+                name=bond.name,
+                face_value=nominal,
+                coupon_rate=coupon_rate_val,
+                coupon_frequency=bond.coupon_quantity_per_year,
+                maturity_date=maturity,
+                floating_coupon=bond.floating_coupon_flag,
+                class_code=bond.class_code,
+                currency=bond.currency,
+            )
+
+    def fetch_bond_coupons(
+        self,
+        figi: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[CouponPayment]:
+        """Fetch coupon payment schedule for a bond.
+
+        Args:
+            figi: FIGI identifier for the bond.
+            start: Start date (inclusive).
+            end: End date (inclusive).
+
+        Returns:
+            List of CouponPayment events within the date range.
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            result = asyncio.run(self._fetch_bond_coupons_async(figi, start, end))
+        except Exception as exc:
+            msg = f"Tinkoff gRPC error fetching coupons for {figi}: {exc}"
+            raise DataFetchError(msg) from exc
+        return result
+
+    async def _fetch_bond_coupons_async(
+        self, figi: str, start: datetime, end: datetime
+    ) -> list[CouponPayment]:
+        """Async call to T-Bank SDK get_bond_coupons."""
+        client = self._make_client()
+        async with client as services:
+            resp = await services.instruments.get_bond_coupons(
+                figi=figi,
+                from_=start,
+                to=end,
+            )
+            coupons: list[CouponPayment] = []
+            for c in resp.events:
+                amount = self._money_to_decimal(c.pay_one_bond)
+                coupon_date = (
+                    c.coupon_date.date() if hasattr(c.coupon_date, "date") else c.coupon_date
+                )
+                # Record date is typically T-2 business days before payment.
+                # T-Bank doesn't provide it directly; estimate from coupon_date.
+                record_date = self._business_days_before(coupon_date, 2)
+                coupons.append(
+                    CouponPayment(
+                        bond_figi=figi,
+                        coupon_date=coupon_date,
+                        record_date=record_date,
+                        amount_per_bond=amount,
+                        coupon_number=c.coupon_number,
+                    )
+                )
+            return coupons
+
+    def fetch_accrued_interest(
+        self,
+        figi: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[AccruedInterest]:
+        """Fetch daily accrued interest (NKD) for a bond.
+
+        Args:
+            figi: FIGI identifier for the bond.
+            start: Start date (inclusive).
+            end: End date (inclusive).
+
+        Returns:
+            List of daily AccruedInterest records.
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            result = asyncio.run(self._fetch_accrued_interest_async(figi, start, end))
+        except Exception as exc:
+            msg = f"Tinkoff gRPC error fetching NKD for {figi}: {exc}"
+            raise DataFetchError(msg) from exc
+        return result
+
+    async def _fetch_accrued_interest_async(
+        self, figi: str, start: datetime, end: datetime
+    ) -> list[AccruedInterest]:
+        """Async call to T-Bank SDK get_accrued_interests."""
+        client = self._make_client()
+        async with client as services:
+            resp = await services.instruments.get_accrued_interests(
+                figi=figi,
+                from_=start,
+                to=end,
+            )
+            results: list[AccruedInterest] = []
+            for ai in resp.accrued_interests:
+                value = self._money_to_decimal(ai.value)
+                value_pct = self._quotation_to_decimal(ai.value_percent)
+                ai_date: date = ai.date.date() if hasattr(ai.date, "date") else ai.date
+                results.append(
+                    AccruedInterest(
+                        bond_figi=figi,
+                        date=ai_date,
+                        value=value,
+                        value_percent=value_pct,
+                    )
+                )
+            return results
 
     @staticmethod
     def _next_business_day(dt: datetime) -> datetime:

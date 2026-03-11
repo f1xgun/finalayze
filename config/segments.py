@@ -1,4 +1,4 @@
-"""Stock segment definitions.
+"""Segment definitions (stocks, bonds, ETFs).
 
 See docs/design/SEGMENTS.md for the full segment system design.
 """
@@ -10,12 +10,13 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class SegmentConfig:
-    """Configuration for a stock segment."""
+    """Configuration for a market segment (stock, bond, ETF)."""
 
     segment_id: str
     market: str
     broker: str
     currency: str
+    instrument_type: str = "stock"
     symbols: list[str] = field(default_factory=list)
     active_strategies: list[str] = field(default_factory=list)
     strategy_params: dict[str, dict[str, object]] = field(default_factory=dict)
@@ -114,6 +115,38 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         active_strategies=["mean_reversion", "event_driven", "momentum"],
         news_languages=["ru", "en"],
         max_allocation_pct=0.25,
+        trading_hours="07:00-15:40 UTC",
+    ),
+    SegmentConfig(
+        segment_id="ru_ofz_pd",
+        market="moex",
+        broker="tinkoff",
+        currency="RUB",
+        instrument_type="bond",
+        symbols=[
+            "SU26239RMFS2",
+            "SU26241RMFS8",
+            "SU26243RMFS4",
+            "SU26244RMFS2",
+            "SU26246RMFS7",
+            "SU26252RMFS5",
+            "SU26253RMFS3",
+        ],
+        active_strategies=["bond_duration_rotation"],
+        news_languages=["ru"],
+        max_allocation_pct=0.30,
+        trading_hours="07:00-15:40 UTC",
+    ),
+    SegmentConfig(
+        segment_id="ru_ofz_pk",
+        market="moex",
+        broker="tinkoff",
+        currency="RUB",
+        instrument_type="bond",
+        symbols=["SU29007RMFS0", "SU29008RMFS8", "SU29009RMFS6", "SU29010RMFS4"],
+        active_strategies=["bond_carry"],
+        news_languages=["ru"],
+        max_allocation_pct=0.50,
         trading_hours="07:00-15:40 UTC",
     ),
 ]
