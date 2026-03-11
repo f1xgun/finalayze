@@ -393,6 +393,23 @@ class AccruedInterest(BaseModel):
 
 
 @dataclass(frozen=True)
+class MultiTimeframeContext:
+    """Higher-timeframe context derived from daily candles.
+
+    All values use COMPLETED periods only (no partial bars).
+    Weekly: last completed Mon-Fri week. Monthly: last completed calendar month.
+    A 2-bar lag (_EXTERNAL_DATA_LAG_BARS) is applied on top.
+    """
+
+    weekly_completed: Candle | None = dc_field(default=None)
+    monthly_completed: Candle | None = dc_field(default=None)
+    # Derived features
+    weekly_rsi_14: float | None = dc_field(default=None)
+    weekly_sma_50_ratio: float | None = dc_field(default=None)  # close / SMA50 ratio
+    monthly_trend_direction: int | None = dc_field(default=None)  # +1, 0, -1
+
+
+@dataclass(frozen=True)
 class MoexMarketData:
     """MOEX-specific ambient data. None = unavailable."""
 

@@ -204,12 +204,25 @@ def _build_strategies(
     end: datetime,
     models_dir: Path | None,
 ) -> list[BaseStrategy]:
-    """Build the full strategy list for evaluation."""
-    strategies: list[BaseStrategy] = [
-        MomentumStrategy(),
-        MeanReversionStrategy(),
-        RSI2ConnorsStrategy(),
-    ]
+    """Build the full strategy list for evaluation.
+
+    Reads the preset YAML to check which strategies are enabled.
+    Momentum is skipped when ``enabled: false`` in the preset
+    (e.g. MOEX equity segments are mean-reverting).
+    """
+    preset = _load_preset(segment)
+    strategies_cfg = preset.get("strategies", {})
+
+    strategies: list[BaseStrategy] = []
+
+    # Momentum — only include if enabled in preset (default: true for backward compat)
+    mom_cfg = strategies_cfg.get("momentum", {})
+    if mom_cfg.get("enabled", True):
+        strategies.append(MomentumStrategy())
+
+    # MR strategies — always include (core strategies)
+    strategies.append(MeanReversionStrategy())
+    strategies.append(RSI2ConnorsStrategy())
 
     pairs = _setup_pairs_strategy(segment, fetcher, start, end)
     if pairs is not None:
