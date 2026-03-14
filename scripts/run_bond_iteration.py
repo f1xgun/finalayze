@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import traceback
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -82,6 +83,8 @@ OFZ_PK_TICKERS = [
     "SU29009RMFS6",
     "SU29010RMFS4",
 ]
+
+_MIN_OOS_EQUITY_POINTS = 2
 
 BOND_UNIVERSE: dict[str, list[str]] = {
     "ru_ofz_pd": OFZ_PD_TICKERS,
@@ -181,6 +184,260 @@ def _compute_effective_coupon_rate(
     avg_coupon = sum(c.amount_per_bond for c in coupons) / len(coupons)
     annualized = avg_coupon * info.coupon_frequency / info.face_value * Decimal(100)
     return annualized.quantize(Decimal("0.01"))
+
+
+@dataclass
+class WalkForwardResult:
+    """Result of a walk-forward bond backtest."""
+
+    per_fold: list[dict[str, Any]] = field(default_factory=list)
+    aggregate: dict[str, Any] = field(default_factory=dict)
+
+
+def _generate_walk_forward_folds(
+    start: date,
+    end: date,
+    train_months: int = 12,
+    test_months: int = 6,
+    roll_months: int = 3,
+) -> list[tuple[date, date, date, date]]:
+    """Generate rolling walk-forward folds.
+
+    Returns list of (train_start, train_end, test_start, test_end) tuples.
+    """
+    from dateutil.relativedelta import relativedelta  # noqa: PLC0415
+
+    folds: list[tuple[date, date, date, date]] = []
+    fold_start = start
+
+    while True:
+        train_start = fold_start
+        train_end = train_start + relativedelta(months=train_months)
+        test_start = train_end
+        test_end = test_start + relativedelta(months=test_months)
+
+        # Stop if test period extends past the data range
+        if test_start >= end:
+            break
+
+        # Clip test_end to data range
+        actual_test_end = min(test_end, end)
+        folds.append((train_start, train_end, test_start, actual_test_end))
+
+        fold_start = fold_start + relativedelta(months=roll_months)
+
+    return folds
+
+
+def _slice_candles_by_date(
+    candles_by_symbol: dict[str, list[Candle]],
+    start: date,
+    end: date,
+) -> dict[str, list[Candle]]:
+    """Slice candles to include only bars within [start, end]."""
+    sliced: dict[str, list[Candle]] = {}
+    for sym, candles in candles_by_symbol.items():
+        filtered = [c for c in candles if start <= c.timestamp.date() <= end]
+        if filtered:
+            sliced[sym] = filtered
+    return sliced
+
+
+def _slice_coupons_by_date(
+    coupon_schedule: dict[str, list[CouponPayment]],
+    start: date,
+    end: date,
+) -> dict[str, list[CouponPayment]]:
+    """Slice coupon schedule to include only coupons within [start, end]."""
+    sliced: dict[str, list[CouponPayment]] = {}
+    for sym, coupons in coupon_schedule.items():
+        filtered = [c for c in coupons if start <= c.coupon_date <= end]
+        if filtered:
+            sliced[sym] = filtered
+        else:
+            # Keep empty list so engine doesn't skip the symbol
+            sliced[sym] = []
+    return sliced
+
+
+def walk_forward_bond_backtest(
+    candles_by_symbol: dict[str, list[Candle]],
+    bond_info: dict[str, BondInfo],
+    coupon_schedule: dict[str, list[CouponPayment]],
+    strategy_fn: Any,
+    config: BondBacktestConfig,
+    start: date,
+    end: date,
+    macro_provider: Any | None = None,
+    train_months: int = 12,
+    test_months: int = 6,
+    roll_months: int = 3,
+) -> WalkForwardResult:
+    """Run walk-forward bond backtest with rolling windows.
+
+    Splits the date range into rolling folds (train_months train + test_months test),
+    runs BondBacktestEngine on each fold's test period, and aggregates out-of-sample
+    equity curves and metrics.
+
+    Args:
+        candles_by_symbol: Full candle data for all symbols.
+        bond_info: Static bond metadata per symbol.
+        coupon_schedule: Coupon payment schedule per symbol.
+        strategy_fn: Bond strategy callable.
+        config: Backtest configuration.
+        start: Overall start date.
+        end: Overall end date.
+        macro_provider: Optional macro context provider.
+        train_months: Training window in months (default 12).
+        test_months: Test window in months (default 6).
+        roll_months: Roll step in months (default 3).
+
+    Returns:
+        WalkForwardResult with per-fold and aggregate metrics.
+    """
+    folds = _generate_walk_forward_folds(start, end, train_months, test_months, roll_months)
+
+    per_fold: list[dict[str, Any]] = []
+    oos_equity: list[float] = []
+    oos_dates: list[date] = []
+    all_trades: list[Any] = []
+    total_coupon_gross = 0.0
+    total_coupon_net = 0.0
+
+    for fold_idx, (train_start, train_end, test_start, test_end) in enumerate(folds):
+        print(f"\n  Fold {fold_idx + 1}/{len(folds)}: "
+              f"train {train_start} to {train_end}, "
+              f"test {test_start} to {test_end}")
+
+        # Slice data to test period
+        test_candles = _slice_candles_by_date(candles_by_symbol, test_start, test_end)
+        test_coupons = _slice_coupons_by_date(coupon_schedule, test_start, test_end)
+
+        if not test_candles:
+            print("    No candle data in test period, skipping fold")
+            per_fold.append({
+                "fold": fold_idx + 1,
+                "train_start": str(train_start),
+                "train_end": str(train_end),
+                "test_start": str(test_start),
+                "test_end": str(test_end),
+                "metrics": None,
+                "skipped": True,
+            })
+            continue
+
+        # Run engine on test period
+        engine = BondBacktestEngine(config=config)
+        try:
+            result: BondBacktestResult = engine.run(
+                candles_by_symbol=test_candles,
+                bond_info=bond_info,
+                coupon_schedule=test_coupons,
+                strategy_fn=strategy_fn,
+                macro_provider=macro_provider,
+            )
+        except Exception:
+            print(f"    ERROR in fold {fold_idx + 1}: "
+                  f"{traceback.format_exc().splitlines()[-1]}")
+            per_fold.append({
+                "fold": fold_idx + 1,
+                "train_start": str(train_start),
+                "train_end": str(train_end),
+                "test_start": str(test_start),
+                "test_end": str(test_end),
+                "metrics": None,
+                "error": True,
+            })
+            continue
+
+        # Compute fold metrics
+        equity_float = [float(v) for v in result.equity_curve]
+        fold_metrics = compute_bond_metrics(
+            equity_curve=equity_float,
+            dates=result.dates,
+            trades=result.trades,
+            coupon_income_gross=float(result.total_coupon_income_gross),
+            coupon_income_net=float(result.total_coupon_income_net),
+            initial_cash=float(config.initial_cash),
+        )
+
+        fold_data: dict[str, Any] = {
+            "fold": fold_idx + 1,
+            "train_start": str(train_start),
+            "train_end": str(train_end),
+            "test_start": str(test_start),
+            "test_end": str(test_end),
+            "metrics": {
+                "total_return_pct": fold_metrics.total_return_pct,
+                "excess_sharpe": fold_metrics.excess_sharpe,
+                "max_drawdown_pct": fold_metrics.max_drawdown_pct,
+                "profit_factor": fold_metrics.profit_factor,
+                "trade_count": fold_metrics.trade_count,
+                "win_rate": fold_metrics.win_rate,
+                "coupon_contribution_pct": fold_metrics.coupon_contribution_pct,
+            },
+        }
+        per_fold.append(fold_data)
+
+        print(f"    Return: {fold_metrics.total_return_pct:+.2f}% | "
+              f"Sharpe: {fold_metrics.excess_sharpe:+.4f} | "
+              f"PF: {fold_metrics.profit_factor:.2f} | "
+              f"DD: {fold_metrics.max_drawdown_pct:.2f}% | "
+              f"Trades: {fold_metrics.trade_count}")
+
+        # Accumulate out-of-sample data for aggregate metrics
+        # Normalize equity curve to start at previous OOS endpoint (chain them)
+        if equity_float:
+            if oos_equity:
+                # Scale this fold's equity to continue from last OOS value
+                scale = oos_equity[-1] / equity_float[0] if equity_float[0] != 0 else 1.0
+                oos_equity.extend(v * scale for v in equity_float[1:])
+            else:
+                oos_equity.extend(equity_float)
+            oos_dates.extend(result.dates if not oos_dates else result.dates[1:])
+
+        all_trades.extend(result.trades)
+        total_coupon_gross += float(result.total_coupon_income_gross)
+        total_coupon_net += float(result.total_coupon_income_net)
+
+    # Compute aggregate metrics from concatenated OOS equity curve
+    aggregate: dict[str, Any] = {}
+    if len(oos_equity) >= _MIN_OOS_EQUITY_POINTS:
+        agg_metrics = compute_bond_metrics(
+            equity_curve=oos_equity,
+            dates=oos_dates,
+            trades=all_trades,
+            coupon_income_gross=total_coupon_gross,
+            coupon_income_net=total_coupon_net,
+            initial_cash=float(config.initial_cash),
+        )
+        aggregate = {
+            "total_return_pct": agg_metrics.total_return_pct,
+            "annualized_return_pct": agg_metrics.annualized_return_pct,
+            "excess_return_pct": agg_metrics.excess_return_pct,
+            "sharpe": agg_metrics.excess_sharpe,
+            "max_drawdown_pct": agg_metrics.max_drawdown_pct,
+            "profit_factor": agg_metrics.profit_factor,
+            "trade_count": agg_metrics.trade_count,
+            "win_rate": agg_metrics.win_rate,
+            "total_folds": len(folds),
+            "completed_folds": sum(1 for f in per_fold if f.get("metrics") is not None),
+        }
+    else:
+        aggregate = {
+            "total_return_pct": 0.0,
+            "annualized_return_pct": 0.0,
+            "excess_return_pct": 0.0,
+            "sharpe": 0.0,
+            "max_drawdown_pct": 0.0,
+            "profit_factor": 0.0,
+            "trade_count": 0,
+            "win_rate": 0.0,
+            "total_folds": len(folds),
+            "completed_folds": 0,
+        }
+
+    return WalkForwardResult(per_fold=per_fold, aggregate=aggregate)
 
 
 def _build_carry_strategy(
@@ -353,6 +610,145 @@ def _run_bond_segment(
     return summary
 
 
+def _run_bond_segment_walk_forward(
+    segment: str,
+    cash: Decimal,
+    start: datetime,
+    end: datetime,
+    output_dir: Path,
+) -> dict[str, Any] | None:
+    """Run walk-forward bond backtest for a single segment.
+
+    Returns:
+        Summary dict with walk-forward results or None if cannot run.
+    """
+    symbols = BOND_UNIVERSE.get(segment, [])
+    if not symbols:
+        print(f"  Segment '{segment}' has no bond universe, skipping")
+        return None
+
+    preset = _load_preset(segment)
+    print(f"\n{'=' * 72}")
+    print(f"  WALK-FORWARD BOND SEGMENT: {segment} ({len(symbols)} bonds)")
+    print(f"  Cash: {cash:,.0f} RUB")
+    print(f"{'=' * 72}")
+
+    # Fetch data
+    fetcher = _make_tinkoff_fetcher()
+    if fetcher is None:
+        print("  WARNING: FINALAYZE_TINKOFF_TOKEN not set. Cannot fetch OFZ data.")
+        print("  Skipping bond segment.")
+        return None
+
+    candles_by_symbol, bond_info, coupon_schedule = _fetch_bond_data(fetcher, symbols, start, end)
+
+    if not candles_by_symbol:
+        print("  No bond data available, skipping segment")
+        return None
+
+    # Build strategy
+    macro_provider: MacroContextProvider | None = None
+    if segment == "ru_ofz_pk":
+        carry_strategy = _build_carry_strategy(symbols, bond_info, preset)
+        strategy_fn = carry_strategy.generate_signal
+        strategy_name = "bond_carry"
+    elif segment == "ru_ofz_pd":
+        dur_strategy = _build_duration_rotation_strategy(symbols, bond_info)
+        strategy_fn = dur_strategy.generate_signal
+        strategy_name = "bond_duration_rotation"
+        macro_provider = MacroContextProvider()
+    else:
+        print(f"  Unknown bond segment '{segment}', skipping")
+        return None
+
+    # Build engine config
+    config = _build_bond_backtest_config(cash, preset, segment)
+
+    # Run walk-forward
+    print(f"\n  Running walk-forward backtest with strategy={strategy_name}...")
+    wf_result = walk_forward_bond_backtest(
+        candles_by_symbol=candles_by_symbol,
+        bond_info=bond_info,
+        coupon_schedule=coupon_schedule,
+        strategy_fn=strategy_fn,
+        config=config,
+        start=start.date() if isinstance(start, datetime) else start,
+        end=end.date() if isinstance(end, datetime) else end,
+        macro_provider=macro_provider,
+    )
+
+    # Print walk-forward results
+    agg = wf_result.aggregate
+    print(f"\n  {'=' * 60}")
+    print(f"  WALK-FORWARD AGGREGATE RESULTS: {segment}")
+    print(f"  {'─' * 60}")
+    print(f"  {'Total Return:':<30} {agg.get('total_return_pct', 0):>+8.2f}%")
+    print(f"  {'Annualized Return:':<30} {agg.get('annualized_return_pct', 0):>+8.2f}%")
+    print(f"  {'Excess Sharpe:':<30} {agg.get('sharpe', 0):>+8.4f}")
+    print(f"  {'Max Drawdown:':<30} {agg.get('max_drawdown_pct', 0):>8.2f}%")
+    print(f"  {'Profit Factor:':<30} {agg.get('profit_factor', 0):>8.2f}")
+    print(f"  {'Trade Count:':<30} {agg.get('trade_count', 0):>8d}")
+    print(f"  {'Win Rate:':<30} {agg.get('win_rate', 0):>8.1%}")
+    print(f"  {'Folds Completed:':<30} {agg.get('completed_folds', 0)}/{agg.get('total_folds', 0)}")
+
+    # Verdict
+    verdict = _evaluate_wf_verdict(agg)
+    _print_wf_verdict(agg, verdict)
+
+    # Save walk-forward results
+    seg_dir = output_dir / segment
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    wf_summary = {
+        "segment": segment,
+        "strategy": strategy_name,
+        "walk_forward": {
+            "per_fold": wf_result.per_fold,
+            "aggregate": wf_result.aggregate,
+        },
+        "verdict": verdict,
+    }
+    (seg_dir / "walk_forward_summary.json").write_text(
+        json.dumps(wf_summary, indent=2, default=str)
+    )
+
+    return wf_summary
+
+
+# Walk-forward acceptance thresholds
+_WF_MAX_DD_PCT = 3.0
+_WF_MIN_PF = 1.0
+
+
+def _evaluate_wf_verdict(agg: dict[str, Any]) -> dict[str, bool]:
+    """Evaluate walk-forward acceptance criteria."""
+    sharpe_ok = agg.get("sharpe", 0) > 0
+    pf_ok = agg.get("profit_factor", 0) > _WF_MIN_PF
+    dd_ok = agg.get("max_drawdown_pct", 100) <= _WF_MAX_DD_PCT
+    return {
+        "sharpe_pass": sharpe_ok,
+        "pf_pass": pf_ok,
+        "dd_pass": dd_ok,
+        "overall_pass": sharpe_ok and pf_ok and dd_ok,
+    }
+
+
+def _print_wf_verdict(agg: dict[str, Any], verdict: dict[str, bool]) -> None:
+    """Print walk-forward acceptance verdict."""
+    def _tag(key: str) -> str:
+        return "PASS" if verdict.get(key) else "FAIL"
+
+    sharpe_val = agg.get("sharpe", 0)
+    pf_val = agg.get("profit_factor", 0)
+    dd_val = agg.get("max_drawdown_pct", 0)
+
+    print("\n  ACCEPTANCE CRITERIA:")
+    print(f"    Sharpe > 0:     {_tag('sharpe_pass')} ({sharpe_val:+.4f})")
+    print(f"    PF > 1.0:       {_tag('pf_pass')} ({pf_val:.2f})")
+    print(f"    DD <= 3%:       {_tag('dd_pass')} ({dd_val:.2f}%)")
+    print(f"    Overall:        {_tag('overall_pass')}")
+    print()
+
+
 def _print_bond_results(
     segment: str,
     result: BondBacktestResult,
@@ -390,7 +786,7 @@ def _build_summary(
             "initial_cash": str(config.initial_cash),
             "max_positions": config.max_positions,
             "max_hold_bars": config.max_hold_bars,
-            "yield_stop_bps": config.yield_stop.threshold_bps,
+            "yield_stop_bps": config.yield_stop._threshold_bps,
         },
         "results": {
             "total_return_pct": float(result.total_return_pct),
@@ -436,6 +832,11 @@ def _parse_args() -> argparse.Namespace:
         "--cash", type=int, default=1_000_000, help="Initial cash per segment in RUB"
     )
     parser.add_argument("--output", default="results/iterations/", help="Output root")
+    parser.add_argument(
+        "--walk-forward",
+        action="store_true",
+        help="Run walk-forward validation (12mo train / 6mo test / 3mo roll)",
+    )
     return parser.parse_args()
 
 
@@ -450,7 +851,8 @@ def main() -> None:
     output_dir = Path(args.output) / args.name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\nBond Iteration: '{args.name}'")
+    mode = "WALK-FORWARD" if args.walk_forward else "SINGLE-PASS"
+    print(f"\nBond Iteration: '{args.name}' ({mode})")
     print(f"  Description: {args.description}")
     print(f"  Period: {args.start} to {args.end}")
     print(f"  Segments: {', '.join(segments)}")
@@ -458,8 +860,10 @@ def main() -> None:
 
     all_summaries: list[dict[str, Any]] = []
 
+    run_fn = _run_bond_segment_walk_forward if args.walk_forward else _run_bond_segment
+
     for segment in segments:
-        summary = _run_bond_segment(
+        summary = run_fn(
             segment=segment,
             cash=cash,
             start=start,

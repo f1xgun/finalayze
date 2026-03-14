@@ -19,15 +19,15 @@ from pathlib import Path
 
 import pytest
 
-# Ensure scripts/ is importable
-_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent.parent / "scripts")
-if _SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPTS_DIR)
-
 from finalayze.backtest.bond_engine import BondBacktestConfig
 from finalayze.backtest.costs import MOEX_BOND_COSTS
 from finalayze.core.schemas import BondInfo, Candle, CouponPayment, Signal, SignalDirection
 from finalayze.risk.yield_stop import YieldStop
+
+# Ensure scripts/ is importable
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent.parent / "scripts")
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
 
 
 def _make_candle(symbol: str, dt: date, close: Decimal = Decimal("99.50")) -> Candle:
@@ -258,18 +258,10 @@ class TestWalkForwardCLI:
     """Test that --walk-forward CLI flag is recognized."""
 
     def test_walk_forward_flag_in_parser(self) -> None:
+        """Verify walk_forward_bond_backtest and WalkForwardResult exist in module."""
         import run_bond_iteration
 
-        parser = run_bond_iteration._parse_args.__wrapped__ if hasattr(
-            run_bond_iteration._parse_args, "__wrapped__"
-        ) else None
-
-        # Just verify the module has walk-forward support
-        # by checking argument parser accepts --walk-forward
-        import argparse
-
-        # Recreate parser to test flag
-        test_parser = argparse.ArgumentParser()
-        test_parser.add_argument("--walk-forward", action="store_true")
-        ns = test_parser.parse_args(["--walk-forward"])
-        assert ns.walk_forward is True
+        # Module should have walk-forward support
+        assert hasattr(run_bond_iteration, "walk_forward_bond_backtest")
+        assert hasattr(run_bond_iteration, "WalkForwardResult")
+        assert hasattr(run_bond_iteration, "_run_bond_segment_walk_forward")
