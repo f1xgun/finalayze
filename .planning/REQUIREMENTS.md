@@ -1,0 +1,141 @@
+# Requirements: Finalayze MOEX MVP
+
+**Defined:** 2026-03-14
+**Core Value:** Autonomous profitable MOEX trading (stocks + bonds + coupons) with risk limits, operating without human intervention
+
+## v1 Requirements
+
+Requirements for initial release. Each maps to roadmap phases.
+
+### MOEX Equity Foundation
+
+- [ ] **EQF-01**: Position sizing uses RUB denomination for MOEX segments (not USD)
+- [ ] **EQF-02**: MOEX backtest produces positive PnL with walk-forward validation
+- [ ] **EQF-03**: MOEX-specific strategy parameters tuned (ru_* YAML presets calibrated)
+- [ ] **EQF-04**: MOEX holiday calendar integrated (14-20 non-weekend non-trading days/year)
+- [ ] **EQF-05**: MOEX costs (commissions, slippage) fully wired in backtest engine
+
+### Bond Data Pipeline
+
+- [ ] **BDP-01**: Bond candle data fetched via T-Invest API (GetBonds, GetBondCoupons)
+- [ ] **BDP-02**: NKD (accrued coupon interest) and dirty price computed correctly
+- [ ] **BDP-03**: MacroCacheService provides real-time CBR key rate and FX data
+- [ ] **BDP-04**: QuantLib integration for YTM, modified duration, convexity calculations
+- [ ] **BDP-05**: Bond instrument registry with FIGI mapping for OFZ and corporate bonds
+
+### Bond Execution
+
+- [ ] **BEX-01**: `BondCycleProcessor._size_and_execute()` completes real order submission
+- [ ] **BEX-02**: `YieldStop._process_yield_stops()` computes current YTM and exits positions
+- [ ] **BEX-03**: Separate `moex_bonds` TinkoffBroker instance in BrokerRouter
+- [ ] **BEX-04**: DV01BudgetStep uses dirty price (not face_value) for cash calculations
+- [ ] **BEX-05**: Bond backtest shows positive carry PnL with walk-forward validation
+- [ ] **BEX-06**: LayerLedger reconciliation on startup (sync with broker state)
+
+### News Pipeline
+
+- [ ] **NWS-01**: Russian news RSS feed reader (RBC, Interfax, TASS, Kommersant)
+- [ ] **NWS-02**: LLM analysis of Russian news via existing NewsAnalyzer + Russian prompts
+- [ ] **NWS-03**: Telegram channel reading for financial sentiment (Telethon)
+- [ ] **NWS-04**: News-driven signal generation (event impact → trading decision)
+- [ ] **NWS-05**: `event_driven` strategy enabled on MOEX segments
+
+### Monitoring & Alerts
+
+- [ ] **MON-01**: Telegram bot sends trade alerts (fill, stop-loss, circuit breaker)
+- [ ] **MON-02**: Daily P&L summary fixed (currently shows zero)
+- [ ] **MON-03**: Telegram priority message queue (prevent loss during circuit breaker bursts)
+- [ ] **MON-04**: Coupon receipt alerts via Telegram
+- [ ] **MON-05**: CBR meeting alerts with impact analysis
+
+### Autonomous Operation
+
+- [ ] **AUT-01**: BondCycleProcessor integrated into TradingLoop scheduler
+- [ ] **AUT-02**: MOEX trading schedule gate (skip non-trading days, respect hours)
+- [ ] **AUT-03**: All circuit breakers verified (equity + bond layers)
+- [ ] **AUT-04**: T-Invest sandbox validation: 5+ days autonomous operation without critical errors
+- [ ] **AUT-05**: Real money deployment on small account (first real MOEX trades)
+- [ ] **AUT-06**: Graceful error recovery (network, API, market data gaps)
+
+## v2 Requirements
+
+Deferred to future release. Tracked but not in current roadmap.
+
+### ML Enhancement
+
+- **ML-01**: ML ensemble enabled for ru_* segments with MOEX-specific features
+- **ML-02**: Cross-market correlations (MOEX vs US, Brent impact)
+- **ML-03**: OFZ yield curve bootstrapping from CBR zero-coupon curve
+
+### Advanced News
+
+- **NWS-06**: T-Invest API news/events stream (if available)
+- **NWS-07**: Telegram Pulse sentiment aggregation
+- **NWS-08**: Multi-LLM comparison (Claude vs GPT for Russian news accuracy)
+
+### Portfolio
+
+- **PRT-01**: Multi-account support
+- **PRT-02**: Cross-asset correlation-based allocation (stocks vs bonds)
+- **PRT-03**: Tax optimization (NDFL, ИИС deductions)
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| US market changes in this milestone | Already works, not MVP focus |
+| Derivatives/futures | Complexity too high for MVP |
+| High-frequency trading | System operates on daily/intraday bars |
+| Mobile app | Streamlit dashboard + Telegram sufficient |
+| Cryptocurrency | Not available on MOEX |
+| Custom ML training UI | CLI scripts sufficient |
+| Python 3.13+ upgrade | Separate task, not blocking |
+| Multi-broker support | T-Invest only for MVP |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| EQF-01 | — | Pending |
+| EQF-02 | — | Pending |
+| EQF-03 | — | Pending |
+| EQF-04 | — | Pending |
+| EQF-05 | — | Pending |
+| BDP-01 | — | Pending |
+| BDP-02 | — | Pending |
+| BDP-03 | — | Pending |
+| BDP-04 | — | Pending |
+| BDP-05 | — | Pending |
+| BEX-01 | — | Pending |
+| BEX-02 | — | Pending |
+| BEX-03 | — | Pending |
+| BEX-04 | — | Pending |
+| BEX-05 | — | Pending |
+| BEX-06 | — | Pending |
+| NWS-01 | — | Pending |
+| NWS-02 | — | Pending |
+| NWS-03 | — | Pending |
+| NWS-04 | — | Pending |
+| NWS-05 | — | Pending |
+| MON-01 | — | Pending |
+| MON-02 | — | Pending |
+| MON-03 | — | Pending |
+| MON-04 | — | Pending |
+| MON-05 | — | Pending |
+| AUT-01 | — | Pending |
+| AUT-02 | — | Pending |
+| AUT-03 | — | Pending |
+| AUT-04 | — | Pending |
+| AUT-05 | — | Pending |
+| AUT-06 | — | Pending |
+
+**Coverage:**
+- v1 requirements: 32 total
+- Mapped to phases: 0
+- Unmapped: 32 ⚠️
+
+---
+*Requirements defined: 2026-03-14*
+*Last updated: 2026-03-14 after initial definition*
