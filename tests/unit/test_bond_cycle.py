@@ -272,6 +272,9 @@ class TestSizeAndExecuteBuy:
         # DV01 sizer returns 5 bonds
         mocks["dv01_sizer"].compute_position_size.return_value = 5
 
+        # Broker returns current price
+        mocks["broker"].get_last_prices.return_value = {"SU26238RMFS4": Decimal("95.50")}
+
         # Broker submit returns order with order_id
         mocks["broker"].submit_order.return_value = _make_order_result()
 
@@ -282,6 +285,8 @@ class TestSizeAndExecuteBuy:
             mock_bm.dirty_price.return_value = Decimal("960.00")
             mock_bm.nkd.return_value = Decimal("10.00")
             mock_bm.ytm.return_value = Decimal("15.50")
+            mock_bm.modified_duration.return_value = Decimal("3.50")
+            mock_bm.dv01.return_value = Decimal("0.0336")
             result = proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
 
         assert result is True
@@ -300,14 +305,20 @@ class TestSizeAndExecuteBuy:
         bond_info = _make_bond_info()
         mocks["registry"].get.return_value = bond_info
         mocks["dv01_sizer"].compute_position_size.return_value = 5
+        mocks["broker"].get_last_prices.return_value = {"SU26238RMFS4": Decimal("95.50")}
 
         mocks["broker"].submit_order.return_value = _make_order_result(
             filled=False, order_id="ord-timeout"
         )
-        # Order stays in "new" status forever
-        mocks["broker"].get_order_state.return_value = _make_order_state(
-            status="new", filled_qty=0, is_terminal=False, order_id="ord-timeout"
-        )
+        # Order stays in "new" status forever then cancelled with 0 fills
+        mocks["broker"].get_order_state.side_effect = [
+            _make_order_state(
+                status="new", filled_qty=0, is_terminal=False, order_id="ord-timeout"
+            ),
+            _make_order_state(
+                status="cancelled", filled_qty=0, is_terminal=True, order_id="ord-timeout"
+            ),
+        ]
 
         with (
             patch("finalayze.core.bond_cycle.bond_math") as mock_bm,
@@ -316,6 +327,8 @@ class TestSizeAndExecuteBuy:
             mock_bm.dirty_price.return_value = Decimal("960.00")
             mock_bm.nkd.return_value = Decimal("10.00")
             mock_bm.ytm.return_value = Decimal("15.50")
+            mock_bm.modified_duration.return_value = Decimal("3.50")
+            mock_bm.dv01.return_value = Decimal("0.0336")
             # Simulate time passing beyond timeout
             mock_time.monotonic.side_effect = [0.0, 0.0, _FILL_TIMEOUT_SECONDS + 1]
             mock_time.sleep = MagicMock()
@@ -337,12 +350,21 @@ class TestSizeAndExecuteBuy:
         bond_info = _make_bond_info()
         mocks["registry"].get.return_value = bond_info
         mocks["dv01_sizer"].compute_position_size.return_value = 5
+        mocks["broker"].get_last_prices.return_value = {"SU26238RMFS4": Decimal("95.50")}
 
         mocks["broker"].submit_order.return_value = _make_order_result(
             filled=False, order_id="ord-partial"
         )
-        # After timeout, order is partially filled (3 of 5)
+        # Poll 1: not terminal (partially filled), still within timeout.
+        # Poll 2: still partially_fill, now timeout exceeded -> return None.
+        # After cancel, final state check returns cancelled with 3 filled.
         mocks["broker"].get_order_state.side_effect = [
+            _make_order_state(
+                status="partially_fill",
+                filled_qty=3,
+                is_terminal=False,
+                order_id="ord-partial",
+            ),
             _make_order_state(
                 status="partially_fill",
                 filled_qty=3,
@@ -365,7 +387,9 @@ class TestSizeAndExecuteBuy:
             mock_bm.dirty_price.return_value = Decimal("960.00")
             mock_bm.nkd.return_value = Decimal("10.00")
             mock_bm.ytm.return_value = Decimal("15.50")
-            # Simulate time passing beyond timeout on first check
+            mock_bm.modified_duration.return_value = Decimal("3.50")
+            mock_bm.dv01.return_value = Decimal("0.0336")
+            # start=0.0, first elapsed check=0.0 (within timeout), second=timeout+1
             mock_time.monotonic.side_effect = [0.0, 0.0, _FILL_TIMEOUT_SECONDS + 1]
             mock_time.sleep = MagicMock()
             result = proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
@@ -386,6 +410,7 @@ class TestSizeAndExecuteBuy:
         bond_info = _make_bond_info()
         mocks["registry"].get.return_value = bond_info
         mocks["dv01_sizer"].compute_position_size.return_value = 5
+        mocks["broker"].get_last_prices.return_value = {"SU26238RMFS4": Decimal("95.50")}
 
         mocks["broker"].submit_order.return_value = _make_order_result(quantity=Decimal(5))
         mocks["broker"].get_order_state.return_value = _make_order_state(filled_qty=5)
@@ -395,6 +420,8 @@ class TestSizeAndExecuteBuy:
             mock_bm.dirty_price.return_value = dirty
             mock_bm.nkd.return_value = Decimal("10.00")
             mock_bm.ytm.return_value = Decimal("15.50")
+            mock_bm.modified_duration.return_value = Decimal("3.50")
+            mock_bm.dv01.return_value = Decimal("0.0336")
             proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
 
         # Cash should be reduced by dirty_price * qty + costs
@@ -412,11 +439,14 @@ class TestSizeAndExecuteBuy:
         bond_info = _make_bond_info()
         mocks["registry"].get.return_value = bond_info
         mocks["dv01_sizer"].compute_position_size.return_value = 0  # 0 means no trade
+        mocks["broker"].get_last_prices.return_value = {"SU26238RMFS4": Decimal("95.50")}
 
         with patch("finalayze.core.bond_cycle.bond_math") as mock_bm:
             mock_bm.dirty_price.return_value = Decimal("960.00")
             mock_bm.nkd.return_value = Decimal("10.00")
             mock_bm.ytm.return_value = Decimal("15.50")
+            mock_bm.modified_duration.return_value = Decimal("3.50")
+            mock_bm.dv01.return_value = Decimal("0.0336")
             proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
 
         # Verify transaction_costs_per_unit was passed
@@ -433,6 +463,9 @@ class TestSizeAndExecuteSell:
         signal = _make_signal(SignalDirection.SELL)
         layer = PortfolioLayer.STRATEGIC
         ledger = mocks["ledgers"][layer]
+
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
 
         # Add a position to sell
         ledger.add_bond_position(
@@ -469,6 +502,9 @@ class TestSizeAndExecuteSell:
         signal = _make_signal(SignalDirection.SELL)
         layer = PortfolioLayer.STRATEGIC
         ledger = mocks["ledgers"][layer]
+
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
 
         ledger.add_bond_position(
             BondPositionRecord(
@@ -509,13 +545,19 @@ class TestSizeAndExecuteNoRetry:
         bond_info = _make_bond_info()
         mocks["registry"].get.return_value = bond_info
         mocks["dv01_sizer"].compute_position_size.return_value = 5
+        mocks["broker"].get_last_prices.return_value = {"SU26238RMFS4": Decimal("95.50")}
 
         mocks["broker"].submit_order.return_value = _make_order_result(
             filled=False, order_id="ord-no-retry"
         )
-        mocks["broker"].get_order_state.return_value = _make_order_state(
-            status="new", filled_qty=0, is_terminal=False, order_id="ord-no-retry"
-        )
+        mocks["broker"].get_order_state.side_effect = [
+            _make_order_state(
+                status="new", filled_qty=0, is_terminal=False, order_id="ord-no-retry"
+            ),
+            _make_order_state(
+                status="cancelled", filled_qty=0, is_terminal=True, order_id="ord-no-retry"
+            ),
+        ]
 
         with (
             patch("finalayze.core.bond_cycle.bond_math") as mock_bm,
@@ -524,6 +566,8 @@ class TestSizeAndExecuteNoRetry:
             mock_bm.dirty_price.return_value = Decimal("960.00")
             mock_bm.nkd.return_value = Decimal("10.00")
             mock_bm.ytm.return_value = Decimal("15.50")
+            mock_bm.modified_duration.return_value = Decimal("3.50")
+            mock_bm.dv01.return_value = Decimal("0.0336")
             mock_time.monotonic.side_effect = [0.0, 0.0, _FILL_TIMEOUT_SECONDS + 1]
             mock_time.sleep = MagicMock()
             result = proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
