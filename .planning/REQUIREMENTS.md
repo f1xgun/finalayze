@@ -17,11 +17,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Bond Data Pipeline
 
-- [ ] **BDP-01**: Bond candle data fetched via T-Invest API (GetBonds, GetBondCoupons)
+- [x] **BDP-01**: Bond candle data fetched via T-Invest API (GetBonds, GetBondCoupons)
 - [x] **BDP-02**: NKD (accrued coupon interest) and dirty price computed correctly
 - [x] **BDP-03**: MacroCacheService provides real-time CBR key rate and FX data
 - [x] **BDP-04**: QuantLib integration for YTM, modified duration, convexity calculations
-- [ ] **BDP-05**: Bond instrument registry with FIGI mapping for OFZ and corporate bonds
+- [x] **BDP-05**: Bond instrument registry with FIGI mapping for OFZ and corporate bonds
 
 ### Bond Execution
 
@@ -103,11 +103,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EQF-03 | Phase 2 | Complete |
 | EQF-04 | Phase 1 | Complete |
 | EQF-05 | Phase 1 | Complete |
-| BDP-01 | Phase 3 | Pending |
+| BDP-01 | Phase 3 | Complete |
 | BDP-02 | Phase 3 | Complete |
 | BDP-03 | Phase 3 | Complete |
 | BDP-04 | Phase 3 | Complete |
-| BDP-05 | Phase 3 | Pending |
+| BDP-05 | Phase 3 | Complete |
 | BEX-01 | Phase 4 | Pending |
 | BEX-02 | Phase 4 | Pending |
 | BEX-03 | Phase 4 | Pending |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md
+stopped_at: Completed 03-03-PLAN.md
 last_updated: "2026-03-14T17:49:50.039Z"
 last_activity: 2026-03-14 -- Completed 03-01 (Bond math QuantLib wrapper)
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 8
-  completed_plans: 7
-  percent: 29
+  total_plans: 10
+  completed_plans: 10
+  percent: 43
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 3 of 7 (Bond Data Pipeline)
-Plan: 1 of 3 in current phase
-Status: Phase 3 In Progress
-Last activity: 2026-03-14 -- Completed 03-01 (Bond math QuantLib wrapper)
+Plan: 3 of 3 in current phase
+Status: Phase 3 Complete
+Last activity: 2026-03-14 -- Completed 03-03 (Bond discovery & candle cache)
 
-Progress: [███░░░░░░░] 29%
+Progress: [████░░░░░░] 43%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [███░░░░░░░] 29%
 | Phase 02 P03 | 4min | 3 tasks | 5 files |
 | Phase 03 P02 | 5min | 3 tasks | 6 files |
 | Phase 03 P01 | 9min | 2 tasks | 6 files |
+| Phase 03 P03 | 9min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,9 @@ Recent decisions affecting current work:
 - [Phase 02]: Three-quarter Kelly (0.75) kept for MOEX segments -- 3x position sizes vs default
 - [Phase 03]: Yield curve parsed from CBR HTML using lxml.html; async DB persistence via asyncio boundary in sync refresh()
 - [Phase 03]: QuantLib cleanPrice/bondYield use % of face (MOEX convention), not absolute RUB
+- [Phase 03]: liquidity_flag as proxy for 10M RUB/day turnover (T-Invest API limitation)
+- [Phase 03]: OFZ classified by class_code (TQOB/TQOD) or sector containing "government"
+- [Phase 03]: CouponEvent emitted on record_date match; bond candle prices in % of face value
 - [Phase 03]: Cross-validation tolerance 100bps (not 1bps) due to business-day vs calendar schedule difference
 - [Phase 03]: FloatingRateBond requires 1-year historical fixings backfill with flat rate (MVP)
 
@@ -97,6 +101,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T17:49:50.037Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-03-14T18:00:13Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None
