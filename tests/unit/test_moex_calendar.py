@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from finalayze.data.moex_calendar import is_moex_holiday, trading_days_gap
+from finalayze.data.moex_calendar import is_moex_holiday, is_moex_trading_day, trading_days_gap
 
 
 class TestIsHoliday:
@@ -69,3 +69,56 @@ class TestTradingDaysGap:
         # Mon to Fri = no non-trading days
         gap = trading_days_gap(date(2024, 3, 11), date(2024, 3, 15))
         assert gap == 0
+
+    def test_transferred_holiday_counted_in_gap(self) -> None:
+        """trading_days_gap counts transferred holidays as non-trading days."""
+        # 2024-04-29 (Mon) is a transferred holiday
+        # Gap from Apr 26 (Fri) to Apr 30 (Tue):
+        # Apr 27 (Sat) = non-trading, Apr 28 (Sun) = non-trading, Apr 29 (Mon) = transferred holiday
+        gap = trading_days_gap(date(2024, 4, 26), date(2024, 4, 30))
+        assert gap == 3  # Sat + Sun + transferred holiday
+
+
+class TestIsMoexTradingDay:
+    """Tests for is_moex_trading_day (unified: weekends + fixed + transferred)."""
+
+    @pytest.mark.parametrize(
+        ("d", "reason"),
+        [
+            (date(2020, 3, 9), "2020 transferred"),
+            (date(2020, 5, 4), "2020 transferred"),
+            (date(2021, 2, 22), "2021 transferred"),
+            (date(2021, 12, 31), "2021 transferred"),
+            (date(2022, 3, 7), "2022 transferred"),
+            (date(2022, 5, 2), "2022 transferred"),
+            (date(2023, 2, 24), "2023 transferred (Fri)"),
+            (date(2023, 5, 8), "2023 transferred"),
+            (date(2024, 4, 29), "2024 transferred (Mon)"),
+            (date(2024, 4, 30), "2024 transferred"),
+            (date(2024, 12, 31), "2024 transferred"),
+            (date(2025, 5, 2), "2025 transferred"),
+            (date(2025, 12, 31), "2025 transferred"),
+            (date(2026, 3, 9), "2026 transferred"),
+        ],
+    )
+    def test_transferred_holidays_not_trading(self, d: date, reason: str) -> None:
+        assert is_moex_trading_day(d) is False, f"Expected non-trading: {reason}"
+
+    def test_normal_weekday_is_trading(self) -> None:
+        assert is_moex_trading_day(date(2024, 3, 11)) is True  # Monday
+
+    def test_fixed_holiday_not_trading(self) -> None:
+        assert is_moex_trading_day(date(2024, 1, 1)) is False
+
+    def test_saturday_not_trading(self) -> None:
+        assert is_moex_trading_day(date(2024, 6, 1)) is False
+
+    def test_sunday_not_trading(self) -> None:
+        assert is_moex_trading_day(date(2024, 6, 2)) is False
+
+    def test_year_without_transferred_data(self) -> None:
+        """Years outside 2020-2026 still check weekends and fixed holidays."""
+        # 2019-03-11 is a Monday, not a fixed holiday
+        assert is_moex_trading_day(date(2019, 3, 11)) is True
+        # 2019-01-01 is fixed holiday
+        assert is_moex_trading_day(date(2019, 1, 1)) is False

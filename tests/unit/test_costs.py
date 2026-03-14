@@ -46,14 +46,14 @@ class TestTransactionCosts:
     def test_moex_costs_rate_based(self) -> None:
         """MOEX_COSTS uses commission_rate (percentage of trade value)."""
         cost = MOEX_COSTS.total_cost(MOEX_PRICE, MOEX_QTY)
-        # commission = max(0.10, 100 * 100 * 0.0003) = max(0.10, 3.0) = 3.0
-        expected_commission = max(Decimal("0.10"), MOEX_PRICE * MOEX_QTY * Decimal("0.0003"))
+        # commission = max(0.10, 100 * 100 * 0.0004) = max(0.10, 4.0) = 4.0
+        expected_commission = max(Decimal("0.10"), MOEX_PRICE * MOEX_QTY * Decimal("0.0004"))
         spread = MOEX_PRICE * Decimal(10) / Decimal(10000)
         slippage = MOEX_PRICE * Decimal(7) / Decimal(10000)
         expected = expected_commission + (spread + slippage) * MOEX_QTY
         assert cost == expected
-        # Verify commission is 3.0 (not the old 0.30)
-        assert expected_commission == Decimal("3.0")
+        # Verify commission is 4.0 (Trader tariff 0.04%)
+        assert expected_commission == Decimal("4.0")
 
     def test_commission_rate_respects_min_commission(self) -> None:
         """For tiny trades, min_commission kicks in."""
@@ -188,11 +188,15 @@ class TestMoexBondCosts:
         expected = expected_commission + (spread + slippage) * US_QTY
         assert cost == expected
 
+    def test_moex_commission_rate_is_trader_tariff(self) -> None:
+        """MOEX_COSTS.commission_rate is 0.04% (Trader tariff), not 0.03%."""
+        assert MOEX_COSTS.commission_rate == Decimal("0.0004")
+
     def test_moex_costs_regression(self) -> None:
         """MOEX_COSTS still produces expected values after bond cost additions."""
         cost = MOEX_COSTS.total_cost(MOEX_PRICE, MOEX_QTY)
         expected_commission = max(
-            Decimal("0.10"), MOEX_PRICE * MOEX_QTY * Decimal("0.0003")
+            Decimal("0.10"), MOEX_PRICE * MOEX_QTY * Decimal("0.0004")
         )
         spread = MOEX_PRICE * Decimal(10) / _BPS_DIVISOR
         slippage = MOEX_PRICE * Decimal(7) / _BPS_DIVISOR
