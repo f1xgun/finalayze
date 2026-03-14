@@ -10,8 +10,8 @@ progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 18
-  completed_plans: 16
-  percent: 89
+  completed_plans: 17
+  percent: 94
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 6 of 7 (Sandbox Validation)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In Progress
-Last activity: 2026-03-15 -- Completed 06-01 (Error recovery hardening: gRPC reconnection, health probes, staleness)
+Last activity: 2026-03-15 -- Completed 06-02 (Docker Compose sandbox stack, Grafana, cycle logging, job persistence)
 
-Progress: [█████████░] 89%
+Progress: [█████████▌] 94%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [█████████░] 89%
 | Phase 05 P03 | 7min | 2 tasks | 8 files |
 | Phase 05 P04 | 4min | 2 tasks | 5 files |
 | Phase 06 P01 | 5min | 2 tasks | 7 files |
+| Phase 06 P02 | 6min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,11 @@ Recent decisions affecting current work:
 - [06-01]: cancel_order_safe() as bool-returning alternative to cancel_order() (which raises)
 - [06-01]: Tinkoff added to mandatory health components; "unknown" status accepted (not configured)
 - [06-01]: All open orders on startup treated as stale and cancelled (conservative reconciliation)
+- [06-02]: SQLAlchemyJobStore with sync URL fallback to MemoryJobStore when psycopg2 unavailable
+- [06-02]: All APScheduler jobs have stable IDs with replace_existing=True for crash recovery
+- [06-02]: TradingLoop starts in daemon thread from FastAPI lifespan (sandbox and real modes)
+- [06-02]: Sandbox mode equity/drawdown sourced from SandboxPortfolioTracker.shadow_portfolio()
+- [06-02]: Single uvicorn worker forced in sandbox mode for TradingLoop thread safety
 
 ### Pending Todos
 
@@ -136,5 +142,5 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-15T00:21:19Z
-Stopped at: Completed 06-01 (Error recovery hardening)
+Last session: 2026-03-15T00:30:27Z
+Stopped at: Completed 06-02 (Docker Compose sandbox stack, Grafana, cycle logging)

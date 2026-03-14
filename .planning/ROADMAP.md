@@ -150,5 +150,5 @@ Note: Phases 2 and 3 depend only on Phase 1 (not on each other) and could theore
 | 3. Bond Data Pipeline | 3/3 | Complete   | 2026-03-14 |
 | 4. Bond Execution | 3/3 | Complete    | 2026-03-14 |
 | 5. Integration and Telegram | 4/4 | Complete   | 2026-03-14 |
-| 6. Sandbox Validation | 1/3 | In Progress|  |
+| 6. Sandbox Validation | 2/3 | In Progress|  |
 | 7. News Pipeline and Go-Live | 0/3 | Not started | - |
