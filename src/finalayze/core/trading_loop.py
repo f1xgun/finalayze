@@ -29,6 +29,12 @@ import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from finalayze.core.schemas import NewsArticle, SignalDirection
+from finalayze.core.validation_logger import CycleLogEntry, ValidationLogger
+
+try:
+    from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+except ImportError:  # pragma: no cover
+    SQLAlchemyJobStore = None  # type: ignore[assignment,misc]
 from finalayze.markets.currency import CurrencyConverter
 
 if TYPE_CHECKING:
@@ -187,6 +193,12 @@ class TradingLoop:
         # gRPC reconnection backoff delays in seconds
         self._reconnect_delays = [30, 60, 120, 240, 300]
 
+        # Structured cycle validation logger
+        self._validation_logger = ValidationLogger()
+
+        # Peak equity for drawdown calculation (sandbox mode)
+        self._peak_equity_rub: float = 0.0
+
     # ── Candle staleness ──────────────────────────────────────────────────
 
     @staticmethod
@@ -344,22 +356,49 @@ class TradingLoop:
             "default": APSThreadPoolExecutor(max_workers=4),
             "retrain": APSThreadPoolExecutor(max_workers=1),
         }
-        self._scheduler = BackgroundScheduler(timezone="UTC", executors=executors)
+
+        # Try to use persistent SQLAlchemy job store for crash recovery
+        jobstores: dict[str, object] = {}
+        db_url = getattr(self._settings, "database_url", "")
+        if db_url and SQLAlchemyJobStore is not None:
+            try:
+                sync_url = db_url.replace("+asyncpg", "")
+                jobstores["default"] = SQLAlchemyJobStore(url=sync_url)
+                _log.info("apscheduler_jobstore_sqlalchemy", url=sync_url[:40] + "...")
+            except Exception:
+                _log.warning("apscheduler_jobstore_sqlalchemy_failed", exc_info=True)
+        else:
+            _log.warning("apscheduler_jobstore_memory_fallback")
+
+        scheduler_kwargs: dict[str, object] = {
+            "timezone": "UTC",
+            "executors": executors,
+        }
+        if jobstores:
+            scheduler_kwargs["jobstores"] = jobstores
+
+        self._scheduler = BackgroundScheduler(**scheduler_kwargs)
         self._scheduler.add_job(
             self._news_cycle,
             "interval",
             minutes=self._settings.news_cycle_minutes,
+            id="news_cycle",
+            replace_existing=True,
         )
         self._scheduler.add_job(
             self._strategy_cycle,
             "interval",
             minutes=self._settings.strategy_cycle_minutes,
+            id="strategy_cycle",
+            replace_existing=True,
         )
         self._scheduler.add_job(
             self._daily_reset,
             "cron",
             hour=self._settings.daily_reset_hour_utc,
             minute=0,
+            id="daily_reset",
+            replace_existing=True,
         )
         if self._ml_registry is not None and getattr(self._settings, "ml_enabled", False):
             self._scheduler.add_job(
@@ -367,12 +406,16 @@ class TradingLoop:
                 "interval",
                 hours=getattr(self._settings, "ml_retrain_interval_hours", 168),
                 executor="retrain",
+                id="retrain_cycle",
+                replace_existing=True,
             )
         if self._fx_service is not None:
             self._scheduler.add_job(
                 self._fx_update_cycle,
                 "interval",
                 minutes=getattr(self._settings, "fx_update_interval_minutes", 60),
+                id="fx_update_cycle",
+                replace_existing=True,
             )
         if self._bond_processor is not None and getattr(
             self._settings, "bond_cycle_enabled", False
@@ -383,16 +426,19 @@ class TradingLoop:
                 self._macro_refresh,
                 CronTrigger(hour=7, minute=0, timezone="UTC"),  # 10:00 MSK
                 id="macro_refresh",
+                replace_existing=True,
             )
             self._scheduler.add_job(
                 self._bond_cycle,
                 CronTrigger(hour=7, minute=30, timezone="UTC"),  # 10:30 MSK
                 id="bond_cycle",
+                replace_existing=True,
             )
             self._scheduler.add_job(
                 self._cbr_day_refresh,
                 CronTrigger(hour=12, minute=30, timezone="UTC"),  # 15:30 MSK
                 id="cbr_day_refresh",
+                replace_existing=True,
             )
             _log.info("bond_cycle_scheduled")
         # Weekly digest on Sunday at configured hour (default 16:00 UTC = 19:00 MSK)
@@ -403,6 +449,7 @@ class TradingLoop:
             self._weekly_digest,
             CronTrigger(day_of_week="sun", hour=digest_hour, minute=0, timezone="UTC"),
             id="weekly_digest",
+            replace_existing=True,
         )
         # Load equity baselines from DB before starting scheduler
         # so daily P&L calculations use persisted start-of-day values
@@ -491,13 +538,39 @@ class TradingLoop:
         if not self._is_market_open("moex", now):
             _log.info("bond_cycle_skipped_hours", time=str(now.time()))
             return
+        import time as _time  # noqa: PLC0415
+
         _log.info("bond_cycle_start")
+        cycle_start = _time.monotonic()
+        errors_caught = 0
         try:
             result = self._bond_processor.run_cycle()
             _log.info("bond_cycle_complete", **result.to_log_dict())
         except Exception:
+            errors_caught = 1
             _log.exception("bond_cycle_failed")
             self._alerter.on_error("BondCycleProcessor", "bond_cycle_failed")
+        finally:
+            try:
+                duration_ms = int((_time.monotonic() - cycle_start) * 1000)
+                equity_rub = self._get_sandbox_equity_rub()
+                drawdown_pct = self._compute_drawdown_pct(equity_rub)
+                entry = CycleLogEntry(
+                    timestamp=self._now(),
+                    cycle_type="bond",
+                    duration_ms=duration_ms,
+                    instruments_processed=0,
+                    signals_generated=0,
+                    orders_submitted=0,
+                    orders_filled=0,
+                    errors_caught=errors_caught,
+                    equity_rub=equity_rub,
+                    drawdown_pct=drawdown_pct,
+                    circuit_breaker_level=0,
+                )
+                self._validation_logger.log_cycle(entry)
+            except Exception:
+                _log.debug("validation_logger_bond_failed", exc_info=True)
 
     def _preflight_check(self) -> bool:
         """Run preflight checks before scheduling bond cycle.
@@ -674,8 +747,31 @@ class TradingLoop:
         """Return current UTC datetime. Extracted for testability."""
         return datetime.now(UTC)
 
+    def _get_sandbox_equity_rub(self) -> float:
+        """Get equity from SandboxPortfolioTracker if in sandbox mode, else broker."""
+        from finalayze.core.modes import WorkMode  # noqa: PLC0415
+        from finalayze.execution.sandbox_tracker import SandboxPortfolioTracker  # noqa: PLC0415
+
+        if self._settings.mode == WorkMode.SANDBOX:
+            broker = self._broker_router.route("moex")
+            if isinstance(broker, SandboxPortfolioTracker):
+                return float(broker.shadow_portfolio().equity)
+        # Fallback: use raw broker portfolio
+        equity = self._get_market_equity("moex")
+        return float(equity) if equity is not None else 0.0
+
+    def _compute_drawdown_pct(self, equity_rub: float) -> float:
+        """Compute drawdown percentage, updating peak equity."""
+        if equity_rub > self._peak_equity_rub:
+            self._peak_equity_rub = equity_rub
+        if self._peak_equity_rub <= 0:
+            return 0.0
+        return (self._peak_equity_rub - equity_rub) / self._peak_equity_rub
+
     def _strategy_cycle(self) -> None:
         """For each market and instrument, generate a signal and submit orders."""
+        import time as _time  # noqa: PLC0415
+
         # 6A.1: Mode gate -- DEBUG mode must not send real orders
         if not self._settings.mode.can_submit_orders():
             _log.info(
@@ -684,11 +780,42 @@ class TradingLoop:
             )
             return
 
+        cycle_start = _time.monotonic()
         self._cycle_portfolio_cache.clear()
         try:
             self._strategy_cycle_impl()
         finally:
             self._cycle_portfolio_cache.clear()
+            # Log cycle metrics
+            try:
+                duration_ms = int((_time.monotonic() - cycle_start) * 1000)
+                equity_rub = self._get_sandbox_equity_rub()
+                drawdown_pct = self._compute_drawdown_pct(equity_rub)
+                # Get circuit breaker level for moex (primary market)
+                cb_level = 0
+                if "moex" in self._circuit_breakers:
+                    cb = self._circuit_breakers["moex"]
+                    cb_level = getattr(cb, "current_level", 0)
+                    if hasattr(cb_level, "value"):
+                        level_map = {"normal": 0, "caution": 1, "halted": 2, "liquidate": 3}
+                        cb_level = level_map.get(str(cb_level.value), 0)
+
+                entry = CycleLogEntry(
+                    timestamp=self._now(),
+                    cycle_type="equity",
+                    duration_ms=duration_ms,
+                    instruments_processed=0,  # TODO: track in impl
+                    signals_generated=0,
+                    orders_submitted=0,
+                    orders_filled=0,
+                    errors_caught=0,
+                    equity_rub=equity_rub,
+                    drawdown_pct=drawdown_pct,
+                    circuit_breaker_level=cb_level,
+                )
+                self._validation_logger.log_cycle(entry)
+            except Exception:
+                _log.debug("validation_logger_failed", exc_info=True)
 
     def _strategy_cycle_impl(self) -> None:
         """Inner implementation of _strategy_cycle with portfolio caching."""
