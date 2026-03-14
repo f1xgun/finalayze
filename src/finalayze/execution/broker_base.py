@@ -32,6 +32,7 @@ class OrderResult:
     side: Literal["BUY", "SELL"] | str = ""
     quantity: Decimal = Decimal(0)
     reason: str = ""
+    order_id: str = ""
 
 
 class BrokerBase(ABC):

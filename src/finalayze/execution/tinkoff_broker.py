@@ -16,6 +16,7 @@ import contextlib
 import math
 import os
 import threading
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -41,6 +42,28 @@ _MOEX_MARKET_ID = "moex"
 _NANO_DIVISOR = Decimal(1_000_000_000)
 _TBANK_GRPC_TARGET = "invest-public-api.tbank.ru:443"
 _TBANK_GRPC_SANDBOX_TARGET = "sandbox-invest-public-api.tbank.ru:443"
+
+# T-Invest execution report status codes -> human-readable names
+_EXECUTION_STATUS_MAP: dict[int, str] = {
+    0: "unspecified",
+    1: "fill",
+    2: "partially_fill",
+    3: "cancelled",
+    4: "new",
+    5: "rejected",
+}
+_TERMINAL_STATUSES = frozenset({"fill", "cancelled", "rejected"})
+
+
+@dataclass(frozen=True)
+class OrderStateResult:
+    """Result of querying order state from T-Invest API."""
+
+    order_id: str
+    execution_status: str  # "fill", "partially_fill", "new", "cancelled", "rejected"
+    filled_quantity: Decimal
+    filled_price: Decimal
+    is_terminal: bool  # True if fill, cancelled, rejected
 
 
 class TinkoffBroker(BrokerBase):
@@ -168,6 +191,7 @@ class TinkoffBroker(BrokerBase):
             raise BrokerError(msg) from exc
 
         fill_price = self._quotation_to_decimal(result.executed_order_price)  # type: ignore[attr-defined]
+        result_order_id: str = getattr(result, "order_id", "")
         _log.info(
             "order_filled",
             symbol=order.symbol,
@@ -175,6 +199,7 @@ class TinkoffBroker(BrokerBase):
             qty=actual_qty,
             fill_price=float(fill_price),
             figi=figi,
+            order_id=result_order_id,
         )
         return OrderResult(
             filled=True,
@@ -182,6 +207,7 @@ class TinkoffBroker(BrokerBase):
             symbol=order.symbol,
             side=order.side,
             quantity=Decimal(actual_qty),
+            order_id=result_order_id,
         )
 
     async def _post_order_async(
@@ -198,6 +224,97 @@ class TinkoffBroker(BrokerBase):
             direction=direction,
             order_type=OrderType.ORDER_TYPE_MARKET,
             account_id=self._account_id,
+        )
+
+    def get_last_prices(self, symbols: list[str]) -> dict[str, Decimal]:
+        """Fetch last prices for given symbols via T-Invest GetLastPrices.
+
+        Maps symbols to FIGIs via the instrument registry, calls the API,
+        and maps results back to symbol keys.
+
+        Args:
+            symbols: List of ticker symbols (e.g. ["SU26238RMFS4"]).
+
+        Returns:
+            Dict of symbol -> price as Decimal (% of face for bonds).
+        """
+        # Build symbol <-> FIGI mappings
+        symbol_to_figi: dict[str, str] = {}
+        figi_to_symbol: dict[str, str] = {}
+        for sym in symbols:
+            try:
+                instrument = self._registry.get(sym, _MOEX_MARKET_ID)
+                if instrument.figi is not None:
+                    symbol_to_figi[sym] = instrument.figi
+                    figi_to_symbol[instrument.figi] = sym
+            except Exception:
+                _log.warning("get_last_prices_symbol_not_found", symbol=sym)
+
+        if not symbol_to_figi:
+            return {}
+
+        figis = list(symbol_to_figi.values())
+        try:
+            self._ensure_account_id()
+            response = self._call(
+                lambda: asyncio.run(self._get_last_prices_async(figis))
+            )
+        except Exception as exc:
+            msg = f"Tinkoff get_last_prices failed: {exc}"
+            raise BrokerError(msg) from exc
+
+        result: dict[str, Decimal] = {}
+        for item in response.last_prices:  # type: ignore[attr-defined]
+            figi = item.figi
+            sym = figi_to_symbol.get(figi)
+            if sym is not None:
+                price = self._quotation_to_decimal(item.price)
+                result[sym] = price
+
+        return result
+
+    async def _get_last_prices_async(self, figis: list[str]) -> object:
+        """Async call to T-Invest GetLastPrices."""
+        client = self._get_client()
+        return await client.market_data.get_last_prices(figi=figis)  # type: ignore[attr-defined]
+
+    def get_order_state(self, order_id: str) -> OrderStateResult:
+        """Query order state from T-Invest API.
+
+        Args:
+            order_id: The broker-assigned order identifier.
+
+        Returns:
+            OrderStateResult with execution status, filled quantity/price, terminal flag.
+        """
+        try:
+            self._ensure_account_id()
+            state = self._call(
+                lambda: asyncio.run(self._get_order_state_async(order_id))
+            )
+        except Exception as exc:
+            msg = f"Tinkoff get_order_state failed for {order_id}: {exc}"
+            raise BrokerError(msg) from exc
+
+        raw_status = getattr(state, "execution_report_status", 0)
+        status_str = _EXECUTION_STATUS_MAP.get(raw_status, "unspecified")
+        filled_qty = Decimal(getattr(state, "lots_executed", 0))
+        filled_price = self._quotation_to_decimal(state.executed_order_price)  # type: ignore[attr-defined]
+
+        return OrderStateResult(
+            order_id=order_id,
+            execution_status=status_str,
+            filled_quantity=filled_qty,
+            filled_price=filled_price,
+            is_terminal=status_str in _TERMINAL_STATUSES,
+        )
+
+    async def _get_order_state_async(self, order_id: str) -> object:
+        """Async call to T-Invest get_order_state."""
+        client = self._get_client()
+        return await client.orders.get_order_state(  # type: ignore[attr-defined]
+            account_id=self._account_id,
+            order_id=order_id,
         )
 
     def get_portfolio(self) -> PortfolioState:
