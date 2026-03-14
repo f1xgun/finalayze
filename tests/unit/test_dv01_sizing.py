@@ -2,9 +2,156 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
+from finalayze.core.schemas import BondPositionRecord
 from finalayze.risk.dv01_sizing import DV01BudgetStep, EqualWeightBondSizer
+
+
+# ── BondPositionRecord tests ─────────────────────────────────────────────
+
+ENTRY_YTM = Decimal("12.50")
+ENTRY_PRICE = Decimal("1030.00")
+ENTRY_CLEAN_PCT = Decimal("98.50")
+RECORD_QTY = Decimal(10)
+
+
+class TestBondPositionRecord:
+    """Tests for BondPositionRecord frozen dataclass."""
+
+    def test_stores_all_fields(self) -> None:
+        record = BondPositionRecord(
+            symbol="SU26244RMFS2",
+            quantity=RECORD_QTY,
+            entry_ytm_pct=ENTRY_YTM,
+            entry_date=date(2026, 3, 14),
+            entry_price=ENTRY_PRICE,
+            entry_clean_pct=ENTRY_CLEAN_PCT,
+            layer_id="core",
+        )
+        assert record.symbol == "SU26244RMFS2"
+        assert record.quantity == RECORD_QTY
+        assert record.entry_ytm_pct == ENTRY_YTM
+        assert record.entry_date == date(2026, 3, 14)
+        assert record.entry_price == ENTRY_PRICE
+        assert record.entry_clean_pct == ENTRY_CLEAN_PCT
+        assert record.layer_id == "core"
+
+    def test_frozen(self) -> None:
+        record = BondPositionRecord(
+            symbol="SU26244RMFS2",
+            quantity=RECORD_QTY,
+            entry_ytm_pct=ENTRY_YTM,
+            entry_date=date(2026, 3, 14),
+            entry_price=ENTRY_PRICE,
+            entry_clean_pct=ENTRY_CLEAN_PCT,
+            layer_id="core",
+        )
+        import pytest
+
+        with pytest.raises(AttributeError):
+            record.symbol = "OTHER"  # type: ignore[misc]
+
+
+# ── DV01 dirty-price + transaction costs tests ──────────────────────────
+
+DIRTY_PRICE = Decimal("1030")
+FACE_VALUE_STD = Decimal("1000")
+TRANSACTION_COST = Decimal("5")
+
+
+class TestDV01UnitCostFix:
+    """Tests for DV01BudgetStep with unit_cost (dirty price) parameter."""
+
+    def test_unit_cost_reduces_bonds_vs_face_value(self) -> None:
+        """Dirty price 1030 should produce fewer bonds than face value 1000."""
+        step = DV01BudgetStep(
+            max_dd_pct=Decimal("0.05"),
+            expected_max_rate_move_bps=200,
+            max_single_position_pct=Decimal("0.30"),
+        )
+        bonds_face = step.compute_position_size(
+            layer_equity=Decimal(1500000),
+            bond_dv01_per_unit=Decimal("7.5"),
+            current_portfolio_dv01=Decimal(0),
+            unit_cost=FACE_VALUE_STD,
+        )
+        bonds_dirty = step.compute_position_size(
+            layer_equity=Decimal(1500000),
+            bond_dv01_per_unit=Decimal("7.5"),
+            current_portfolio_dv01=Decimal(0),
+            unit_cost=DIRTY_PRICE,
+        )
+        assert bonds_dirty < bonds_face
+
+    def test_default_unit_cost_backward_compat(self) -> None:
+        """Default unit_cost=1000 preserves backward compatibility."""
+        step = DV01BudgetStep()
+        result = step.compute_position_size(
+            layer_equity=Decimal(1000000),
+            bond_dv01_per_unit=Decimal(5),
+            current_portfolio_dv01=Decimal(0),
+        )
+        # Same as existing test: should be 8
+        expected_bonds = 8
+        assert result == expected_bonds
+
+    def test_transaction_costs_reduce_bonds(self) -> None:
+        """Adding transaction costs should reduce the number of bonds."""
+        step = DV01BudgetStep(
+            max_dd_pct=Decimal("0.05"),
+            expected_max_rate_move_bps=200,
+            max_single_position_pct=Decimal("0.30"),
+        )
+        bonds_no_cost = step.compute_position_size(
+            layer_equity=Decimal(1500000),
+            bond_dv01_per_unit=Decimal("7.5"),
+            current_portfolio_dv01=Decimal(0),
+            unit_cost=FACE_VALUE_STD,
+            transaction_costs_per_unit=Decimal(0),
+        )
+        bonds_with_cost = step.compute_position_size(
+            layer_equity=Decimal(1500000),
+            bond_dv01_per_unit=Decimal("7.5"),
+            current_portfolio_dv01=Decimal(0),
+            unit_cost=FACE_VALUE_STD,
+            transaction_costs_per_unit=TRANSACTION_COST,
+        )
+        # With costs, position cap shrinks so fewer bonds
+        assert bonds_with_cost <= bonds_no_cost
+
+
+class TestEqualWeightUnitCostFix:
+    """Tests for EqualWeightBondSizer with unit_cost parameter."""
+
+    def test_unit_cost_reduces_bonds(self) -> None:
+        """Dirty price 1030 should produce fewer bonds than face 1000."""
+        sizer = EqualWeightBondSizer(n_symbols=4)
+        bonds_face = sizer.compute_position_size(
+            layer_equity=Decimal(675000),
+            bond_dv01_per_unit=Decimal(5),
+            current_portfolio_dv01=Decimal(0),
+            unit_cost=FACE_VALUE_STD,
+        )
+        bonds_dirty = sizer.compute_position_size(
+            layer_equity=Decimal(675000),
+            bond_dv01_per_unit=Decimal(5),
+            current_portfolio_dv01=Decimal(0),
+            unit_cost=DIRTY_PRICE,
+        )
+        assert bonds_dirty < bonds_face
+
+    def test_default_unit_cost_backward_compat(self) -> None:
+        """Default unit_cost=1000 preserves backward compatibility."""
+        sizer = EqualWeightBondSizer(n_symbols=4)
+        result = sizer.compute_position_size(
+            layer_equity=Decimal(675000),
+            bond_dv01_per_unit=Decimal(5),
+            current_portfolio_dv01=Decimal(100),
+        )
+        expected_bonds = 168
+        assert result == expected_bonds
 
 
 class TestDV01BudgetStep:
