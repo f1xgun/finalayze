@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 5 of 7 (Integration & Telegram)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In Progress
-Last activity: 2026-03-14 -- Completed 05-01 (Telegram priority queue)
+Last activity: 2026-03-14 -- Completed 05-02 (Trading loop bond integration)
 
 Progress: [██████░░░░] 60%
 
@@ -59,6 +59,7 @@ Progress: [██████░░░░] 60%
 | Phase 04 P02 | 11min | 2 tasks | 5 files |
 | Phase 04 P03 | 25min | 2 tasks | 3 files |
 | Phase 05 P01 | 6min | 2 tasks | 3 files |
+| Phase 05 P02 | 8min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -104,6 +105,10 @@ Recent decisions affecting current work:
 - [05-01]: CRITICAL alerts bypass queue entirely (zero latency for circuit breaker)
 - [05-01]: Queue optional via set_queue() -- backward compatible without queue
 - [05-01]: HTML parse_mode on all Telegram messages; persistent httpx.AsyncClient
+- [05-02]: Bond cycle skip uses structlog only (no Telegram) per user decision
+- [05-02]: Preflight independent degradation: bond disabled on failure, equity continues
+- [05-02]: Bond P&L from LayerLedger.current_equity (not broker portfolio)
+- [05-02]: on_daily_summary extended with backward-compatible optional params
 
 ### Pending Todos
 
@@ -118,6 +123,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T20:01:00Z
-Stopped at: Completed 05-01-PLAN.md
-Resume file: .planning/phases/05-integration-and-telegram/05-02-PLAN.md
+Last session: 2026-03-14T20:12:45Z
+Stopped at: Completed 05-02-PLAN.md
+Resume file: .planning/phases/05-integration-and-telegram/05-03-PLAN.md

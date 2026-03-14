@@ -43,16 +43,16 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Monitoring & Alerts
 
 - [x] **MON-01**: Telegram bot sends trade alerts (fill, stop-loss, circuit breaker)
-- [ ] **MON-02**: Daily P&L summary fixed (currently shows zero)
+- [x] **MON-02**: Daily P&L summary fixed (currently shows zero)
 - [x] **MON-03**: Telegram priority message queue (prevent loss during circuit breaker bursts)
 - [ ] **MON-04**: Coupon receipt alerts via Telegram
 - [ ] **MON-05**: CBR meeting alerts with impact analysis
 
 ### Autonomous Operation
 
-- [ ] **AUT-01**: BondCycleProcessor integrated into TradingLoop scheduler
-- [ ] **AUT-02**: MOEX trading schedule gate (skip non-trading days, respect hours)
-- [ ] **AUT-03**: All circuit breakers verified (equity + bond layers)
+- [x] **AUT-01**: BondCycleProcessor integrated into TradingLoop scheduler
+- [x] **AUT-02**: MOEX trading schedule gate (skip non-trading days, respect hours)
+- [x] **AUT-03**: All circuit breakers verified (equity + bond layers)
 - [ ] **AUT-04**: T-Invest sandbox validation: 5+ days autonomous operation without critical errors
 - [ ] **AUT-05**: Real money deployment on small account (first real MOEX trades)
 - [ ] **AUT-06**: Graceful error recovery (network, API, market data gaps)
@@ -120,13 +120,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NWS-04 | Phase 7 | Pending |
 | NWS-05 | Phase 7 | Pending |
 | MON-01 | Phase 5 | Complete |
-| MON-02 | Phase 5 | Pending |
+| MON-02 | Phase 5 | Complete |
 | MON-03 | Phase 5 | Complete |
 | MON-04 | Phase 5 | Pending |
 | MON-05 | Phase 5 | Pending |
-| AUT-01 | Phase 5 | Pending |
-| AUT-02 | Phase 5 | Pending |
-| AUT-03 | Phase 5 | Pending |
+| AUT-01 | Phase 5 | Complete |
+| AUT-02 | Phase 5 | Complete |
+| AUT-03 | Phase 5 | Complete |
 | AUT-04 | Phase 6 | Pending |
 | AUT-05 | Phase 7 | Pending |
 | AUT-06 | Phase 6 | Pending |
