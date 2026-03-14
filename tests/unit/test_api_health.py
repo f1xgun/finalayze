@@ -8,7 +8,7 @@ ModeManager, ensuring full isolation between tests.
 from __future__ import annotations
 
 import os
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from config.settings import Settings, get_settings
@@ -253,3 +253,101 @@ class TestSetModeEndpoint:
                 "/api/v1/mode", json={"mode": MODE_INVALID}, headers={"X-API-Key": key}
             )
         assert response.status_code == HTTP_422
+
+
+# ---------------------------------------------------------------------------
+# Real Tinkoff health probe tests
+# ---------------------------------------------------------------------------
+class TestTinkoffHealthProbe:
+    @pytest.mark.asyncio
+    async def test_check_tinkoff_returns_ok_on_success(self) -> None:
+        """_check_tinkoff() should return 'ok' when get_portfolio() succeeds."""
+        from finalayze.api.v1.system import _check_tinkoff, set_tinkoff_broker
+
+        mock_broker = MagicMock()
+        mock_broker.get_portfolio.return_value = MagicMock()
+        set_tinkoff_broker(mock_broker)
+        try:
+            result = await _check_tinkoff()
+            assert result == "ok"
+        finally:
+            set_tinkoff_broker(None)
+
+    @pytest.mark.asyncio
+    async def test_check_tinkoff_returns_error_on_failure(self) -> None:
+        """_check_tinkoff() should return 'error' when get_portfolio() raises."""
+        from finalayze.api.v1.system import _check_tinkoff, set_tinkoff_broker
+
+        mock_broker = MagicMock()
+        mock_broker.get_portfolio.side_effect = RuntimeError("gRPC down")
+        set_tinkoff_broker(mock_broker)
+        try:
+            result = await _check_tinkoff()
+            assert result == "error"
+        finally:
+            set_tinkoff_broker(None)
+
+    @pytest.mark.asyncio
+    async def test_check_tinkoff_returns_unknown_when_no_broker(self) -> None:
+        """_check_tinkoff() should return 'unknown' when no broker is set."""
+        from finalayze.api.v1.system import _check_tinkoff, set_tinkoff_broker
+
+        set_tinkoff_broker(None)
+        result = await _check_tinkoff()
+        assert result == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_health_degraded_when_tinkoff_down(self) -> None:
+        """Overall /health status should be degraded when tinkoff probe fails."""
+        app, _ = build_test_app()
+        degraded = ComponentStatus(
+            db="ok", redis="ok", alpaca="ok", tinkoff="error", llm="ok"
+        )
+        with patch(
+            "finalayze.api.v1.system._get_component_status",
+            new_callable=AsyncMock,
+            return_value=degraded,
+        ):
+            async with make_client(app) as client:
+                response = await client.get("/api/v1/health")
+        assert response.json()["status"] == "degraded"
+        assert response.json()["components"]["tinkoff"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# Feed freshness probe tests
+# ---------------------------------------------------------------------------
+class TestFeedFreshnessProbe:
+    @pytest.mark.asyncio
+    async def test_feed_freshness_ok_when_fresh(self) -> None:
+        """_check_feed_freshness() should return 'ok' when data is recent."""
+        from datetime import UTC, datetime, timedelta
+
+        from finalayze.api.v1.system import _check_feed_freshness, update_feed_timestamp
+
+        update_feed_timestamp("tinkoff", datetime.now(UTC) - timedelta(minutes=30))
+        result = await _check_feed_freshness()
+        assert result == "ok"
+
+    @pytest.mark.asyncio
+    async def test_feed_freshness_stale_when_old(self) -> None:
+        """_check_feed_freshness() should return 'stale' when data is old."""
+        from datetime import UTC, datetime, timedelta
+
+        from finalayze.api.v1.system import _check_feed_freshness, update_feed_timestamp
+
+        update_feed_timestamp("tinkoff", datetime.now(UTC) - timedelta(hours=3))
+        result = await _check_feed_freshness()
+        assert result == "stale"
+
+    @pytest.mark.asyncio
+    async def test_feed_freshness_unknown_when_no_data(self) -> None:
+        """_check_feed_freshness() should return 'unknown' when no timestamps."""
+        from finalayze.api.v1.system import (
+            _check_feed_freshness,
+            _last_candle_timestamps,
+        )
+
+        _last_candle_timestamps.clear()
+        result = await _check_feed_freshness()
+        assert result == "unknown"

@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from datetime import UTC, datetime
-from typing import Annotated, Any
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Annotated, Any
 
 import redis.asyncio
 import structlog
@@ -22,6 +22,9 @@ from finalayze.core.db import get_async_session_factory
 from finalayze.core.exceptions import ModeError
 from finalayze.core.modes import ModeManager, WorkMode
 
+if TYPE_CHECKING:
+    from finalayze.execution.tinkoff_broker import TinkoffBroker
+
 _log = structlog.get_logger()
 
 router = APIRouter(tags=["system"])
@@ -31,6 +34,13 @@ _default_mode_manager = ModeManager()
 
 APP_VERSION = "0.1.0"
 _start_time = datetime.now(UTC)
+
+# Tinkoff broker reference for health probes (set via set_tinkoff_broker)
+_tinkoff_broker: TinkoffBroker | None = None
+
+# Feed freshness tracking: source -> last candle timestamp
+_last_candle_timestamps: dict[str, datetime] = {}
+_FEED_FRESHNESS_THRESHOLD_HOURS = 2.0
 
 # In-memory ring buffer for recent errors (max 100); deque(maxlen=100) handles eviction
 _recent_errors: deque[dict[str, Any]] = deque(maxlen=100)
@@ -148,6 +158,44 @@ async def _check_redis() -> str:
         return "error"
 
 
+def set_tinkoff_broker(broker: TinkoffBroker | None) -> None:
+    """Set the TinkoffBroker instance for health probes."""
+    global _tinkoff_broker  # noqa: PLW0603
+    _tinkoff_broker = broker
+
+
+def update_feed_timestamp(source: str, ts: datetime) -> None:
+    """Update the latest candle timestamp for a data source."""
+    _last_candle_timestamps[source] = ts
+
+
+async def _check_tinkoff() -> str:
+    """Return 'ok' if TinkoffBroker responds to get_portfolio(), else 'error'.
+
+    Returns 'unknown' if no broker is configured.
+    """
+    if _tinkoff_broker is None:
+        return "unknown"
+    try:
+        _tinkoff_broker.get_portfolio()
+        return "ok"
+    except Exception:
+        _log.debug("Tinkoff health check failed", exc_info=True)
+        return "error"
+
+
+async def _check_feed_freshness() -> str:
+    """Return 'ok' if all feeds are fresh, 'stale' if any exceed threshold, 'unknown' if no data."""
+    if not _last_candle_timestamps:
+        return "unknown"
+    now = datetime.now(UTC)
+    for ts in _last_candle_timestamps.values():
+        age = now - ts
+        if age >= timedelta(hours=_FEED_FRESHNESS_THRESHOLD_HOURS):
+            return "stale"
+    return "ok"
+
+
 async def _get_component_status() -> ComponentStatus:
     """Run real health checks with 30s caching."""
     global _health_cache, _health_cache_ts  # noqa: PLW0603
@@ -158,12 +206,13 @@ async def _get_component_status() -> ComponentStatus:
 
     db_status = await _check_db()
     redis_status = await _check_redis()
+    tinkoff_status = await _check_tinkoff()
 
     result = {
         "db": db_status,
         "redis": redis_status,
         "alpaca": "ok",
-        "tinkoff": "ok",
+        "tinkoff": tinkoff_status,
         "llm": "ok",
     }
     _health_cache = result
@@ -180,10 +229,11 @@ async def health(
 ) -> HealthResponse:
     """Liveness check — performs real DB and Redis probes. No auth required."""
     components = await _get_component_status()
-    # Only mandatory components (db, redis) determine overall status.
-    # Optional components default to "unknown" and do not degrade overall status.
-    _mandatory = {"db": components.db, "redis": components.redis}
-    overall = "ok" if all(v == "ok" for v in _mandatory.values()) else "degraded"
+    # Mandatory components determine overall status.
+    # "unknown" is acceptable (broker not configured); only "error" degrades.
+    _mandatory = {"db": components.db, "redis": components.redis, "tinkoff": components.tinkoff}
+    _ok_values = {"ok", "unknown"}  # "unknown" = not configured, not an error
+    overall = "ok" if all(v in _ok_values for v in _mandatory.values()) else "degraded"
     return HealthResponse(
         status=overall,
         mode=str(mgr.current_mode),

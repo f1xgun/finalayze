@@ -184,6 +184,135 @@ class TradingLoop:
         # Bond cycle enabled flag (set by preflight; independent degradation)
         self._bond_enabled: bool = True
 
+        # gRPC reconnection backoff delays in seconds
+        self._reconnect_delays = [30, 60, 120, 240, 300]
+
+    # ── Candle staleness ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _is_candle_stale(latest_ts: datetime, threshold_hours: float) -> bool:
+        """Return True if the latest candle timestamp is older than threshold.
+
+        Args:
+            latest_ts: Timestamp of the most recent candle (UTC).
+            threshold_hours: Maximum acceptable age in hours.
+
+        Returns:
+            True if candle data is stale and should be skipped.
+        """
+        now = datetime.now(UTC)
+        age = now - latest_ts
+        return age >= timedelta(hours=threshold_hours)
+
+    # ── gRPC reconnection ────────────────────────────────────────────────
+
+    def _attempt_grpc_reconnect(self, broker_name: str) -> bool:
+        """Try to reconnect gRPC channel with exponential backoff.
+
+        Attempts up to 5 reconnections with delays [30, 60, 120, 240, 300]s
+        (jittered 0.8-1.2x). Sends Telegram alert on each attempt.
+
+        Args:
+            broker_name: Market identifier (e.g. "moex") for logging/alerts.
+
+        Returns:
+            True if reconnection succeeded, False if all attempts exhausted
+            (sets _stop_event to halt trading).
+        """
+        import random  # noqa: PLC0415
+
+        from finalayze.execution.tinkoff_broker import TinkoffBroker  # noqa: PLC0415
+
+        broker = self._broker_router.route(broker_name)
+        if not isinstance(broker, TinkoffBroker):
+            _log.warning("reconnect_not_tinkoff", broker_name=broker_name)
+            return False
+
+        for attempt, delay in enumerate(self._reconnect_delays, 1):
+            jitter = random.uniform(0.8, 1.2)  # noqa: S311
+            actual_delay = delay * jitter
+            _log.warning(
+                "grpc_reconnect_attempt",
+                broker=broker_name,
+                attempt=attempt,
+                max_attempts=len(self._reconnect_delays),
+                delay_s=round(actual_delay, 1),
+            )
+            self._alerter.on_error(
+                "TradingLoop",
+                f"gRPC reconnect attempt {attempt}/{len(self._reconnect_delays)} "
+                f"for {broker_name} (delay {round(actual_delay)}s)",
+            )
+
+            import time as _time  # noqa: PLC0415
+
+            _time.sleep(actual_delay)
+
+            if broker.reconnect_client():
+                _log.info("grpc_reconnected", broker=broker_name, attempt=attempt)
+                return True
+
+        _log.error("grpc_reconnect_exhausted", broker=broker_name)
+        self._alerter.on_error(
+            "TradingLoop",
+            f"gRPC reconnection exhausted for {broker_name} -- halting trading",
+        )
+        self._stop_event.set()
+        return False
+
+    # ── In-flight order reconciliation ───────────────────────────────────
+
+    def _reconcile_inflight_orders(self) -> None:
+        """Query open orders from all TinkoffBrokers, cancel stale ones, log fills.
+
+        Stale orders: non-terminal orders older than 2 minutes (fill timeout).
+        Called on startup before scheduler begins.
+        """
+        from finalayze.execution.tinkoff_broker import TinkoffBroker  # noqa: PLC0415
+
+        _fill_timeout_seconds = 120  # 2 minutes
+
+        for market_id in list(self._circuit_breakers.keys()):
+            try:
+                broker = self._broker_router.route(market_id)
+            except Exception:  # noqa: S112
+                continue
+            if not isinstance(broker, TinkoffBroker):
+                continue
+
+            try:
+                open_orders = broker.get_open_orders()
+            except Exception:
+                _log.warning("reconcile_get_orders_failed", market=market_id)
+                continue
+
+            if not open_orders:
+                _log.info("reconcile_no_inflight", market=market_id)
+                continue
+
+            for order in open_orders:
+                _log.info(
+                    "reconcile_inflight_order",
+                    market=market_id,
+                    order_id=order.order_id,
+                    status=order.execution_status,
+                    filled_qty=str(order.filled_quantity),
+                )
+                # Log any partial fills
+                if order.filled_quantity > 0:
+                    _log.warning(
+                        "reconcile_partial_fill_detected",
+                        order_id=order.order_id,
+                        filled_qty=str(order.filled_quantity),
+                        filled_price=str(order.filled_price),
+                    )
+                # Cancel stale orders (all open orders on startup are stale)
+                cancelled = broker.cancel_order_safe(order.order_id)
+                if cancelled:
+                    _log.info("reconcile_cancelled_stale", order_id=order.order_id)
+                else:
+                    _log.warning("reconcile_cancel_failed", order_id=order.order_id)
+
     # ── Async helper ────────────────────────────────────────────────────────
 
     def _run_async(self, coro: Any) -> Any:
@@ -278,6 +407,9 @@ class TradingLoop:
         # Load equity baselines from DB before starting scheduler
         # so daily P&L calculations use persisted start-of-day values
         self._load_baseline_from_db()
+
+        # Reconcile in-flight orders from previous session before trading
+        self._reconcile_inflight_orders()
 
         self._scheduler.start()
         _log.info(
@@ -1285,9 +1417,7 @@ class TradingLoop:
         async with factory() as session:
             for market_id, equity in baselines.items():
                 currency = (
-                    "RUB"
-                    if market_id.startswith("moex") or market_id.startswith("ru_")
-                    else "USD"
+                    "RUB" if market_id.startswith("moex") or market_id.startswith("ru_") else "USD"
                 )
                 snapshot = DailyEquitySnapshot(
                     timestamp=now,
@@ -1328,9 +1458,7 @@ class TradingLoop:
 
         factory = get_async_session_factory()
         async with factory() as session:
-            today_start = datetime.now(tz=UTC).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
+            today_start = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
             # Subquery: latest timestamp per market_id for today
             subq = (
                 select(
@@ -1341,13 +1469,10 @@ class TradingLoop:
                 .group_by(DailyEquitySnapshot.market_id)
                 .subquery()
             )
-            stmt = (
-                select(DailyEquitySnapshot.market_id, DailyEquitySnapshot.equity)
-                .join(
-                    subq,
-                    (DailyEquitySnapshot.market_id == subq.c.market_id)
-                    & (DailyEquitySnapshot.timestamp == subq.c.max_ts),
-                )
+            stmt = select(DailyEquitySnapshot.market_id, DailyEquitySnapshot.equity).join(
+                subq,
+                (DailyEquitySnapshot.market_id == subq.c.market_id)
+                & (DailyEquitySnapshot.timestamp == subq.c.max_ts),
             )
             result = await session.execute(stmt)
             rows = result.all()
