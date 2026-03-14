@@ -112,11 +112,12 @@ Plans:
   2. LayerLedger reconciles with broker state on every startup (no ghost positions after restarts)
   3. Sandbox drawdown stays below 5%
   4. System recovers gracefully from network interruptions, API errors, and market data gaps
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 06-01: TBD
-- [ ] 06-02: TBD
+- [ ] 06-01-PLAN.md — Error recovery hardening: gRPC reconnection, health probes, staleness checks, order reconciliation
+- [ ] 06-02-PLAN.md — Docker Compose sandbox stack with Grafana, APScheduler job store, structured cycle logging, TradingLoop lifespan
+- [ ] 06-03-PLAN.md — Validation report generator, orchestration script, and sandbox stack verification checkpoint
 
 ### Phase 7: News Pipeline and Go-Live
 **Goal**: Russian news feeds drive event-based trading signals and the system executes first real MOEX trades
@@ -149,5 +150,5 @@ Note: Phases 2 and 3 depend only on Phase 1 (not on each other) and could theore
 | 3. Bond Data Pipeline | 3/3 | Complete   | 2026-03-14 |
 | 4. Bond Execution | 3/3 | Complete    | 2026-03-14 |
 | 5. Integration and Telegram | 4/4 | Complete   | 2026-03-14 |
-| 6. Sandbox Validation | 0/2 | Not started | - |
+| 6. Sandbox Validation | 0/3 | Not started | - |
 | 7. News Pipeline and Go-Live | 0/3 | Not started | - |
