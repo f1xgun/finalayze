@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Phase 6 context gathered
-last_updated: "2026-03-14T21:52:42.847Z"
-last_activity: "2026-03-14 -- Completed 05-04 (Gap closure: DB snapshot persistence & webhook wiring)"
+status: in_progress
+stopped_at: Completed 06-01 (Error recovery hardening)
+last_updated: "2026-03-14T22:22:11.000Z"
+last_activity: "2026-03-15 -- Completed 06-01 (Error recovery hardening: gRPC reconnection, health probes, staleness)"
 progress:
   total_phases: 7
   completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
-  percent: 71
+  total_plans: 18
+  completed_plans: 16
+  percent: 89
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Autonomous profitable MOEX trading (stocks + bonds + coupons) with risk limits, operating without human intervention
-**Current focus:** Phase 5 - Integration & Telegram
+**Current focus:** Phase 6 - Sandbox Validation
 
 ## Current Position
 
-Phase: 5 of 7 (Integration & Telegram)
-Plan: 4 of 4 in current phase
-Status: Phase Complete
-Last activity: 2026-03-14 -- Completed 05-04 (Gap closure: DB snapshot persistence & webhook wiring)
+Phase: 6 of 7 (Sandbox Validation)
+Plan: 1 of 3 in current phase
+Status: In Progress
+Last activity: 2026-03-15 -- Completed 06-01 (Error recovery hardening: gRPC reconnection, health probes, staleness)
 
-Progress: [███████░░░] 71%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [███████░░░] 71%
 | Phase 05 P02 | 8min | 2 tasks | 9 files |
 | Phase 05 P03 | 7min | 2 tasks | 8 files |
 | Phase 05 P04 | 4min | 2 tasks | 5 files |
+| Phase 06 P01 | 5min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,9 @@ Recent decisions affecting current work:
 - [05-03]: Weekly digest via CronTrigger(day_of_week='sun') at configurable hour
 - [05-04]: Lazy DB imports inside async methods to maintain dependency layering (Layer 6)
 - [05-04]: Telegram router mounted with placeholder handler; real deps wired by TradingLoop
+- [06-01]: cancel_order_safe() as bool-returning alternative to cancel_order() (which raises)
+- [06-01]: Tinkoff added to mandatory health components; "unknown" status accepted (not configured)
+- [06-01]: All open orders on startup treated as stale and cancelled (conservative reconciliation)
 
 ### Pending Todos
 
@@ -132,5 +136,5 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T21:52:42.844Z
-Stopped at: Phase 6 context gathered
+Last session: 2026-03-15T00:21:19Z
+Stopped at: Completed 06-01 (Error recovery hardening)
