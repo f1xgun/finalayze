@@ -10,8 +10,8 @@ progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 14
-  completed_plans: 11
-  percent: 55
+  completed_plans: 12
+  percent: 60
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Autonomous profitable MOEX trading (stocks + bonds + coupons) with risk limits, operating without human intervention
-**Current focus:** Phase 4 - Bond Execution
+**Current focus:** Phase 5 - Integration & Telegram
 
 ## Current Position
 
-Phase: 4 of 7 (Bond Execution)
-Plan: 3 of 3 in current phase (COMPLETE)
-Status: Phase 4 Complete
-Last activity: 2026-03-14 -- Completed 04-03 (Bond walk-forward validation)
+Phase: 5 of 7 (Integration & Telegram)
+Plan: 1 of 3 in current phase
+Status: In Progress
+Last activity: 2026-03-14 -- Completed 05-01 (Telegram priority queue)
 
-Progress: [██████░░░░] 55%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [██████░░░░] 55%
 | Phase 04 P01 | 7min | 2 tasks | 9 files |
 | Phase 04 P02 | 11min | 2 tasks | 5 files |
 | Phase 04 P03 | 25min | 2 tasks | 3 files |
+| Phase 05 P01 | 6min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -99,6 +100,10 @@ Recent decisions affecting current work:
 - [04-03]: ru_ofz_pk carry strategy ENABLED (Sharpe +1.14, PF 25.22, DD 1.0%, Win Rate 78.6%)
 - [04-03]: ru_ofz_pd duration rotation DISABLED (Sharpe -0.16, negative PnL in 2022-2025 hiking cycle)
 - [04-03]: Raw Sharpe (rf=0) used for bond acceptance checks
+- [05-01]: asyncio.PriorityQueue from stdlib for TelegramMessageQueue (no external dep)
+- [05-01]: CRITICAL alerts bypass queue entirely (zero latency for circuit breaker)
+- [05-01]: Queue optional via set_queue() -- backward compatible without queue
+- [05-01]: HTML parse_mode on all Telegram messages; persistent httpx.AsyncClient
 
 ### Pending Todos
 
@@ -113,6 +118,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T19:53:06.507Z
-Stopped at: Phase 5 planning complete
-Resume file: .planning/phases/05-integration-and-telegram/05-01-PLAN.md
+Last session: 2026-03-14T20:01:00Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: .planning/phases/05-integration-and-telegram/05-02-PLAN.md
