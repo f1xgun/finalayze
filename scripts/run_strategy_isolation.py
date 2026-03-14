@@ -74,8 +74,8 @@ UNIVERSE: dict[str, list[str]] = {
     "us_broad": ["SPY", "QQQ", "DIA", "IWM", "JNJ", "PG"],
     "us_finance": ["JPM", "BAC", "GS", "MS", "V", "MA"],
     "us_healthcare": ["UNH", "LLY", "PFE", "ABBV", "MRK", "TMO"],
-    "ru_blue_chips": ["YNDX", "MGNT", "ALRS", "VTBR", "GMKN"],
-    "ru_energy": ["ROSN", "IRAO", "NVTK"],
+    "ru_blue_chips": ["MGNT", "ALRS", "VTBR"],
+    "ru_energy": ["ROSN"],
     "ru_finance": ["VTBR", "MOEX", "TCSG", "CBOM", "BSPB"],
 }
 
@@ -161,7 +161,7 @@ def _run_isolation(
                 engine = BacktestEngine(
                     strategy=combiner,
                     config=config,
-                    rolling_kelly=RollingKelly(fraction=0.5) if segment.startswith("ru_") else RollingKelly(),
+                    rolling_kelly=RollingKelly(fraction=0.75) if segment.startswith("ru_") else RollingKelly(),
                 )
                 trades, snapshots = engine.run(
                     symbol=symbol,

@@ -1,6 +1,6 @@
 segment_id: ru_energy
 normalize_mode: "firing"
-min_combined_confidence: 0.25
+min_combined_confidence: 0.15
 min_exit_confidence: 0.24
 regime_routing:
   enabled: true

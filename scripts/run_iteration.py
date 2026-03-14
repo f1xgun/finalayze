@@ -189,16 +189,12 @@ UNIVERSE: dict[str, list[str]] = {
         "RSG",
     ],
     "ru_blue_chips": [
-        "YNDX",
         "MGNT",
         "ALRS",
         "VTBR",
-        "GMKN",
     ],
     "ru_energy": [
         "ROSN",
-        "IRAO",
-        "NVTK",
     ],
     "ru_finance": [
         "VTBR",
@@ -675,7 +671,7 @@ def _run_symbol(
             config=BacktestConfig(
                 initial_cash=cash,
                 decision_journal=journal,
-                rolling_kelly=RollingKelly(fraction=0.5) if segment.startswith("ru_") else RollingKelly(),
+                rolling_kelly=RollingKelly(fraction=0.75) if segment.startswith("ru_") else RollingKelly(),
                 use_impact_model=True,
                 use_evt_sizing=use_evt_sizing,
                 use_copula_scaling=use_copula_scaling,
