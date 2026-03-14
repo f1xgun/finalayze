@@ -261,6 +261,7 @@ class MacroSnapshotModel(Base):
     breakeven_inflation: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     yield_curve: Mapped[dict | None] = mapped_column(JSONB)
     usdrub: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    ofzin_indexation_coefficient: Mapped[Decimal | None] = mapped_column(Numeric(8, 6))
 
 
 class PortfolioSnapshot(Base):

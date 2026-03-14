@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -17,7 +17,7 @@ from finalayze.core.models import MacroSnapshotModel
 from finalayze.data.fetchers.cbr import CBR_MEETINGS, MacroContextProvider, MacroSnapshot
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import Callable
 
 _log = structlog.get_logger()
 
@@ -42,6 +42,7 @@ class MacroCacheService:
         self._last_refresh: datetime | None = None
         self._history: deque[MacroSnapshot] = deque(maxlen=history_size)
         self._db_session_factory = db_session_factory
+        self._persist_task: asyncio.Task[None] | None = None
 
     def refresh(self) -> MacroSnapshot:
         """Fetch fresh macro snapshot. Called by scheduler. SYNC."""
@@ -59,11 +60,13 @@ class MacroCacheService:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    loop.create_task(self._persist_snapshot(self._snapshot))
+                    self._persist_task = loop.create_task(
+                        self._persist_snapshot(self._snapshot)
+                    )
                 except RuntimeError:
                     # No running loop — create one for the write
                     asyncio.run(self._persist_snapshot(self._snapshot))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _log.warning(
                     "macro_snapshot_persist_failed",
                     key_rate=str(self._snapshot.key_rate),
@@ -90,6 +93,7 @@ class MacroCacheService:
                 else None
             ),
             usdrub=snapshot.usdrub,
+            ofzin_indexation_coefficient=snapshot.ofzin_indexation_coefficient,
         )
         session = await self._db_session_factory()
         session.add(model)

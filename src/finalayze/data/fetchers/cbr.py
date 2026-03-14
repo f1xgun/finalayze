@@ -49,6 +49,7 @@ _KEY_RATE_SOAP = """<?xml version="1.0" encoding="utf-8"?>
 _KEY_RATE_PERCENT_DIVISOR = Decimal(100)  # CBR returns percentage points
 _ZCYC_URL = "https://www.cbr.ru/hd_base/zcyc_params/"
 _ZCYC_MATURITIES = ("0.25", "0.50", "0.75", "1", "2", "3", "5", "7", "10", "15", "20", "30")
+_INDEXATION_URL = "https://www.cbr.ru/hd_base/ostat_depo_new/"
 
 
 class CBRFetcher:
@@ -138,10 +139,54 @@ class CBRFetcher:
                 try:
                     maturity = headers[i].strip()
                     result[maturity] = Decimal(val_str.replace(",", "."))
-                except Exception:  # noqa: BLE001
+                except (ValueError, ArithmeticError):
                     continue
 
-        return result if result else None
+        return result or None
+
+    def fetch_ofzin_indexation_coefficient(self, as_of: date) -> Decimal | None:
+        """Fetch OFZ-IN daily indexation coefficient from CBR for *as_of* date.
+
+        The coefficient represents cumulative CPI adjustment since issuance
+        (e.g. 1.0523 = 5.23% cumulative inflation). Used for adjusting
+        OFZ-IN face value: adjusted_nominal = original_nominal * coefficient.
+
+        Returns None if no data available (weekends, holidays, HTTP errors).
+        """
+        params = {"DateReq": as_of.strftime("%d.%m.%Y")}
+        try:
+            content = self._request("GET", _INDEXATION_URL, params=params)
+        except DataFetchError:
+            _log.warning("cbr_indexation_fetch_failed", as_of=str(as_of))
+            return None
+        return self._parse_indexation_response(content.decode("utf-8", errors="replace"))
+
+    @staticmethod
+    def _parse_indexation_response(content: str) -> Decimal | None:
+        """Parse CBR OFZ-IN indexation HTML response.
+
+        Returns the indexation coefficient as Decimal, or None if no data.
+        """
+        doc = lxml_html.fromstring(content)
+        tables = doc.xpath("//table[contains(@class, 'data')]")
+        if not tables:
+            return None
+
+        table = tables[0]
+        rows = table.xpath(".//tr")
+        if len(rows) < 2:  # noqa: PLR2004 -- header + at least 1 data row
+            return None
+
+        # Data row: second row (first is header)
+        data_cells = [td.text_content().strip() for td in rows[1].xpath("td")]
+        if len(data_cells) < 2:  # noqa: PLR2004 -- date + coefficient
+            return None
+
+        coeff_str = data_cells[1].replace(",", ".")
+        try:
+            return Decimal(coeff_str)
+        except (ValueError, ArithmeticError):
+            return None
 
     def fetch_key_rate(self, start: datetime, end: datetime) -> list[KeyRateRecord]:
         """Fetch CBR key rate history via SOAP. Rate normalized to decimal fraction."""
@@ -399,6 +444,7 @@ class MacroSnapshot:
     yield_curve: dict[str, Decimal] | None = None  # maturity -> yield (%)
     breakeven_inflation: Decimal | None = None  # OFZ-IN vs OFZ-PD spread at 5Y
     usdrub: Decimal | None = None  # USD/RUB exchange rate
+    ofzin_indexation_coefficient: Decimal | None = None  # cumulative CPI adjustment
 
 
 # RUONIA proxy: key_rate minus 50bps (RUONIA typically tracks 30-80bps below).
