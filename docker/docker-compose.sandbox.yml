@@ -1,0 +1,113 @@
+name: finalayze-sandbox
+
+services:
+  postgres:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: finalayze-sandbox-db
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c max_connections=50
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-finalayze}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-finalayze}
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-finalayze}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: finalayze-sandbox-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - net
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    container_name: finalayze-sandbox-app
+    env_file:
+      - ../.env
+    environment:
+      FINALAYZE_MODE: sandbox
+      FINALAYZE_TINKOFF_SANDBOX: "true"
+      FINALAYZE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finalayze}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-finalayze}
+      FINALAYZE_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      UVICORN_WORKERS: "1"
+      GRPC_DNS_RESOLVER: native
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    networks:
+      - net
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: finalayze-sandbox-prometheus
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:11.4.0
+    container_name: finalayze-sandbox-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - net
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  net:
+    name: finalayze_sandbox_net

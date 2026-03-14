@@ -762,8 +762,7 @@ class TradingLoop:
 
     def _compute_drawdown_pct(self, equity_rub: float) -> float:
         """Compute drawdown percentage, updating peak equity."""
-        if equity_rub > self._peak_equity_rub:
-            self._peak_equity_rub = equity_rub
+        self._peak_equity_rub = max(equity_rub, self._peak_equity_rub)
         if self._peak_equity_rub <= 0:
             return 0.0
         return (self._peak_equity_rub - equity_rub) / self._peak_equity_rub

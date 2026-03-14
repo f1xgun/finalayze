@@ -51,9 +51,8 @@ class ValidationLogger:
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         data = asdict(entry)
         line = json.dumps(data, default=str) + "\n"
-        with self._lock:
-            with self._log_path.open("a") as f:
-                f.write(line)
+        with self._lock, self._log_path.open("a") as f:
+            f.write(line)
 
     def get_entries(self) -> list[CycleLogEntry]:
         """Read all entries back from the JSONL file."""
@@ -61,11 +60,11 @@ class ValidationLogger:
             return []
         entries: list[CycleLogEntry] = []
         with self._log_path.open() as f:
-            for line in f:
-                line = line.strip()
-                if not line:
+            for raw_line in f:
+                stripped = raw_line.strip()
+                if not stripped:
                     continue
-                data = json.loads(line)
+                data = json.loads(stripped)
                 # Parse timestamp back from ISO string
                 data["timestamp"] = datetime.fromisoformat(data["timestamp"])
                 entries.append(CycleLogEntry(**data))
