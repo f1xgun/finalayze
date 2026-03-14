@@ -36,6 +36,7 @@ class EventBus:
     STREAM_MARKET_DATA = "market_data"
     STREAM_SIGNALS = "signals"
     STREAM_EXECUTION = "execution"
+    STREAM_COUPONS = "coupons"
 
     def __init__(self, redis_url: str = "redis://localhost:6379/0") -> None:
         self._redis: redis.asyncio.Redis[str] = redis.asyncio.from_url(

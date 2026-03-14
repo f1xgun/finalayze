@@ -264,6 +264,46 @@ class MacroSnapshotModel(Base):
     ofzin_indexation_coefficient: Mapped[Decimal | None] = mapped_column(Numeric(8, 6))
 
 
+class BondCandleModel(Base):
+    """Bond OHLCV candle cache for TimescaleDB."""
+
+    __tablename__ = "bond_candles"
+
+    bond_figi: Mapped[str] = mapped_column(String(20), primary_key=True)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    open: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    high: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    low: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    close: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    volume: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+
+
+class CouponScheduleModel(Base):
+    """Coupon schedule cache for bond coupon payments."""
+
+    __tablename__ = "coupon_schedules"
+
+    bond_figi: Mapped[str] = mapped_column(String(20), primary_key=True)
+    coupon_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    coupon_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    record_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    amount_per_bond: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    is_floating: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class AmortizationEventModel(Base):
+    """Amortization event schedule for amortizing bonds."""
+
+    __tablename__ = "amortization_events"
+
+    bond_figi: Mapped[str] = mapped_column(String(20), primary_key=True)
+    event_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    remaining_nominal_pct: Mapped[Decimal] = mapped_column(
+        Numeric(8, 4), nullable=False, default=Decimal("100.0")
+    )
+
+
 class PortfolioSnapshot(Base):
     """Portfolio equity snapshot written after each strategy cycle."""
 

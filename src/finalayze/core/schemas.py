@@ -388,6 +388,20 @@ class CouponPayment(BaseModel):
     is_floating: bool = False
 
 
+class CouponEvent(BaseModel):
+    """Coupon event emitted on ex-coupon date for bond coupon scheduling."""
+
+    model_config = ConfigDict(frozen=True)
+
+    bond_figi: str
+    bond_ticker: str
+    coupon_date: date
+    record_date: date
+    amount_per_bond: Decimal
+    coupon_number: int
+    is_floating: bool = False
+
+
 class AccruedInterest(BaseModel):
     """Daily accrued interest (NKD) for a bond."""
 

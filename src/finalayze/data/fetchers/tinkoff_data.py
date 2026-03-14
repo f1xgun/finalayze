@@ -26,12 +26,14 @@ from datetime import UTC, date, datetime  # noqa: E402
 from decimal import Decimal  # noqa: E402
 from typing import TYPE_CHECKING, Any  # noqa: E402
 
+import structlog  # noqa: E402
 from t_tech.invest import AsyncClient, CandleInterval  # noqa: E402
-from t_tech.invest.sandbox.async_client import AsyncSandboxClient  # noqa: E402
 
 from finalayze.core.exceptions import DataFetchError, InstrumentNotFoundError  # noqa: E402
-from finalayze.core.schemas import AccruedInterest, BondInfo, Candle, CouponPayment  # noqa: E402
+from finalayze.core.schemas import AccruedInterest, BondInfo, Candle, CouponEvent, CouponPayment  # noqa: E402
 from finalayze.data.fetchers.base import BaseFetcher  # noqa: E402
+
+_log = structlog.get_logger()
 
 if TYPE_CHECKING:
     from finalayze.data.rate_limiter import RateLimiter
@@ -74,11 +76,14 @@ class TinkoffFetcher(BaseFetcher):
         self._sandbox = sandbox
         self._rate_limiter = rate_limiter
 
-    def _make_client(self) -> AsyncClient | AsyncSandboxClient:
-        """Create a new async client instance."""
-        if self._sandbox:
-            return AsyncSandboxClient(self._token, target=_TBANK_GRPC_SANDBOX_TARGET)
-        return AsyncClient(self._token, target=_TBANK_GRPC_TARGET)
+    def _make_client(self) -> AsyncClient:
+        """Create a new async client instance.
+
+        Uses AsyncClient for both sandbox and production — AsyncSandboxClient
+        forcibly overrides target with the old tinkoff.ru domain.
+        """
+        target = _TBANK_GRPC_SANDBOX_TARGET if self._sandbox else _TBANK_GRPC_TARGET
+        return AsyncClient(self._token, target=target)
 
     def close(self) -> None:
         """No-op — each fetch creates and closes its own channel."""
@@ -107,10 +112,13 @@ class TinkoffFetcher(BaseFetcher):
         except InstrumentNotFoundError:
             raise
         except Exception as exc:
+            _log.exception("candle_fetch_failed", symbol=symbol, figi=figi)
             msg = f"Tinkoff gRPC error fetching {symbol}: {exc}"
             raise DataFetchError(msg) from exc
 
-        return [self._map_candle(c, symbol, timeframe) for c in raw_candles]
+        candles = [self._map_candle(c, symbol, timeframe) for c in raw_candles]
+        _log.debug("candles_fetched", symbol=symbol, count=len(candles), timeframe=timeframe)
+        return candles
 
     async def _fetch_async(
         self,
@@ -208,6 +216,133 @@ class TinkoffFetcher(BaseFetcher):
                 to=end,
             )
             return list(response.dividends)
+
+    # ── Bond discovery methods ─────────────────────────────────────────────
+
+    def fetch_all_bonds(self) -> list[dict[str, Any]]:
+        """Fetch all MOEX bonds from T-Invest API.
+
+        Returns a list of dicts with bond metadata fields:
+        figi, ticker, isin, name, lot, currency, nominal, initial_nominal,
+        coupon_quantity_per_year, maturity_date, floating_coupon_flag,
+        amortization_flag, risk_level, aci_value, class_code,
+        subordinated_flag, liquidity_flag, sector, bond_type,
+        call_date, perpetual_flag, api_trade_available_flag.
+
+        Handles gRPC errors gracefully (logs and returns empty list).
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            return asyncio.run(self._fetch_all_bonds_async())
+        except Exception:
+            _log.exception("fetch_all_bonds_failed")
+            return []
+
+    async def _fetch_all_bonds_async(self) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK bonds()."""
+        from t_tech.invest.schemas import InstrumentStatus  # noqa: PLC0415
+
+        client = self._make_client()
+        async with client as services:
+            resp = await services.instruments.bonds(
+                instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
+            )
+            result: list[dict[str, Any]] = []
+            for bond in resp.instruments:
+                nominal = self._money_to_decimal(bond.nominal)
+                initial_nom = self._money_to_decimal(bond.initial_nominal)
+                aci = self._money_to_decimal(bond.aci_value)
+
+                maturity = None
+                if hasattr(bond, "maturity_date") and bond.maturity_date:
+                    maturity = (
+                        bond.maturity_date.date()
+                        if hasattr(bond.maturity_date, "date")
+                        else bond.maturity_date
+                    )
+
+                call_d = None
+                if hasattr(bond, "call_date") and bond.call_date:
+                    call_d = (
+                        bond.call_date.date()
+                        if hasattr(bond.call_date, "date")
+                        else bond.call_date
+                    )
+
+                result.append(
+                    {
+                        "figi": bond.figi,
+                        "ticker": bond.ticker,
+                        "isin": bond.isin,
+                        "name": bond.name,
+                        "lot": bond.lot,
+                        "currency": bond.currency,
+                        "nominal": nominal,
+                        "initial_nominal": initial_nom,
+                        "coupon_quantity_per_year": bond.coupon_quantity_per_year,
+                        "maturity_date": maturity,
+                        "floating_coupon_flag": bond.floating_coupon_flag,
+                        "amortization_flag": bond.amortization_flag,
+                        "risk_level": getattr(bond, "risk_level", 0),
+                        "aci_value": aci,
+                        "class_code": bond.class_code,
+                        "subordinated_flag": getattr(bond, "subordinated_flag", False),
+                        "liquidity_flag": getattr(bond, "liquidity_flag", False),
+                        "sector": getattr(bond, "sector", ""),
+                        "bond_type": getattr(bond, "bond_type", ""),
+                        "call_date": call_d,
+                        "perpetual_flag": getattr(bond, "perpetual_flag", False),
+                        "api_trade_available_flag": getattr(
+                            bond, "api_trade_available_flag", False
+                        ),
+                    }
+                )
+            return result
+
+    def fetch_amortization_schedule(self, instrument_id: str) -> list[dict[str, Any]]:
+        """Fetch amortization schedule for a bond.
+
+        Args:
+            instrument_id: Bond FIGI or instrument UID.
+
+        Returns:
+            List of dicts with: event_date, pay_one_bond (Decimal), event_number.
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            return asyncio.run(self._fetch_amortization_async(instrument_id))
+        except Exception:
+            _log.exception("fetch_amortization_failed", instrument_id=instrument_id)
+            return []
+
+    async def _fetch_amortization_async(self, instrument_id: str) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK get_bond_events for amortization."""
+        from t_tech.invest.schemas import EventType, GetBondEventsRequest  # noqa: PLC0415
+
+        client = self._make_client()
+        async with client as services:
+            resp = await services.instruments.get_bond_events(
+                request=GetBondEventsRequest(
+                    instrument_id=instrument_id,
+                    type=EventType.EVENT_TYPE_MTY,
+                ),
+            )
+            events: list[dict[str, Any]] = []
+            for ev in resp.events:
+                ev_date = (
+                    ev.event_date.date() if hasattr(ev.event_date, "date") else ev.event_date
+                )
+                pay = self._money_to_decimal(ev.pay_one_bond)
+                events.append(
+                    {
+                        "event_date": ev_date,
+                        "pay_one_bond": pay,
+                        "event_number": ev.event_number,
+                    }
+                )
+            return events
 
     # ── Bond data methods ──────────────────────────────────────────────────
 
