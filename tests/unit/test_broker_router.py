@@ -78,3 +78,52 @@ class TestBrokerRouterRegistration:
     def test_registered_markets(self) -> None:
         router, _, _ = _make_router()
         assert set(router.registered_markets) == {"us", "moex"}
+
+
+# ── moex_bonds routing ────────────────────────────────────────────────────
+
+
+class TestBrokerRouterMoexBonds:
+    def test_routes_moex_bonds_to_bond_broker(self) -> None:
+        """BrokerRouter with 'moex_bonds' key routes to bond broker."""
+        mock_broker = _make_mock_broker("moex")
+        mock_bond_broker = _make_mock_broker("moex_bonds")
+        router = BrokerRouter({"moex": mock_broker, "moex_bonds": mock_bond_broker})
+        routed = router.route("moex_bonds")
+        assert routed is mock_bond_broker
+
+    def test_submit_through_moex_bonds(self) -> None:
+        """submit() works through moex_bonds route."""
+        mock_bond_broker = _make_mock_broker("moex_bonds")
+        expected = OrderResult(filled=True, symbol="SU26244RMFS2", side="BUY")
+        mock_bond_broker.submit_order.return_value = expected
+
+        router = BrokerRouter({"moex_bonds": mock_bond_broker})
+        order = OrderRequest(symbol="SU26244RMFS2", side="BUY", quantity=Decimal(5))
+        result = router.submit(order, market_id="moex_bonds")
+        assert result is expected
+        mock_bond_broker.submit_order.assert_called_once()
+
+
+# ── make_bond_broker factory ──────────────────────────────────────────────
+
+
+class TestMakeBondBroker:
+    def test_creates_broker_sharing_client(self) -> None:
+        """make_bond_broker creates TinkoffBroker sharing equity broker's AsyncClient."""
+        from finalayze.execution.tinkoff_broker import TinkoffBroker, make_bond_broker
+
+        mock_registry = MagicMock()
+        equity_broker = TinkoffBroker(
+            token="test-token",
+            registry=mock_registry,
+            sandbox=True,
+        )
+        # Manually set a mock client
+        mock_client = MagicMock()
+        equity_broker._client = mock_client
+
+        bond_broker = make_bond_broker(equity_broker)
+        assert isinstance(bond_broker, TinkoffBroker)
+        assert bond_broker._client is mock_client  # same client
+        assert bond_broker is not equity_broker  # different instance
