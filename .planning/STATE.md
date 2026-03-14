@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Phase 2 context gathered
-last_updated: "2026-03-14T13:58:06.187Z"
-last_activity: 2026-03-14 -- Completed 01-02 (MOEX RUB sizing & pre-trade fix)
+status: in_progress
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-03-14T14:33:00.000Z"
+last_activity: 2026-03-14 -- Completed 02-01 (MOEX tooling & strategy enablement)
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 14
+  total_plans: 4
+  completed_plans: 3
+  percent: 21
 ---
 
 # Project State
@@ -21,33 +21,34 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Autonomous profitable MOEX trading (stocks + bonds + coupons) with risk limits, operating without human intervention
-**Current focus:** Phase 1 - MOEX Equity Foundation
+**Current focus:** Phase 2 - MOEX Equity Validation
 
 ## Current Position
 
-Phase: 1 of 7 (MOEX Equity Foundation)
-Plan: 2 of 2 in current phase (COMPLETE)
-Status: Phase 1 Complete
-Last activity: 2026-03-14 -- Completed 01-02 (MOEX RUB sizing & pre-trade fix)
+Phase: 2 of 7 (MOEX Equity Validation)
+Plan: 1 of 2 in current phase
+Status: Phase 2 In Progress
+Last activity: 2026-03-14 -- Completed 02-01 (MOEX tooling & strategy enablement)
 
-Progress: [██░░░░░░░░] 14%
+Progress: [██░░░░░░░░] 21%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 12min
-- Total execution time: 0.4 hours
+- Total plans completed: 3
+- Average duration: 11min
+- Total execution time: 0.6 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 2 | 24min | 12min |
+| 02 | 1 | 11min | 11min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (6min), 01-02 (18min)
-- Trend: starting
+- Last 5 plans: 01-01 (6min), 01-02 (18min), 02-01 (11min)
+- Trend: stable
 
 *Updated after each plan completion*
 
@@ -66,6 +67,9 @@ Recent decisions affecting current work:
 - [01-01]: Lazy import of moex_calendar in trading_loop to maintain dependency layering
 - [01-02]: MOEX starting capital fixed at 1M RUB (not USD * FX rate)
 - [01-02]: Half-Kelly with default params gives 8.33% position size (not 10-20% as initially expected)
+- [02-01]: ou_mean_reversion disabled on all MOEX segments (negative Sharpe on all 3: -0.28, -0.11, -0.55)
+- [02-01]: Weights redistributed proportionally after OU disable; all presets sum to 1.00
+- [02-01]: ru_finance added to UNIVERSE (7 symbols in run_iteration, 4 in isolation)
 
 ### Pending Todos
 
@@ -80,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T13:58:06.184Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-moex-equity-validation/02-CONTEXT.md
+Last session: 2026-03-14T14:33:00.000Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: .planning/phases/02-moex-equity-validation/02-01-SUMMARY.md
