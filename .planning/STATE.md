@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: in_progress
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-03-14T16:14:54.568Z"
+status: completed
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-03-14T16:41:57.497Z"
 last_activity: 2026-03-14 -- Completed 02-02 (MOEX calibration & walk-forward validation)
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 5
+  completed_plans: 5
   percent: 29
 ---
 
@@ -51,6 +51,7 @@ Progress: [███░░░░░░░] 29%
 - Trend: stable
 
 *Updated after each plan completion*
+| Phase 02 P03 | 4min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,8 @@ Recent decisions affecting current work:
 - [02-02]: Optuna-tuned MOEX-specific params (ADX thresholds, BB std_dev, confidence levels) distinct from US defaults
 - [02-02]: Walk-forward targets not fully met (avg Sharpe negative) -- best-effort accepted after 5 iterations per plan
 - [02-02]: Individual symbols profitable (YNDX Sharpe +0.88, ROSN +0.65) but segment averages dragged by losing symbols
+- [Phase 02]: All pruned MOEX symbols restored for future news/sentiment integration (Phase 7)
+- [Phase 02]: Three-quarter Kelly (0.75) kept for MOEX segments -- 3x position sizes vs default
 
 ### Pending Todos
 
@@ -88,6 +91,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T16:14:00.000Z
-Stopped at: Completed 02-02-PLAN.md
-Resume file: .planning/phases/02-moex-equity-validation/02-02-SUMMARY.md
+Last session: 2026-03-14T16:41:57.494Z
+Stopped at: Completed 02-03-PLAN.md
+Resume file: None

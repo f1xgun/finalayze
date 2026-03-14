@@ -13,7 +13,7 @@ This roadmap takes Finalayze from a working US equity trading system to a fully 
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: MOEX Equity Foundation** - Fix RUB sizing, wire MOEX costs and holiday calendar into backtest engine (completed 2026-03-14)
-- [ ] **Phase 2: MOEX Equity Validation** - Tune ru_* strategy presets and achieve positive walk-forward backtest PnL (gap closure in progress)
+- [x] **Phase 2: MOEX Equity Validation** - Tune ru_* strategy presets and achieve positive walk-forward backtest PnL (gap closure in progress) (completed 2026-03-14)
 - [ ] **Phase 3: Bond Data Pipeline** - Wire bond instrument discovery, NKD/dirty price math, and MacroCacheService
 - [ ] **Phase 4: Bond Execution** - Complete BondCycleProcessor stubs, YieldStop, and achieve positive bond backtest PnL
 - [ ] **Phase 5: Integration and Telegram** - Wire equity+bond cycles into TradingLoop, build Telegram alerting with rate limiting
@@ -144,7 +144,7 @@ Note: Phases 2 and 3 depend only on Phase 1 (not on each other) and could theore
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. MOEX Equity Foundation | 2/2 | Complete   | 2026-03-14 |
-| 2. MOEX Equity Validation | 2/3 | Gap closure | - |
+| 2. MOEX Equity Validation | 3/3 | Complete   | 2026-03-14 |
 | 3. Bond Data Pipeline | 0/3 | Not started | - |
 | 4. Bond Execution | 0/3 | Not started | - |
 | 5. Integration and Telegram | 0/3 | Not started | - |
