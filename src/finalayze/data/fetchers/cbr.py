@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import structlog
 from lxml import etree
+from lxml import html as lxml_html
 
 from finalayze.core.exceptions import DataFetchError
 from finalayze.core.schemas import FXRate, KeyRateRecord
@@ -46,6 +47,8 @@ _KEY_RATE_SOAP = """<?xml version="1.0" encoding="utf-8"?>
 </soap:Envelope>"""
 
 _KEY_RATE_PERCENT_DIVISOR = Decimal(100)  # CBR returns percentage points
+_ZCYC_URL = "https://www.cbr.ru/hd_base/zcyc_params/"
+_ZCYC_MATURITIES = ("0.25", "0.50", "0.75", "1", "2", "3", "5", "7", "10", "15", "20", "30")
 
 
 class CBRFetcher:
@@ -87,6 +90,58 @@ class CBRFetcher:
         }
         content = self._request("GET", _FX_URL, params=params)
         return self._parse_fx_xml(content, pair)
+
+    def fetch_yield_curve(self, as_of: date) -> dict[str, Decimal] | None:
+        """Fetch zero-coupon yield curve from CBR for *as_of* date.
+
+        Returns dict of maturity -> yield (percentage points), or None if no data
+        (weekends, holidays, HTTP errors).
+        """
+        params = {
+            "DateReq": as_of.strftime("%d.%m.%Y"),
+        }
+        try:
+            content = self._request("GET", _ZCYC_URL, params=params)
+        except DataFetchError:
+            _log.warning("cbr_yield_curve_fetch_failed", as_of=str(as_of))
+            return None
+        return self._parse_zcyc_html(content.decode("utf-8", errors="replace"))
+
+    @staticmethod
+    def _parse_zcyc_html(content: str) -> dict[str, Decimal] | None:
+        """Parse CBR ZCYC HTML table into maturity -> yield dict.
+
+        Returns None if no data rows found (weekends/holidays).
+        """
+        doc = lxml_html.fromstring(content)
+        tables = doc.xpath("//table[contains(@class, 'data')]")
+        if not tables:
+            return None
+
+        table = tables[0]
+        rows = table.xpath(".//tr")
+        if len(rows) < 2:  # noqa: PLR2004 -- header + at least 1 data row
+            return None
+
+        # Header row: extract maturity labels
+        headers = [th.text_content().strip() for th in rows[0].xpath("th|td")]
+        # Data row: first data row after header
+        data_cells = [td.text_content().strip() for td in rows[1].xpath("td")]
+
+        if len(data_cells) < 2:  # noqa: PLR2004 -- date + at least 1 value
+            return None
+
+        # Skip first cell (date), map remaining to headers
+        result: dict[str, Decimal] = {}
+        for i, val_str in enumerate(data_cells[1:], start=1):
+            if i < len(headers) and val_str:
+                try:
+                    maturity = headers[i].strip()
+                    result[maturity] = Decimal(val_str.replace(",", "."))
+                except Exception:  # noqa: BLE001
+                    continue
+
+        return result if result else None
 
     def fetch_key_rate(self, start: datetime, end: datetime) -> list[KeyRateRecord]:
         """Fetch CBR key rate history via SOAP. Rate normalized to decimal fraction."""
@@ -341,6 +396,9 @@ class MacroSnapshot:
     ruonia_7d_avg: Decimal | None = None
     cpi_yoy: Decimal | None = None
     last_cbr_decision: str | None = None  # "cut", "hold", "hike"
+    yield_curve: dict[str, Decimal] | None = None  # maturity -> yield (%)
+    breakeven_inflation: Decimal | None = None  # OFZ-IN vs OFZ-PD spread at 5Y
+    usdrub: Decimal | None = None  # USD/RUB exchange rate
 
 
 # RUONIA proxy: key_rate minus 50bps (RUONIA typically tracks 30-80bps below).

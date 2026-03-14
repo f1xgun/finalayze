@@ -246,6 +246,23 @@ class SentimentScoreModel(Base):
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
 
 
+class MacroSnapshotModel(Base):
+    """Macro snapshot persisted to TimescaleDB on each cache refresh."""
+
+    __tablename__ = "macro_snapshots"
+
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+    key_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    ruonia_7d_avg: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    cpi_yoy: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    last_cbr_decision: Mapped[str | None] = mapped_column(String(10))
+    breakeven_inflation: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    yield_curve: Mapped[dict | None] = mapped_column(JSONB)
+    usdrub: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+
+
 class PortfolioSnapshot(Base):
     """Portfolio equity snapshot written after each strategy cycle."""
 
