@@ -23,6 +23,8 @@ class DV01BudgetStep:
         max_dd_pct: Maximum acceptable drawdown as a fraction (default 0.05 = 5%).
         expected_max_rate_move_bps: Worst-case parallel rate shock in basis points.
         max_single_position_pct: Maximum fraction of equity in a single bond issue.
+        max_dv01_per_bond_pct: Maximum fraction of total DV01 budget a single bond
+            issue may consume (default 0.40 = 40%).
     """
 
     def __init__(
@@ -30,10 +32,12 @@ class DV01BudgetStep:
         max_dd_pct: Decimal = Decimal("0.05"),
         expected_max_rate_move_bps: int = 500,
         max_single_position_pct: Decimal = Decimal("0.30"),
+        max_dv01_per_bond_pct: Decimal = Decimal("0.40"),
     ) -> None:
         self._max_dd_pct = max_dd_pct
         self._expected_max_rate_move_bps = expected_max_rate_move_bps
         self._max_single_position_pct = max_single_position_pct
+        self._max_dv01_per_bond_pct = max_dv01_per_bond_pct
 
     def compute_position_size(
         self,
@@ -59,13 +63,17 @@ class DV01BudgetStep:
         if remaining_dv01 <= 0 or bond_dv01_per_unit <= 0:
             return 0
 
-        # Max bonds by DV01 budget
+        # Max bonds by total DV01 budget
         max_by_dv01 = int(remaining_dv01 / bond_dv01_per_unit)
+
+        # Max bonds by per-bond DV01 cap (fraction of total budget)
+        per_bond_dv01_cap = max_dv01 * self._max_dv01_per_bond_pct
+        max_by_per_bond = int(per_bond_dv01_cap / bond_dv01_per_unit)
 
         # Max bonds by single position limit
         max_by_position = int(layer_equity * self._max_single_position_pct / face_value)
 
-        return min(max_by_dv01, max_by_position)
+        return min(max_by_dv01, max_by_per_bond, max_by_position)
 
 
 class EqualWeightBondSizer:

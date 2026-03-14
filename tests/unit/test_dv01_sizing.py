@@ -15,8 +15,9 @@ class TestDV01BudgetStep:
 
         With DV01 per unit = 7.5 and no existing portfolio DV01:
             max_by_dv01 = 375 / 7.5 = 50 bonds
+            per_bond_cap = 375 * 0.40 = 150, max_by_per_bond = 150 / 7.5 = 20 bonds
             max_by_position = 1_500_000 * 0.30 / 1000 = 450 bonds
-        Result = min(50, 450) = 50
+        Result = min(50, 20, 450) = 20
         """
         step = DV01BudgetStep(
             max_dd_pct=Decimal("0.05"),
@@ -29,7 +30,7 @@ class TestDV01BudgetStep:
             current_portfolio_dv01=Decimal(0),
             face_value=Decimal(1000),
         )
-        assert result == 50
+        assert result == 20
 
     def test_limited_by_dv01_budget(self) -> None:
         """When existing portfolio DV01 is high, remaining budget limits sizing.
@@ -121,8 +122,9 @@ class TestDV01BudgetStep:
         max_dv01 = 2_000_000 * 0.05 / 500 = 200
         remaining_dv01 = 200 - 0 = 200
         max_by_dv01 = 200 / 50 = 4 bonds
+        per_bond_cap = 200 * 0.40 = 80, max_by_per_bond = 80 / 50 = 1 bond
         max_by_position = 2_000_000 * 0.30 / 10_000 = 60 bonds
-        Result = min(4, 60) = 4
+        Result = min(4, 1, 60) = 1
         """
         step = DV01BudgetStep()
         result = step.compute_position_size(
@@ -131,16 +133,17 @@ class TestDV01BudgetStep:
             current_portfolio_dv01=Decimal(0),
             face_value=Decimal(10000),
         )
-        assert result == 4
+        assert result == 1
 
     def test_default_parameters(self) -> None:
-        """Default parameters: 5% DD, 500bps, 30% single position.
+        """Default parameters: 5% DD, 500bps, 30% single position, 40% per-bond cap.
 
         max_dv01 = 1_000_000 * 0.05 / 500 = 100
         remaining_dv01 = 100
         max_by_dv01 = 100 / 5 = 20
+        per_bond_cap = 100 * 0.40 = 40, max_by_per_bond = 40 / 5 = 8
         max_by_position = 1_000_000 * 0.30 / 1000 = 300
-        Result = 20
+        Result = min(20, 8, 300) = 8
         """
         step = DV01BudgetStep()
         result = step.compute_position_size(
@@ -148,7 +151,28 @@ class TestDV01BudgetStep:
             bond_dv01_per_unit=Decimal(5),
             current_portfolio_dv01=Decimal(0),
         )
-        assert result == 20
+        assert result == 8
+
+
+LAYER_EQUITY = Decimal(100000)
+FACE_VALUE = Decimal(1000)
+
+
+def test_dv01_per_bond_cap_limits_single_position() -> None:
+    """Per-bond DV01 cap (40%) prevents single issue consuming entire budget."""
+    sizer = DV01BudgetStep(max_dv01_per_bond_pct=Decimal("0.40"))
+    # Large DV01 per unit — without cap would consume entire budget
+    result = sizer.compute_position_size(
+        layer_equity=LAYER_EQUITY,
+        bond_dv01_per_unit=Decimal("1.0"),
+        current_portfolio_dv01=Decimal(0),
+        face_value=FACE_VALUE,
+    )
+    # Max DV01 budget = 100000 * 0.05 / 500 = 10.0
+    # Per-bond cap = 10.0 * 0.40 = 4.0
+    # Max by DV01 cap = 4 bonds
+    # Max by position = 100000 * 0.30 / 1000 = 30 bonds
+    assert result == 4
 
 
 class TestEqualWeightBondSizer:
