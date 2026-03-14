@@ -10,10 +10,11 @@ import pytest
 from t_tech.invest import OrderDirection
 
 from finalayze.core.exceptions import BrokerError, InstrumentNotFoundError
-from finalayze.execution.broker_base import OrderRequest
+from finalayze.execution.broker_base import OrderRequest, OrderResult
 from finalayze.execution.tinkoff_broker import (
     _TBANK_GRPC_SANDBOX_TARGET,
     _TBANK_GRPC_TARGET,
+    OrderStateResult,
     TinkoffBroker,
 )
 from finalayze.markets.instruments import DEFAULT_MOEX_INSTRUMENTS, Instrument, InstrumentRegistry
@@ -302,10 +303,10 @@ class TestTinkoffBrokerGrpcTarget:
         assert _TBANK_GRPC_SANDBOX_TARGET == _EXPECTED_SANDBOX_TARGET
 
     def test_sandbox_client_receives_target(self) -> None:
-        """In sandbox mode, AsyncSandboxClient must be constructed with target=."""
+        """In sandbox mode, AsyncClient must be constructed with sandbox target=."""
         mock_client = MagicMock()
         with patch(
-            "finalayze.execution.tinkoff_broker.AsyncSandboxClient",
+            "finalayze.execution.tinkoff_broker.AsyncClient",
             return_value=mock_client,
         ) as mock_cls:
             broker = _make_broker(sandbox=True)
@@ -336,3 +337,183 @@ class TestTinkoffBrokerGrpcTarget:
     def test_grpc_dns_resolver_env_set(self) -> None:
         """GRPC_DNS_RESOLVER env var must be set to 'native' after module import."""
         assert os.environ.get("GRPC_DNS_RESOLVER") == "native"
+
+
+class TestOrderResultOrderId:
+    """OrderResult must have order_id field with default empty string."""
+
+    def test_order_result_has_order_id_default(self) -> None:
+        result = OrderResult(filled=True, fill_price=Decimal(100))
+        assert result.order_id == ""
+
+    def test_order_result_order_id_set(self) -> None:
+        result = OrderResult(filled=True, fill_price=Decimal(100), order_id="abc-123")
+        assert result.order_id == "abc-123"
+
+    def test_order_result_backward_compatible(self) -> None:
+        """Existing code that creates OrderResult without order_id must still work."""
+        result = OrderResult(
+            filled=True,
+            fill_price=Decimal(100),
+            symbol="SBER",
+            side="BUY",
+            quantity=Decimal(10),
+            reason="",
+        )
+        assert result.order_id == ""
+
+
+class TestTinkoffBrokerGetLastPrices:
+    """Tests for get_last_prices method."""
+
+    def _mock_accounts(self) -> MagicMock:
+        mock_accounts_response = MagicMock()
+        mock_account = MagicMock()
+        mock_account.id = "test-account-id"
+        mock_accounts_response.accounts = [mock_account]
+        return mock_accounts_response
+
+    def test_get_last_prices_returns_symbol_to_decimal(self) -> None:
+        """get_last_prices returns dict mapping symbol to Decimal price."""
+        # Mock GetLastPrices response
+        mock_price_item = MagicMock()
+        mock_price_item.figi = SBER_FIGI
+        mock_price_item.price.units = 270
+        mock_price_item.price.nano = 500_000_000  # 270.50
+
+        mock_response = MagicMock()
+        mock_response.last_prices = [mock_price_item]
+
+        with patch(
+            "finalayze.execution.tinkoff_broker.asyncio.run",
+            side_effect=[self._mock_accounts(), mock_response],
+        ):
+            broker = _make_broker()
+            result = broker.get_last_prices(["SBER"])
+
+        assert "SBER" in result
+        assert result["SBER"] == Decimal("270.5")
+
+    def test_get_last_prices_maps_figi_to_symbol(self) -> None:
+        """get_last_prices maps FIGI via registry and back to symbols."""
+        mock_price_item = MagicMock()
+        mock_price_item.figi = SBER_FIGI
+        mock_price_item.price.units = 100
+        mock_price_item.price.nano = 0
+
+        mock_response = MagicMock()
+        mock_response.last_prices = [mock_price_item]
+
+        with patch(
+            "finalayze.execution.tinkoff_broker.asyncio.run",
+            side_effect=[self._mock_accounts(), mock_response],
+        ):
+            broker = _make_broker()
+            result = broker.get_last_prices(["SBER"])
+
+        # Key should be symbol, not FIGI
+        assert SBER_FIGI not in result
+        assert "SBER" in result
+
+    def test_get_last_prices_unknown_symbol_skipped(self) -> None:
+        """Symbols not in registry are skipped without error."""
+        broker = _make_broker()
+        # "UNKNOWN" is not in registry, should not break
+        with patch(
+            "finalayze.execution.tinkoff_broker.asyncio.run",
+            side_effect=[self._mock_accounts(), MagicMock(last_prices=[])],
+        ):
+            result = broker.get_last_prices(["UNKNOWN_BOND_XYZ"])
+        assert result == {}
+
+
+class TestTinkoffBrokerGetOrderState:
+    """Tests for get_order_state method."""
+
+    def _mock_accounts(self) -> MagicMock:
+        mock_accounts_response = MagicMock()
+        mock_account = MagicMock()
+        mock_account.id = "test-account-id"
+        mock_accounts_response.accounts = [mock_account]
+        return mock_accounts_response
+
+    def test_get_order_state_filled(self) -> None:
+        """get_order_state returns OrderStateResult for a filled order."""
+        mock_state = MagicMock()
+        mock_state.execution_report_status = 1  # FILL
+        mock_state.lots_executed = 5
+        mock_state.executed_order_price.units = 95
+        mock_state.executed_order_price.nano = 200_000_000
+
+        with patch(
+            "finalayze.execution.tinkoff_broker.asyncio.run",
+            side_effect=[self._mock_accounts(), mock_state],
+        ):
+            broker = _make_broker()
+            result = broker.get_order_state("ord-123")
+
+        assert isinstance(result, OrderStateResult)
+        assert result.order_id == "ord-123"
+        assert result.execution_status == "fill"
+        assert result.filled_quantity == Decimal(5)
+        assert result.filled_price == Decimal("95.2")
+        assert result.is_terminal is True
+
+    def test_get_order_state_new(self) -> None:
+        """get_order_state returns non-terminal for NEW status."""
+        mock_state = MagicMock()
+        mock_state.execution_report_status = 4  # NEW
+        mock_state.lots_executed = 0
+        mock_state.executed_order_price.units = 0
+        mock_state.executed_order_price.nano = 0
+
+        with patch(
+            "finalayze.execution.tinkoff_broker.asyncio.run",
+            side_effect=[self._mock_accounts(), mock_state],
+        ):
+            broker = _make_broker()
+            result = broker.get_order_state("ord-456")
+
+        assert result.is_terminal is False
+        assert result.execution_status == "new"
+
+    def test_get_order_state_partially_filled(self) -> None:
+        """get_order_state returns partial fill with filled quantity."""
+        mock_state = MagicMock()
+        mock_state.execution_report_status = 2  # PARTIALLY_FILL
+        mock_state.lots_executed = 3
+        mock_state.executed_order_price.units = 96
+        mock_state.executed_order_price.nano = 0
+
+        with patch(
+            "finalayze.execution.tinkoff_broker.asyncio.run",
+            side_effect=[self._mock_accounts(), mock_state],
+        ):
+            broker = _make_broker()
+            result = broker.get_order_state("ord-789")
+
+        assert result.execution_status == "partially_fill"
+        assert result.filled_quantity == Decimal(3)
+        assert result.is_terminal is False
+
+
+class TestTinkoffBrokerSubmitOrderReturnsOrderId:
+    """submit_order must populate order_id in returned OrderResult."""
+
+    def test_submit_order_returns_order_id(self) -> None:
+        mock_result = MagicMock()
+        mock_result.order_id = "new-order-id-42"
+        mock_result.executed_order_price.units = 270
+        mock_result.executed_order_price.nano = 0
+        mock_result.lots_executed = 1
+
+        with patch(
+            "finalayze.execution.tinkoff_broker.asyncio.run",
+            return_value=mock_result,
+        ):
+            broker = _make_broker()
+            order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
+            result = broker.submit_order(order)
+
+        assert result.order_id == "new-order-id-42"
+        assert result.filled is True
