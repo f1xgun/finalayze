@@ -95,12 +95,13 @@ Plans:
   3. All circuit breakers fire correctly for both equity and bond layers
   4. Telegram bot delivers trade fill, stop-loss, and circuit breaker alerts within 60 seconds (even during 20-fill bursts)
   5. Daily P&L summary shows correct RUB amounts (not zero)
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Telegram priority message queue with rate limiting, fill batching, and HTML formatting
-- [ ] 05-02-PLAN.md — Bond cycle TradingLoop integration with holiday gating, preflight checks, and daily P&L fix
-- [ ] 05-03-PLAN.md — Telegram webhook commands (/status, /breakers) and coupon/CBR alert wiring
+- [x] 05-01-PLAN.md — Telegram priority message queue with rate limiting, fill batching, and HTML formatting
+- [x] 05-02-PLAN.md — Bond cycle TradingLoop integration with holiday gating, preflight checks, and daily P&L fix
+- [x] 05-03-PLAN.md — Telegram webhook commands (/status, /breakers) and coupon/CBR alert wiring
+- [ ] 05-04-PLAN.md — Gap closure: TimescaleDB snapshot persistence and Telegram webhook router wiring
 
 ### Phase 6: Sandbox Validation
 **Goal**: System proves autonomous operation capability in T-Invest sandbox over multiple trading days
@@ -147,6 +148,6 @@ Note: Phases 2 and 3 depend only on Phase 1 (not on each other) and could theore
 | 2. MOEX Equity Validation | 3/3 | Complete   | 2026-03-14 |
 | 3. Bond Data Pipeline | 3/3 | Complete   | 2026-03-14 |
 | 4. Bond Execution | 3/3 | Complete    | 2026-03-14 |
-| 5. Integration and Telegram | 2/3 | In Progress|  |
+| 5. Integration and Telegram | 3/4 | In Progress|  |
 | 6. Sandbox Validation | 0/2 | Not started | - |
 | 7. News Pipeline and Go-Live | 0/3 | Not started | - |
