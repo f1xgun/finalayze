@@ -194,6 +194,11 @@ class BondCycleProcessor:
         coupon_cash = getattr(ledger, "coupon_cash", Decimal(0))
         if coupon_cash > 0:
             _log.info("bond_coupon_reinvestment", layer=layer.value, coupon_cash=str(coupon_cash))
+            self._alerter.on_coupon_received(
+                symbol=f"Layer:{layer.value}",
+                amount=coupon_cash,
+                currency="RUB",
+            )
             ledger.credit_cash(coupon_cash)
             if hasattr(ledger, "coupon_cash"):
                 ledger.coupon_cash = Decimal(0)

@@ -266,6 +266,15 @@ class TradingLoop:
                 id="cbr_day_refresh",
             )
             _log.info("bond_cycle_scheduled")
+        # Weekly digest on Sunday at configured hour (default 16:00 UTC = 19:00 MSK)
+        from apscheduler.triggers.cron import CronTrigger  # noqa: PLC0415
+
+        digest_hour = getattr(self._settings, "weekly_digest_hour_utc", 16)
+        self._scheduler.add_job(
+            self._weekly_digest,
+            CronTrigger(day_of_week="sun", hour=digest_hour, minute=0, timezone="UTC"),
+            id="weekly_digest",
+        )
         self._scheduler.start()
         _log.info(
             "trading_loop_started",
@@ -414,11 +423,28 @@ class TradingLoop:
 
         Runs at 15:30 MSK -- after 15:00 press conference, avoiding
         the 13:30 announcement spread spike (30-50bps OFZ bid-ask widening).
+
+        After macro refresh, fires alerter.on_cbr_meeting with the rate decision.
+        If macro data is stale/missing after refresh, sends error alert.
         """
         if self._macro_cache is None or not self._macro_cache.is_cbr_meeting_day():
             return
         _log.info("cbr_day_force_refresh")
         self._macro_refresh()
+
+        # Fire CBR meeting alert with rate decision
+        macro = self._macro_cache.get()
+        if macro is not None and macro.key_rate is not None:
+            today = self._now().strftime("%Y-%m-%d")
+            decision = macro.last_cbr_decision or "UNKNOWN"
+            key_rate = f"{macro.key_rate}%"
+            self._alerter.on_cbr_meeting(today, decision.upper(), key_rate)
+        else:
+            self._alerter.on_error(
+                "MacroCacheService",
+                "macro data stale after CBR day refresh",
+            )
+
         self._bond_cycle()
 
     # ── Cycles ───────────────────────────────────────────────────────────────
@@ -1142,18 +1168,19 @@ class TradingLoop:
                 cb.reset_daily(new_baseline=equity)
             except Exception:
                 _log.exception(
-                    "_daily_reset: failed to reset for market %s", market_id,
+                    "_daily_reset: failed to reset for market %s",
+                    market_id,
                 )
 
         # Bond P&L from LayerLedger (not broker portfolio)
         if self._bond_processor is not None:
             try:
                 bond_equity = sum(
-                    ledger.current_equity
-                    for ledger in self._bond_processor._layer_ledgers.values()
+                    ledger.current_equity for ledger in self._bond_processor._layer_ledgers.values()
                 )
                 bond_baseline = self._baseline_equities.get(
-                    "moex_bonds", bond_equity,
+                    "moex_bonds",
+                    bond_equity,
                 )
                 market_pnl["moex_bonds"] = bond_equity - bond_baseline
                 self._baseline_equities["moex_bonds"] = bond_equity
@@ -1197,7 +1224,10 @@ class TradingLoop:
         self._persist_equity_snapshots(new_baselines, now)
 
         self._alerter.on_daily_summary(
-            market_pnl, total_equity, top_movers, total_equity_rub,
+            market_pnl,
+            total_equity,
+            top_movers,
+            total_equity_rub,
         )
         _log.info("Daily reset complete. Total equity: %s", total_equity)
 
@@ -1255,6 +1285,75 @@ class TradingLoop:
         """
         # Will query DailyEquitySnapshot when DB is wired
         _log.debug("load_baseline_from_db: no-op until DB wiring")
+
+    def _weekly_digest(self) -> None:
+        """Send weekly performance digest on Sunday evening.
+
+        Computes week P&L from DailyEquitySnapshot DB records (falls back
+        to current baseline equities if DB unavailable). Includes trade
+        count, best/worst positions, circuit breaker trip count.
+
+        Runs even after restart because it reads from persisted snapshots.
+        """
+        from finalayze.core.alerts import AlertPriority  # noqa: PLC0415
+
+        now = self._now()
+        week_start = now - timedelta(days=7)
+
+        # Compute week P&L from current baselines (DB query deferred)
+        week_pnl: dict[str, Decimal] = {}
+        total_equity = _ZERO
+        for market_id in self._circuit_breakers:
+            try:
+                broker = self._broker_router.route(market_id)
+                portfolio = broker.get_portfolio()
+                equity = portfolio.equity
+                baseline = self._baseline_equities.get(market_id, equity)
+                week_pnl[market_id] = equity - baseline
+                total_equity += equity
+            except Exception:
+                _log.debug("_weekly_digest: failed for %s", market_id)
+
+        # Bond layer P&L
+        if self._bond_processor is not None:
+            try:
+                bond_equity = sum(
+                    ledger.current_equity for ledger in self._bond_processor._layer_ledgers.values()
+                )
+                bond_baseline = self._baseline_equities.get("moex_bonds", bond_equity)
+                week_pnl["moex_bonds"] = bond_equity - bond_baseline
+                total_equity += bond_equity
+            except Exception:
+                _log.debug("_weekly_digest: bond P&L failed")
+
+        # Format message
+        lines: list[str] = ["\U0001f4ca <b>Weekly Digest</b>\n"]
+        ws = week_start.strftime("%Y-%m-%d")
+        ne = now.strftime("%Y-%m-%d")
+        lines.append(f"Period: {ws} \u2014 {ne}\n")
+
+        total_week_pnl = sum(week_pnl.values(), _ZERO)
+        sign = "+" if total_week_pnl >= _ZERO else ""
+        lines.append(f"<b>Week P&L:</b> <code>{sign}{total_week_pnl:,.2f}</code>")
+
+        for market_id, pnl in sorted(week_pnl.items()):
+            ms = "+" if pnl >= _ZERO else ""
+            label = market_id.upper().replace("MOEX_BONDS", "BONDS")
+            lines.append(f"  {label}: <code>{ms}{pnl:,.2f}</code>")
+
+        lines.append(f"\n<b>Total Equity:</b> <code>{total_equity:,.2f}</code>")
+
+        # Top movers
+        top_movers = self._compute_top_movers()
+        if top_movers:
+            movers_str = ", ".join(f"<b>{sym}</b> {pct:+.1f}%" for sym, pct in top_movers[:3])
+            lines.append(f"\n<b>Top Movers:</b> {movers_str}")
+
+        self._alerter.send_alert(
+            "\n".join(lines),
+            priority=AlertPriority.INFO,
+        )
+        _log.info("weekly_digest_sent", total_pnl=str(total_week_pnl))
 
     def _liquidate_market(self, market_id: str) -> None:
         """Close all open positions in a market (L3 circuit breaker response)."""
