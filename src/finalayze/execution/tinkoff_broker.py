@@ -256,9 +256,7 @@ class TinkoffBroker(BrokerBase):
         figis = list(symbol_to_figi.values())
         try:
             self._ensure_account_id()
-            response = self._call(
-                lambda: asyncio.run(self._get_last_prices_async(figis))
-            )
+            response = self._call(lambda: asyncio.run(self._get_last_prices_async(figis)))
         except Exception as exc:
             msg = f"Tinkoff get_last_prices failed: {exc}"
             raise BrokerError(msg) from exc
@@ -289,9 +287,7 @@ class TinkoffBroker(BrokerBase):
         """
         try:
             self._ensure_account_id()
-            state = self._call(
-                lambda: asyncio.run(self._get_order_state_async(order_id))
-            )
+            state = self._call(lambda: asyncio.run(self._get_order_state_async(order_id)))
         except Exception as exc:
             msg = f"Tinkoff get_order_state failed for {order_id}: {exc}"
             raise BrokerError(msg) from exc
@@ -383,6 +379,86 @@ class TinkoffBroker(BrokerBase):
         """Async call to Tinkoff SDK cancel_order."""
         client = self._get_client()
         await client.orders.cancel_order(account_id=self._account_id, order_id=order_id)  # type: ignore[attr-defined]
+
+    def reconnect_client(self) -> bool:
+        """Destroy existing gRPC client and create a new one.
+
+        Thread-safe. Resets _account_id and re-fetches it from the API.
+
+        Returns:
+            True if reconnection succeeded, False otherwise.
+        """
+        with self._client_lock:
+            # Close old client (suppress exceptions)
+            self.close()
+            self._account_id = ""
+            try:
+                target = (
+                    _TBANK_GRPC_SANDBOX_TARGET if self._sandbox else _TBANK_GRPC_TARGET
+                )
+                self._client = AsyncClient(self._token, target=target)
+                self._ensure_account_id()
+                _log.info(
+                    "tinkoff_reconnected",
+                    account_id=self._account_id,
+                    sandbox=self._sandbox,
+                )
+                return True
+            except Exception:
+                _log.exception("tinkoff_reconnect_failed")
+                self._client = None
+                return False
+
+    def get_open_orders(self) -> list[OrderStateResult]:
+        """Return all non-terminal orders in the account.
+
+        Returns empty list on API failure (logs warning, does not raise).
+        """
+        try:
+            self._ensure_account_id()
+            response = self._call(
+                lambda: asyncio.run(self._get_orders_async())
+            )
+            orders: list[OrderStateResult] = []
+            for order in getattr(response, "orders", []):
+                raw_status = getattr(order, "execution_report_status", 0)
+                status_str = _EXECUTION_STATUS_MAP.get(raw_status, "unspecified")
+                if status_str in _TERMINAL_STATUSES:
+                    continue
+                filled_qty = Decimal(getattr(order, "lots_executed", 0))
+                filled_price = self._quotation_to_decimal(order.executed_order_price)
+                orders.append(
+                    OrderStateResult(
+                        order_id=order.order_id,
+                        execution_status=status_str,
+                        filled_quantity=filled_qty,
+                        filled_price=filled_price,
+                        is_terminal=False,
+                    )
+                )
+            return orders
+        except Exception:
+            _log.warning("get_open_orders_failed", exc_info=True)
+            return []
+
+    async def _get_orders_async(self) -> object:
+        """Async call to T-Invest get_orders."""
+        client = self._get_client()
+        return await client.orders.get_orders(account_id=self._account_id)  # type: ignore[attr-defined]
+
+    def cancel_order_safe(self, order_id: str) -> bool:
+        """Cancel a specific order by ID. Returns True on success, False on error.
+
+        Unlike cancel_order(), this method does not raise on failure.
+        """
+        try:
+            self._ensure_account_id()
+            self._call(lambda: asyncio.run(self._cancel_order_async(order_id)))
+            _log.info("order_cancelled", order_id=order_id)
+            return True
+        except Exception:
+            _log.warning("cancel_order_safe_failed", order_id=order_id, exc_info=True)
+            return False
 
     @staticmethod
     def _quotation_to_decimal(q: object) -> Decimal:
