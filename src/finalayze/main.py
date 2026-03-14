@@ -50,9 +50,12 @@ def create_app() -> FastAPI:
         from finalayze.api.v1.telegram import create_telegram_router  # noqa: PLC0415
         from finalayze.core.telegram_bot import TelegramBotHandler  # noqa: PLC0415
 
+        from finalayze.core.alerts import TelegramAlerter  # noqa: PLC0415
+
+        alerter = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
         bot_handler = TelegramBotHandler(
-            alerter=None,  # type: ignore[arg-type]
-            broker_router=None,  # type: ignore[arg-type]
+            alerter=alerter,
+            broker_router=None,  # type: ignore[arg-type] — wired in TradingLoop startup
             circuit_breakers={},
             settings=settings,  # type: ignore[arg-type]
         )

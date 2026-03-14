@@ -103,29 +103,32 @@ class TelegramBotHandler:
         """
         lines: list[str] = ["<b>Portfolio Status</b>\n"]
 
-        markets = self._broker_router.registered_markets
-        for market_id in markets:
-            try:
-                broker = self._broker_router.route(market_id)
-                portfolio = broker.get_portfolio()
-                equity = portfolio.equity
-                cash = portfolio.cash
-                positions = portfolio.positions
+        if self._broker_router is None:
+            lines.append("Broker not connected (API-only mode)")
+        else:
+            markets = self._broker_router.registered_markets
+            for market_id in markets:
+                try:
+                    broker = self._broker_router.route(market_id)
+                    portfolio = broker.get_portfolio()
+                    equity = portfolio.equity
+                    cash = portfolio.cash
+                    positions = portfolio.positions
 
-                lines.append(f"<b>{market_id.upper()}</b>")
-                lines.append(f"  Equity: <code>{equity:,.2f}</code>")
-                lines.append(f"  Cash: <code>{cash:,.2f}</code>")
+                    lines.append(f"<b>{market_id.upper()}</b>")
+                    lines.append(f"  Equity: <code>{equity:,.2f}</code>")
+                    lines.append(f"  Cash: <code>{cash:,.2f}</code>")
 
-                if positions:
-                    for sym, qty in sorted(positions.items()):
-                        if qty > _ZERO:
-                            lines.append(f"  {sym}: <code>{qty}</code>")
-                else:
-                    lines.append("  No positions")
-                lines.append("")
-            except Exception:
-                lines.append(f"<b>{market_id.upper()}</b>: unavailable\n")
-                _log.debug("telegram_status_market_failed", market_id=market_id)
+                    if positions:
+                        for sym, qty in sorted(positions.items()):
+                            if qty > _ZERO:
+                                lines.append(f"  {sym}: <code>{qty}</code>")
+                    else:
+                        lines.append("  No positions")
+                    lines.append("")
+                except Exception:
+                    lines.append(f"<b>{market_id.upper()}</b>: unavailable\n")
+                    _log.debug("telegram_status_market_failed", market_id=market_id)
 
         # Bond layer status
         if self._bond_processor is not None:
@@ -151,6 +154,9 @@ class TelegramBotHandler:
             chat_id: Telegram chat ID (reserved for per-chat responses).
         """
         lines: list[str] = ["<b>Circuit Breakers</b>\n"]
+
+        if not self._circuit_breakers:
+            lines.append("No circuit breakers configured (API-only mode)")
 
         for market_id, cb in sorted(self._circuit_breakers.items()):
             level = cb.level
