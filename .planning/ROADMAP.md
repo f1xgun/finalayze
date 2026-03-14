@@ -78,12 +78,12 @@ Plans:
   3. Separate "moex_bonds" TinkoffBroker instance handles bond orders (no shared gRPC client with equity cycle)
   4. DV01BudgetStep uses dirty price (clean price + NKD) for cash sufficiency checks
   5. Bond backtest shows positive carry PnL with walk-forward validation on OFZ instruments
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
-- [ ] 04-03: TBD
+- [ ] 04-01-PLAN.md — BondPositionRecord, DV01 dirty-price fix, LayerLedger DB persistence, moex_bonds broker, reconciliation
+- [ ] 04-02-PLAN.md — BondCycleProcessor _size_and_execute + _process_yield_stops with fill wait and partial fill handling
+- [ ] 04-03-PLAN.md — Bond walk-forward backtest validation proving positive PnL on OFZ instruments
 
 ### Phase 5: Integration and Telegram
 **Goal**: Equity and bond cycles run together in TradingLoop with reliable Telegram alerting for all trade events
