@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Phase 4 context gathered
-last_updated: "2026-03-14T18:25:03.098Z"
-last_activity: 2026-03-14 -- Completed 03-03 (Bond discovery & candle cache)
+status: executing
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-03-14T18:56:08.856Z"
+last_activity: 2026-03-14 -- Completed 04-01 (Bond infrastructure)
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
+  total_plans: 11
+  completed_plans: 9
   percent: 43
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Autonomous profitable MOEX trading (stocks + bonds + coupons) with risk limits, operating without human intervention
-**Current focus:** Phase 3 - Bond Data Pipeline
+**Current focus:** Phase 4 - Bond Execution
 
 ## Current Position
 
-Phase: 3 of 7 (Bond Data Pipeline)
-Plan: 3 of 3 in current phase
-Status: Phase 3 Complete
-Last activity: 2026-03-14 -- Completed 03-03 (Bond discovery & candle cache)
+Phase: 4 of 7 (Bond Execution)
+Plan: 1 of 3 in current phase
+Status: In Progress
+Last activity: 2026-03-14 -- Completed 04-01 (Bond infrastructure)
 
 Progress: [████░░░░░░] 43%
 
@@ -55,6 +55,7 @@ Progress: [████░░░░░░] 43%
 | Phase 03 P02 | 5min | 3 tasks | 6 files |
 | Phase 03 P01 | 9min | 2 tasks | 6 files |
 | Phase 03 P03 | 9min | 3 tasks | 8 files |
+| Phase 04 P01 | 7min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,9 @@ Recent decisions affecting current work:
 - [Phase 03]: CouponEvent emitted on record_date match; bond candle prices in % of face value
 - [Phase 03]: Cross-validation tolerance 100bps (not 1bps) due to business-day vs calendar schedule difference
 - [Phase 03]: FloatingRateBond requires 1-year historical fixings backfill with flat rate (MVP)
+- [Phase 04]: face_value renamed to unit_cost (default 1000) for DV01 sizing backward compat
+- [Phase 04]: make_bond_broker shares AsyncClient (single gRPC channel) with equity broker
+- [Phase 04]: reconcile_with_broker adds unknown bonds to Core layer with zeroed entry data
 
 ### Pending Todos
 
@@ -101,6 +105,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T18:25:03.096Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-bond-execution/04-CONTEXT.md
+Last session: 2026-03-14T18:56:08.853Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
