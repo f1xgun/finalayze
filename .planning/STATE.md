@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-03-14T14:33:00.000Z"
-last_activity: 2026-03-14 -- Completed 02-01 (MOEX tooling & strategy enablement)
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-03-14T16:14:54.568Z"
+last_activity: 2026-03-14 -- Completed 02-02 (MOEX calibration & walk-forward validation)
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
-  percent: 21
+  completed_plans: 4
+  percent: 29
 ---
 
 # Project State
@@ -21,33 +21,33 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Autonomous profitable MOEX trading (stocks + bonds + coupons) with risk limits, operating without human intervention
-**Current focus:** Phase 2 - MOEX Equity Validation
+**Current focus:** Phase 3 - Bond Data Pipeline
 
 ## Current Position
 
-Phase: 2 of 7 (MOEX Equity Validation)
-Plan: 1 of 2 in current phase
-Status: Phase 2 In Progress
-Last activity: 2026-03-14 -- Completed 02-01 (MOEX tooling & strategy enablement)
+Phase: 3 of 7 (Bond Data Pipeline)
+Plan: 0 of 3 in current phase
+Status: Phase 2 Complete, Phase 3 Not Started
+Last activity: 2026-03-14 -- Completed 02-02 (MOEX calibration & walk-forward validation)
 
-Progress: [██░░░░░░░░] 21%
+Progress: [███░░░░░░░] 29%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: 11min
-- Total execution time: 0.6 hours
+- Total plans completed: 4
+- Average duration: 18min
+- Total execution time: 1.2 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 2 | 24min | 12min |
-| 02 | 1 | 11min | 11min |
+| 02 | 2 | 49min | 25min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (6min), 01-02 (18min), 02-01 (11min)
+- Last 5 plans: 01-01 (6min), 01-02 (18min), 02-01 (11min), 02-02 (38min)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -70,6 +70,10 @@ Recent decisions affecting current work:
 - [02-01]: ou_mean_reversion disabled on all MOEX segments (negative Sharpe on all 3: -0.28, -0.11, -0.55)
 - [02-01]: Weights redistributed proportionally after OU disable; all presets sum to 1.00
 - [02-01]: ru_finance added to UNIVERSE (7 symbols in run_iteration, 4 in isolation)
+- [02-02]: All 8 candidate pairs failed cointegration (p>0.05) -- pairs strategy disabled on all MOEX segments
+- [02-02]: Optuna-tuned MOEX-specific params (ADX thresholds, BB std_dev, confidence levels) distinct from US defaults
+- [02-02]: Walk-forward targets not fully met (avg Sharpe negative) -- best-effort accepted after 5 iterations per plan
+- [02-02]: Individual symbols profitable (YNDX Sharpe +0.88, ROSN +0.65) but segment averages dragged by losing symbols
 
 ### Pending Todos
 
@@ -78,12 +82,12 @@ None yet.
 ### Blockers/Concerns
 
 - ~~RUB position sizing bug~~ FIXED in 01-02 (1M RUB starting capital, 8% position sizing)
-- MOEX-specific ADX threshold calibration may need research during Phase 2 planning
+- ~~MOEX-specific ADX threshold calibration~~ DONE in 02-02 (Optuna-tuned per segment)
 - OFZ-PK floater duration formula needs validation during Phase 4 planning
 - Russian news RSS URLs have MEDIUM confidence -- validate at Phase 7 implementation
 
 ## Session Continuity
 
-Last session: 2026-03-14T14:33:00.000Z
-Stopped at: Completed 02-01-PLAN.md
-Resume file: .planning/phases/02-moex-equity-validation/02-01-SUMMARY.md
+Last session: 2026-03-14T16:14:00.000Z
+Stopped at: Completed 02-02-PLAN.md
+Resume file: .planning/phases/02-moex-equity-validation/02-02-SUMMARY.md
