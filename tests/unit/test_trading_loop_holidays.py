@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -66,3 +66,63 @@ class TestUsMarketUnchanged:
         result = TradingLoop._is_market_open(mock_loop, "us", dt)
         # US doesn't have holiday check in TradingLoop -- it returns True during hours
         assert result is True
+
+
+class TestBondCycleHolidayGating:
+    """Bond cycle gating: skip on MOEX holidays, skip outside hours, proceed when OK."""
+
+    def test_bond_cycle_skips_moex_holiday(self) -> None:
+        """_bond_cycle skips when is_moex_trading_day returns False (structlog, no Telegram)."""
+        loop = MagicMock()
+        loop._bond_processor = MagicMock()
+        loop._bond_enabled = True
+        loop._now.return_value = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+
+        with patch(
+            "finalayze.core.trading_loop.is_moex_trading_day", return_value=False
+        ):
+            TradingLoop._bond_cycle(loop)
+
+        loop._bond_processor.run_cycle.assert_not_called()
+        loop._alerter.on_error.assert_not_called()
+
+    def test_bond_cycle_skips_outside_market_hours(self) -> None:
+        """_bond_cycle skips when outside 10:00-18:45 MSK (07:00-15:45 UTC)."""
+        loop = MagicMock()
+        loop._bond_processor = MagicMock()
+        loop._bond_enabled = True
+        # 2024-03-11 is a normal Monday, but 05:00 UTC is before MOEX open
+        loop._now.return_value = datetime(2024, 3, 11, 5, 0, tzinfo=UTC)
+
+        with patch(
+            "finalayze.core.trading_loop.is_moex_trading_day", return_value=True
+        ):
+            TradingLoop._bond_cycle(loop)
+
+        loop._bond_processor.run_cycle.assert_not_called()
+
+    def test_bond_cycle_proceeds_when_ok(self) -> None:
+        """_bond_cycle proceeds when MOEX trading day AND within market hours."""
+        loop = MagicMock()
+        loop._bond_processor = MagicMock()
+        loop._bond_enabled = True
+        # 2024-03-11 is normal Monday, 10:00 UTC is within MOEX hours
+        loop._now.return_value = datetime(2024, 3, 11, 10, 0, tzinfo=UTC)
+        loop._is_market_open.return_value = True
+
+        with patch(
+            "finalayze.core.trading_loop.is_moex_trading_day", return_value=True
+        ):
+            TradingLoop._bond_cycle(loop)
+
+        loop._bond_processor.run_cycle.assert_called_once()
+
+    def test_macro_refresh_runs_regardless_of_holiday(self) -> None:
+        """_macro_refresh runs regardless of holiday (no gate)."""
+        loop = MagicMock()
+        loop._macro_cache = MagicMock()
+        loop._macro_cache.refresh.return_value = MagicMock(key_rate="21.00", ruonia_7d_avg="20.50")
+
+        TradingLoop._macro_refresh(loop)
+
+        loop._macro_cache.refresh.assert_called_once()

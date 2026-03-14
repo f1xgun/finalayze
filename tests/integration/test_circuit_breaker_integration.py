@@ -153,3 +153,83 @@ class TestCrossMarketIntegration:
             )
             is False
         )
+
+
+# ── Bond Layer Circuit Breaker Tests ──────────────────────────────────────
+
+MARKET_BOND = "moex_bonds"
+BOND_BASELINE = Decimal(1_000_000)
+BOND_EQUITY_AT_6PCT = Decimal(940_000)
+BOND_EQUITY_AT_11PCT = Decimal(890_000)
+BOND_EQUITY_AT_16PCT = Decimal(840_000)
+
+
+@pytest.mark.integration
+class TestBondLayerCircuitBreaker:
+    """Circuit breaker tests for bond layer -- independent of equity."""
+
+    def _make_bond_cb(self) -> CircuitBreaker:
+        return CircuitBreaker(
+            market_id=MARKET_BOND,
+            l1_threshold=L1_THRESHOLD,
+            l2_threshold=L2_THRESHOLD,
+            l3_threshold=L3_THRESHOLD,
+        )
+
+    def test_bond_breaker_trips_on_drawdown(self) -> None:
+        """Circuit breaker trips correctly for bond layer drawdown exceeding threshold."""
+        cb = self._make_bond_cb()
+        level = cb.check(BOND_EQUITY_AT_6PCT, BOND_BASELINE)
+        assert level == CircuitLevel.CAUTION
+
+        level = cb.check(BOND_EQUITY_AT_11PCT, BOND_BASELINE)
+        assert level == CircuitLevel.HALTED
+
+    def test_bond_breaker_independent_of_equity(self) -> None:
+        """Bond layer breaker is independent of equity layer breaker."""
+        equity_cb = CircuitBreaker(
+            market_id=MARKET_US,
+            l1_threshold=L1_THRESHOLD,
+            l2_threshold=L2_THRESHOLD,
+            l3_threshold=L3_THRESHOLD,
+        )
+        bond_cb = self._make_bond_cb()
+
+        # Trip equity breaker to HALTED
+        equity_cb.check(EQUITY_AT_11PCT, BASELINE)
+        assert equity_cb.level == CircuitLevel.HALTED
+
+        # Bond breaker should still be NORMAL
+        assert bond_cb.level == CircuitLevel.NORMAL
+
+        # Trip bond breaker independently
+        bond_cb.check(BOND_EQUITY_AT_6PCT, BOND_BASELINE)
+        assert bond_cb.level == CircuitLevel.CAUTION
+        # Equity breaker unchanged
+        assert equity_cb.level == CircuitLevel.HALTED
+
+    def test_bond_breaker_reset_after_cooldown(self) -> None:
+        """Bond layer circuit breaker reset works correctly after cooldown."""
+        cb = self._make_bond_cb()
+
+        # Trip to CAUTION
+        cb.check(BOND_EQUITY_AT_6PCT, BOND_BASELINE)
+        assert cb.level == CircuitLevel.CAUTION
+
+        # Daily reset clears CAUTION
+        cb.reset_daily(new_baseline=BOND_EQUITY_AT_6PCT)
+        assert cb.level == CircuitLevel.NORMAL
+
+    def test_bond_breaker_halted_requires_profitable_days(self) -> None:
+        """Bond layer HALTED requires 2 consecutive profitable days to clear."""
+        cb = self._make_bond_cb()
+        cb.check(BOND_EQUITY_AT_11PCT, BOND_BASELINE)
+        assert cb.level == CircuitLevel.HALTED
+
+        # Day 1: profitable
+        cb.reset_daily(new_baseline=BOND_BASELINE + Decimal(5000))
+        assert cb.level == CircuitLevel.HALTED
+
+        # Day 2: profitable
+        cb.reset_daily(new_baseline=BOND_BASELINE + Decimal(10000))
+        assert cb.level == CircuitLevel.NORMAL
