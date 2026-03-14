@@ -30,7 +30,7 @@ import structlog  # noqa: E402
 from t_tech.invest import AsyncClient, CandleInterval  # noqa: E402
 
 from finalayze.core.exceptions import DataFetchError, InstrumentNotFoundError  # noqa: E402
-from finalayze.core.schemas import AccruedInterest, BondInfo, Candle, CouponEvent, CouponPayment  # noqa: E402
+from finalayze.core.schemas import AccruedInterest, BondInfo, Candle, CouponPayment  # noqa: E402
 from finalayze.data.fetchers.base import BaseFetcher  # noqa: E402
 
 _log = structlog.get_logger()
@@ -343,6 +343,75 @@ class TinkoffFetcher(BaseFetcher):
                     }
                 )
             return events
+
+    def fetch_bond_candles(
+        self,
+        figi: str,
+        from_date: date,
+        to_date: date,
+        interval: CandleInterval | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch daily OHLCV candle data for a bond FIGI.
+
+        Bond candle prices on MOEX are quoted as percentage of face value
+        (e.g. 95.50 means 95.50% of face). Same convention as bond_math.py clean_price_pct.
+
+        Args:
+            figi: Bond FIGI identifier.
+            from_date: Start date (inclusive).
+            to_date: End date (inclusive).
+            interval: Candle interval (defaults to daily).
+
+        Returns:
+            List of dicts with: date, open, high, low, close (Decimal), volume (int).
+            Returns empty list on gRPC error.
+        """
+        if interval is None:
+            interval = CandleInterval.CANDLE_INTERVAL_DAY
+
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+
+        try:
+            return asyncio.run(self._fetch_bond_candles_async(figi, from_date, to_date, interval))
+        except Exception:
+            _log.exception("bond_candle_fetch_failed", figi=figi)
+            return []
+
+    async def _fetch_bond_candles_async(
+        self,
+        figi: str,
+        from_date: date,
+        to_date: date,
+        interval: CandleInterval,
+    ) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK get_candles for bonds."""
+        start_dt = datetime.combine(from_date, datetime.min.time(), tzinfo=UTC)
+        end_dt = datetime.combine(to_date, datetime.max.time(), tzinfo=UTC)
+
+        client = self._make_client()
+        async with client as services:
+            response = await services.market_data.get_candles(
+                figi=figi,
+                from_=start_dt,
+                to=end_dt,
+                interval=interval,
+            )
+            result: list[dict[str, Any]] = []
+            for c in response.candles:
+                ts = c.time
+                candle_date = ts.date() if hasattr(ts, "date") else ts
+                result.append(
+                    {
+                        "date": candle_date,
+                        "open": self._quotation_to_decimal(c.open),
+                        "high": self._quotation_to_decimal(c.high),
+                        "low": self._quotation_to_decimal(c.low),
+                        "close": self._quotation_to_decimal(c.close),
+                        "volume": int(c.volume),
+                    }
+                )
+            return result
 
     # ── Bond data methods ──────────────────────────────────────────────────
 

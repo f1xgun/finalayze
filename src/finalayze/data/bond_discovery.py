@@ -10,7 +10,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -78,7 +78,7 @@ class BondDiscoveryService:
             DiscoveryResult with ofz/corporate lists and counts.
         """
         if today is None:
-            today = date.today()
+            today = datetime.now(tz=UTC).date()
 
         all_bonds = self._fetcher.fetch_all_bonds()
         total = len(all_bonds)
@@ -147,6 +147,98 @@ class BondDiscoveryService:
             filtered_count=len(passed),
         )
 
+    async def populate_candle_cache(
+        self,
+        bonds: list[BondInfo],
+        db_session_factory: Any,
+        lookback_days: int = 365,
+    ) -> int:
+        """Fetch and cache daily bond candles for discovered bonds.
+
+        Per CONTEXT.md: cache bond candles in TimescaleDB with daily append.
+        Bond candle prices are in percentage of face value (MOEX convention).
+
+        Args:
+            bonds: List of discovered BondInfo objects.
+            db_session_factory: Async session factory for DB writes.
+            lookback_days: Default lookback for initial fetch.
+
+        Returns:
+            Total count of new candles cached.
+        """
+        from finalayze.core.models import BondCandleModel  # noqa: PLC0415
+
+        total_cached = 0
+
+        for bond_info in bonds:
+            try:
+                # Check latest cached date
+                async with db_session_factory() as session:
+                    from sqlalchemy import func, select  # noqa: PLC0415
+
+                    stmt = select(func.max(BondCandleModel.date)).where(
+                        BondCandleModel.bond_figi == bond_info.figi
+                    )
+                    result = await session.execute(stmt)
+                    latest_date = result.scalar()
+
+                # Determine fetch range
+                today = datetime.now(tz=UTC).date()
+                if latest_date is not None:
+                    if hasattr(latest_date, "date"):
+                        from_date = latest_date.date() + timedelta(days=1)
+                    else:
+                        from_date = latest_date + timedelta(days=1)
+                else:
+                    from_date = today - timedelta(days=lookback_days)
+
+                candle_dicts = self._fetcher.fetch_bond_candles(
+                    bond_info.figi, from_date, today
+                )
+
+                if not candle_dicts:
+                    continue
+
+                # Convert to ORM models
+                models = []
+                for cd in candle_dicts:
+                    candle_dt = cd["date"]
+                    if isinstance(candle_dt, date) and not isinstance(candle_dt, datetime):
+                        candle_dt = datetime.combine(
+                            candle_dt, datetime.min.time(), tzinfo=UTC
+                        )
+                    models.append(
+                        BondCandleModel(
+                            bond_figi=bond_info.figi,
+                            date=candle_dt,
+                            open=cd["open"],
+                            high=cd["high"],
+                            low=cd["low"],
+                            close=cd["close"],
+                            volume=cd["volume"],
+                        )
+                    )
+
+                async with db_session_factory() as session:
+                    session.add_all(models)
+                    await session.commit()
+
+                total_cached += len(models)
+                _log.info(
+                    "bond_candles_cached",
+                    figi=bond_info.figi,
+                    count=len(models),
+                )
+            except Exception:
+                _log.warning(
+                    "bond_candle_cache_failed",
+                    figi=bond_info.figi,
+                    exc_info=True,
+                )
+                continue
+
+        return total_cached
+
     async def check_and_emit_coupon_events(
         self,
         discovered_bonds: list[BondInfo],
@@ -167,7 +259,7 @@ class BondDiscoveryService:
             return 0
 
         if today is None:
-            today = date.today()
+            today = datetime.now(tz=UTC).date()
 
         emitted = 0
         bond_map = {b.figi: b for b in discovered_bonds}
@@ -253,10 +345,10 @@ def _bond_proto_to_info(bond_dict: dict[str, Any]) -> BondInfo:
 
     # Day count convention from class code
     class_code = str(bond_dict.get("class_code", "TQOB")).upper()
-    day_count = "actual/365" if class_code in {"TQOB", "TQOD"} else "actual/365"
+    day_count = "actual/365"
 
     initial_nom = bond_dict.get("initial_nominal")
-    nominal = bond_dict.get("nominal", Decimal("1000"))
+    nominal = bond_dict.get("nominal", Decimal(1000))
 
     return BondInfo(
         figi=bond_dict["figi"],
