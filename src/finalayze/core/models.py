@@ -321,6 +321,17 @@ class LayerLedgerModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class DailyEquitySnapshot(Base):
+    """Start-of-day equity snapshot per market, persisted to TimescaleDB."""
+
+    __tablename__ = "daily_equity_snapshots"
+
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    market_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    equity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+
+
 class PortfolioSnapshot(Base):
     """Portfolio equity snapshot written after each strategy cycle."""
 

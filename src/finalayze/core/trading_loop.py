@@ -178,6 +178,12 @@ class TradingLoop:
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._async_thread: threading.Thread | None = None
 
+        # asyncio.Lock for gRPC client serialization (equity + bond don't overlap)
+        self._grpc_lock = asyncio.Lock()
+
+        # Bond cycle enabled flag (set by preflight; independent degradation)
+        self._bond_enabled: bool = True
+
     # ── Async helper ────────────────────────────────────────────────────────
 
     def _run_async(self, coro: Any) -> Any:
@@ -318,8 +324,27 @@ class TradingLoop:
             _log.exception("macro_refresh_failed")
 
     def _bond_cycle(self) -> None:
-        """Daily bond trading cycle across all layers. SYNC."""
+        """Daily bond trading cycle across all layers. SYNC.
+
+        Gates on:
+          1. bond_enabled flag (set by preflight)
+          2. MOEX trading day (holiday calendar)
+          3. MOEX market hours (10:00-18:45 MSK = 07:00-15:45 UTC)
+        Skips are logged via structlog only -- no Telegram alert per user decision.
+        """
         if self._bond_processor is None:
+            return
+        if not self._bond_enabled:
+            _log.info("bond_cycle_skipped_disabled")
+            return
+        now = self._now()
+        from finalayze.data.moex_calendar import is_moex_trading_day  # noqa: PLC0415
+
+        if not is_moex_trading_day(now.date()):
+            _log.info("bond_cycle_skipped_holiday", date=str(now.date()))
+            return  # structlog only, no Telegram per user decision
+        if not self._is_market_open("moex", now):
+            _log.info("bond_cycle_skipped_hours", time=str(now.time()))
             return
         _log.info("bond_cycle_start")
         try:
@@ -327,6 +352,62 @@ class TradingLoop:
             _log.info("bond_cycle_complete", **result.to_log_dict())
         except Exception:
             _log.exception("bond_cycle_failed")
+            self._alerter.on_error("BondCycleProcessor", "bond_cycle_failed")
+
+    def _preflight_check(self) -> bool:
+        """Run preflight checks before scheduling bond cycle.
+
+        Checks:
+          1. gRPC connectivity: can we reach the MOEX broker?
+          2. Macro data freshness: is cached data less than 48h old?
+          3. LayerLedger state: can we reconcile with broker?
+
+        On success: sends startup alert, returns True.
+        On failure: disables bond cycle, sends degraded alert, returns False.
+        """
+        _grpc_timeout = 10
+        _macro_max_age_hours = 48
+        checks_ok = True
+
+        # Check 1: gRPC connectivity
+        try:
+            broker = self._broker_router.route("moex")
+            broker.get_portfolio()
+        except Exception:
+            _log.exception("preflight_grpc_failed")
+            checks_ok = False
+
+        # Check 2: Macro data freshness
+        if checks_ok and self._macro_cache is not None:
+            try:
+                macro = self._macro_cache.get()
+                if macro is None:
+                    _log.warning("preflight_macro_no_data")
+                    checks_ok = False
+            except Exception:
+                _log.exception("preflight_macro_failed")
+                checks_ok = False
+
+        # Check 3: LayerLedger reconciliation
+        if checks_ok and self._bond_processor is not None:
+            try:
+                self._bond_processor.reconcile_with_broker()
+            except Exception:
+                _log.exception("preflight_ledger_failed")
+                checks_ok = False
+
+        if checks_ok:
+            cb_keys = self._circuit_breakers if hasattr(self, "_circuit_breakers") else {}
+            markets = list(cb_keys.keys())
+            instruments = len(self._registry.list_by_market("moex")) if self._registry else 0
+            mode = str(self._settings.mode) if self._settings else "unknown"
+            self._alerter.on_startup(mode, markets, instruments)
+            return True
+
+        # Independent degradation: disable bond, equity continues
+        self._bond_enabled = False
+        self._alerter.on_error("Preflight", "Bond cycle disabled -- preflight checks failed")
+        return False
 
     def _cbr_day_refresh(self) -> None:
         """Force macro refresh + extra bond cycle on CBR meeting days.

@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     # Bond layers
     bond_capital: float = 1_000_000.0  # FINALAYZE_BOND_CAPITAL (RUB)
     bond_cycle_enabled: bool = True  # FINALAYZE_BOND_CYCLE_ENABLED
+    bond_cycle_minutes: int = 1440  # FINALAYZE_BOND_CYCLE_MINUTES (default daily)
+
+    # Telegram extensions (Plan 03 prep)
+    telegram_webhook_secret: str = ""  # FINALAYZE_TELEGRAM_WEBHOOK_SECRET
+    telegram_allowed_chat_ids: list[str] = []  # FINALAYZE_TELEGRAM_ALLOWED_CHAT_IDS
+    weekly_digest_hour_utc: int = 16  # FINALAYZE_WEEKLY_DIGEST_HOUR_UTC (Sunday 19:00 MSK)
 
     # Safety
     real_confirmed: bool = False
@@ -107,17 +113,18 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_mode_requirements(self) -> Settings:
         """Ensure required keys are set for non-DEBUG/TEST modes."""
-        # DEBUG and TEST modes skip credential validation (no live services needed)
-        if self.mode in (WorkMode.DEBUG, WorkMode.TEST):
+        # DEBUG, TEST, and SANDBOX modes skip credential validation
+        # (SANDBOX uses stubs for missing services)
+        if self.mode in (WorkMode.DEBUG, WorkMode.TEST, WorkMode.SANDBOX):
             if not self.database_url:
                 self.database_url = "postgresql+asyncpg://finalayze:secret@localhost:5432/finalayze"
             return self
-        # Non-DEBUG/TEST modes require an explicit database URL
+        # Non-DEBUG/TEST/SANDBOX modes require an explicit database URL
         if not self.database_url:
             raise ValueError("FINALAYZE_DATABASE_URL is required for non-DEBUG/TEST modes")
-        # All non-DEBUG modes need a live LLM
+        # REAL mode needs a live LLM
         if not self.llm_api_key and not self.anthropic_api_key:
-            raise ValueError("llm_api_key (or anthropic_api_key) is required for non-DEBUG mode")
+            raise ValueError("llm_api_key (or anthropic_api_key) is required for REAL mode")
         # REAL mode additionally requires broker credentials
         if self.mode == WorkMode.REAL:
             if not self.alpaca_api_key or not self.alpaca_secret_key:

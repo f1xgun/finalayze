@@ -79,7 +79,7 @@ class TestBondCycleHolidayGating:
         loop._now.return_value = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
 
         with patch(
-            "finalayze.core.trading_loop.is_moex_trading_day", return_value=False
+            "finalayze.data.moex_calendar.is_moex_trading_day", return_value=False
         ):
             TradingLoop._bond_cycle(loop)
 
@@ -93,9 +93,10 @@ class TestBondCycleHolidayGating:
         loop._bond_enabled = True
         # 2024-03-11 is a normal Monday, but 05:00 UTC is before MOEX open
         loop._now.return_value = datetime(2024, 3, 11, 5, 0, tzinfo=UTC)
+        loop._is_market_open.return_value = False  # outside hours
 
         with patch(
-            "finalayze.core.trading_loop.is_moex_trading_day", return_value=True
+            "finalayze.data.moex_calendar.is_moex_trading_day", return_value=True
         ):
             TradingLoop._bond_cycle(loop)
 
@@ -111,7 +112,7 @@ class TestBondCycleHolidayGating:
         loop._is_market_open.return_value = True
 
         with patch(
-            "finalayze.core.trading_loop.is_moex_trading_day", return_value=True
+            "finalayze.data.moex_calendar.is_moex_trading_day", return_value=True
         ):
             TradingLoop._bond_cycle(loop)
 
