@@ -55,3 +55,17 @@ class TestSegmentConfig:
     def test_all_segments_have_broker(self) -> None:
         for seg in DEFAULT_SEGMENTS:
             assert seg.broker in ("alpaca", "tinkoff")
+
+
+class TestBondSettings:
+    def test_bond_capital_default(self) -> None:
+        from config.settings import Settings
+
+        s = Settings(mode="test")
+        assert s.bond_capital == 1_000_000.0
+
+    def test_bond_cycle_enabled_default(self) -> None:
+        from config.settings import Settings
+
+        s = Settings(mode="test")
+        assert s.bond_cycle_enabled is True

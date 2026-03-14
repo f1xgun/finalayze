@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     # FX
     fx_update_interval_minutes: int = 60  # FINALAYZE_FX_UPDATE_INTERVAL_MINUTES
 
+    # Bond layers
+    bond_capital: float = 1_000_000.0  # FINALAYZE_BOND_CAPITAL (RUB)
+    bond_cycle_enabled: bool = True  # FINALAYZE_BOND_CYCLE_ENABLED
+
     # Safety
     real_confirmed: bool = False
 
