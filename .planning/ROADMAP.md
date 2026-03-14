@@ -95,12 +95,12 @@ Plans:
   3. All circuit breakers fire correctly for both equity and bond layers
   4. Telegram bot delivers trade fill, stop-loss, and circuit breaker alerts within 60 seconds (even during 20-fill bursts)
   5. Daily P&L summary shows correct RUB amounts (not zero)
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 05-01: TBD
-- [ ] 05-02: TBD
-- [ ] 05-03: TBD
+- [ ] 05-01-PLAN.md — Telegram priority message queue with rate limiting, fill batching, and HTML formatting
+- [ ] 05-02-PLAN.md — Bond cycle TradingLoop integration with holiday gating, preflight checks, and daily P&L fix
+- [ ] 05-03-PLAN.md — Telegram webhook commands (/status, /breakers) and coupon/CBR alert wiring
 
 ### Phase 6: Sandbox Validation
 **Goal**: System proves autonomous operation capability in T-Invest sandbox over multiple trading days
