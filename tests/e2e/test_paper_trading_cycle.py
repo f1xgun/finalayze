@@ -37,8 +37,9 @@ from finalayze.strategies.momentum import MomentumStrategy
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-# A Monday during market hours (14:30 UTC = 10:30 ET)
-MARKET_OPEN_DT = datetime(2026, 2, 23, 15, 0, tzinfo=UTC)
+# A Tuesday during market hours (15:00 UTC).
+# NOTE: 2026-02-23 is Defender of the Fatherland Day (MOEX holiday), so we use 2026-02-24.
+MARKET_OPEN_DT = datetime(2026, 2, 24, 15, 0, tzinfo=UTC)
 
 INITIAL_CASH = Decimal(100_000)
 INITIAL_EQUITY = Decimal(100_000)
