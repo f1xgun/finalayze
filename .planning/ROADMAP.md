@@ -146,7 +146,7 @@ Note: Phases 2 and 3 depend only on Phase 1 (not on each other) and could theore
 | 1. MOEX Equity Foundation | 2/2 | Complete   | 2026-03-14 |
 | 2. MOEX Equity Validation | 3/3 | Complete   | 2026-03-14 |
 | 3. Bond Data Pipeline | 3/3 | Complete   | 2026-03-14 |
-| 4. Bond Execution | 3/3 | Complete   | 2026-03-14 |
+| 4. Bond Execution | 3/3 | Complete    | 2026-03-14 |
 | 5. Integration and Telegram | 0/3 | Not started | - |
 | 6. Sandbox Validation | 0/2 | Not started | - |
 | 7. News Pipeline and Go-Live | 0/3 | Not started | - |
