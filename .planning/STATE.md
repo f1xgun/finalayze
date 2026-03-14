@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Phase 3 context gathered
-last_updated: "2026-03-14T17:13:53.366Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-03-14T17:45:08.748Z"
 last_activity: 2026-03-14 -- Completed 02-02 (MOEX calibration & walk-forward validation)
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 8
+  completed_plans: 6
   percent: 29
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 3 of 7 (Bond Data Pipeline)
-Plan: 0 of 3 in current phase
-Status: Phase 2 Complete, Phase 3 Not Started
-Last activity: 2026-03-14 -- Completed 02-02 (MOEX calibration & walk-forward validation)
+Plan: 2 of 3 in current phase
+Status: Phase 3 In Progress
+Last activity: 2026-03-14 -- Completed 03-02 (Macro data & yield curve)
 
 Progress: [███░░░░░░░] 29%
 
@@ -52,6 +52,7 @@ Progress: [███░░░░░░░] 29%
 
 *Updated after each plan completion*
 | Phase 02 P03 | 4min | 3 tasks | 5 files |
+| Phase 03 P02 | 5min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,7 @@ Recent decisions affecting current work:
 - [02-02]: Individual symbols profitable (YNDX Sharpe +0.88, ROSN +0.65) but segment averages dragged by losing symbols
 - [Phase 02]: All pruned MOEX symbols restored for future news/sentiment integration (Phase 7)
 - [Phase 02]: Three-quarter Kelly (0.75) kept for MOEX segments -- 3x position sizes vs default
+- [Phase 03]: Yield curve parsed from CBR HTML using lxml.html; async DB persistence via asyncio boundary in sync refresh()
 
 ### Pending Todos
 
@@ -91,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T17:13:53.363Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-bond-data-pipeline/03-CONTEXT.md
+Last session: 2026-03-14T17:45:08.746Z
+Stopped at: Completed 03-02-PLAN.md
+Resume file: None
