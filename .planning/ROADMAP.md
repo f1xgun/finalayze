@@ -30,11 +30,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. MOEX backtest positions are sized at 10-20% of RUB equity (not 0.02%)
   2. Backtest engine skips MOEX non-trading days (public holidays, not just weekends)
   3. MOEX commission and slippage costs are deducted in backtest PnL calculations
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
+- [ ] 01-01-PLAN.md — Fix MOEX commission rate (0.04%) and add transferred holidays with TradingLoop integration
+- [ ] 01-02-PLAN.md — Fix RUB position sizing (1M RUB capital) and validate MOEX backtest on all segments
 
 ### Phase 2: MOEX Equity Validation
 **Goal**: MOEX equity strategies produce profitable results in walk-forward backtests
@@ -142,7 +142,7 @@ Note: Phases 2 and 3 depend only on Phase 1 (not on each other) and could theore
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. MOEX Equity Foundation | 0/2 | Not started | - |
+| 1. MOEX Equity Foundation | 0/2 | Planning complete | - |
 | 2. MOEX Equity Validation | 0/2 | Not started | - |
 | 3. Bond Data Pipeline | 0/3 | Not started | - |
 | 4. Bond Execution | 0/3 | Not started | - |
