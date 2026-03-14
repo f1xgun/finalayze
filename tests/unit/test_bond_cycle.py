@@ -2,19 +2,35 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from finalayze.core.bond_cycle import BondCycleProcessor, BondCycleResult, LayerResult
+from finalayze.core.bond_cycle import (
+    BondCycleProcessor,
+    BondCycleResult,
+    LayerResult,
+    _FILL_TIMEOUT_SECONDS,
+    _MAX_SIZING_ITERATIONS,
+)
 from finalayze.core.layer_ledger import LayerLedger
-from finalayze.core.schemas import DEFAULT_LAYER_CONFIGS, PortfolioLayer
+from finalayze.core.schemas import (
+    BondPositionRecord,
+    DEFAULT_LAYER_CONFIGS,
+    PortfolioLayer,
+    Signal,
+    SignalDirection,
+)
 from finalayze.data.fetchers.cbr import MacroSnapshot
 from finalayze.data.macro_cache import MacroCacheService
+from finalayze.execution.broker_base import OrderResult
+from finalayze.execution.tinkoff_broker import OrderStateResult
 from finalayze.risk.layer_circuit_breaker import AggregateBondBreaker, BondLayerBreaker
 
-INITIAL_CASH = Decimal(100000)
+INITIAL_CASH = Decimal(100_000)
+FACE_VALUE = Decimal(1000)
 
 
 def _make_processor(
@@ -105,3 +121,579 @@ def test_layer_result_defaults() -> None:
     assert lr.exits == 0
     assert lr.halted is False
     assert lr.error is False
+
+
+# ── Helpers for _size_and_execute / _process_yield_stops tests ───────────────
+
+
+def _make_signal(
+    direction: SignalDirection = SignalDirection.BUY,
+    symbol: str = "SU26238RMFS4",
+) -> Signal:
+    """Create a minimal bond Signal for testing."""
+    return Signal(
+        strategy_name="bond_carry",
+        symbol=symbol,
+        market_id="moex",
+        segment_id="ru_ofz_pd",
+        direction=direction,
+        confidence=0.70,
+        features={},
+        reasoning="test signal",
+        instrument_type="bond",
+    )
+
+
+def _make_bond_info() -> MagicMock:
+    """Create a mock BondInfo with typical OFZ values."""
+    info = MagicMock()
+    info.figi = "BBG00TEST001"
+    info.ticker = "SU26238RMFS4"
+    info.face_value = FACE_VALUE
+    info.coupon_rate = Decimal("7.10")
+    info.coupon_frequency = 2
+    info.maturity_date = date(2028, 5, 10)
+    info.floating_coupon = False
+    return info
+
+
+def _make_order_result(
+    filled: bool = True,
+    order_id: str = "ord-test-1",
+    fill_price: Decimal = Decimal("95.50"),
+    quantity: Decimal = Decimal(5),
+    side: str = "BUY",
+    symbol: str = "SU26238RMFS4",
+) -> OrderResult:
+    return OrderResult(
+        filled=filled,
+        fill_price=fill_price,
+        symbol=symbol,
+        side=side,
+        quantity=quantity,
+        order_id=order_id,
+    )
+
+
+def _make_order_state(
+    status: str = "fill",
+    filled_qty: int = 5,
+    filled_price: Decimal = Decimal("95.50"),
+    is_terminal: bool = True,
+    order_id: str = "ord-test-1",
+) -> OrderStateResult:
+    return OrderStateResult(
+        order_id=order_id,
+        execution_status=status,
+        filled_quantity=Decimal(filled_qty),
+        filled_price=filled_price,
+        is_terminal=is_terminal,
+    )
+
+
+def _make_processor_with_mocks(
+    macro_snapshot: MacroSnapshot | None = None,
+) -> tuple[BondCycleProcessor, dict[str, MagicMock]]:
+    """Create a BondCycleProcessor with accessible mock dependencies."""
+    if macro_snapshot is None:
+        macro_snapshot = MacroSnapshot(
+            key_rate=Decimal("16.00"),
+            ruonia_7d_avg=Decimal("15.50"),
+            cpi_yoy=Decimal("9.0"),
+            last_cbr_decision="hold",
+        )
+
+    layer_configs = DEFAULT_LAYER_CONFIGS
+    layer_ledgers = {
+        layer: LayerLedger(layer_id=layer.value, cash=INITIAL_CASH) for layer in PortfolioLayer
+    }
+    layer_breakers = {
+        layer: BondLayerBreaker(cfg, layer_ledgers[layer]) for layer, cfg in layer_configs.items()
+    }
+
+    mock_broker = MagicMock()
+    mock_router = MagicMock()
+    mock_router.route.return_value = mock_broker
+    mock_dv01_sizer = MagicMock()
+    mock_equal_sizer = MagicMock()
+    mock_registry = MagicMock()
+    mock_yield_stops = {layer: MagicMock() for layer in PortfolioLayer}
+    mock_macro_cache = MagicMock(spec=MacroCacheService)
+    mock_macro_cache.get.return_value = macro_snapshot
+    mock_alerter = MagicMock()
+
+    proc = BondCycleProcessor(
+        layer_configs=layer_configs,
+        layer_ledgers=layer_ledgers,
+        layer_breakers=layer_breakers,
+        aggregate_breaker=AggregateBondBreaker(layer_ledgers),
+        strategies={layer: [] for layer in PortfolioLayer},
+        macro_cache=mock_macro_cache,
+        dv01_sizer=mock_dv01_sizer,
+        equal_weight_sizer=mock_equal_sizer,
+        yield_stops=mock_yield_stops,
+        broker_router=mock_router,
+        instrument_registry=mock_registry,
+        fetcher=MagicMock(),
+        alerter=mock_alerter,
+    )
+
+    mocks = {
+        "broker": mock_broker,
+        "router": mock_router,
+        "dv01_sizer": mock_dv01_sizer,
+        "equal_sizer": mock_equal_sizer,
+        "registry": mock_registry,
+        "yield_stops": mock_yield_stops,
+        "ledgers": layer_ledgers,
+        "macro_cache": mock_macro_cache,
+        "alerter": mock_alerter,
+    }
+    return proc, mocks
+
+
+# ── _size_and_execute tests ──────────────────────────────────────────────────
+
+
+class TestSizeAndExecuteBuy:
+    """Tests for _size_and_execute with BUY signals."""
+
+    def test_buy_submits_order_and_updates_ledger(self) -> None:
+        """BUY signal: iterative sizing, submit order, wait fill, update ledger."""
+        proc, mocks = _make_processor_with_mocks()
+        signal = _make_signal(SignalDirection.BUY)
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        # Setup mocks
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
+
+        # DV01 sizer returns 5 bonds
+        mocks["dv01_sizer"].compute_position_size.return_value = 5
+
+        # Broker submit returns order with order_id
+        mocks["broker"].submit_order.return_value = _make_order_result()
+
+        # get_order_state returns filled immediately
+        mocks["broker"].get_order_state.return_value = _make_order_state()
+
+        with patch("finalayze.core.bond_cycle.bond_math") as mock_bm:
+            mock_bm.dirty_price.return_value = Decimal("960.00")
+            mock_bm.nkd.return_value = Decimal("10.00")
+            mock_bm.ytm.return_value = Decimal("15.50")
+            result = proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
+
+        assert result is True
+        # Ledger should have a bond position
+        assert signal.symbol in ledger.bond_positions
+        # Cash should be debited
+        assert ledger.cash < INITIAL_CASH
+
+    def test_buy_timeout_cancels_and_returns_false(self) -> None:
+        """BUY signal: fill timeout cancels order, returns False."""
+        proc, mocks = _make_processor_with_mocks()
+        signal = _make_signal(SignalDirection.BUY)
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
+        mocks["dv01_sizer"].compute_position_size.return_value = 5
+
+        mocks["broker"].submit_order.return_value = _make_order_result(
+            filled=False, order_id="ord-timeout"
+        )
+        # Order stays in "new" status forever
+        mocks["broker"].get_order_state.return_value = _make_order_state(
+            status="new", filled_qty=0, is_terminal=False, order_id="ord-timeout"
+        )
+
+        with (
+            patch("finalayze.core.bond_cycle.bond_math") as mock_bm,
+            patch("finalayze.core.bond_cycle.time") as mock_time,
+        ):
+            mock_bm.dirty_price.return_value = Decimal("960.00")
+            mock_bm.nkd.return_value = Decimal("10.00")
+            mock_bm.ytm.return_value = Decimal("15.50")
+            # Simulate time passing beyond timeout
+            mock_time.monotonic.side_effect = [0.0, 0.0, _FILL_TIMEOUT_SECONDS + 1]
+            mock_time.sleep = MagicMock()
+            result = proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
+
+        assert result is False
+        mocks["broker"].cancel_order.assert_called_once_with("ord-timeout")
+        # Ledger unchanged
+        assert signal.symbol not in ledger.bond_positions
+        assert ledger.cash == INITIAL_CASH
+
+    def test_buy_partial_fill_keeps_partial(self) -> None:
+        """Partial fill: cancel remainder, keep partial, update ledger with filled qty."""
+        proc, mocks = _make_processor_with_mocks()
+        signal = _make_signal(SignalDirection.BUY)
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
+        mocks["dv01_sizer"].compute_position_size.return_value = 5
+
+        mocks["broker"].submit_order.return_value = _make_order_result(
+            filled=False, order_id="ord-partial"
+        )
+        # After timeout, order is partially filled (3 of 5)
+        mocks["broker"].get_order_state.side_effect = [
+            _make_order_state(
+                status="partially_fill",
+                filled_qty=3,
+                is_terminal=False,
+                order_id="ord-partial",
+            ),
+            # After cancel, check again shows cancelled with 3 filled
+            _make_order_state(
+                status="cancelled",
+                filled_qty=3,
+                is_terminal=True,
+                order_id="ord-partial",
+            ),
+        ]
+
+        with (
+            patch("finalayze.core.bond_cycle.bond_math") as mock_bm,
+            patch("finalayze.core.bond_cycle.time") as mock_time,
+        ):
+            mock_bm.dirty_price.return_value = Decimal("960.00")
+            mock_bm.nkd.return_value = Decimal("10.00")
+            mock_bm.ytm.return_value = Decimal("15.50")
+            # Simulate time passing beyond timeout on first check
+            mock_time.monotonic.side_effect = [0.0, 0.0, _FILL_TIMEOUT_SECONDS + 1]
+            mock_time.sleep = MagicMock()
+            result = proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
+
+        assert result is True
+        mocks["broker"].cancel_order.assert_called_once_with("ord-partial")
+        # Ledger should have 3 bonds (partial fill)
+        assert signal.symbol in ledger.bond_positions
+        assert ledger.bond_positions[signal.symbol].quantity == Decimal(3)
+
+    def test_buy_deducts_dirty_price_plus_costs(self) -> None:
+        """Cash deduction = dirty_price * qty + transaction_costs_per_unit * qty."""
+        proc, mocks = _make_processor_with_mocks()
+        signal = _make_signal(SignalDirection.BUY)
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
+        mocks["dv01_sizer"].compute_position_size.return_value = 5
+
+        mocks["broker"].submit_order.return_value = _make_order_result(quantity=Decimal(5))
+        mocks["broker"].get_order_state.return_value = _make_order_state(filled_qty=5)
+
+        dirty = Decimal("960.00")
+        with patch("finalayze.core.bond_cycle.bond_math") as mock_bm:
+            mock_bm.dirty_price.return_value = dirty
+            mock_bm.nkd.return_value = Decimal("10.00")
+            mock_bm.ytm.return_value = Decimal("15.50")
+            proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
+
+        # Cash should be reduced by dirty_price * qty + costs
+        assert ledger.cash < INITIAL_CASH
+        # At minimum dirty_price * 5 = 4800
+        assert ledger.cash <= INITIAL_CASH - dirty * 5
+
+    def test_buy_passes_transaction_costs_to_sizer(self) -> None:
+        """DV01BudgetStep receives transaction_costs_per_unit argument."""
+        proc, mocks = _make_processor_with_mocks()
+        signal = _make_signal(SignalDirection.BUY)
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
+        mocks["dv01_sizer"].compute_position_size.return_value = 0  # 0 means no trade
+
+        with patch("finalayze.core.bond_cycle.bond_math") as mock_bm:
+            mock_bm.dirty_price.return_value = Decimal("960.00")
+            mock_bm.nkd.return_value = Decimal("10.00")
+            mock_bm.ytm.return_value = Decimal("15.50")
+            proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
+
+        # Verify transaction_costs_per_unit was passed
+        args = mocks["dv01_sizer"].compute_position_size.call_args
+        assert "transaction_costs_per_unit" in args.kwargs or len(args.args) >= 5
+
+
+class TestSizeAndExecuteSell:
+    """Tests for _size_and_execute with SELL signals."""
+
+    def test_sell_submits_for_full_position(self) -> None:
+        """SELL signal submits sell order for full held quantity."""
+        proc, mocks = _make_processor_with_mocks()
+        signal = _make_signal(SignalDirection.SELL)
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        # Add a position to sell
+        ledger.add_bond_position(
+            BondPositionRecord(
+                symbol=signal.symbol,
+                quantity=Decimal(10),
+                entry_ytm_pct=Decimal("14.50"),
+                entry_date=date(2026, 1, 1),
+                entry_price=Decimal("95.00"),
+                entry_clean_pct=Decimal("95.00"),
+                layer_id=layer.value,
+            )
+        )
+
+        mocks["broker"].submit_order.return_value = _make_order_result(
+            side="SELL", quantity=Decimal(10)
+        )
+        mocks["broker"].get_order_state.return_value = _make_order_state(
+            filled_qty=10, filled_price=Decimal("96.00")
+        )
+
+        with patch("finalayze.core.bond_cycle.bond_math") as mock_bm:
+            mock_bm.dirty_price.return_value = Decimal("970.00")
+            mock_bm.nkd.return_value = Decimal("10.00")
+            result = proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
+
+        assert result is True
+        # Position should be removed
+        assert signal.symbol not in ledger.bond_positions
+
+    def test_sell_credits_cash(self) -> None:
+        """SELL credits cash after fill."""
+        proc, mocks = _make_processor_with_mocks()
+        signal = _make_signal(SignalDirection.SELL)
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        ledger.add_bond_position(
+            BondPositionRecord(
+                symbol=signal.symbol,
+                quantity=Decimal(5),
+                entry_ytm_pct=Decimal("14.50"),
+                entry_date=date(2026, 1, 1),
+                entry_price=Decimal("95.00"),
+                entry_clean_pct=Decimal("95.00"),
+                layer_id=layer.value,
+            )
+        )
+
+        mocks["broker"].submit_order.return_value = _make_order_result(
+            side="SELL", quantity=Decimal(5), fill_price=Decimal("96.00")
+        )
+        mocks["broker"].get_order_state.return_value = _make_order_state(
+            filled_qty=5, filled_price=Decimal("96.00")
+        )
+
+        with patch("finalayze.core.bond_cycle.bond_math") as mock_bm:
+            mock_bm.dirty_price.return_value = Decimal("970.00")
+            mock_bm.nkd.return_value = Decimal("10.00")
+            proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
+
+        assert ledger.cash > INITIAL_CASH
+
+
+class TestSizeAndExecuteNoRetry:
+    """No retry on timeout -- simply returns False."""
+
+    def test_no_retry_on_timeout(self) -> None:
+        proc, mocks = _make_processor_with_mocks()
+        signal = _make_signal(SignalDirection.BUY)
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
+        mocks["dv01_sizer"].compute_position_size.return_value = 5
+
+        mocks["broker"].submit_order.return_value = _make_order_result(
+            filled=False, order_id="ord-no-retry"
+        )
+        mocks["broker"].get_order_state.return_value = _make_order_state(
+            status="new", filled_qty=0, is_terminal=False, order_id="ord-no-retry"
+        )
+
+        with (
+            patch("finalayze.core.bond_cycle.bond_math") as mock_bm,
+            patch("finalayze.core.bond_cycle.time") as mock_time,
+        ):
+            mock_bm.dirty_price.return_value = Decimal("960.00")
+            mock_bm.nkd.return_value = Decimal("10.00")
+            mock_bm.ytm.return_value = Decimal("15.50")
+            mock_time.monotonic.side_effect = [0.0, 0.0, _FILL_TIMEOUT_SECONDS + 1]
+            mock_time.sleep = MagicMock()
+            result = proc._size_and_execute(signal, layer, ledger)  # noqa: SLF001
+
+        assert result is False
+        # submit_order called exactly once (no retry)
+        assert mocks["broker"].submit_order.call_count == 1
+
+
+# ── _process_yield_stops tests ───────────────────────────────────────────────
+
+
+class TestProcessYieldStops:
+    """Tests for _process_yield_stops method."""
+
+    def test_fetches_prices_for_all_held_symbols(self) -> None:
+        """get_last_prices called with all held bond symbols."""
+        proc, mocks = _make_processor_with_mocks()
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        # Add two positions
+        for sym in ["SU26238RMFS4", "SU26240RMFS8"]:
+            ledger.add_bond_position(
+                BondPositionRecord(
+                    symbol=sym,
+                    quantity=Decimal(5),
+                    entry_ytm_pct=Decimal("14.50"),
+                    entry_date=date(2026, 1, 1),
+                    entry_price=Decimal("95.00"),
+                    entry_clean_pct=Decimal("95.00"),
+                    layer_id=layer.value,
+                )
+            )
+
+        # Not stopped
+        yield_stop = mocks["yield_stops"][layer]
+        yield_stop.is_stopped_with_regime.return_value = False
+
+        mocks["broker"].get_last_prices.return_value = {
+            "SU26238RMFS4": Decimal("94.50"),
+            "SU26240RMFS8": Decimal("96.00"),
+        }
+
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
+
+        macro = MacroSnapshot(
+            key_rate=Decimal("16.00"),
+            ruonia_7d_avg=Decimal("15.50"),
+            cpi_yoy=Decimal("9.0"),
+            last_cbr_decision="hold",
+        )
+
+        with patch("finalayze.core.bond_cycle.bond_math") as mock_bm:
+            mock_bm.ytm.return_value = Decimal("15.00")
+            exits = proc._process_yield_stops(layer, ledger, yield_stop, macro)  # noqa: SLF001
+
+        assert exits == 0
+        mocks["broker"].get_last_prices.assert_called_once()
+        call_symbols = mocks["broker"].get_last_prices.call_args[0][0]
+        assert "SU26238RMFS4" in call_symbols
+        assert "SU26240RMFS8" in call_symbols
+
+    def test_stopped_position_triggers_sell_and_returns_count(self) -> None:
+        """When YTM above threshold, SELL order submitted and exit count returned."""
+        proc, mocks = _make_processor_with_mocks()
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        ledger.add_bond_position(
+            BondPositionRecord(
+                symbol="SU26238RMFS4",
+                quantity=Decimal(5),
+                entry_ytm_pct=Decimal("14.50"),
+                entry_date=date(2026, 1, 1),
+                entry_price=Decimal("95.00"),
+                entry_clean_pct=Decimal("95.00"),
+                layer_id=layer.value,
+            )
+        )
+
+        yield_stop = mocks["yield_stops"][layer]
+        yield_stop.is_stopped_with_regime.return_value = True
+
+        mocks["broker"].get_last_prices.return_value = {
+            "SU26238RMFS4": Decimal("90.00"),
+        }
+        mocks["broker"].submit_order.return_value = _make_order_result(
+            side="SELL", quantity=Decimal(5)
+        )
+        mocks["broker"].get_order_state.return_value = _make_order_state(
+            filled_qty=5, filled_price=Decimal("90.00")
+        )
+
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
+
+        macro = MacroSnapshot(
+            key_rate=Decimal("16.00"),
+            ruonia_7d_avg=Decimal("15.50"),
+            cpi_yoy=Decimal("9.0"),
+            last_cbr_decision="hold",
+        )
+
+        with patch("finalayze.core.bond_cycle.bond_math") as mock_bm:
+            mock_bm.ytm.return_value = Decimal("16.50")
+            mock_bm.dirty_price.return_value = Decimal("910.00")
+            mock_bm.nkd.return_value = Decimal("10.00")
+            exits = proc._process_yield_stops(layer, ledger, yield_stop, macro)  # noqa: SLF001
+
+        assert exits == 1
+        mocks["broker"].submit_order.assert_called_once()
+
+    def test_below_threshold_returns_zero(self) -> None:
+        """When current YTM below threshold, no exit."""
+        proc, mocks = _make_processor_with_mocks()
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+
+        ledger.add_bond_position(
+            BondPositionRecord(
+                symbol="SU26238RMFS4",
+                quantity=Decimal(5),
+                entry_ytm_pct=Decimal("14.50"),
+                entry_date=date(2026, 1, 1),
+                entry_price=Decimal("95.00"),
+                entry_clean_pct=Decimal("95.00"),
+                layer_id=layer.value,
+            )
+        )
+
+        yield_stop = mocks["yield_stops"][layer]
+        yield_stop.is_stopped_with_regime.return_value = False
+
+        mocks["broker"].get_last_prices.return_value = {
+            "SU26238RMFS4": Decimal("95.00"),
+        }
+
+        bond_info = _make_bond_info()
+        mocks["registry"].get.return_value = bond_info
+
+        macro = MacroSnapshot(
+            key_rate=Decimal("16.00"),
+            ruonia_7d_avg=Decimal("15.50"),
+            cpi_yoy=Decimal("9.0"),
+            last_cbr_decision="hold",
+        )
+
+        with patch("finalayze.core.bond_cycle.bond_math") as mock_bm:
+            mock_bm.ytm.return_value = Decimal("14.60")
+            exits = proc._process_yield_stops(layer, ledger, yield_stop, macro)  # noqa: SLF001
+
+        assert exits == 0
+        mocks["broker"].submit_order.assert_not_called()
+
+    def test_empty_positions_returns_zero(self) -> None:
+        """No positions held means no yield stop evaluation."""
+        proc, mocks = _make_processor_with_mocks()
+        layer = PortfolioLayer.STRATEGIC
+        ledger = mocks["ledgers"][layer]
+        yield_stop = mocks["yield_stops"][layer]
+
+        macro = MacroSnapshot(
+            key_rate=Decimal("16.00"),
+            ruonia_7d_avg=Decimal("15.50"),
+            cpi_yoy=Decimal("9.0"),
+            last_cbr_decision="hold",
+        )
+
+        exits = proc._process_yield_stops(layer, ledger, yield_stop, macro)  # noqa: SLF001
+        assert exits == 0
+        mocks["broker"].get_last_prices.assert_not_called()
