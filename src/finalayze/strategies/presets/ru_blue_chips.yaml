@@ -9,8 +9,8 @@ regime_routing:
   mr_threshold: 20
 strategies:
   momentum:
-    enabled: false
-    weight: 0.00
+    enabled: true
+    weight: 0.15
     params:
       rsi_period: 14
       rsi_oversold: 30
@@ -43,7 +43,7 @@ strategies:
       event_types: [geopolitical, sanctions, cbr_rate, commodity_price, earnings]
   mean_reversion:
     enabled: true
-    weight: 0.30
+    weight: 0.15
     params:
       bb_period: 20
       bb_std_dev: 2.5
@@ -64,7 +64,7 @@ strategies:
       min_confidence: 0.40
   dividend_gap:
     enabled: true
-    weight: 0.20
+    weight: 0.15
     params:
       min_gap_pct: 3.0
       max_hold_bars: 60
@@ -86,8 +86,8 @@ strategies:
       sma_exit_period: 5
       min_confidence: 0.35
   dual_momentum:
-    enabled: false
-    weight: 0.00
+    enabled: true
+    weight: 0.15
     params:
       lookback_1m: 21
       lookback_3m: 63

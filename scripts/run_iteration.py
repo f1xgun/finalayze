@@ -210,6 +210,15 @@ UNIVERSE: dict[str, list[str]] = {
         "TRNFP",
         "IRAO",
     ],
+    "ru_finance": [
+        "SBER",
+        "SBERP",
+        "VTBR",
+        "TCSG",
+        "CBOM",
+        "BSPB",
+        "MOEX",
+    ],
 }
 
 

@@ -296,10 +296,25 @@ def run_backtest_for_trial(
 
         start = start_date or _OPT_START
         end = end_date or _OPT_END
-        cash = Decimal(100_000)
 
         market_id = "moex" if segment_id.startswith("ru_") else "us"
-        fetcher = CachingFetcher(YFinanceFetcher(market_id=market_id))
+        if segment_id.startswith("ru_"):
+            import os  # noqa: PLC0415
+
+            from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
+            from finalayze.markets.instruments import build_default_registry  # noqa: PLC0415
+
+            token = os.environ.get("FINALAYZE_TINKOFF_TOKEN", "")
+            if not token:
+                return {"wf_sharpe": -1.0, "trades": 0, "max_dd": 1.0}
+            registry = build_default_registry()
+            fetcher = CachingFetcher(
+                TinkoffFetcher(token=token, registry=registry, sandbox=False)
+            )
+            cash = Decimal(1_000_000)
+        else:
+            fetcher = CachingFetcher(YFinanceFetcher(market_id=market_id))
+            cash = Decimal(100_000)
         strategies = _build_strategies(segment_id, fetcher, start, end, None, symbols=symbols)
 
         regime_provider = _build_regime_provider("vix", segment_id, start, end)
