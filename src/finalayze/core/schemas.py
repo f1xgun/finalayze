@@ -479,10 +479,10 @@ DEFAULT_LAYER_CONFIGS: dict[PortfolioLayer, LayerConfig] = {
     PortfolioLayer.SHORT: LayerConfig(
         layer=PortfolioLayer.SHORT,
         capital_pct=Decimal("0.10"),
-        max_drawdown_pct=Decimal("0.05"),
+        max_drawdown_pct=Decimal("0.02"),  # risk review: 2% not 5%
         max_positions=6,
         rebalance_interval="daily",
-        allowed_instrument_types=("stock",),
+        allowed_instrument_types=("stock", "bond"),  # was ("stock",)
         yield_stop_bps=0,
     ),
 }
