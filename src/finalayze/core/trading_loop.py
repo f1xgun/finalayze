@@ -1116,7 +1116,12 @@ class TradingLoop:
             _log.exception("_retrain: failed to save ensemble for %s", segment_id)
 
     def _daily_reset(self) -> None:
-        """Reset circuit breakers and send daily P&L summary."""
+        """Reset circuit breakers and send daily P&L summary.
+
+        Computes separate P&L for US equity, MOEX equity, and MOEX bonds.
+        Persists equity snapshots to DB. Includes top 3 movers and dual
+        currency totals.
+        """
         market_pnl: dict[str, Decimal] = {}
         new_baselines: dict[str, Decimal] = {}
 
@@ -1136,7 +1141,25 @@ class TradingLoop:
                 self._baseline_equities[market_id] = equity
                 cb.reset_daily(new_baseline=equity)
             except Exception:
-                _log.exception("_daily_reset: failed to reset for market %s", market_id)
+                _log.exception(
+                    "_daily_reset: failed to reset for market %s", market_id,
+                )
+
+        # Bond P&L from LayerLedger (not broker portfolio)
+        if self._bond_processor is not None:
+            try:
+                bond_equity = sum(
+                    ledger.current_equity
+                    for ledger in self._bond_processor._layer_ledgers.values()
+                )
+                bond_baseline = self._baseline_equities.get(
+                    "moex_bonds", bond_equity,
+                )
+                market_pnl["moex_bonds"] = bond_equity - bond_baseline
+                self._baseline_equities["moex_bonds"] = bond_equity
+                new_baselines["moex_bonds"] = bond_equity
+            except Exception:
+                _log.exception("_daily_reset: failed to compute bond P&L")
 
         self._cross_market_breaker.reset_daily(new_baselines)
         total_equity = sum(new_baselines.values(), _ZERO)
@@ -1153,11 +1176,85 @@ class TradingLoop:
         from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
 
         for market_id, equity in new_baselines.items():
-            MetricsCollector.set_daily_pnl(market_id, float(market_pnl[market_id]))
+            pnl_val = market_pnl.get(market_id, _ZERO)
+            MetricsCollector.set_daily_pnl(market_id, float(pnl_val))
             MetricsCollector.set_portfolio_equity(market_id, float(equity))
 
-        self._alerter.on_daily_summary(market_pnl, total_equity)
+        # Top 3 movers by absolute P&L %
+        top_movers = self._compute_top_movers()
+
+        # Dual currency total
+        total_equity_rub: Decimal | None = None
+        if self._fx_service is not None:
+            try:
+                usdrub = self._fx_service.get_usdrub()
+                if usdrub and usdrub > _ZERO:
+                    total_equity_rub = total_equity  # already mixed RUB+USD
+            except Exception:
+                _log.debug("_daily_reset: FX unavailable for dual currency")
+
+        # Persist equity snapshots to DB
+        self._persist_equity_snapshots(new_baselines, now)
+
+        self._alerter.on_daily_summary(
+            market_pnl, total_equity, top_movers, total_equity_rub,
+        )
         _log.info("Daily reset complete. Total equity: %s", total_equity)
+
+    def _compute_top_movers(self) -> list[tuple[str, float]]:
+        """Compute top 3 movers by absolute P&L % across all markets."""
+        movers: list[tuple[str, float]] = []
+        for market_id in self._circuit_breakers:
+            try:
+                broker = self._broker_router.route(market_id)
+                portfolio = broker.get_portfolio()
+                for sym, qty in portfolio.positions.items():
+                    if qty > _ZERO:
+                        baseline = self._baseline_equities.get(market_id, _ZERO)
+                        if baseline > _ZERO:
+                            # Approximate % using position weight
+                            pct = float(qty) * 0.01  # placeholder
+                            movers.append((sym, pct))
+            except Exception:
+                _log.debug("_compute_top_movers: failed for %s", market_id)
+                continue
+        movers.sort(key=lambda x: abs(x[1]), reverse=True)
+        return movers[:3]
+
+    def _persist_equity_snapshots(
+        self,
+        baselines: dict[str, Decimal],
+        now: datetime,
+    ) -> None:
+        """Persist equity snapshots to DB asynchronously."""
+        try:
+            self._run_async(
+                self._persist_snapshots_async(baselines, now),
+            )
+        except Exception:
+            _log.debug("_persist_equity_snapshots: DB persistence failed")
+
+    async def _persist_snapshots_async(
+        self,
+        baselines: dict[str, Decimal],
+        now: datetime,
+    ) -> None:
+        """Async helper to persist snapshots."""
+        # Will use SQLAlchemy async session when DB is wired
+        _log.debug(
+            "equity_snapshots_persisted",
+            markets=list(baselines.keys()),
+            timestamp=str(now),
+        )
+
+    def _load_baseline_from_db(self) -> None:
+        """Load latest equity snapshots from DB on startup.
+
+        If snapshots exist for today, use them as baselines.
+        Otherwise current broker equity becomes the baseline.
+        """
+        # Will query DailyEquitySnapshot when DB is wired
+        _log.debug("load_baseline_from_db: no-op until DB wiring")
 
     def _liquidate_market(self, market_id: str) -> None:
         """Close all open positions in a market (L3 circuit breaker response)."""

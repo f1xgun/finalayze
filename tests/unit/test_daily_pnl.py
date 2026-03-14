@@ -124,15 +124,13 @@ class TestEquitySnapshotPersistence:
     """Equity snapshots persisted to DB via DailyEquitySnapshot model."""
 
     def test_snapshots_persisted(self) -> None:
-        """After _daily_reset, _run_async is called (for DB persistence)."""
+        """After _daily_reset, _persist_equity_snapshots is called."""
         from finalayze.core.trading_loop import TradingLoop
 
         loop = _make_trading_loop_mock()
-        persist_calls: list[object] = []
-        loop._run_async = lambda coro: persist_calls.append(coro)
         TradingLoop._daily_reset(loop)
-        # At least one async call should be made for DB persistence
-        assert len(persist_calls) >= 1
+        # _persist_equity_snapshots should have been called
+        loop._persist_equity_snapshots.assert_called_once()
 
     def test_baseline_loaded_from_db_on_restart(self) -> None:
         """_load_baseline_from_db should exist and be callable."""

@@ -258,19 +258,39 @@ class TelegramAlerter:
         self,
         market_pnl: dict[str, Decimal],
         total_equity_usd: Decimal,
+        top_movers: list[tuple[str, float]] | None = None,
+        total_equity_rub: Decimal | None = None,
     ) -> None:
         """Alert with daily P&L summary.
 
-        Example: ``Daily: US +$342 | MOEX +1,200 | Equity $51,200``
+        Example::
+
+            Daily: US +$342 | MOEX +1,200 | BONDS +500
+            Top: SBER +2.1%, GAZP -0.8%, SU26244 +0.3%
+            Total: 2.5M RUB ($28,400)
         """
         parts = []
         for market_id, pnl in sorted(market_pnl.items()):
             sign = "+" if pnl >= Decimal(0) else ""
-            parts.append(f"{market_id.upper()} {sign}{pnl}")
+            label = market_id.upper().replace("MOEX_BONDS", "BONDS")
+            parts.append(f"{label} {sign}{pnl}")
         summary = " | ".join(parts)
-        text = (
-            f"\U0001f4ca Daily: {summary} | Equity <code>${total_equity_usd:,.0f}</code>"
-        )
+        text = f"\U0001f4ca Daily: {summary}"
+
+        if top_movers:
+            movers_str = ", ".join(
+                f"<b>{sym}</b> {pct:+.1f}%" for sym, pct in top_movers[:3]
+            )
+            text += f"\nTop: {movers_str}"
+
+        if total_equity_rub is not None:
+            text += (
+                f"\nTotal: <code>{total_equity_rub:,.0f}</code> RUB "
+                f"(<code>${total_equity_usd:,.0f}</code>)"
+            )
+        else:
+            text += f" | Equity <code>${total_equity_usd:,.0f}</code>"
+
         self.send_alert(text, priority=AlertPriority.INFO)
 
     def on_coupon_received(
