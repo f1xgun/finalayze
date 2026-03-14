@@ -59,15 +59,12 @@ US_COSTS = TransactionCosts(
     slippage_bps=Decimal(3),
 )
 
-# MOEX (Tinkoff Invest): ~0.03% (~3 bps) commission as fraction of trade value,
-# modelled as commission_per_share=0 with a higher spread to capture the percentage cost.
-# MOEX typical costs: 0.03% commission + 10 bps spread + 7 bps slippage.
-# commission_per_share=0.003 * price is approximated by setting spread_bps appropriately.
-# We use a per-share commission that is a small fixed amount and rely on spread/slippage
-# to capture the percentage-based MOEX fee structure.
+# MOEX (Tinkoff Invest): 0.04% (4 bps) commission as fraction of trade value,
+# using the Trader tariff. Commission is purely percentage-based (no per-share fee).
+# MOEX typical costs: 0.04% commission + 10 bps spread + 7 bps slippage.
 MOEX_COSTS = TransactionCosts(
     commission_per_share=Decimal(0),  # Not used for MOEX
-    commission_rate=Decimal("0.0003"),  # 0.03% of trade value (Tinkoff Invest standard)
+    commission_rate=Decimal("0.0004"),  # 0.04% of trade value (Tinkoff Invest Trader tariff)
     min_commission=Decimal("0.10"),  # Very low min (ruble markets have small ticks)
     spread_bps=Decimal(10),  # Wider spreads on MOEX
     slippage_bps=Decimal(7),  # Higher slippage on less liquid MOEX
