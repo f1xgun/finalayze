@@ -127,7 +127,7 @@ class TestDefaultLayerConfigs:
         assert cfg.capital_pct == SHORT_CAPITAL_PCT
         assert cfg.max_positions == SHORT_MAX_POSITIONS
         assert cfg.rebalance_interval == "daily"
-        assert cfg.allowed_instrument_types == ("stock",)
+        assert cfg.allowed_instrument_types == ("stock", "bond")
 
 
 # ── LayerLedger ──────────────────────────────────────────────────────────
