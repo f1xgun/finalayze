@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from finalayze.core.alerts import TelegramAlerter
+from finalayze.core.alerts import AlertPriority, TelegramAlerter, TelegramMessageQueue
 from finalayze.execution.broker_base import OrderRequest, OrderResult
 from finalayze.risk.circuit_breaker import CircuitLevel
 
@@ -226,3 +226,124 @@ class TestTelegramAlerterErrorHandling:
         with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             # Must not raise even on 4xx response
             await alerter._send("test message")
+
+
+class TestPersistentClient:
+    """_send uses persistent httpx.AsyncClient (not creating new per call)."""
+
+    @pytest.mark.asyncio
+    async def test_persistent_client_reused(self) -> None:
+        alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=MagicMock(status_code=200))
+        alerter._client = mock_client
+        await alerter._send("msg1")
+        await alerter._send("msg2")
+        call_count = 2
+        assert mock_client.post.call_count == call_count
+
+
+class TestHTMLParseMode:
+    """_send passes parse_mode='HTML' to Telegram API."""
+
+    @pytest.mark.asyncio
+    async def test_send_includes_html_parse_mode(self) -> None:
+        alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=MagicMock(status_code=200))
+        alerter._client = mock_client
+        await alerter._send("test")
+        payload = mock_client.post.call_args[1]["json"]
+        assert payload["parse_mode"] == "HTML"
+
+
+class TestHTTP429Handling:
+    """_send returns False on HTTP 429 (rate limited)."""
+
+    @pytest.mark.asyncio
+    async def test_send_returns_false_on_429(self) -> None:
+        alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
+        mock_resp = MagicMock(status_code=429)
+        mock_resp.json.return_value = {"parameters": {"retry_after": 30}}
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        alerter._client = mock_client
+        result = await alerter._send("test")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_send_returns_true_on_success(self) -> None:
+        alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=MagicMock(status_code=200))
+        alerter._client = mock_client
+        result = await alerter._send("test")
+        assert result is True
+
+
+class TestQueueIntegration:
+    """send_alert routes through queue.enqueue (not direct create_task)."""
+
+    @pytest.mark.asyncio
+    async def test_send_alert_routes_through_queue(self) -> None:
+        alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
+        mock_queue = MagicMock(spec=TelegramMessageQueue)
+        mock_queue.enqueue = AsyncMock()
+        alerter.set_queue(mock_queue)
+        alerter.send_alert("test", priority=AlertPriority.INFO)
+        # Give event loop a chance to run the task
+        import asyncio
+
+        await asyncio.sleep(0.05)
+        mock_queue.enqueue.assert_called_once()
+
+
+class TestHTMLFormatting:
+    """on_trade_filled formats with HTML bold for symbol, monospace for price."""
+
+    def test_on_trade_filled_html(self) -> None:
+        alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
+        alerter.send_alert = MagicMock()  # type: ignore[assignment]
+        alerter.on_trade_filled(_make_order_result(), MARKET_US, "alpaca")
+        call_args = alerter.send_alert.call_args
+        text = call_args[0][0]
+        assert "<b>AAPL</b>" in text
+        assert "<code>" in text
+
+
+class TestPriorityAssignment:
+    """Methods pass correct priority to send_alert."""
+
+    def test_circuit_breaker_trip_is_critical(self) -> None:
+        alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
+        alerter.send_alert = MagicMock()  # type: ignore[assignment]
+        alerter.on_circuit_breaker_trip(MARKET_US, CircuitLevel.HALTED, DRAWDOWN_PCT)
+        kwargs = alerter.send_alert.call_args[1]
+        assert kwargs["priority"] == AlertPriority.CRITICAL
+
+    def test_daily_summary_is_info(self) -> None:
+        alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
+        alerter.send_alert = MagicMock()  # type: ignore[assignment]
+        alerter.on_daily_summary(
+            {MARKET_US: DAILY_PNL_US},
+            TOTAL_EQUITY,
+        )
+        kwargs = alerter.send_alert.call_args[1]
+        assert kwargs["priority"] == AlertPriority.INFO
+
+
+class TestCloseMethod:
+    """close() shuts down persistent httpx client and queue."""
+
+    @pytest.mark.asyncio
+    async def test_close_shuts_down_client_and_queue(self) -> None:
+        alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
+        mock_client = MagicMock()
+        mock_client.aclose = AsyncMock()
+        alerter._client = mock_client
+        mock_queue = MagicMock(spec=TelegramMessageQueue)
+        mock_queue.stop = AsyncMock()
+        alerter.set_queue(mock_queue)
+        await alerter.close()
+        mock_client.aclose.assert_called_once()
+        mock_queue.stop.assert_called_once()
