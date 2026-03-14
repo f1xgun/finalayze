@@ -411,11 +411,24 @@ def walk_forward_bond_backtest(
             coupon_income_net=total_coupon_net,
             initial_cash=float(config.initial_cash),
         )
+        # Also compute raw Sharpe (no RUONIA subtraction) for acceptance check.
+        # Excess Sharpe penalises uninvested cash (earns 0% vs 15% RUONIA benchmark).
+        # The acceptance criterion "Sharpe > 0" means raw portfolio Sharpe.
+        raw_metrics = compute_bond_metrics(
+            equity_curve=oos_equity,
+            dates=oos_dates,
+            trades=all_trades,
+            coupon_income_gross=total_coupon_gross,
+            coupon_income_net=total_coupon_net,
+            initial_cash=float(config.initial_cash),
+            risk_free_annual_pct=0.0,
+        )
         aggregate = {
             "total_return_pct": agg_metrics.total_return_pct,
             "annualized_return_pct": agg_metrics.annualized_return_pct,
             "excess_return_pct": agg_metrics.excess_return_pct,
-            "sharpe": agg_metrics.excess_sharpe,
+            "excess_sharpe": agg_metrics.excess_sharpe,
+            "sharpe": raw_metrics.excess_sharpe,  # raw Sharpe (rf=0) for acceptance
             "max_drawdown_pct": agg_metrics.max_drawdown_pct,
             "profit_factor": agg_metrics.profit_factor,
             "trade_count": agg_metrics.trade_count,
@@ -428,6 +441,7 @@ def walk_forward_bond_backtest(
             "total_return_pct": 0.0,
             "annualized_return_pct": 0.0,
             "excess_return_pct": 0.0,
+            "excess_sharpe": 0.0,
             "sharpe": 0.0,
             "max_drawdown_pct": 0.0,
             "profit_factor": 0.0,
@@ -684,7 +698,8 @@ def _run_bond_segment_walk_forward(
     print(f"  {'─' * 60}")
     print(f"  {'Total Return:':<30} {agg.get('total_return_pct', 0):>+8.2f}%")
     print(f"  {'Annualized Return:':<30} {agg.get('annualized_return_pct', 0):>+8.2f}%")
-    print(f"  {'Excess Sharpe:':<30} {agg.get('sharpe', 0):>+8.4f}")
+    print(f"  {'Sharpe (raw):':<30} {agg.get('sharpe', 0):>+8.4f}")
+    print(f"  {'Sharpe (excess vs RUONIA):':<30} {agg.get('excess_sharpe', 0):>+8.4f}")
     print(f"  {'Max Drawdown:':<30} {agg.get('max_drawdown_pct', 0):>8.2f}%")
     print(f"  {'Profit Factor:':<30} {agg.get('profit_factor', 0):>8.2f}")
     print(f"  {'Trade Count:':<30} {agg.get('trade_count', 0):>8d}")

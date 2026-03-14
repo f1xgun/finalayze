@@ -478,7 +478,7 @@ class BondBacktestEngine:
             layer_equity=layer_equity,
             bond_dv01_per_unit=bond_dv01,
             current_portfolio_dv01=portfolio_dv01,
-            face_value=cfg.face_value,
+            unit_cost=dirty_px,
         )
 
         if quantity <= 0:
