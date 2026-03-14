@@ -669,6 +669,7 @@ dependencies = [
     { name = "python-dotenv", marker = "sys_platform != 'win32'" },
     { name = "pywavelets", marker = "sys_platform != 'win32'" },
     { name = "pyyaml", marker = "sys_platform != 'win32'" },
+    { name = "quantlib", marker = "sys_platform != 'win32'" },
     { name = "redis", marker = "sys_platform != 'win32'" },
     { name = "scikit-learn", marker = "sys_platform != 'win32'" },
     { name = "sqlalchemy", extra = ["asyncio"], marker = "sys_platform != 'win32'" },
@@ -740,6 +741,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "pywavelets", specifier = ">=1.6.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "quantlib", specifier = ">=1.41" },
     { name = "redis", specifier = ">=5.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.0" },
     { name = "scikit-learn", specifier = ">=1.5.0" },
@@ -2171,6 +2173,21 @@ wheels = [
 ]
 
 [[package]]
+name = "quantlib"
+version = "1.41"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fc/eb/32fcd49ee156ce7663f8aebc1e7b1c7fc02c7e669339f6038a539c55f6e7/quantlib-1.41-cp38-abi3-macosx_10_13_x86_64.whl", hash = "sha256:40ef36dc74984d681f9f526ab5482615bf084f0f27f960d898098f1ef0356ecf", size = 15917800, upload-time = "2026-01-13T08:21:54.76Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/be/4f7dcfbee2be88bb6de484eb545f98c4748c4acd38f06cea267cafbc5fe2/quantlib-1.41-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:b24dbf2bf3b837453b9a57766d18b0ae7ec568feee99c8cd5a24a57998f79c27", size = 15287599, upload-time = "2026-01-13T08:21:57.526Z" },
+    { url = "https://files.pythonhosted.org/packages/23/0f/6ce6eb14377af613eba4d7ec922c457cc0952145eb807ac45a10f60e4404/quantlib-1.41-cp38-abi3-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:9303f2dcb9f7e403522f856f4aa762d808a9deeef2427b88aca0c83e80aab84f", size = 18805419, upload-time = "2026-01-13T08:22:00.252Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/fa/1b3055f646ad551025f12d448c7b4f523d1d40a9dbfe01cf6bcf8141c115/quantlib-1.41-cp38-abi3-manylinux_2_24_i686.manylinux_2_28_i686.whl", hash = "sha256:facc562ae214094f20eddcc74cb0dff8e7edf76e12be2592b8cc5169f7ad2305", size = 23269309, upload-time = "2026-01-13T08:22:02.992Z" },
+    { url = "https://files.pythonhosted.org/packages/13/bf/a16a9b5dec5e6a8d257d404bd31157df1d3a86181d974225f63d188adf1b/quantlib-1.41-cp38-abi3-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:66797f50dd6c250423315e7cbec39a1831fefa7638467a6b7922ea4144730e62", size = 20075661, upload-time = "2026-01-13T08:22:05.72Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/73/4fc65911c0d647d795ebcd88e9209ad9d341468f499430913e7c5c8a0360/quantlib-1.41-cp38-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:53eadd55105294d5338d311074a643773d32a6dec930df7c4f8da4cfce203f67", size = 20395460, upload-time = "2026-01-13T08:22:08.686Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/40/21814077745cfd970a63edac7658a801825f4f9a12f521323742249c2bce/quantlib-1.41-cp38-abi3-musllinux_1_2_i686.whl", hash = "sha256:6884a0b98b8c7ba4102292b1516f034c29f8b81fc0657e8582dacf1e87729f87", size = 25206253, upload-time = "2026-01-13T08:22:11.306Z" },
+    { url = "https://files.pythonhosted.org/packages/38/1e/430b57707769a64a98d3f8d3f3c54f0946b42ab7bbad326c2a8ecd0f261f/quantlib-1.41-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:ff3c68686452fc69cf00a98c36b8a25e32a468aff3d4fcc30059438b7f32034d", size = 21520747, upload-time = "2026-01-13T08:22:14.145Z" },
+]
+
+[[package]]
 name = "redis"
 version = "6.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2610,6 +2627,9 @@ dependencies = [
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d3/54/a2ba279afcca44bbd320d4e73675b282fcee3d81400ea1b53934efca6462/torch-2.10.0-2-cp312-none-macosx_11_0_arm64.whl", hash = "sha256:13ec4add8c3faaed8d13e0574f5cd4a323c11655546f91fbe6afa77b57423574", size = 79498202, upload-time = "2026-02-10T21:44:52.603Z" },
     { url = "https://files.pythonhosted.org/packages/ec/23/2c9fe0c9c27f7f6cb865abcea8a4568f29f00acaeadfc6a37f6801f84cb4/torch-2.10.0-2-cp313-none-macosx_11_0_arm64.whl", hash = "sha256:e521c9f030a3774ed770a9c011751fb47c4d12029a3d6522116e48431f2ff89e", size = 79498254, upload-time = "2026-02-10T21:44:44.095Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/7a/abada41517ce0011775f0f4eacc79659bc9bc6c361e6bfe6f7052a6b9363/torch-2.10.0-3-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:98c01b8bb5e3240426dcde1446eed6f40c778091c8544767ef1168fc663a05a6", size = 915622781, upload-time = "2026-03-11T14:17:11.354Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/c6/4dfe238342ffdcec5aef1c96c457548762d33c40b45a1ab7033bb26d2ff2/torch-2.10.0-3-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:80b1b5bfe38eb0e9f5ff09f206dcac0a87aadd084230d4a36eea5ec5232c115b", size = 915627275, upload-time = "2026-03-11T14:16:11.325Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/f0/72bf18847f58f877a6a8acf60614b14935e2f156d942483af1ffc081aea0/torch-2.10.0-3-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:46b3574d93a2a8134b3f5475cfb98e2eb46771794c57015f6ad1fb795ec25e49", size = 915523474, upload-time = "2026-03-11T14:17:44.422Z" },
     { url = "https://files.pythonhosted.org/packages/cc/af/758e242e9102e9988969b5e621d41f36b8f258bb4a099109b7a4b4b50ea4/torch-2.10.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:5fd4117d89ffd47e3dcc71e71a22efac24828ad781c7e46aaaf56bf7f2796acf", size = 145996088, upload-time = "2026-01-21T16:24:44.171Z" },
     { url = "https://files.pythonhosted.org/packages/23/8e/3c74db5e53bff7ed9e34c8123e6a8bfef718b2450c35eefab85bb4a7e270/torch-2.10.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:787124e7db3b379d4f1ed54dd12ae7c741c16a4d29b49c0226a89bea50923ffb", size = 915711952, upload-time = "2026-01-21T16:23:53.503Z" },
     { url = "https://files.pythonhosted.org/packages/c9/5c/dee910b87c4d5c0fcb41b50839ae04df87c1cfc663cf1b5fca7ea565eeaa/torch-2.10.0-cp312-none-macosx_11_0_arm64.whl", hash = "sha256:6d3707a61863d1c4d6ebba7be4ca320f42b869ee657e9b2c21c736bf17000294", size = 79498198, upload-time = "2026-01-21T16:24:34.704Z" },

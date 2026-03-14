@@ -367,6 +367,12 @@ class BondInfo(BaseModel):
     floating_coupon: bool = False
     class_code: str = "TQOB"
     currency: str = "RUB"
+    # Extended fields (Phase 3)
+    amortization_flag: bool = False
+    inflation_linked: bool = False
+    initial_nominal: Decimal | None = None  # original face value before amortization
+    day_count_convention: str = "actual/365"  # from T-Invest metadata
+    bond_type: str = "fixed"  # "fixed", "floating", "amortizing", "inflation_linked"
 
 
 class CouponPayment(BaseModel):
@@ -379,6 +385,7 @@ class CouponPayment(BaseModel):
     record_date: date  # T-2 business days before payment
     amount_per_bond: Decimal  # gross RUB per bond
     coupon_number: int
+    is_floating: bool = False
 
 
 class AccruedInterest(BaseModel):

@@ -57,6 +57,7 @@ dependencies = [
     "PyWavelets>=1.6.0",
     "lxml>=6.0.2",
     "optuna>=4.7.0",
+    "quantlib>=1.41",
 ]
 
 [project.optional-dependencies]

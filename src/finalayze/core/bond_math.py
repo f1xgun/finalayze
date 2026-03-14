@@ -72,20 +72,35 @@ def nkd(
     coupon_amount: Decimal,
     days_since_last_coupon: int,
     coupon_period_days: int,
+    *,
+    day_count: str = "actual/365",
 ) -> Decimal:
     """Compute accrued interest (NKD) for a bond.
 
-    ``NKD = coupon_amount * days_since_last_coupon / coupon_period_days``
+    ``NKD = coupon_amount * adjusted_days / adjusted_period``
 
     Args:
         coupon_amount: Coupon payment per bond (RUB).
         days_since_last_coupon: Calendar days since last coupon payment.
         coupon_period_days: Total days in the coupon period.
+        day_count: Day-count convention. Supported: "actual/365" (default), "30/360".
 
     Returns:
         NKD in RUB per bond, rounded to 2 decimal places.
     """
-    result = coupon_amount * Decimal(days_since_last_coupon) / Decimal(coupon_period_days)
+    if day_count == "30/360":
+        # Under 30/360 convention, approximate months from actual days
+        # and use 30-day months / 360-day year
+        months_elapsed = round(days_since_last_coupon / 30.4375)
+        months_in_period = round(coupon_period_days / 30.4375)
+        adj_days = months_elapsed * 30
+        adj_period = months_in_period * 30
+        if adj_period == 0:
+            return Decimal("0.00")
+        result = coupon_amount * Decimal(adj_days) / Decimal(adj_period)
+    else:
+        # actual/365 (default, existing behavior)
+        result = coupon_amount * Decimal(days_since_last_coupon) / Decimal(coupon_period_days)
     return result.quantize(_QUANT_2DP, rounding=ROUND_HALF_UP)
 
 
