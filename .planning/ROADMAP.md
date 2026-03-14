@@ -142,7 +142,7 @@ Note: Phases 2 and 3 depend only on Phase 1 (not on each other) and could theore
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. MOEX Equity Foundation | 0/2 | Planning complete | - |
+| 1. MOEX Equity Foundation | 1/2 | In Progress|  |
 | 2. MOEX Equity Validation | 0/2 | Not started | - |
 | 3. Bond Data Pipeline | 0/3 | Not started | - |
 | 4. Bond Execution | 0/3 | Not started | - |
