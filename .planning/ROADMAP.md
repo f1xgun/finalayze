@@ -61,12 +61,12 @@ Plans:
   3. MacroCacheService provides CBR key rate within 24 hours of actual CBR value
   4. QuantLib YTM and modified duration calculations match manual bond math for test OFZ bonds
   5. Bond instrument registry contains OFZ and corporate bonds with correct FIGI mappings
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
-- [ ] 03-03: TBD
+- [ ] 03-01-PLAN.md — Install QuantLib, build hybrid bond math engine (QuantLib wrapper + extended schemas)
+- [ ] 03-02-PLAN.md — Extend MacroSnapshot with yield curve and DB persistence
+- [ ] 03-03-PLAN.md — Bond auto-discovery pipeline with filters, registry integration, and coupon events
 
 ### Phase 4: Bond Execution
 **Goal**: BondCycleProcessor executes the full 4-layer bond pipeline without stubs, with proven positive PnL
