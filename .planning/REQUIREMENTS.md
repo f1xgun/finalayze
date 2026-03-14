@@ -9,7 +9,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### MOEX Equity Foundation
 
-- [ ] **EQF-01**: Position sizing uses RUB denomination for MOEX segments (not USD)
+- [x] **EQF-01**: Position sizing uses RUB denomination for MOEX segments (not USD)
 - [ ] **EQF-02**: MOEX backtest produces positive PnL with walk-forward validation
 - [ ] **EQF-03**: MOEX-specific strategy parameters tuned (ru_* YAML presets calibrated)
 - [x] **EQF-04**: MOEX holiday calendar integrated (14-20 non-weekend non-trading days/year)
@@ -98,7 +98,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EQF-01 | Phase 1 | Pending |
+| EQF-01 | Phase 1 | Complete |
 | EQF-02 | Phase 2 | Pending |
 | EQF-03 | Phase 2 | Pending |
 | EQF-04 | Phase 1 | Complete |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-03-14T13:08:04Z"
-last_activity: 2026-03-14 -- Completed 01-01 (MOEX costs & holidays)
+stopped_at: Completed 01-02-PLAN.md (Phase 1 complete)
+last_updated: "2026-03-14T13:29:21Z"
+last_activity: 2026-03-14 -- Completed 01-02 (MOEX RUB sizing & pre-trade fix)
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 2
-  completed_plans: 1
-  percent: 7
+  completed_plans: 2
+  percent: 14
 ---
 
 # Project State
@@ -26,27 +26,27 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 1 of 7 (MOEX Equity Foundation)
-Plan: 1 of 2 in current phase
-Status: Executing
-Last activity: 2026-03-14 -- Completed 01-01 (MOEX costs & holidays)
+Plan: 2 of 2 in current phase (COMPLETE)
+Status: Phase 1 Complete
+Last activity: 2026-03-14 -- Completed 01-02 (MOEX RUB sizing & pre-trade fix)
 
-Progress: [█░░░░░░░░░] 7%
+Progress: [██░░░░░░░░] 14%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 6min
-- Total execution time: 0.1 hours
+- Total plans completed: 2
+- Average duration: 12min
+- Total execution time: 0.4 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01 | 1 | 6min | 6min |
+| 01 | 2 | 24min | 12min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (6min)
+- Last 5 plans: 01-01 (6min), 01-02 (18min)
 - Trend: starting
 
 *Updated after each plan completion*
@@ -64,6 +64,8 @@ Recent decisions affecting current work:
 - [01-01]: Transferred holidays as static per-year frozensets (government decrees are static)
 - [01-01]: is_moex_holiday expanded to check both fixed and transferred (backward-compatible)
 - [01-01]: Lazy import of moex_calendar in trading_loop to maintain dependency layering
+- [01-02]: MOEX starting capital fixed at 1M RUB (not USD * FX rate)
+- [01-02]: Half-Kelly with default params gives 8.33% position size (not 10-20% as initially expected)
 
 ### Pending Todos
 
@@ -71,13 +73,13 @@ None yet.
 
 ### Blockers/Concerns
 
-- RUB position sizing bug is the confirmed blocker for all MOEX work (Phase 1 priority)
+- ~~RUB position sizing bug~~ FIXED in 01-02 (1M RUB starting capital, 8% position sizing)
 - MOEX-specific ADX threshold calibration may need research during Phase 2 planning
 - OFZ-PK floater duration formula needs validation during Phase 4 planning
 - Russian news RSS URLs have MEDIUM confidence -- validate at Phase 7 implementation
 
 ## Session Continuity
 
-Last session: 2026-03-14T13:08:04Z
-Stopped at: Completed 01-01-PLAN.md
-Resume file: .planning/phases/01-moex-equity-foundation/01-01-SUMMARY.md
+Last session: 2026-03-14T13:29:21Z
+Stopped at: Completed 01-02-PLAN.md (Phase 1 complete)
+Resume file: .planning/phases/01-moex-equity-foundation/01-02-SUMMARY.md
