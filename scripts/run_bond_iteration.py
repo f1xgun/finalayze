@@ -32,6 +32,15 @@ load_dotenv()
 
 # Ensure config/ at project root is importable
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+
+# gRPC env vars MUST be set before importing grpc (via t_tech.invest).
+# C-ares DNS resolver may fail; force native (system) resolver.
+os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
+# T-Bank uses Russian Trusted Root CA not in standard CA bundles.
+_GRPC_ROOTS = Path(PROJECT_ROOT) / "certs" / "grpc_roots.pem"
+if _GRPC_ROOTS.exists():
+    os.environ.setdefault("GRPC_DEFAULT_SSL_ROOTS_FILE_PATH", str(_GRPC_ROOTS))
+
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -98,7 +107,8 @@ def _make_tinkoff_fetcher() -> Any:
     from finalayze.markets.instruments import build_default_registry  # noqa: PLC0415
 
     registry = build_default_registry()
-    return TinkoffFetcher(token=token, registry=registry, sandbox=False)
+    use_sandbox = os.environ.get("FINALAYZE_MODE", "sandbox") == "sandbox"
+    return TinkoffFetcher(token=token, registry=registry, sandbox=use_sandbox)
 
 
 def _fetch_bond_data(

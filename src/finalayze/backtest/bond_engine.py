@@ -30,6 +30,7 @@ from finalayze.core.schemas import (
 from finalayze.execution.bond_simulated_broker import BondSimulatedBroker
 from finalayze.risk.dv01_sizing import DV01BudgetStep, EqualWeightBondSizer
 from finalayze.risk.yield_stop import YieldStop
+from finalayze.strategies.bond_duration_rotation import CBRRegime, classify_regime
 
 if TYPE_CHECKING:
     from datetime import date
@@ -181,7 +182,10 @@ class BondBacktestEngine:
             # Update coupon tracking for open positions (gross amount)
             self._update_coupon_tracking(positions, coupon_schedule, current_date)
 
-            # 2. Check yield-based stops and max hold bars
+            # 2. Compute CBR regime for regime-adaptive yield stops
+            regime = self._get_current_regime(current_date, macro_provider)
+
+            # 3. Check yield-based stops and max hold bars
             close_trades = self._check_stops_and_limits(
                 positions,
                 bar_idx,
@@ -191,6 +195,7 @@ class BondBacktestEngine:
                 broker,
                 bond_info,
                 coupon_schedule,
+                regime=regime,
             )
             trades.extend(close_trades)
 
@@ -272,6 +277,8 @@ class BondBacktestEngine:
         broker: BondSimulatedBroker,
         bond_info: dict[str, BondInfo],
         coupon_schedule: dict[str, list[CouponPayment]],
+        *,
+        regime: int = 1,
     ) -> list[TradeResult]:
         """Check yield stops and max hold bars, close triggered positions."""
         cfg = self._config
@@ -299,7 +306,7 @@ class BondBacktestEngine:
             except (ValueError, ZeroDivisionError):
                 current_ytm = pos.entry_ytm_pct  # fallback: no stop
 
-            if cfg.yield_stop.is_stopped(pos.entry_ytm_pct, current_ytm):
+            if cfg.yield_stop.is_stopped_with_regime(pos.entry_ytm_pct, current_ytm, regime=regime):
                 symbols_to_close.append((sym, "yield_stop"))
                 continue
 
@@ -529,6 +536,31 @@ class BondBacktestEngine:
                         sym, current_date, nkd_series, coupon_schedule, info
                     )
         return broker.portfolio_value_at(prices, nkd_vals)
+
+    @staticmethod
+    def _get_current_regime(
+        current_date: date,
+        macro_provider: MacroContextProvider | None,
+    ) -> int:
+        """Get CBR regime as int for regime-adaptive yield stops."""
+        if macro_provider is None:
+            return int(CBRRegime.NEUTRAL)
+        snapshot = macro_provider.get_snapshot(current_date)
+        if (
+            snapshot.key_rate is None
+            or snapshot.ruonia_7d_avg is None
+            or snapshot.cpi_yoy is None
+            or snapshot.last_cbr_decision is None
+        ):
+            return int(CBRRegime.NEUTRAL)
+        return int(
+            classify_regime(
+                key_rate=snapshot.key_rate,
+                ruonia_7d_avg=snapshot.ruonia_7d_avg,
+                cpi_yoy_latest_published=snapshot.cpi_yoy,
+                last_cbr_decision=snapshot.last_cbr_decision,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Private helpers

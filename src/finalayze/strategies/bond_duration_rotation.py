@@ -22,9 +22,13 @@ if TYPE_CHECKING:
 
 # ── Regime classifier ────────────────────────────────────────────────────────
 
-_GAP_DOVISH_THRESHOLD = Decimal("-0.50")
-_GAP_HAWKISH_THRESHOLD = Decimal("0.50")
+# Must be wider than the RUONIA proxy offset (50bps) to avoid false
+# dovish signals when RUONIA is approximated as key_rate - 50bps.
+_GAP_HOLD_LEAN_THRESHOLD = Decimal("0.75")
 _CPI_STAGFLATION_THRESHOLD = Decimal("8.0")
+# When key rate is at or above this level, CBR is in restrictive territory.
+# Unless CBR is actively cutting, OFZ-PD should not be bought (force HAWKISH).
+_KEY_RATE_RESTRICTIVE = Decimal("15.0")
 
 _STRATEGY_NAME = "bond_duration_rotation"
 _MARKET_ID = "moex"
@@ -52,25 +56,42 @@ def classify_regime(
 ) -> CBRRegime:
     """Rule-based CBR regime classifier.
 
-    Primary signal: RUONIA-key rate gap.
-    - gap < -0.50% AND last decision was cut -> DOVISH
-    - gap > +0.50% AND last decision was hike -> HAWKISH
-    - Otherwise -> NEUTRAL
+    Primary signal: last CBR meeting decision.
+    - last_cbr_decision == "hike" -> HAWKISH
+    - last_cbr_decision == "cut"  -> DOVISH
+    - last_cbr_decision == "hold" -> use RUONIA-key rate gap as tiebreaker:
+        - gap < -0.30  -> DOVISH  (markets pricing in cut)
+        - gap > +0.30  -> HAWKISH (markets pricing in hike)
+        - otherwise    -> NEUTRAL
 
     CPI override: If CPI > 8% YoY, force at least NEUTRAL (never DOVISH).
-    """
-    gap = ruonia_7d_avg - key_rate
 
-    if gap < _GAP_DOVISH_THRESHOLD and last_cbr_decision == "cut":
-        regime = CBRRegime.DOVISH
-    elif gap > _GAP_HAWKISH_THRESHOLD and last_cbr_decision == "hike":
+    Key-rate restrictive override: If key_rate >= 15% and CBR is not cutting,
+    force HAWKISH. At restrictive rates OFZ-PD lose value; only a confirmed
+    easing cycle justifies buying fixed-coupon bonds.
+    """
+    if last_cbr_decision == "hike":
         regime = CBRRegime.HAWKISH
+    elif last_cbr_decision == "cut":
+        regime = CBRRegime.DOVISH
     else:
-        regime = CBRRegime.NEUTRAL
+        # "hold" — use RUONIA gap as tiebreaker
+        gap = ruonia_7d_avg - key_rate
+        if gap < -_GAP_HOLD_LEAN_THRESHOLD:
+            regime = CBRRegime.DOVISH
+        elif gap > _GAP_HOLD_LEAN_THRESHOLD:
+            regime = CBRRegime.HAWKISH
+        else:
+            regime = CBRRegime.NEUTRAL
 
     # CPI stagflation override
     if cpi_yoy_latest_published > _CPI_STAGFLATION_THRESHOLD:
         regime = max(regime, CBRRegime.NEUTRAL)
+
+    # Key-rate restrictive override: at high rates, only an active easing
+    # cycle (cut) justifies holding fixed-coupon OFZ-PD.
+    if key_rate >= _KEY_RATE_RESTRICTIVE and last_cbr_decision != "cut":
+        regime = max(regime, CBRRegime.HAWKISH)
 
     return regime
 

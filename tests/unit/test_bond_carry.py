@@ -410,3 +410,161 @@ class TestSignalFields:
         assert signal is not None
         assert len(signal.reasoning) > 0
         assert _BOND_A in signal.reasoning
+
+
+# ── 7. Macro regime gating ──────────────────────────────────────────────
+
+_CONFIDENCE_BUY_CUT = 0.85
+
+
+class TestMacroRegimeGating:
+    """BUY signals are gated by last_cbr_decision from macro context."""
+
+    def test_buy_suppressed_during_hike(self) -> None:
+        """No BUY when last_cbr_decision='hike'."""
+        strategy = BondCarryStrategy(
+            symbols=[_BOND_A],
+            maturity_dates={_BOND_A: _far_maturity()},
+        )
+        candles = _make_candles(_BOND_A, 1)
+        signal = strategy.generate_signal(
+            symbol=_BOND_A,
+            candles=candles,
+            open_positions={},
+            bar_idx=0,
+            last_cbr_decision="hike",
+        )
+        assert signal is None
+
+    def test_maturity_sell_still_works_during_hike(self) -> None:
+        """Maturity SELL must fire regardless of hiking regime."""
+        candles = _make_candles(_BOND_A, 5)
+        current_date = candles[-1].timestamp.date()
+        near_mat = _near_maturity(current_date)
+
+        strategy = BondCarryStrategy(
+            symbols=[_BOND_A],
+            maturity_dates={_BOND_A: near_mat},
+        )
+        open_positions = {_BOND_A: {"qty": 10}}
+        signal = strategy.generate_signal(
+            symbol=_BOND_A,
+            candles=candles,
+            open_positions=open_positions,
+            bar_idx=10,
+            last_cbr_decision="hike",
+        )
+        assert signal is not None
+        assert signal.direction == SignalDirection.SELL
+        assert signal.confidence == _CONFIDENCE_SELL
+
+    def test_buy_works_during_hold(self) -> None:
+        """Normal BUY when last_cbr_decision='hold'."""
+        strategy = BondCarryStrategy(
+            symbols=[_BOND_A],
+            maturity_dates={_BOND_A: _far_maturity()},
+        )
+        candles = _make_candles(_BOND_A, 1)
+        signal = strategy.generate_signal(
+            symbol=_BOND_A,
+            candles=candles,
+            open_positions={},
+            bar_idx=0,
+            last_cbr_decision="hold",
+        )
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY
+        assert signal.confidence == _CONFIDENCE_BUY
+
+    def test_buy_higher_confidence_during_cut(self) -> None:
+        """BUY with higher confidence (0.85) when last_cbr_decision='cut'."""
+        strategy = BondCarryStrategy(
+            symbols=[_BOND_A],
+            maturity_dates={_BOND_A: _far_maturity()},
+        )
+        candles = _make_candles(_BOND_A, 1)
+        signal = strategy.generate_signal(
+            symbol=_BOND_A,
+            candles=candles,
+            open_positions={},
+            bar_idx=0,
+            last_cbr_decision="cut",
+        )
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY
+        assert signal.confidence == _CONFIDENCE_BUY_CUT
+
+    def test_backward_compat_no_kwargs(self) -> None:
+        """No kwargs at all still produces BUY (existing behavior)."""
+        strategy = BondCarryStrategy(
+            symbols=[_BOND_A],
+            maturity_dates={_BOND_A: _far_maturity()},
+        )
+        candles = _make_candles(_BOND_A, 1)
+        signal = strategy.generate_signal(
+            symbol=_BOND_A,
+            candles=candles,
+            open_positions={},
+            bar_idx=0,
+        )
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY
+        assert signal.confidence == _CONFIDENCE_BUY
+
+    def test_reasoning_includes_regime(self) -> None:
+        """BUY reasoning mentions regime when macro context provided."""
+        strategy = BondCarryStrategy(
+            symbols=[_BOND_A],
+            maturity_dates={_BOND_A: _far_maturity()},
+        )
+        candles = _make_candles(_BOND_A, 1)
+        signal = strategy.generate_signal(
+            symbol=_BOND_A,
+            candles=candles,
+            open_positions={},
+            bar_idx=0,
+            last_cbr_decision="hold",
+        )
+        assert signal is not None
+        assert "regime" in signal.reasoning.lower()
+        assert "hold" in signal.reasoning.lower()
+
+    def test_hike_reasoning_in_features_when_suppressed(self) -> None:
+        """When BUY is suppressed during hike, no signal returned (None)."""
+        strategy = BondCarryStrategy(
+            symbols=[_BOND_A],
+            maturity_dates={_BOND_A: _far_maturity()},
+        )
+        candles = _make_candles(_BOND_A, 1)
+        signal = strategy.generate_signal(
+            symbol=_BOND_A,
+            candles=candles,
+            open_positions={},
+            bar_idx=0,
+            last_cbr_decision="hike",
+        )
+        # Suppressed BUY returns None
+        assert signal is None
+
+    def test_rebalance_buy_suppressed_during_hike(self) -> None:
+        """Rebalance BUY at interval boundary is suppressed during hike."""
+        symbols = [_BOND_A, _BOND_B]
+        maturity_dates = {s: _far_maturity() for s in symbols}
+        strategy = BondCarryStrategy(
+            symbols=symbols,
+            maturity_dates=maturity_dates,
+        )
+        strategy._last_rebalance_bar = 0
+
+        candles = _make_candles(_BOND_A, 70)
+        open_positions = {_BOND_B: {"qty": 10}}
+        bar_idx = _DEFAULT_REBALANCE_INTERVAL
+
+        signal = strategy.generate_signal(
+            symbol=_BOND_A,
+            candles=candles,
+            open_positions=open_positions,
+            bar_idx=bar_idx,
+            last_cbr_decision="hike",
+        )
+        assert signal is None

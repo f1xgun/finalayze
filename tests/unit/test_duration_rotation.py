@@ -17,11 +17,15 @@ from finalayze.strategies.bond_duration_rotation import (
 # Key rates
 KEY_RATE_16 = Decimal("16.00")
 KEY_RATE_21 = Decimal("21.00")
+# Below restrictive threshold (15%) — used to test gap tiebreaker in isolation
+KEY_RATE_10 = Decimal("10.00")
 
-# RUONIA gaps relative to key rate
+# RUONIA gaps relative to key rate (for KEY_RATE_16 / KEY_RATE_21 — cut/hike tests)
 RUONIA_DOVISH = Decimal("15.40")  # gap = 15.40 - 16.00 = -0.60 (< -0.50)
 RUONIA_HAWKISH = Decimal("21.60")  # gap = 21.60 - 21.00 = +0.60 (> +0.50)
 RUONIA_NEUTRAL = Decimal("16.10")  # gap = 16.10 - 16.00 = +0.10 (within +-0.50)
+# RUONIA relative to KEY_RATE_10 for hold-neutral tests
+RUONIA_NEUTRAL_LOW = Decimal("10.10")  # gap = +0.10 (within +-0.75)
 
 # CPI values
 CPI_NORMAL = Decimal("5.0")
@@ -148,30 +152,30 @@ class TestClassifyRegime:
         assert result == CBRRegime.HAWKISH
 
     def test_neutral_when_gap_within_bounds(self) -> None:
-        """RUONIA gap within +-0.50 => NEUTRAL."""
+        """RUONIA gap within +-0.75 at non-restrictive rate => NEUTRAL."""
         result = classify_regime(
-            key_rate=KEY_RATE_16,
-            ruonia_7d_avg=RUONIA_NEUTRAL,
+            key_rate=KEY_RATE_10,
+            ruonia_7d_avg=RUONIA_NEUTRAL_LOW,
             cpi_yoy_latest_published=CPI_NORMAL,
             last_cbr_decision="hold",
         )
         assert result == CBRRegime.NEUTRAL
 
-    def test_neutral_when_gap_negative_but_last_hold(self) -> None:
-        """Gap < -0.50 but last decision was hold (not cut) => NEUTRAL."""
+    def test_neutral_when_gap_moderate_negative_and_hold(self) -> None:
+        """Gap = -0.60 with hold at non-restrictive rate: within +-0.75 => NEUTRAL."""
         result = classify_regime(
-            key_rate=KEY_RATE_16,
-            ruonia_7d_avg=RUONIA_DOVISH,
+            key_rate=KEY_RATE_10,
+            ruonia_7d_avg=Decimal("9.40"),  # gap = -0.60
             cpi_yoy_latest_published=CPI_NORMAL,
             last_cbr_decision="hold",
         )
         assert result == CBRRegime.NEUTRAL
 
-    def test_neutral_when_gap_positive_but_last_hold(self) -> None:
-        """Gap > +0.50 but last decision was hold (not hike) => NEUTRAL."""
+    def test_neutral_when_gap_moderate_positive_and_hold(self) -> None:
+        """Gap = +0.60 with hold at non-restrictive rate: within +-0.75 => NEUTRAL."""
         result = classify_regime(
-            key_rate=KEY_RATE_21,
-            ruonia_7d_avg=RUONIA_HAWKISH,
+            key_rate=KEY_RATE_10,
+            ruonia_7d_avg=Decimal("10.60"),  # gap = +0.60
             cpi_yoy_latest_published=CPI_NORMAL,
             last_cbr_decision="hold",
         )
@@ -207,25 +211,25 @@ class TestClassifyRegime:
         )
         assert result == CBRRegime.DOVISH
 
-    def test_gap_exactly_minus_050_is_neutral(self) -> None:
-        """Gap == -0.50 exactly is NOT < -0.50, so NEUTRAL."""
+    def test_cut_decision_is_dovish_regardless_of_gap(self) -> None:
+        """Decision-first: cut => DOVISH regardless of RUONIA gap."""
         result = classify_regime(
             key_rate=KEY_RATE_16,
-            ruonia_7d_avg=Decimal("15.50"),  # gap = -0.50 exactly
+            ruonia_7d_avg=Decimal("15.50"),  # gap = -0.50
             cpi_yoy_latest_published=CPI_NORMAL,
             last_cbr_decision="cut",
         )
-        assert result == CBRRegime.NEUTRAL
+        assert result == CBRRegime.DOVISH
 
-    def test_gap_exactly_plus_050_is_neutral(self) -> None:
-        """Gap == +0.50 exactly is NOT > +0.50, so NEUTRAL."""
+    def test_hike_decision_is_hawkish_regardless_of_gap(self) -> None:
+        """Decision-first: hike => HAWKISH regardless of RUONIA gap."""
         result = classify_regime(
             key_rate=KEY_RATE_21,
-            ruonia_7d_avg=Decimal("21.50"),  # gap = +0.50 exactly
+            ruonia_7d_avg=Decimal("21.50"),  # gap = +0.50
             cpi_yoy_latest_published=CPI_NORMAL,
             last_cbr_decision="hike",
         )
-        assert result == CBRRegime.NEUTRAL
+        assert result == CBRRegime.HAWKISH
 
     def test_regime_ordering(self) -> None:
         """CBRRegime IntEnum ordering: DOVISH < NEUTRAL < HAWKISH."""
@@ -292,8 +296,8 @@ class TestBondDurationRotationStrategy:
             candles=candles,
             open_positions={},
             bar_idx=9,
-            key_rate=KEY_RATE_16,
-            ruonia_7d_avg=RUONIA_NEUTRAL,
+            key_rate=KEY_RATE_10,
+            ruonia_7d_avg=RUONIA_NEUTRAL_LOW,
             cpi_yoy=CPI_NORMAL,
             last_cbr_decision="hold",
         )
@@ -311,8 +315,8 @@ class TestBondDurationRotationStrategy:
             candles=candles,
             open_positions={LONG_BOND: Decimal(5)},
             bar_idx=9,
-            key_rate=KEY_RATE_16,
-            ruonia_7d_avg=RUONIA_NEUTRAL,
+            key_rate=KEY_RATE_10,
+            ruonia_7d_avg=RUONIA_NEUTRAL_LOW,
             cpi_yoy=CPI_NORMAL,
             last_cbr_decision="hold",
         )
@@ -330,8 +334,8 @@ class TestBondDurationRotationStrategy:
             candles=candles,
             open_positions={MEDIUM_BOND: Decimal(10)},  # already held
             bar_idx=9,
-            key_rate=KEY_RATE_16,
-            ruonia_7d_avg=RUONIA_NEUTRAL,
+            key_rate=KEY_RATE_10,
+            ruonia_7d_avg=RUONIA_NEUTRAL_LOW,
             cpi_yoy=CPI_NORMAL,
             last_cbr_decision="hold",
         )
