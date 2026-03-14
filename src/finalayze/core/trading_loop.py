@@ -38,10 +38,12 @@ if TYPE_CHECKING:
     from finalayze.analysis.impact_estimator import ImpactEstimator
     from finalayze.analysis.news_analyzer import NewsAnalyzer
     from finalayze.core.alerts import TelegramAlerter
+    from finalayze.core.bond_cycle import BondCycleProcessor
     from finalayze.core.events import EventBus
     from finalayze.core.schemas import Candle, PortfolioState, SentimentResult, Signal  # noqa: F401
     from finalayze.data.cache import RedisCache
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
+    from finalayze.data.macro_cache import MacroCacheService
     from finalayze.execution.broker_base import BrokerBase, OrderRequest
     from finalayze.execution.broker_router import BrokerRouter
     from finalayze.markets.fx_service import FXRateService
@@ -101,6 +103,8 @@ class TradingLoop:
         ml_registry: MLModelRegistry | None = None,
         event_bus: EventBus | None = None,
         fx_service: FXRateService | None = None,
+        bond_cycle_processor: BondCycleProcessor | None = None,
+        macro_cache: MacroCacheService | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
@@ -127,6 +131,8 @@ class TradingLoop:
         self._cache = cache
         self._event_bus = event_bus
         self._fx_service = fx_service
+        self._bond_processor = bond_cycle_processor
+        self._macro_cache = macro_cache
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -233,6 +239,27 @@ class TradingLoop:
                 "interval",
                 minutes=getattr(self._settings, "fx_update_interval_minutes", 60),
             )
+        if self._bond_processor is not None and getattr(
+            self._settings, "bond_cycle_enabled", False
+        ):
+            from apscheduler.triggers.cron import CronTrigger  # noqa: PLC0415
+
+            self._scheduler.add_job(
+                self._macro_refresh,
+                CronTrigger(hour=7, minute=0, timezone="UTC"),  # 10:00 MSK
+                id="macro_refresh",
+            )
+            self._scheduler.add_job(
+                self._bond_cycle,
+                CronTrigger(hour=7, minute=30, timezone="UTC"),  # 10:30 MSK
+                id="bond_cycle",
+            )
+            self._scheduler.add_job(
+                self._cbr_day_refresh,
+                CronTrigger(hour=12, minute=30, timezone="UTC"),  # 15:30 MSK
+                id="cbr_day_refresh",
+            )
+            _log.info("bond_cycle_scheduled")
         self._scheduler.start()
         _log.info(
             "trading_loop_started",
@@ -273,6 +300,45 @@ class TradingLoop:
             if self._async_thread is not None:
                 self._async_thread.join(timeout=5)
         self._stop_event.set()
+
+    # ── Bond cycle methods ───────────────────────────────────────────────
+
+    def _macro_refresh(self) -> None:
+        """Scheduled macro data refresh. SYNC -- runs in APScheduler thread."""
+        if self._macro_cache is None:
+            return
+        try:
+            snapshot = self._macro_cache.refresh()
+            _log.info(
+                "macro_refreshed",
+                key_rate=str(snapshot.key_rate),
+                ruonia=str(snapshot.ruonia_7d_avg),
+            )
+        except Exception:
+            _log.exception("macro_refresh_failed")
+
+    def _bond_cycle(self) -> None:
+        """Daily bond trading cycle across all layers. SYNC."""
+        if self._bond_processor is None:
+            return
+        _log.info("bond_cycle_start")
+        try:
+            result = self._bond_processor.run_cycle()
+            _log.info("bond_cycle_complete", **result.to_log_dict())
+        except Exception:
+            _log.exception("bond_cycle_failed")
+
+    def _cbr_day_refresh(self) -> None:
+        """Force macro refresh + extra bond cycle on CBR meeting days.
+
+        Runs at 15:30 MSK -- after 15:00 press conference, avoiding
+        the 13:30 announcement spread spike (30-50bps OFZ bid-ask widening).
+        """
+        if self._macro_cache is None or not self._macro_cache.is_cbr_meeting_day():
+            return
+        _log.info("cbr_day_force_refresh")
+        self._macro_refresh()
+        self._bond_cycle()
 
     # ── Cycles ───────────────────────────────────────────────────────────────
 
