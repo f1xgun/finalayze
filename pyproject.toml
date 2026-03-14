@@ -186,6 +186,8 @@ module = [
     "pywt.*",
     "arch",
     "arch.*",
+    "QuantLib",
+    "QuantLib.*",
 ]
 ignore_missing_imports = true
 
