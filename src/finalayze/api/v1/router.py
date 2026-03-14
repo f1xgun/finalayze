@@ -18,3 +18,7 @@ api_router.include_router(signals_router)
 api_router.include_router(risk_router)
 api_router.include_router(ml_router)
 api_router.include_router(news_router)
+
+# Telegram webhook router is mounted via create_telegram_router() at app startup
+# (requires runtime dependencies: TelegramBotHandler, webhook_secret).
+# See: finalayze.api.v1.telegram.create_telegram_router

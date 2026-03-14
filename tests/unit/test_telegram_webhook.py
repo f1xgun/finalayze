@@ -160,7 +160,9 @@ class TestCommandDispatch:
         # Should have called alerter._send with HTML content
         mocks["alerter"]._send.assert_called()
         call_text = mocks["alerter"]._send.call_args[0][0]
-        assert "AAPL" in call_text or "Portfolio" in call_text.lower() or "equity" in call_text.lower()
+        assert (
+            "AAPL" in call_text or "Portfolio" in call_text.lower() or "equity" in call_text.lower()
+        )
 
     def test_breakers_command_shows_levels(self) -> None:
         """/breakers command responds with circuit breaker states."""
