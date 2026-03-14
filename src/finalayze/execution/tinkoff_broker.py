@@ -20,12 +20,14 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+import structlog
 from t_tech.invest import AsyncClient, OrderDirection, OrderType
-from t_tech.invest.sandbox.async_client import AsyncSandboxClient
 
 from finalayze.core.exceptions import BrokerError, InstrumentNotFoundError
 from finalayze.core.schemas import PortfolioState
 from finalayze.execution.broker_base import BrokerBase, OrderRequest, OrderResult
+
+_log = structlog.get_logger()
 
 if TYPE_CHECKING:
     from finalayze.core.schemas import Candle
@@ -62,20 +64,20 @@ class TinkoffBroker(BrokerBase):
         self._sandbox = sandbox
         self._retry = retry_policy
         self._account_id: str = ""  # populated lazily on first API call
-        self._client: AsyncClient | AsyncSandboxClient | None = None
+        self._client: AsyncClient | None = None
         self._client_lock = threading.Lock()
 
-    def _get_client(self) -> AsyncClient | AsyncSandboxClient:
-        """Return the persistent async client, creating it lazily."""
+    def _get_client(self) -> AsyncClient:
+        """Return the persistent async client, creating it lazily.
+
+        Uses AsyncClient for both sandbox and production — AsyncSandboxClient
+        forcibly overrides target with the old tinkoff.ru domain.
+        """
         if self._client is None:
             with self._client_lock:
                 if self._client is None:  # double-check
-                    if self._sandbox:
-                        self._client = AsyncSandboxClient(
-                            self._token, target=_TBANK_GRPC_SANDBOX_TARGET
-                        )
-                    else:
-                        self._client = AsyncClient(self._token, target=_TBANK_GRPC_TARGET)
+                    target = _TBANK_GRPC_SANDBOX_TARGET if self._sandbox else _TBANK_GRPC_TARGET
+                    self._client = AsyncClient(self._token, target=target)
         return self._client
 
     def close(self) -> None:
@@ -99,8 +101,10 @@ class TinkoffBroker(BrokerBase):
         accounts = getattr(response, "accounts", [])
         if not accounts:
             msg = "Tinkoff: no accounts found for the provided token"
+            _log.error("tinkoff_no_accounts")
             raise BrokerError(msg)
         self._account_id = accounts[0].id
+        _log.info("tinkoff_account_resolved", account_id=self._account_id, sandbox=self._sandbox)
 
     async def _get_accounts_async(self) -> object:
         """Async call to fetch accounts list."""
@@ -124,6 +128,13 @@ class TinkoffBroker(BrokerBase):
         actual_qty = math.floor(float(order.quantity) / lot_size) * lot_size
 
         if actual_qty <= 0:
+            _log.warning(
+                "order_rejected_lot_size",
+                symbol=order.symbol,
+                side=order.side,
+                requested_qty=str(order.quantity),
+                lot_size=lot_size,
+            )
             return OrderResult(
                 filled=False,
                 symbol=order.symbol,
@@ -146,10 +157,25 @@ class TinkoffBroker(BrokerBase):
         except InstrumentNotFoundError:
             raise
         except Exception as exc:
+            _log.exception(
+                "order_submission_failed",
+                symbol=order.symbol,
+                side=order.side,
+                qty=actual_qty,
+                figi=figi,
+            )
             msg = f"Tinkoff order failed for {order.symbol}: {exc}"
             raise BrokerError(msg) from exc
 
         fill_price = self._quotation_to_decimal(result.executed_order_price)  # type: ignore[attr-defined]
+        _log.info(
+            "order_filled",
+            symbol=order.symbol,
+            side=order.side,
+            qty=actual_qty,
+            fill_price=float(fill_price),
+            figi=figi,
+        )
         return OrderResult(
             filled=True,
             fill_price=fill_price,
@@ -180,6 +206,7 @@ class TinkoffBroker(BrokerBase):
             self._ensure_account_id()
             portfolio = self._call(lambda: asyncio.run(self._get_portfolio_async()))
         except Exception as exc:
+            _log.exception("portfolio_fetch_failed")
             msg = f"Tinkoff portfolio fetch failed: {exc}"
             raise BrokerError(msg) from exc
 
@@ -193,6 +220,12 @@ class TinkoffBroker(BrokerBase):
             else:
                 pos_map[pos.figi] = qty  # Tinkoff positions are FIGI-keyed
 
+        _log.debug(
+            "portfolio_fetched",
+            equity=float(total),
+            cash=float(cash_sum),
+            positions=len(pos_map),
+        )
         return PortfolioState(
             cash=cash_sum,
             positions=pos_map,
@@ -240,3 +273,28 @@ class TinkoffBroker(BrokerBase):
         units = getattr(q, "units", 0)
         nano = getattr(q, "nano", 0)
         return Decimal(units) + Decimal(nano) / _NANO_DIVISOR
+
+
+def make_bond_broker(equity_broker: TinkoffBroker) -> TinkoffBroker:
+    """Create a TinkoffBroker for bonds sharing the equity broker's gRPC client.
+
+    Reuses the same AsyncClient (and therefore the same gRPC channel) to avoid
+    opening a second connection.  The returned instance is a separate object
+    so it can carry bond-specific state if needed.
+
+    Args:
+        equity_broker: The existing equity TinkoffBroker instance.
+
+    Returns:
+        A new TinkoffBroker sharing the same AsyncClient.
+    """
+    bond_broker = TinkoffBroker(
+        token=equity_broker._token,
+        registry=equity_broker._registry,
+        sandbox=equity_broker._sandbox,
+        retry_policy=equity_broker._retry,
+    )
+    # Share the same gRPC client to avoid a second connection
+    bond_broker._client = equity_broker._client
+    bond_broker._account_id = equity_broker._account_id
+    return bond_broker

@@ -251,9 +251,7 @@ class MacroSnapshotModel(Base):
 
     __tablename__ = "macro_snapshots"
 
-    timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), primary_key=True
-    )
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
     key_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     ruonia_7d_avg: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     cpi_yoy: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
@@ -302,6 +300,25 @@ class AmortizationEventModel(Base):
     remaining_nominal_pct: Mapped[Decimal] = mapped_column(
         Numeric(8, 4), nullable=False, default=Decimal("100.0")
     )
+
+
+class LayerLedgerModel(Base):
+    """Persisted layer ledger state for bond positions.
+
+    Composite primary key (layer_id, symbol) stores one row per bond position
+    per portfolio layer.
+    """
+
+    __tablename__ = "layer_ledger"
+
+    layer_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(30), primary_key=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    entry_ytm_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    entry_price: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    entry_clean_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    entry_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class PortfolioSnapshot(Base):
