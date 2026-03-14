@@ -45,8 +45,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **MON-01**: Telegram bot sends trade alerts (fill, stop-loss, circuit breaker)
 - [x] **MON-02**: Daily P&L summary fixed (currently shows zero)
 - [x] **MON-03**: Telegram priority message queue (prevent loss during circuit breaker bursts)
-- [ ] **MON-04**: Coupon receipt alerts via Telegram
-- [ ] **MON-05**: CBR meeting alerts with impact analysis
+- [x] **MON-04**: Coupon receipt alerts via Telegram
+- [x] **MON-05**: CBR meeting alerts with impact analysis
 
 ### Autonomous Operation
 
@@ -122,8 +122,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MON-01 | Phase 5 | Complete |
 | MON-02 | Phase 5 | Complete |
 | MON-03 | Phase 5 | Complete |
-| MON-04 | Phase 5 | Pending |
-| MON-05 | Phase 5 | Pending |
+| MON-04 | Phase 5 | Complete |
+| MON-05 | Phase 5 | Complete |
 | AUT-01 | Phase 5 | Complete |
 | AUT-02 | Phase 5 | Complete |
 | AUT-03 | Phase 5 | Complete |

@@ -8,10 +8,10 @@ last_updated: "2026-03-14T19:53:06.510Z"
 last_activity: 2026-03-14 -- Completed 04-03 (Bond walk-forward validation)
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 14
-  completed_plans: 12
-  percent: 60
+  completed_plans: 13
+  percent: 71
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 5 of 7 (Integration & Telegram)
-Plan: 2 of 3 in current phase
-Status: In Progress
-Last activity: 2026-03-14 -- Completed 05-02 (Trading loop bond integration)
+Plan: 3 of 3 in current phase
+Status: Phase Complete
+Last activity: 2026-03-14 -- Completed 05-03 (Telegram webhook & monitoring alerts)
 
-Progress: [██████░░░░] 60%
+Progress: [███████░░░] 71%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [██████░░░░] 60%
 | Phase 04 P03 | 25min | 2 tasks | 3 files |
 | Phase 05 P01 | 6min | 2 tasks | 3 files |
 | Phase 05 P02 | 8min | 2 tasks | 9 files |
+| Phase 05 P03 | 7min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -109,6 +110,11 @@ Recent decisions affecting current work:
 - [05-02]: Preflight independent degradation: bond disabled on failure, equity continues
 - [05-02]: Bond P&L from LayerLedger.current_equity (not broker portfolio)
 - [05-02]: on_daily_summary extended with backward-compatible optional params
+- [05-03]: Factory router pattern for telegram webhook (needs runtime dependencies)
+- [05-03]: Read-only commands only (/status, /breakers) -- no trading via Telegram
+- [05-03]: CBR alert fires on_cbr_meeting with rate from MacroSnapshot.last_cbr_decision
+- [05-03]: Coupon alert fires on reinvestment step in _process_layer
+- [05-03]: Weekly digest via CronTrigger(day_of_week='sun') at configurable hour
 
 ### Pending Todos
 
@@ -123,6 +129,5 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T20:12:45Z
-Stopped at: Completed 05-02-PLAN.md
-Resume file: .planning/phases/05-integration-and-telegram/05-03-PLAN.md
+Last session: 2026-03-14T20:23:14Z
+Stopped at: Completed 05-03-PLAN.md (Phase 5 complete)
