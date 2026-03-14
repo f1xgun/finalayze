@@ -13,7 +13,7 @@ This roadmap takes Finalayze from a working US equity trading system to a fully 
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: MOEX Equity Foundation** - Fix RUB sizing, wire MOEX costs and holiday calendar into backtest engine (completed 2026-03-14)
-- [x] **Phase 2: MOEX Equity Validation** - Tune ru_* strategy presets and achieve positive walk-forward backtest PnL (completed 2026-03-14)
+- [ ] **Phase 2: MOEX Equity Validation** - Tune ru_* strategy presets and achieve positive walk-forward backtest PnL (gap closure in progress)
 - [ ] **Phase 3: Bond Data Pipeline** - Wire bond instrument discovery, NKD/dirty price math, and MacroCacheService
 - [ ] **Phase 4: Bond Execution** - Complete BondCycleProcessor stubs, YieldStop, and achieve positive bond backtest PnL
 - [ ] **Phase 5: Integration and Telegram** - Wire equity+bond cycles into TradingLoop, build Telegram alerting with rate limiting
@@ -44,11 +44,12 @@ Plans:
   1. Walk-forward backtest shows positive PnL on at least 2 MOEX segments (ru_blue_chips, ru_energy)
   2. ru_* YAML strategy presets are calibrated with MOEX-specific parameters (not US defaults)
   3. Walk-forward out-of-sample Sharpe > 0 over 2022-2025 period
-**Plans**: 2 plans
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Fix MOEX infrastructure scripts, enable all strategies, run isolation tests
-- [ ] 02-02-PLAN.md — Cointegration testing, Optuna tuning, walk-forward validation
+- [x] 02-01-PLAN.md — Fix MOEX infrastructure scripts, enable all strategies, run isolation tests
+- [x] 02-02-PLAN.md — Cointegration testing, Optuna tuning, walk-forward validation
+- [ ] 02-03-PLAN.md — Gap closure: increase MOEX position sizing (half-Kelly) and prune losing symbols
 
 ### Phase 3: Bond Data Pipeline
 **Goal**: Bond instruments are discoverable and all bond math (YTM, duration, NKD, dirty price) computes correctly
@@ -143,7 +144,7 @@ Note: Phases 2 and 3 depend only on Phase 1 (not on each other) and could theore
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. MOEX Equity Foundation | 2/2 | Complete   | 2026-03-14 |
-| 2. MOEX Equity Validation | 2/2 | Complete   | 2026-03-14 |
+| 2. MOEX Equity Validation | 2/3 | Gap closure | - |
 | 3. Bond Data Pipeline | 0/3 | Not started | - |
 | 4. Bond Execution | 0/3 | Not started | - |
 | 5. Integration and Telegram | 0/3 | Not started | - |
