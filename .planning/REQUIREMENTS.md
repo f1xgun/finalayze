@@ -77,7 +77,7 @@ Deferred to future release. Tracked but not in current roadmap.
 
 - **PRT-01**: Multi-account support
 - **PRT-02**: Cross-asset correlation-based allocation (stocks vs bonds)
-- **PRT-03**: Tax optimization (NDFL, ИИС deductions)
+- **PRT-03**: Tax optimization (NDFL, IIS deductions)
 
 ## Out of Scope
 
@@ -98,44 +98,44 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EQF-01 | — | Pending |
-| EQF-02 | — | Pending |
-| EQF-03 | — | Pending |
-| EQF-04 | — | Pending |
-| EQF-05 | — | Pending |
-| BDP-01 | — | Pending |
-| BDP-02 | — | Pending |
-| BDP-03 | — | Pending |
-| BDP-04 | — | Pending |
-| BDP-05 | — | Pending |
-| BEX-01 | — | Pending |
-| BEX-02 | — | Pending |
-| BEX-03 | — | Pending |
-| BEX-04 | — | Pending |
-| BEX-05 | — | Pending |
-| BEX-06 | — | Pending |
-| NWS-01 | — | Pending |
-| NWS-02 | — | Pending |
-| NWS-03 | — | Pending |
-| NWS-04 | — | Pending |
-| NWS-05 | — | Pending |
-| MON-01 | — | Pending |
-| MON-02 | — | Pending |
-| MON-03 | — | Pending |
-| MON-04 | — | Pending |
-| MON-05 | — | Pending |
-| AUT-01 | — | Pending |
-| AUT-02 | — | Pending |
-| AUT-03 | — | Pending |
-| AUT-04 | — | Pending |
-| AUT-05 | — | Pending |
-| AUT-06 | — | Pending |
+| EQF-01 | Phase 1 | Pending |
+| EQF-02 | Phase 2 | Pending |
+| EQF-03 | Phase 2 | Pending |
+| EQF-04 | Phase 1 | Pending |
+| EQF-05 | Phase 1 | Pending |
+| BDP-01 | Phase 3 | Pending |
+| BDP-02 | Phase 3 | Pending |
+| BDP-03 | Phase 3 | Pending |
+| BDP-04 | Phase 3 | Pending |
+| BDP-05 | Phase 3 | Pending |
+| BEX-01 | Phase 4 | Pending |
+| BEX-02 | Phase 4 | Pending |
+| BEX-03 | Phase 4 | Pending |
+| BEX-04 | Phase 4 | Pending |
+| BEX-05 | Phase 4 | Pending |
+| BEX-06 | Phase 4 | Pending |
+| NWS-01 | Phase 7 | Pending |
+| NWS-02 | Phase 7 | Pending |
+| NWS-03 | Phase 7 | Pending |
+| NWS-04 | Phase 7 | Pending |
+| NWS-05 | Phase 7 | Pending |
+| MON-01 | Phase 5 | Pending |
+| MON-02 | Phase 5 | Pending |
+| MON-03 | Phase 5 | Pending |
+| MON-04 | Phase 5 | Pending |
+| MON-05 | Phase 5 | Pending |
+| AUT-01 | Phase 5 | Pending |
+| AUT-02 | Phase 5 | Pending |
+| AUT-03 | Phase 5 | Pending |
+| AUT-04 | Phase 6 | Pending |
+| AUT-05 | Phase 7 | Pending |
+| AUT-06 | Phase 6 | Pending |
 
 **Coverage:**
 - v1 requirements: 32 total
-- Mapped to phases: 0
-- Unmapped: 32 ⚠️
+- Mapped to phases: 32
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after initial definition*
+*Last updated: 2026-03-14 after roadmap creation*
