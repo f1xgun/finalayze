@@ -1,12 +1,12 @@
 segment_id: ru_finance
 normalize_mode: "firing"
-min_combined_confidence: 0.30
-min_exit_confidence: 0.25
+min_combined_confidence: 0.21
+min_exit_confidence: 0.2
 regime_routing:
   enabled: true
   adx_period: 14
-  trend_threshold: 30
-  mr_threshold: 20
+  trend_threshold: 29
+  mr_threshold: 17
 strategies:
   mean_reversion:
     enabled: true
@@ -53,7 +53,7 @@ strategies:
       volume_min_ratio: 0.8
       neutral_reset_bars: 8
       vol_target_enabled: true
-      vol_target: 0.20
+      vol_target: 0.21
   ml_ensemble:
     enabled: false
     weight: 0.00
@@ -77,8 +77,8 @@ strategies:
     weight: 0.22
     params:
       rsi_period: 2
-      rsi_buy_threshold: 10.0
-      rsi_sell_threshold: 90.0
+      rsi_buy_threshold: 8.4
+      rsi_sell_threshold: 92.8
       sma_trend_period: 100
       sma_exit_period: 5
       min_confidence: 0.45
@@ -91,7 +91,7 @@ strategies:
       lookback_6m: 126
       min_confidence: 0.50
       vol_target_enabled: true
-      vol_target: 0.20
+      vol_target: 0.21
   ou_mean_reversion:
     enabled: false
     weight: 0.00

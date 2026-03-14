@@ -1,16 +1,16 @@
 segment_id: ru_blue_chips
 normalize_mode: "firing"
-min_combined_confidence: 0.30
-min_exit_confidence: 0.25
+min_combined_confidence: 0.25
+min_exit_confidence: 0.24
 regime_routing:
   enabled: true
   adx_period: 14
-  trend_threshold: 30
-  mr_threshold: 20
+  trend_threshold: 34
+  mr_threshold: 13
 strategies:
   momentum:
     enabled: true
-    weight: 0.18
+    weight: 0.20
     params:
       rsi_period: 14
       rsi_oversold: 30
@@ -34,7 +34,7 @@ strategies:
       volume_min_ratio: 0.8
       neutral_reset_bars: 8
       vol_target_enabled: true
-      vol_target: 0.20
+      vol_target: 0.19
   event_driven:
     enabled: false
     weight: 0.00
@@ -43,7 +43,7 @@ strategies:
       event_types: [geopolitical, sanctions, cbr_rate, commodity_price, earnings]
   mean_reversion:
     enabled: true
-    weight: 0.18
+    weight: 0.20
     params:
       bb_period: 20
       bb_std_dev: 2.5
@@ -55,16 +55,16 @@ strategies:
       rsi_oversold_mr: 25
       rsi_overbought_mr: 75
   pairs:
-    enabled: true
-    weight: 0.10
+    enabled: false
+    weight: 0.00
     params:
-      pairs: [[SBER, VTBR], [GAZP, LKOH]]
+      pairs: []
       z_entry: 1.5
       z_exit: 0.0
       min_confidence: 0.40
   dividend_gap:
     enabled: true
-    weight: 0.18
+    weight: 0.20
     params:
       min_gap_pct: 3.0
       max_hold_bars: 60
@@ -77,24 +77,24 @@ strategies:
       min_confidence: 0.30
   rsi2_connors:
     enabled: true
-    weight: 0.18
+    weight: 0.20
     params:
       rsi_period: 2
-      rsi_buy_threshold: 10.0
-      rsi_sell_threshold: 90.0
+      rsi_buy_threshold: 8.6
+      rsi_sell_threshold: 88.7
       sma_trend_period: 100
       sma_exit_period: 5
       min_confidence: 0.35
   dual_momentum:
     enabled: true
-    weight: 0.18
+    weight: 0.20
     params:
       lookback_1m: 21
       lookback_3m: 63
       lookback_6m: 126
       min_confidence: 0.50
       vol_target_enabled: true
-      vol_target: 0.20
+      vol_target: 0.19
   ou_mean_reversion:
     enabled: false
     weight: 0.00
