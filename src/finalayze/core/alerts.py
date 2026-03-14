@@ -1,8 +1,14 @@
 """Telegram alerting for trade events and system notifications (Layer 0/6 boundary).
 
-TelegramAlerter is stateless and fire-and-forget:
-  - If bot_token is empty, all methods are no-ops (safe default for dev/test).
-  - HTTP errors are caught and logged -- they never propagate to the trading loop.
+TelegramAlerter sends messages via Telegram Bot API with:
+  - 3-tier priority queue (CRITICAL bypass, IMPORTANT batching, INFO background)
+  - Sliding-window rate limiting (20 msg/min)
+  - Persistent httpx.AsyncClient (no per-message creation)
+  - HTML parse_mode on all messages
+  - One retry on failure after 5s delay
+
+When ``bot_token`` is empty, all methods are no-ops (safe default for dev/test).
+HTTP errors are caught and logged -- they never propagate to the trading loop.
 
 See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 """
@@ -10,7 +16,12 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
+from collections import deque
+from dataclasses import dataclass, field
 from decimal import Decimal
+from enum import IntEnum
 from typing import TYPE_CHECKING
 
 import httpx
@@ -24,6 +35,148 @@ _TELEGRAM_API_BASE = "https://api.telegram.org/bot"
 _SEND_MESSAGE_PATH = "/sendMessage"
 
 _log = structlog.get_logger()
+
+
+# ── Priority & Queue Types ───────────────────────────────────────────────────
+
+
+class AlertPriority(IntEnum):
+    """Three-tier alert priority. Lower value = higher priority."""
+
+    CRITICAL = 0
+    IMPORTANT = 1
+    INFO = 2
+
+
+@dataclass(order=True)
+class QueuedMessage:
+    """A message waiting to be sent, ordered by (priority, timestamp)."""
+
+    priority: AlertPriority
+    timestamp: float = field(compare=True)
+    text: str = field(compare=False)
+    parse_mode: str = field(default="HTML", compare=False)
+
+
+class TelegramMessageQueue:
+    """Priority message queue with rate limiting, batching, and retry.
+
+    - CRITICAL: bypass queue, send immediately with retry
+    - IMPORTANT: queued, batched if 5+ pending
+    - INFO: queued, drained in order
+
+    Rate limit: 20 messages per 60-second sliding window.
+    Retry: one retry after 5s on failure, then drop.
+    """
+
+    _RATE_LIMIT_PER_MINUTE = 20
+    _RATE_WINDOW_SECONDS = 60
+    _BATCH_THRESHOLD = 5
+    _BATCH_MAX = 10
+    _RETRY_DELAY = 5
+
+    def __init__(self, alerter: TelegramAlerter) -> None:
+        self._alerter = alerter
+        self._queue: asyncio.PriorityQueue[QueuedMessage] = asyncio.PriorityQueue()
+        self._sent_timestamps: deque[float] = deque(
+            maxlen=self._RATE_LIMIT_PER_MINUTE * 2,
+        )
+        self._drain_task: asyncio.Task[None] | None = None
+
+    async def enqueue(self, text: str, priority: AlertPriority) -> None:
+        """Add a message to the queue, or send immediately if CRITICAL."""
+        if priority == AlertPriority.CRITICAL:
+            await self._send_with_retry(text)
+            return
+        msg = QueuedMessage(
+            priority=priority,
+            timestamp=time.monotonic(),
+            text=text,
+        )
+        await self._queue.put(msg)
+
+    async def start(self) -> None:
+        """Start the background drain loop."""
+        self._drain_task = asyncio.create_task(self._drain_loop())
+
+    async def stop(self) -> None:
+        """Cancel the drain loop gracefully."""
+        if self._drain_task is not None:
+            self._drain_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._drain_task
+            self._drain_task = None
+
+    def _is_rate_limited(self) -> bool:
+        """Check if we've hit 20 messages in the last 60s."""
+        now = time.monotonic()
+        # Purge timestamps older than the window
+        while self._sent_timestamps and (
+            now - self._sent_timestamps[0] > self._RATE_WINDOW_SECONDS
+        ):
+            self._sent_timestamps.popleft()
+        return len(self._sent_timestamps) >= self._RATE_LIMIT_PER_MINUTE
+
+    def _collect_batch(self, priority: AlertPriority) -> list[str]:
+        """Collect consecutive messages of the given priority for batching."""
+        collected: list[str] = []
+        # Peek at queue items without blocking
+        temp: list[QueuedMessage] = []
+        while not self._queue.empty() and len(collected) < self._BATCH_MAX:
+            try:
+                msg = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if msg.priority == priority:
+                collected.append(msg.text)
+            else:
+                temp.append(msg)
+                break
+        # Put back non-matching messages
+        for msg in temp:
+            self._queue.put_nowait(msg)
+        return collected
+
+    async def _drain_loop(self) -> None:
+        """Infinite loop: dequeue, rate-limit, batch, send."""
+        while True:
+            msg = await self._queue.get()
+            # Wait for rate limit to clear
+            while self._is_rate_limited():
+                await asyncio.sleep(1)
+            # Check for batching on IMPORTANT
+            if (
+                msg.priority == AlertPriority.IMPORTANT
+                and self._queue.qsize() >= self._BATCH_THRESHOLD - 1
+            ):
+                batch = [msg.text, *self._collect_batch(AlertPriority.IMPORTANT)]
+                if len(batch) >= self._BATCH_THRESHOLD:
+                    digest = f"{len(batch)} fills executed:\n"
+                    digest += "\n".join(f"- {line}" for line in batch)
+                    await self._send_with_retry(digest)
+                    self._sent_timestamps.append(time.monotonic())
+                    continue
+                # Not enough for batch -- send individually, put rest back
+                for text in batch[1:]:
+                    self._queue.put_nowait(
+                        QueuedMessage(
+                            priority=AlertPriority.IMPORTANT,
+                            timestamp=time.monotonic(),
+                            text=text,
+                        )
+                    )
+            await self._send_with_retry(msg.text, msg.parse_mode)
+            self._sent_timestamps.append(time.monotonic())
+
+    async def _send_with_retry(
+        self, text: str, parse_mode: str = "HTML"
+    ) -> bool:
+        """Send via alerter._send, retry once on failure after 5s."""
+        ok = await self._alerter._send(text, parse_mode=parse_mode)
+        if not ok:
+            await asyncio.sleep(self._RETRY_DELAY)
+            ok = await self._alerter._send(text, parse_mode=parse_mode)
+        return ok
 
 
 class TelegramAlerter:
@@ -98,6 +251,74 @@ class TelegramAlerter:
         text = f"\U0001f4ca Daily: {summary} | Equity ${total_equity_usd:,.0f}"
         self.send_alert(text)
 
+    def on_coupon_received(
+        self,
+        symbol: str,
+        amount: Decimal,
+        currency: str = "RUB",
+    ) -> None:
+        """Alert on a coupon payment received.
+
+        Example: ``Coupon: SU26244RMFS2 +3,250.00 RUB``
+        """
+        text = f"\U0001f4b0 Coupon: {symbol} +{amount:,.2f} {currency}"
+        self.send_alert(text)
+
+    def on_cbr_meeting(
+        self,
+        meeting_date: str,
+        decision: str,
+        key_rate: str,
+    ) -> None:
+        """Alert on a CBR rate decision.
+
+        Example: ``CBR meeting 2026-03-20: HOLD, key rate 21.00%``
+        """
+        text = f"\U0001f3e6 CBR meeting {meeting_date}: {decision}, key rate {key_rate}"
+        self.send_alert(text)
+
+    def on_bond_event_trade(
+        self,
+        symbol: str,
+        side: str,
+        reason: str,
+    ) -> None:
+        """Alert on a CBR event-driven bond trade.
+
+        Example: ``CBR Event BUY SU26244RMFS2: 5d before meeting, gap=-0.25``
+        """
+        text = f"\U0001f4c5 CBR Event {side} {symbol}: {reason}"
+        self.send_alert(text)
+
+    def on_stop_loss_triggered(
+        self,
+        symbol: str,
+        entry_price: Decimal,
+        stop_price: Decimal,
+        current_price: Decimal,
+    ) -> None:
+        """Alert on a stop-loss trigger.
+
+        Example: ``Stop-loss: SBER entry=280.50, stop=266.48, price=265.00``
+        """
+        text = (
+            f"\U0001f6d1 Stop-loss: {symbol} "
+            f"entry={entry_price:.2f}, stop={stop_price:.2f}, price={current_price:.2f}"
+        )
+        self.send_alert(text)
+
+    def on_startup(self, mode: str, markets: list[str], instruments: int) -> None:
+        """Alert on system startup.
+
+        Example: ``Finalayze started: sandbox, markets=[moex], 23 instruments``
+        """
+        text = f"\U0001f680 Finalayze started: {mode}, markets={markets}, {instruments} instruments"
+        self.send_alert(text)
+
+    def on_shutdown(self) -> None:
+        """Alert on system shutdown."""
+        self.send_alert("\u23f9\ufe0f Finalayze stopped")
+
     def on_error(self, component: str, message: str) -> None:
         """Alert on system errors.
 
@@ -108,21 +329,32 @@ class TelegramAlerter:
 
     # ── Internal ─────────────────────────────────────────────────────────────
 
-    async def _send(self, text: str) -> None:
+    async def _send(self, text: str, *, parse_mode: str = "HTML") -> bool:
         """Async POST a message to the Telegram Bot API.
 
-        Silently returns if token is empty or if any error occurs.
+        Returns True on success, False on failure.
+        Silently returns True (no-op) if token is empty.
         """
         if not self._token:
-            return
+            return True
 
         url = f"{_TELEGRAM_API_BASE}{self._token}{_SEND_MESSAGE_PATH}"
-        payload = {"chat_id": self._chat_id, "text": text}
+        payload: dict[str, str] = {
+            "chat_id": self._chat_id,
+            "text": text,
+            "parse_mode": parse_mode,
+        }
         try:
             async with httpx.AsyncClient() as client:
-                await client.post(url, json=payload, timeout=10)
+                resp = await client.post(url, json=payload, timeout=10)
+                if resp.status_code == 429:  # noqa: PLR2004
+                    retry_after = resp.json().get("parameters", {}).get("retry_after", 30)
+                    _log.warning("Telegram rate limited", retry_after=retry_after)
+                    return False
+                return True
         except Exception:
             _log.exception("TelegramAlerter failed to send message")
+            return False
 
     def send_alert(self, message: str) -> None:
         """Schedule or run ``_send`` safely from any thread context.
