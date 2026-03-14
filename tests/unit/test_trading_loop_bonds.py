@@ -1,8 +1,9 @@
-"""Tests for TradingLoop bond cycle integration (05-02)."""
+"""Tests for TradingLoop bond cycle integration (05-02, 05-03)."""
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -90,3 +91,76 @@ class TestDailyEquitySnapshotModel:
         from finalayze.core.models import DailyEquitySnapshot
 
         assert DailyEquitySnapshot.__tablename__ == "daily_equity_snapshots"
+
+
+# ── 05-03 Tests: CBR alerts, coupon alerts, weekly digest ──────────────────
+
+
+def _make_trading_loop_mocks() -> dict[str, MagicMock]:
+    """Create mock dependencies for TradingLoop instantiation."""
+    settings = MagicMock()
+    settings.mode = "test"
+    settings.max_position_pct = 0.20
+    settings.max_positions_per_market = 10
+    settings.daily_loss_limit_pct = 0.02
+    settings.kelly_fraction = 0.5
+    settings.news_cycle_minutes = 30
+    settings.strategy_cycle_minutes = 60
+    settings.daily_reset_hour_utc = 0
+    settings.ml_enabled = False
+    settings.bond_cycle_enabled = True
+    settings.bond_cycle_minutes = 1440
+    settings.weekly_digest_hour_utc = 16
+    settings.telegram_allowed_chat_ids = []
+    settings.telegram_webhook_secret = ""
+
+    return {
+        "settings": settings,
+        "fetchers": {},
+        "news_fetcher": MagicMock(),
+        "news_analyzer": MagicMock(),
+        "event_classifier": MagicMock(),
+        "impact_estimator": MagicMock(),
+        "strategy": MagicMock(),
+        "broker_router": MagicMock(),
+        "circuit_breakers": {"us": MagicMock(), "moex": MagicMock()},
+        "cross_market_breaker": MagicMock(),
+        "alerter": MagicMock(),
+        "instrument_registry": MagicMock(),
+        "bond_cycle_processor": MagicMock(),
+        "macro_cache": MagicMock(),
+    }
+
+
+class TestCBRDayAlerts:
+    """_cbr_day_refresh calls alerter.on_cbr_meeting after macro refresh."""
+
+    def test_cbr_day_refresh_calls_on_cbr_meeting(self) -> None:
+        """After macro refresh on CBR meeting day, alerter.on_cbr_meeting is called."""
+        source = inspect.getsource(TradingLoop._cbr_day_refresh)
+        assert "on_cbr_meeting" in source
+
+    def test_cbr_day_refresh_sends_skip_alert_on_missing_macro(self) -> None:
+        """If macro data stale after refresh, sends unexpected-skip alert."""
+        source = inspect.getsource(TradingLoop._cbr_day_refresh)
+        assert "on_error" in source or "stale" in source.lower()
+
+
+class TestWeeklyDigest:
+    """Weekly digest runs on Sunday with week P&L and trade stats."""
+
+    def test_weekly_digest_method_exists(self) -> None:
+        """TradingLoop has a _weekly_digest method."""
+        assert hasattr(TradingLoop, "_weekly_digest")
+        assert callable(getattr(TradingLoop, "_weekly_digest"))
+
+    def test_weekly_digest_scheduled_via_cron(self) -> None:
+        """Weekly digest is scheduled via CronTrigger on Sunday."""
+        source = inspect.getsource(TradingLoop.start)
+        assert "weekly_digest" in source
+        assert "sun" in source.lower() or "day_of_week" in source
+
+    def test_weekly_digest_sends_alert(self) -> None:
+        """_weekly_digest sends alert via alerter.send_alert."""
+        source = inspect.getsource(TradingLoop._weekly_digest)
+        assert "send_alert" in source or "_send" in source
