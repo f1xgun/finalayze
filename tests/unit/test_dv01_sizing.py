@@ -65,21 +65,28 @@ class TestDV01UnitCostFix:
     """Tests for DV01BudgetStep with unit_cost (dirty price) parameter."""
 
     def test_unit_cost_reduces_bonds_vs_face_value(self) -> None:
-        """Dirty price 1030 should produce fewer bonds than face value 1000."""
+        """Dirty price 1030 should produce fewer bonds than face value 1000.
+
+        Use small DV01 per unit so DV01 budget is not the binding constraint
+        and the position-size cap (which uses unit_cost) dominates.
+        max_by_position (face) = 1_500_000 * 0.30 / 1000 = 450
+        max_by_position (dirty) = 1_500_000 * 0.30 / 1030 = 436
+        """
         step = DV01BudgetStep(
             max_dd_pct=Decimal("0.05"),
             expected_max_rate_move_bps=200,
             max_single_position_pct=Decimal("0.30"),
+            max_dv01_per_bond_pct=Decimal("1.00"),  # disable per-bond DV01 cap
         )
         bonds_face = step.compute_position_size(
             layer_equity=Decimal(1500000),
-            bond_dv01_per_unit=Decimal("7.5"),
+            bond_dv01_per_unit=Decimal("0.5"),
             current_portfolio_dv01=Decimal(0),
             unit_cost=FACE_VALUE_STD,
         )
         bonds_dirty = step.compute_position_size(
             layer_equity=Decimal(1500000),
-            bond_dv01_per_unit=Decimal("7.5"),
+            bond_dv01_per_unit=Decimal("0.5"),
             current_portfolio_dv01=Decimal(0),
             unit_cost=DIRTY_PRICE,
         )
@@ -175,7 +182,7 @@ class TestDV01BudgetStep:
             layer_equity=Decimal(1500000),
             bond_dv01_per_unit=Decimal("7.5"),
             current_portfolio_dv01=Decimal(0),
-            face_value=Decimal(1000),
+            unit_cost=Decimal(1000),
         )
         assert result == 20
 
@@ -197,7 +204,7 @@ class TestDV01BudgetStep:
             layer_equity=Decimal(1000000),
             bond_dv01_per_unit=Decimal(10),
             current_portfolio_dv01=Decimal(200),
-            face_value=Decimal(1000),
+            unit_cost=Decimal(1000),
         )
         assert result == 5
 
@@ -219,7 +226,7 @@ class TestDV01BudgetStep:
             layer_equity=Decimal(10000000),
             bond_dv01_per_unit=Decimal("0.5"),
             current_portfolio_dv01=Decimal(0),
-            face_value=Decimal(1000),
+            unit_cost=Decimal(1000),
         )
         assert result == 1000
 
@@ -237,7 +244,7 @@ class TestDV01BudgetStep:
             layer_equity=Decimal(500000),
             bond_dv01_per_unit=Decimal(8),
             current_portfolio_dv01=Decimal(130),
-            face_value=Decimal(1000),
+            unit_cost=Decimal(1000),
         )
         assert result == 0
 
@@ -248,7 +255,7 @@ class TestDV01BudgetStep:
             layer_equity=Decimal(1000000),
             bond_dv01_per_unit=Decimal(0),
             current_portfolio_dv01=Decimal(0),
-            face_value=Decimal(1000),
+            unit_cost=Decimal(1000),
         )
         assert result == 0
 
@@ -259,7 +266,7 @@ class TestDV01BudgetStep:
             layer_equity=Decimal(1000000),
             bond_dv01_per_unit=Decimal(-5),
             current_portfolio_dv01=Decimal(0),
-            face_value=Decimal(1000),
+            unit_cost=Decimal(1000),
         )
         assert result == 0
 
@@ -278,7 +285,7 @@ class TestDV01BudgetStep:
             layer_equity=Decimal(2000000),
             bond_dv01_per_unit=Decimal(50),
             current_portfolio_dv01=Decimal(0),
-            face_value=Decimal(10000),
+            unit_cost=Decimal(10000),
         )
         assert result == 1
 
@@ -313,7 +320,7 @@ def test_dv01_per_bond_cap_limits_single_position() -> None:
         layer_equity=LAYER_EQUITY,
         bond_dv01_per_unit=Decimal("1.0"),
         current_portfolio_dv01=Decimal(0),
-        face_value=FACE_VALUE,
+        unit_cost=FACE_VALUE,
     )
     # Max DV01 budget = 100000 * 0.05 / 500 = 10.0
     # Per-bond cap = 10.0 * 0.40 = 4.0

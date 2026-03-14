@@ -44,7 +44,8 @@ class DV01BudgetStep:
         layer_equity: Decimal,
         bond_dv01_per_unit: Decimal,
         current_portfolio_dv01: Decimal,
-        face_value: Decimal = Decimal(1000),
+        unit_cost: Decimal = Decimal(1000),
+        transaction_costs_per_unit: Decimal = Decimal(0),
     ) -> int:
         """Compute number of bonds to buy.
 
@@ -52,7 +53,10 @@ class DV01BudgetStep:
             layer_equity: Total equity allocated to this layer.
             bond_dv01_per_unit: DV01 of one bond (from bond_math.dv01()).
             current_portfolio_dv01: Sum of DV01 across all existing positions.
-            face_value: Face value per bond.
+            unit_cost: Cost per bond unit -- dirty price for bonds (face + NKD),
+                not face value.  Default 1000 for backward compatibility.
+            transaction_costs_per_unit: Broker commission + exchange fee per bond
+                unit.  Added to unit_cost for the cash sufficiency check.
 
         Returns:
             Number of bonds (integer, may be 0 if budget exhausted).
@@ -70,8 +74,9 @@ class DV01BudgetStep:
         per_bond_dv01_cap = max_dv01 * self._max_dv01_per_bond_pct
         max_by_per_bond = int(per_bond_dv01_cap / bond_dv01_per_unit)
 
-        # Max bonds by single position limit
-        max_by_position = int(layer_equity * self._max_single_position_pct / face_value)
+        # Max bonds by single position limit (uses dirty price + transaction costs)
+        effective_cost = unit_cost + transaction_costs_per_unit
+        max_by_position = int(layer_equity * self._max_single_position_pct / effective_cost)
 
         return min(max_by_dv01, max_by_per_bond, max_by_position)
 
@@ -96,9 +101,20 @@ class EqualWeightBondSizer:
         layer_equity: Decimal,
         bond_dv01_per_unit: Decimal,  # noqa: ARG002
         current_portfolio_dv01: Decimal,  # noqa: ARG002
-        face_value: Decimal = Decimal(1000),
+        unit_cost: Decimal = Decimal(1000),
+        transaction_costs_per_unit: Decimal = Decimal(0),
     ) -> int:
-        """Compute number of bonds for an equal-weight allocation."""
+        """Compute number of bonds for an equal-weight allocation.
+
+        Args:
+            layer_equity: Total equity allocated to this layer.
+            bond_dv01_per_unit: Ignored (floaters have near-zero duration).
+            current_portfolio_dv01: Ignored.
+            unit_cost: Cost per bond unit -- dirty price for bonds.
+                Default 1000 for backward compatibility.
+            transaction_costs_per_unit: Broker commission + exchange fee per unit.
+        """
         target = layer_equity / Decimal(self._n_symbols)
         cap = layer_equity * self._max_single_position_pct
-        return int(min(target, cap) / face_value)
+        effective_cost = unit_cost + transaction_costs_per_unit
+        return int(min(target, cap) / effective_cost)

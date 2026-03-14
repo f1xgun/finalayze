@@ -414,6 +414,23 @@ class AccruedInterest(BaseModel):
 
 
 @dataclass(frozen=True)
+class BondPositionRecord:
+    """Immutable record for a bond position in a portfolio layer.
+
+    Stores entry conditions (YTM, price, clean price) for P&L tracking
+    and risk management.
+    """
+
+    symbol: str
+    quantity: Decimal
+    entry_ytm_pct: Decimal  # yield-to-maturity at entry (%)
+    entry_date: date
+    entry_price: Decimal  # dirty price at entry (RUB)
+    entry_clean_pct: Decimal  # clean price as % of face at entry
+    layer_id: str
+
+
+@dataclass(frozen=True)
 class MultiTimeframeContext:
     """Higher-timeframe context derived from daily candles.
 
