@@ -79,6 +79,10 @@ _DEFAULT_AVG_WIN_RATIO = Decimal("1.5")
 # candle timestamps so the pre-trade market-hours check passes during backtest.
 _US_MARKET_OPEN_UTC = time(14, 30, tzinfo=UTC)
 
+# MOEX market open time (10:00 MSK = 07:00 UTC) used to adjust daily
+# candle timestamps for pre-trade market-hours check during backtest.
+_MOEX_MARKET_OPEN_UTC = time(7, 0, tzinfo=UTC)
+
 
 class BacktestEngine:
     """Iterate candles and execute a strategy with risk management."""
@@ -1220,7 +1224,10 @@ class BacktestEngine:
         # market-open time so the market-hours check passes during backtest.
         check_dt = fill_candle.timestamp
         if check_dt.hour == 0 and check_dt.minute == 0:
-            check_dt = datetime.combine(check_dt.date(), _US_MARKET_OPEN_UTC)
+            if segment_id.startswith("ru_"):
+                check_dt = datetime.combine(check_dt.date(), _MOEX_MARKET_OPEN_UTC)
+            else:
+                check_dt = datetime.combine(check_dt.date(), _US_MARKET_OPEN_UTC)
         market_id = "moex" if segment_id.startswith("ru_") else "us"
         result = checker.check(
             order_value=position_value,

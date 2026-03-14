@@ -994,7 +994,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     print(f"\nRunning iteration '{args.name}'")
     print(f"  Period: {args.start_date} to {args.end_date}")
     print(f"  Segments: {', '.join(segments)}")
-    print(f"  Cash: ${cash:,.0f} (MOEX: ₽{cash * _FALLBACK_USDRUB:,.0f})")
+    print(f"  Cash: ${cash:,.0f} (MOEX: ₽1,000,000)")
     print()
 
     try:
@@ -1050,8 +1050,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             print()
 
             segment_trades[segment] = []
-            # Convert cash to RUB for MOEX segments so portfolio is ~$100K equivalent
-            segment_cash = cash * _FALLBACK_USDRUB if segment.startswith("ru_") else cash
+            # 1M RUB starting capital for MOEX segments (per user decision)
+            segment_cash = Decimal(1_000_000) if segment.startswith("ru_") else cash
 
             for symbol in symbols:
                 # Fetch candles
