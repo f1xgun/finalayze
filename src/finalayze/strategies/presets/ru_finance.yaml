@@ -1,6 +1,6 @@
 segment_id: ru_finance
 normalize_mode: "firing"
-min_combined_confidence: 0.21
+min_combined_confidence: 0.16
 min_exit_confidence: 0.2
 regime_routing:
   enabled: true
