@@ -20,8 +20,20 @@ Levels:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import IntEnum
+from typing import TYPE_CHECKING
+
+import structlog
+
+from finalayze.core.schemas import PortfolioLayer
+
+if TYPE_CHECKING:
+    from finalayze.core.layer_ledger import LayerLedger
+    from finalayze.core.schemas import LayerConfig
+
+_log = structlog.get_logger()
 
 
 class CircuitLevel(IntEnum):
@@ -187,3 +199,129 @@ class PortfolioCircuitBreaker:
         """Reset portfolio circuit breaker state."""
         self._peak_equity = Decimal(0)
         self._triggered = False
+
+
+# ── Bond-specific breakers (added for bond cycle integration) ────────────
+
+_AUTO_CLEAR_LAYERS = frozenset({PortfolioLayer.TACTICAL, PortfolioLayer.SHORT})
+_AUTO_CLEAR_OK_DAYS = 1
+
+
+class BondLayerBreaker:
+    """Halts bond trading for a layer when drawdown exceeds max_drawdown_pct.
+
+    STICKY: once halted, stays halted until daily_reset_check() clears it
+    (Tactical/Short) or reset_manual() is called (Core/Strategic).
+
+    Complements the existing LayerCircuitBreaker (which uses multi-level
+    L1/L2/L3 thresholds for equity layers). This breaker uses the simpler
+    single-threshold from LayerConfig.max_drawdown_pct and adds sticky behavior.
+    """
+
+    def __init__(self, layer_config: LayerConfig, ledger: LayerLedger) -> None:
+        self._config = layer_config
+        self._ledger = ledger
+        self._halted = False
+        self._halt_date: date | None = None
+        self._consecutive_ok_days: int = 0
+
+    @property
+    def is_halted(self) -> bool:
+        return self._halted
+
+    def check(self) -> bool:
+        """Returns True if trading is allowed, False if halted."""
+        dd = self._ledger.drawdown_pct
+        if dd >= self._config.max_drawdown_pct:
+            if not self._halted:
+                _log.warning(
+                    "bond_layer_breaker_halted",
+                    layer=self._config.layer.value,
+                    drawdown=str(dd),
+                    threshold=str(self._config.max_drawdown_pct),
+                )
+            self._halted = True
+            self._halt_date = datetime.now(tz=UTC).date()
+            self._consecutive_ok_days = 0
+            return False
+        return not self._halted
+
+    def daily_reset_check(self) -> None:
+        """Called once per day. Tactical/Short auto-clear after 1 OK day."""
+        if not self._halted:
+            return
+        dd = self._ledger.drawdown_pct
+        if dd < self._config.max_drawdown_pct:
+            self._consecutive_ok_days += 1
+        else:
+            self._consecutive_ok_days = 0
+        if (
+            self._config.layer in _AUTO_CLEAR_LAYERS
+            and self._consecutive_ok_days >= _AUTO_CLEAR_OK_DAYS
+        ):
+            _log.info(
+                "bond_layer_breaker_auto_cleared",
+                layer=self._config.layer.value,
+            )
+            self._halted = False
+
+    def reset_manual(self) -> None:
+        """Manual reset for Core/Strategic layers.
+
+        Resets the ledger peak to current equity so drawdown
+        computation starts fresh from the current level.
+        """
+        self._halted = False
+        self._halt_date = None
+        self._consecutive_ok_days = 0
+        self._ledger.peak_equity = self._ledger.current_equity
+
+
+class AggregateBondBreaker:
+    """Halts entire bond portfolio when combined layer drawdown exceeds threshold.
+
+    Checked BEFORE per-layer processing in BondCycleProcessor.run_cycle().
+    Always requires manual reset.
+
+    Threshold (3%) is calibrated below the sum of weighted per-layer maximums
+    (Core 1.35% + Strategic 1.375% + Tactical 0.875% + Short 0.2% = 3.8%)
+    so it fires as a first line of defense before individual layer breakers.
+    """
+
+    def __init__(
+        self,
+        ledgers: dict[PortfolioLayer, LayerLedger],
+        max_total_drawdown_pct: Decimal = Decimal("0.03"),
+    ) -> None:
+        self._ledgers = ledgers
+        self._max_dd = max_total_drawdown_pct
+        self._halted = False
+        self._halt_date: date | None = None
+
+    @property
+    def is_halted(self) -> bool:
+        return self._halted
+
+    def check(self) -> bool:
+        """Returns True if trading is allowed, False if halted."""
+        total_equity = sum(led.current_equity for led in self._ledgers.values())
+        total_peak = sum(led.peak_equity for led in self._ledgers.values())
+        if total_peak <= 0:
+            return True
+        dd = (total_peak - total_equity) / total_peak
+        if dd >= self._max_dd:
+            if not self._halted:
+                _log.warning(
+                    "aggregate_bond_breaker_halted",
+                    drawdown=str(dd),
+                    threshold=str(self._max_dd),
+                )
+            self._halted = True
+            self._halt_date = datetime.now(tz=UTC).date()
+            return False
+        return not self._halted
+
+    def reset_manual(self) -> None:
+        """Manual reset -- operator must explicitly re-enable."""
+        self._halted = False
+        self._halt_date = None
