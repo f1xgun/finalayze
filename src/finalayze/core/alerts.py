@@ -183,6 +183,12 @@ class TelegramAlerter:
     """Sends Telegram messages for trade fills, rejections, circuit breaker events,
     daily summaries, and errors.
 
+    Features:
+      - Persistent ``httpx.AsyncClient`` (reused across messages)
+      - HTML parse_mode on all messages
+      - Optional ``TelegramMessageQueue`` integration for rate limiting / batching
+      - Backward compatible: works without queue (fire-and-forget via create_task)
+
     When ``bot_token`` is an empty string, all methods return immediately
     without any network call (safe default for debug and test modes).
     """
@@ -190,6 +196,18 @@ class TelegramAlerter:
     def __init__(self, bot_token: str, chat_id: str) -> None:
         self._token = bot_token
         self._chat_id = chat_id
+        self._client: httpx.AsyncClient = httpx.AsyncClient(timeout=10)
+        self._queue: TelegramMessageQueue | None = None
+
+    def set_queue(self, queue: TelegramMessageQueue) -> None:
+        """Attach a message queue for rate limiting and batching."""
+        self._queue = queue
+
+    async def close(self) -> None:
+        """Shut down persistent httpx client and queue."""
+        if self._queue is not None:
+            await self._queue.stop()
+        await self._client.aclose()
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -200,18 +218,20 @@ class TelegramAlerter:
         """
         price = result.fill_price if result.fill_price is not None else Decimal(0)
         text = (
-            f"\U0001f7e2 {result.side} {result.symbol} \xd7{result.quantity} "
-            f"@ ${price:.2f} ({broker} {market_id})"
+            f"\U0001f7e2 {result.side} <b>{result.symbol}</b> "
+            f"\xd7{result.quantity} @ <code>${price:.2f}</code> ({broker} {market_id})"
         )
-        self.send_alert(text)
+        self.send_alert(text, priority=AlertPriority.IMPORTANT)
 
     def on_trade_rejected(self, order: OrderRequest, reason: str) -> None:
         """Alert on an order rejection.
 
         Example: ``AAPL BUY rejected: insufficient funds``
         """
-        text = f"\u26a0\ufe0f {order.symbol} {order.side} rejected: {reason}"
-        self.send_alert(text)
+        text = (
+            f"\u26a0\ufe0f <b>{order.symbol}</b> {order.side} rejected: {reason}"
+        )
+        self.send_alert(text, priority=AlertPriority.IMPORTANT)
 
     def on_circuit_breaker_trip(
         self, market_id: str, level: CircuitLevel, drawdown_pct: float
@@ -222,9 +242,9 @@ class TelegramAlerter:
         """
         text = (
             f"\U0001f534 [{market_id.upper()}] Circuit breaker {level.upper()} "
-            f"-- trading {level} ({drawdown_pct * 100:.1f}% daily drawdown)"
+            f"-- trading {level} (<code>{drawdown_pct * 100:.1f}%</code> daily drawdown)"
         )
-        self.send_alert(text)
+        self.send_alert(text, priority=AlertPriority.CRITICAL)
 
     def on_circuit_breaker_reset(self, market_id: str) -> None:
         """Alert on circuit breaker reset.
@@ -232,7 +252,7 @@ class TelegramAlerter:
         Example: ``[US] Circuit breaker reset -- trading resumed``
         """
         text = f"\u2705 [{market_id.upper()}] Circuit breaker reset \u2014 trading resumed"
-        self.send_alert(text)
+        self.send_alert(text, priority=AlertPriority.INFO)
 
     def on_daily_summary(
         self,
@@ -248,8 +268,10 @@ class TelegramAlerter:
             sign = "+" if pnl >= Decimal(0) else ""
             parts.append(f"{market_id.upper()} {sign}{pnl}")
         summary = " | ".join(parts)
-        text = f"\U0001f4ca Daily: {summary} | Equity ${total_equity_usd:,.0f}"
-        self.send_alert(text)
+        text = (
+            f"\U0001f4ca Daily: {summary} | Equity <code>${total_equity_usd:,.0f}</code>"
+        )
+        self.send_alert(text, priority=AlertPriority.INFO)
 
     def on_coupon_received(
         self,
@@ -261,8 +283,11 @@ class TelegramAlerter:
 
         Example: ``Coupon: SU26244RMFS2 +3,250.00 RUB``
         """
-        text = f"\U0001f4b0 Coupon: {symbol} +{amount:,.2f} {currency}"
-        self.send_alert(text)
+        text = (
+            f"\U0001f4b0 Coupon: <b>{symbol}</b> "
+            f"+<code>{amount:,.2f}</code> {currency}"
+        )
+        self.send_alert(text, priority=AlertPriority.INFO)
 
     def on_cbr_meeting(
         self,
@@ -274,8 +299,11 @@ class TelegramAlerter:
 
         Example: ``CBR meeting 2026-03-20: HOLD, key rate 21.00%``
         """
-        text = f"\U0001f3e6 CBR meeting {meeting_date}: {decision}, key rate {key_rate}"
-        self.send_alert(text)
+        text = (
+            f"\U0001f3e6 CBR meeting {meeting_date}: "
+            f"{decision}, key rate <code>{key_rate}</code>"
+        )
+        self.send_alert(text, priority=AlertPriority.INFO)
 
     def on_bond_event_trade(
         self,
@@ -287,8 +315,8 @@ class TelegramAlerter:
 
         Example: ``CBR Event BUY SU26244RMFS2: 5d before meeting, gap=-0.25``
         """
-        text = f"\U0001f4c5 CBR Event {side} {symbol}: {reason}"
-        self.send_alert(text)
+        text = f"\U0001f4c5 CBR Event {side} <b>{symbol}</b>: {reason}"
+        self.send_alert(text, priority=AlertPriority.IMPORTANT)
 
     def on_stop_loss_triggered(
         self,
@@ -302,22 +330,27 @@ class TelegramAlerter:
         Example: ``Stop-loss: SBER entry=280.50, stop=266.48, price=265.00``
         """
         text = (
-            f"\U0001f6d1 Stop-loss: {symbol} "
-            f"entry={entry_price:.2f}, stop={stop_price:.2f}, price={current_price:.2f}"
+            f"\U0001f6d1 Stop-loss: <b>{symbol}</b> "
+            f"entry=<code>{entry_price:.2f}</code>, "
+            f"stop=<code>{stop_price:.2f}</code>, "
+            f"price=<code>{current_price:.2f}</code>"
         )
-        self.send_alert(text)
+        self.send_alert(text, priority=AlertPriority.IMPORTANT)
 
     def on_startup(self, mode: str, markets: list[str], instruments: int) -> None:
         """Alert on system startup.
 
         Example: ``Finalayze started: sandbox, markets=[moex], 23 instruments``
         """
-        text = f"\U0001f680 Finalayze started: {mode}, markets={markets}, {instruments} instruments"
-        self.send_alert(text)
+        text = (
+            f"\U0001f680 Finalayze started: {mode}, "
+            f"markets={markets}, {instruments} instruments"
+        )
+        self.send_alert(text, priority=AlertPriority.INFO)
 
     def on_shutdown(self) -> None:
         """Alert on system shutdown."""
-        self.send_alert("\u23f9\ufe0f Finalayze stopped")
+        self.send_alert("\u23f9\ufe0f Finalayze stopped", priority=AlertPriority.INFO)
 
     def on_error(self, component: str, message: str) -> None:
         """Alert on system errors.
@@ -325,14 +358,14 @@ class TelegramAlerter:
         Example: ``TinkoffFetcher error: gRPC timeout``
         """
         text = f"\U0001f6a8 {component} error: {message}"
-        self.send_alert(text)
+        self.send_alert(text, priority=AlertPriority.CRITICAL)
 
     # ── Internal ─────────────────────────────────────────────────────────────
 
     async def _send(self, text: str, *, parse_mode: str = "HTML") -> bool:
         """Async POST a message to the Telegram Bot API.
 
-        Returns True on success, False on failure.
+        Uses persistent ``self._client``. Returns True on success, False on failure.
         Silently returns True (no-op) if token is empty.
         """
         if not self._token:
@@ -345,23 +378,27 @@ class TelegramAlerter:
             "parse_mode": parse_mode,
         }
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(url, json=payload, timeout=10)
-                if resp.status_code == 429:  # noqa: PLR2004
-                    retry_after = resp.json().get("parameters", {}).get("retry_after", 30)
-                    _log.warning("Telegram rate limited", retry_after=retry_after)
-                    return False
-                return True
+            resp = await self._client.post(url, json=payload)
+            if resp.status_code == 429:  # noqa: PLR2004
+                retry_after = resp.json().get("parameters", {}).get("retry_after", 30)
+                _log.warning("Telegram rate limited", retry_after=retry_after)
+                return False
+            return True
         except Exception:
             _log.exception("TelegramAlerter failed to send message")
             return False
 
-    def send_alert(self, message: str) -> None:
+    def send_alert(
+        self,
+        message: str,
+        *,
+        priority: AlertPriority | None = None,
+    ) -> None:
         """Schedule or run ``_send`` safely from any thread context.
 
-        If an asyncio event loop is running (e.g. inside the trading loop coroutine),
-        a fire-and-forget task is created.  Otherwise ``asyncio.run()`` is used to
-        send the message synchronously from the calling thread.
+        If a queue is attached, routes through ``queue.enqueue`` with the given
+        priority. Otherwise uses fire-and-forget ``create_task`` / ``asyncio.run``
+        for backward compatibility.
 
         Exceptions are always suppressed -- alerts must never crash the caller.
         """
@@ -369,8 +406,15 @@ class TelegramAlerter:
             return
         try:
             loop = asyncio.get_event_loop()
-            if loop.is_running():
-                _task = loop.create_task(self._send(message))  # noqa: RUF006 -- fire-and-forget
+            if self._queue is not None and priority is not None:
+                if loop.is_running():
+                    _task = loop.create_task(  # noqa: RUF006
+                        self._queue.enqueue(message, priority),
+                    )
+                else:
+                    asyncio.run(self._queue.enqueue(message, priority))
+            elif loop.is_running():
+                _task = loop.create_task(self._send(message))  # noqa: RUF006
             else:
                 asyncio.run(self._send(message))
         except Exception:

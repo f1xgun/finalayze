@@ -43,11 +43,9 @@ def _make_order_request() -> OrderRequest:
 
 
 def _make_mock_client() -> MagicMock:
-    """Build a mock httpx.AsyncClient whose post() is an AsyncMock."""
+    """Build a mock httpx client whose post() is an AsyncMock."""
     mock_response = MagicMock(status_code=200)
     mock_client = MagicMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
     mock_client.post = AsyncMock(return_value=mock_response)
     return mock_client
 
@@ -105,71 +103,71 @@ class TestTelegramAlerterSendsMessages:
     async def test_on_trade_filled_calls_post(self) -> None:
         alerter = self._make_alerter()
         mock_client = _make_mock_client()
-        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
-            await alerter._send(f"\U0001f7e2 BUY AAPL \xd710 @ $150.00 (alpaca {MARKET_US})")
-            mock_client.post.assert_called_once()
-            call_kwargs = mock_client.post.call_args
-            assert VALID_TOKEN in call_kwargs[0][0]
-            payload = call_kwargs[1]["json"]
-            assert payload["chat_id"] == VALID_CHAT_ID
-            assert "AAPL" in payload["text"]
+        alerter._client = mock_client
+        await alerter._send(f"\U0001f7e2 BUY AAPL \xd710 @ $150.00 (alpaca {MARKET_US})")
+        mock_client.post.assert_called_once()
+        call_kwargs = mock_client.post.call_args
+        assert VALID_TOKEN in call_kwargs[0][0]
+        payload = call_kwargs[1]["json"]
+        assert payload["chat_id"] == VALID_CHAT_ID
+        assert "AAPL" in payload["text"]
 
     @pytest.mark.asyncio
     async def test_on_trade_rejected_payload(self) -> None:
         alerter = self._make_alerter()
         mock_client = _make_mock_client()
-        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
-            await alerter._send("\u26a0\ufe0f AAPL BUY rejected: insufficient funds")
-            mock_client.post.assert_called_once()
-            payload = mock_client.post.call_args[1]["json"]
-            assert "AAPL" in payload["text"]
-            assert "insufficient funds" in payload["text"]
+        alerter._client = mock_client
+        await alerter._send("\u26a0\ufe0f AAPL BUY rejected: insufficient funds")
+        mock_client.post.assert_called_once()
+        payload = mock_client.post.call_args[1]["json"]
+        assert "AAPL" in payload["text"]
+        assert "insufficient funds" in payload["text"]
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_trip_payload(self) -> None:
         alerter = self._make_alerter()
         mock_client = _make_mock_client()
-        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
-            await alerter._send(
-                f"\U0001f534 [{MARKET_US.upper()}] Circuit breaker HALTED "
-                f"-- trading halted ({DRAWDOWN_PCT * 100:.1f}% daily drawdown)"
-            )
-            payload = mock_client.post.call_args[1]["json"]
-            assert MARKET_US.upper() in payload["text"]
-            assert "halted" in payload["text"].lower() or "HALTED" in payload["text"]
+        alerter._client = mock_client
+        await alerter._send(
+            f"\U0001f534 [{MARKET_US.upper()}] Circuit breaker HALTED "
+            f"-- trading halted ({DRAWDOWN_PCT * 100:.1f}% daily drawdown)"
+        )
+        payload = mock_client.post.call_args[1]["json"]
+        assert MARKET_US.upper() in payload["text"]
+        assert "halted" in payload["text"].lower() or "HALTED" in payload["text"]
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_reset_payload(self) -> None:
         alerter = self._make_alerter()
         mock_client = _make_mock_client()
-        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
-            await alerter._send(
-                f"\u2705 [{MARKET_US.upper()}] Circuit breaker reset \u2014 trading resumed"
-            )
-            payload = mock_client.post.call_args[1]["json"]
-            assert "reset" in payload["text"].lower() or "resumed" in payload["text"].lower()
+        alerter._client = mock_client
+        await alerter._send(
+            f"\u2705 [{MARKET_US.upper()}] Circuit breaker reset \u2014 trading resumed"
+        )
+        payload = mock_client.post.call_args[1]["json"]
+        assert "reset" in payload["text"].lower() or "resumed" in payload["text"].lower()
 
     @pytest.mark.asyncio
     async def test_daily_summary_payload(self) -> None:
         alerter = self._make_alerter()
         mock_client = _make_mock_client()
-        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
-            await alerter._send(
-                f"\U0001f4ca Daily: MOEX +{DAILY_PNL_MOEX} | US +{DAILY_PNL_US}"
-                f" | Equity ${TOTAL_EQUITY:,.0f}"
-            )
-            payload = mock_client.post.call_args[1]["json"]
-            assert "51,200" in payload["text"] or "Daily" in payload["text"]
+        alerter._client = mock_client
+        await alerter._send(
+            f"\U0001f4ca Daily: MOEX +{DAILY_PNL_MOEX} | US +{DAILY_PNL_US}"
+            f" | Equity ${TOTAL_EQUITY:,.0f}"
+        )
+        payload = mock_client.post.call_args[1]["json"]
+        assert "51,200" in payload["text"] or "Daily" in payload["text"]
 
     @pytest.mark.asyncio
     async def test_on_error_payload(self) -> None:
         alerter = self._make_alerter()
         mock_client = _make_mock_client()
-        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
-            await alerter._send("\U0001f6a8 NewsApiFetcher error: gRPC timeout")
-            payload = mock_client.post.call_args[1]["json"]
-            assert "NewsApiFetcher" in payload["text"]
-            assert "gRPC timeout" in payload["text"]
+        alerter._client = mock_client
+        await alerter._send("\U0001f6a8 NewsApiFetcher error: gRPC timeout")
+        payload = mock_client.post.call_args[1]["json"]
+        assert "NewsApiFetcher" in payload["text"]
+        assert "gRPC timeout" in payload["text"]
 
     def test_send_alert_no_loop_uses_asyncio_run(self) -> None:
         """send_alert must use asyncio.run() when no event loop is running."""
@@ -207,9 +205,9 @@ class TestTelegramAlerterErrorHandling:
         alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
         mock_client = _make_mock_client()
         mock_client.post = AsyncMock(side_effect=Exception("network failure"))
-        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
-            # Must not raise
-            await alerter._send("test message")
+        alerter._client = mock_client
+        # Must not raise
+        await alerter._send("test message")
 
     def test_send_alert_exception_does_not_propagate(self) -> None:
         """send_alert must never raise even when internals fail."""
@@ -223,9 +221,9 @@ class TestTelegramAlerterErrorHandling:
         alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
         mock_client = _make_mock_client()
         mock_client.post = AsyncMock(return_value=MagicMock(status_code=400))
-        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
-            # Must not raise even on 4xx response
-            await alerter._send("test message")
+        alerter._client = mock_client
+        # Must not raise even on 4xx response
+        await alerter._send("test message")
 
 
 class TestPersistentClient:
