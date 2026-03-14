@@ -132,12 +132,6 @@ class TestEquitySnapshotPersistence:
         # _persist_equity_snapshots should have been called
         loop._persist_equity_snapshots.assert_called_once()
 
-    def test_baseline_loaded_from_db_on_restart(self) -> None:
-        """_load_baseline_from_db should exist and be callable."""
-        from finalayze.core.trading_loop import TradingLoop
-
-        assert hasattr(TradingLoop, "_load_baseline_from_db")
-
     def test_no_snapshot_uses_current_equity(self) -> None:
         """If no snapshot exists for today, current equity used as baseline."""
         from finalayze.core.trading_loop import TradingLoop
@@ -147,6 +141,125 @@ class TestEquitySnapshotPersistence:
         TradingLoop._daily_reset(loop)
         # Should not error; alerter still called
         loop._alerter.on_daily_summary.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_persist_snapshots_async_creates_rows(self) -> None:
+        """_persist_snapshots_async creates DailyEquitySnapshot rows via session.add + commit."""
+        from finalayze.core.trading_loop import TradingLoop
+
+        loop = MagicMock(spec=TradingLoop)
+        baselines = {
+            "us": Decimal("50000"),
+            "moex": Decimal("3000000"),
+            "moex_bonds": Decimal("1000000"),
+        }
+        now = datetime(2026, 3, 14, 0, 0, tzinfo=UTC)
+
+        mock_session = AsyncMock()
+        mock_factory = MagicMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "finalayze.core.trading_loop.get_async_session_factory",
+            return_value=mock_factory,
+        ):
+            await TradingLoop._persist_snapshots_async(loop, baselines, now)
+
+        # Should have called session.add 3 times (one per market)
+        assert mock_session.add.call_count == 3
+        # Should have committed
+        mock_session.commit.assert_awaited_once()
+
+        # Verify the snapshot objects have correct attributes
+        added_objects = [call.args[0] for call in mock_session.add.call_args_list]
+        market_ids = {obj.market_id for obj in added_objects}
+        assert market_ids == {"us", "moex", "moex_bonds"}
+
+        # Verify currency assignment
+        for obj in added_objects:
+            if obj.market_id in ("moex", "moex_bonds"):
+                assert obj.currency == "RUB"
+            else:
+                assert obj.currency == "USD"
+
+    @pytest.mark.asyncio
+    async def test_load_baseline_async_populates_baselines(self) -> None:
+        """_load_baseline_async queries DB and updates _baseline_equities."""
+        from unittest.mock import PropertyMock
+
+        from finalayze.core.trading_loop import TradingLoop
+
+        loop = MagicMock(spec=TradingLoop)
+        loop._baseline_equities = {}
+
+        # Mock DB results
+        row_us = MagicMock()
+        row_us.market_id = "us"
+        row_us.equity = Decimal("50000")
+        row_moex = MagicMock()
+        row_moex.market_id = "moex"
+        row_moex.equity = Decimal("3000000")
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = [row_us, row_moex]
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_factory = MagicMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "finalayze.core.trading_loop.get_async_session_factory",
+            return_value=mock_factory,
+        ):
+            await TradingLoop._load_baseline_async(loop)
+
+        assert loop._baseline_equities["us"] == Decimal("50000")
+        assert loop._baseline_equities["moex"] == Decimal("3000000")
+
+    @pytest.mark.asyncio
+    async def test_load_baseline_async_no_rows_leaves_unchanged(self) -> None:
+        """_load_baseline_async with no rows for today leaves _baseline_equities unchanged."""
+        from finalayze.core.trading_loop import TradingLoop
+
+        loop = MagicMock(spec=TradingLoop)
+        original = {"us": Decimal("40000")}
+        loop._baseline_equities = original.copy()
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_factory = MagicMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "finalayze.core.trading_loop.get_async_session_factory",
+            return_value=mock_factory,
+        ):
+            await TradingLoop._load_baseline_async(loop)
+
+        # Should remain unchanged
+        assert loop._baseline_equities == original
+
+    def test_load_baseline_from_db_called_in_start(self) -> None:
+        """_load_baseline_from_db is called during start() before scheduler begins."""
+        import inspect
+
+        from finalayze.core.trading_loop import TradingLoop
+
+        source = inspect.getsource(TradingLoop.start)
+        # Must call _load_baseline_from_db before _scheduler.start()
+        load_idx = source.find("_load_baseline_from_db")
+        scheduler_idx = source.find("_scheduler.start()")
+        assert load_idx != -1, "_load_baseline_from_db not found in start()"
+        assert load_idx < scheduler_idx, (
+            "_load_baseline_from_db must be called before _scheduler.start()"
+        )
 
 
 class TestTopMovers:
