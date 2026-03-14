@@ -6,12 +6,18 @@ Future LiveMacroContextProvider with httpx must use asyncio.to_thread().
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Callable
 
 import structlog
 
+from finalayze.core.models import MacroSnapshotModel
 from finalayze.data.fetchers.cbr import CBR_MEETINGS, MacroContextProvider, MacroSnapshot
+
+if TYPE_CHECKING:
+    pass
 
 _log = structlog.get_logger()
 
@@ -22,17 +28,20 @@ class MacroCacheService:
     """Cached macro context with daily refresh and CBR-day force-refresh.
 
     Stores rolling history for future ML feature engineering.
+    Optionally persists snapshots to TimescaleDB when db_session_factory is provided.
     """
 
     def __init__(
         self,
         provider: MacroContextProvider,
         history_size: int = _DEFAULT_HISTORY_SIZE,
+        db_session_factory: Callable[..., Any] | None = None,
     ) -> None:
         self._provider = provider
         self._snapshot: MacroSnapshot | None = None
         self._last_refresh: datetime | None = None
         self._history: deque[MacroSnapshot] = deque(maxlen=history_size)
+        self._db_session_factory = db_session_factory
 
     def refresh(self) -> MacroSnapshot:
         """Fetch fresh macro snapshot. Called by scheduler. SYNC."""
@@ -44,7 +53,48 @@ class MacroCacheService:
             key_rate=str(self._snapshot.key_rate),
             ruonia=str(self._snapshot.ruonia_7d_avg),
         )
+
+        # Persist to DB if session factory is provided
+        if self._db_session_factory is not None:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._persist_snapshot(self._snapshot))
+                except RuntimeError:
+                    # No running loop — create one for the write
+                    asyncio.run(self._persist_snapshot(self._snapshot))
+            except Exception:  # noqa: BLE001
+                _log.warning(
+                    "macro_snapshot_persist_failed",
+                    key_rate=str(self._snapshot.key_rate),
+                )
+
         return self._snapshot
+
+    async def _persist_snapshot(self, snapshot: MacroSnapshot) -> None:
+        """Persist a MacroSnapshot to the database.
+
+        Creates a MacroSnapshotModel and commits it via the async session factory.
+        """
+        now = datetime.now(tz=UTC)
+        model = MacroSnapshotModel(
+            timestamp=now,
+            key_rate=snapshot.key_rate,
+            ruonia_7d_avg=snapshot.ruonia_7d_avg,
+            cpi_yoy=snapshot.cpi_yoy,
+            last_cbr_decision=snapshot.last_cbr_decision,
+            breakeven_inflation=snapshot.breakeven_inflation,
+            yield_curve=(
+                {k: str(v) for k, v in snapshot.yield_curve.items()}
+                if snapshot.yield_curve
+                else None
+            ),
+            usdrub=snapshot.usdrub,
+        )
+        session = await self._db_session_factory()
+        session.add(model)
+        await session.commit()
+        _log.info("macro_snapshot_persisted", timestamp=str(now))
 
     def get(self) -> MacroSnapshot | None:
         """Return cached snapshot. None only before first refresh."""
