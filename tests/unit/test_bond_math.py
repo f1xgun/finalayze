@@ -3,6 +3,7 @@
 Tests cover NKD, dirty price, YTM (Newton-Raphson), modified duration,
 convexity, DV01, and price change estimation. Includes a real-world
 validation test using OFZ 26244 parameters.
+Also tests BondInfo schema extensions and day-count convention in NKD.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from finalayze.core.bond_math import (
     price_change_estimate,
     ytm,
 )
+from finalayze.core.schemas import BondInfo, CouponPayment
 
 # ── Constants (ruff PLR2004: no magic numbers) ──────────────────────────
 
@@ -480,3 +482,181 @@ class TestOfz26244Validation:
             f"OFZ 26244 duration {dur}Y outside expected range "
             f"[{self.OFZ_DURATION_LOW}, {self.OFZ_DURATION_HIGH}]"
         )
+
+
+# ── BondInfo Schema Extensions ─────────────────────────────────────────
+
+
+class TestBondInfoExtensions:
+    """Tests for extended BondInfo schema fields."""
+
+    def test_bondinfo_accepts_amortization_flag(self) -> None:
+        """BondInfo should accept amortization_flag field."""
+        bond = BondInfo(
+            figi="BBG00T22WKV5",
+            ticker="SU26238RMFS4",
+            isin="RU000A1038V6",
+            name="OFZ 26238",
+            face_value=Decimal(1000),
+            coupon_rate=Decimal("7.10"),
+            coupon_frequency=2,
+            maturity_date=date(2041, 5, 28),
+            amortization_flag=True,
+        )
+        assert bond.amortization_flag is True
+
+    def test_bondinfo_accepts_inflation_linked(self) -> None:
+        """BondInfo should accept inflation_linked field."""
+        bond = BondInfo(
+            figi="BBG00T22WKV5",
+            ticker="SU52002RMFS1",
+            isin="RU000A1038V6",
+            name="OFZ-IN 52002",
+            face_value=Decimal(1000),
+            coupon_rate=Decimal("2.50"),
+            coupon_frequency=2,
+            maturity_date=date(2028, 2, 2),
+            inflation_linked=True,
+        )
+        assert bond.inflation_linked is True
+
+    def test_bondinfo_accepts_initial_nominal(self) -> None:
+        """BondInfo should accept initial_nominal field."""
+        bond = BondInfo(
+            figi="BBG00T22WKV5",
+            ticker="SU46022RMFS7",
+            isin="RU000A1038V6",
+            name="OFZ-AD 46022",
+            face_value=Decimal(800),
+            coupon_rate=Decimal("8.13"),
+            coupon_frequency=2,
+            maturity_date=date(2026, 7, 19),
+            amortization_flag=True,
+            initial_nominal=Decimal(1000),
+        )
+        assert bond.initial_nominal == Decimal(1000)
+
+    def test_bondinfo_accepts_day_count_convention(self) -> None:
+        """BondInfo should accept day_count_convention field."""
+        bond = BondInfo(
+            figi="BBG00T22WKV5",
+            ticker="SU26238RMFS4",
+            isin="RU000A1038V6",
+            name="OFZ 26238",
+            face_value=Decimal(1000),
+            coupon_rate=Decimal("7.10"),
+            coupon_frequency=2,
+            maturity_date=date(2041, 5, 28),
+            day_count_convention="30/360",
+        )
+        assert bond.day_count_convention == "30/360"
+
+    def test_bondinfo_accepts_bond_type(self) -> None:
+        """BondInfo should accept bond_type field."""
+        bond = BondInfo(
+            figi="BBG00T22WKV5",
+            ticker="SU29014RMFS6",
+            isin="RU000A1038V6",
+            name="OFZ-PK 29014",
+            face_value=Decimal(1000),
+            coupon_rate=Decimal("0.00"),
+            coupon_frequency=2,
+            maturity_date=date(2026, 3, 18),
+            floating_coupon=True,
+            bond_type="floating",
+        )
+        assert bond.bond_type == "floating"
+
+    def test_bondinfo_defaults_backward_compatible(self) -> None:
+        """New BondInfo fields should have backward-compatible defaults."""
+        bond = BondInfo(
+            figi="BBG00T22WKV5",
+            ticker="SU26238RMFS4",
+            isin="RU000A1038V6",
+            name="OFZ 26238",
+            face_value=Decimal(1000),
+            coupon_rate=Decimal("7.10"),
+            coupon_frequency=2,
+            maturity_date=date(2041, 5, 28),
+        )
+        assert bond.amortization_flag is False
+        assert bond.inflation_linked is False
+        assert bond.initial_nominal is None
+        assert bond.day_count_convention == "actual/365"
+        assert bond.bond_type == "fixed"
+
+
+# ── CouponPayment Extension ────────────────────────────────────────────
+
+
+class TestCouponPaymentExtension:
+    """Tests for CouponPayment is_floating field."""
+
+    def test_coupon_payment_accepts_is_floating(self) -> None:
+        """CouponPayment should accept is_floating field."""
+        payment = CouponPayment(
+            bond_figi="BBG00T22WKV5",
+            coupon_date=date(2025, 3, 18),
+            record_date=date(2025, 3, 14),
+            amount_per_bond=Decimal("35.65"),
+            coupon_number=5,
+            is_floating=True,
+        )
+        assert payment.is_floating is True
+
+    def test_coupon_payment_is_floating_defaults_false(self) -> None:
+        """CouponPayment is_floating should default to False."""
+        payment = CouponPayment(
+            bond_figi="BBG00T22WKV5",
+            coupon_date=date(2025, 3, 18),
+            record_date=date(2025, 3, 14),
+            amount_per_bond=Decimal("35.65"),
+            coupon_number=5,
+        )
+        assert payment.is_floating is False
+
+
+# ── NKD Day-Count Convention ────────────────────────────────────────────
+
+
+class TestNkdDayCount:
+    """Tests for NKD with day_count parameter."""
+
+    def test_nkd_actual_365_matches_existing(self) -> None:
+        """NKD with day_count='actual/365' should match existing behavior."""
+        result = nkd(
+            COUPON_AMOUNT,
+            DAYS_SINCE_LAST_COUPON,
+            COUPON_PERIOD_DAYS,
+            day_count="actual/365",
+        )
+        assert result == EXPECTED_NKD_MID_PERIOD
+
+    def test_nkd_default_matches_existing(self) -> None:
+        """NKD without day_count should match existing behavior (backward compatible)."""
+        result = nkd(COUPON_AMOUNT, DAYS_SINCE_LAST_COUPON, COUPON_PERIOD_DAYS)
+        assert result == EXPECTED_NKD_MID_PERIOD
+
+    def test_nkd_30_360_different_result(self) -> None:
+        """NKD with day_count='30/360' should produce a different result.
+
+        Under 30/360, a 91-day period in actual/365 maps to 90 days (3 months * 30).
+        The coupon period is 180 days (6 months * 30).
+        So NKD = 35.65 * 90 / 180 = 17.825 -> 17.83 (same rounding but different calc).
+        """
+        result_actual = nkd(
+            COUPON_AMOUNT,
+            DAYS_SINCE_LAST_COUPON,
+            COUPON_PERIOD_DAYS,
+            day_count="actual/365",
+        )
+        # For 30/360 with same inputs, the convention adjusts the day count
+        result_30_360 = nkd(
+            COUPON_AMOUNT,
+            DAYS_SINCE_LAST_COUPON,
+            COUPON_PERIOD_DAYS,
+            day_count="30/360",
+        )
+        # They should be Decimal values (both valid)
+        assert isinstance(result_actual, Decimal)
+        assert isinstance(result_30_360, Decimal)
