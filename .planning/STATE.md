@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 5 of 7 (Integration & Telegram)
-Plan: 3 of 3 in current phase
+Plan: 4 of 4 in current phase
 Status: Phase Complete
-Last activity: 2026-03-14 -- Completed 05-03 (Telegram webhook & monitoring alerts)
+Last activity: 2026-03-14 -- Completed 05-04 (Gap closure: DB snapshot persistence & webhook wiring)
 
 Progress: [███████░░░] 71%
 
@@ -61,6 +61,7 @@ Progress: [███████░░░] 71%
 | Phase 05 P01 | 6min | 2 tasks | 3 files |
 | Phase 05 P02 | 8min | 2 tasks | 9 files |
 | Phase 05 P03 | 7min | 2 tasks | 8 files |
+| Phase 05 P04 | 4min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,8 @@ Recent decisions affecting current work:
 - [05-03]: CBR alert fires on_cbr_meeting with rate from MacroSnapshot.last_cbr_decision
 - [05-03]: Coupon alert fires on reinvestment step in _process_layer
 - [05-03]: Weekly digest via CronTrigger(day_of_week='sun') at configurable hour
+- [05-04]: Lazy DB imports inside async methods to maintain dependency layering (Layer 6)
+- [05-04]: Telegram router mounted with placeholder handler; real deps wired by TradingLoop
 
 ### Pending Todos
 
@@ -129,5 +132,5 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T20:23:14Z
-Stopped at: Completed 05-03-PLAN.md (Phase 5 complete)
+Last session: 2026-03-14T20:44:54Z
+Stopped at: Completed 05-04-PLAN.md (Phase 5 gap closure complete)
