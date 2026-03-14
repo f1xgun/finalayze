@@ -44,6 +44,24 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "X-API-Key"],
     )
     application.include_router(api_router, prefix="/api/v1")
+
+    # Mount Telegram webhook router when bot token and webhook secret are configured
+    if settings.telegram_bot_token and settings.telegram_webhook_secret:
+        from finalayze.api.v1.telegram import create_telegram_router  # noqa: PLC0415
+        from finalayze.core.telegram_bot import TelegramBotHandler  # noqa: PLC0415
+
+        bot_handler = TelegramBotHandler(
+            alerter=None,  # type: ignore[arg-type]
+            broker_router=None,  # type: ignore[arg-type]
+            circuit_breakers={},
+            settings=settings,  # type: ignore[arg-type]
+        )
+        telegram_router = create_telegram_router(
+            bot_handler, settings.telegram_webhook_secret
+        )
+        application.include_router(telegram_router)
+        log.info("telegram_webhook_mounted", path="/api/telegram/webhook")
+
     # Prometheus HTTP metrics — no auth (internal network only)
     Instrumentator().instrument(application).expose(
         application, endpoint="/metrics", include_in_schema=False

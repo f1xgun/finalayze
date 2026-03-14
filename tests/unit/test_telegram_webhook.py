@@ -221,3 +221,47 @@ class TestCommandDispatch:
         )
         # FastAPI returns 422 for invalid JSON by default, or we handle it as 400
         assert resp.status_code in (400, 422)
+
+
+class TestWebhookMountedInCreateApp:
+    """Telegram webhook route is mounted in create_app() when configured."""
+
+    def test_webhook_route_mounted_with_token_and_secret(self) -> None:
+        """create_app() mounts /api/telegram/webhook when token+secret configured."""
+        mock_settings = MagicMock()
+        mock_settings.telegram_bot_token = "test-bot-token"  # noqa: S105
+        mock_settings.telegram_webhook_secret = "test-secret"  # noqa: S105
+        mock_settings.telegram_allowed_chat_ids = ["123456"]
+        mock_settings.cors_origins = []
+        mock_settings.mode = MagicMock()
+        mock_settings.mode.value = "test"
+
+        with patch("finalayze.main.get_settings", return_value=mock_settings), patch(
+            "finalayze.main._settings", mock_settings
+        ):
+            from finalayze.main import create_app
+
+            app = create_app()
+
+        # Check that /api/telegram/webhook route exists
+        routes = [r.path for r in app.routes if hasattr(r, "path")]
+        assert "/api/telegram/webhook" in routes
+
+    def test_webhook_route_not_mounted_without_token(self) -> None:
+        """create_app() does NOT mount webhook when token is empty."""
+        mock_settings = MagicMock()
+        mock_settings.telegram_bot_token = ""
+        mock_settings.telegram_webhook_secret = "test-secret"  # noqa: S105
+        mock_settings.cors_origins = []
+        mock_settings.mode = MagicMock()
+        mock_settings.mode.value = "test"
+
+        with patch("finalayze.main.get_settings", return_value=mock_settings), patch(
+            "finalayze.main._settings", mock_settings
+        ):
+            from finalayze.main import create_app
+
+            app = create_app()
+
+        routes = [r.path for r in app.routes if hasattr(r, "path")]
+        assert "/api/telegram/webhook" not in routes
