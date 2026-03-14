@@ -25,11 +25,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Bond Execution
 
-- [ ] **BEX-01**: `BondCycleProcessor._size_and_execute()` completes real order submission
-- [ ] **BEX-02**: `YieldStop._process_yield_stops()` computes current YTM and exits positions
+- [x] **BEX-01**: `BondCycleProcessor._size_and_execute()` completes real order submission
+- [x] **BEX-02**: `YieldStop._process_yield_stops()` computes current YTM and exits positions
 - [x] **BEX-03**: Separate `moex_bonds` TinkoffBroker instance in BrokerRouter
 - [x] **BEX-04**: DV01BudgetStep uses dirty price (not face_value) for cash calculations
-- [ ] **BEX-05**: Bond backtest shows positive carry PnL with walk-forward validation
+- [x] **BEX-05**: Bond backtest shows positive carry PnL with walk-forward validation
 - [x] **BEX-06**: LayerLedger reconciliation on startup (sync with broker state)
 
 ### News Pipeline
@@ -108,11 +108,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BDP-03 | Phase 3 | Complete |
 | BDP-04 | Phase 3 | Complete |
 | BDP-05 | Phase 3 | Complete |
-| BEX-01 | Phase 4 | Pending |
-| BEX-02 | Phase 4 | Pending |
+| BEX-01 | Phase 4 | Complete |
+| BEX-02 | Phase 4 | Complete |
 | BEX-03 | Phase 4 | Complete |
 | BEX-04 | Phase 4 | Complete |
-| BEX-05 | Phase 4 | Pending |
+| BEX-05 | Phase 4 | Complete |
 | BEX-06 | Phase 4 | Complete |
 | NWS-01 | Phase 7 | Pending |
 | NWS-02 | Phase 7 | Pending |

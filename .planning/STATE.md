@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-03-14T18:56:08.856Z"
-last_activity: 2026-03-14 -- Completed 04-01 (Bond infrastructure)
+status: completed
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-03-14T19:11:20.337Z"
+last_activity: 2026-03-14 -- Completed 04-03 (Bond walk-forward validation)
 progress:
   total_phases: 7
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 11
-  completed_plans: 9
-  percent: 43
+  completed_plans: 11
+  percent: 55
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 4 of 7 (Bond Execution)
-Plan: 1 of 3 in current phase
-Status: In Progress
-Last activity: 2026-03-14 -- Completed 04-01 (Bond infrastructure)
+Plan: 3 of 3 in current phase (COMPLETE)
+Status: Phase 4 Complete
+Last activity: 2026-03-14 -- Completed 04-03 (Bond walk-forward validation)
 
-Progress: [████░░░░░░] 43%
+Progress: [██████░░░░] 55%
 
 ## Performance Metrics
 
@@ -56,6 +56,8 @@ Progress: [████░░░░░░] 43%
 | Phase 03 P01 | 9min | 2 tasks | 6 files |
 | Phase 03 P03 | 9min | 3 tasks | 8 files |
 | Phase 04 P01 | 7min | 2 tasks | 9 files |
+| Phase 04 P02 | 11min | 2 tasks | 5 files |
+| Phase 04 P03 | 25min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -91,6 +93,12 @@ Recent decisions affecting current work:
 - [Phase 04]: face_value renamed to unit_cost (default 1000) for DV01 sizing backward compat
 - [Phase 04]: make_bond_broker shares AsyncClient (single gRPC channel) with equity broker
 - [Phase 04]: reconcile_with_broker adds unknown bonds to Core layer with zeroed entry data
+- [Phase 04]: Limit orders (not market) for bond execution; 2-min fill timeout with 2s polling
+- [Phase 04]: Partial fills kept in ledger; remainder cancelled; no retry (next cycle tries again)
+- [Phase 04]: Transaction costs estimated from MOEX bond cost constants (0.05% + 5bps + 3bps)
+- [04-03]: ru_ofz_pk carry strategy ENABLED (Sharpe +1.14, PF 25.22, DD 1.0%, Win Rate 78.6%)
+- [04-03]: ru_ofz_pd duration rotation DISABLED (Sharpe -0.16, negative PnL in 2022-2025 hiking cycle)
+- [04-03]: Raw Sharpe (rf=0) used for bond acceptance checks
 
 ### Pending Todos
 
@@ -105,6 +113,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T18:56:08.853Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-03-14T19:11:20.334Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
