@@ -14,12 +14,13 @@ import yaml
 _PRESETS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "finalayze" / "strategies" / "presets"
 
 # All equity strategies that should be enabled on MOEX presets
+# Core equity strategies that should be enabled on MOEX presets
+# ou_mean_reversion disabled after isolation tests showed negative Sharpe on all 3 MOEX segments
 _EQUITY_STRATEGIES = [
     "momentum",
     "dual_momentum",
     "mean_reversion",
     "rsi2_connors",
-    "ou_mean_reversion",
     "dividend_gap",
 ]
 

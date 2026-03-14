@@ -76,6 +76,7 @@ UNIVERSE: dict[str, list[str]] = {
     "us_healthcare": ["UNH", "LLY", "PFE", "ABBV", "MRK", "TMO"],
     "ru_blue_chips": ["SBER", "GAZP", "LKOH", "GMKN"],
     "ru_energy": ["ROSN", "TATN", "NVTK"],
+    "ru_finance": ["SBER", "VTBR", "TCSG", "CBOM"],
 }
 
 

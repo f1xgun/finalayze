@@ -10,7 +10,7 @@ regime_routing:
 strategies:
   momentum:
     enabled: true
-    weight: 0.20
+    weight: 0.22
     params:
       rsi_period: 14
       rsi_oversold: 30
@@ -43,7 +43,7 @@ strategies:
       event_types: [opec, oil_price, sanctions, commodity_price, geopolitical]
   mean_reversion:
     enabled: true
-    weight: 0.12
+    weight: 0.14
     params:
       bb_period: 20
       bb_std_dev: 2.8
@@ -64,7 +64,7 @@ strategies:
       min_confidence: 0.40
   dividend_gap:
     enabled: true
-    weight: 0.18
+    weight: 0.20
     params:
       min_gap_pct: 3.0
       max_hold_bars: 60
@@ -77,7 +77,7 @@ strategies:
       min_confidence: 0.30
   rsi2_connors:
     enabled: true
-    weight: 0.12
+    weight: 0.14
     params:
       rsi_period: 2
       rsi_buy_threshold: 10.0
@@ -87,7 +87,7 @@ strategies:
       min_confidence: 0.45
   dual_momentum:
     enabled: true
-    weight: 0.20
+    weight: 0.22
     params:
       lookback_1m: 21
       lookback_3m: 63
@@ -96,8 +96,8 @@ strategies:
       vol_target_enabled: true
       vol_target: 0.20
   ou_mean_reversion:
-    enabled: true
-    weight: 0.10
+    enabled: false
+    weight: 0.00
     params:
       ou_window: 60
       entry_threshold: 1.8
