@@ -275,6 +275,10 @@ class TradingLoop:
             CronTrigger(day_of_week="sun", hour=digest_hour, minute=0, timezone="UTC"),
             id="weekly_digest",
         )
+        # Load equity baselines from DB before starting scheduler
+        # so daily P&L calculations use persisted start-of-day values
+        self._load_baseline_from_db()
+
         self._scheduler.start()
         _log.info(
             "trading_loop_started",
@@ -1269,12 +1273,34 @@ class TradingLoop:
         baselines: dict[str, Decimal],
         now: datetime,
     ) -> None:
-        """Async helper to persist snapshots."""
-        # Will use SQLAlchemy async session when DB is wired
-        _log.debug(
+        """Async helper to persist equity snapshots to TimescaleDB.
+
+        Creates one DailyEquitySnapshot row per market_id. Currency is
+        determined from market_id prefix (moex/ru_ -> RUB, else USD).
+        """
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+        from finalayze.core.models import DailyEquitySnapshot  # noqa: PLC0415
+
+        factory = get_async_session_factory()
+        async with factory() as session:
+            for market_id, equity in baselines.items():
+                currency = (
+                    "RUB"
+                    if market_id.startswith("moex") or market_id.startswith("ru_")
+                    else "USD"
+                )
+                snapshot = DailyEquitySnapshot(
+                    timestamp=now,
+                    market_id=market_id,
+                    equity=equity,
+                    currency=currency,
+                )
+                session.add(snapshot)
+            await session.commit()
+        _log.info(
             "equity_snapshots_persisted",
             markets=list(baselines.keys()),
-            timestamp=str(now),
+            count=len(baselines),
         )
 
     def _load_baseline_from_db(self) -> None:
@@ -1283,8 +1309,58 @@ class TradingLoop:
         If snapshots exist for today, use them as baselines.
         Otherwise current broker equity becomes the baseline.
         """
-        # Will query DailyEquitySnapshot when DB is wired
-        _log.debug("load_baseline_from_db: no-op until DB wiring")
+        try:
+            self._run_async(self._load_baseline_async())
+        except Exception:
+            _log.warning("load_baseline_from_db: failed to load from DB, using broker equity")
+
+    async def _load_baseline_async(self) -> None:
+        """Async helper to query today's equity snapshots from TimescaleDB.
+
+        Fetches all DailyEquitySnapshot rows for today, groups by market_id,
+        and takes the latest equity per market. Updates _baseline_equities
+        for each market_id found.
+        """
+        from sqlalchemy import func, select  # noqa: PLC0415
+
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+        from finalayze.core.models import DailyEquitySnapshot  # noqa: PLC0415
+
+        factory = get_async_session_factory()
+        async with factory() as session:
+            today_start = datetime.now(tz=UTC).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            # Subquery: latest timestamp per market_id for today
+            subq = (
+                select(
+                    DailyEquitySnapshot.market_id,
+                    func.max(DailyEquitySnapshot.timestamp).label("max_ts"),
+                )
+                .where(DailyEquitySnapshot.timestamp >= today_start)
+                .group_by(DailyEquitySnapshot.market_id)
+                .subquery()
+            )
+            stmt = (
+                select(DailyEquitySnapshot.market_id, DailyEquitySnapshot.equity)
+                .join(
+                    subq,
+                    (DailyEquitySnapshot.market_id == subq.c.market_id)
+                    & (DailyEquitySnapshot.timestamp == subq.c.max_ts),
+                )
+            )
+            result = await session.execute(stmt)
+            rows = result.all()
+
+        loaded = 0
+        for row in rows:
+            self._baseline_equities[row.market_id] = row.equity
+            loaded += 1
+
+        if loaded:
+            _log.info("baselines_loaded_from_db", count=loaded)
+        else:
+            _log.debug("no_baselines_in_db_for_today")
 
     def _weekly_digest(self) -> None:
         """Send weekly performance digest on Sunday evening.

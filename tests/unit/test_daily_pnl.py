@@ -156,12 +156,14 @@ class TestEquitySnapshotPersistence:
         now = datetime(2026, 3, 14, 0, 0, tzinfo=UTC)
 
         mock_session = AsyncMock()
+        # session.add is sync in SQLAlchemy -- use MagicMock to avoid coroutine warning
+        mock_session.add = MagicMock()
         mock_factory = MagicMock()
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "finalayze.core.trading_loop.get_async_session_factory",
+            "finalayze.core.db.get_async_session_factory",
             return_value=mock_factory,
         ):
             await TradingLoop._persist_snapshots_async(loop, baselines, now)
@@ -211,7 +213,7 @@ class TestEquitySnapshotPersistence:
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "finalayze.core.trading_loop.get_async_session_factory",
+            "finalayze.core.db.get_async_session_factory",
             return_value=mock_factory,
         ):
             await TradingLoop._load_baseline_async(loop)
@@ -238,7 +240,7 @@ class TestEquitySnapshotPersistence:
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "finalayze.core.trading_loop.get_async_session_factory",
+            "finalayze.core.db.get_async_session_factory",
             return_value=mock_factory,
         ):
             await TradingLoop._load_baseline_async(loop)
