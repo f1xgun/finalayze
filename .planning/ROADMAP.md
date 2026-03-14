@@ -33,8 +33,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Fix MOEX commission rate (0.04%) and add transferred holidays with TradingLoop integration
-- [ ] 01-02-PLAN.md — Fix RUB position sizing (1M RUB capital) and validate MOEX backtest on all segments
+- [x] 01-01-PLAN.md — Fix MOEX commission rate (0.04%) and add transferred holidays with TradingLoop integration
+- [x] 01-02-PLAN.md — Fix RUB position sizing (1M RUB capital) and validate MOEX backtest on all segments
 
 ### Phase 2: MOEX Equity Validation
 **Goal**: MOEX equity strategies produce profitable results in walk-forward backtests
@@ -44,11 +44,11 @@ Plans:
   1. Walk-forward backtest shows positive PnL on at least 2 MOEX segments (ru_blue_chips, ru_energy)
   2. ru_* YAML strategy presets are calibrated with MOEX-specific parameters (not US defaults)
   3. Walk-forward out-of-sample Sharpe > 0 over 2022-2025 period
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
+- [ ] 02-01-PLAN.md — Fix MOEX infrastructure scripts, enable all strategies, run isolation tests
+- [ ] 02-02-PLAN.md — Cointegration testing, Optuna tuning, walk-forward validation
 
 ### Phase 3: Bond Data Pipeline
 **Goal**: Bond instruments are discoverable and all bond math (YTM, duration, NKD, dirty price) computes correctly
