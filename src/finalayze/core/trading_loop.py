@@ -574,6 +574,13 @@ class TradingLoop:
         if dt.weekday() >= _WEEKEND_WEEKDAY:
             return False
 
+        # MOEX holiday gate: reject fixed + transferred holidays before time check
+        if market_id == "moex":
+            from finalayze.data.moex_calendar import is_moex_trading_day  # noqa: PLC0415
+
+            if not is_moex_trading_day(dt.date()):
+                return False
+
         if market_id == "us":
             open_h, open_m = _US_OPEN_UTC
             close_h, close_m = _US_CLOSE_UTC
@@ -662,6 +669,13 @@ class TradingLoop:
 
         # #162: Use RollingKelly for position sizing
         kelly_fraction = self._kelly_sizer.optimal_fraction()
+        _log.debug(
+            "kelly_sizing",
+            symbol=instrument.symbol,
+            kelly_fraction=float(kelly_fraction),
+            equity=float(portfolio.equity),
+            cash=float(portfolio.cash),
+        )
         order = self._build_order(
             signal,
             level,
@@ -788,6 +802,14 @@ class TradingLoop:
         try:
             result = self._broker_router.submit(order, market_id=market_id)
             if result.filled:
+                _log.info(
+                    "order_executed",
+                    symbol=order.symbol,
+                    side=order.side,
+                    qty=float(result.quantity),
+                    fill_price=float(result.fill_price) if result.fill_price else None,
+                    market=market_id,
+                )
                 self._alerter.on_trade_filled(result, market_id, broker=market_id)
                 from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
 
@@ -814,6 +836,13 @@ class TradingLoop:
                     with self._stop_loss_lock:
                         self._stop_loss_prices.pop(order.symbol, None)
             else:
+                _log.warning(
+                    "order_rejected",
+                    symbol=order.symbol,
+                    side=order.side,
+                    reason=result.reason,
+                    market=market_id,
+                )
                 self._alerter.on_trade_rejected(order, result.reason)
                 from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
 
