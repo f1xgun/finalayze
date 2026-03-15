@@ -34,8 +34,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### News Pipeline
 
-- [ ] **NWS-01**: Russian news RSS feed reader (RBC, Interfax, TASS, Kommersant)
-- [ ] **NWS-02**: LLM analysis of Russian news via existing NewsAnalyzer + Russian prompts
+- [x] **NWS-01**: Russian news RSS feed reader (RBC, Interfax, TASS, Kommersant)
+- [x] **NWS-02**: LLM analysis of Russian news via existing NewsAnalyzer + Russian prompts
 - [x] **NWS-03**: Telegram channel reading for financial sentiment (Telethon)
 - [ ] **NWS-04**: News-driven signal generation (event impact → trading decision)
 - [ ] **NWS-05**: `event_driven` strategy enabled on MOEX segments
@@ -114,8 +114,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BEX-04 | Phase 4 | Complete |
 | BEX-05 | Phase 4 | Complete |
 | BEX-06 | Phase 4 | Complete |
-| NWS-01 | Phase 7 | Pending |
-| NWS-02 | Phase 7 | Pending |
+| NWS-01 | Phase 7 | Complete |
+| NWS-02 | Phase 7 | Complete |
 | NWS-03 | Phase 7 | Complete |
 | NWS-04 | Phase 7 | Pending |
 | NWS-05 | Phase 7 | Pending |
