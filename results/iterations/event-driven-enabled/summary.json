@@ -1,0 +1,151 @@
+[
+  {
+    "symbol": "SBER",
+    "segment": "ru_finance",
+    "total_candles": 510,
+    "total_trades": 14,
+    "metrics": {
+      "sharpe": "-0.8636",
+      "max_drawdown": "0.0009",
+      "win_rate": "0.4286",
+      "profit_factor": "0.4659",
+      "total_return": "-0.0008",
+      "total_trades": 14,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0844",
+      "alpha": null,
+      "beta": null,
+      "information_ratio": null,
+      "max_relative_drawdown": null,
+      "benchmark_return": null
+    },
+    "journal_summary": {
+      "total_decisions": 505,
+      "action_counts": {
+        "SKIP": 489,
+        "BUY": 14,
+        "SELL": 2
+      },
+      "top_skip_reasons": {
+        "no_signal": 465,
+        "no_position_held": 9,
+        "position_already_open": 6,
+        "profit_target": 6,
+        "position_value_zero": 2,
+        "time_exit": 1
+      }
+    }
+  },
+  {
+    "symbol": "SBERP",
+    "segment": "ru_finance",
+    "total_candles": 510,
+    "total_trades": 13,
+    "metrics": {
+      "sharpe": "-1.0796",
+      "max_drawdown": "0.0010",
+      "win_rate": "0.3846",
+      "profit_factor": "0.3726",
+      "total_return": "-0.0010",
+      "total_trades": 13,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0902",
+      "alpha": null,
+      "beta": null,
+      "information_ratio": null,
+      "max_relative_drawdown": null,
+      "benchmark_return": null
+    },
+    "journal_summary": {
+      "total_decisions": 504,
+      "action_counts": {
+        "SKIP": 489,
+        "BUY": 13,
+        "SELL": 2
+      },
+      "top_skip_reasons": {
+        "no_signal": 465,
+        "no_position_held": 11,
+        "position_already_open": 8,
+        "profit_target": 4,
+        "time_exit": 1
+      }
+    }
+  },
+  {
+    "symbol": "VTBR",
+    "segment": "ru_finance",
+    "total_candles": 506,
+    "total_trades": 10,
+    "metrics": {
+      "sharpe": "0.2634",
+      "max_drawdown": "0.0004",
+      "win_rate": "0.6000",
+      "profit_factor": "1.3574",
+      "total_return": "0.0003",
+      "total_trades": 10,
+      "sortino_ratio": "0.4438",
+      "calmar_ratio": "0.3531",
+      "turnover_ratio": "0.0424",
+      "alpha": null,
+      "beta": null,
+      "information_ratio": null,
+      "max_relative_drawdown": null,
+      "benchmark_return": null
+    },
+    "journal_summary": {
+      "total_decisions": 501,
+      "action_counts": {
+        "SKIP": 491,
+        "BUY": 10
+      },
+      "top_skip_reasons": {
+        "no_signal": 463,
+        "no_position_held": 17,
+        "position_already_open": 6,
+        "profit_target": 4,
+        "time_exit": 1
+      }
+    }
+  },
+  {
+    "symbol": "MOEX",
+    "segment": "ru_finance",
+    "total_candles": 510,
+    "total_trades": 13,
+    "metrics": {
+      "sharpe": "-0.1706",
+      "max_drawdown": "0.0006",
+      "win_rate": "0.6154",
+      "profit_factor": "0.8202",
+      "total_return": "-0.0002",
+      "total_trades": 13,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0604",
+      "alpha": null,
+      "beta": null,
+      "information_ratio": null,
+      "max_relative_drawdown": null,
+      "benchmark_return": null
+    },
+    "journal_summary": {
+      "total_decisions": 506,
+      "action_counts": {
+        "SKIP": 490,
+        "BUY": 13,
+        "SELL": 3
+      },
+      "top_skip_reasons": {
+        "no_signal": 461,
+        "position_value_zero": 10,
+        "no_position_held": 9,
+        "profit_target": 6,
+        "position_already_open": 3,
+        "pre_trade_check_failed": 1
+      }
+    }
+  }
+]
