@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     api_key: str = ""  # FINALAYZE_API_KEY — set in production
     real_token: str = ""  # FINALAYZE_REAL_TOKEN — required to switch to REAL mode via API
 
-    model_config = {"env_prefix": "FINALAYZE_", "env_file": ".env"}
+    model_config = {"env_prefix": "FINALAYZE_", "env_file": ".env", "extra": "ignore"}
 
     @model_validator(mode="after")
     def validate_mode_requirements(self) -> Settings:
