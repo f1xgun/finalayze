@@ -42,16 +42,19 @@ class TelegramBotHandler:
         circuit_breakers: dict[str, CircuitBreaker],
         settings: Settings,
         bond_processor: object | None = None,
+        trading_loop: object | None = None,
     ) -> None:
         self._alerter = alerter
         self._broker_router = broker_router
         self._circuit_breakers = circuit_breakers
         self._settings = settings
         self._bond_processor = bond_processor
+        self._trading_loop = trading_loop
 
         self._commands: dict[str, Any] = {
             "/status": self.handle_status,
             "/breakers": self.handle_breakers,
+            "/stop": self.handle_stop,
         }
 
     async def handle_update(self, update: dict[str, Any]) -> dict[str, str]:
@@ -146,6 +149,30 @@ class TelegramBotHandler:
                 _log.debug("telegram_status_bonds_failed")
 
         await self._alerter._send("\n".join(lines))
+
+    async def handle_stop(self, chat_id: str) -> None:  # noqa: ARG002
+        """Emergency stop: halt all trading cycles.
+
+        Args:
+            chat_id: Telegram chat ID (reserved for per-chat responses).
+        """
+        _log.critical("telegram_stop_command", chat_id=chat_id)
+        if self._trading_loop is not None:
+            try:
+                self._trading_loop.stop()  # type: ignore[union-attr]
+                await self._alerter._send(
+                    "<b>TRADING HALTED</b>\n\n"
+                    "All cycles stopped. Manual restart required to resume."
+                )
+            except Exception:
+                _log.exception("telegram_stop_failed")
+                await self._alerter._send(
+                    "<b>STOP FAILED</b>\n\nCheck logs. Scheduler may still be running."
+                )
+        else:
+            await self._alerter._send(
+                "<b>STOP: No trading loop</b>\n\nRunning in API-only mode."
+            )
 
     async def handle_breakers(self, chat_id: str) -> None:  # noqa: ARG002
         """Show circuit breaker states for all layers.
