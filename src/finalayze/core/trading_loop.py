@@ -679,8 +679,7 @@ class TradingLoop:
                 to_date=now,
             )
         except Exception:
-            _log.exception("_news_cycle: failed to fetch news")
-            self._alerter.on_error("NewsApiFetcher", "fetch_news failed")
+            _log.warning("_news_cycle: failed to fetch news (no API key?)", exc_info=True)
             return
 
         for article in articles:
