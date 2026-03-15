@@ -88,27 +88,58 @@ class TinkoffBroker(BrokerBase):
         self._retry = retry_policy
         self._account_id: str = ""  # populated lazily on first API call
         self._client: AsyncClient | None = None
+        self._services: object | None = None  # AsyncServices from __aenter__
         self._client_lock = threading.Lock()
+        # Persistent event loop for gRPC — asyncio.run() closes the loop
+        # after each call, killing the gRPC channel. We keep one loop alive.
+        self._loop: asyncio.AbstractEventLoop | None = None
 
-    def _get_client(self) -> AsyncClient:
-        """Return the persistent async client, creating it lazily.
+    async def _get_services_async(self) -> object:
+        """Return the persistent AsyncServices, creating client lazily.
 
-        Uses AsyncClient for both sandbox and production — AsyncSandboxClient
-        forcibly overrides target with the old tinkoff.ru domain.
+        AsyncClient must be entered via __aenter__ to get AsyncServices
+        which provides .users, .orders, .operations, .market_data etc.
         """
+        if self._services is None:
+            with self._client_lock:
+                if self._services is None:  # double-check
+                    target = _TBANK_GRPC_SANDBOX_TARGET if self._sandbox else _TBANK_GRPC_TARGET
+                    self._client = AsyncClient(self._token, target=target)
+                    self._services = await self._client.__aenter__()
+        return self._services
+
+    # Keep backward compat alias
+    def _get_client(self) -> AsyncClient:
+        """Return raw AsyncClient (deprecated — use _get_services_async)."""
         if self._client is None:
             with self._client_lock:
-                if self._client is None:  # double-check
+                if self._client is None:
                     target = _TBANK_GRPC_SANDBOX_TARGET if self._sandbox else _TBANK_GRPC_TARGET
                     self._client = AsyncClient(self._token, target=target)
         return self._client
 
     def close(self) -> None:
-        """Close the persistent gRPC channel."""
+        """Close the persistent gRPC channel and event loop."""
         if self._client is not None:
             with contextlib.suppress(Exception):
-                asyncio.run(self._client.__aexit__(None, None, None))  # type: ignore[no-untyped-call]
+                if self._loop and not self._loop.is_closed():
+                    self._loop.run_until_complete(
+                        self._client.__aexit__(None, None, None)  # type: ignore[no-untyped-call]
+                    )
+                    self._loop.close()
             self._client = None
+            self._services = None
+            self._loop = None
+
+    def _run_async(self, coro: object) -> object:
+        """Run an async coroutine on the persistent event loop.
+
+        Unlike asyncio.run(), this keeps the loop alive so gRPC channels
+        survive across multiple calls.
+        """
+        if self._loop is None or self._loop.is_closed():
+            self._loop = asyncio.new_event_loop()
+        return self._loop.run_until_complete(coro)  # type: ignore[arg-type]
 
     def _call(self, fn: object) -> object:
         """Execute fn with retry if a RetryPolicy is configured."""
@@ -120,7 +151,7 @@ class TinkoffBroker(BrokerBase):
         """Fetch and cache the account ID from the API if not already set."""
         if self._account_id:
             return
-        response = self._call(lambda: asyncio.run(self._get_accounts_async()))
+        response = self._call(lambda: self._run_async(self._get_accounts_async()))
         accounts = getattr(response, "accounts", [])
         if not accounts:
             msg = "Tinkoff: no accounts found for the provided token"
@@ -131,8 +162,8 @@ class TinkoffBroker(BrokerBase):
 
     async def _get_accounts_async(self) -> object:
         """Async call to fetch accounts list."""
-        client = self._get_client()
-        return await client.users.get_accounts()  # type: ignore[attr-defined]
+        services = await self._get_services_async()
+        return await services.users.get_accounts()  # type: ignore[attr-defined]
 
     def submit_order(
         self,
@@ -175,7 +206,7 @@ class TinkoffBroker(BrokerBase):
         try:
             self._ensure_account_id()
             result = self._call(
-                lambda: asyncio.run(self._post_order_async(figi, actual_qty, direction))
+                lambda: self._run_async(self._post_order_async(figi, actual_qty, direction))
             )
         except InstrumentNotFoundError:
             raise
@@ -217,7 +248,7 @@ class TinkoffBroker(BrokerBase):
         direction: OrderDirection,
     ) -> object:
         """Async call to Tinkoff SDK post_order."""
-        client = self._get_client()
+        client = await self._get_services_async()
         return await client.orders.post_order(  # type: ignore[attr-defined]
             figi=figi,
             quantity=quantity,
@@ -256,7 +287,7 @@ class TinkoffBroker(BrokerBase):
         figis = list(symbol_to_figi.values())
         try:
             self._ensure_account_id()
-            response = self._call(lambda: asyncio.run(self._get_last_prices_async(figis)))
+            response = self._call(lambda: self._run_async(self._get_last_prices_async(figis)))
         except Exception as exc:
             msg = f"Tinkoff get_last_prices failed: {exc}"
             raise BrokerError(msg) from exc
@@ -273,7 +304,7 @@ class TinkoffBroker(BrokerBase):
 
     async def _get_last_prices_async(self, figis: list[str]) -> object:
         """Async call to T-Invest GetLastPrices."""
-        client = self._get_client()
+        client = await self._get_services_async()
         return await client.market_data.get_last_prices(figi=figis)  # type: ignore[attr-defined]
 
     def get_order_state(self, order_id: str) -> OrderStateResult:
@@ -287,7 +318,7 @@ class TinkoffBroker(BrokerBase):
         """
         try:
             self._ensure_account_id()
-            state = self._call(lambda: asyncio.run(self._get_order_state_async(order_id)))
+            state = self._call(lambda: self._run_async(self._get_order_state_async(order_id)))
         except Exception as exc:
             msg = f"Tinkoff get_order_state failed for {order_id}: {exc}"
             raise BrokerError(msg) from exc
@@ -307,7 +338,7 @@ class TinkoffBroker(BrokerBase):
 
     async def _get_order_state_async(self, order_id: str) -> object:
         """Async call to T-Invest get_order_state."""
-        client = self._get_client()
+        client = await self._get_services_async()
         return await client.orders.get_order_state(  # type: ignore[attr-defined]
             account_id=self._account_id,
             order_id=order_id,
@@ -317,7 +348,7 @@ class TinkoffBroker(BrokerBase):
         """Return current MOEX portfolio state from Tinkoff."""
         try:
             self._ensure_account_id()
-            portfolio = self._call(lambda: asyncio.run(self._get_portfolio_async()))
+            portfolio = self._call(lambda: self._run_async(self._get_portfolio_async()))
         except Exception as exc:
             _log.exception("portfolio_fetch_failed")
             msg = f"Tinkoff portfolio fetch failed: {exc}"
@@ -348,8 +379,8 @@ class TinkoffBroker(BrokerBase):
 
     async def _get_portfolio_async(self) -> object:
         """Async call to Tinkoff SDK get_portfolio."""
-        client = self._get_client()
-        return await client.operations.get_portfolio(account_id=self._account_id)  # type: ignore[attr-defined]
+        services = await self._get_services_async()
+        return await services.operations.get_portfolio(account_id=self._account_id)  # type: ignore[attr-defined]
 
     def has_position(self, symbol: str) -> bool:
         """Return True if Tinkoff account holds a non-zero position in symbol."""
@@ -370,14 +401,14 @@ class TinkoffBroker(BrokerBase):
         """Cancel a pending Tinkoff order by ID."""
         try:
             self._ensure_account_id()
-            self._call(lambda: asyncio.run(self._cancel_order_async(order_id)))
+            self._call(lambda: self._run_async(self._cancel_order_async(order_id)))
         except Exception as exc:
             msg = f"Tinkoff cancel_order failed for {order_id}: {exc}"
             raise BrokerError(msg) from exc
 
     async def _cancel_order_async(self, order_id: str) -> None:
         """Async call to Tinkoff SDK cancel_order."""
-        client = self._get_client()
+        client = await self._get_services_async()
         await client.orders.cancel_order(account_id=self._account_id, order_id=order_id)  # type: ignore[attr-defined]
 
     def reconnect_client(self) -> bool:
@@ -393,9 +424,7 @@ class TinkoffBroker(BrokerBase):
             self.close()
             self._account_id = ""
             try:
-                target = (
-                    _TBANK_GRPC_SANDBOX_TARGET if self._sandbox else _TBANK_GRPC_TARGET
-                )
+                target = _TBANK_GRPC_SANDBOX_TARGET if self._sandbox else _TBANK_GRPC_TARGET
                 self._client = AsyncClient(self._token, target=target)
                 self._ensure_account_id()
                 _log.info(
@@ -416,9 +445,7 @@ class TinkoffBroker(BrokerBase):
         """
         try:
             self._ensure_account_id()
-            response = self._call(
-                lambda: asyncio.run(self._get_orders_async())
-            )
+            response = self._call(lambda: self._run_async(self._get_orders_async()))
             orders: list[OrderStateResult] = []
             for order in getattr(response, "orders", []):
                 raw_status = getattr(order, "execution_report_status", 0)
@@ -443,7 +470,7 @@ class TinkoffBroker(BrokerBase):
 
     async def _get_orders_async(self) -> object:
         """Async call to T-Invest get_orders."""
-        client = self._get_client()
+        client = await self._get_services_async()
         return await client.orders.get_orders(account_id=self._account_id)  # type: ignore[attr-defined]
 
     def cancel_order_safe(self, order_id: str) -> bool:
@@ -453,7 +480,7 @@ class TinkoffBroker(BrokerBase):
         """
         try:
             self._ensure_account_id()
-            self._call(lambda: asyncio.run(self._cancel_order_async(order_id)))
+            self._call(lambda: self._run_async(self._cancel_order_async(order_id)))
             _log.info("order_cancelled", order_id=order_id)
             return True
         except Exception:

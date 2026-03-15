@@ -173,11 +173,16 @@ async def _check_tinkoff() -> str:
     """Return 'ok' if TinkoffBroker responds to get_portfolio(), else 'error'.
 
     Returns 'unknown' if no broker is configured.
+    TinkoffBroker uses asyncio.run() internally, so we run it in a thread
+    to avoid conflict with uvicorn's event loop.
     """
     if _tinkoff_broker is None:
         return "unknown"
     try:
-        _tinkoff_broker.get_portfolio()
+        import asyncio  # noqa: PLC0415
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _tinkoff_broker.get_portfolio)
         return "ok"
     except Exception:
         _log.debug("Tinkoff health check failed", exc_info=True)
