@@ -130,12 +130,12 @@ Plans:
   3. event_driven strategy is enabled on MOEX segments and generates signals from news events
   4. Telegram channel reader ingests financial sentiment from configured channels
   5. First real MOEX trades execute on a small account (500K RUB) after sandbox validation passes
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 07-01: TBD
-- [ ] 07-02: TBD
-- [ ] 07-03: TBD
+- [ ] 07-01-PLAN.md — RSS news fetcher (feedparser), LLM entity extractor, and news Settings fields
+- [ ] 07-02-PLAN.md — Telegram channel reader (Telethon) for Russian financial sentiment
+- [ ] 07-03-PLAN.md — TradingLoop news cycle integration, event_driven enablement, /stop command, go-live prep
 
 ## Progress
 
