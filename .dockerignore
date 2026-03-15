@@ -11,6 +11,8 @@ tests/
 # Documentation
 docs/
 *.md
+# But keep README.md (needed by pyproject.toml)
+!README.md
 
 # Python artifacts
 __pycache__/
