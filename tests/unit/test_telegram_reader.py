@@ -10,7 +10,6 @@ import pytest
 
 from finalayze.data.fetchers.telegram_reader import TelegramChannelReader
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -64,7 +63,7 @@ class TestTelegramChannelReaderConfigured:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.iter_messages = MagicMock(return_value=_async_iter(msgs))
 
-        with patch("finalayze.data.fetchers.telegram_reader.TelegramClient", return_value=mock_client):
+        with patch("telethon.TelegramClient", return_value=mock_client):
             reader = TelegramChannelReader(api_id=12345, api_hash="abc123")
             articles = await reader.fetch_recent_messages(channels=["@fin_news"])
 
@@ -82,7 +81,7 @@ class TestTelegramChannelReaderConfigured:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.iter_messages = MagicMock(return_value=_async_iter(msgs))
 
-        with patch("finalayze.data.fetchers.telegram_reader.TelegramClient", return_value=mock_client):
+        with patch("telethon.TelegramClient", return_value=mock_client):
             reader = TelegramChannelReader(api_id=12345, api_hash="abc123")
             articles = await reader.fetch_recent_messages(channels=["@fin_news"])
 
@@ -96,7 +95,7 @@ class TestTelegramChannelReaderConfigured:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.iter_messages = MagicMock(return_value=_async_iter(msgs))
 
-        with patch("finalayze.data.fetchers.telegram_reader.TelegramClient", return_value=mock_client):
+        with patch("telethon.TelegramClient", return_value=mock_client):
             reader = TelegramChannelReader(api_id=12345, api_hash="abc123")
             articles = await reader.fetch_recent_messages(channels=["@fin_news"])
 
@@ -113,7 +112,7 @@ class TestTelegramChannelReaderConfigured:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.iter_messages = MagicMock(return_value=_async_iter(msgs))
 
-        with patch("finalayze.data.fetchers.telegram_reader.TelegramClient", return_value=mock_client):
+        with patch("telethon.TelegramClient", return_value=mock_client):
             reader = TelegramChannelReader(api_id=12345, api_hash="abc123")
             articles = await reader.fetch_recent_messages(channels=["@test"])
 
@@ -131,7 +130,7 @@ class TestTelegramChannelReaderConfigured:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.iter_messages = MagicMock(return_value=_async_iter(msgs))
 
-        with patch("finalayze.data.fetchers.telegram_reader.TelegramClient", return_value=mock_client):
+        with patch("telethon.TelegramClient", return_value=mock_client):
             reader = TelegramChannelReader(api_id=12345, api_hash="abc123")
             articles = await reader.fetch_recent_messages(channels=["@test"])
 
@@ -149,7 +148,7 @@ class TestTelegramChannelReaderConfigured:
             side_effect=[_async_iter(msgs_ch1), _async_iter(msgs_ch2)]
         )
 
-        with patch("finalayze.data.fetchers.telegram_reader.TelegramClient", return_value=mock_client):
+        with patch("telethon.TelegramClient", return_value=mock_client):
             reader = TelegramChannelReader(api_id=12345, api_hash="abc123")
             articles = await reader.fetch_recent_messages(channels=["@ch1", "@ch2"])
 
@@ -166,7 +165,7 @@ class TestTelegramChannelReaderConfigured:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.iter_messages = MagicMock(return_value=_async_iter(msgs))
 
-        with patch("finalayze.data.fetchers.telegram_reader.TelegramClient", return_value=mock_client):
+        with patch("telethon.TelegramClient", return_value=mock_client):
             reader = TelegramChannelReader(api_id=12345, api_hash="abc123")
             articles = await reader.fetch_recent_messages(channels=["@test"])
 
@@ -189,9 +188,10 @@ class TestTelegramChannelReaderConfigured:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.iter_messages = MagicMock(side_effect=_side_effect)
 
-        with patch("finalayze.data.fetchers.telegram_reader.TelegramClient", return_value=mock_client):
+        with patch("telethon.TelegramClient", return_value=mock_client):
             reader = TelegramChannelReader(api_id=12345, api_hash="abc123")
-            articles = await reader.fetch_recent_messages(channels=["@bad_channel", "@good_channel"])
+            channels = ["@bad_channel", "@good_channel"]
+            articles = await reader.fetch_recent_messages(channels=channels)
 
         assert len(articles) == 1
         assert articles[0].source == "telegram:@good_channel"
