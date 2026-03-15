@@ -258,6 +258,28 @@ def _build_trading_loop(settings: object) -> object | None:
             if _has_news else NewsApiFetcher(api_key="")
         )
 
+        # ── Entity Extractor (LLM-based MOEX ticker extraction) ──────────
+        from finalayze.analysis.entity_extractor import EntityExtractor  # noqa: PLC0415
+
+        entity_extractor = (
+            EntityExtractor(llm_client) if not isinstance(llm_client, _StubLLMClient) else None
+        )
+
+        # ── RSS + Telegram Fetchers ──────────────────────────────────────
+        from finalayze.data.fetchers.rss_fetcher import RssNewsFetcher  # noqa: PLC0415
+        from finalayze.data.fetchers.telegram_reader import TelegramChannelReader  # noqa: PLC0415
+
+        _rss_urls = getattr(settings, "news_rss_urls", []) or []
+        rss_fetcher = RssNewsFetcher(feed_urls=_rss_urls) if _rss_urls else None
+
+        _tg_api_id = getattr(settings, "telegram_api_id", 0) or 0
+        _tg_api_hash = getattr(settings, "telegram_api_hash", "") or ""
+        telegram_reader = (
+            TelegramChannelReader(api_id=_tg_api_id, api_hash=_tg_api_hash)
+            if _tg_api_id != 0 and _tg_api_hash
+            else None
+        )
+
         # ── Build TradingLoop ────────────────────────────────────────────
         loop = TradingLoop(
             settings=settings,  # type: ignore[arg-type]
@@ -272,6 +294,9 @@ def _build_trading_loop(settings: object) -> object | None:
             cross_market_breaker=cross_market_breaker,
             alerter=alerter,
             instrument_registry=registry,
+            rss_fetcher=rss_fetcher,
+            telegram_reader=telegram_reader,
+            entity_extractor=entity_extractor,
         )
         log.info(
             "trading_loop_built",

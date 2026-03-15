@@ -40,6 +40,7 @@ from finalayze.markets.currency import CurrencyConverter
 if TYPE_CHECKING:
     from config.settings import Settings
 
+    from finalayze.analysis.entity_extractor import EntityExtractor
     from finalayze.analysis.event_classifier import EventClassifier, EventType
     from finalayze.analysis.impact_estimator import ImpactEstimator
     from finalayze.analysis.news_analyzer import NewsAnalyzer
@@ -49,6 +50,8 @@ if TYPE_CHECKING:
     from finalayze.core.schemas import Candle, PortfolioState, SentimentResult, Signal  # noqa: F401
     from finalayze.data.cache import RedisCache
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
+    from finalayze.data.fetchers.rss_fetcher import RssNewsFetcher
+    from finalayze.data.fetchers.telegram_reader import TelegramChannelReader
     from finalayze.data.macro_cache import MacroCacheService
     from finalayze.execution.broker_base import BrokerBase, OrderRequest
     from finalayze.execution.broker_router import BrokerRouter
@@ -111,6 +114,9 @@ class TradingLoop:
         fx_service: FXRateService | None = None,
         bond_cycle_processor: BondCycleProcessor | None = None,
         macro_cache: MacroCacheService | None = None,
+        rss_fetcher: RssNewsFetcher | None = None,
+        telegram_reader: TelegramChannelReader | None = None,
+        entity_extractor: EntityExtractor | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
@@ -139,6 +145,9 @@ class TradingLoop:
         self._fx_service = fx_service
         self._bond_processor = bond_cycle_processor
         self._macro_cache = macro_cache
+        self._rss_fetcher = rss_fetcher
+        self._telegram_reader = telegram_reader
+        self._entity_extractor = entity_extractor
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -383,10 +392,15 @@ class TradingLoop:
             scheduler_kwargs["jobstores"] = jobstores
 
         self._scheduler = BackgroundScheduler(**scheduler_kwargs)
+        news_interval = (
+            self._settings.news_poll_interval_minutes
+            if self._rss_fetcher is not None or self._telegram_reader is not None
+            else self._settings.news_cycle_minutes
+        )
         self._scheduler.add_job(
             self._news_cycle,
             "interval",
-            minutes=self._settings.news_cycle_minutes,
+            minutes=news_interval,
             id="news_cycle",
             replace_existing=True,
         )
@@ -669,24 +683,62 @@ class TradingLoop:
             self._run_async(self._fx_service.update_usdrub())
 
     def _news_cycle(self) -> None:
-        """Fetch latest news, analyze sentiment, update _sentiment_cache."""
-        now = datetime.now(UTC)
-        from_date = now - timedelta(hours=_NEWS_LOOKBACK_HOURS)
-        try:
-            articles = self._news_fetcher.fetch_news(
-                query=_NEWS_QUERY,
-                from_date=from_date,
-                to_date=now,
-            )
-        except Exception:
-            _log.warning("_news_cycle: failed to fetch news (no API key?)", exc_info=True)
-            return
+        """Fetch news from RSS, Telegram, and legacy NewsAPI; analyze and update sentiment."""
+        articles: list[NewsArticle] = []
 
+        # RSS feeds (sync -- runs in APScheduler thread)
+        if self._rss_fetcher is not None:
+            try:
+                rss_articles = self._rss_fetcher.fetch_news()
+                articles.extend(rss_articles)
+                _log.info("news_rss_fetched", count=len(rss_articles))
+            except Exception:
+                _log.warning("news_rss_fetch_failed", exc_info=True)
+
+        # Telegram channels (async -- bridge via _run_async)
+        if self._telegram_reader is not None:
+            try:
+                tg_channels = self._settings.telegram_channels
+                if tg_channels:
+                    tg_articles = self._run_async(
+                        self._telegram_reader.fetch_recent_messages(
+                            channels=tg_channels,
+                            since_minutes=self._settings.news_poll_interval_minutes,
+                        )
+                    )
+                    articles.extend(tg_articles)
+                    _log.info("news_telegram_fetched", count=len(tg_articles))
+            except Exception:
+                _log.warning("news_telegram_fetch_failed", exc_info=True)
+
+        # Legacy NewsAPI fallback (unchanged behavior)
+        if not articles and self._news_fetcher is not None:
+            now = datetime.now(UTC)
+            from_date = now - timedelta(hours=_NEWS_LOOKBACK_HOURS)
+            try:
+                articles = self._news_fetcher.fetch_news(
+                    query=_NEWS_QUERY, from_date=from_date, to_date=now,
+                )
+            except Exception:
+                _log.warning("news_legacy_fetch_failed", exc_info=True)
+                return
+
+        # Entity extraction: enrich articles with MOEX tickers
+        if self._entity_extractor is not None:
+            for i, article in enumerate(articles):
+                try:
+                    tickers = self._run_async(self._entity_extractor.extract(article))
+                    if tickers:
+                        articles[i] = article.model_copy(update={"symbols": tickers})
+                except Exception:
+                    _log.debug("entity_extraction_failed", article_id=str(article.id))
+
+        # Process through existing pipeline
         for article in articles:
             try:
                 self._process_news_article(article)
             except Exception:
-                _log.exception("_news_cycle: error processing article %s", article.id)
+                _log.exception("news_article_processing_failed", article_id=str(article.id))
 
     async def _analyze_article(self, article: NewsArticle) -> tuple[SentimentResult, EventType]:
         """Run sentiment analysis and event classification concurrently."""
