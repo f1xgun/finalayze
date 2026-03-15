@@ -408,34 +408,59 @@ class TelegramAlerter:
             _log.exception("TelegramAlerter failed to send message")
             return False
 
+    def _send_sync(self, text: str) -> bool:
+        """Synchronous POST to Telegram Bot API.
+
+        Used when called from non-async context (APScheduler threads).
+        Creates a short-lived httpx.Client per call to avoid event loop issues.
+        """
+        if not self._token:
+            return True
+        url = f"{_TELEGRAM_API_BASE}{self._token}{_SEND_MESSAGE_PATH}"
+        payload = {"chat_id": self._chat_id, "text": text, "parse_mode": "HTML"}
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.post(url, json=payload)
+                if resp.status_code == 429:  # noqa: PLR2004
+                    retry_after = resp.json().get("parameters", {}).get("retry_after", 30)
+                    _log.warning("Telegram rate limited", retry_after=retry_after)
+                    return False
+                return True
+        except Exception:
+            _log.exception("TelegramAlerter sync send failed")
+            return False
+
     def send_alert(
         self,
         message: str,
         *,
         priority: AlertPriority | None = None,
     ) -> None:
-        """Schedule or run ``_send`` safely from any thread context.
+        """Send alert safely from any thread context.
 
-        If a queue is attached, routes through ``queue.enqueue`` with the given
-        priority. Otherwise uses fire-and-forget ``create_task`` / ``asyncio.run``
-        for backward compatibility.
+        From async context (running event loop): uses create_task with async _send.
+        From sync context (APScheduler threads): uses synchronous httpx.Client.
 
         Exceptions are always suppressed -- alerts must never crash the caller.
         """
         if not self._token:
             return
         try:
-            loop = asyncio.get_event_loop()
-            if self._queue is not None and priority is not None:
-                if loop.is_running():
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop is not None and loop.is_running():
+                # Async context — use create_task
+                if self._queue is not None and priority is not None:
                     _task = loop.create_task(  # noqa: RUF006
                         self._queue.enqueue(message, priority),
                     )
                 else:
-                    asyncio.run(self._queue.enqueue(message, priority))
-            elif loop.is_running():
-                _task = loop.create_task(self._send(message))  # noqa: RUF006
+                    _task = loop.create_task(self._send(message))  # noqa: RUF006
             else:
-                asyncio.run(self._send(message))
+                # Sync context (APScheduler thread) — use sync httpx
+                self._send_sync(message)
         except Exception:
             _log.exception("TelegramAlerter send_alert failed")
