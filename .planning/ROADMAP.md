@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Bond Data Pipeline** - Wire bond instrument discovery, NKD/dirty price math, and MacroCacheService (completed 2026-03-14)
 - [x] **Phase 4: Bond Execution** - Complete BondCycleProcessor stubs, YieldStop, and achieve positive bond backtest PnL (completed 2026-03-14)
 - [x] **Phase 5: Integration and Telegram** - Wire equity+bond cycles into TradingLoop, build Telegram alerting with rate limiting (completed 2026-03-14)
-- [ ] **Phase 6: Sandbox Validation** - Prove 5+ days autonomous operation in T-Invest sandbox without critical errors
+- [x] **Phase 6: Sandbox Validation** - Prove 5+ days autonomous operation in T-Invest sandbox without critical errors (completed 2026-03-15)
 - [ ] **Phase 7: News Pipeline and Go-Live** - Connect Russian news sources, enable event_driven strategy, deploy real money
 
 ## Phase Details
@@ -115,9 +115,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Error recovery hardening: gRPC reconnection, health probes, staleness checks, order reconciliation
-- [ ] 06-02-PLAN.md — Docker Compose sandbox stack with Grafana, APScheduler job store, structured cycle logging, TradingLoop lifespan
-- [ ] 06-03-PLAN.md — Validation report generator, orchestration script, and sandbox stack verification checkpoint
+- [x] 06-01-PLAN.md — Error recovery hardening: gRPC reconnection, health probes, staleness checks, order reconciliation
+- [x] 06-02-PLAN.md — Docker Compose sandbox stack with Grafana, APScheduler job store, structured cycle logging, TradingLoop lifespan
+- [x] 06-03-PLAN.md — Validation report generator, orchestration script, and sandbox stack verification checkpoint
 
 ### Phase 7: News Pipeline and Go-Live
 **Goal**: Russian news feeds drive event-based trading signals and the system executes first real MOEX trades
@@ -150,5 +150,5 @@ Note: Phases 2 and 3 depend only on Phase 1 (not on each other) and could theore
 | 3. Bond Data Pipeline | 3/3 | Complete   | 2026-03-14 |
 | 4. Bond Execution | 3/3 | Complete    | 2026-03-14 |
 | 5. Integration and Telegram | 4/4 | Complete   | 2026-03-14 |
-| 6. Sandbox Validation | 2/3 | In Progress|  |
+| 6. Sandbox Validation | 3/3 | Complete   | 2026-03-15 |
 | 7. News Pipeline and Go-Live | 0/3 | Not started | - |

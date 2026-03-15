@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-stopped_at: Completed 06-01 (Error recovery hardening)
-last_updated: "2026-03-14T22:22:11.000Z"
-last_activity: "2026-03-15 -- Completed 06-01 (Error recovery hardening: gRPC reconnection, health probes, staleness)"
+stopped_at: Completed 06-03 (Validation report generator and sandbox verification)
+last_updated: "2026-03-15T01:00:00.000Z"
+last_activity: "2026-03-15 -- Completed 06-03 (Validation report generator, orchestration script, sandbox stack verified)"
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 18
-  completed_plans: 17
-  percent: 94
+  completed_plans: 18
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 6 of 7 (Sandbox Validation)
-Plan: 2 of 3 in current phase
-Status: In Progress
-Last activity: 2026-03-15 -- Completed 06-02 (Docker Compose sandbox stack, Grafana, cycle logging, job persistence)
+Plan: 3 of 3 in current phase (COMPLETE)
+Status: Phase 6 Complete
+Last activity: 2026-03-15 -- Completed 06-03 (Validation report generator, orchestration script, sandbox stack verified)
 
-Progress: [█████████▌] 94%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [█████████▌] 94%
 | Phase 05 P04 | 4min | 2 tasks | 5 files |
 | Phase 06 P01 | 5min | 2 tasks | 7 files |
 | Phase 06 P02 | 6min | 2 tasks | 10 files |
+| Phase 06 P03 | 6min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -128,6 +129,9 @@ Recent decisions affecting current work:
 - [06-02]: TradingLoop starts in daemon thread from FastAPI lifespan (sandbox and real modes)
 - [06-02]: Sandbox mode equity/drawdown sourced from SandboxPortfolioTracker.shadow_portfolio()
 - [06-02]: Single uvicorn worker forced in sandbox mode for TradingLoop thread safety
+- [06-03]: Validation criteria: 5+ days, <5% DD, >=10 trades, 0 critical errors (matches AUT-04)
+- [06-03]: Report generator returns bool for programmatic use; orchestration script is checklist (not automated runner)
+- [06-03]: Docker fixes: README.md in both stages, psycopg2-binary, .dockerignore whitelist
 
 ### Pending Todos
 
@@ -142,5 +146,5 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-15T00:30:27Z
-Stopped at: Completed 06-02 (Docker Compose sandbox stack, Grafana, cycle logging)
+Last session: 2026-03-15T01:00:00Z
+Stopped at: Completed 06-03 (Validation report generator, sandbox stack verified) -- Phase 6 COMPLETE
