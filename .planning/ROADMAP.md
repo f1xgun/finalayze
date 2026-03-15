@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Bond Execution** - Complete BondCycleProcessor stubs, YieldStop, and achieve positive bond backtest PnL (completed 2026-03-14)
 - [x] **Phase 5: Integration and Telegram** - Wire equity+bond cycles into TradingLoop, build Telegram alerting with rate limiting (completed 2026-03-14)
 - [x] **Phase 6: Sandbox Validation** - Prove 5+ days autonomous operation in T-Invest sandbox without critical errors (completed 2026-03-15)
-- [ ] **Phase 7: News Pipeline and Go-Live** - Connect Russian news sources, enable event_driven strategy, deploy real money
+- [x] **Phase 7: News Pipeline and Go-Live** - Connect Russian news sources, enable event_driven strategy, deploy real money (completed 2026-03-15)
 
 ## Phase Details
 
@@ -152,4 +152,4 @@ Note: Phases 2 and 3 depend only on Phase 1 (not on each other) and could theore
 | 4. Bond Execution | 3/3 | Complete    | 2026-03-14 |
 | 5. Integration and Telegram | 4/4 | Complete   | 2026-03-14 |
 | 6. Sandbox Validation | 3/4 | Gap closure | 2026-03-15 |
-| 7. News Pipeline and Go-Live | 0/3 | Not started | - |
+| 7. News Pipeline and Go-Live | 3/3 | Complete   | 2026-03-15 |

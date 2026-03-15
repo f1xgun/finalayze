@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 07-01-PLAN.md (RSS fetcher + EntityExtractor)
-last_updated: "2026-03-15T19:17:10.571Z"
-last_activity: 2026-03-15 -- Completed 07-02 (TelegramChannelReader for Russian financial news)
+status: completed
+stopped_at: Completed 07-03-PLAN.md (TradingLoop news integration + go-live)
+last_updated: "2026-03-15T19:38:06.322Z"
+last_activity: 2026-03-15 -- Completed 07-03 (TradingLoop news integration, event_driven enablement, go-live prep)
 progress:
   total_phases: 7
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 22
-  completed_plans: 21
-  percent: 91
+  completed_plans: 22
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Autonomous profitable MOEX trading (stocks + bonds + coupons) with risk limits, operating without human intervention
-**Current focus:** Phase 7 - News Pipeline & Go-Live
+**Current focus:** All phases complete - ready for go-live
 
 ## Current Position
 
 Phase: 7 of 7 (News Pipeline & Go-Live)
-Plan: 2 of 3 in current phase (COMPLETE)
-Status: Executing Phase 7
-Last activity: 2026-03-15 -- Completed 07-02 (TelegramChannelReader for Russian financial news)
+Plan: 3 of 3 in current phase (COMPLETE)
+Status: All plans complete
+Last activity: 2026-03-15 -- Completed 07-03 (TradingLoop news integration, event_driven enablement, go-live prep)
 
-Progress: [█████████░] 91%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -68,6 +68,7 @@ Progress: [█████████░] 91%
 | Phase 06 P04 | 4min | 2 tasks | 3 files |
 | Phase 07 P02 | 3min | 1 tasks | 3 files |
 | Phase 07 P01 | 5min | 2 tasks | 8 files |
+| Phase 07 P03 | 15min | 4 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -139,6 +140,8 @@ Recent decisions affecting current work:
 - [Phase 07]: Telethon lazy-imported inside method to avoid ImportError when not configured
 - [Phase 07]: feedparser for RSS parsing with OrderedDict LRU dedup (MAX_SEEN_SIZE=5000)
 - [Phase 07]: 29 MOEX tickers as frozenset for LLM output validation in EntityExtractor
+- [Phase 07-03]: RSS and Telegram fetchers as optional TradingLoop params; legacy NewsAPI fallback only when both return empty
+- [Phase 07-03]: event_driven weight 0.15 on all ru_* segments; other strategy weights reduced proportionally to keep sum=1.00
 
 ### Pending Todos
 
@@ -153,5 +156,5 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-15T19:17:10.567Z
-Stopped at: Completed 07-01-PLAN.md (RSS fetcher + EntityExtractor)
+Last session: 2026-03-15T19:37:54.226Z
+Stopped at: Completed 07-03-PLAN.md (TradingLoop news integration + go-live)

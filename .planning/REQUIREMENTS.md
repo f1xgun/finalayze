@@ -37,8 +37,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **NWS-01**: Russian news RSS feed reader (RBC, Interfax, TASS, Kommersant)
 - [x] **NWS-02**: LLM analysis of Russian news via existing NewsAnalyzer + Russian prompts
 - [x] **NWS-03**: Telegram channel reading for financial sentiment (Telethon)
-- [ ] **NWS-04**: News-driven signal generation (event impact → trading decision)
-- [ ] **NWS-05**: `event_driven` strategy enabled on MOEX segments
+- [x] **NWS-04**: News-driven signal generation (event impact → trading decision)
+- [x] **NWS-05**: `event_driven` strategy enabled on MOEX segments
 
 ### Monitoring & Alerts
 
@@ -54,7 +54,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **AUT-02**: MOEX trading schedule gate (skip non-trading days, respect hours)
 - [x] **AUT-03**: All circuit breakers verified (equity + bond layers)
 - [x] **AUT-04**: T-Invest sandbox validation: 5+ days autonomous operation without critical errors
-- [ ] **AUT-05**: Real money deployment on small account (first real MOEX trades)
+- [x] **AUT-05**: Real money deployment on small account (first real MOEX trades)
 - [x] **AUT-06**: Graceful error recovery (network, API, market data gaps)
 
 ## v2 Requirements
@@ -117,8 +117,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NWS-01 | Phase 7 | Complete |
 | NWS-02 | Phase 7 | Complete |
 | NWS-03 | Phase 7 | Complete |
-| NWS-04 | Phase 7 | Pending |
-| NWS-05 | Phase 7 | Pending |
+| NWS-04 | Phase 7 | Complete |
+| NWS-05 | Phase 7 | Complete |
 | MON-01 | Phase 5 | Complete |
 | MON-02 | Phase 5 | Complete |
 | MON-03 | Phase 5 | Complete |
@@ -128,7 +128,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AUT-02 | Phase 5 | Complete |
 | AUT-03 | Phase 5 | Complete |
 | AUT-04 | Phase 6 | Complete |
-| AUT-05 | Phase 7 | Pending |
+| AUT-05 | Phase 7 | Complete |
 | AUT-06 | Phase 6 | Complete |
 
 **Coverage:**
