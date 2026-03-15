@@ -196,8 +196,19 @@ class TradingLoop:
         # Structured cycle validation logger
         self._validation_logger = ValidationLogger()
 
+        # Per-cycle counters for CycleLogEntry (reset at each equity cycle start)
+        self._reset_cycle_counters()
+
         # Peak equity for drawdown calculation (sandbox mode)
         self._peak_equity_rub: float = 0.0
+
+    def _reset_cycle_counters(self) -> None:
+        """Reset per-cycle counters for CycleLogEntry tracking."""
+        self._cycle_instruments_processed: int = 0
+        self._cycle_signals_generated: int = 0
+        self._cycle_orders_submitted: int = 0
+        self._cycle_orders_filled: int = 0
+        self._cycle_errors_caught: int = 0
 
     # ── Candle staleness ──────────────────────────────────────────────────
 
@@ -781,6 +792,7 @@ class TradingLoop:
 
         cycle_start = _time.monotonic()
         self._cycle_portfolio_cache.clear()
+        self._reset_cycle_counters()
         try:
             self._strategy_cycle_impl()
         finally:
@@ -803,11 +815,11 @@ class TradingLoop:
                     timestamp=self._now(),
                     cycle_type="equity",
                     duration_ms=duration_ms,
-                    instruments_processed=0,  # TODO: track in impl
-                    signals_generated=0,
-                    orders_submitted=0,
-                    orders_filled=0,
-                    errors_caught=0,
+                    instruments_processed=self._cycle_instruments_processed,
+                    signals_generated=self._cycle_signals_generated,
+                    orders_submitted=self._cycle_orders_submitted,
+                    orders_filled=self._cycle_orders_filled,
+                    errors_caught=self._cycle_errors_caught,
                     equity_rub=equity_rub,
                     drawdown_pct=drawdown_pct,
                     circuit_breaker_level=cb_level,
@@ -892,6 +904,7 @@ class TradingLoop:
             return
 
         instruments = self._registry.list_by_market(market_id)
+        self._cycle_instruments_processed += len(instruments)
         for instrument in instruments:
             self._process_instrument(instrument, market_id, level, fetcher, now)
 
@@ -995,6 +1008,7 @@ class TradingLoop:
             )
         except Exception:
             _log.exception("_strategy_cycle: failed to fetch candles for %s", instrument.symbol)
+            self._cycle_errors_caught += 1
             return
 
         # #157/#182: Check stop-losses against latest candle price
@@ -1016,6 +1030,8 @@ class TradingLoop:
         )
         if signal is None:
             return
+
+        self._cycle_signals_generated += 1
 
         from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
 
@@ -1124,6 +1140,7 @@ class TradingLoop:
             return
 
         self._submit_order(order, market_id, candles=candles)
+        self._cycle_orders_submitted += 1
 
         # 6A.7: Record day trade after successful order submission
         if is_day_trade:
@@ -1171,6 +1188,7 @@ class TradingLoop:
         try:
             result = self._broker_router.submit(order, market_id=market_id)
             if result.filled:
+                self._cycle_orders_filled += 1
                 _log.info(
                     "order_executed",
                     symbol=order.symbol,
@@ -1220,6 +1238,7 @@ class TradingLoop:
                 )
         except Exception:
             _log.exception("_strategy_cycle: order submission failed for %s", order.symbol)
+            self._cycle_errors_caught += 1
 
     def _check_stop_losses(
         self,
