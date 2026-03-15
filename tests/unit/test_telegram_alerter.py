@@ -169,27 +169,20 @@ class TestTelegramAlerterSendsMessages:
         assert "NewsApiFetcher" in payload["text"]
         assert "gRPC timeout" in payload["text"]
 
-    def test_send_alert_no_loop_uses_asyncio_run(self) -> None:
-        """send_alert must use asyncio.run() when no event loop is running."""
+    def test_send_alert_no_loop_uses_send_sync(self) -> None:
+        """send_alert must use _send_sync when no event loop is running."""
         alerter = self._make_alerter()
-        with (
-            patch.object(alerter, "_send", new_callable=AsyncMock),
-            patch("finalayze.core.alerts.asyncio.get_event_loop") as mock_get_loop,
-            patch("finalayze.core.alerts.asyncio.run") as mock_run,
-        ):
-            mock_loop = MagicMock()
-            mock_loop.is_running.return_value = False
-            mock_get_loop.return_value = mock_loop
+        with patch.object(alerter, "_send_sync") as mock_sync:
+            # No running event loop → RuntimeError → falls through to _send_sync
             alerter.send_alert("test message")
-            mock_run.assert_called_once()
+            mock_sync.assert_called_once_with("test message")
 
     def test_send_alert_running_loop_creates_task(self) -> None:
         """send_alert must create a task when an event loop is already running."""
         alerter = self._make_alerter()
-        with (
-            patch.object(alerter, "_send", new_callable=AsyncMock),
-            patch("finalayze.core.alerts.asyncio.get_event_loop") as mock_get_loop,
-        ):
+        with patch(
+            "finalayze.core.alerts.asyncio.get_running_loop"
+        ) as mock_get_loop:
             mock_loop = MagicMock()
             mock_loop.is_running.return_value = True
             mock_get_loop.return_value = mock_loop
