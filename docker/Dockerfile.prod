@@ -34,6 +34,7 @@ COPY README.md /app/README.md
 COPY src/ src/
 COPY config/ config/
 COPY alembic/ alembic/
+COPY certs/ certs/
 
 # Copy entrypoint
 COPY docker/entrypoint.sh /app/entrypoint.sh

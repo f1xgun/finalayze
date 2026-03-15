@@ -82,46 +82,186 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
 def _build_trading_loop(settings: object) -> object | None:
     """Build TradingLoop with all dependencies. Returns None on failure.
 
-    Lazy imports to maintain dependency layering (Layer 6).
+    Reuses the full wiring from scripts/run_sandbox.py via subprocess
+    bootstrap module. All component construction is done here so Docker
+    can run both API + TradingLoop in one process.
     """
     try:
+        import asyncio  # noqa: PLC0415
+        import os  # noqa: PLC0415
+
         from finalayze.analysis.event_classifier import EventClassifier  # noqa: PLC0415
         from finalayze.analysis.impact_estimator import ImpactEstimator  # noqa: PLC0415
         from finalayze.analysis.news_analyzer import NewsAnalyzer  # noqa: PLC0415
         from finalayze.core.alerts import TelegramAlerter  # noqa: PLC0415
         from finalayze.core.trading_loop import TradingLoop  # noqa: PLC0415
         from finalayze.data.fetchers.newsapi import NewsApiFetcher  # noqa: PLC0415
+        from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
         from finalayze.execution.broker_router import BrokerRouter  # noqa: PLC0415
-        from finalayze.markets.instruments import InstrumentRegistry  # noqa: PLC0415
+        from finalayze.execution.retry import RetryPolicy  # noqa: PLC0415
+        from finalayze.execution.tinkoff_broker import TinkoffBroker  # noqa: PLC0415
+        from finalayze.markets.instruments import (  # noqa: PLC0415
+            Instrument,
+            InstrumentRegistry,
+        )
         from finalayze.risk.circuit_breaker import (  # noqa: PLC0415
             CircuitBreaker,
             CrossMarketCircuitBreaker,
         )
-        from finalayze.analysis.llm_client import AnthropicClient  # noqa: PLC0415
         from finalayze.strategies.combiner import StrategyCombiner  # noqa: PLC0415
+        from finalayze.strategies.dual_momentum import DualMomentumStrategy  # noqa: PLC0415
+        from finalayze.strategies.mean_reversion import MeanReversionStrategy  # noqa: PLC0415
+        from finalayze.strategies.momentum import MomentumStrategy  # noqa: PLC0415
+        from finalayze.strategies.rsi2_connors import RSI2ConnorsStrategy  # noqa: PLC0415
 
-        # Build minimal dependencies -- actual wiring depends on available services
+        # Force native gRPC DNS resolver
+        os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
+
+        tinkoff_token = getattr(settings, "tinkoff_token", "") or ""
+        is_sandbox = getattr(settings, "tinkoff_sandbox", True)
+
+        # ── Instrument Registry ──────────────────────────────────────────
+        from config.segments import DEFAULT_SEGMENTS  # noqa: PLC0415
+
+        registry = InstrumentRegistry()
+        moex_segments = [s for s in DEFAULT_SEGMENTS if s.market == "moex"]
+        for seg in moex_segments:
+            for sym in seg.symbols:
+                registry.register(Instrument(
+                    symbol=sym, market_id="moex", name=sym,
+                    instrument_type=seg.instrument_type,
+                    currency=seg.currency, segment_id=seg.segment_id,
+                ))
+
+        # Discover MOEX shares via T-Bank API for FIGI resolution
+        if tinkoff_token:
+            from t_tech.invest import AsyncClient  # noqa: PLC0415
+
+            target = (
+                "sandbox-invest-public-api.tbank.ru:443" if is_sandbox
+                else "invest-public-api.tbank.ru:443"
+            )
+
+            async def _discover(token: str) -> list[dict[str, object]]:
+                client = AsyncClient(token, target=target)
+                discovered: list[dict[str, object]] = []
+                async with client as services:
+                    resp = await services.instruments.shares()
+                    for share in resp.instruments:
+                        if not getattr(share, "api_trade_available_flag", False):
+                            continue
+                        if getattr(share, "class_code", "") != "TQBR":
+                            continue
+                        discovered.append({
+                            "ticker": share.ticker, "figi": share.figi,
+                            "name": share.name, "lot": share.lot,
+                        })
+                return discovered
+
+            # Can't use asyncio.run() inside uvicorn (event loop already running).
+            # Use a dedicated thread with its own loop for the sync gRPC call.
+            import concurrent.futures  # noqa: PLC0415
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                all_shares = pool.submit(asyncio.run, _discover(tinkoff_token)).result(timeout=30)
+            share_by_ticker = {str(s["ticker"]): s for s in all_shares}
+            configured_symbols: set[str] = set()
+            for seg in moex_segments:
+                if seg.instrument_type == "stock":
+                    configured_symbols.update(seg.symbols)
+            for sym in configured_symbols:
+                if sym in share_by_ticker:
+                    share = share_by_ticker[sym]
+                    try:
+                        existing = registry.get(sym, "moex")
+                    except Exception:
+                        continue
+                    registry.register(Instrument(
+                        symbol=existing.symbol, market_id="moex",
+                        name=str(share["name"]),
+                        instrument_type=existing.instrument_type,
+                        figi=str(share["figi"]),
+                        lot_size=int(share["lot"]),
+                        currency=existing.currency, segment_id=existing.segment_id,
+                    ))
+            log.info("moex_shares_discovered", count=len(all_shares))
+
+        # ── Data Fetcher ─────────────────────────────────────────────────
+        fetchers: dict[str, object] = {}
+        if tinkoff_token:
+            tinkoff_fetcher = TinkoffFetcher(
+                token=tinkoff_token, registry=registry, sandbox=is_sandbox,
+            )
+            fetchers["moex"] = tinkoff_fetcher
+
+        # ── Broker ───────────────────────────────────────────────────────
+        retry_policy = RetryPolicy(max_retries=3, base_delay=1.0)
+        brokers: dict[str, TinkoffBroker] = {}
+        if tinkoff_token:
+            brokers["moex"] = TinkoffBroker(
+                token=tinkoff_token, registry=registry,
+                sandbox=is_sandbox, retry_policy=retry_policy,
+            )
+            brokers["moex_bonds"] = TinkoffBroker(
+                token=tinkoff_token, registry=registry,
+                sandbox=is_sandbox, retry_policy=retry_policy,
+            )
+        broker_router = BrokerRouter(brokers=brokers)
+
+        # ── Strategies ───────────────────────────────────────────────────
+        strategies_list = [
+            MomentumStrategy(), DualMomentumStrategy(),
+            MeanReversionStrategy(), RSI2ConnorsStrategy(),
+        ]
+        combiner = StrategyCombiner(strategies=strategies_list)
+
+        # ── Risk ─────────────────────────────────────────────────────────
+        circuit_breakers: dict[str, CircuitBreaker] = {
+            "moex": CircuitBreaker(
+                market_id="moex",
+                l1_threshold=getattr(settings, "circuit_breaker_l1", 0.05),
+                l2_threshold=getattr(settings, "circuit_breaker_l2", 0.10),
+                l3_threshold=getattr(settings, "circuit_breaker_l3", 0.15),
+            ),
+        }
+        cross_market_breaker = CrossMarketCircuitBreaker(
+            halt_threshold=getattr(settings, "max_cross_market_exposure_pct", 0.80),
+        )
+
+        # ── Alerting ────────────────────────────────────────────────────
         alerter = TelegramAlerter(
             getattr(settings, "telegram_bot_token", "") or "",
             getattr(settings, "telegram_chat_id", "") or "",
         )
-        registry = InstrumentRegistry()
-        broker_router = BrokerRouter(brokers={})
-        circuit_breakers: dict[str, CircuitBreaker] = {}
-        cross_market_breaker = CrossMarketCircuitBreaker()
-        combiner = StrategyCombiner(strategies={})
-        news_fetcher = NewsApiFetcher(api_key=getattr(settings, "newsapi_api_key", "") or "")
-        llm_client = AnthropicClient(
-            api_key=getattr(settings, "anthropic_api_key", "") or "",
-            model=getattr(settings, "llm_model", "claude-sonnet-4-20250514"),
-        )
+
+        # ── News Analysis ────────────────────────────────────────────────
+        from finalayze.analysis.llm_client import LLMClient  # noqa: PLC0415
+
+        class _StubLLMClient(LLMClient):
+            async def complete(self, prompt: str, system: str) -> str:  # noqa: ARG002
+                return '{"sentiment": 0.0, "confidence": 0.0, "reasoning": "stub"}'
+
+        _has_llm = bool(getattr(settings, "llm_api_key", "") or
+                        getattr(settings, "anthropic_api_key", ""))
+        if _has_llm:
+            from finalayze.analysis.llm_client import create_llm_client  # noqa: PLC0415
+            llm_client = create_llm_client(settings)
+        else:
+            llm_client = _StubLLMClient()
+
         news_analyzer = NewsAnalyzer(llm_client=llm_client)
         event_classifier = EventClassifier(llm_client=llm_client)
         impact_estimator = ImpactEstimator()
+        _has_news = bool(getattr(settings, "newsapi_api_key", ""))
+        news_fetcher = (
+            NewsApiFetcher(api_key=settings.newsapi_api_key)  # type: ignore[union-attr]
+            if _has_news else NewsApiFetcher(api_key="")
+        )
 
+        # ── Build TradingLoop ────────────────────────────────────────────
         loop = TradingLoop(
             settings=settings,  # type: ignore[arg-type]
-            fetchers={},
+            fetchers=fetchers,
             news_fetcher=news_fetcher,
             news_analyzer=news_analyzer,
             event_classifier=event_classifier,
@@ -133,7 +273,12 @@ def _build_trading_loop(settings: object) -> object | None:
             alerter=alerter,
             instrument_registry=registry,
         )
-        log.info("trading_loop_built")
+        log.info(
+            "trading_loop_built",
+            markets=broker_router.registered_markets,
+            instruments=len(registry.list_by_market("moex")),
+            strategies=len(strategies_list),
+        )
         return loop
     except Exception:
         log.exception("trading_loop_build_failed")
