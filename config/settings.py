@@ -98,6 +98,17 @@ class Settings(BaseSettings):
     telegram_allowed_chat_ids: list[str] = []  # FINALAYZE_TELEGRAM_ALLOWED_CHAT_IDS
     weekly_digest_hour_utc: int = 16  # FINALAYZE_WEEKLY_DIGEST_HOUR_UTC (Sunday 19:00 MSK)
 
+    # News pipeline (Phase 7)
+    news_rss_urls: list[str] = [
+        "https://rssexport.rbc.ru/rbcnews/news/30/full.rss",
+        "https://www.interfax.ru/rss.asp",
+        "https://tass.com/rss/v2.xml",
+    ]
+    news_poll_interval_minutes: int = 5  # FINALAYZE_NEWS_POLL_INTERVAL_MINUTES
+    telegram_api_id: int = 0  # FINALAYZE_TELEGRAM_API_ID
+    telegram_api_hash: str = ""  # FINALAYZE_TELEGRAM_API_HASH
+    telegram_channels: list[str] = []  # FINALAYZE_TELEGRAM_CHANNELS
+
     # Safety
     real_confirmed: bool = False
 

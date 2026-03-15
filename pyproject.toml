@@ -43,6 +43,7 @@ dependencies = [
     "httpx>=0.28.0",
     "yfinance>=0.2.50",
     "finnhub-python>=2.4.20",
+    "telethon>=1.37.0",
     # Dashboard
     "streamlit>=1.41.0",
     # Monitoring
@@ -59,6 +60,8 @@ dependencies = [
     "lxml>=6.0.2",
     "optuna>=4.7.0",
     "quantlib>=1.41",
+    "feedparser>=6.0.12",
+    "telethon>=1.42.0",
 ]
 
 [project.optional-dependencies]
