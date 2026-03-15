@@ -368,18 +368,12 @@ class TradingLoop:
             "retrain": APSThreadPoolExecutor(max_workers=1),
         }
 
-        # Try to use persistent SQLAlchemy job store for crash recovery
+        # APScheduler SQLAlchemyJobStore requires picklable job targets.
+        # Bound methods with threading locks are NOT picklable, so we use
+        # the default MemoryJobStore. Docker restart policy + preflight
+        # reconciliation handle crash recovery instead.
         jobstores: dict[str, object] = {}
-        db_url = getattr(self._settings, "database_url", "")
-        if db_url and SQLAlchemyJobStore is not None:
-            try:
-                sync_url = db_url.replace("+asyncpg", "")
-                jobstores["default"] = SQLAlchemyJobStore(url=sync_url)
-                _log.info("apscheduler_jobstore_sqlalchemy", url=sync_url[:40] + "...")
-            except Exception:
-                _log.warning("apscheduler_jobstore_sqlalchemy_failed", exc_info=True)
-        else:
-            _log.warning("apscheduler_jobstore_memory_fallback")
+        _log.info("apscheduler_jobstore_memory")
 
         scheduler_kwargs: dict[str, object] = {
             "timezone": "UTC",

@@ -97,6 +97,7 @@ def _build_trading_loop(settings: object) -> object | None:
             CircuitBreaker,
             CrossMarketCircuitBreaker,
         )
+        from finalayze.analysis.llm_client import AnthropicClient  # noqa: PLC0415
         from finalayze.strategies.combiner import StrategyCombiner  # noqa: PLC0415
 
         # Build minimal dependencies -- actual wiring depends on available services
@@ -105,13 +106,17 @@ def _build_trading_loop(settings: object) -> object | None:
             getattr(settings, "telegram_chat_id", "") or "",
         )
         registry = InstrumentRegistry()
-        broker_router = BrokerRouter()
+        broker_router = BrokerRouter(brokers={})
         circuit_breakers: dict[str, CircuitBreaker] = {}
         cross_market_breaker = CrossMarketCircuitBreaker()
         combiner = StrategyCombiner(strategies={})
         news_fetcher = NewsApiFetcher(api_key=getattr(settings, "newsapi_api_key", "") or "")
-        news_analyzer = NewsAnalyzer()
-        event_classifier = EventClassifier()
+        llm_client = AnthropicClient(
+            api_key=getattr(settings, "anthropic_api_key", "") or "",
+            model=getattr(settings, "llm_model", "claude-sonnet-4-20250514"),
+        )
+        news_analyzer = NewsAnalyzer(llm_client=llm_client)
+        event_classifier = EventClassifier(llm_client=llm_client)
         impact_estimator = ImpactEstimator()
 
         loop = TradingLoop(
