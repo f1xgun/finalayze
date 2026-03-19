@@ -3,6 +3,14 @@
 This is the master index of all project documentation. Start with the
 [CLAUDE.md](../CLAUDE.md) file in the project root for a quick orientation.
 
+## Agent Context (start here)
+
+| Document | Description |
+|---|---|
+| [AGENTS.md](AGENTS.md) | Agent dispatch rules, context loading order, coordination patterns |
+| [GLOSSARY.md](GLOSSARY.md) | Domain terminology reference (60+ terms) |
+| `src/finalayze/*/CLAUDE.md` | Module-level context: layer, public API, contracts, testing |
+
 ## Architecture
 
 | Document | Description |
@@ -12,7 +20,7 @@ This is the master index of all project documentation. Start with the
 | [architecture/DATA_FLOW.md](architecture/DATA_FLOW.md) | Event flow, data pipeline diagrams |
 | [architecture/DECISIONS.md](architecture/DECISIONS.md) | Architecture Decision Records (ADRs) |
 
-## Design
+## Design Specs
 
 | Document | Description |
 |---|---|
@@ -22,11 +30,8 @@ This is the master index of all project documentation. Start with the
 | [design/RISK.md](design/RISK.md) | Risk management rules and position sizing |
 | [design/NEWS_PIPELINE.md](design/NEWS_PIPELINE.md) | News ingestion, LLM analysis, sentiment scoring |
 | [design/ML_PIPELINE.md](design/ML_PIPELINE.md) | ML ensemble: XGBoost + LightGBM + LSTM, feature engineering |
-
-## API
-
-| Document | Description |
-|---|---|
+| [design/BROKER_CONTRACTS.md](design/BROKER_CONTRACTS.md) | Broker integration specs (Tinkoff, Alpaca, Simulated) |
+| [database/SCHEMA.md](database/SCHEMA.md) | Database tables, migrations, conventions |
 | [api/ENDPOINTS.md](api/ENDPOINTS.md) | REST API contract, endpoint reference |
 
 ## Quality

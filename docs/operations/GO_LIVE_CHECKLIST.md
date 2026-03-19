@@ -11,7 +11,7 @@
 - [ ] Set `FINALAYZE_TINKOFF_TOKEN` to real account token (not sandbox)
 - [ ] Set `FINALAYZE_LLM_API_KEY` for OpenRouter entity extraction
 - [ ] Set `FINALAYZE_TELEGRAM_BOT_TOKEN` and `FINALAYZE_TELEGRAM_CHAT_ID` for alerts
-- [ ] Set `FINALAYZE_TELEGRAM_API_ID` and `FINALAYZE_TELEGRAM_API_HASH` for news reading
+- [ ] Set `FINALAYZE_TELEGRAM_CHANNELS` with target channel list for news reading
 - [ ] Verify starting capital: 500K RUB in T-Invest account
 
 ## Safety Verification

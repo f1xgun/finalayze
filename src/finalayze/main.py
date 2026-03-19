@@ -272,11 +272,10 @@ def _build_trading_loop(settings: object) -> object | None:
         _rss_urls = getattr(settings, "news_rss_urls", []) or []
         rss_fetcher = RssNewsFetcher(feed_urls=_rss_urls) if _rss_urls else None
 
-        _tg_api_id = getattr(settings, "telegram_api_id", 0) or 0
-        _tg_api_hash = getattr(settings, "telegram_api_hash", "") or ""
+        _tg_channels = getattr(settings, "telegram_channels", []) or []
         telegram_reader = (
-            TelegramChannelReader(api_id=_tg_api_id, api_hash=_tg_api_hash)
-            if _tg_api_id != 0 and _tg_api_hash
+            TelegramChannelReader(channels=_tg_channels)
+            if _tg_channels
             else None
         )
 

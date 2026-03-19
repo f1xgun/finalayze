@@ -1,103 +1,78 @@
 """Telegram channel reader for Russian financial news (Layer 2).
 
-Fetches recent messages from configured Telegram channels and converts
-them to :class:`~finalayze.core.schemas.NewsArticle` objects.
+Fetches recent messages from public Telegram channels via t.me/s/ web preview.
+No authentication required — uses plain HTTP GET + HTML parsing.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
+import httpx
 import structlog
+from bs4 import BeautifulSoup, Tag
 
 from finalayze.core.schemas import NewsArticle
 
-if TYPE_CHECKING:
-    from telethon import TelegramClient
-
 logger = structlog.get_logger(__name__)
 
-_MAX_MESSAGES_PER_CHANNEL = 50  # Cap per poll cycle
-_MIN_TEXT_LENGTH = 10  # Filter noise / media-only messages
+_MAX_MESSAGES_PER_CHANNEL = 50
+_MIN_TEXT_LENGTH = 10
 _TITLE_MAX_LENGTH = 100
+_USER_AGENT = "Mozilla/5.0 (compatible; Finalayze/1.0)"
+_REQUEST_TIMEOUT = 15
 
 
 class TelegramChannelReader:
-    """Reads financial news messages from Telegram channels.
+    """Reads financial news from public Telegram channels via web preview.
 
-    Uses Telethon to connect to Telegram and iterate over recent messages
-    in configured channels. Returns a list of NewsArticle objects.
-
-    When credentials are not configured (api_id=0 or api_hash=""),
-    all fetch operations return an empty list without error.
+    Parses ``https://t.me/s/<channel>`` HTML pages — no Telegram API
+    credentials needed.  When ``channels`` list is empty, all fetch
+    operations return an empty list without error.
     """
 
-    def __init__(
-        self,
-        api_id: int,
-        api_hash: str,
-        session_name: str = "finalayze_reader",
-    ) -> None:
-        self._api_id = api_id
-        self._api_hash = api_hash
-        self._session_name = session_name
-        self._configured = api_id != 0 and api_hash != ""
+    def __init__(self, *, channels: list[str] | None = None) -> None:
+        self._channels = channels or []
+
+    @property
+    def configured(self) -> bool:
+        """Whether any channels are set."""
+        return len(self._channels) > 0
 
     async def fetch_recent_messages(
         self,
-        channels: list[str],
-        since_minutes: int = 5,
+        channels: list[str] | None = None,
+        since_minutes: int = 30,
     ) -> list[NewsArticle]:
-        """Fetch recent messages from Telegram channels.
+        """Fetch recent messages from public Telegram channels.
 
         Args:
-            channels: List of Telegram channel usernames (e.g. ``["@fin_news"]``).
+            channels: Override channel list (uses constructor list if *None*).
             since_minutes: Only return messages from the last N minutes.
 
         Returns:
-            List of NewsArticle objects, may be empty.
+            List of :class:`NewsArticle`, may be empty.
         """
-        if not self._configured:
-            logger.debug("telegram_reader_not_configured")
+        target_channels = channels if channels is not None else self._channels
+        if not target_channels:
+            logger.debug("telegram_reader_no_channels")
             return []
-
-        from telethon import TelegramClient  # noqa: PLC0415
 
         cutoff = datetime.now(UTC) - timedelta(minutes=since_minutes)
         articles: list[NewsArticle] = []
 
-        client: TelegramClient = TelegramClient(
-            self._session_name,
-            self._api_id,
-            self._api_hash,
-        )
-
-        async with client:
-            for channel in channels:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": _USER_AGENT},
+            timeout=_REQUEST_TIMEOUT,
+            follow_redirects=True,
+        ) as client:
+            for channel in target_channels:
                 try:
-                    async for msg in client.iter_messages(
-                        channel,
-                        offset_date=cutoff,
-                        reverse=True,
-                        limit=_MAX_MESSAGES_PER_CHANNEL,
-                    ):
-                        if not msg.text or len(msg.text.strip()) < _MIN_TEXT_LENGTH:
-                            continue
-
-                        channel_name = channel.lstrip("@")
-                        article = NewsArticle(
-                            id=uuid4(),
-                            source=f"telegram:{channel}",
-                            title=msg.text[:_TITLE_MAX_LENGTH],
-                            content=msg.text,
-                            url=f"https://t.me/{channel_name}/{msg.id}",
-                            language="ru",
-                            published_at=msg.date,
-                            scope="russia",
-                        )
-                        articles.append(article)
+                    channel_articles = await self._fetch_channel(
+                        client, channel, cutoff
+                    )
+                    articles.extend(channel_articles)
                 except Exception:
                     logger.warning(
                         "telegram_channel_fetch_failed",
@@ -107,3 +82,89 @@ class TelegramChannelReader:
                     continue
 
         return articles
+
+    async def _fetch_channel(
+        self,
+        client: httpx.AsyncClient,
+        channel: str,
+        cutoff: datetime,
+    ) -> list[NewsArticle]:
+        """Parse a single channel's web preview page."""
+        channel_name = channel.lstrip("@")
+        url = f"https://t.me/s/{channel_name}"
+        resp = await client.get(url)
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        widgets = soup.select(".tgme_widget_message_wrap")
+
+        articles: list[NewsArticle] = []
+        for widget in widgets[-_MAX_MESSAGES_PER_CHANNEL:]:
+            article = self._parse_message(widget, channel, cutoff)
+            if article is not None:
+                articles.append(article)
+
+        logger.info(
+            "telegram_channel_fetched",
+            channel=channel,
+            count=len(articles),
+        )
+        return articles
+
+    def _parse_message(
+        self,
+        widget: Tag,
+        channel: str,
+        cutoff: datetime,
+    ) -> NewsArticle | None:
+        """Extract a NewsArticle from a single message widget, or *None*."""
+        # Extract timestamp
+        time_tag = widget.select_one("time[datetime]")
+        if time_tag is None:
+            return None
+
+        dt_str = time_tag.get("datetime", "")
+        if isinstance(dt_str, list):
+            dt_str = dt_str[0] if dt_str else ""
+        try:
+            published = datetime.fromisoformat(dt_str.replace("+00:00", "+00:00"))
+            if published.tzinfo is None:
+                published = published.replace(tzinfo=UTC)
+        except (ValueError, AttributeError):
+            return None
+
+        if published < cutoff:
+            return None
+
+        # Extract text
+        text_el = widget.select_one(".tgme_widget_message_text")
+        if text_el is None:
+            return None
+
+        text = text_el.get_text(strip=True)
+        if len(text) < _MIN_TEXT_LENGTH:
+            return None
+
+        # Extract message link
+        channel_name = channel.lstrip("@")
+        link_el = widget.select_one(
+            ".tgme_widget_message[data-post]"
+        )
+        if link_el is not None:
+            data_post = link_el.get("data-post", "")
+            if isinstance(data_post, list):
+                data_post = data_post[0] if data_post else ""
+            msg_url = f"https://t.me/{data_post}" if data_post else f"https://t.me/{channel_name}"
+        else:
+            msg_url = f"https://t.me/{channel_name}"
+
+        return NewsArticle(
+            id=uuid4(),
+            source=f"telegram:{channel}",
+            title=text[:_TITLE_MAX_LENGTH],
+            content=text,
+            url=msg_url,
+            language="ru",
+            published_at=published,
+            scope="russia",
+        )

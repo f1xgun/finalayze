@@ -4,18 +4,47 @@ Finalayze is an AI-powered multi-market stock trading system. It ingests news,
 social sentiment, and market data; analyzes them with LLMs and ML ensembles;
 and executes trades on US (Alpaca) and MOEX (Tinkoff Invest) markets.
 
-## Superpowers Workflow (mandatory)
+## Development Workflow (mandatory)
 
-Follow this sequence for ALL work. Skills trigger automatically -- invoke them.
+GSD is the primary orchestration framework. Trading skills are domain hooks within it.
 
-1. **Brainstorm** before any feature/change (design first, code never)
-2. **Worktree** -- isolate work in a git worktree
-3. **Write plan** -- save to `docs/plans/YYYY-MM-DD-<name>.md`
-4. **Execute plan** via subagent-driven-development or executing-plans
-5. **TDD** -- RED-GREEN-REFACTOR for all implementations
-6. **Verify** before claiming completion (run tests, read output)
-7. **Backtest validate** -- run `backtest-iteration` skill for strategy/risk/backtest/ML changes
-8. **Finish branch** -- merge, PR, or keep
+### Planned work (phases/milestones)
+
+```
+/gsd:new-project          # first time only — creates .planning/, ROADMAP, etc.
+/gsd:discuss-phase N      # brainstorm design decisions for phase N
+/gsd:plan-phase N         # research → plan → verify loop
+/gsd:execute-phase N      # wave-based parallel execution with TDD
+/gsd:verify-work N        # UAT / manual verification
+/gsd:progress             # check status, route to next action
+```
+
+### Quick tasks (ad-hoc, no milestone ceremony)
+
+```
+/gsd:quick "description"           # plan + execute in one shot
+/gsd:quick --discuss "description" # brainstorm gray areas first
+/gsd:quick --full "description"    # adds plan-checking + verification
+```
+
+### Debugging
+
+```
+/gsd:debug "description"  # systematic debugging with checkpoints
+```
+
+### Session management
+
+```
+/gsd:pause-work           # save context for later
+/gsd:resume-work          # restore context from previous session
+```
+
+### Trading-specific gates (mandatory)
+
+After ANY change to strategies/risk/backtest/ML, run `backtest-iteration` skill
+before completing the phase or quick task. Use other trading skills as needed
+(see Trading Skills table below).
 
 ## Trading Skills (`.claude/skills/`)
 
@@ -33,20 +62,37 @@ See [WORKFLOW.md §9](WORKFLOW.md) for full dispatch rules.
 
 ## Documentation Map
 
+### Agent Context (read first)
 | Document | Purpose |
 |---|---|
-| [docs/INDEX.md](docs/INDEX.md) | Master index of all documentation |
+| [docs/AGENTS.md](docs/AGENTS.md) | Agent dispatch rules, context loading order, coordination patterns |
+| [docs/GLOSSARY.md](docs/GLOSSARY.md) | Domain terminology reference |
+| `src/finalayze/*/CLAUDE.md` | Module-level context (layer, public API, contracts) |
+
+### Architecture & Design Specs
+| Document | Purpose |
+|---|---|
 | [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md) | System architecture |
 | [docs/architecture/DEPENDENCY_LAYERS.md](docs/architecture/DEPENDENCY_LAYERS.md) | Import layering rules |
 | [docs/architecture/DATA_FLOW.md](docs/architecture/DATA_FLOW.md) | Event flow diagrams |
-| [docs/design/](docs/design/) | MARKETS, SEGMENTS, STRATEGIES, RISK, NEWS, ML |
-| [docs/api/ENDPOINTS.md](docs/api/ENDPOINTS.md) | API contract reference |
+| [docs/design/](docs/design/) | STRATEGIES, RISK, ML_PIPELINE, MARKETS, SEGMENTS, NEWS_PIPELINE |
+| [docs/design/BROKER_CONTRACTS.md](docs/design/BROKER_CONTRACTS.md) | Broker integration specs |
+| [docs/database/SCHEMA.md](docs/database/SCHEMA.md) | Database tables, migrations, conventions |
+| [docs/api/ENDPOINTS.md](docs/api/ENDPOINTS.md) | REST API contract reference |
+
+### Quality & Operations
+| Document | Purpose |
+|---|---|
 | [docs/quality/GRADES.md](docs/quality/GRADES.md) | Quality grades per domain |
 | [docs/quality/GAPS.md](docs/quality/GAPS.md) | Tech debt tracker |
-| [docs/plans/ROADMAP.md](docs/plans/ROADMAP.md) | Phase overview with status |
-| [docs/plans/PHASE_1.md](docs/plans/PHASE_1.md) | Phase 1 execution plan |
+| [docs/operations/GO_LIVE_CHECKLIST.md](docs/operations/GO_LIVE_CHECKLIST.md) | Pre-production validation |
+
+### Process
+| Document | Purpose |
+|---|---|
 | [WORKFLOW.md](WORKFLOW.md) | Development process conventions |
-| [.claude/agents/](/.claude/agents/) | 18 sub-agent definitions (4 domain experts + 14 module/specialized agents) |
+| [.claude/agents/](/.claude/agents/) | 36 sub-agent definitions |
+| [.planning/](/.planning/) | GSD state, milestones, retrospective |
 
 ## Dependency Layering Rules
 
@@ -76,9 +122,11 @@ Layer 6: API / Dashboard        api/, dashboard/
 
 18 Claude Code sub-agents in `.claude/agents/`. See §8 in [WORKFLOW.md](WORKFLOW.md) for dispatch rules.
 
-**Domain experts (audit + design review):** `quant-analyst`, `risk-officer`, `ml-engineer`, `systems-architect`
+**Domain experts (audit + design review):** `quant-analyst`, `risk-officer`, `ml-engineer`, `systems-architect`, `portfolio-strategist`
 
-**Module agents (implementers):** `core-agent`, `config-agent`, `data-agent`, `markets-agent`, `analysis-agent`, `ml-agent`, `strategies-agent`, `risk-agent`, `execution-agent`, `backtest-agent`, `api-agent`, `infra-agent`
+**Module agents (implementers):** `core-agent`, `config-agent`, `data-agent`, `markets-agent`, `analysis-agent`, `ml-agent`, `strategies-agent`, `risk-agent`, `execution-agent`, `backtest-agent`, `api-agent`, `infra-agent`, `news-pipeline-agent`
+
+**Operations agents:** `live-monitor-agent`, `data-quality-agent`, `evaluation-agent`
 
 **Specialized agents:** `evaluation-agent`, `data-quality-agent`
 

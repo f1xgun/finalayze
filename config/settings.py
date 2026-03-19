@@ -105,8 +105,6 @@ class Settings(BaseSettings):
         "https://tass.com/rss/v2.xml",
     ]
     news_poll_interval_minutes: int = 5  # FINALAYZE_NEWS_POLL_INTERVAL_MINUTES
-    telegram_api_id: int = 0  # FINALAYZE_TELEGRAM_API_ID
-    telegram_api_hash: str = ""  # FINALAYZE_TELEGRAM_API_HASH
     telegram_channels: list[str] = []  # FINALAYZE_TELEGRAM_CHANNELS
 
     # Safety
