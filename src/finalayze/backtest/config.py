@@ -157,3 +157,14 @@ class BacktestConfig:
 
     # MetaLabeler for ML-based position sizing (predicts P(profitable))
     meta_labeler: MetaLabeler | None = None
+
+    # Date ranges to exclude from vol/ATR calculations (e.g. MOEX 2022 closure).
+    # Candles within these ranges remain in OHLCV for position tracking but are
+    # skipped when computing volatility-based metrics.
+    # Format: tuple of (start_date_iso, end_date_iso) inclusive strings.
+    exclude_periods: tuple[tuple[str, str], ...] = ()
+
+
+# MOEX was closed Feb 28 - Mar 24 2022 with extreme dislocation before/after.
+# This period distorts vol estimates 3-5x and teaches false mean-reversion patterns.
+MOEX_2022_BREAK: tuple[tuple[str, str], ...] = (("2022-02-21", "2022-04-01"),)

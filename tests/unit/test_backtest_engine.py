@@ -285,8 +285,7 @@ class TestFilterCandlesByExclusion:
         """Candles within excluded period are removed, others preserved."""
         from finalayze.risk.stop_loss import filter_candles_by_exclusion
 
-        candles: list[Candle] = []
-        # 10 candles: 5 before, 3 inside, 2 after the exclusion window
+        # 10 candles: 4 before, 3 inside, 3 after the exclusion window
         dates = [
             datetime(2022, 1, 10, tzinfo=UTC),  # before
             datetime(2022, 2, 1, tzinfo=UTC),  # before
@@ -297,32 +296,35 @@ class TestFilterCandlesByExclusion:
             datetime(2022, 4, 1, tzinfo=UTC),  # excluded (end, inclusive)
             datetime(2022, 4, 2, tzinfo=UTC),  # after
             datetime(2022, 5, 1, tzinfo=UTC),  # after
-            datetime(2022, 6, 1, tzinfo=UTC),  # after (10th candle to have 10 total)
+            datetime(2022, 6, 1, tzinfo=UTC),  # after
         ]
-        for dt in dates:
-            candles.append(
-                Candle(
-                    symbol="SBER",
-                    market_id="moex",
-                    timeframe="1d",
-                    timestamp=dt,
-                    open=Decimal(100),
-                    high=Decimal(105),
-                    low=Decimal(95),
-                    close=Decimal(102),
-                    volume=1_000_000,
-                )
+        candles = [
+            Candle(
+                symbol="SBER",
+                market_id="moex",
+                timeframe="1d",
+                timestamp=dt,
+                open=Decimal(100),
+                high=Decimal(105),
+                low=Decimal(95),
+                close=Decimal(102),
+                volume=1_000_000,
             )
+            for dt in dates
+        ]
 
         exclude = (("2022-02-21", "2022-04-01"),)
         filtered = filter_candles_by_exclusion(candles, exclude)
         expected_count = 7
         assert len(filtered) == expected_count
         # None of the filtered candles should fall within the excluded range
+        from datetime import date
+
+        excl_start = date(2022, 2, 21)
+        excl_end = date(2022, 4, 1)
         for c in filtered:
             d = c.timestamp.date()
-            assert not (d >= datetime(2022, 2, 21, tzinfo=UTC).date()
-                        and d <= datetime(2022, 4, 1, tzinfo=UTC).date())
+            assert not (excl_start <= d <= excl_end)
 
 
 class TestAtrExcludesStructuralBreak:
@@ -332,60 +334,68 @@ class TestAtrExcludesStructuralBreak:
         """ATR with exclusion is significantly lower than without when break has extreme vol."""
         from finalayze.risk.stop_loss import compute_atr_stop_loss
 
-        candles: list[Candle] = []
-        # Normal candles before break (Jan 2022)
-        for day in range(1, 21):
-            candles.append(
-                Candle(
-                    symbol="SBER",
-                    market_id="moex",
-                    timeframe="1d",
-                    timestamp=datetime(2022, 1, day, 7, 0, tzinfo=UTC),
-                    open=Decimal(100),
-                    high=Decimal(102),
-                    low=Decimal(98),
-                    close=Decimal(101),
-                    volume=1_000_000,
-                )
+        # 5 normal candles before break (Jan 2022)
+        normal_before = [
+            Candle(
+                symbol="SBER",
+                market_id="moex",
+                timeframe="1d",
+                timestamp=datetime(2022, 1, day, 7, 0, tzinfo=UTC),
+                open=Decimal(100),
+                high=Decimal(102),
+                low=Decimal(98),
+                close=Decimal(101),
+                volume=1_000_000,
             )
-        # Extreme vol candles during break (Feb 21 - Apr 1 2022)
+            for day in range(10, 15)
+        ]
+        # 10 extreme vol candles during break (Feb 21-28 + Mar 1-5 2022)
         extreme_dates = [
             datetime(2022, 2, 21, 7, 0, tzinfo=UTC),
+            datetime(2022, 2, 22, 7, 0, tzinfo=UTC),
+            datetime(2022, 2, 23, 7, 0, tzinfo=UTC),
+            datetime(2022, 2, 24, 7, 0, tzinfo=UTC),
             datetime(2022, 2, 25, 7, 0, tzinfo=UTC),
+            datetime(2022, 3, 1, 7, 0, tzinfo=UTC),
+            datetime(2022, 3, 2, 7, 0, tzinfo=UTC),
+            datetime(2022, 3, 3, 7, 0, tzinfo=UTC),
+            datetime(2022, 3, 4, 7, 0, tzinfo=UTC),
             datetime(2022, 3, 5, 7, 0, tzinfo=UTC),
-            datetime(2022, 3, 15, 7, 0, tzinfo=UTC),
-            datetime(2022, 3, 25, 7, 0, tzinfo=UTC),
         ]
-        for dt in extreme_dates:
-            candles.append(
-                Candle(
-                    symbol="SBER",
-                    market_id="moex",
-                    timeframe="1d",
-                    timestamp=dt,
-                    open=Decimal(80),
-                    high=Decimal(130),
-                    low=Decimal(50),
-                    close=Decimal(70),
-                    volume=5_000_000,
-                )
+        extreme = [
+            Candle(
+                symbol="SBER",
+                market_id="moex",
+                timeframe="1d",
+                timestamp=dt,
+                open=Decimal(80),
+                high=Decimal(150),
+                low=Decimal(40),
+                close=Decimal(70),
+                volume=5_000_000,
             )
-        # Normal candles after break (Apr-May 2022)
-        for day in range(5, 25):
-            candles.append(
-                Candle(
-                    symbol="SBER",
-                    market_id="moex",
-                    timeframe="1d",
-                    timestamp=datetime(2022, 4, day, 7, 0, tzinfo=UTC),
-                    open=Decimal(100),
-                    high=Decimal(103),
-                    low=Decimal(97),
-                    close=Decimal(101),
-                    volume=1_000_000,
-                )
+            for dt in extreme_dates
+        ]
+        # 5 normal candles after break (Apr 5-9 2022)
+        normal_after = [
+            Candle(
+                symbol="SBER",
+                market_id="moex",
+                timeframe="1d",
+                timestamp=datetime(2022, 4, day, 7, 0, tzinfo=UTC),
+                open=Decimal(100),
+                high=Decimal(103),
+                low=Decimal(97),
+                close=Decimal(101),
+                volume=1_000_000,
             )
+            for day in range(5, 10)
+        ]
+        candles: list[Candle] = normal_before + extreme + normal_after
 
+        # Total: 20 candles (5 normal + 10 extreme + 5 normal)
+        # Without exclusion, last 15 = 10 extreme + 5 normal -> high ATR
+        # With exclusion, extreme candles removed -> 10 normal candles only
         entry_price = Decimal(100)
         exclude = (("2022-02-21", "2022-04-01"),)
 
@@ -397,11 +407,12 @@ class TestAtrExcludesStructuralBreak:
             atr_multiplier=Decimal("2.0"),
         )
 
-        # With exclusion -- ATR based on normal candles only
+        # With exclusion -- ATR based on normal candles only (10 candles, need 14+1
+        # so we use a smaller period to ensure the test works)
         stop_with_exclude = compute_atr_stop_loss(
             entry_price=entry_price,
             candles=candles,
-            atr_period=14,
+            atr_period=8,
             atr_multiplier=Decimal("2.0"),
             exclude_periods=exclude,
         )

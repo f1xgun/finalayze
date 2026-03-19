@@ -52,7 +52,7 @@ from finalayze.risk.position_sizing_pipeline import (
     VolTargetStep,
 )
 from finalayze.risk.pre_trade_check import PreTradeChecker
-from finalayze.risk.stop_loss import compute_atr_stop_loss
+from finalayze.risk.stop_loss import compute_atr_stop_loss, filter_candles_by_exclusion
 
 if TYPE_CHECKING:
     from finalayze.backtest.costs import TransactionCosts
@@ -147,6 +147,7 @@ class BacktestEngine:
         self._profit_target_atr = cfg.profit_target_atr
         self._max_hold_bars = cfg.max_hold_bars
         self._stop_loss_mode = cfg.stop_loss_mode
+        self._exclude_periods = cfg.exclude_periods
         self._regime_provider = regime_provider
         self._meta_labeler = cfg.meta_labeler
         # Propagate market context to strategy if it supports it (duck typing)
@@ -281,9 +282,12 @@ class BacktestEngine:
             # (b2) Update Chandelier stops (monotonic ratchet)
             if self._stop_loss_mode == "chandelier" and symbol in chandelier_stops:
                 history_so_far = candles[: i + 1]
+                history_for_atr = filter_candles_by_exclusion(
+                    history_so_far, self._exclude_periods
+                ) if self._exclude_periods else history_so_far
                 segment_mult = get_chandelier_multiplier(segment_id)
                 candidate = compute_chandelier_stop(
-                    history_so_far,
+                    history_for_atr,
                     atr_period=22,
                     multiplier=segment_mult,
                 )
@@ -677,9 +681,12 @@ class BacktestEngine:
                     sym_candles = candles_by_symbol.get(sym, [])
                     idx = candle_index[sym][ts]
                     history_so_far = sym_candles[: idx + 1]
+                    history_for_atr = filter_candles_by_exclusion(
+                        history_so_far, self._exclude_periods
+                    ) if self._exclude_periods else history_so_far
                     segment_mult = get_chandelier_multiplier(segment_id)
                     candidate = compute_chandelier_stop(
-                        history_so_far, atr_period=22, multiplier=segment_mult
+                        history_for_atr, atr_period=22, multiplier=segment_mult
                     )
                     if candidate is not None:
                         new_stop = max(chandelier_stops[sym], candidate)
@@ -1291,6 +1298,7 @@ class BacktestEngine:
             entry_price=fill_price,
             candles=history,
             atr_multiplier=stop_atr_mult,
+            exclude_periods=self._exclude_periods,
         )
         if stop_price is None:
             self._journal_skip(
@@ -1354,6 +1362,7 @@ class BacktestEngine:
                     candles=history,
                     atr_period=22,
                     atr_multiplier=Decimal(str(segment_mult)),
+                    exclude_periods=self._exclude_periods,
                 )
                 if initial_stop is not None:
                     if chandelier_stops is not None:
