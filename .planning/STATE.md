@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: MOEX Profitability
-status: defining_requirements
+status: ready_to_plan
 stopped_at: null
-last_updated: "2026-03-20T12:00:00.000Z"
-last_activity: 2026-03-20 -- Milestone v2.0 started
+last_updated: "2026-03-20T14:00:00.000Z"
+last_activity: 2026-03-20 -- Roadmap created (5 phases, 17 requirements mapped)
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,35 +20,39 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-03-20)
 
-**Core value:** Autonomous profitable MOEX trading (stocks + bonds + coupons) with risk limits, operating without human intervention
-**Current focus:** v2.0 MOEX Profitability — make MOEX equity profitable through universe cleanup, MOEX-native strategies, and ML
+**Core value:** Autonomous profitable MOEX trading with acceptable risk limits
+**Current focus:** Phase 8 -- Data Foundation
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-03-20 — Milestone v2.0 started
+Phase: 8 of 12 (Data Foundation) -- first phase of v2.0
+Plan: 0 of ? in current phase
+Status: Ready to plan
+Last activity: 2026-03-20 -- Roadmap created for v2.0 MOEX Profitability (5 phases, 17 requirements)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [..........] 0% (v2.0 milestone)
+
+## Performance Metrics
+
+**Velocity (v1.0):**
+- Total plans completed: 22
+- Average duration: ~45 min
+- Total execution time: ~16.5 hours
+
+*v2.0 metrics will populate after first plan completes*
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-v1.0 decisions carried forward:
+Recent decisions affecting current work:
 
-- [v1.0]: ou_mean_reversion disabled on all MOEX segments (negative Sharpe: -0.28, -0.11, -0.55)
-- [v1.0]: All 8 candidate pairs failed cointegration (p>0.05) — pairs strategy disabled on all MOEX
-- [v1.0]: Individual symbols profitable (YNDX +0.88, ROSN +0.65) but segment averages dragged by losing symbols
-- [v1.0]: OFZ-PK carry ENABLED (Sharpe +1.14, PF 25.22), OFZ-PD duration rotation DISABLED (Sharpe -0.16)
-- [v1.0]: event_driven at 0.15 weight, 0 backtest trades (needs live news)
-- [v1.0]: Three-quarter Kelly (0.75) for MOEX — 3x position sizes vs default
-- [v2.0-CEO]: GAZP, VTBR, SNGS, IRAO, ALRS identified as toxic symbols (~60% of negative PnL)
-- [v2.0-CEO]: Dividend gap closure documented as primary MOEX alpha source (70%+ gap closure within 30-60 days)
-- [v2.0-CEO]: OFZ-PK carry is portfolio foundation (20% annual at 21% CBR rate)
-- [v2.0-CEO]: US market development deferred — MOEX-only focus
+- [v2.0]: MOEX-only focus -- US market deferred
+- [v2.0]: Universe surgery first -- toxic symbols account for ~60% negative PnL
+- [v2.0]: Dividend gap as primary alpha -- 70%+ documented closure rate on blue chips
+- [v2.0]: Sector rotation MUST be in sizing pipeline, NOT combiner (architectural constraint)
+- [v1.0]: OFZ-PK carry ENABLED (Sharpe +1.14) -- portfolio foundation for v2.0
 
 ### Pending Todos
 
@@ -56,12 +60,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- MOEX equity WF Sharpe consistently negative (-0.01 to -0.09 across all iterations)
-- moex_dividends.yaml has only 43 events across 6 symbols — data gap for dividend strategy
-- rub_oil_regime.py exists but not wired into equity sizing pipeline
-- 2022 sanctions regime makes backtest data noisy (structural break)
+- MOEX sector index tickers (MOEXOG, MOEXFN) need live API validation before Phase 10
+- OFZ yield curve slope data source unclear -- research needed before Phase 10
+- Preferred share cointegration must be validated on post-2022 data before Phase 11
 
 ## Session Continuity
 
 Last session: 2026-03-20
-Stopped at: Defining v2.0 requirements
+Stopped at: Roadmap created for v2.0 milestone
+Resume file: None

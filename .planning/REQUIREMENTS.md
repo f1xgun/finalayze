@@ -24,7 +24,7 @@ Requirements for MOEX profitability milestone. Each maps to roadmap phases.
 ### Macro Regime
 
 - [ ] **MACRO-01**: CBRRegimeStep in sizing pipeline — CBR rate level + direction affects equity allocation sizing
-- [ ] **MACRO-02**: OFZ PK→PD rotation trigger — detects CBR cutting cycle start for bond allocation shift
+- [ ] **MACRO-02**: OFZ PK-to-PD rotation trigger — detects CBR cutting cycle start for bond allocation shift
 - [ ] **MACRO-03**: SectorAllocationStep in sizing pipeline for sector rotation using MOEX sector indices (MOEXOG, MOEXFN, etc.)
 
 ### Advanced Strategies
@@ -36,7 +36,7 @@ Requirements for MOEX profitability milestone. Each maps to roadmap phases.
 ### Portfolio Assembly
 
 - [ ] **PORT-01**: PortfolioBacktestOrchestrator for joint equity + OFZ backtest with merged equity curve
-- [ ] **PORT-02**: Portfolio allocation 40% OFZ carry + 60% equity with RUB crisis brake (USD/RUB +15% over 20 bars → freeze equity)
+- [ ] **PORT-02**: Portfolio allocation 40% OFZ carry + 60% equity with RUB crisis brake (USD/RUB +15% over 20 bars -> freeze equity)
 - [ ] **PORT-03**: Blended MOEX portfolio walk-forward Sharpe >= +0.10 (combined equity + OFZ)
 
 ## Future Requirements
@@ -64,29 +64,29 @@ Deferred to v3.0+.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Pending | Pending |
-| DATA-02 | Pending | Pending |
-| DATA-03 | Pending | Pending |
-| DATA-04 | Pending | Pending |
-| STRAT-01 | Pending | Pending |
-| STRAT-02 | Pending | Pending |
-| STRAT-03 | Pending | Pending |
-| STRAT-04 | Pending | Pending |
-| MACRO-01 | Pending | Pending |
-| MACRO-02 | Pending | Pending |
-| MACRO-03 | Pending | Pending |
-| ADV-01 | Pending | Pending |
-| ADV-02 | Pending | Pending |
-| ADV-03 | Pending | Pending |
-| PORT-01 | Pending | Pending |
-| PORT-02 | Pending | Pending |
-| PORT-03 | Pending | Pending |
+| DATA-01 | Phase 8 | Pending |
+| DATA-02 | Phase 8 | Pending |
+| DATA-03 | Phase 8 | Pending |
+| DATA-04 | Phase 8 | Pending |
+| STRAT-01 | Phase 9 | Pending |
+| STRAT-02 | Phase 9 | Pending |
+| STRAT-03 | Phase 9 | Pending |
+| STRAT-04 | Phase 9 | Pending |
+| MACRO-01 | Phase 10 | Pending |
+| MACRO-02 | Phase 10 | Pending |
+| MACRO-03 | Phase 10 | Pending |
+| ADV-01 | Phase 11 | Pending |
+| ADV-02 | Phase 11 | Pending |
+| ADV-03 | Phase 11 | Pending |
+| PORT-01 | Phase 12 | Pending |
+| PORT-02 | Phase 12 | Pending |
+| PORT-03 | Phase 12 | Pending |
 
 **Coverage:**
 - v2.0 requirements: 17 total
-- Mapped to phases: 0
-- Unmapped: 17 ⚠️
+- Mapped to phases: 17
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-20*
-*Last updated: 2026-03-20 after initial definition*
+*Last updated: 2026-03-20 after roadmap creation*
