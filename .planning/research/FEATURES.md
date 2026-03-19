@@ -1,245 +1,226 @@
-# Feature Research
+# Feature Landscape: MOEX Equity Profitability (v2.0)
 
-**Domain:** Autonomous MOEX trading — stocks, OFZ bonds, coupons, LLM news, Telegram
-**Researched:** 2026-03-14
-**Confidence:** HIGH (codebase inspection) / MEDIUM (market landscape via web search)
-
----
-
-## Feature Landscape
-
-### Table Stakes (Users Expect These)
-
-Features that any autonomous MOEX trading system must have. Missing these = system feels broken.
-
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Autonomous order execution (MOEX stocks) | Core value proposition — "hands-off operation" | MEDIUM | TinkoffBroker exists; needs MOEX segment tuning + RUB sizing fix |
-| Position sizing in RUB | MOEX positions sized wrong (USD math gives ~0.02% instead of 15%) | MEDIUM | Known blocker in PROJECT.md; RUB base in `position_sizing_pipeline.py` needed |
-| MOEX-specific strategy parameters | Russian market has different volatility; US params produce poor signals on RU segments | MEDIUM | ru_* YAML presets exist but may need tuning; MOEX backtest results required |
-| Positive MOEX backtest (walk-forward) | Can't deploy real money without validated backtests | HIGH | Walk-forward engine exists; needs MOEX candle data via TinkoffFetcher + Russian segment results |
-| 3-level circuit breaker for MOEX portfolio | Prevent runaway losses in autonomous mode | LOW | `CircuitBreaker` exists and is wired; MOEX-specific thresholds to verify |
-| ATR-based stop-losses (MOEX 1.2x uplift) | Standard risk control; MOEX is more volatile than US | LOW | Already implemented with 1.2x MOEX multiplier in backtest config |
-| Telegram alert on trade fill | User needs to know trades happened without watching dashboard | LOW | `TelegramAlerter.on_trade_filled()` exists and fires correctly |
-| Telegram alert on circuit breaker trip | User must be notified immediately when autopilot halts | LOW | `on_circuit_breaker_trip()` exists |
-| Daily P&L summary via Telegram | Primary monitoring signal for hands-off operation | LOW | `on_daily_summary()` exists but known bug: shows zero (PROJECT.md) |
-| Sandbox validation before real money | Safety gate — must prove system works before live | MEDIUM | sandbox mode + TinkoffBroker sandbox endpoint wired; need to run N days |
-| MOEX trading hours gate | MOEX main session 07:00-15:40 UTC, evening 16:05-20:50 UTC | LOW | Pre-trade check item 1; needs MOEX-specific schedule (not US hours) |
-| T-Invest gRPC candle data | yfinance cannot fetch MOEX tickers (SBER, GAZP, etc.) | LOW | TinkoffFetcher fully wired; constraint is hard-enforced |
-| FIGI-based instrument identification | MOEX uses FIGI codes, not ticker symbols, for orders | LOW | InstrumentRegistry with FIGI mapping exists |
-| Lot-size-aware ordering | MOEX lots (e.g. SBER = 10 shares); wrong sizing = order rejection | LOW | Must be enforced in order construction |
-| Autonomous OFZ bond trading (4-layer) | Bond trading is explicitly in scope; user requirement | HIGH | BondCycleProcessor + 3 bond strategies + LayerLedger exist; need TradingLoop wiring |
-| Coupon schedule tracking | Bonds pay coupons; system must avoid buying in ex-coupon period | MEDIUM | `fetch_bond_coupons()` exists; ex-coupon check in bond pre-trade validation |
-| Coupon Telegram alert | User wants to know when income arrives | LOW | `on_coupon_received()` exists in TelegramAlerter |
-| CBR key rate as macro input | Bond strategies (BondDurationRotationStrategy, CBREventStrategy) require CBR data | LOW | CBRFetcher + MacroContextProvider exist; MacroCacheService needs wiring |
-| LLM news analysis (Russian) | Event-driven strategy for MOEX needs RU sentiment; English news misses key events | HIGH | NewsAnalyzer + sentiment_ru.txt prompt exist; no live Russian news source wired |
+**Domain:** MOEX-native alpha strategies for Russian equity market
+**Researched:** 2026-03-20
+**Scope:** NEW features only -- dividend gap optimization, CBR regime trading, sector rotation, preferred share arbitrage, MOEX-specific ML
+**Overall confidence:** MEDIUM (domain knowledge + web research; limited quantitative backtesting data available publicly)
 
 ---
 
-### Differentiators (Competitive Advantage)
+## Table Stakes
 
-Features that set Finalayze apart from simple trading bots. These are the "AI" in "AI-powered."
+Features that are minimum-viable for MOEX equity profitability. Without these, the system cannot generate positive Sharpe on Russian equities.
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| 4-layer OFZ bond portfolio architecture | Separates capital by time horizon (Core/Strategic/Tactical/Short) with regime-adaptive rebalancing; most bots treat bonds as a single undifferentiated asset | HIGH | Architecture exists (`bond_duration_rotation`, `bond_carry`, `cbr_event` strategies, DV01 sizing, LayerLedger) |
-| CBR regime classifier driving bond decisions | Automatically adjusts duration target based on RUONIA-key rate gap + last CBR meeting decision + CPI; removes subjectivity from rate-cycle positioning | MEDIUM | `classify_regime()` in `bond_duration_rotation.py` fully implemented |
-| DV01-budget-aware bond position sizing | Size bonds by interest rate risk (bps impact), not just capital; avoids overconcentration in long-duration instruments | MEDIUM | `DV01BudgetStep` implemented; `EqualWeightBondSizer` for OFZ-PK floaters |
-| Yield stop-loss (not ATR) for bonds | Bond price moves are driven by yield changes; ATR is wrong for fixed income | LOW | `YieldStop` with regime-adaptive thresholds implemented |
-| CBR event strategy (pre-meeting momentum) | Trades OFZ around CBR rate meetings; entry 2-7 days before, mechanical exit T+1/T+2; statistically grounded arbitrage of announcement drift | MEDIUM | `CBREventStrategy` fully implemented; ~24 trades per 3-year backtest |
-| Claude Sonnet LLM analysis with Russian prompt | Multi-step reasoning (extract facts → identify affected companies → assess market impact → synthesize) in Russian; far above keyword-based sentiment | MEDIUM | Prompt exists; needs live news source |
-| Sanctions proximity scoring on Russian equities | Geopolitical risk of individual stocks (GAZP 0.8, SBER 0.3) reduces confidence on sanctions-related events | LOW | Implemented in `event_driven.py`; reusable once news feed is wired |
-| ADX regime routing (MOEX segments) | Separates trend-following and mean-reversion strategies by market regime; prevents fighting trend with MR strategies | LOW | Exists for US; needs validation/tuning for MOEX volatility regime thresholds |
-| ML ensemble as signal reinforcer | XGBoost + LightGBM + CatBoost meta-learner boosts confirmed signals rather than generating standalone trades | HIGH | Architecture exists; models need training on MOEX features |
-| RUB-oil regime overlay | Russian market is strongly correlated to Brent crude; RUB/oil regime changes trading posture | LOW | `rub_oil_regime.py` + `commodity_currency.py` in risk module |
-| MacroCacheService with CBR-day force-refresh | Macro data refreshes at market open + forced refresh after CBR press conference (15:30 MSK, not 13:30 spread-spike window) | LOW | Designed and documented; needs implementation |
+| Feature | Why Expected | Complexity | Existing Code | Notes |
+|---------|--------------|------------|---------------|-------|
+| Expanded dividend calendar (150+ events) | Current 43 events produce too few trades; dividend gap is the most documented MOEX alpha | LOW | `moex_dividends.yaml` has 43 entries; `DividendGapStrategy` exists | Must expand to cover SBER, SBERP, LKOH, TATN, TATNP, ROSN, NVTK, GMKN, CHMF, MTSS, PHOR + 2022-2025 history. T-Invest `get_dividends()` API fetches this data. |
+| Dividend gap closure strategy tuning | Default params (min_gap 3%, max_hold 40 bars) are untested against real closure statistics | MEDIUM | `DividendGapStrategy` with configurable params | See Market Mechanics below. Rosneft closes same-day; Lukoil ~10 days; Tatneft varies wildly (19-255 days). Per-symbol max_hold_bars needed. |
+| CBR rate regime gating for equities | 21% key rate environment suppresses equity returns; rate decisions cause 3-5% intraday moves on financials | MEDIUM | `cbr_calendar.py` exists but is NOT wired into combiner or backtest engine | CBR meets 8x/year (known schedule). Surprise hikes (+100-200bps) trigger sell-off then 3-5 day contrarian rebound. Already coded; needs integration. |
+| Universe cleanup (toxic symbol removal) | GAZP, VTBR, SNGS, IRAO, ALRS account for ~60% of negative PnL per PROJECT.md | LOW | Symbols defined in `segments.py` | Remove from active universe or add negative weight bias. GAZP: sanctions-impaired, no dividends since 2022. VTBR: chronic dilution. |
+| Brent price gate for energy sector | MOEX energy sector (40%+ of IMOEX) is highly correlated with Brent; trading energy without oil context is blind | MEDIUM | `rub_oil_regime.py` computes RUB/oil correlation but is NOT wired into strategy combiner | Must gate energy sector momentum: Brent > $75 = energy bullish, Brent < $60 = energy bearish. Use yfinance BZ=F for Brent data. |
+| CBR rate direction as bond/equity allocation signal | In hiking cycles (2023-2024: 7.5% to 21%), equities underperform; in cutting cycles, equities rally | LOW | `CBRFetcher` provides key rate history; rate direction trivially computable | 2pp cut (21% to 18%) in Jul 2025 sent IMOEX +15% in 2 months per Forbes.ru data. |
+
+### Market Mechanics: Dividend Gap Closure (MOEX-specific)
+
+**Source:** spydell.livejournal.com historical analysis (2007-2017), finam.ru (2024-2025 data).
+
+| Company | Typical Gap Size | Average Closure Time | Notes |
+|---------|-----------------|---------------------|-------|
+| Rosneft (ROSN) | 3-5% | Same day to 1 day | Fastest closer on MOEX. 9 of 10 last gaps closed within 1 trading day. |
+| Lukoil (LKOH) | 5-8% | ~10 trading days | Consistent fast closer. 57 total trading days for ~30% returns over 5 years of gap events. |
+| Sberbank (SBER) | 3-6% | 5-15 days (normal market) | Gap closure disrupted by sanctions events (2014: 226+ days). Filter by regime. |
+| Tatneft (TATN) | 4-7% | 19 days (recent) to 255 days (worst) | Bimodal: either fast (under 20 days) or very slow. Requires regime filter. |
+| Surgutneft pref (SNGSP) | 8-12% | Variable; 18 days (2015 for 21% yield) | Highest yields but unpredictable closure. FX-driven (USD cash pile). |
+| Norilsk (GMKN) | 5-10% | 490+ total days (slow); typically 1-2 weeks normally | Macro-sensitive. Avoid during commodity downturns. |
+| Gazprom (GAZP) | 0-6% | 324 days (historically slow) | EXCLUDE from dividend gap strategy. No dividends since 2022 ex-date. |
+
+**Key insight:** Gap closure speed correlates with: (a) market expectations for future dividends, (b) no geopolitical stress, (c) overall MOEX trend. Strategy MUST include regime filter (RUB/oil correlation > 0.3 = normal).
+
+### Market Mechanics: CBR Rate Meeting Impact
+
+**Source:** CBR official calendar, Forbes.ru analysis, RBC Investitsii.
+
+- CBR meets 8x per year on a published schedule (next: 2026-03-20, 2026-04-24, 2026-06-19...)
+- Russian rate moves are 100-200bps (vs Fed's 25bps) -- outsized impact
+- Press release at 13:30 MSK, press conference at 15:00 MSK
+- Financial sector (SBER, VTBR, SBERP) reacts within minutes
+- Surprise hike: -3% to -5% on financials day-of, then contrarian rebound bars 3-5
+- Surprise cut: immediate +3% to +5% on financials, real estate (PIK, SMLT), and indebted companies (RUAL, MTLR)
+- Rate direction matters more than level: cutting cycle = equity bullish, hiking cycle = equity bearish
 
 ---
 
-### Anti-Features (Commonly Requested, Often Problematic)
+## Differentiators
 
-Features that seem good but create more problems than they solve for this system.
+Features that provide competitive edge over simple MOEX trading bots. These are the alpha generators.
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| Real-time tick-level MOEX trading (HFT) | More trades = more opportunity | System operates on daily/intraday bars; tick-level requires co-location, different risk model, and different API quota tier. Out of scope in PROJECT.md. | Daily + intraday candles via TinkoffFetcher; no tick data |
-| Multi-account management | Separate accounts for different strategies | Complicates capital allocation, reporting, and circuit breaker logic significantly. Single T-Invest account is sufficient for MVP. | Layer-based capital allocation (LayerLedger) within one account |
-| Derivatives/futures trading | Leverage boosts returns | Futures on MOEX require separate margin account, different risk model (VaR/margin calls vs stop-losses), and increase max-loss beyond the 10% hard limit. | Equity + bond portfolio with Kelly sizing provides sufficient leverage-free return |
-| Mobile app | Monitoring on phone | Streamlit dashboard + Telegram alerts cover all operational needs. Building a native app is months of work with no trading value. | Telegram bot (alerts + /status command) |
-| Full Telegram trading commands (/buy, /sell) | Manual override capability | Manual orders bypass the pre-trade pipeline and circuit breakers, violating the "autonomous with risk limits" design contract. Commands should be view-only. | `/status` command showing positions/P&L; manual trades via T-Invest app directly |
-| Automated ML model retraining in production | "Self-learning" system | Continuous retraining without human review creates model drift risk and potential for silent degradation. Walk-forward + sequential bootstrap already handles the training/validation split. | Scheduled offline retraining via `train_models.py`, human review before deployment |
-| Custom UI for ML model configuration | Power-user feature | CLI scripts (`train_models.py`, `run_iteration.py`) are sufficient; a UI adds frontend complexity with no trading value. | CLI + structured YAML presets |
-| News from Telegram crypto channels | Broader news coverage | Crypto channels produce noisy signals for equity/bond trading; majority of content is irrelevant or adversarially biased. | T-Invest news API + RBC/Interfax/TASS RSS (financial-focused, regulated sources) |
-| Cryptocurrency trading | MOEX users want one platform for all assets | Crypto is not available on MOEX. Integrating a separate exchange (Binance, etc.) breaks the "T-Invest only" broker constraint and the Russian regulatory framework. | Out of scope; clearly documented in PROJECT.md |
+| Feature | Value Proposition | Complexity | Existing Code | Notes |
+|---------|-------------------|------------|---------------|-------|
+| Per-symbol adaptive max_hold for dividend gaps | Instead of fixed 40-bar hold, use historical closure statistics per symbol (ROSN: 2 bars, LKOH: 15, TATN: 30) | LOW | `DividendGapStrategy._max_hold_bars` is global | Reduces capital lock-up. ROSN gap closes same-day -- holding 40 bars wastes opportunity cost. |
+| Dividend gap confidence scaling by historical closure rate | Higher confidence for symbols with >80% closure rate (ROSN, LKOH); lower for unreliable closers (GAZP, GMKN in downturns) | LOW | `_CONFIDENCE_SCALE` exists but is gap-size-based, not closure-rate-based | Add `closure_reliability` feature to confidence calculation. |
+| Preferred share arbitrage (SBER/SBERP, TATN/TATNP, SNGS/SNGSP) | Pref-ordinary spread on MOEX ranges 5-30%; same dividends but different prices. Mean-reversion of spread is tradeable. | HIGH | `PairsStrategy` with Kalman hedge ratio exists; NOT configured for pref/ord pairs | SBER/SBERP spread narrowed from 30% to 5% historically. When spread widens beyond 1 sigma, buy pref + sell ordinary (or just buy pref if no short-selling). MOEX short-selling restrictions are a constraint. |
+| Brent-conditional sector rotation | Rotate between energy (Brent > $75), financials (rate cut cycle), and defensive (MTSS, MGNT) sectors based on macro regime | HIGH | `rub_oil_regime.py` provides regime; sector segments defined in `segments.py` | Energy stocks (ROSN, LKOH, TATN) have 0.6-0.8 correlation with Brent. When Brent drops 20%+, rotate to defensive/consumer sectors. |
+| CBR meeting pre-positioning | Enter financial sector positions 3-5 days before CBR meeting when rate cut is expected; exit T+1 after announcement | MEDIUM | `cbr_calendar.py` has `generate_cbr_signal()` with contrarian logic | Extend to pre-meeting positioning, not just post-surprise contrarian. Requires consensus rate expectation data (manual input or scraping). |
+| ML ensemble with Russian macro features | Add CBR key rate, USDRUB, Brent price, IMOEX relative strength, and VIX-Russia (RVI index) as ML features | HIGH | ML pipeline exists for us_tech (XGBoost+LightGBM+CatBoost+meta-learner); 45 technical features | arxiv.org/abs/2503.08696 confirms multimodal (price + text) approach works on MOEX with 176 stocks. Add macro features: CBR rate delta, USDRUB 20d momentum, Brent/IMOEX beta, RVI level. |
+| OFZ PK-to-PD rotation on CBR cutting cycle detection | When CBR starts cutting (21% to 18%), switch from floating-rate OFZ-PK to fixed-rate OFZ-PD to lock in high yields before they fall | MEDIUM | `bond_carry.py` (OFZ-PK) and `bond_duration_rotation.py` (OFZ-PD) exist separately | Rotation trigger: CBR cuts >= 2 consecutive meetings OR cumulative cut >= 200bps. Current OFZ-PK carry Sharpe +1.14; OFZ-PD would outperform in cutting cycle. |
+| RUB crisis brake (portfolio-level) | When USDRUB moves >5% in 5 days or RUB/oil correlation breaks down (< 0.1), halt all new equity longs and increase OFZ allocation to 60% | LOW | `rub_oil_regime.py` provides crisis detection; circuit breaker exists | Geopolitical/sanctions events cause 10-20% RUB drops. System must protect capital. |
+| Dividend reinvestment timing | After collecting dividend, immediately reinvest into the same stock if gap exists (compound the gap-closure alpha) | LOW | `DividendGapStrategy` handles entry; no reinvestment logic | Dividends credited T+25 working days on MOEX. Can pre-plan reinvestment. |
+
+### Preferred Share Arbitrage: MOEX-Specific Mechanics
+
+**Key pairs on MOEX with same dividends for ordinary and preferred:**
+
+| Pair | Typical Spread | Dividend Equality | Liquidity | Tradability |
+|------|---------------|-------------------|-----------|-------------|
+| SBER / SBERP | 5-15% (was 30%) | Yes, same dividend per share | Both highly liquid | HIGH -- best pair for arb |
+| TATN / TATNP | 5-10% | Yes, same dividend per share | Both liquid | HIGH |
+| SNGS / SNGSP | 200-400% (ordinary much cheaper) | No -- SNGSP gets 10%+ yield, SNGS gets ~1% | SNGSP more liquid | MEDIUM -- not true arb, different economics |
+| ROSN / ROSNP | N/A | Preferred rarely trades | Very low ROSNP liquidity | LOW -- skip |
+
+**Constraint:** MOEX short-selling is restricted for retail investors via T-Invest. Strategy must be long-only on the undervalued leg (typically pref), or use the `PairsStrategy` spread z-score to time entries on the cheaper leg only.
+
+### Brent-MOEX Correlation Specifics
+
+- Energy stocks (ROSN, LKOH, TATN, SIBN) have 0.6-0.8 rolling correlation with Brent crude
+- When Brent > $80: energy sector outperforms IMOEX by 5-10% annually
+- When Brent < $60: energy sector underperforms by 10-15%; financials and consumer staples outperform
+- Urals discount to Brent varies ($5-$25 depending on sanctions); direct Brent tracking is sufficient proxy
+- MOEX Oil & Gas Index (MOEXOG) available via MOEX ISS API as sector benchmark
+
+---
+
+## Anti-Features
+
+Features to explicitly NOT build for v2.0.
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| Intraday dividend gap scalping | Gap closure happens over days/weeks, not intraday. Intraday noise would trigger false exits. Daily bars are correct timeframe. | Keep daily bar resolution for dividend gap strategy. |
+| Automated CBR consensus scraping | Consensus rate expectations change daily; scraping Russian financial sites is fragile and may violate ToS. | Manual input of expected rate before each CBR meeting (8x/year = low burden). Store in YAML. |
+| Full sector rotation optimizer | Optimizing across 10+ sectors with macro inputs is an overfitting trap with MOEX's short liquid history (post-2022 sanctions). | Binary sector gates: energy ON/OFF based on Brent, financials ON/OFF based on CBR direction. Simple rules, not optimization. |
+| Preferred share short-selling | T-Invest retail accounts cannot short most MOEX stocks. Building short-leg infrastructure is wasted effort. | Long-only on undervalued leg (buy pref when spread is wide). Use PairsStrategy z-score for timing only. |
+| ML model with sanctions text features | Sanctions events are rare (2-3 per year), unpredictable, and regime-breaking. ML cannot learn from N=3 events. | Use RUB/oil correlation regime (already built) as sanctions proxy. News pipeline handles specific events. |
+| PEAD strategy for MOEX | Russian companies have inconsistent earnings calendars; MOEX earnings surprises are not systematically measurable. | Focus on dividends (MOEX's primary corporate event with clean data) rather than earnings. |
+| Cross-market arbitrage (MOEX vs London/HK listings) | Russian ADRs suspended since 2022 sanctions. No liquid cross-listed pairs available. | MOEX-only trading. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-[MOEX stock autonomous trading]
-    └──requires──> [RUB position sizing fix]
-    └──requires──> [MOEX strategy tuning (ru_* YAML presets)]
-    └──requires──> [Positive MOEX walk-forward backtest]
-    └──requires──> [MOEX trading hours gate]
-    └──requires──> [Lot-size-aware ordering]
+[Dividend gap optimization]
+    requires -> [Expanded dividend calendar: 43 -> 150+ events]
+    requires -> [Per-symbol closure statistics (backtest analysis)]
+    requires -> [Regime filter wired (rub_oil_regime.py)]
+    enhances -> [Existing DividendGapStrategy code]
 
-[Positive MOEX walk-forward backtest]
-    └──requires──> [TinkoffFetcher candle data (already exists)]
-    └──requires──> [ru_* segment definitions (already exist)]
+[CBR regime trading]
+    requires -> [cbr_calendar.py wired into strategy combiner]
+    requires -> [CBR meeting dates in YAML config]
+    requires -> [Expected rate input (manual, 8x/year)]
+    enhances -> [Existing cbr_calendar.py + generate_cbr_signal()]
 
-[OFZ bond autonomous trading]
-    └──requires──> [BondCycleProcessor wired into TradingLoop]
-    └──requires──> [MacroCacheService with CBR refresh schedule]
-    └──requires──> [CBRFetcher (already exists)]
-    └──requires──> [Bond instrument registry (OFZ-PD + OFZ-PK)]
-    └──requires──> [Bond backtest showing positive PnL]
+[Brent-conditional sector rotation]
+    requires -> [Brent price data (yfinance BZ=F -- already available)]
+    requires -> [rub_oil_regime.py wired into combiner]
+    requires -> [Sector segment allocation weights adjustable at runtime]
+    depends-on -> [Universe cleanup (remove toxic symbols first)]
 
-[MacroCacheService]
-    └──requires──> [MacroContextProvider + CBRFetcher (already exist)]
+[Preferred share arbitrage]
+    requires -> [PairsStrategy configured for SBER/SBERP, TATN/TATNP pairs]
+    requires -> [Cointegration testing on pref/ord pairs (backtest)]
+    requires -> [Long-only constraint enforcement (no short selling)]
+    depends-on -> [Universe includes both SBER+SBERP, TATN+TATNP in same segment]
 
-[CBR event strategy (live)]
-    └──requires──> [MacroCacheService]
-    └──requires──> [BondCycleProcessor]
+[ML with Russian macro features]
+    requires -> [CBR rate, USDRUB, Brent as feature inputs to ML pipeline]
+    requires -> [MOEX training data (3+ years via TinkoffFetcher)]
+    requires -> [Walk-forward validation with quality gates]
+    depends-on -> [Universe cleanup + dividend gap tuning (clean baseline first)]
+    depends-on -> [Existing ML pipeline (us_tech architecture reused)]
 
-[LLM news analysis from Russian sources]
-    └──requires──> [Russian news fetcher (RBC/Interfax/TASS RSS or T-Invest news)]
-    └──requires──> [NewsAnalyzer + sentiment_ru.txt prompt (already exist)]
-    └──requires──> [NewsArticle language routing (already exists)]
+[Portfolio allocation (40% OFZ + 60% equity)]
+    requires -> [OFZ carry strategy (already Sharpe +1.14)]
+    requires -> [Equity strategies with positive Sharpe (this milestone)]
+    requires -> [RUB crisis brake (rub_oil_regime wired)]
+    depends-on -> [All equity strategies tuned and validated]
 
-[Event-driven strategy (live)]
-    └──requires──> [LLM news analysis from Russian sources]
-    └──requires──> [Sentiment cache updated on news cycle]
-
-[Telegram alerts]
-    └──requires──> [TelegramAlerter (already exists — needs daily P&L bug fix)]
-
-[Coupon Telegram alert]
-    └──requires──> [OFZ bond autonomous trading]
-    └──requires──> [Coupon detection in bond cycle (needs implementation)]
-
-[Daily P&L summary (correct)]
-    └──requires──> [MOEX portfolio equity calculation in RUB]
-    └──requires──> [RUB→USD conversion for multi-market totals]
-
-[Real money deployment]
-    └──requires──> [Sandbox validation (N days without critical errors)]
-    └──requires──> [All circuit breakers tested]
-    └──requires──> [Telegram alerts verified working]
-
-[ML ensemble on MOEX]
-    └──requires──> [MOEX training data via TinkoffFetcher]
-    └──requires──> [ML model training for ru_* segments]
-    └──requires──> [Walk-forward validation + quality gates]
-    └──enhances──> [MOEX stock autonomous trading]
+[OFZ PK->PD rotation]
+    requires -> [CBR cutting cycle detection]
+    requires -> [bond_carry.py + bond_duration_rotation.py coordination]
+    depends-on -> [CBR regime trading (uses same regime signal)]
 ```
-
-### Dependency Notes
-
-- **RUB position sizing is a blocker for everything else**: MOEX positions at 0.02% instead of 15% means the system is effectively in "paper mode" even with real money. This must be fixed before any meaningful backtest or live test.
-- **MOEX backtest must precede sandbox**: Cannot validate autonomous operation without known-good historical performance on Russian segments.
-- **Bond cycle wiring is an independent path**: BondCycleProcessor can be wired into TradingLoop independently of the equity MOEX fixes. Bond strategies are better isolated from equity risk.
-- **LLM news conflicts with event_driven timeline**: The event_driven strategy is disabled and requires a live news feed. This is a differentiator feature (not table stakes), so it should come after the equity and bond foundations are stable.
-- **MacroCacheService is a bond prerequisite**: Without daily CBR macro data, all 3 bond strategies fall back to NEUTRAL regime (sub-optimal decisions).
 
 ---
 
-## MVP Definition
+## MVP Recommendation (v2.0 Minimum)
 
-### Launch With (v1 — MOEX MVP)
+### Prioritize (must-have for positive MOEX Sharpe):
 
-Minimum to achieve "autonomous MOEX trading with acceptable risk."
+1. **Universe cleanup** -- remove GAZP, VTBR, SNGS, IRAO, ALRS. Immediate PnL improvement.
+2. **Expanded dividend calendar** -- 150+ events from T-Invest API. Foundation for dividend gap alpha.
+3. **Dividend gap strategy tuning** -- per-symbol max_hold, regime filter, closure-rate confidence.
+4. **CBR regime gating** -- wire `cbr_calendar.py` into combiner. Block equity longs during hiking surprises.
+5. **Brent energy gate** -- wire `rub_oil_regime.py` into combiner for energy sector positions.
+6. **RUB crisis brake** -- halt new longs when RUB/oil correlation < 0.1.
 
-- [ ] RUB position sizing fix — without this, no MOEX trade is sized correctly
-- [ ] MOEX walk-forward backtest with positive PnL (ru_blue_chips + ru_energy at minimum)
-- [ ] MOEX strategy parameter tuning (tighter RSI thresholds, wider BB for higher RU volatility)
-- [ ] OFZ bond autonomous trading: BondCycleProcessor wired into TradingLoop with all 4 layers
-- [ ] MacroCacheService with daily CBR refresh + CBR-day force-refresh
-- [ ] Bond backtest with positive PnL (OFZ-PD duration rotation + OFZ-PK carry)
-- [ ] Telegram daily P&L summary bug fix (currently shows zero)
-- [ ] Sandbox validation: N days of autonomous operation without critical errors
-- [ ] Telegram alerts for circuit breaker events working
-- [ ] Coupon payment detection and alert
+### Add after baseline is positive:
 
-### Add After Validation (v1.x)
+7. **Preferred share arbitrage** -- configure PairsStrategy for SBER/SBERP, TATN/TATNP.
+8. **Brent-conditional sector rotation** -- sector weight adjustment based on macro regime.
+9. **CBR meeting pre-positioning** -- pre-meeting entry on financials when cut expected.
 
-Features to add once core autonomous trading is proven in sandbox.
+### Defer (only after positive Sharpe on equity):
 
-- [ ] Russian news feed (T-Invest API news or RBC/Interfax RSS) — trigger: sandbox stable, event_driven strategy ready to enable
-- [ ] LLM-powered Russian news analysis wired to event_driven strategy — trigger: news feed working
-- [ ] Real money deployment (small account, 500K RUB) — trigger: sandbox proves itself over 2+ weeks
-- [ ] Telegram `/status` command — trigger: real money deployment, user wants on-demand check
-
-### Future Consideration (v2+)
-
-Features to defer until MVP is generating positive live returns.
-
-- [ ] ML ensemble for MOEX (ru_* segments) — training requires 3+ years of MOEX candle history; quality gates must pass before enablement
-- [ ] PEAD strategy for MOEX (requires Russian earnings surprise data source — not readily available)
-- [ ] Pairs trading on MOEX (requires careful cointegration testing on RU pairs; sanctions-driven correlation breaks are a risk)
-- [ ] Telegram financial channel monitoring for news — filter noise from signal is research work
-- [ ] Portfolio optimization with HRP weights across MOEX segments
+10. **ML with Russian macro features** -- requires clean baseline data; overfitting risk without clean signals first.
+11. **OFZ PK->PD rotation** -- already have Sharpe +1.14 on PK carry; rotation is optimization.
+12. **Portfolio-level allocation optimizer** -- simple fixed 40/60 split first; optimize later.
 
 ---
 
 ## Feature Prioritization Matrix
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| RUB position sizing fix | HIGH | LOW | P1 |
-| MOEX walk-forward backtest (positive) | HIGH | MEDIUM | P1 |
-| MOEX strategy parameter tuning | HIGH | MEDIUM | P1 |
-| OFZ bond cycle wired into TradingLoop | HIGH | MEDIUM | P1 |
-| MacroCacheService | HIGH | LOW | P1 |
-| Bond backtest (positive) | HIGH | MEDIUM | P1 |
-| Telegram daily P&L bug fix | HIGH | LOW | P1 |
-| Sandbox validation | HIGH | LOW | P1 |
-| Coupon payment detection + alert | MEDIUM | LOW | P1 |
-| MOEX trading hours gate validation | HIGH | LOW | P1 |
-| Russian news feed integration | HIGH | MEDIUM | P2 |
-| LLM news → event_driven strategy | HIGH | MEDIUM | P2 |
-| Telegram /status command | MEDIUM | LOW | P2 |
-| Real money deployment | HIGH | LOW (ops) | P2 |
-| ML ensemble for MOEX | MEDIUM | HIGH | P3 |
-| PEAD strategy for MOEX | LOW | HIGH | P3 |
-| Pairs trading for MOEX | LOW | HIGH | P3 |
-| Telegram financial channel monitoring | MEDIUM | HIGH | P3 |
-
-**Priority key:**
-- P1: Must have for MOEX MVP launch
-- P2: Should have, add after sandbox validation
-- P3: Nice to have, defer to v2+
-
----
-
-## Competitor Feature Analysis
-
-The MOEX autonomous trading space is thin. Most Russian retail algo-trading tools are simple rule-based bots. Direct comparisons are limited.
-
-| Feature | EIDiamond invest-bot (GitHub) | MOEX ALGOPACK (platform) | Finalayze Approach |
-|---------|-------------------------------|--------------------------|-------------------|
-| Bond trading | Not supported | Backtesting data only | 4-layer OFZ portfolio with CBR regime routing |
-| LLM news analysis | Not supported | Not supported | Claude Sonnet with Russian financial prompt |
-| Telegram alerts | Order details + daily summary | Not applicable | 9 alert types including coupon, CBR meeting, stop-loss |
-| Risk controls | Min balance + lot limits | Backtesting only | 11-check pre-trade pipeline + 3-level circuit breaker + DV01 budget |
-| Sandbox mode | Not mentioned | Available | T-Invest sandbox with separate endpoint |
-| CBR rate sensitivity | Not addressed | Not addressed | MacroContextProvider + regime classifier drives bond strategy |
-| Coupon income | Not tracked | Not addressed | `on_coupon_received()` alert + ex-coupon period filter |
+| Feature | Alpha Potential | Implementation Cost | Risk of Overfitting | Priority |
+|---------|----------------|--------------------|--------------------|----------|
+| Universe cleanup | HIGH (remove -60% PnL drag) | LOW | NONE | P0 |
+| Expanded dividend calendar | HIGH (3x more tradeable events) | LOW | NONE | P0 |
+| Dividend gap tuning (per-symbol) | HIGH (documented 70%+ closure) | MEDIUM | LOW | P1 |
+| CBR regime gating | MEDIUM (8 events/year) | MEDIUM | LOW | P1 |
+| Brent energy gate | MEDIUM (filters bad energy trades) | LOW | LOW | P1 |
+| RUB crisis brake | MEDIUM (drawdown protection) | LOW | NONE | P1 |
+| Preferred share arbitrage | MEDIUM (mean-reversion of spread) | HIGH | MEDIUM | P2 |
+| Sector rotation | MEDIUM (macro-driven allocation) | HIGH | HIGH | P2 |
+| CBR pre-positioning | LOW-MEDIUM (8 events/year, needs consensus data) | MEDIUM | MEDIUM | P2 |
+| ML with macro features | MEDIUM-HIGH (if done right) | HIGH | HIGH | P3 |
+| OFZ PK->PD rotation | LOW (optimization of already-working strategy) | MEDIUM | LOW | P3 |
 
 ---
 
 ## Sources
 
-- Codebase inspection (HIGH confidence): `src/finalayze/strategies/bond_carry.py`, `bond_duration_rotation.py`, `cbr_event.py`, `risk/dv01_sizing.py`, `risk/yield_stop.py`, `core/alerts.py`, `data/fetchers/tinkoff_data.py`, `data/fetchers/cbr.py`, `analysis/news_analyzer.py`
-- Design documents (HIGH confidence): `docs/plans/2026-03-12-bond-tradingloop-integration-design.md`, `docs/design/RISK.md`, `docs/design/NEWS_PIPELINE.md`, `docs/design/STRATEGIES.md`
-- Project context (HIGH confidence): `.planning/PROJECT.md`
-- [EIDiamond invest-bot — GitHub](https://github.com/EIDiamond/invest-bot) (MEDIUM confidence, community bot example)
-- [T-Invest API — RussianInvestments investAPI](https://github.com/RussianInvestments/investAPI) (MEDIUM confidence, official SDK)
-- [MOEX bonds market overview](https://www.moex.com/en/bondization) (MEDIUM confidence)
-- [FIA Best Practices for Automated Trading Risk Controls](https://www.fia.org/sites/default/files/2024-07/FIA_WP_AUTOMATED%20TRADING%20RISK%20CONTROLS_FINAL_0.pdf) (MEDIUM confidence, general industry standard)
-- Web search: MOEX algorithmic trading 2025, T-Invest Telegram integration, Russian news bots (LOW confidence, limited MOEX-specific results)
+### HIGH confidence (official, quantitative)
+- CBR official calendar of rate decisions: [cbr.ru/eng/dkp/cal_mp/](https://www.cbr.ru/eng/dkp/cal_mp/)
+- CBR key rate history: [cbr.ru/eng/hd_base/KeyRate/](https://cbr.ru/eng/hd_base/KeyRate/)
+- MOEX Oil & Gas Index: [investing.com/indices/mcxog](https://www.investing.com/indices/mcxog)
+- Codebase inspection: `dividend_gap.py`, `cbr_calendar.py`, `rub_oil_regime.py`, `pairs.py`, `segments.py`
+- Project context: `.planning/PROJECT.md` (v2.0 requirements)
+
+### MEDIUM confidence (financial media, research)
+- Dividend gap closure statistics (2007-2017): [spydell.livejournal.com](https://spydell.livejournal.com/642950.html)
+- Dividend gap recent data (2024-2025): [finam.ru historical analysis](https://www.finam.ru/publications/item/istoricheski-lukoyl-i-tatneft-obladayut-potentsialom-bystrogo-vosstanovleniya-posle-dividendnogo-gepa-20250604-0900/)
+- CBR rate impact on financial sector: [Forbes.ru analysis](https://www.forbes.ru/investicii/543288-raduznye-nadezdy-kakie-akcii-vyrastut-iz-za-snizenia-stavki-cb)
+- CBR rate cut impact on sectors: [RBC Investitsii](https://www.rbc.ru/quote/news/article/68497aae9a794711e7402f87)
+- SBER/SBERP spread dynamics: [t-j.ru](https://t-j.ru/ask/sber-pref/)
+- ML on MOEX stocks (multimodal): [arxiv.org/abs/2503.08696](https://arxiv.org/html/2503.08696)
+- MOEX dividend calendar: [school.moex.com](https://school.moex.com/articles/dividendnyy-kalendar)
+- Dividend gap general mechanics: [a2-finance.com](https://a2-finance.com/en/posts/the-dividend-gap)
+
+### LOW confidence (general market context, needs validation)
+- Brent-MOEX energy correlation magnitude (0.6-0.8) -- based on training data, not verified with recent data
+- Preferred share spread ranges -- based on historical patterns, current levels need live verification
+- MOEX short-selling restrictions for retail -- based on T-Invest documentation, may have changed
 
 ---
 
-*Feature research for: Autonomous MOEX trading — stocks, OFZ bonds, coupons, LLM news, Telegram*
-*Researched: 2026-03-14*
+*Feature research for: MOEX Equity Profitability v2.0*
+*Researched: 2026-03-20*

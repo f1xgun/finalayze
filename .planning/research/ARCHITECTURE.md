@@ -1,460 +1,395 @@
-# Architecture Research
+# Architecture: MOEX Profitability Integration
 
-**Domain:** MOEX autonomous trading with bond support, news analysis, and Telegram alerting
-**Researched:** 2026-03-14
-**Confidence:** HIGH — derived from direct codebase inspection (367 Python files, 2325+ tests)
+**Domain:** MOEX-native strategies, macro regime gating, portfolio-level allocation
+**Researched:** 2026-03-20
+**Confidence:** HIGH -- derived from direct inspection of existing codebase (dividend_gap.py, cbr_calendar.py, rub_oil_regime.py, combiner.py, position_sizing_pipeline.py, backtest engine, schemas, and all relevant modules)
 
-## Standard Architecture
+## Recommended Architecture
 
-### System Overview
+The v2.0 MOEX profitability features integrate into the existing 7-layer architecture without violating layer boundaries. No new layers needed. The design principle is: **new strategies extend BaseStrategy (L4), new regime providers implement RegimeProvider protocol (L4), new data fetchers go to L2, and portfolio allocation is a new L4/L5 orchestrator**.
 
-The system is a layered trading engine. New components (bonds, news pipeline, Telegram) slot
-into existing layers without restructuring. The dependency rule is strictly enforced: imports
-flow downward only (Layer 0 → Layer 6). No upward imports permitted.
+### Integration Overview
 
 ```
-+─────────────────────────────────────────────────────────────────────────────+
-│  LAYER 6 — Orchestration / API / Dashboard                                  │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐  │
-│  │  TradingLoop     │  │  BondCycleProc.  │  │  FastAPI + Streamlit     │  │
-│  │  (APScheduler)   │  │  (APScheduler)   │  │  REST + Prometheus       │  │
-│  └────────┬─────────┘  └────────┬─────────┘  └──────────────────────────┘  │
-│           │ 3 cycles:           │ 1 cycle:                                   │
-│           │ news, strategy,     │ bond (daily)                              │
-│           │ daily reset         │                                            │
-+───────────┼─────────────────────┼──────────────────────────────────────────+
-│  LAYER 5 — Execution                                                        │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  BrokerRouter                                                        │   │
-│  │  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────┐ │   │
-│  │  │ TinkoffBroker  │  │ AlpacaBroker   │  │ SimulatedBroker        │ │   │
-│  │  │ (gRPC live +   │  │ (US markets)   │  │ (backtest / sandbox)   │ │   │
-│  │  │  sandbox)      │  │                │  │                        │ │   │
-│  │  └────────────────┘  └────────────────┘  └────────────────────────┘ │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-+─────────────────────────────────────────────────────────────────────────────+
-│  LAYER 4 — Strategy / Risk                                                  │
-│  ┌─────────────────────────────────┐  ┌──────────────────────────────────┐ │
-│  │  Strategy Engine (stocks)       │  │  Bond Strategy Engine            │ │
-│  │  StrategyCombiner               │  │  BondCarryStrategy               │ │
-│  │  ADX regime router              │  │  BondDurationRotation            │ │
-│  │  5 active strategies            │  │  CBREventStrategy                │ │
-│  └─────────────────────────────────┘  │  CBRStrategyWrapper              │ │
-│                                        └──────────────────────────────────┘ │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  Risk Pipeline                                                       │   │
-│  │  CircuitBreaker  │  LayerCircuitBreaker  │  AggregateBondBreaker    │   │
-│  │  PreTradeCheck   │  DV01BudgetStep       │  EqualWeightBondSizer    │   │
-│  │  YieldStop       │  HalfKelly sizing     │  PositionSizingPipeline  │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-+─────────────────────────────────────────────────────────────────────────────+
-│  LAYER 3 — Analysis / ML                                                    │
-│  ┌─────────────────────────────┐  ┌────────────────────────────────────┐   │
-│  │  News Pipeline              │  │  ML Ensemble                       │   │
-│  │  LLMClient (Claude Sonnet)  │  │  XGBoost + LightGBM + CatBoost     │   │
-│  │  NewsAnalyzer (EN/RU)       │  │  + meta-learner                    │   │
-│  │  EventClassifier            │  │  45 technical features             │   │
-│  │  ImpactEstimator            │  │  Feature selection pipeline        │   │
-│  └─────────────────────────────┘  └────────────────────────────────────┘   │
-+─────────────────────────────────────────────────────────────────────────────+
-│  LAYER 2 — Data / Markets                                                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐ │
-│  │ TinkoffFetch │  │ CBRFetcher   │  │ MOEXISSFetch │  │ MacroCacheSvc  │ │
-│  │ (candles,    │  │ (FX rates,   │  │ (IMOEX index,│  │ (key rate,     │ │
-│  │  dividends,  │  │  key rate,   │  │  turnover)   │  │  RUONIA,       │ │
-│  │  instruments)│  │  RUONIA)     │  │              │  │  CPI history)  │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └────────────────┘ │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │  InstrumentRegistry  (symbol → FIGI, lot_size, bond metadata)       │  │
-│  │  MarketSchedule  (MOEX trading hours, MOEX holidays)                │  │
-│  │  CurrencyConverter  (RUB/USD, live + cached)                        │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-+─────────────────────────────────────────────────────────────────────────────+
-│  LAYER 1 — Configuration                                                    │
-│  Settings (Pydantic BaseSettings)  │  Modes (debug/sandbox/test/real)       │
-│  Segments (ru_ofz_pk, ru_ofz_pd, ru_blue_chips, …)                         │
-+─────────────────────────────────────────────────────────────────────────────+
-│  LAYER 0 — Types & Schemas                                                  │
-│  Candle  Signal  TradeResult  PortfolioState  NewsArticle  SentimentResult  │
-│  PortfolioLayer  LayerConfig  InstrumentType  SignalDirection                │
-│  LayerLedger  (tracks per-layer cash, positions, peak equity)               │
-+─────────────────────────────────────────────────────────────────────────────+
+Layer 2: Data
+  CBRFetcher (EXISTING) ── key rates, FX
+  MoexISSFetcher (EXISTING) ── IMOEX, turnover
+  YFinanceFetcher (EXISTING) ── Brent BZ=F
+  TinkoffFetcher (EXISTING) ── dividends, candles
+  + BrentDataProvider (NEW) ── wraps yfinance Brent with caching
+  + DividendCalendarLoader (NEW) ── bulk load ex-div dates from Tinkoff
+  + PreferredShareMapper (NEW) ── SBER↔SBERP FIGI mapping
+
+Layer 4: Strategy / Risk
+  STRATEGIES:
+    DividendGapStrategy (EXISTING) ── needs calendar wiring
+    CBRStrategyWrapper (EXISTING) ── needs combiner registration
+    + SectorRotationStrategy (NEW) ── Brent-gated energy, CBR-gated finance
+    + PreferredShareArbStrategy (NEW) ── common/pref spread convergence
+  RISK:
+    RubOilRegimeSignal (EXISTING) ── needs wiring into backtest
+    + CBRRegimeGate (NEW) ── hiking=restrict equity, cutting=allow
+    + BrentConditionGate (NEW) ── Brent < $60 blocks energy longs
+    + PortfolioAllocator (NEW) ── 40% OFZ / 60% equity capital split
+    + RUBCrisisBrake (NEW) ── USDRUB spike blocks all equity
+
+Layer 5: Execution / Backtest
+  BacktestEngine (MODIFY) ── pass macro context per bar
+  + PortfolioBacktestOrchestrator (NEW) ── run bond + equity backtests, merge
 ```
 
-### Component Responsibilities
+### Component Boundaries
 
 | Component | Layer | Responsibility | Communicates With |
-|-----------|-------|----------------|-------------------|
-| `TradingLoop` | L6 | APScheduler orchestrator. 3 cycles: news (5min), strategy (15min), daily reset | NewsAnalyzer, StrategyCombiner, BrokerRouter, TelegramAlerter |
-| `BondCycleProcessor` | L6 | Bond trading cycle: yield stops → strategy signals → DV01 sizing → execute | Bond strategies, DV01BudgetStep, BrokerRouter, TelegramAlerter |
-| `TelegramAlerter` | L6 (fire-and-forget) | Sends trade fills, rejections, circuit breaker trips, daily PnL, coupon alerts, CBR events | Telegram Bot API (httpx) |
-| `BrokerRouter` | L5 | Routes orders to correct broker by `market_id` | TinkoffBroker, AlpacaBroker |
-| `TinkoffBroker` | L5 | gRPC order submission to T-Invest. Supports sandbox + live. Retry policy | T-Invest gRPC API |
-| `StrategyCombiner` | L4 | Weighted signal aggregation across 5 strategies. ADX regime gating. Hook pattern | BaseStrategy subclasses, ADX router |
-| `BondCarryStrategy` | L4 | OFZ-PK floater carry: maturity ladder + quarterly rebalancing. Macro-aware | MacroCacheService |
-| `CBREventStrategy` | L4 | Tactical OFZ-PD trades around CBR rate meetings (entry 2-7d before, exit T+2) | CBR calendar (static data in cbr.py) |
-| `BondDurationRotationStrategy` | L4 | Rotates OFZ-PD duration based on yield curve shape | MacroSnapshot |
-| `CircuitBreaker` / `LayerCircuitBreaker` | L4 | 3-level per-layer drawdown limits (L1=caution, L2=halt, L3=liquidate) | LayerLedger |
-| `AggregateBondBreaker` | L4 | Portfolio-wide bond drawdown halt at 3% combined DD | All LayerLedgers |
-| `DV01BudgetStep` | L4 | Sizes fixed-rate bond positions against DV01 risk budget | — |
-| `YieldStop` | L4 | Force-exits bonds when YTM spread deteriorates past threshold | — |
-| `NewsAnalyzer` | L3 | Calls Claude Sonnet to produce SentimentResult for each NewsArticle. EN/RU prompts | LLMClient |
-| `EventClassifier` | L3 | Classifies news into event types (earnings, macro, geopolitical) | LLMClient |
-| `ImpactEstimator` | L3 | Estimates price impact magnitude from event type + sentiment | — |
-| `ML Ensemble` | L3 | XGBoost + LightGBM + CatBoost + meta-learner. Per-segment models. Conformal calibration | Feature pipeline, MLModelRegistry |
-| `TinkoffFetcher` | L2 | Fetches MOEX candles, instruments, dividends via T-Invest gRPC. FIGI-based | T-Invest gRPC API |
-| `CBRFetcher` | L2 | Fetches FX rates (XML), key rate (SOAP), RUONIA from cbr.ru | CBR REST/SOAP APIs |
-| `MacroCacheService` | L2 | Caches macro snapshot (key rate, RUONIA, CPI). Daily refresh + CBR-day force-refresh | CBRFetcher, CBR calendar |
-| `InstrumentRegistry` | L2 | Maps (symbol, market_id) → Instrument (includes bond metadata: face value, maturity, coupon) | — |
-| `LayerLedger` | L0 | Per-layer virtual sub-account: cash, positions, drawdown tracking | — |
+|-----------|-------|---------------|-------------------|
+| `DividendCalendarLoader` | L2 | Bulk-load ex-div dates from Tinkoff API for all ru_* symbols | TinkoffFetcher, DividendGapStrategy |
+| `BrentDataProvider` | L2 | Provide Brent candles (yfinance BZ=F) with caching | YFinanceFetcher, SectorRotationStrategy |
+| `PreferredShareMapper` | L2 | Map common↔preferred share FIGIs (SBER/SBERP etc.) | InstrumentRegistry, PreferredShareArbStrategy |
+| `CBRRegimeGate` | L4 | CBR hiking/cutting cycle → regime state for equity gating | MacroContextProvider, PositionSizingPipeline |
+| `BrentConditionGate` | L4 | Brent price threshold → energy sector position gate | BrentDataProvider, SectorRotationStrategy |
+| `SectorRotationStrategy` | L4 | MOEX sector rotation: energy=Brent-gated, finance=CBR-gated | BrentConditionGate, CBRRegimeGate, StrategyCombiner |
+| `PreferredShareArbStrategy` | L4 | Trade common/pref spread when it exceeds historical norms | PreferredShareMapper, StrategyCombiner |
+| `PortfolioAllocator` | L4 | Split capital 40% OFZ / 60% equity, enforce caps | PositionSizingPipeline, BacktestEngine |
+| `RUBCrisisBrake` | L4 | USDRUB > threshold → block all equity, shift to OFZ | RubOilRegimeSignal, PortfolioAllocator |
+| `PortfolioBacktestOrchestrator` | L5 | Run bond + equity backtests separately, merge PnL | BacktestEngine, BondBacktestEngine, PerformanceAnalyzer |
 
-## Recommended Project Structure
+### Data Flow
 
-The structure is already established. New components fit into existing modules:
+#### 1. Macro Context Per Bar (new flow)
+
+The backtest engine currently receives a `RegimeProvider` and `MarketContext` at init time. For v2.0, strategies need **per-bar macro data** (CBR rate, Brent price, USDRUB) that changes during the backtest window.
 
 ```
-src/finalayze/
-├── core/                    # L0/L6 — schemas, events, orchestrators
-│   ├── schemas.py           # Candle, Signal, PortfolioLayer, LayerConfig, LayerLedger
-│   ├── alerts.py            # TelegramAlerter (DONE — all bond/trade/CBR alert methods)
-│   ├── trading_loop.py      # TradingLoop (DONE — 3-cycle APScheduler orchestrator)
-│   ├── bond_cycle.py        # BondCycleProcessor (DONE — skeleton, sizing/exec stubs)
-│   └── layer_ledger.py      # LayerLedger (DONE)
-├── config/
-│   └── segments.py          # Add: ru_ofz_pk, ru_ofz_pd, ru_blue_chips segment defs
-├── data/
-│   ├── fetchers/
-│   │   ├── tinkoff_data.py  # DONE — candles, dividends, instruments via gRPC
-│   │   ├── cbr.py           # DONE — FX rates, key rate, RUONIA, CBR calendar
-│   │   └── newsapi.py       # Extend: add T-Invest news endpoint + Telegram channel polling
-│   ├── macro_cache.py       # DONE — MacroCacheService with CBR-day refresh
-│   └── moex_calendar.py     # DONE — MOEX trading day schedule
-├── analysis/
-│   ├── llm_client.py        # DONE — Claude Sonnet async wrapper
-│   ├── news_analyzer.py     # DONE — EN/RU sentiment analysis
-│   ├── event_classifier.py  # DONE — event type classification
-│   └── impact_estimator.py  # DONE — price impact estimation
-├── strategies/
-│   ├── bond_carry.py        # DONE — OFZ-PK floater carry (Core layer)
-│   ├── bond_duration_rotation.py  # DONE — OFZ-PD duration rotation (Strategic)
-│   ├── cbr_event.py         # DONE — CBR meeting event strategy (Tactical)
-│   ├── cbr_strategy_wrapper.py    # DONE — macro-aware wrapper
-│   └── presets/
-│       └── moex_bonds.yaml  # ADD: bond strategy params, layer allocations
-├── risk/
-│   ├── dv01_sizing.py       # DONE — DV01BudgetStep + EqualWeightBondSizer
-│   ├── yield_stop.py        # DONE — YieldStop for bond exits
-│   ├── layer_circuit_breaker.py   # DONE — BondLayerBreaker + AggregateBondBreaker
-│   └── bond_equity_correlation.py # DONE — correlation-based regime detection
-├── execution/
-│   ├── tinkoff_broker.py    # DONE — gRPC order submission, sandbox + live
-│   ├── broker_router.py     # DONE — market_id dispatch
-│   └── bond_simulated_broker.py   # DONE — backtest simulator for bonds
-└── markets/
-    └── instruments.py       # DONE — InstrumentRegistry with bond metadata fields
+MacroContextProvider (EXISTING, L2)
+  + get_snapshot(as_of: date) -> MacroSnapshot
+    ├── key_rate: from CBR meeting calendar
+    ├── ruonia_7d_avg: proxy from key_rate
+    ├── cpi_yoy: from Rosstat publication dates
+    ├── brent_close: NEW - from Brent candle series
+    └── usdrub: from CBR FX rates
+
+BacktestEngine._process_bar():
+  macro = self._macro_provider.get_snapshot(candle.timestamp.date())
+  signal = strategy.generate_signal(
+      symbol, candles, segment_id,
+      regime_state=regime_state,
+      macro_snapshot=macro,         # NEW kwarg
+  )
 ```
 
-### Structure Rationale
+**Key design decision:** Pass `MacroSnapshot` via `**kwargs` to `generate_signal()` rather than changing the BaseStrategy interface. The existing `**kwargs` pattern (used by `regime_state` already) avoids breaking all 8+ strategy implementations.
 
-- **Bond strategies are NOT subclasses of BaseStrategy.** They use a different interface (accept `key_rate`, `ruonia_7d_avg`, `cpi_yoy`, `last_cbr_decision` kwargs). This is intentional — bonds are fundamentally different assets and sharing the equity strategy interface would force awkward abstractions.
-- **BondCycleProcessor lives in `core/`** for import convenience even though it is architecturally L6. All higher-layer imports are deferred inside methods via `TYPE_CHECKING` to prevent import-time circular dependencies.
-- **MacroCacheService lives in `data/`** (L2) because it is a data provider — it fetches and caches, but does not analyze or decide.
-- **TelegramAlerter lives in `core/`** as a fire-and-forget sink. It imports nothing upward (only uses httpx and standard library at runtime). Errors are always suppressed — alerts must never crash the trading loop.
+#### 2. Dividend Gap Calendar Wiring
 
-## Architectural Patterns
+```
+BEFORE (current):
+  DividendGapStrategy._calendar is empty dict
+  → 0 trades in backtest
 
-### Pattern 1: Scheduled Cycle Decomposition
+AFTER:
+  DividendCalendarLoader.load_all(symbols, start, end)
+    → TinkoffFetcher.get_dividends(figi) for each symbol
+    → Returns dict[str, list[DividendEntry]]
 
-**What:** The trading loop runs multiple independent cycles on different schedules via APScheduler BackgroundScheduler. Each cycle is fault-isolated — an exception in the news cycle does not stop the strategy cycle.
+  BacktestEngine/run_iteration.py:
+    calendar_data = loader.load_all(symbols, start, end)
+    dividend_strategy.populate_calendar(calendar_data)
+    → DividendGapStrategy._calendar populated before run()
+```
 
-**When to use:** Any new periodic process (news polling, dividend collection, macro refresh) should be wired as a separate scheduled job, not embedded in the strategy cycle.
+**Integration point:** `run_iteration.py` (L5 script) populates the calendar before `engine.run()`. This keeps the strategy stateless w.r.t. data fetching (L4 never imports L2).
 
-**Trade-offs:** Simple to reason about, easy to add new cycles. Concurrent cycle execution possible if cycles overlap — guard with threading.Lock for shared state (e.g., `_sentiment_cache` uses `_sentiment_lock`).
+#### 3. Sector Rotation Signal Flow
+
+```
+SectorRotationStrategy.generate_signal(symbol, candles, segment_id, **kwargs):
+  1. Determine symbol's sector (energy, finance, other)
+  2. If energy sector:
+     brent = kwargs.get("macro_snapshot").brent_close
+     if brent < BRENT_FLOOR → return None (block)
+     if brent > BRENT_MOMENTUM_THRESHOLD → boost confidence
+  3. If finance sector:
+     cbr_decision = kwargs.get("macro_snapshot").last_cbr_decision
+     if decision == "hike" → return None (block new longs)
+     if decision == "cut" → boost confidence
+  4. Apply relative IMOEX momentum (sector vs index)
+  5. Return Signal with direction + adjusted confidence
+```
+
+**Combiner integration:** SectorRotationStrategy extends BaseStrategy, registered in combiner alongside existing strategies. Preset YAML weights control its influence per segment.
+
+#### 4. Preferred Share Arbitrage Flow
+
+```
+PreferredShareArbStrategy.generate_signal(symbol, candles, segment_id, **kwargs):
+  1. Check if symbol is in a common/pref pair (SBER/SBERP, TATN/TATNP, SNGS/SNGSP)
+  2. Get counterpart candles from kwargs["pair_candles"]
+  3. Compute spread = common_price / pref_price
+  4. Compare to rolling mean spread (60-day window)
+  5. If spread > mean + 1.5*std → BUY pref, SELL common
+  6. If spread < mean - 1.5*std → BUY common, SELL pref
+  7. Exit when spread reverts to mean
+```
+
+**Data requirement:** The engine must provide both common and preferred candles simultaneously. This requires a multi-symbol context, which the current per-symbol backtest loop does not support natively.
+
+**Solution:** Run PreferredShareArbStrategy as a **pairs-style strategy** (like the existing `pairs.py`). The strategy receives the primary symbol's candles and fetches the counterpart from a pre-loaded dict passed via `set_market_context()`.
+
+#### 5. Portfolio-Level Allocation Flow
+
+```
+PortfolioAllocator:
+  total_capital = 2_000_000 RUB
+
+  OFZ allocation = 40% = 800K
+    → BondBacktestEngine runs OFZ carry + CBR event strategies
+    → PnL from bond layer
+
+  Equity allocation = 60% = 1_200K
+    → BacktestEngine runs equity strategies per segment
+    → Position sizing capped at equity_allocation, not total_capital
+
+  RUB Crisis Brake:
+    if usdrub_daily_change > 5% OR rub_oil_corr < 0.1:
+      equity_allocation = max(20%, equity_allocation * 0.5)
+      ofz_allocation = total_capital - equity_allocation
+      → Shift capital to OFZ carry
+
+  Rebalance:
+    Monthly: check actual vs target allocation
+    If drift > 5%: rebalance
+
+PortfolioBacktestOrchestrator:
+  1. Split initial_cash: 40% → bond engine, 60% → equity engine
+  2. Run both engines independently
+  3. Monthly rebalance: transfer PnL drift back to target weights
+  4. Merge PortfolioState timeseries
+  5. Compute aggregate Sharpe, DD, PF across combined portfolio
+```
+
+## Patterns to Follow
+
+### Pattern 1: Macro-Gated Strategy (Strategy receives macro via kwargs)
+
+**What:** Strategies that depend on macro conditions (Brent, CBR, USDRUB) receive a `MacroSnapshot` through the existing `**kwargs` mechanism in `generate_signal()`.
+
+**When:** Any strategy that needs CBR rate, Brent price, or FX data for signal generation.
+
+**Why:** Avoids changing BaseStrategy ABC signature. Already precedented by `regime_state` kwarg in DividendGapStrategy.
 
 ```python
-# TradingLoop wires cycles at startup
-scheduler.add_job(self._news_cycle, "interval", minutes=5)
-scheduler.add_job(self._strategy_cycle, "interval", minutes=15)
-scheduler.add_job(self._bond_cycle, "interval", minutes=30)
-scheduler.add_job(self._daily_reset, "cron", hour=0, minute=5)
+class SectorRotationStrategy(BaseStrategy):
+    def generate_signal(
+        self,
+        symbol: str,
+        candles: list[Candle],
+        segment_id: str,
+        sentiment_score: float = 0.0,
+        has_open_position: bool = False,
+        **kwargs: object,
+    ) -> Signal | None:
+        macro: MacroSnapshot | None = kwargs.get("macro_snapshot")
+        if macro is None:
+            return None  # Cannot operate without macro context
+
+        sector = self._get_sector(symbol)
+        if sector == "energy" and macro.brent_close is not None:
+            if float(macro.brent_close) < self._brent_floor:
+                return None  # Block energy longs when Brent is low
+        # ... signal logic
 ```
 
-### Pattern 2: 4-Layer Bond Portfolio (LayerLedger per layer)
+### Pattern 2: Regime Gate as Sizing Step (PositionSizingStep protocol)
 
-**What:** Bond capital is partitioned into 4 virtual sub-accounts (Core, Strategic, Tactical, Short), each with its own LayerLedger, circuit breaker, and strategy set. BondCycleProcessor iterates layers in order: aggregate breaker check → per-layer breaker → yield stops → signals → sizing → execute.
+**What:** New macro conditions (CBR regime, Brent gate) plug into the position sizing pipeline as additional `PositionSizingStep` implementations.
 
-**When to use:** Whenever adding a new bond segment or changing allocation weights. Layer separation ensures Core (OFZ-PK floaters) is never liquidated by portfolio-level drawdown events.
+**When:** Conditions that should scale position size rather than block signals entirely.
 
-**Trade-offs:** More bookkeeping than a flat portfolio. Payoff is independent risk limits per layer and clear separation of strategy intent (Core = income, Strategic = duration rotation, Tactical = CBR events, Short = inverse/hedge).
+**Why:** Follows existing pipeline architecture. CBR hiking cycle should reduce equity sizing, not eliminate all signals.
 
-```
-Bond Portfolio Split (target allocations):
-  Core    (OFZ-PK floaters)    ~45% — buy-and-hold, max DD 9%
-  Strategic (OFZ-PD 3-7Y)     ~27.5% — duration rotation, max DD 5%
-  Tactical  (OFZ-PD 2-5Y)     ~17.5% — CBR event trades, max DD 3%
-  Short     (inverse ETF/cash) ~10%   — hedge, max DD 3%
-```
+```python
+class CBRRegimeStep:
+    """Scale equity positions based on CBR rate cycle."""
 
-### Pattern 3: Macro Context Injection via MacroCacheService
-
-**What:** All bond strategies receive macro context (key_rate, ruonia_7d_avg, cpi_yoy, last_cbr_decision) as kwargs from BondCycleProcessor. The processor reads from MacroCacheService — a cached snapshot refreshed daily and force-refreshed on CBR meeting days. Bond strategies never call CBRFetcher directly.
-
-**When to use:** Any new bond strategy or ML feature that needs CBR/macro data.
-
-**Trade-offs:** Strategies receive possibly-stale data (up to 24h). Acceptable for daily-bar bond strategies. Not suitable for intraday FX or real-time rate moves.
-
-### Pattern 4: News Pipeline → Sentiment Cache → Event-Driven Signals
-
-**What:** TradingLoop's `_news_cycle` fetches articles, runs NewsAnalyzer (Claude Sonnet call), updates `_sentiment_cache` (protected by threading.Lock). The `_strategy_cycle` reads from the cache. The news cycle is intentionally decoupled from the strategy cycle — a slow LLM call does not block order generation.
-
-**When to use:** Adding new news sources (T-Invest API, Telegram channels, RBC RSS). Each source produces NewsArticle objects; the same NewsAnalyzer handles them regardless of source.
-
-**Trade-offs:** Sentiment is always at most one cycle stale (5 min lag maximum). For slow-moving MOEX instruments on daily bars, this is acceptable. If an article breaks 30 seconds before market close, it won't be acted on until next open — acceptable risk.
-
-### Pattern 5: Fire-and-Forget Alerting
-
-**What:** TelegramAlerter uses `asyncio.get_event_loop().create_task()` if a loop is running, else `asyncio.run()`. All exceptions are suppressed. If `bot_token` is empty, all methods are no-ops (safe for debug/test modes).
-
-**When to use:** Every new alert type (coupon received, macro event, ML model degradation) should add a dedicated method to TelegramAlerter rather than calling `send_alert()` directly with formatted strings from business logic.
-
-**Trade-offs:** Alert delivery is not guaranteed (fire-and-forget). This is correct — a Telegram delivery failure must never abort a trade execution.
-
-## Data Flow
-
-### Bond Trading Cycle Flow
-
-```
-APScheduler (daily, 10:15 Moscow)
-    ↓
-MacroCacheService.get()  →  MacroSnapshot (key_rate, ruonia, cpi, last_decision)
-    ↓
-AggregateBondBreaker.check()
-    ↓ (if NOT halted)
-for each layer [Core, Strategic, Tactical, Short]:
-    BondLayerBreaker.check()
-        ↓ (if NOT halted)
-    YieldStop.evaluate(positions)  →  SELL signals for deteriorated bonds
-        ↓
-    TinkoffFetcher.fetch_candles(symbol, 90d)  (per bond)
-        ↓
-    BondStrategy.generate_signal(candles, macro_kwargs)  →  Signal | None
-        ↓
-    MLFilter.filter(signals)  [no-op until bond ML models trained]
-        ↓
-    DV01BudgetStep / EqualWeightBondSizer → quantity (int)
-        ↓
-    BrokerRouter.submit(order, market_id="moex")
-        ↓
-    TinkoffBroker.submit_order()  →  OrderResult
-        ↓
-    TelegramAlerter.on_trade_filled() / on_trade_rejected()
-    LayerLedger.add_position() / debit_cash()
+    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:
+        if context.cbr_regime == "hiking":
+            return (size * Decimal("0.6")).quantize(_FOUR_DP)
+        if context.cbr_regime == "cutting":
+            return (size * Decimal("1.2")).quantize(_FOUR_DP)  # more aggressive
+        return size  # "hold" = neutral
 ```
 
-### News Analysis Flow
+**Pipeline order:** Kelly -> VolTarget -> Regime -> **CBRRegime** -> **BrentGate** -> MetaLabel -> HardCaps
 
-```
-APScheduler (every 5 min)
-    ↓
-NewsFetcher.fetch_articles()  ← T-Invest news API + RSS sources
-    ↓  (list[NewsArticle])
-NewsAnalyzer.analyze(article)  ← LLMClient → Claude Sonnet
-    ↓  (SentimentResult: score [-1,1], confidence, reasoning)
-EventClassifier.classify(article)  →  EventType
-    ↓
-ImpactEstimator.estimate(event_type, sentiment)  →  impact_score
-    ↓
-_sentiment_cache[symbol] = SentimentResult  (with threading.Lock)
-    ↓
-[15 min later] StrategyCombiner reads sentiment cache
-    event_driven strategy weight applied to combined signal
-```
+### Pattern 3: Calendar-Driven Strategy Initialization
 
-### Stock Strategy Cycle Flow
+**What:** Strategies that depend on calendar data (dividend dates, CBR meetings) are populated before the backtest run, not during.
 
-```
-APScheduler (every 15 min)
-    ↓
-for each MOEX instrument in registry:
-    TinkoffFetcher.fetch_candles(symbol, recent)
-        ↓
-    ADX router: trend (ADX>30) → momentum pool | MR (ADX<20) → MR pool
-        ↓
-    StrategyCombiner.generate_signal(candles, sentiment_score)
-        ↓  (weighted signal from 5 strategies + optional ML reinforcer)
-    CircuitBreaker.check(market_id="moex")
-        ↓ (if NOT halted)
-    PreTradeCheck.run(signal, portfolio)  — 11 checks including RUB sizing
-        ↓ (if APPROVED)
-    BrokerRouter.submit(order, market_id="moex")
-        ↓
-    TelegramAlerter.on_trade_filled()
+**When:** DividendGapStrategy, CBRStrategyWrapper.
+
+**Why:** Keeps strategy logic (L4) separate from data fetching (L2). The orchestration script (L5+) wires them together.
+
+```python
+# In run_iteration.py (orchestration layer):
+dividend_loader = DividendCalendarLoader(tinkoff_fetcher)
+calendar_data = dividend_loader.load_all(symbols, start, end)
+
+dividend_strategy = DividendGapStrategy(min_gap_pct=3.0, max_hold_bars=60)
+for symbol, entries in calendar_data.items():
+    for entry in entries:
+        dividend_strategy.add_dividend(symbol, entry)
 ```
 
-### Telegram Alert Flow
+### Pattern 4: Multi-Asset Backtest via Orchestrator
+
+**What:** Run bond and equity backtests separately with independent engines, then merge results at the portfolio level.
+
+**When:** Portfolio-level allocation (40% OFZ + 60% equity).
+
+**Why:** Bond and equity backtests have fundamentally different engines (BondBacktestEngine vs BacktestEngine). Merging at the PnL level avoids coupling them.
+
+```python
+class PortfolioBacktestOrchestrator:
+    def run(self, equity_candles, bond_candles, total_capital):
+        bond_capital = total_capital * Decimal("0.40")
+        equity_capital = total_capital * Decimal("0.60")
+
+        bond_result = self._bond_engine.run(bond_candles, bond_capital)
+        equity_result = self._equity_engine.run(equity_candles, equity_capital)
+
+        return self._merge_results(bond_result, equity_result)
+```
+
+## Anti-Patterns to Avoid
+
+### Anti-Pattern 1: Strategy Fetching Its Own Data
+**What:** A strategy class importing from L2 to fetch Brent prices or CBR rates directly.
+**Why bad:** Violates layer boundaries (L4 cannot import L2 for data fetching). Creates hidden I/O in signal generation. Makes backtesting non-deterministic.
+**Instead:** Pass all external data via `MacroSnapshot` kwarg or `set_market_context()`.
+
+### Anti-Pattern 2: Single Monolithic Backtest Engine for Bond+Equity
+**What:** Modifying BacktestEngine to handle both bond and equity logic internally.
+**Why bad:** Bond and equity have different signal interfaces (BondCarryStrategy does not extend BaseStrategy), different risk parameters, different cost models. Coupling them creates a god object.
+**Instead:** Use PortfolioBacktestOrchestrator to run separate engines and merge results.
+
+### Anti-Pattern 3: Hardcoded Sector Classification
+**What:** `if symbol in ["LKOH", "ROSN", "TATN"]: sector = "energy"` scattered through strategy code.
+**Why bad:** Fragile, duplicated, breaks when universe changes.
+**Instead:** Create a `SectorClassifier` in L2 that maps symbols to sectors using InstrumentRegistry or a static YAML. Strategies receive sector as metadata.
+
+### Anti-Pattern 4: Look-Ahead in Macro Data
+**What:** Using today's CBR rate or Brent close to make decisions about yesterday's bar.
+**Why bad:** Overfits backtests, creates phantom alpha that vanishes in live trading.
+**Instead:** MacroContextProvider already enforces point-in-time access. All new macro features (Brent, USDRUB) must respect publication dates. Use `as_of` date pattern.
+
+### Anti-Pattern 5: Portfolio Rebalancing Inside Position Sizing
+**What:** Putting OFZ/equity capital split logic inside `PositionSizingPipeline`.
+**Why bad:** Sizing pipeline operates per-position. Portfolio allocation is a cross-asset concern that must see total equity and all positions simultaneously.
+**Instead:** PortfolioAllocator sits above the sizing pipeline, setting `equity` in `SizingContext` to the allocated capital (not total portfolio).
+
+## New vs Modified Components
+
+### New Components (must be created)
+
+| Component | File | Layer | Complexity |
+|-----------|------|-------|------------|
+| `DividendCalendarLoader` | `data/dividend_calendar.py` | L2 | Low |
+| `BrentDataProvider` | Extension of MarketDataLoader | L2 | Low |
+| `PreferredShareMapper` | `data/preferred_shares.py` | L2 | Low |
+| `SectorClassifier` | `data/sector_classifier.py` | L2 | Low |
+| `SectorRotationStrategy` | `strategies/sector_rotation.py` | L4 | Medium |
+| `PreferredShareArbStrategy` | `strategies/preferred_arb.py` | L4 | Medium |
+| `CBRRegimeStep` | Addition to `risk/position_sizing_pipeline.py` | L4 | Low |
+| `BrentGateStep` | Addition to `risk/position_sizing_pipeline.py` | L4 | Low |
+| `PortfolioAllocator` | `risk/portfolio_allocator.py` | L4 | Medium |
+| `RUBCrisisBrake` | `risk/rub_crisis_brake.py` | L4 | Low |
+| `PortfolioBacktestOrchestrator` | `backtest/portfolio_orchestrator.py` | L5 | High |
+
+### Modified Components (extend existing)
+
+| Component | File | Change | Complexity |
+|-----------|------|--------|------------|
+| `MacroSnapshot` | `data/fetchers/cbr.py` | Add `brent_close`, `usdrub_daily_change` fields | Low |
+| `MacroContextProvider` | `data/fetchers/cbr.py` | Populate Brent and USDRUB from candle series | Low |
+| `SizingContext` | `risk/position_sizing_pipeline.py` | Add `cbr_regime`, `brent_price` fields | Low |
+| `BacktestEngine._process_bar()` | `backtest/engine.py` | Pass `macro_snapshot` to strategy kwargs | Low |
+| `StrategyCombiner` | `strategies/combiner.py` | Register new strategies, pass macro kwargs | Low |
+| YAML presets (`ru_*.yaml`) | `strategies/presets/` | Add weights for `sector_rotation`, `preferred_arb`, `dividend_gap` | Low |
+| `run_iteration.py` | `scripts/` | Wire DividendCalendarLoader, macro provider | Medium |
+| `MarketDataLoader._load_moex()` | `data/loader.py` | Include Brent candles in MarketContext | Low |
+
+## Suggested Build Order (Dependency Chain)
+
+The build order must respect both layer dependencies and feature dependencies:
 
 ```
-Trade event occurs in TradingLoop / BondCycleProcessor
-    ↓
-TelegramAlerter.<specific_method>(...)
-    ↓
-send_alert(formatted_text)
-    ↓  (fire-and-forget)
-asyncio task → POST https://api.telegram.org/bot{token}/sendMessage
-    ↓
-User receives notification on Telegram (best-effort)
+Phase 1: Data Foundation (L2)
+  1.1 DividendCalendarLoader — needed by DividendGapStrategy wiring
+  1.2 SectorClassifier — needed by SectorRotationStrategy
+  1.3 PreferredShareMapper — needed by PreferredShareArbStrategy
+  1.4 MacroSnapshot extensions (Brent, USDRUB) — needed by all macro-gated strategies
+
+Phase 2: Strategy Implementation (L4)
+  2.1 Wire DividendGapStrategy calendar (EXISTING strategy, just needs data)
+  2.2 CBRRegimeStep + BrentGateStep in sizing pipeline
+  2.3 SectorRotationStrategy (depends on 1.2, 1.4)
+  2.4 PreferredShareArbStrategy (depends on 1.3)
+  2.5 Wire CBRStrategyWrapper into combiner (EXISTING strategy)
+  2.6 Wire RubOilRegimeSignal into backtest regime provider (EXISTING)
+
+Phase 3: Portfolio Allocation (L4-L5)
+  3.1 PortfolioAllocator (40/60 split)
+  3.2 RUBCrisisBrake
+  3.3 PortfolioBacktestOrchestrator
+
+Phase 4: Integration & Backtest (L5)
+  4.1 Update run_iteration.py to wire all new components
+  4.2 Update YAML presets with new strategy weights
+  4.3 Run walk-forward backtests per segment
+  4.4 Run combined portfolio backtest
 ```
 
-## Scaling Considerations
+**Phase ordering rationale:**
+- Phase 1 first because all strategies depend on data providers.
+- Phase 2 next because strategies can be individually backtested.
+- Phase 3 after strategies work individually, because portfolio allocation composes them.
+- Phase 4 last because integration requires all components to exist.
 
-This is a single-account autonomous trading system, not a multi-tenant SaaS. Scaling means handling more instruments and more news volume, not more users.
+**Within Phase 2:** DividendGapStrategy wiring (2.1) first because it is the highest expected-alpha feature (documented 70%+ gap closure) and the strategy already exists -- just needs data. Sizing pipeline steps (2.2) next because they affect all equity strategies. SectorRotation (2.3) before PreferredArb (2.4) because sector rotation applies broadly while arb is niche.
 
-| Scale Concern | Current Approach | Limit / When to Revisit |
-|---------------|-----------------|--------------------------|
-| News LLM calls | Synchronous sequential per article | At >50 articles/cycle, parallelize with asyncio.gather() |
-| Bond instrument count | Sequential fetch per bond in cycle | At >100 bonds, batch candle fetches via T-Invest streaming |
-| MacroCache refresh | Daily batch from cbr.ru | CBR API rate limits are not a concern at 1 request/day |
-| T-Invest gRPC rate limits | Retry with backoff in TinkoffBroker | Monitor 429s; add token bucket if needed |
-| Sentiment cache size | In-memory dict (symbol → SentimentResult) | No concern at <1000 symbols |
-| APScheduler jobs | BackgroundScheduler (thread-based) | Fine for <10 cycles. If cycles overlap frequently, add job coalesce=True |
+## Layer Violation Analysis
 
-## Anti-Patterns
+All proposed components respect the 7-layer dependency rules:
 
-### Anti-Pattern 1: Bond Strategies as BaseStrategy Subclasses
+| New Component | Layer | Imports From | Violation? |
+|---------------|-------|-------------|------------|
+| DividendCalendarLoader | L2 | L0 (schemas), L1 (config) | No |
+| SectorClassifier | L2 | L0 (schemas) | No |
+| SectorRotationStrategy | L4 | L0 (schemas), L4 (base) | No |
+| PreferredShareArbStrategy | L4 | L0 (schemas), L4 (base) | No |
+| CBRRegimeStep | L4 | L0 (Decimal), L4 (SizingContext) | No |
+| PortfolioAllocator | L4 | L0 (Decimal), L4 (SizingContext) | No |
+| PortfolioBacktestOrchestrator | L5 | L0-L5 | No |
 
-**What people do:** Try to fit BondCarryStrategy, CBREventStrategy into BaseStrategy by adding optional kwargs.
+**No upward imports proposed.** All macro data flows downward from L2 to L4 via `MacroSnapshot` kwarg.
 
-**Why it's wrong:** BaseStrategy.generate_signal() expects standard candle/market context. Bond strategies need macro kwargs (key_rate, ruonia, cpi_yoy, last_cbr_decision) that have no meaning for equity strategies. Forcing the same interface creates leaky abstractions and requires every equity strategy to accept and ignore bond-specific kwargs.
+## Scalability Considerations
 
-**Do this instead:** Keep bond strategies as independent classes with their own `generate_signal(symbol, candles, open_positions, bar_idx, **macro_kwargs)` interface. BondCycleProcessor knows about this interface explicitly.
+| Concern | Current (5 symbols) | At 30 symbols | At 150+ dividend events |
+|---------|---------------------|---------------|------------------------|
+| Dividend calendar loading | N/A (empty) | 30 Tinkoff API calls | ~150 events, <1MB RAM |
+| Brent data | Already fetched via yfinance | Same (single series) | Same |
+| Preferred pair backtesting | N/A | 3 pairs = 6 symbols | 3 pairs, negligible |
+| Portfolio orchestrator | N/A | 2 engines (bond+equity) | 2 engines, linear time |
+| MacroSnapshot per bar | ~1K bars | ~1K bars | O(1) lookup per bar |
 
-### Anti-Pattern 2: Calling CBRFetcher Directly from Strategies
-
-**What people do:** Bond strategies import CBRFetcher and call it directly to get the latest key rate.
-
-**Why it's wrong:** Creates L2 → L4 upward dependency violation. Also causes redundant HTTP calls (one per strategy per bond per cycle). CBR rate limits are not generous.
-
-**Do this instead:** MacroCacheService provides the macro snapshot. BondCycleProcessor injects it as kwargs. Strategies only consume what is passed in — they never fetch.
-
-### Anti-Pattern 3: Blocking the Trading Loop with LLM Calls
-
-**What people do:** Call `await news_analyzer.analyze(article)` inside the strategy cycle to get "fresh" sentiment.
-
-**Why it's wrong:** Claude API calls take 1-5 seconds each. With 10+ articles/cycle this blocks order generation for up to 50 seconds. MOEX orders need to be submitted before market close.
-
-**Do this instead:** Keep news cycle and strategy cycle separate (already done in TradingLoop). The strategy cycle reads from `_sentiment_cache` — always fast, never blocking.
-
-### Anti-Pattern 4: Telegram Alerts That Can Raise Exceptions
-
-**What people do:** Add new alert methods that do not wrap exceptions, expecting callers to handle them.
-
-**Why it's wrong:** An alert failure (network timeout, invalid token, Telegram API error) must never propagate into the trading loop and abort an order.
-
-**Do this instead:** All TelegramAlerter methods catch all exceptions internally. The calling code never needs a try/except around alert calls.
-
-### Anti-Pattern 5: Mixing RUB and USD Position Sizing
-
-**What people do:** Use the same HalfKelly position sizer for MOEX that was calibrated for USD-denominated US equities.
-
-**Why it's wrong:** MOEX instruments are priced in RUB. Using USD-calibrated sizing produces positions that are ~80x too small (e.g. 0.02% instead of 15%). This was identified as a known bug in the MVP plan.
-
-**Do this instead:** CurrencyConverter provides RUB/USD conversion. All MOEX position sizing must be done in RUB before converting to lot quantities. The DV01BudgetStep and EqualWeightBondSizer already operate in RUB natively (face_value = 1000 RUB).
-
-## Integration Points
-
-### External Services
-
-| Service | Protocol | Integration Pattern | Notes |
-|---------|----------|---------------------|-------|
-| T-Invest (Tinkoff) gRPC | gRPC | `AsyncClient` as context manager, `target="invest-public-api.tbank.ru:443"` | Old `tinkoff.ru` domain no longer works. Set `GRPC_DNS_RESOLVER=native`. |
-| T-Invest Sandbox | gRPC | `AsyncSandboxClient`, `target="sandbox-invest-public-api.tbank.ru:443"` | Separate endpoint. Use for all pre-production validation. |
-| CBR XML/SOAP | HTTP | Sync httpx client in CBRFetcher. Never call from async without `asyncio.to_thread()` | Rate-limit-free. CBR allows repeated polling. |
-| Claude Sonnet (Anthropic) | REST | `LLMClient.complete(prompt, system)` async | Costs money per call — cache aggressively. Do not call per-instrument per-cycle. |
-| Telegram Bot API | HTTP | httpx POST to `api.telegram.org/bot{token}/sendMessage` | Fire-and-forget. Token configured via `FINALAYZE_TELEGRAM_BOT_TOKEN` and `FINALAYZE_TELEGRAM_CHAT_ID`. |
-| MOEX ISS | REST | `MOEXISSFetcher` — index levels, instrument lists | Free, no auth. Use for IMOEX benchmark. |
-
-### Internal Boundaries
-
-| Boundary | Communication Pattern | Notes |
-|----------|-----------------------|-------|
-| TradingLoop ↔ BondCycleProcessor | Direct method call (`run_cycle()`) | BondCycleProcessor is instantiated inside TradingLoop |
-| StrategyCombiner ↔ EventDriven | `_sentiment_cache` dict read | Protected by `threading.Lock`. Strategy reads latest cached sentiment. |
-| BondCycleProcessor ↔ MacroCacheService | `macro_cache.get()` → MacroSnapshot | Sync read. MacroCacheService refreshes on separate APScheduler job. |
-| Bond Strategies ↔ Risk | DV01BudgetStep / EqualWeightBondSizer called by BondCycleProcessor | Strategies produce Signals; BondCycleProcessor handles sizing — strategies never self-size. |
-| TelegramAlerter ↔ Trading Loop | Method calls at event points | Alerter is injected into TradingLoop and BondCycleProcessor constructors. |
-| All → InstrumentRegistry | `.get(symbol, market_id)` or `.list_by_type()` | Registry is populated at startup from TinkoffFetcher instrument discovery. |
-
-## Build Order Implications
-
-The dependency structure dictates a specific build order for new MOEX features. Each phase should produce independently testable artifacts.
-
-```
-Phase A: Data layer completeness (L2)
-  → MOEX instrument discovery (TinkoffFetcher → InstrumentRegistry population)
-  → MOEX bond candle fetch validation
-  → MacroCacheService with live CBR data
-  GATE: backtests on MOEX bonds produce non-empty candle series
-
-Phase B: Bond strategy calibration (L4)
-  Depends on: Phase A (need live MOEX candle data)
-  → BondCarryStrategy parameter tuning (rebalance interval, confidence thresholds)
-  → CBREventStrategy gap threshold validation against historical meetings
-  → BondDurationRotationStrategy yield curve logic
-  GATE: bond backtest shows positive PnL with walk-forward validation
-
-Phase C: Risk wiring (L4)
-  Depends on: Phase A (need live data for DV01 calculation)
-  → DV01BudgetStep validation (requires real bond duration data from T-Invest)
-  → YieldStop full implementation (YTM computation from price + remaining coupons)
-  → BondLayerBreaker integration into BondCycleProcessor (complete _size_and_execute stub)
-  GATE: BondCycleProcessor.run_cycle() executes orders in T-Invest sandbox
-
-Phase D: News pipeline activation (L3 → L4)
-  Depends on: Phase A (instrument list needed for entity matching)
-  → T-Invest news API fetcher
-  → Russian media RSS fetcher (RBC, Interfax, TASS)
-  → Telegram channel poller (python-telegram-bot or pyrogram)
-  → event_driven strategy enable for MOEX
-  GATE: sentiment signals influence combined signal on MOEX instruments in sandbox
-
-Phase E: Telegram alerting validation (L6)
-  Depends on: Phases B, C (need real trades to alert on)
-  → TelegramAlerter integration test against sandbox trades
-  → Daily P&L summary showing non-zero MOEX P&L
-  → Coupon alert wiring (detect coupon payments from T-Invest portfolio events)
-  GATE: operator receives correct alerts for every sandbox trade and daily summary
-
-Phase F: Sandbox autonomous run (L6)
-  Depends on: Phases A-E complete
-  → End-to-end autonomous run for 5+ trading days in T-Invest sandbox
-  → No critical errors, circuit breakers fire correctly, alerts arrive
-  GATE: system operates 24/7 without human intervention for 5 days
-
-Phase G: Real money deployment
-  Depends on: Phase F GATE passed, max drawdown <5% in sandbox
-  → Switch mode from sandbox → real
-  → Monitor position sizing correctness (RUB amounts)
-  → Hard stop: if drawdown >5% in first week, revert to sandbox
-```
+The dominant cost is the Tinkoff API calls for dividend data. With 30 symbols and 3 years of history, this is ~90 API calls total -- well within rate limits.
 
 ## Sources
 
-All findings are HIGH confidence — derived from direct inspection of the production codebase.
-
-- `src/finalayze/core/trading_loop.py` — TradingLoop scheduler architecture
-- `src/finalayze/core/bond_cycle.py` — BondCycleProcessor 9-step pipeline
-- `src/finalayze/core/alerts.py` — TelegramAlerter full API surface
-- `src/finalayze/core/layer_ledger.py` — LayerLedger virtual sub-account pattern
-- `src/finalayze/strategies/bond_carry.py` — BondCarryStrategy macro-aware interface
-- `src/finalayze/strategies/cbr_event.py` — CBREventStrategy entry/exit logic
-- `src/finalayze/risk/dv01_sizing.py` — DV01BudgetStep + EqualWeightBondSizer
-- `src/finalayze/risk/layer_circuit_breaker.py` — 4-layer circuit breaker hierarchy
-- `src/finalayze/data/macro_cache.py` — MacroCacheService daily refresh pattern
-- `src/finalayze/execution/broker_router.py` — market_id dispatch pattern
-- `src/finalayze/markets/instruments.py` — InstrumentRegistry with bond metadata
-- `docs/architecture/DEPENDENCY_LAYERS.md` — enforced L0-L6 import rules
-- `docs/architecture/DATA_FLOW.md` — original event bus and data flow diagrams
-
----
-*Architecture research for: MOEX autonomous trading with bonds, news analysis, and alerting*
-*Researched: 2026-03-14*
+- Direct codebase inspection: `dividend_gap.py`, `cbr_calendar.py`, `cbr_event.py`, `cbr_strategy_wrapper.py`, `rub_oil_regime.py`, `regime.py`, `position_sizing_pipeline.py`, `combiner.py`, `engine.py`, `loader.py`, `schemas.py`, `bond_carry.py`
+- Existing CBR meeting calendar: `data/fetchers/cbr.py` (2022-2026, 40+ meetings)
+- Existing CPI publication dates: `data/fetchers/cbr.py` (2024-2025, Rosstat lag-aware)
+- MOEX segment presets: `strategies/presets/ru_*.yaml` (6 MOEX equity + 2 OFZ segments)
+- PortfolioLayer enum: `core/schemas.py` (CORE/STRATEGIC/TACTICAL/SHORT)
+- LayerConfig defaults: 45% CORE + 27.5% STRATEGIC + 17.5% TACTICAL + 10% SHORT

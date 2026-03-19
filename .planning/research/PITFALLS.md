@@ -1,331 +1,419 @@
-# Pitfalls Research
+# Domain Pitfalls: MOEX Equity Profitability (v2.0)
 
-**Domain:** MOEX autonomous bond/coupon trading with LLM news and Telegram alerting
-**Researched:** 2026-03-14
-**Confidence:** HIGH (codebase analysis + verified domain knowledge)
+**Domain:** Adding dividend gap, CBR regime overlay, and sector rotation strategies to existing MOEX multi-strategy trading system
+**Researched:** 2026-03-20
+**Confidence:** HIGH (codebase analysis) / MEDIUM (MOEX-specific domain knowledge from web research)
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Sizing Against Clean Price Instead of Dirty Price (NKD)
+Mistakes that cause rewrites, persistent negative Sharpe, or invalidate entire backtest results.
+
+### Pitfall 1: Look-Ahead Bias in Dividend Gap Backtests
 
 **What goes wrong:**
-Bond position sizing computes how many bonds to buy using clean price (% of face value) but the actual cash deducted at settlement is the dirty price — clean price + NKD (накопленный купонный доход). A system that only checks `clean_price * quantity <= available_cash` will approve orders that actually overdraw the account by the NKD amount. For OFZ bonds mid-coupon period, NKD can be 3–5% of face value. At scale (buying 100+ bonds), this causes cash balance to go negative in the broker account.
+The dividend gap strategy uses `moex_dividends.yaml` (static file with 43 events) to know ex-dividend dates and amounts. In a backtest, the strategy "sees" all future dividends at bar 0. When the engine encounters bar N matching an ex-date, it generates a BUY. This is correct *if* the dividend was publicly announced before the ex-date. But on MOEX, dividend recommendations are announced by the Board of Directors 30-50 days before the shareholder meeting, and the ex-date is set at record date - 2 business days. A strategy that buys on the ex-date is fine (the date is known by then). But if gap_pct or confidence scaling uses the dividend amount, there is look-ahead risk: the *exact* dividend amount is often finalized only at the shareholder meeting, which can be 5-10 days before record date. In 2022, GAZP's board recommended 52.53 RUB but shareholders rejected it -- the YAML file shows the actual 51.03 RUB payment from October, but the strategy would have traded on the announced 52.53 RUB in June.
 
 **Why it happens:**
-Market data and quoting APIs report clean price as the "price." Developers see the price field and use it directly. The NKD is a separate field that requires a separate API call (`get_accrued_interests`) or computation via `bond_math.nkd()`. The existing `DV01BudgetStep.compute_position_size()` uses `face_value` as the cash proxy — not dirty price — making this a latent bug in the sizing pipeline.
+The static YAML file conflates "announced" and "paid" dividends. The DividendGapStrategy.generate_signal() uses `matching_div.amount` from the YAML to compute `gap_pct = amount / pre_exdiv_close * 100`. If the YAML contains the final paid amount but the market priced in the announced amount (which may differ), the gap_pct calculation is wrong. Worse, some MOEX companies announce dividends then cancel them entirely (GAZP 2022, VTBR 2022) -- these events should NOT generate BUY signals but will if the YAML only contains successful payments.
 
-**How to avoid:**
-Cash sufficiency check in bond pre-trade validation MUST use `dirty_price = (clean_price_pct / 100) * face_value + nkd_per_bond`. The `_validate_orders()` method in `BondCycleProcessor` already has this in its spec ("Cash sufficiency against dirty price"), but the actual sizing step in `DV01BudgetStep` uses `face_value` as the cash estimate — fix the sizer to accept `dirty_price_per_bond` and use that for the position cap, not face value.
+**Consequences:**
+- Backtest shows inflated win rate because only successful dividend payments are in the dataset
+- Gap closure rate appears higher than reality (cancelled dividends = no gap to close, but also no loss counted)
+- Strategy appears to have ~15 clean trades when real deployment would encounter 3-5 cancelled/reduced dividends per year
 
-**Warning signs:**
-- Sandbox broker reports insufficient funds errors after position sizing passed pre-trade check
-- Cash balance after bond buy is less than NKD × quantity bought
-- Telegram alerts for rejected orders with "insufficient cash" on bonds that should fit in budget
+**Prevention:**
+1. Add a `status` field to YAML entries: `paid`, `cancelled`, `reduced`. Include ALL announced dividends, not just paid ones
+2. DividendGapStrategy must only use dividend data that would have been known at the ex-date: the amount from the Board recommendation (not shareholder vote), flagged with `confidence: preliminary|confirmed`
+3. Include failed dividend events (GAZP 2022 June: recommended 52.53, cancelled) as entries with `status: cancelled` -- the strategy must NOT trade these in backtest
+4. Expand YAML from 43 to 150+ events, including ALL board recommendations from 2020-2025, not just successful payments
+5. Add test: no DividendEntry in calendar has ex_date before board_recommendation_date
 
-**Phase to address:**
-Bond execution wiring phase (the phase that completes `_size_and_execute()` in `BondCycleProcessor`).
+**Detection:**
+- Backtest shows 0 losing dividend gap trades (unrealistic -- ~20% of announced dividends are modified or cancelled)
+- All gap_pct values in backtest exactly match final paid amounts (impossible to know pre-ex-date for ~30% of events)
+- Win rate > 85% on dividend gap strategy (historically 65-75% when including cancellations)
+
+**Phase to address:** Phase 1 (data preparation) -- must be resolved before any dividend gap backtesting.
 
 ---
 
-### Pitfall 2: Applying Equity Stop-Loss ATR Logic to Bonds
+### Pitfall 2: Survivorship Bias from 2022 Sanctions Structural Break
 
 **What goes wrong:**
-The existing equity stop-loss pipeline (`risk/stop_loss.py`, `risk/chandelier_exit.py`) uses ATR-based trailing stops calibrated for equity volatility (1.5–2.5× ATR). OFZ bonds trade in price-percentage terms (e.g., 92.50 to 93.10), have very different volatility characteristics, and are affected by yield movements (interest rate sensitivity) rather than momentum. Applying ATR equity stops to bonds will either stop out on normal daily price noise (too tight) or never trigger (too wide). The existing `yield_stop.py` is the correct instrument but `_process_yield_stops()` currently returns 0 (stub).
+The backtest uses 2022-2025 data for walk-forward validation. February 2022 sanctions caused: MOEX closure Feb 28 - Mar 24 (25 trading days), foreign investor freeze (40% of equity ownership trapped), index drop of ~50% in Feb 2022, and permanent delisting/restructuring of several instruments (Polymetal -> Solidcore, Yandex -> YDEX). The current universe in `segments.py` includes symbols that either didn't exist pre-2022 (YDEX) or were fundamentally different entities (POLY -> new listing). Backtesting these symbols across the structural break treats pre-break and post-break as the same instrument.
 
 **Why it happens:**
-The existing equity pipeline is mature and the path of least resistance is to reuse it for bonds. Bond strategies are added to the same `Signal` schema and the same execution path, making it tempting to run them through the same risk pipeline.
+The segment definitions in `config/segments.py` use current ticker lists. Symbols like `GAZP`, `VTBR`, `SNGS` are in the universe but the PROJECT.md already identifies them as "toxic" (60% of negative PnL). The system treats 2022 as regular data, but the Feb-Mar 2022 period had: trading halt, forced margin calls, artificial circuit breakers by MOEX (20% daily limits), and CBR-mandated short-selling ban. Any strategy calibrated on this data learns "crisis = opportunity" which is survivorship bias -- you only see the survivors.
 
-**How to avoid:**
-Keep bond and equity risk pipelines strictly separate. Bond exits must use `YieldStop` (threshold in basis points above entry YTM), not ATR. The `BondCycleProcessor._process_yield_stops()` stub must be completed before any live bond trading. Never pass bond orders through `PositionSizingPipeline` (equity-specific). The `DV01BudgetStep` and `EqualWeightBondSizer` are the correct bond sizing tools.
+**Consequences:**
+- Walk-forward folds that include Feb-Mar 2022 in training learn distorted patterns (artificial floor from MOEX circuit breakers)
+- Strategies calibrated on 2022 data overestimate recovery speed (MOEX intervention prevented natural price discovery)
+- Toxic symbols (GAZP, VTBR) show "mean reversion" in 2022-2023 that was actually government-supported price floors, not a repeatable pattern
+- Vol estimates from 2022 data are 3-5x higher than normal, choking VolTargetStep for all subsequent bars
 
-**Warning signs:**
-- Bond positions getting stopped on 0.1–0.3% intraday moves (ATR too tight for bonds)
-- No bond positions ever exiting despite yield rising substantially above entry (ATR too wide)
-- `yield_stop` counter in logs always showing 0 after the first week of live trading
+**Prevention:**
+1. Universe surgery FIRST: remove GAZP, VTBR, SNGS, IRAO, ALRS from active segments before any backtesting
+2. Purge Feb-Mar 2022 data from walk-forward training windows entirely (treat as gap, not data)
+3. Use separate walk-forward configs: pre-sanctions (2020-2022-02) and post-sanctions (2022-04-2025). Never train across the break
+4. For symbols that were restructured (POLY, YNDX), start data only from post-restructuring date
+5. Add `exclude_periods` parameter to BacktestConfig: `[("2022-02-24", "2022-04-01")]`
+6. Vol estimates must use adaptive window that excludes the crisis period or uses exponential decay
 
-**Phase to address:**
-Bond cycle completion phase (implementing full `_process_yield_stops()` and `_size_and_execute()`).
+**Detection:**
+- Walk-forward Sharpe swings wildly between folds (one fold includes 2022, another doesn't)
+- VolTargetStep consistently scales MOEX positions to 25% (floor) because asset_vol > 0.50 from 2022 data
+- Mean reversion strategies show artificially high win rate on GAZP/VTBR in 2022-2023 folds
+
+**Phase to address:** Phase 1 (universe cleanup and data preparation) -- must be the FIRST thing done.
 
 ---
 
-### Pitfall 3: Ignoring MOEX Holiday Calendar in Bond Cycle Scheduler
+### Pitfall 3: Vol Target Calibrated for US (0.19) Destroys MOEX Position Sizes
 
 **What goes wrong:**
-The bond cycle scheduler triggers at 10:30 MSK daily (`CronTrigger`). MOEX has 14–20 non-trading days per year (official public holidays plus official non-business days where bond market is still open for some instruments but not others). The current `MarketSchedule` only skips weekends. If the bond cycle runs on a MOEX holiday, it fetches zero candles for all bonds (empty responses from T-Invest API), generates no signals, and logs confusing "no candles" warnings — or worse, proceeds with stale data from the cache if CachingFetcher is used.
+The VolTargetStep in `position_sizing_pipeline.py` computes `raw_ratio = target_vol / asset_vol` and clamps to [0.25, 1.5]. The target_vol comes from strategy presets: `vol_target: 0.19` (19% annualized). MOEX blue chip volatility is typically 0.35-0.60 (35-60% annualized). The ratio becomes 0.19/0.45 = 0.42, clamped to 0.42. Combined with RegimeStep (scale 0.50 in ELEVATED), the position becomes 0.42 * 0.50 = 0.21 of base. Combined with the pipeline floor of 15%, many signals end up at exactly the 15% floor -- effectively a fixed tiny position regardless of signal strength.
 
 **Why it happens:**
-The existing `MarketSchedule` class in `markets/schedule.py` only handles weekends (`weekday() >= 5`). Russian holiday calendar has irregular structure: some years have bridge holidays, some officially non-business days still trade, and the list changes annually. The MOEX design doc (`2026-03-10-moex-data-sources-design.md`) lists `config/moex_calendar.py` as the solution but it needs to be connected to the bond cycle scheduler.
+The 0.19 vol target was calibrated for US equities (SPY vol ~0.15-0.20). MOEX equities inherently have 2-3x higher vol due to: thinner liquidity, commodity/FX exposure, geopolitical risk premium, and smaller free float. The preset YAML files (`ru_blue_chips.yaml`) copy-pasted `vol_target: 0.19` from US presets without recalibrating.
 
-**How to avoid:**
-The bond cycle's `_bond_cycle()` method must check `is_moex_trading_day(today)` before proceeding. The `moex_calendar.py` static holiday list must be maintained and checked annually. Always have a fallback: if candle fetch returns empty for all bonds in a cycle, log `bond_cycle_skipped reason=holiday` — never proceed with zero-candle data.
+**Consequences:**
+- ALL MOEX equity positions are systematically undersized (21-42% of what they should be)
+- The pipeline floor (15%) fires on 60-70% of MOEX trades, eliminating any signal-strength differentiation
+- Position sizes too small to overcome transaction costs (MOEX commission + slippage > expected return on tiny positions)
+- 104 backtest iterations ALL showing negative Sharpe partly because positions are too small to generate meaningful P&L
 
-**Warning signs:**
-- `bond_candle_fetch_failed` warnings for ALL bonds simultaneously on specific dates
-- `bond_cycle_complete total_signals=0 total_executed=0` on dates that should be national holidays
-- Yield stops not evaluating on days adjacent to holidays when positions need monitoring
+**Prevention:**
+1. Set MOEX-specific vol_target: 0.35-0.40 for ru_blue_chips, 0.45-0.50 for ru_energy (match the market's natural vol level)
+2. Alternative: disable VolTargetStep entirely for MOEX segments and rely on Kelly + RegimeStep for sizing
+3. Never copy US preset parameters to MOEX presets without recalibrating -- create a separate calibration script
+4. Add a test: for each segment, assert that VolTargetStep ratio > 0.50 for the median asset_vol of that segment's universe
+5. Log the VolTargetStep ratio per trade in backtest -- if > 70% of trades hit the floor, the vol_target is miscalibrated
 
-**Phase to address:**
-Bond cycle integration phase (TradingLoop scheduler setup with `MacroCacheService`).
+**Detection:**
+- Backtest logs show `vol_target_ratio: 0.25` (clamped to floor) for > 50% of MOEX trades
+- Pipeline floor firing rate > 50% for MOEX segments (should be < 10%)
+- Position sizes for MOEX equities are 0.5-2% of equity (should be 5-15%)
+
+**Phase to address:** Phase 1 (parameter recalibration) -- quick fix, high impact, do alongside universe cleanup.
 
 ---
 
-### Pitfall 4: TinkoffBroker Thread-Safety Across Equity and Bond Cycles
+### Pitfall 4: CBR Rate Regime Timing Error -- Using Announcement Date Instead of Market Pricing Date
 
 **What goes wrong:**
-APScheduler `BackgroundScheduler` runs each job in a separate thread. The equity `_strategy_cycle()` and bond `_bond_cycle()` can execute concurrently. If both share the same `TinkoffBroker` instance, they share the same `AsyncClient` which is not thread-safe across different `asyncio.run()` calls — each `asyncio.run()` creates a new event loop, but the shared `AsyncClient`'s gRPC channel may have state from the previous loop. This causes intermittent gRPC errors, partial order submissions, or silent failures.
+The CBR announces key rate decisions 8 times per year. The `rub_oil_regime.py` exists but is not wired into sizing. When adding a CBR rate regime overlay, the natural approach is: "if CBR cut rate, go risk-on; if CBR hiked, go risk-off." But the market prices in CBR decisions 1-3 weeks BEFORE the announcement based on: inflation data (released monthly), CBR forward guidance (published in monetary policy reports), and OFZ yield curve movements. If the strategy waits for the actual announcement, the move has already happened. If the strategy trades on announcement, it buys at the post-announcement price (already adjusted).
 
 **Why it happens:**
-The bootstrap script creates one `TinkoffBroker` instance and routes all MOEX traffic through it via `BrokerRouter`. The concurrency issue only manifests under load — in sandbox with slow cycles it appears to work fine. The design doc (`bond-tradingloop-integration-design.md` §3.6) already identified this and mandates a separate `TinkoffBroker` instance for bonds keyed as `"moex_bonds"`. The pitfall is forgetting to implement this separation.
+Developers treat CBR decisions as "events" (like earnings). But unlike earnings, CBR decisions are highly predictable -- the OFZ yield curve embeds the expected rate path. The "surprise" component (actual vs. expected) is what moves prices, not the absolute decision. A strategy that buys on "CBR cut" and sells on "CBR hike" is buying/selling AFTER the information is priced in.
 
-**How to avoid:**
-Register `tinkoff_broker_bonds = TinkoffBroker(...)` as a separate instance in `BrokerRouter` under key `"moex_bonds"`. Validate in integration tests that concurrent equity + bond cycles do not share gRPC channel state (`tests/integration/test_concurrent_cycles.py`). Never reuse an `AsyncClient` instance across threads.
+**Consequences:**
+- CBR regime overlay shows near-zero alpha in backtests (market already priced the decision)
+- Worse: if the strategy buys on "cut" announcement, it buys AFTER the rally, then holds through the mean-reversion back to fair value -- negative alpha
+- Look-ahead bias if the backtest uses actual CBR decisions to size positions on dates before the decision was announced
 
-**Warning signs:**
-- Intermittent gRPC errors only during overlapping equity + bond cycle times
-- "cannot schedule new futures after interpreter shutdown" Python errors
-- Orders disappearing without error logs (silently dropped due to event loop conflict)
+**Prevention:**
+1. CBR regime must use OFZ yield curve slope (2Y-10Y spread) and RUONIA-OIS spread as *leading* indicators, not the CBR decision itself as a *lagging* indicator
+2. Implement two distinct regime signals:
+   - **Pre-decision positioning** (2 weeks before meeting): based on OFZ curve steepening/flattening trend
+   - **Post-decision adjustment** (day after meeting): only on *surprise* component (actual vs. market-implied rate)
+3. The existing `rub_oil_regime.py` (RUB-oil decorrelation) is actually a BETTER regime signal than CBR decisions -- wire it into sizing first
+4. For backtesting: CBR decision dates must be from a historical calendar (available from cbr.ru), NOT embedded in the candle data. Ensure the strategy only "sees" the decision after the announcement bar
+5. Add "CBR surprise" feature for ML: `actual_rate - implied_rate_from_OFZ_curve`. This has genuine predictive value
 
-**Phase to address:**
-Bond cycle integration phase (bootstrap wiring of `BondCycleProcessor`).
+**Detection:**
+- CBR regime overlay shows < 0.05 improvement in Sharpe vs. no overlay (signal already priced in)
+- Positions opened on CBR decision day show negative average return over next 5 bars (bought the top)
+- All CBR-gated trades cluster around 8 dates per year with no signal between meetings
+
+**Phase to address:** Phase 3 (CBR regime integration) -- requires careful design; do NOT just gate on rate decisions.
 
 ---
 
-### Pitfall 5: CBR Key Rate Announcement Timing — Spread Spike Window
+### Pitfall 5: Dividend Gap Strategy Conflicts with Combiner ADX Routing
 
 **What goes wrong:**
-CBR announces key rate decisions at 13:30 MSK. OFZ bid-ask spreads spike 30–50 bps immediately after the announcement as market makers reprice. If the bond cycle runs at 13:30–14:30 MSK on CBR meeting days, it will buy/sell at inflated spreads, turning what should be a 5–10 bps cost into a 30–50 bps cost. The `CBREventStrategy` is designed to trade around CBR meetings but must avoid execution in this window.
+The `DividendGapStrategy` generates BUY signals on ex-dividend dates. These signals enter the `StrategyCombiner` where they are subject to ADX regime routing. If ADX > 35 (trend regime), only `_MOMENTUM_STRATEGIES` (momentum, dual_momentum) are allowed. Dividend gap is NOT in `_MOMENTUM_STRATEGIES` or `_MR_STRATEGIES` -- it is not classified in either pool. This means: (a) the signal may be filtered by regime routing (depending on implementation), or (b) it always passes routing but its weight gets diluted by whichever pool is active.
+
+The deeper problem: dividend gap is an EVENT-DRIVEN strategy (triggers on calendar date, not price pattern). It should bypass ADX routing entirely. But the combiner's `generate_combined_signal()` applies routing to ALL strategies. The current code in combiner.py lines 35-36 defines:
+```
+_MOMENTUM_STRATEGIES = frozenset({"momentum", "dual_momentum"})
+_MR_STRATEGIES = frozenset({"mean_reversion", "pairs", "ou_mean_reversion", "rsi2_connors"})
+```
+`dividend_gap` is in neither set, so it falls through to "ambiguous" classification and gets included regardless of ADX -- but this is ACCIDENTAL, not intentional. A future refactor that defaults unknown strategies to "blocked" would silently kill the dividend gap strategy.
 
 **Why it happens:**
-The CBR meeting day extra bond cycle is a useful feature, but its timing is critical. The design doc correctly identifies 15:30 MSK as the safe window (after the 15:00 press conference). Incorrectly implementing it at 13:30 or 14:00 MSK — or not gating execution at all on announcement day — wastes the alpha from the strategy on transaction costs.
+ADX routing was designed for US equity strategies (trend vs. mean-reversion classification). Event-driven strategies (dividend_gap, pead, cbr_calendar) don't fit this taxonomy. The combiner was not designed for strategies with fundamentally different signal generation logic.
 
-**How to avoid:**
-Extra CBR-day bond cycle must run at 15:30 MSK minimum, after the press conference with forward guidance. The `_cbr_day_refresh()` implementation in the design doc is correct. Validate by logging `fill_price` and comparing to last mid-price before execution — if spread exceeds 20 bps, flag a warning. Never schedule bond execution between 13:30 and 15:00 MSK on CBR meeting days.
+**Consequences:**
+- Dividend gap signals get weighted alongside trend/MR signals, diluting a high-conviction event signal with noisy technical signals
+- On ex-div days, the combined confidence may fall below `min_combined_confidence` (0.15 for ru_blue_chips) because other strategies generate HOLD/SELL signals that average down the BUY
+- If another strategy generates a SELL on the ex-div day (e.g., momentum sees the gap as a bearish breakdown), the signals cancel out and no trade occurs -- missing the highest-alpha signal
 
-**Warning signs:**
-- Bond fills on CBR meeting days showing significantly worse prices than the pre-announcement mid
-- `CBREventStrategy` generating negative alpha despite correct signal direction
-- `MacroSnapshot.last_cbr_decision` showing "unexpected" decision when fill was taken before press conference
+**Prevention:**
+1. Create an `_EVENT_STRATEGIES` frozenset: `{"dividend_gap", "pead", "cbr_calendar", "event_driven"}` that bypasses ADX routing entirely
+2. Event strategies should have a "standalone" mode: if dividend_gap confidence > 0.60, it should generate a trade independently of the combiner's weighted average
+3. Alternative: give dividend_gap a combiner weight of 0.50+ on MOEX segments so it dominates the combined signal on ex-div days
+4. Test: on a known ex-div date with ADX > 35, verify dividend_gap signal is NOT filtered
+5. Test: on a known ex-div date, verify combined signal is BUY even if momentum generates SELL
 
-**Phase to address:**
-TradingLoop bond cycle scheduling phase (CBR meeting detection + `_cbr_day_refresh()`).
+**Detection:**
+- Backtest shows 0 dividend_gap trades despite 43 ex-div events in calendar (signals filtered or diluted)
+- Trade log shows "combined_confidence: 0.12" on ex-div dates (below 0.15 threshold)
+- Dividend gap appears in strategy signal log but never in final trade list
+
+**Phase to address:** Phase 2 (dividend gap strategy implementation) -- combiner modification required before dividend gap can work.
 
 ---
 
-### Pitfall 6: LayerLedger State Diverging from Actual Broker Portfolio
+### Pitfall 6: Sector Rotation Creates Catastrophic Signal Conflicts in Multi-Strategy Combiner
 
 **What goes wrong:**
-`LayerLedger` is in-memory and tracks per-layer positions, cash, and drawdown. If the process crashes and restarts, the ledger is reset to initial state. If an order executes but the result is not recorded (exception during `_log_signals`, network error during ledger update), the ledger shows no position while the broker holds one. This "ghost position" causes the bond cycle to repeatedly try to open the same position it already holds, accumulating unintended exposure up to the pre-trade position count limit.
+Sector rotation generates allocation signals at the SECTOR level (overweight energy, underweight financials). But the existing combiner operates at the SYMBOL level (BUY SBER, SELL GAZP). Mixing these two levels creates contradictions: sector rotation says "overweight energy" (all energy symbols should get larger positions), but mean_reversion says "SELL ROSN" (overbought). The combiner weights these equally, and the result is incoherent -- neither a clean sector bet nor a clean technical signal.
+
+Worse: sector rotation typically rebalances monthly. Technical strategies generate daily signals. If sector rotation weight is significant (e.g., 0.20), it produces a constant BUY/SELL bias for 30 days that drowns out daily technical signals. If sector rotation weight is small (e.g., 0.05), it has no effect and adds complexity without alpha.
 
 **Why it happens:**
-The design doc explicitly defers ledger persistence to a future phase ("In-memory for sandbox. Daily reconciliation against broker portfolio state at cycle start"). This is acceptable for sandbox validation, but the reconciliation step is critical before any real-money deployment. Without it, a single process restart doubles or triples bond exposure.
+The combiner was designed for strategies that all operate at the same level (per-symbol, per-bar). Sector rotation is a different beast -- it operates at the portfolio level across symbols. Forcing it into the per-symbol combiner framework creates an impedance mismatch.
 
-**How to avoid:**
-Before every bond cycle run (or at minimum on process startup), reconcile `LayerLedger.positions` against `TinkoffBroker.get_positions()`. Any discrepancy — broker holds FIGI with no ledger entry — must be registered as an existing position in the ledger at conservative cost basis. Log discrepancies as `WARNING` alerts in Telegram. Do not proceed with new BUY signals until reconciliation is complete.
+**Consequences:**
+- Sector rotation "BUY energy" generates weak BUY signals for ALL energy symbols, even toxic ones (SNGS, GAZP) that should be excluded
+- The constant sector bias reduces the combiner's ability to discriminate between strong and weak signals within a sector
+- Monthly rebalancing creates whipsaw at transition dates: sector rotation flips from BUY to SELL on all symbols in a sector simultaneously
+- Backtest optimization overfits the sector rotation timing to known macro events (2022 sanctions, 2024 rate hikes)
 
-**Warning signs:**
-- Bond position count in ledger is 0 but `TinkoffBroker.get_positions()` returns non-empty after restart
-- Duplicate FIGI entries in broker portfolio for the same bond issue
-- Aggregate DV01 budget exhausted faster than expected
+**Prevention:**
+1. Sector rotation must NOT go through the per-symbol combiner. Implement it as a PORTFOLIO-LEVEL overlay in the sizing pipeline, not the signal pipeline
+2. Correct architecture: sector rotation modifies position sizes (via a `SectorAllocationStep` in `PositionSizingPipeline`), not signal direction
+3. The `SectorAllocationStep` scales positions: if sector = overweight (1.5x), the position for symbols in that sector is 1.5x base. If sector = underweight (0.5x), the position is 0.5x
+4. Sector rotation rebalancing should use a 20-day rolling transition (linear ramp from old weights to new weights), not a hard flip on rebalance day
+5. Never apply sector rotation to individual toxic symbols -- if a symbol is excluded from the universe, it stays excluded regardless of sector weight
 
-**Phase to address:**
-Sandbox validation phase (before real-money deployment). Must be resolved before go-live.
+**Detection:**
+- Backtest shows sector rotation generating trades on excluded symbols (GAZP, VTBR)
+- Trade log shows 20+ trades on the same day at month-end (sector rebalance whipsaw)
+- Sector rotation + technical signals produce opposite directions on the same symbol simultaneously
+
+**Phase to address:** Phase 3 (sector rotation implementation) -- requires architectural decision on where sector rotation lives (signal vs. sizing).
 
 ---
 
-### Pitfall 7: RUB Position Sizing Using USD-Derived Kelly/Equity Figures
+### Pitfall 7: Overfitting to 2022-2024 CBR Hiking Cycle
 
 **What goes wrong:**
-The existing equity position sizing pipeline uses portfolio equity in USD (Alpaca broker). The `PreTradeChecker` and `PositionSizingPipeline` were built with USD denominations. When applied to MOEX in RUB, if the system uses the total portfolio equity (USD + RUB converted) without careful currency separation, the MOEX position sizes become either absurdly small (if RUB equity is divided by USD-sized Kelly fractions) or dangerously large (if a USD target size is applied to RUB notional). The PROJECT.md notes this was a confirmed bug: "Position sizing in USD instead of RUB (MOEX positions ~0.02% instead of 15%)".
+The backtest period (2022-2025) covers an extraordinary CBR hiking cycle: 9.5% (Feb 2022) -> 20% (Feb 2022 emergency) -> 7.5% (Sep 2022) -> 16% (Aug 2023) -> 21% (Oct 2024) -> 15.5% (Feb 2026). This is NOT a normal rate cycle -- it includes emergency wartime hikes, sanctions-driven currency crisis, and the most aggressive tightening in CBR history. Any regime strategy calibrated on this data will be overfit to extreme events that may not recur.
 
 **Why it happens:**
-`PreTradeChecker.check()` takes `portfolio_equity: Decimal` without a currency argument. The caller must ensure this is denominated correctly. In a multi-currency system (USD Alpaca + RUB Tinkoff), it is easy to pass total USD-converted equity instead of the per-market RUB-denominated equity. The circuit breaker uses baseline equity in whatever units it received at initialization.
+The 2022-2025 window happens to be the available data with Tinkoff API. It is also one of the most volatile periods in Russian financial history. Walk-forward optimization on this data will find parameters that work well for crisis/recovery cycles but fail in "boring" markets (e.g., 2017-2019 when CBR rate was stable at 7.25-7.75%).
 
-**How to avoid:**
-Every MOEX risk check must use RUB-denominated equity from `TinkoffBroker.get_portfolio()`. Never convert MOEX equity to USD for risk calculations — keep markets isolated. The `LayerLedger` for bonds must be initialized in RUB and use the `settings.bond_capital` (RUB) figure directly. Add a `currency` field assertion to position sizing inputs in tests.
+**Consequences:**
+- CBR regime parameters tuned to detect 200bps+ emergency hikes will never fire in normal conditions (typical hikes are 25-50bps)
+- RUB/oil decorrelation thresholds calibrated on 2022 sanctions shock (correlation went negative) will never trigger in normal markets (correlation typically 0.30-0.60)
+- Walk-forward results look good because train/test both cover crisis periods -- but this is overfitting to crisis, not genuine alpha
+- When deployed in a "normal" 2026 market (CBR cutting from 15.5% gradually), all regime signals will be permanently in NORMAL mode and add no value
 
-**Warning signs:**
-- MOEX bond positions showing 0.01–0.1% of equity (too small)
-- DV01 budget exhausted with only 1–2 bonds (too large — USD equity treated as RUB)
-- `PreTradeChecker` passing on bond orders whose notional exceeds the entire MOEX account value
+**Prevention:**
+1. If possible, source pre-2022 MOEX data from MOEX ISS (free, goes back to 2010) for longer backtest windows that include calm periods (2017-2019)
+2. Apply Optuna overfitting guardrails (already implemented for US): DSR haircut, holdout validation, perturbation check
+3. For CBR regime parameters: use academic/historical thresholds from CBR monetary policy research, not data-mined thresholds from 2022-2025
+4. Test regime parameters on "synthetic calm" data: generate 2 years of flat rate environment and verify the strategy does NOT trade (no false positives)
+5. Track "regime signal firing rate" -- if it fires < 5% of bars, it's a crisis-only detector (fine for risk overlay, useless for alpha generation)
+6. The RUB/oil decorrelation regime (`rub_oil_regime.py`) with thresholds 0.3/0.1 was designed for normal markets -- validate these thresholds still make sense post-2022
 
-**Phase to address:**
-MOEX position sizing fix phase (first MOEX-specific phase). Confirmed existing bug.
+**Detection:**
+- Walk-forward Sharpe is positive ONLY on folds that include crisis/recovery periods
+- Regime signal fires 0 times in 2024-2025 data (market normalized, parameters only detect 2022-level events)
+- CBR regime strategy shows Sharpe > 1.0 in backtest but all alpha comes from 3-4 crisis trades
+
+**Phase to address:** Phase 2-3 (regime strategy development) -- design the strategy for normal markets FIRST, then add crisis detection as an overlay.
 
 ---
 
-### Pitfall 8: Floating-Coupon OFZ Duration Assumption Is Wrong at High Rate Environments
+## Moderate Pitfalls
+
+### Pitfall 8: Dividend Calendar Sparse Data Creates Backtest Starvation
 
 **What goes wrong:**
-`EqualWeightBondSizer` (for OFZ-PK floaters) assumes near-zero duration because floating coupons reset to RUONIA. This is correct in stable rate environments. However, at CBR key rate = 21% (as of March 2026), OFZ-PK bonds have meaningful duration even between resets: the reset lag (quarterly or semi-annual) means the bond underperforms during rapid CBR rate hikes. Treating all floaters as zero-duration results in overweighting them during hiking cycles — exactly when they underperform most.
+The current `moex_dividends.yaml` has 43 entries across 7 symbols over 3 years. That's ~6 events per symbol per year, but some symbols have only 1-2 events. For walk-forward with 12-month training windows, a training fold may contain 0-2 dividend events for a given symbol -- far too few to estimate win rate, expected return, or calibrate any parameters. The strategy appears to "work" in backtest only because the few events happen to be winners (survivorship from only including paid dividends -- see Pitfall 1).
 
-**Why it happens:**
-The zero-duration assumption for floaters is a textbook simplification that breaks at high-rate/high-volatility regimes. In normal conditions (2015–2019 Russia) it was acceptable. At 21% key rate with potential for further hikes or cuts, even floater price moves of 3–5% can occur between coupon resets.
+**Prevention:**
+1. Expand to 150+ events: add ALL blue chip + mid-cap dividends from 2020-2025 using Tinkoff API `get_dividends()`
+2. Include symbols beyond current universe: MTSS, MGNT, CHMF, NLMK, PHOR -- all have regular dividends
+3. For symbols with < 3 events in a walk-forward fold, fall back to a "MOEX average" gap closure model (pooled parameters)
+4. Add interim dividends: many MOEX companies pay twice or thrice per year (TATN has 3/year, LKOH has 2/year)
+5. Test: assert that every walk-forward training fold contains >= 10 dividend events across all symbols
 
-**How to avoid:**
-For OFZ-PK floaters, compute "effective duration" as half the coupon reset period (in years). For semiannual-reset bonds, effective duration ≈ 0.25 years. Weight the Short layer's equal-weight allocation down by `effective_duration / target_duration_bucket`. Use the Short layer exclusively for floaters in the Core layer to minimize exposure. Do not allow the Short layer to exceed 15% of total bond capital.
+**Detection:**
+- Walk-forward folds show dividend_gap firing 0-1 times in 6-month test window
+- Gap closure parameters (hold period, confidence) cannot be calibrated due to < 5 events per fold
+- Strategy appears to have infinite Sharpe (2 trades, both winners) in some folds
 
-**Warning signs:**
-- OFZ-PK prices dropping 2%+ during CBR rate hike cycles despite "near-zero duration" assumption
-- Short layer showing larger drawdown than Core layer (floaters underperforming)
-- `DV01` budget calculation showing budget exhausted by floaters that "shouldn't count"
-
-**Phase to address:**
-Bond strategy calibration phase (OFZ-PK strategy parameter tuning).
+**Phase to address:** Phase 1 (data preparation).
 
 ---
 
-### Pitfall 9: Russian News Sources Require Dedicated Latency and Reliability Handling
+### Pitfall 9: event_driven Strategy Generates Phantom Trades in Combined Backtests
 
 **What goes wrong:**
-Russian financial news sources (RBC, Interfax, TASS, Kommersant) have irregular RSS update intervals, sometimes going silent for hours during major market events (which are exactly when news-driven signals matter most). TASS is state-owned and introduces official framing/delay on government-sensitive information. RSS feeds from Russian sources frequently change format without notice (Cyrillic encoding issues, malformed XML, redirects). A news pipeline that treats these sources as always-available will silently fail to generate signals during crises.
+The `event_driven` strategy is enabled in `ru_blue_chips.yaml` with weight 0.15. In backtests, there is no real news feed, so `event_driven` generates 0 trades (expected). But its 15% weight allocation is still present in the combiner normalization. When `normalize_mode: "firing"` is used (only normalize across strategies that actually fire), event_driven's weight is excluded. This is correct. BUT: if event_driven is accidentally configured with `normalize_mode: "all"`, every combined signal is multiplied by 0.85 (because event_driven contributes 0, taking 15% of the weight). This systematically reduces all signal confidences by 15%, pushing more signals below `min_combined_confidence`.
 
-**Why it happens:**
-Developers test the news pipeline during normal market conditions when feeds are reliable. Edge cases (MOEX suspension, geopolitical events, government communication embargoes) are not tested. State news agencies (TASS) have documented lag in covering market-moving events the government wants to control.
+Separately: the PROJECT.md notes "event_driven strategy fires without real news feed in backtests" as an issue. If the strategy has cached/stale sentiment data from a previous live run, it may generate phantom signals in backtest mode.
 
-**How to avoid:**
-Implement per-source health monitoring with staleness detection: if any source has not published in N minutes (e.g., 30 minutes during market hours), log `WARNING source_stale`. Weight Interfax (commercially independent) higher than TASS for market-sensitive company news. Always have a "no news = neutral" fallback — the `EventDrivenStrategy` must degrade gracefully, not amplify signals from the last cached article. LLM calls must include publication timestamp validation (reject articles older than 4 hours for intraday signals).
+**Prevention:**
+1. Explicitly disable `event_driven` in ALL segment presets used for backtesting: `event_driven: {enabled: false}` in backtest configs
+2. Ensure `normalize_mode: "firing"` is the default for all MOEX presets (it is, but verify)
+3. Add a guard in BacktestEngine: if `mode != "real"` and `event_driven.enabled`, log WARNING and auto-disable
+4. Clear any cached sentiment state at backtest start (DividendGapStrategy already has `reset()`, event_driven needs the same)
+5. Test: backtest with event_driven enabled vs. disabled produces identical results (zero contribution)
 
-**Warning signs:**
-- News pipeline generating signals from articles published during the previous trading session
-- All signals on the same day pointing in the same direction (TASS echo chamber during controlled events)
-- `NewsAnalyzer` producing identical sentiment scores across multiple instruments on the same day
+**Detection:**
+- Backtest metrics differ between `event_driven.enabled: true` and `event_driven.enabled: false` even though no news feed exists
+- Trade count changes when event_driven weight changes (shouldn't if it fires 0 times)
+- Combiner logs show `event_driven: confidence=0.XX` in backtest (phantom signal from cached data)
 
-**Phase to address:**
-LLM news integration phase (enabling `event_driven` strategy with Russian media sources).
+**Phase to address:** Phase 1 (backtest configuration cleanup).
 
 ---
 
-### Pitfall 10: Telegram Bot Message Storm During Circuit Breaker Events
+### Pitfall 10: Preferred Share Arbitrage (SBER/SBERP) Assumes Constant Spread
 
 **What goes wrong:**
-During a circuit breaker LIQUIDATE event, the system may attempt to close 10–20 positions simultaneously. Each fill triggers `on_trade_filled()` → `send_alert()`. At 20 fills in 5 seconds, the Telegram Bot API returns 429 (Too Many Requests) with a retry-after delay. The current `send_alert()` in `TelegramAlerter` is fire-and-forget with a single `timeout=10` and swallows all exceptions — meaning 80% of circuit breaker alerts are silently dropped. During exactly the moment when the operator needs maximum alerting, they receive none.
+Preferred share arbitrage (buy SBERP when discount to SBER > historical mean) assumes a mean-reverting spread. But MOEX preferred shares have structurally different dynamics: (a) SBERP gets the SAME dividend as SBER but trades at 5-15% discount -- the discount IS the dividend yield premium, (b) the spread changes with interest rate environment (higher rates -> smaller discount, because prefs have higher yield), (c) during 2022 crisis, preferred shares became MORE expensive than common (SBERP > SBER briefly) due to retail buying of high-yield instruments.
 
-**Why it happens:**
-Telegram allows ~1 message/second per chat and rejects bursts exceeding this. The current implementation creates a new `httpx.AsyncClient` per message and has no rate limiting or queuing. Under normal conditions (1 fill every few minutes) this is invisible. Under liquidation events it fails completely.
+**Prevention:**
+1. Model the spread as a function of CBR rate and dividend yield, not a simple mean
+2. Use spread z-score relative to a rolling window that EXCLUDES the 2022 crisis period
+3. Entry threshold must be > 2 standard deviations (not 1.5 as in current pairs params)
+4. Always check that BOTH legs (SBER and SBERP) are in the active universe and tradeable
+5. Set max_hold_bars for pairs to match dividend cycle (if entering before ex-div, close before record date to avoid dividend tax complications)
 
-**How to avoid:**
-Implement a message queue with rate limiting in `TelegramAlerter`: buffer messages in a `deque`, drain at max 1/second using a background thread or asyncio task. On 429 responses, respect `retry_after` from the response header and re-enqueue. Prioritize circuit breaker alerts over trade fills (two priority queues: HIGH and NORMAL). For LIQUIDATE events specifically, batch fills into a single message: "LIQUIDATE: closed 12 positions" instead of 12 individual messages.
+**Detection:**
+- Pairs strategy shows > 50% of trades entering during crisis periods (overfitting to 2022)
+- Spread mean changes significantly between walk-forward folds (non-stationary)
+- Win rate drops below 40% when 2022 data is excluded from training
 
-**Warning signs:**
-- Zero Telegram messages received during a known high-activity period
-- Logs show `TelegramAlerter failed to send message` with 429 status repeatedly
-- Telegram shows single-digit messages on a day when dozens of fills occurred
-
-**Phase to address:**
-Telegram alerting hardening phase (before real-money deployment).
+**Phase to address:** Phase 3 (if implementing preferred arbitrage).
 
 ---
 
-### Pitfall 11: MOEX Extended Holiday Windows Break NKD-Based Calculations
+### Pitfall 11: Brent Gate for Energy Sector Uses Wrong Correlation Lag
 
 **What goes wrong:**
-During the Russian New Year holiday window (January 1–8), MOEX is closed for 7+ consecutive calendar days. NKD computation uses `days_since_last_coupon` — if the system computes NKD on January 9 (first trading day) using calendar days since last coupon, it correctly includes the 8 holiday days. But if the bond cycle skipped running during the holiday (correctly), and the `MacroCacheService` snapshot is 8 days stale, the `MacroSnapshot.key_rate` used for signal generation is from December. For CBR decisions announced between December 20 and January 8 (rare but possible), signals would use the old rate.
+MOEX energy stocks (ROSN, TATN, LKOH) correlate with Brent crude, but with a 1-3 day lag (Russian market closes before Brent final settlement). A Brent price gate that uses same-day Brent close to gate MOEX entries introduces a timing mismatch: if you gate on today's Brent, MOEX already reacted to yesterday's Brent. The signal is stale.
 
-**Why it happens:**
-The `MacroCacheService` refresh is triggered by the bond cycle scheduler at 10:00 MSK daily. During a 7-day MOEX holiday, the bond cycle correctly skips (no trading), but the macro refresh should still happen to stay current. The design conflates "bond trading day" with "macro data refresh day."
+Worse: Brent data comes from yfinance (BZ=F), which reports in USD. The actual exposure is Brent-in-RUB (Brent * USDRUB). When RUB weakens (Brent in USD flat), Brent-in-RUB rises and MOEX energy stocks rally -- but a USD Brent gate would miss this entirely.
 
-**How to avoid:**
-Separate the macro refresh schedule from the bond cycle schedule. The `macro_refresh` job should run 7 days/week (including holidays and weekends). Only the `bond_cycle` job should be gated on trading day status. The `MacroCacheService` should expose `snapshot_age_days` and the bond cycle should refuse to trade if age exceeds 2 business days.
+**Prevention:**
+1. Use Brent-in-RUB (Brent * USDRUB) as the gate variable, not USD Brent
+2. Apply 1-day lag: gate on yesterday's Brent-in-RUB change, not today's
+3. Brent gate should be a SIZING modifier (SectorAllocationStep), not a signal filter -- don't block entries, scale positions
+4. The existing `rub_oil_regime.py` already computes RUB/oil correlation -- use this as the Brent gate rather than building a separate one
+5. Test: correlation between MOEX energy returns and Brent-in-RUB returns at lag=1 vs lag=0 (expect lag=1 is higher)
 
-**Warning signs:**
-- `macro_refreshed key_rate=X` in logs where X is 7+ days old on the first post-holiday trading day
-- `CBREventStrategy` not detecting a key rate change that occurred during holidays
-- `bond_cycle_skipped reason=no macro data` on the first post-holiday trading day
+**Detection:**
+- Brent gate correlation with energy stock returns is < 0.20 (using wrong lag or wrong currency)
+- Energy sector positions are gated off on days when energy stocks actually rally (Brent-in-RUB up but USD Brent flat)
 
-**Phase to address:**
-Bond cycle integration phase (TradingLoop scheduler setup).
+**Phase to address:** Phase 3 (sector rotation / Brent gating).
 
 ---
 
-### Pitfall 12: Coupon Record Date vs. Payment Date Confusion in Ex-Coupon Logic
+## Minor Pitfalls
+
+### Pitfall 12: Dividend Gap max_hold_bars Set Too High (60 in preset, 15 in config)
 
 **What goes wrong:**
-OFZ bond coupons have three dates: (1) record date (cut-off for who receives the coupon), (2) payment date (when cash is credited), and (3) ex-coupon date (day after record date when price drops by coupon amount). The current `TinkoffFetcher._fetch_bond_coupons_async()` estimates record date as `coupon_date - 2 business days` since T-Bank does not provide it directly. This estimation can be wrong around holidays (e.g., if payment day falls after a 5-day holiday, the actual record date may be 4+ business days before payment, not 2). Trading on a day that the system thinks is pre-record but is actually post-record causes purchasing NKD that will not be received.
+`ru_blue_chips.yaml` sets `dividend_gap.params.max_hold_bars: 60` but `backtest/config.py` has `DEFAULT_STRATEGY_HOLD_BARS["dividend_gap"] = 15`. These are different code paths: the preset parameter controls the strategy's internal exit logic, while the config parameter controls the engine's forced exit. The engine will force-close positions at 15 bars even though the strategy expects 60 bars for gap closure. For MOEX blue chips, typical gap closure takes 20-40 bars (30-60 calendar days). The 15-bar engine limit will cut most dividend gap positions before gap closure, converting winners into losers.
 
-**Why it happens:**
-T-Bank's `get_bond_coupons` API returns `coupon_date` (payment date) and `pay_one_bond` (amount). The record date requires separate lookup via MOEX ISS (`securityevents` endpoint) or manual calendar calculation. The 2-business-day estimate is the standard but breaks around MOEX holiday sequences.
+**Prevention:**
+1. Align `DEFAULT_STRATEGY_HOLD_BARS["dividend_gap"]` with the strategy's `max_hold_bars` parameter (60)
+2. Better: dividend_gap should NOT use the engine's generic hold bar limit at all -- it has its own exit logic (gap closure OR max_hold_bars)
+3. Add test: `assert DEFAULT_STRATEGY_HOLD_BARS["dividend_gap"] >= preset_max_hold_bars`
 
-**How to avoid:**
-Cross-reference coupon record dates from MOEX ISS `securityevents` API (`https://iss.moex.com/iss/securities/{ticker}/events.json`) rather than estimating. If ISS lookup fails, use a conservative 3-business-day buffer instead of 2. Block bond purchases in the 3 business days before estimated payment date (not 2), and never purchase on payment day itself (NKD resets to zero, price impact).
-
-**Warning signs:**
-- Bond purchases immediately followed by NKD dropping to near zero the next day (bought just past record date)
-- Coupon receipt alerts (`on_coupon_received`) not firing for bonds that were held through the payment date
-- Position shows clean price jumping up then back down around coupon dates
-
-**Phase to address:**
-Bond data pipeline phase (before bond cycle execution is enabled).
+**Phase to address:** Phase 2 (dividend gap implementation).
 
 ---
 
-## Technical Debt Patterns
+### Pitfall 13: T+1 Settlement Means Dividend Gap Entry Is One Bar Late
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| In-memory `LayerLedger` without persistence | Simpler sandbox setup | Ghost positions after crashes; cannot safely scale to real money | Sandbox validation only — never in production |
-| Estimating record date as `coupon_date - 2d` | Avoids MOEX ISS `securityevents` lookup | Incorrect ex-coupon blocking around holidays | MVP with corporate bond exclusion; fix before adding non-OFZ bonds |
-| Static `moex_calendar.py` holiday list | No external API dependency | Outdated after each year; requires annual manual update | Acceptable if calendar has automated test that fails when >1 year old |
-| Single T-Invest API token for sandbox + live | Simpler config management | Accidental real orders from sandbox code path | Never — use separate sandbox/live tokens always |
-| Fire-and-forget Telegram alerts | Simple implementation | Alerts lost during burst events (circuit breaker, liquidation) | Never in production — implement rate-limited queue before go-live |
-| Floating coupon zero-duration assumption | Simpler DV01 calculation | Overweights floaters in high-rate/hiking environments | Only when key rate is stable and < 10%; not at 21% |
+**What goes wrong:**
+MOEX uses T+1 settlement for equities. The strategy buys on the ex-dividend date (current_candle.timestamp matches ex_date). But in MOEX terminology, the "last buy date" in the Tinkoff API is actually T-1 relative to the record date. If you buy at close on the "last buy date," you get the dividend. If you buy on the NEXT day (actual ex-date), you don't. The YAML comments confirm: "ex_date = last buy date (Tinkoff convention); actual ex-div is next trading day." But the strategy uses `div.ex_date.date() == current_date.date()` to trigger -- this triggers on the LAST BUY DATE, not the ex-date. This means the strategy buys BEFORE the gap occurs, at the pre-gap price, and the position immediately drops by the dividend amount.
 
----
+**Prevention:**
+1. Clarify terminology: rename YAML field from `ex_date` to `last_buy_date` to match Tinkoff convention
+2. Strategy should buy ONE BAR AFTER `last_buy_date` (the actual ex-date when the gap appears)
+3. OR: buy on `last_buy_date`, collect the dividend, and set gap closure target = pre-ex-date price + dividend (breakeven accounting for dividend received)
+4. The current implementation uses `candles[-2].close` as pre_exdiv_close, which is correct IF triggered on the actual ex-date (bar after last_buy_date), but WRONG if triggered on last_buy_date itself
 
-## Integration Gotchas
+**Detection:**
+- Dividend gap trades show entry price = pre-gap price (no gap at entry)
+- Many trades show immediate 5-10% unrealized loss on day 1 (bought pre-gap, gap happened next bar)
+- gap_pct in trade features doesn't match actual price drop
 
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| T-Invest API gRPC | Using `AsyncSandboxClient` — forcibly overrides target to old `tinkoff.ru` domain | Use `AsyncClient` with `target="sandbox-invest-public-api.tbank.ru:443"` explicitly |
-| T-Invest API gRPC | Sharing one `AsyncClient` across APScheduler threads | Create separate `TinkoffBroker` instance for bond cycle (`"moex_bonds"` key in `BrokerRouter`) |
-| T-Invest API gRPC | Not setting `GRPC_DNS_RESOLVER=native` before importing grpc | Set env var before any `from t_tech.invest import ...` — already done in `tinkoff_data.py` |
-| T-Invest API bond data | Using `get_candles` FIGI for a delisted/restructured bond | Check `bond.trading_status` field in `bond_by` response before adding to registry |
-| CBR XML API | Parsing CBR XML without lxml (using stdlib `xml.etree`) | CBR XML uses non-standard encoding declarations; requires lxml with `recover=True` |
-| MOEX ISS REST | Not handling 100-row pagination | ISS returns max 100 rows per page; must paginate with `start=` parameter |
-| MOEX ISS REST | Assuming ISS timestamps are UTC | ISS returns MSK timestamps; must convert via `ZoneInfo("Europe/Moscow")` to UTC |
-| Telegram Bot API | Sending messages without retry on 429 | Respect `retry_after` header; implement exponential backoff queue |
-| Telegram Bot API | Long messages exceeding 4096 character limit | All alert methods must truncate or split messages over 4096 chars |
-| Russian news RSS | Treating all sources as equally reliable | Weight by independence score: Interfax > RBC > Kommersant > TASS |
+**Phase to address:** Phase 2 (dividend gap implementation) -- critical correctness issue.
 
 ---
 
-## Performance Traps
+### Pitfall 14: RegimeStep and Sector Rotation Step Compete for Position Scale
 
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Creating new `httpx.AsyncClient` per Telegram message | Each `send_alert()` opens TCP connection + TLS handshake (~100ms) | Reuse client via connection pool; use fire-and-forget task queue | At > 5 messages/minute (circuit breaker events) |
-| Creating new gRPC channel per candle fetch | Each `asyncio.run()` in `TinkoffFetcher` creates/destroys channel | Acceptable for low-frequency bond cycle (daily); would be a bottleneck at hourly equity cycle | Bond cycle: fine. If bond cycle ever goes sub-hourly, switch to persistent channel |
-| Fetching 90-day candles for each bond separately | N sequential gRPC calls for N bonds in bond cycle | Low N (10–15 OFZ) keeps this acceptable. Add rate limiter between calls | Breaks if bond universe expands to 50+ instruments |
-| LLM API calls for every news article | Each Claude API call = 0.5–2s latency | Batch news items; cache embeddings; skip articles older than 4h | At > 20 news items per cycle (high-activity market days) |
-| In-process CachingFetcher for ISS/CBR data | Cache miss requires synchronous HTTP call in trading loop thread | Pre-warm cache on startup; use `GenericFileCache` with TTL | First trading day after restart when cache is cold |
+**What goes wrong:**
+The sizing pipeline already has `RegimeStep` (scale by regime_scale, floor 0.15) and adding a `SectorAllocationStep` creates multiplicative scaling: final_size = base * vol_target_ratio * regime_scale * sector_scale. If regime_scale = 0.50 (ELEVATED) and sector_scale = 0.50 (underweight sector), the position is 0.25x base -- hitting the pipeline floor of 15%. Three or more multiplicative reduction steps guarantee that most MOEX positions end up at the floor, eliminating signal differentiation.
 
----
+**Prevention:**
+1. Cap total multiplicative reduction: `total_scale = max(product_of_all_scales, 0.25)` at the pipeline level
+2. Or: make sector allocation ADDITIVE to a neutral baseline, not multiplicative: `sector_adjusted = base * (1.0 + sector_deviation)` where sector_deviation is [-0.30, +0.30]
+3. Monitor floor-hit rate: if > 30% of trades hit the pipeline floor, the pipeline has too many reduction steps
+4. Consider reducing the number of sizing steps for MOEX: Kelly -> MOEX-calibrated VolTarget -> HardCaps (3 steps instead of 7)
 
-## Security Mistakes
-
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| Same T-Invest token for sandbox and live environments | Sandbox code triggers real orders | Separate `FINALAYZE_TINKOFF_TOKEN` (sandbox) and `FINALAYZE_TINKOFF_TOKEN_LIVE` (production) env vars with assertion that live token never used in sandbox mode |
-| Logging T-Invest API token in error messages | Token exposed in log aggregation systems | `structlog` must never log `settings.tinkoff_token`; use `token[:4]+"***"` in debug logs |
-| Telegram bot token in structured logs | Bot hijacking if logs are compromised | Same as above — never log raw tokens |
-| No validation that CBR XML is from `www.cbr.ru` | DNS spoofing could inject fake key rate data | Validate SSL certificate against CBR's known cert fingerprint; flag if key_rate changes > 200bps between fetches |
-| LLM prompt injection via news content | Malicious actor publishes news with injected instructions | Wrap all news content in explicit delimiters in LLM prompts; validate output schema before using sentiment score |
+**Phase to address:** Phase 3 (sector rotation sizing integration).
 
 ---
 
-## "Looks Done But Isn't" Checklist
+## Phase-Specific Warnings
 
-- [ ] **YieldStop**: `_process_yield_stops()` returns 0 (stub) — verify it actually evaluates positions before calling done
-- [ ] **Bond execution**: `_size_and_execute()` returns `False` (stub) — verify actual broker order submission before calling done
-- [ ] **NKD-aware sizing**: `DV01BudgetStep` uses `face_value` not `dirty_price` — verify pre-trade cash check uses dirty price
-- [ ] **Telegram rate limiting**: `send_alert()` is fire-and-forget with no queue — verify burst scenario doesn't lose circuit breaker alerts
-- [ ] **LayerLedger reconciliation**: in-memory ledger with no crash recovery — verify reconciliation against `TinkoffBroker.get_positions()` on startup
-- [ ] **Holiday calendar wiring**: `moex_calendar.py` exists in design but must be connected to `_bond_cycle()` gate check
-- [ ] **MOEX equity sizing in RUB**: confirmed existing bug — verify MOEX positions are 10–20% of MOEX equity, not 0.02%
-- [ ] **Separate bond TinkoffBroker instance**: design requires `"moex_bonds"` key in `BrokerRouter` — verify it is wired in `run_sandbox.py`
-- [ ] **CBR meeting day timing**: extra bond cycle must trigger at 15:30 MSK, not 13:30 — verify `_cbr_day_refresh` schedule
-- [ ] **Coupon record date buffering**: 2-day estimate may be wrong around holidays — verify 3-day conservative buffer is used
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| Phase 1: Universe cleanup | Removing toxic symbols changes walk-forward fold composition; old iterations incomparable | Start iteration history fresh for v2.0; do not compare v2.0 Sharpe to v1.0 iterations |
+| Phase 1: Data expansion | Tinkoff API rate limits on historical dividend fetches (600 requests/minute) | Batch dividend fetches per symbol; cache to YAML; fetch once and store |
+| Phase 2: Dividend gap | T+1 settlement timing confusion between last_buy_date and ex-date (Pitfall 13) | Write explicit test with known SBER 2024 dividend; verify entry is on gap day |
+| Phase 2: Dividend gap | Combiner dilutes dividend signal below threshold (Pitfall 5) | Give dividend_gap standalone mode or weight >= 0.40 on MOEX segments |
+| Phase 2: Dividend gap | Only 43 events -> insufficient for walk-forward calibration (Pitfall 8) | Expand to 150+ events BEFORE any backtest tuning |
+| Phase 3: CBR regime | Using CBR decisions as signals instead of leading indicators (Pitfall 4) | Wire `rub_oil_regime.py` FIRST; add OFZ curve slope as leading indicator |
+| Phase 3: Sector rotation | Portfolio-level strategy forced into per-symbol combiner (Pitfall 6) | Implement as SectorAllocationStep in sizing pipeline, NOT in combiner |
+| Phase 3: Brent gate | Wrong currency denomination for energy correlation (Pitfall 11) | Use Brent * USDRUB, not USD Brent; test correlation at lag=0 vs lag=1 |
+| Phase 3: Parameter tuning | Overfitting to 2022 crisis regime (Pitfall 7) | Source pre-2022 data from MOEX ISS; use academic thresholds for regime |
+| Phase 4: ML ensemble | MOEX features trained on 2022 crisis -> model learns crisis-only patterns | Exclude Feb-Mar 2022 from training; validate on 2024-2025 calm data |
+| Phase 4: ML ensemble | Too few training samples (3 years MOEX vs 10+ years US data) | Pool features across sectors; use transfer learning from US model |
+| Phase 5: Portfolio assembly | OFZ + equity allocation creates currency double-counting (both RUB) | Track OFZ and equity allocations separately with independent circuit breakers |
+
+---
+
+## Integration Gotchas Specific to v2.0
+
+| Integration Point | Common Mistake | Correct Approach |
+|-------------------|----------------|------------------|
+| DividendGapStrategy + Combiner | Dividend signals diluted by technical strategy HOLD/SELL signals | Create `_EVENT_STRATEGIES` bypass in ADX routing; or give dividend_gap standalone trade capability |
+| CBR Regime + VolTargetStep | CBR regime reduces position AND vol target reduces position -> double penalty | Choose ONE of: regime overlay OR vol target for MOEX. Not both multiplicatively |
+| Sector rotation + existing segments | Sector rotation implies variable universe; existing segments have fixed symbol lists | Sector rotation modifies WEIGHTS within fixed universe, does not add/remove symbols |
+| rub_oil_regime.py + RegimeStep | Both produce a regime_scale; which one wins? | Compose: `effective_regime_scale = min(rub_oil_scale, vix_regime_scale)` -- use the more conservative |
+| dividend_gap + ATR stop | ATR trailing stop triggers on gap day (price drops by dividend amount) | Exempt dividend_gap positions from trailing stop for first 5 bars (grace period for gap to stabilize) |
+| MOEX ISS data + Tinkoff API data | Timestamps from different sources in different timezones (ISS = MSK, Tinkoff = UTC) | Normalize all timestamps to UTC at fetch time; assert timezone-aware datetimes in all data pipelines |
+
+---
+
+## "Looks Done But Isn't" Checklist for v2.0
+
+- [ ] **vol_target recalibration**: YAML files still show `vol_target: 0.19` for MOEX -- verify updated to 0.35-0.40 before any backtest
+- [ ] **dividend calendar completeness**: `moex_dividends.yaml` has 43 events -- verify expanded to 150+ before dividend gap backtest
+- [ ] **ex-date vs. last_buy_date alignment**: `DividendGapStrategy` triggers on `ex_date` from YAML -- verify this is the actual gap day, not the day before
+- [ ] **rub_oil_regime.py wired into sizing**: file exists but is not referenced in `BacktestEngine` or `PositionSizingPipeline` -- verify wired before claiming regime overlay works
+- [ ] **event_driven disabled in backtest**: `ru_blue_chips.yaml` has `event_driven.enabled: true` -- verify disabled or confirm 0 phantom signals in backtest
+- [ ] **DEFAULT_STRATEGY_HOLD_BARS for dividend_gap**: config says 15, strategy expects 60 -- verify aligned
+- [ ] **2022 data handling**: walk-forward includes Feb-Mar 2022 -- verify either excluded or handled with purge gap
+- [ ] **toxic symbols removed**: GAZP, VTBR still in `ru_blue_chips` segments.py definition -- verify removed from MOEX equity backtests
+- [ ] **sector rotation architecture**: decided as combiner strategy vs. sizing step -- verify sizing step approach before implementation
+- [ ] **Brent-in-RUB not USD Brent**: Brent gate uses correct currency -- verify BZ=F * USDRUB, not raw BZ=F
 
 ---
 
@@ -333,48 +421,28 @@ Bond data pipeline phase (before bond cycle execution is enabled).
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| NKD-aware sizing bug triggers overdraft | HIGH | Manual cancel of in-flight orders; manual cash top-up; fix sizer; validate all positions; restart bond cycle |
-| ATR stop closes all bond positions incorrectly | HIGH | Manually re-enter positions at market; disable equity stop pipeline for bonds; implement `YieldStop`; run backtest to validate |
-| LayerLedger diverges from broker portfolio | MEDIUM | `TinkoffBroker.get_positions()` audit; manual ledger reset; reconcile quantities; resume with fresh cycle |
-| Telegram storm drops all circuit breaker alerts | MEDIUM | Check logs for `circuit_breaker_escalated` events; manually close positions if needed; implement queue before restarting |
-| CBR meeting buy at 13:30 spread spike | LOW | Accept the bad fill; log as execution quality event; shift `_cbr_day_refresh` to 15:30 MSK |
-| Stale macro data after holiday | LOW | Manual `macro_cache.refresh()` call via API; verify `snapshot.key_rate` matches CBR website; resume cycle |
-| Duplicate bond positions from ledger reset | HIGH | Check broker portfolio for double positions; submit SELL for duplicate quantity; reset ledger to actual broker state |
-
----
-
-## Pitfall-to-Phase Mapping
-
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| NKD-aware sizing (dirty price) | Bond cycle execution completion | Pre-trade check test: order with exact cash = clean_price * qty fails if NKD would overdraw |
-| Equity stop-loss applied to bonds | Bond cycle execution completion | Assert no `chandelier_exit` or `stop_loss` code path is called for bond orders |
-| MOEX holiday calendar gap | Bond cycle TradingLoop integration | Bond cycle returns `skipped=True` for every confirmed MOEX holiday in 2025 |
-| TinkoffBroker thread-safety | Bond cycle TradingLoop integration | Integration test: concurrent equity + bond cycles complete without gRPC errors |
-| CBR announcement timing | Bond cycle TradingLoop scheduling | Unit test: `_cbr_day_refresh` schedule is at 15:30 MSK, not earlier |
-| LayerLedger divergence recovery | Sandbox validation phase | Process restart test: ledger state matches broker portfolio after restart |
-| RUB position sizing bug | First MOEX-specific backtest phase | Assert MOEX position size is 10–20% of MOEX RUB equity in backtest |
-| Floater duration assumption at high rates | Bond strategy calibration | Stress test: 300bps rate shock shows Short layer drawdown < 3% with corrected duration |
-| Russian news reliability | LLM news integration phase | Source health monitoring alerts when feed silent > 30 minutes during market hours |
-| Telegram burst failure | Telegram hardening phase (pre-go-live) | Load test: 20 fill alerts in 2 seconds — verify all delivered within 60 seconds |
-| Extended holiday macro staleness | Bond cycle TradingLoop integration | Test: macro_refresh job runs on MOEX holiday; bond_cycle job skips on same day |
-| Coupon record date estimation | Bond data pipeline phase | Test: ex-coupon gate uses 3-day buffer; validate against MOEX ISS `securityevents` for known OFZ coupon dates |
+| Look-ahead bias in dividend data | HIGH | Rebuild entire dividend calendar with announcement dates and cancelled events; re-run all backtests; previous iterations invalidated |
+| Survivorship bias from 2022 | HIGH | Source pre-2022 data from MOEX ISS; rebuild walk-forward with separate pre/post periods; all 104 iterations invalid for comparison |
+| Vol target miscalibration | LOW | Update YAML `vol_target` values; re-run backtests; quick fix, no architectural change |
+| CBR regime timing error | MEDIUM | Redesign regime from "react to decision" to "lead with OFZ curve"; requires new data pipeline for OFZ yields |
+| Combiner dilutes dividend signals | MEDIUM | Add `_EVENT_STRATEGIES` bypass; requires combiner refactor but isolated change |
+| Sector rotation in wrong layer | HIGH | If implemented in combiner, must refactor to sizing pipeline; significant code move |
+| T+1 settlement date confusion | LOW | Fix date matching in DividendGapStrategy; rename YAML field; re-run backtests |
+| Multiplicative sizing reduction | MEDIUM | Reduce pipeline steps for MOEX or add total-scale floor; requires sizing pipeline redesign |
 
 ---
 
 ## Sources
 
-- Codebase analysis: `src/finalayze/core/bond_cycle.py`, `src/finalayze/risk/dv01_sizing.py`, `src/finalayze/core/alerts.py`, `src/finalayze/data/fetchers/tinkoff_data.py`, `src/finalayze/execution/tinkoff_broker.py`, `src/finalayze/markets/schedule.py`
-- Design documents: `docs/plans/2026-03-12-bond-tradingloop-integration-design.md`, `docs/plans/2026-03-10-moex-data-sources-design.md`
-- MOEX settlement: [MOEX T+1 settlement for OFZs](https://www.moex.com/n8973)
-- MOEX holiday calendar: [MOEX Trading Calendar](https://www.moex.com/en/tradingcalendar/) | [2025 trading schedule](https://www.moex.com/n73702)
-- Telegram rate limits: [python-telegram-bot wiki](https://github.com/python-telegram-bot/python-telegram-bot/wiki/Avoiding-flood-limits) | [Telegram Bot FAQ](https://core.telegram.org/bots/faq)
-- T-Invest API: [Tinkoff invest-python GitHub](https://github.com/Tinkoff/invest-python) | [investAPI issues: stream limit](https://github.com/Tinkoff/investAPI/issues/64)
-- Russian news bias: [Interfax bias rating](https://mediabiasfactcheck.com/interfax-russia-bias/) | [TASS bias rating](https://mediabiasfactcheck.com/russian-news-agency-tass/)
-- MOEX bond clean/dirty price: Wikipedia dirty price, BTRM Working Paper #14 on bond market clean price conventions
-- Known project bugs: `docs/quality/GAPS.md`, `.planning/PROJECT.md` §Known Blockers
-- MOEX bond market microstructure: [MOEX bonds market page](https://www.moex.com/s2264)
+- Codebase analysis: `src/finalayze/strategies/dividend_gap.py`, `src/finalayze/strategies/combiner.py`, `src/finalayze/risk/position_sizing_pipeline.py`, `src/finalayze/risk/rub_oil_regime.py`, `src/finalayze/strategies/presets/ru_blue_chips.yaml`, `src/finalayze/strategies/presets/moex_dividends.yaml`, `config/segments.py`, `src/finalayze/backtest/config.py`
+- PROJECT.md: v2.0 milestone context, known issues, 104 REJECT iterations, toxic symbol identification
+- MOEX dividend calendar: [MOEX Dividend Yield Listing](https://www.moex.com/ru/listing/dividend-yield.aspx) | [Smart-Lab Dividend Calendar](https://smart-lab.ru/dividends/)
+- CBR key rate history: [CBR Key Rate](https://cbr.ru/eng/hd_base/KeyRate/) | [CBR Monetary Policy Guidelines 2024-2026](https://www.cbr.ru/eng/about_br/publ/ondkp/on_2024_2026/)
+- MOEX 2022 crisis: [Bloomberg - Russian Stocks Slump Most on Record](https://www.bloomberg.com/news/articles/2022-02-24/russian-stocks-slump-most-on-record-on-ukraine-attack-chart)
+- Sector rotation pitfalls: [Common Pitfalls of Sector Rotation - GIGAPRO](https://www.gwcindia.in/gigapro/blog/common-pitfalls-of-sector-rotation-and-how-to-avoid-them/) | [Sector Rotation Myth - Molchanov 2024](https://onlinelibrary.wiley.com/doi/10.1002/ijfe.2882)
+- Dividend gap closure statistics: [T-Bank Invest - MOEX_TRADE analysis](https://www.tbank.ru/invest/social/profile/MOEX_TRADE/d9c7bf45-730e-4294-b376-557ca790fcdb/) | [Alfa Investor - Dividend Gap Closure](https://alfabank.ru/alfa-investor/t/moskovskaya-birzha-kak-bystro-zakroetsya-dividendnyy-gep/)
+- MOEX market data: [Trading Economics - Russia Stock Market](https://tradingeconomics.com/russia/stock-market) | [Statista - Weekly MOEX Performance](https://www.statista.com/statistics/1254381/weekly-performance-moex/)
 
 ---
-*Pitfalls research for: MOEX autonomous bond/coupon trading with LLM news and Telegram alerting*
-*Researched: 2026-03-14*
+*Pitfalls research for: v2.0 MOEX Equity Profitability -- dividend gap, CBR regime, sector rotation*
+*Researched: 2026-03-20*
