@@ -40,7 +40,7 @@ if PROJECT_ROOT not in sys.path:
 
 import yaml
 
-from finalayze.backtest.config import DEFAULT_STRATEGY_HOLD_BARS, BacktestConfig
+from finalayze.backtest.config import DEFAULT_STRATEGY_HOLD_BARS, MOEX_2022_BREAK, BacktestConfig
 from finalayze.backtest.costs import MOEX_COSTS, US_COSTS
 from finalayze.backtest.decision_journal import DecisionJournal
 from finalayze.backtest.engine import BacktestEngine
@@ -694,6 +694,7 @@ def _run_symbol(
                 stop_loss_mode=stop_loss_mode,
                 max_hold_bars=DEFAULT_STRATEGY_HOLD_BARS,
                 transaction_costs=MOEX_COSTS if segment.startswith("ru_") else US_COSTS,
+                exclude_periods=MOEX_2022_BREAK if segment.startswith("ru_") else (),
             ),
             regime_provider=regime_provider,
         )

@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from finalayze.backtest.config import BacktestConfig
+from finalayze.backtest.config import MOEX_2022_BREAK, BacktestConfig
 from finalayze.backtest.costs import MOEX_COSTS, US_COSTS
 from finalayze.backtest.engine import BacktestEngine
 from finalayze.backtest.performance import PerformanceAnalyzer
@@ -114,7 +114,8 @@ def _make_fetcher(segment: str) -> CachingFetcher:
 def _build_config(segment: str, cash: Decimal) -> BacktestConfig:
     """Build backtest config with appropriate costs."""
     costs = MOEX_COSTS if segment.startswith("ru_") else US_COSTS
-    return BacktestConfig(initial_cash=cash, transaction_costs=costs)
+    exclude = MOEX_2022_BREAK if segment.startswith("ru_") else ()
+    return BacktestConfig(initial_cash=cash, transaction_costs=costs, exclude_periods=exclude)
 
 
 def _run_isolation(
