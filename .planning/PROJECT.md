@@ -12,6 +12,18 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
+## Current Milestone: v2.0 MOEX Profitability
+
+**Goal:** Transform MOEX equity from consistently negative Sharpe to profitable operation through universe cleanup, MOEX-native strategies (dividend gap, CBR regime, sector rotation), and ML with Russian macro features.
+
+**Target features:**
+- Universe surgery: remove toxic symbols (GAZP, VTBR, SNGS, IRAO, ALRS), raise confidence thresholds
+- Dividend gap closure as primary MOEX equity alpha engine (expand from 43 to 150+ events)
+- CBR rate and macro regime gating for equity positions
+- MOEX-specific sector rotation (Brent-gated energy, CBR-sensitive financials)
+- ML ensemble for MOEX with Russian macro features (CBR rate, USDRUB, Brent, IMOEX relative)
+- Portfolio assembly: OFZ carry 40% + equity 60%, RUB crisis brake
+
 ## Requirements
 
 ### Validated
@@ -55,13 +67,18 @@ operating 24/7 without human intervention beyond initial configuration and monit
 
 ### Active
 
-<!-- Next milestone scope -->
+<!-- v2.0 MOEX Profitability scope -->
 
-- [ ] ML ensemble enabled for ru_* segments (currently us_tech only)
-- [ ] Cross-market correlations (MOEX vs US, Brent impact)
-- [ ] OFZ yield curve bootstrapping from CBR zero-coupon curve
-- [ ] Multi-account support
-- [ ] Tax optimization (NDFL, IIS deductions)
+- [ ] Universe cleanup: remove structurally broken symbols, raise confidence thresholds
+- [ ] Dividend gap closure strategy as primary MOEX equity alpha engine
+- [ ] Preferred share arbitrage (SBER/SBERP, TATN/TATNP, SNGS/SNGSP)
+- [ ] CBR rate regime gating for equity and bond allocation
+- [ ] Brent price gate for energy sector momentum
+- [ ] RUB/oil decorrelation regime wiring into position sizing
+- [ ] OFZ PK→PD rotation trigger (CBR cutting cycle detection)
+- [ ] MOEX-specific sector rotation strategy (replace US-calibrated momentum)
+- [ ] ML ensemble for ru_* segments with Russian macro features
+- [ ] Portfolio-level allocation (40% OFZ + 60% equity) with RUB crisis brake
 
 ### Out of Scope
 
@@ -70,6 +87,9 @@ operating 24/7 without human intervention beyond initial configuration and monit
 - Mobile app — Streamlit dashboard + Telegram alerts sufficient
 - Cryptocurrency — not available on MOEX
 - Custom ML model training UI — CLI scripts sufficient
+- US market development — deferred, MOEX-only focus for v2.0
+- Multi-account support — deferred to v3.0
+- Tax optimization (NDFL, IIS) — deferred to v3.0
 
 ## Context
 
@@ -120,5 +140,10 @@ All v1.0 MOEX MVP requirements shipped. System ready for sandbox deployment and 
 | OpenRouter free model for LLM | Cost efficiency for news analysis | ✓ Good — avoids per-call charges |
 | Three-quarter Kelly for MOEX | Larger positions for less liquid market | ⚠️ Revisit — monitor in live trading |
 
+| MOEX-only focus for v2.0 | MOEX equity needs fixing; US already works | — Pending |
+| Universe surgery first | Toxic symbols (GAZP, VTBR, SNGS) account for 60% negative PnL | — Pending |
+| Dividend gap as primary alpha | Documented 70%+ gap closure on MOEX blue chips within 30-60 days | — Pending |
+| OFZ carry as portfolio foundation | Sharpe +1.14, provides 20% base return at 21% CBR rate | ✓ Good |
+
 ---
-*Last updated: 2026-03-19 after v1.0 milestone*
+*Last updated: 2026-03-20 after v2.0 milestone start*

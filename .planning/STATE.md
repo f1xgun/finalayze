@@ -1,147 +1,54 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: completed
-stopped_at: Completed 07-03-PLAN.md (TradingLoop news integration + go-live)
-last_updated: "2026-03-19T20:10:54.794Z"
-last_activity: 2026-03-15 -- Completed 07-03 (TradingLoop news integration, event_driven enablement, go-live prep)
+milestone: v2.0
+milestone_name: MOEX Profitability
+status: defining_requirements
+stopped_at: null
+last_updated: "2026-03-20T12:00:00.000Z"
+last_activity: 2026-03-20 -- Milestone v2.0 started
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 22
-  completed_plans: 22
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-19)
+See: .planning/PROJECT.md (updated 2026-03-20)
 
 **Core value:** Autonomous profitable MOEX trading (stocks + bonds + coupons) with risk limits, operating without human intervention
-**Current focus:** v1.0 shipped — planning next milestone
+**Current focus:** v2.0 MOEX Profitability — make MOEX equity profitable through universe cleanup, MOEX-native strategies, and ML
 
 ## Current Position
 
-Phase: 7 of 7 (News Pipeline & Go-Live)
-Plan: 3 of 3 in current phase (COMPLETE)
-Status: All plans complete
-Last activity: 2026-03-15 -- Completed 07-03 (TradingLoop news integration, event_driven enablement, go-live prep)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-20 — Milestone v2.0 started
 
-Progress: [██████████] 100%
-
-## Performance Metrics
-
-**Velocity:**
-- Total plans completed: 4
-- Average duration: 18min
-- Total execution time: 1.2 hours
-
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 01 | 2 | 24min | 12min |
-| 02 | 2 | 49min | 25min |
-
-**Recent Trend:**
-- Last 5 plans: 01-01 (6min), 01-02 (18min), 02-01 (11min), 02-02 (38min)
-- Trend: stable
-
-*Updated after each plan completion*
-| Phase 02 P03 | 4min | 3 tasks | 5 files |
-| Phase 03 P02 | 5min | 3 tasks | 6 files |
-| Phase 03 P01 | 9min | 2 tasks | 6 files |
-| Phase 03 P03 | 9min | 3 tasks | 8 files |
-| Phase 04 P01 | 7min | 2 tasks | 9 files |
-| Phase 04 P02 | 11min | 2 tasks | 5 files |
-| Phase 04 P03 | 25min | 2 tasks | 3 files |
-| Phase 05 P01 | 6min | 2 tasks | 3 files |
-| Phase 05 P02 | 8min | 2 tasks | 9 files |
-| Phase 05 P03 | 7min | 2 tasks | 8 files |
-| Phase 05 P04 | 4min | 2 tasks | 5 files |
-| Phase 06 P01 | 5min | 2 tasks | 7 files |
-| Phase 06 P02 | 6min | 2 tasks | 10 files |
-| Phase 06 P03 | 6min | 2 tasks | 5 files |
-| Phase 06 P04 | 4min | 2 tasks | 3 files |
-| Phase 07 P02 | 3min | 1 tasks | 3 files |
-| Phase 07 P01 | 5min | 2 tasks | 8 files |
-| Phase 07 P03 | 15min | 4 tasks | 12 files |
+Progress: [░░░░░░░░░░] 0%
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
+v1.0 decisions carried forward:
 
-- [Roadmap]: 7 phases derived from 32 requirements; strict dependency chain (sizing -> equity validation -> bond data -> bond execution -> integration -> sandbox -> news+go-live)
-- [Roadmap]: Phases 2 and 3 both depend only on Phase 1 (parallel-capable but sequential recommended)
-- [Roadmap]: News pipeline deferred to Phase 7 (differentiator, not table-stake for autonomous operation)
-- [01-01]: Transferred holidays as static per-year frozensets (government decrees are static)
-- [01-01]: is_moex_holiday expanded to check both fixed and transferred (backward-compatible)
-- [01-01]: Lazy import of moex_calendar in trading_loop to maintain dependency layering
-- [01-02]: MOEX starting capital fixed at 1M RUB (not USD * FX rate)
-- [01-02]: Half-Kelly with default params gives 8.33% position size (not 10-20% as initially expected)
-- [02-01]: ou_mean_reversion disabled on all MOEX segments (negative Sharpe on all 3: -0.28, -0.11, -0.55)
-- [02-01]: Weights redistributed proportionally after OU disable; all presets sum to 1.00
-- [02-01]: ru_finance added to UNIVERSE (7 symbols in run_iteration, 4 in isolation)
-- [02-02]: All 8 candidate pairs failed cointegration (p>0.05) -- pairs strategy disabled on all MOEX segments
-- [02-02]: Optuna-tuned MOEX-specific params (ADX thresholds, BB std_dev, confidence levels) distinct from US defaults
-- [02-02]: Walk-forward targets not fully met (avg Sharpe negative) -- best-effort accepted after 5 iterations per plan
-- [02-02]: Individual symbols profitable (YNDX Sharpe +0.88, ROSN +0.65) but segment averages dragged by losing symbols
-- [Phase 02]: All pruned MOEX symbols restored for future news/sentiment integration (Phase 7)
-- [Phase 02]: Three-quarter Kelly (0.75) kept for MOEX segments -- 3x position sizes vs default
-- [Phase 03]: Yield curve parsed from CBR HTML using lxml.html; async DB persistence via asyncio boundary in sync refresh()
-- [Phase 03]: QuantLib cleanPrice/bondYield use % of face (MOEX convention), not absolute RUB
-- [Phase 03]: liquidity_flag as proxy for 10M RUB/day turnover (T-Invest API limitation)
-- [Phase 03]: OFZ classified by class_code (TQOB/TQOD) or sector containing "government"
-- [Phase 03]: CouponEvent emitted on record_date match; bond candle prices in % of face value
-- [Phase 03]: Cross-validation tolerance 100bps (not 1bps) due to business-day vs calendar schedule difference
-- [Phase 03]: FloatingRateBond requires 1-year historical fixings backfill with flat rate (MVP)
-- [Phase 04]: face_value renamed to unit_cost (default 1000) for DV01 sizing backward compat
-- [Phase 04]: make_bond_broker shares AsyncClient (single gRPC channel) with equity broker
-- [Phase 04]: reconcile_with_broker adds unknown bonds to Core layer with zeroed entry data
-- [Phase 04]: Limit orders (not market) for bond execution; 2-min fill timeout with 2s polling
-- [Phase 04]: Partial fills kept in ledger; remainder cancelled; no retry (next cycle tries again)
-- [Phase 04]: Transaction costs estimated from MOEX bond cost constants (0.05% + 5bps + 3bps)
-- [04-03]: ru_ofz_pk carry strategy ENABLED (Sharpe +1.14, PF 25.22, DD 1.0%, Win Rate 78.6%)
-- [04-03]: ru_ofz_pd duration rotation DISABLED (Sharpe -0.16, negative PnL in 2022-2025 hiking cycle)
-- [04-03]: Raw Sharpe (rf=0) used for bond acceptance checks
-- [05-01]: asyncio.PriorityQueue from stdlib for TelegramMessageQueue (no external dep)
-- [05-01]: CRITICAL alerts bypass queue entirely (zero latency for circuit breaker)
-- [05-01]: Queue optional via set_queue() -- backward compatible without queue
-- [05-01]: HTML parse_mode on all Telegram messages; persistent httpx.AsyncClient
-- [05-02]: Bond cycle skip uses structlog only (no Telegram) per user decision
-- [05-02]: Preflight independent degradation: bond disabled on failure, equity continues
-- [05-02]: Bond P&L from LayerLedger.current_equity (not broker portfolio)
-- [05-02]: on_daily_summary extended with backward-compatible optional params
-- [05-03]: Factory router pattern for telegram webhook (needs runtime dependencies)
-- [05-03]: Read-only commands only (/status, /breakers) -- no trading via Telegram
-- [05-03]: CBR alert fires on_cbr_meeting with rate from MacroSnapshot.last_cbr_decision
-- [05-03]: Coupon alert fires on reinvestment step in _process_layer
-- [05-03]: Weekly digest via CronTrigger(day_of_week='sun') at configurable hour
-- [05-04]: Lazy DB imports inside async methods to maintain dependency layering (Layer 6)
-- [05-04]: Telegram router mounted with placeholder handler; real deps wired by TradingLoop
-- [06-01]: cancel_order_safe() as bool-returning alternative to cancel_order() (which raises)
-- [06-01]: Tinkoff added to mandatory health components; "unknown" status accepted (not configured)
-- [06-01]: All open orders on startup treated as stale and cancelled (conservative reconciliation)
-- [06-02]: SQLAlchemyJobStore with sync URL fallback to MemoryJobStore when psycopg2 unavailable
-- [06-02]: All APScheduler jobs have stable IDs with replace_existing=True for crash recovery
-- [06-02]: TradingLoop starts in daemon thread from FastAPI lifespan (sandbox and real modes)
-- [06-02]: Sandbox mode equity/drawdown sourced from SandboxPortfolioTracker.shadow_portfolio()
-- [06-02]: Single uvicorn worker forced in sandbox mode for TradingLoop thread safety
-- [06-03]: Validation criteria: 5+ days, <5% DD, >=10 trades, 0 critical errors (matches AUT-04)
-- [06-03]: Report generator returns bool for programmatic use; orchestration script is checklist (not automated runner)
-- [06-03]: Docker fixes: README.md in both stages, psycopg2-binary, .dockerignore whitelist
-- [Phase 06]: errors_caught counter tracks candle fetch and order submission failures in equity cycle
-- [Phase 07]: Telethon lazy-imported inside method to avoid ImportError when not configured
-- [Phase 07]: feedparser for RSS parsing with OrderedDict LRU dedup (MAX_SEEN_SIZE=5000)
-- [Phase 07]: 29 MOEX tickers as frozenset for LLM output validation in EntityExtractor
-- [Phase 07-03]: RSS and Telegram fetchers as optional TradingLoop params; legacy NewsAPI fallback only when both return empty
-- [Phase 07-03]: event_driven weight 0.15 on all ru_* segments; other strategy weights reduced proportionally to keep sum=1.00
+- [v1.0]: ou_mean_reversion disabled on all MOEX segments (negative Sharpe: -0.28, -0.11, -0.55)
+- [v1.0]: All 8 candidate pairs failed cointegration (p>0.05) — pairs strategy disabled on all MOEX
+- [v1.0]: Individual symbols profitable (YNDX +0.88, ROSN +0.65) but segment averages dragged by losing symbols
+- [v1.0]: OFZ-PK carry ENABLED (Sharpe +1.14, PF 25.22), OFZ-PD duration rotation DISABLED (Sharpe -0.16)
+- [v1.0]: event_driven at 0.15 weight, 0 backtest trades (needs live news)
+- [v1.0]: Three-quarter Kelly (0.75) for MOEX — 3x position sizes vs default
+- [v2.0-CEO]: GAZP, VTBR, SNGS, IRAO, ALRS identified as toxic symbols (~60% of negative PnL)
+- [v2.0-CEO]: Dividend gap closure documented as primary MOEX alpha source (70%+ gap closure within 30-60 days)
+- [v2.0-CEO]: OFZ-PK carry is portfolio foundation (20% annual at 21% CBR rate)
+- [v2.0-CEO]: US market development deferred — MOEX-only focus
 
 ### Pending Todos
 
@@ -149,12 +56,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- ~~RUB position sizing bug~~ FIXED in 01-02 (1M RUB starting capital, 8% position sizing)
-- ~~MOEX-specific ADX threshold calibration~~ DONE in 02-02 (Optuna-tuned per segment)
-- OFZ-PK floater duration formula needs validation during Phase 4 planning
-- Russian news RSS URLs have MEDIUM confidence -- validate at Phase 7 implementation
+- MOEX equity WF Sharpe consistently negative (-0.01 to -0.09 across all iterations)
+- moex_dividends.yaml has only 43 events across 6 symbols — data gap for dividend strategy
+- rub_oil_regime.py exists but not wired into equity sizing pipeline
+- 2022 sanctions regime makes backtest data noisy (structural break)
 
 ## Session Continuity
 
-Last session: 2026-03-15T19:37:54.226Z
-Stopped at: Completed 07-03-PLAN.md (TradingLoop news integration + go-live)
+Last session: 2026-03-20
+Stopped at: Defining v2.0 requirements
