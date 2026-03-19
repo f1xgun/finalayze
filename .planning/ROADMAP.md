@@ -43,7 +43,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
   2. GAZP, VTBR, SNGS, IRAO, ALRS are excluded from all ru_* segment backtests and no trades are generated for them
   3. Dividend calendar contains 150+ events including cancelled/reduced dividends with a status field distinguishing paid/cancelled/reduced
   4. Walk-forward backtest on any ru_* segment with training window crossing Feb-Mar 2022 excludes the structural break period from vol and ATR calculations
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 
 Plans:
 - [ ] 08-01-PLAN.md -- Vol target recalibration (0.40) and toxic symbol removal from MOEX universe
@@ -106,7 +106,7 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 5. Integration and Telegram | v1.0 | 4/4 | Complete | 2026-03-14 |
 | 6. Sandbox Validation | v1.0 | 4/4 | Complete | 2026-03-15 |
 | 7. News Pipeline and Go-Live | v1.0 | 3/3 | Complete | 2026-03-15 |
-| 8. Data Foundation | v2.0 | 0/3 | In progress | - |
+| 8. Data Foundation | 1/3 | In Progress|  | - |
 | 9. Strategy Wiring | v2.0 | 0/? | Not started | - |
 | 10. Macro Regime | v2.0 | 0/? | Not started | - |
 | 11. Advanced Strategies and ML | v2.0 | 0/? | Not started | - |
