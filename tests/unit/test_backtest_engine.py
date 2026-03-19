@@ -254,3 +254,175 @@ class TestPortfolioBacktest:
         )
         # Should not crash, and produce some trades
         assert len(snapshots) > 0
+
+
+# ---------------------------------------------------------------------------
+# Structural break exclusion tests
+# ---------------------------------------------------------------------------
+
+
+class TestBacktestConfigExcludePeriods:
+    """Tests for the exclude_periods field on BacktestConfig."""
+
+    def test_backtest_config_exclude_periods_default(self) -> None:
+        """Default exclude_periods is empty tuple."""
+        from finalayze.backtest.config import BacktestConfig
+
+        cfg = BacktestConfig()
+        assert cfg.exclude_periods == ()
+
+    def test_moex_2022_break_constant(self) -> None:
+        """MOEX_2022_BREAK constant matches expected date range."""
+        from finalayze.backtest.config import MOEX_2022_BREAK
+
+        assert MOEX_2022_BREAK == (("2022-02-21", "2022-04-01"),)
+
+
+class TestFilterCandlesByExclusion:
+    """Tests for the filter_candles_by_exclusion helper."""
+
+    def test_filter_candles_by_exclusion(self) -> None:
+        """Candles within excluded period are removed, others preserved."""
+        from finalayze.risk.stop_loss import filter_candles_by_exclusion
+
+        candles: list[Candle] = []
+        # 10 candles: 5 before, 3 inside, 2 after the exclusion window
+        dates = [
+            datetime(2022, 1, 10, tzinfo=UTC),  # before
+            datetime(2022, 2, 1, tzinfo=UTC),  # before
+            datetime(2022, 2, 15, tzinfo=UTC),  # before
+            datetime(2022, 2, 20, tzinfo=UTC),  # before (day before exclusion)
+            datetime(2022, 2, 21, tzinfo=UTC),  # excluded (start)
+            datetime(2022, 3, 1, tzinfo=UTC),  # excluded (middle)
+            datetime(2022, 4, 1, tzinfo=UTC),  # excluded (end, inclusive)
+            datetime(2022, 4, 2, tzinfo=UTC),  # after
+            datetime(2022, 5, 1, tzinfo=UTC),  # after
+            datetime(2022, 6, 1, tzinfo=UTC),  # after (10th candle to have 10 total)
+        ]
+        for dt in dates:
+            candles.append(
+                Candle(
+                    symbol="SBER",
+                    market_id="moex",
+                    timeframe="1d",
+                    timestamp=dt,
+                    open=Decimal(100),
+                    high=Decimal(105),
+                    low=Decimal(95),
+                    close=Decimal(102),
+                    volume=1_000_000,
+                )
+            )
+
+        exclude = (("2022-02-21", "2022-04-01"),)
+        filtered = filter_candles_by_exclusion(candles, exclude)
+        expected_count = 7
+        assert len(filtered) == expected_count
+        # None of the filtered candles should fall within the excluded range
+        for c in filtered:
+            d = c.timestamp.date()
+            assert not (d >= datetime(2022, 2, 21, tzinfo=UTC).date()
+                        and d <= datetime(2022, 4, 1, tzinfo=UTC).date())
+
+
+class TestAtrExcludesStructuralBreak:
+    """Tests for compute_atr_stop_loss with exclude_periods."""
+
+    def test_atr_excludes_structural_break_period(self) -> None:
+        """ATR with exclusion is significantly lower than without when break has extreme vol."""
+        from finalayze.risk.stop_loss import compute_atr_stop_loss
+
+        candles: list[Candle] = []
+        # Normal candles before break (Jan 2022)
+        for day in range(1, 21):
+            candles.append(
+                Candle(
+                    symbol="SBER",
+                    market_id="moex",
+                    timeframe="1d",
+                    timestamp=datetime(2022, 1, day, 7, 0, tzinfo=UTC),
+                    open=Decimal(100),
+                    high=Decimal(102),
+                    low=Decimal(98),
+                    close=Decimal(101),
+                    volume=1_000_000,
+                )
+            )
+        # Extreme vol candles during break (Feb 21 - Apr 1 2022)
+        extreme_dates = [
+            datetime(2022, 2, 21, 7, 0, tzinfo=UTC),
+            datetime(2022, 2, 25, 7, 0, tzinfo=UTC),
+            datetime(2022, 3, 5, 7, 0, tzinfo=UTC),
+            datetime(2022, 3, 15, 7, 0, tzinfo=UTC),
+            datetime(2022, 3, 25, 7, 0, tzinfo=UTC),
+        ]
+        for dt in extreme_dates:
+            candles.append(
+                Candle(
+                    symbol="SBER",
+                    market_id="moex",
+                    timeframe="1d",
+                    timestamp=dt,
+                    open=Decimal(80),
+                    high=Decimal(130),
+                    low=Decimal(50),
+                    close=Decimal(70),
+                    volume=5_000_000,
+                )
+            )
+        # Normal candles after break (Apr-May 2022)
+        for day in range(5, 25):
+            candles.append(
+                Candle(
+                    symbol="SBER",
+                    market_id="moex",
+                    timeframe="1d",
+                    timestamp=datetime(2022, 4, day, 7, 0, tzinfo=UTC),
+                    open=Decimal(100),
+                    high=Decimal(103),
+                    low=Decimal(97),
+                    close=Decimal(101),
+                    volume=1_000_000,
+                )
+            )
+
+        entry_price = Decimal(100)
+        exclude = (("2022-02-21", "2022-04-01"),)
+
+        # Without exclusion -- ATR inflated by extreme candles
+        stop_no_exclude = compute_atr_stop_loss(
+            entry_price=entry_price,
+            candles=candles,
+            atr_period=14,
+            atr_multiplier=Decimal("2.0"),
+        )
+
+        # With exclusion -- ATR based on normal candles only
+        stop_with_exclude = compute_atr_stop_loss(
+            entry_price=entry_price,
+            candles=candles,
+            atr_period=14,
+            atr_multiplier=Decimal("2.0"),
+            exclude_periods=exclude,
+        )
+
+        assert stop_no_exclude is not None
+        assert stop_with_exclude is not None
+        # ATR without exclusion produces a LOWER stop (wider stop distance)
+        # because extreme vol makes ATR much larger.
+        # With exclusion, stop is closer to entry (smaller ATR).
+        assert stop_with_exclude > stop_no_exclude
+
+    def test_atr_without_exclude_periods_backward_compatible(self) -> None:
+        """compute_atr_stop_loss without exclude_periods works as before."""
+        from finalayze.risk.stop_loss import compute_atr_stop_loss
+
+        candles = _make_candle_series(count=20)
+        stop = compute_atr_stop_loss(
+            entry_price=Decimal(120),
+            candles=candles,
+            atr_period=14,
+            atr_multiplier=Decimal("2.0"),
+        )
+        assert stop is not None
+        assert stop > Decimal(0)
