@@ -1,6 +1,6 @@
 segment_id: ru_energy
 normalize_mode: "firing"
-min_combined_confidence: 0.15
+min_combined_confidence: 0.38
 min_exit_confidence: 0.24
 regime_routing:
   enabled: true
@@ -34,9 +34,9 @@ strategies:
       volume_min_ratio: 0.8
       neutral_reset_bars: 8
       vol_target_enabled: true
-      vol_target: 0.22
+      vol_target: 0.40
   event_driven:
-    enabled: true
+    enabled: false
     weight: 0.15
     params:
       min_sentiment: 0.6
@@ -94,7 +94,7 @@ strategies:
       lookback_6m: 126
       min_confidence: 0.50
       vol_target_enabled: true
-      vol_target: 0.22
+      vol_target: 0.40
   ou_mean_reversion:
     enabled: false
     weight: 0.00
