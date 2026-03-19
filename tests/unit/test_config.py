@@ -6,9 +6,9 @@ from config.modes import WorkMode
 from config.segments import DEFAULT_SEGMENTS, SegmentConfig
 
 EXPECTED_MODE_COUNT = 4
-EXPECTED_SEGMENT_COUNT = 10  # 8 stock + 2 OFZ bond segments
+EXPECTED_SEGMENT_COUNT = 17  # 4 US + 11 MOEX stock + 2 OFZ bond segments
 EXPECTED_US_SEGMENT_COUNT = 4
-EXPECTED_MOEX_SEGMENT_COUNT = 6  # 4 stock + 2 OFZ bond
+EXPECTED_MOEX_SEGMENT_COUNT = 13  # 11 stock + 2 OFZ bond
 
 
 class TestWorkMode:
@@ -55,6 +55,21 @@ class TestSegmentConfig:
     def test_all_segments_have_broker(self) -> None:
         for seg in DEFAULT_SEGMENTS:
             assert seg.broker in ("alpaca", "tinkoff")
+
+
+class TestToxicSymbolsExcluded:
+    """Verify toxic MOEX symbols are excluded from segment universe."""
+
+    def _get_segment(self, segment_id: str) -> SegmentConfig:
+        return next(s for s in DEFAULT_SEGMENTS if s.segment_id == segment_id)
+
+    def test_toxic_symbols_excluded_from_moex_segments(self) -> None:
+        assert "GAZP" not in self._get_segment("ru_blue_chips").symbols
+        assert "VTBR" not in self._get_segment("ru_finance").symbols
+        assert "SNGS" not in self._get_segment("ru_energy").symbols
+        assert "SNGSP" not in self._get_segment("ru_energy").symbols
+        assert "IRAO" not in self._get_segment("ru_utilities").symbols
+        assert "ALRS" not in self._get_segment("ru_metals").symbols
 
 
 class TestBondSettings:
