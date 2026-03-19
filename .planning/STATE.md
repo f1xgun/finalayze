@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: completed
 stopped_at: Completed 07-03-PLAN.md (TradingLoop news integration + go-live)
-last_updated: "2026-03-15T19:38:06.322Z"
+last_updated: "2026-03-19T20:10:54.794Z"
 last_activity: 2026-03-15 -- Completed 07-03 (TradingLoop news integration, event_driven enablement, go-live prep)
 progress:
   total_phases: 7
@@ -18,10 +18,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-14)
+See: .planning/PROJECT.md (updated 2026-03-19)
 
 **Core value:** Autonomous profitable MOEX trading (stocks + bonds + coupons) with risk limits, operating without human intervention
-**Current focus:** All phases complete - ready for go-live
+**Current focus:** v1.0 shipped — planning next milestone
 
 ## Current Position
 
