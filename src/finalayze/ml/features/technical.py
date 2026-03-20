@@ -84,6 +84,9 @@ _MIN_ZSCORE_OBSERVATIONS = 20  # Minimum for meaningful z-score
 _BRENT_HOLIDAY_SUPPRESS_BARS = 2  # Suppress z-score for this many bars after MOEX reopening
 _BRENT_HOLIDAY_MIN_GAP = 3  # Trigger only if gap > this many non-trading days (>weekend)
 
+# CBR rate comparison epsilon (avoid float equality issues)
+_CBR_RATE_EPSILON = 1e-10
+
 # Trailing 12-month CPI (Росстат), annualized as decimal fraction.
 # 6-month fallback in _compute_macro_features if exact month missing.
 _TRAILING_CPI: dict[tuple[int, int], float] = {
@@ -556,6 +559,155 @@ def _compute_turnover_features(moex_data: MoexMarketData | None) -> dict[str, fl
     return {"market_turnover_zscore": _rolling_zscore_clipped(values, _MOEX_ZSCORE_WINDOW)}
 
 
+def _compute_cbr_features(
+    moex_data: MoexMarketData | None,
+    candle_timestamps: list[datetime] | None = None,
+) -> dict[str, float]:
+    """Compute CBR key rate features: level, delta, direction one-hot.
+
+    Returns 4 features:
+    - cbr_rate_level: forward-filled key rate value (already decimal fraction, e.g. 0.16)
+    - cbr_rate_delta: change between last two distinct rate values
+    - cbr_direction_cut: 1.0 if rate was cut (delta < 0), else 0.0
+    - cbr_direction_hike: 1.0 if rate was hiked (delta > 0), else 0.0
+
+    All values are lagged by _EXTERNAL_DATA_LAG_BARS to avoid look-ahead bias.
+    Rates in KeyRateRecord are already decimal fractions (0.16 = 16%).
+    """
+    _default: dict[str, float] = {
+        "cbr_rate_level": 0.0,
+        "cbr_rate_delta": 0.0,
+        "cbr_direction_cut": 0.0,
+        "cbr_direction_hike": 0.0,
+    }
+
+    if moex_data is None or not moex_data.key_rates or len(moex_data.key_rates) < 2:  # noqa: PLR2004
+        return _default
+
+    # Build sparse rate series and forward-fill to daily using candle_timestamps union
+    sparse: dict[datetime, float] = {
+        record.timestamp: float(record.rate) for record in moex_data.key_rates
+    }
+    sparse_dates = list(sparse.keys())
+    all_timestamps = set(candle_timestamps or []) | set(sparse_dates)
+    daily_index = pd.DatetimeIndex(sorted(all_timestamps))
+
+    sparse_series = pd.Series(sparse)
+    daily = sparse_series.reindex(daily_index).ffill().dropna()
+
+    min_required = _EXTERNAL_DATA_LAG_BARS + 2  # need at least 2 values after lag
+    if daily.empty or len(daily) < min_required:
+        return _default
+
+    # Apply lag
+    lagged = daily.iloc[:-_EXTERNAL_DATA_LAG_BARS] if _EXTERNAL_DATA_LAG_BARS > 0 else daily
+    if len(lagged) < 2:  # noqa: PLR2004
+        return _default
+
+    rate_level = float(lagged.iloc[-1])
+
+    # Find last two distinct rate values for delta
+    # Walk backward through lagged series to find the previous distinct value
+    current_rate = rate_level
+    prev_rate = current_rate  # default: no change
+    for i in range(len(lagged) - 2, -1, -1):
+        val = float(lagged.iloc[i])
+        if abs(val - current_rate) > _CBR_RATE_EPSILON:
+            prev_rate = val
+            break
+
+    rate_delta = current_rate - prev_rate
+
+    direction_cut = 1.0 if rate_delta < -_CBR_RATE_EPSILON else 0.0
+    direction_hike = 1.0 if rate_delta > _CBR_RATE_EPSILON else 0.0
+
+    return {
+        "cbr_rate_level": rate_level,
+        "cbr_rate_delta": rate_delta,
+        "cbr_direction_cut": direction_cut,
+        "cbr_direction_hike": direction_hike,
+    }
+
+
+def _compute_fx_return_features(moex_data: MoexMarketData | None) -> dict[str, float]:
+    """Compute FX return features from USD/RUB daily rates.
+
+    Returns 2 features:
+    - usdrub_return: log return of USDRUB over 1 bar, lagged by _EXTERNAL_DATA_LAG_BARS.
+      Clipped to [-0.15, 0.15].
+    - usdrub_vol: 20-day rolling std of USDRUB log returns, lagged.
+      Clipped to [0, 0.10].
+    """
+    _default: dict[str, float] = {"usdrub_return": 0.0, "usdrub_vol": 0.0}
+
+    if moex_data is None or not moex_data.fx_rates:
+        return _default
+
+    rates = moex_data.fx_rates
+    lag = _EXTERNAL_DATA_LAG_BARS
+    # Need at least lag + 2 rates for 1-bar return + lag
+    min_required = lag + 2
+    if len(rates) < min_required:
+        return _default
+
+    # Compute lagged 1-bar log return
+    rate_prev = float(rates[-lag - 2].rate)
+    rate_curr = float(rates[-lag - 1].rate)
+
+    if rate_prev <= 0 or rate_curr <= 0:
+        return _default
+
+    usdrub_return = float(np.clip(np.log(rate_curr / rate_prev), -0.15, 0.15))
+
+    # Compute rolling vol: need enough data for 20-day window
+    _vol_window = 20
+    usdrub_vol = 0.0
+    if len(rates) >= lag + _vol_window + 1:
+        # Use lagged series for vol computation
+        lagged_rates = rates[:-lag] if lag > 0 else rates
+        rate_values = pd.Series([float(r.rate) for r in lagged_rates], dtype=float)
+        log_returns = np.log(rate_values / rate_values.shift(1)).dropna()
+        if len(log_returns) >= _vol_window:
+            rolling_std = log_returns.rolling(_vol_window).std()
+            last_std = float(rolling_std.iloc[-1])
+            if math.isfinite(last_std):
+                usdrub_vol = float(np.clip(last_std, 0.0, 0.10))
+
+    return {"usdrub_return": usdrub_return, "usdrub_vol": usdrub_vol}
+
+
+def _compute_brent_return_features(moex_data: MoexMarketData | None) -> dict[str, float]:
+    """Compute Brent crude log return feature.
+
+    Returns 1 feature:
+    - brent_return: log return of Brent over 1 bar, lagged by _EXTERNAL_DATA_LAG_BARS.
+      Clipped to [-0.15, 0.15].
+    """
+    _default: dict[str, float] = {"brent_return": 0.0}
+
+    if moex_data is None or not moex_data.commodity_candles:
+        return _default
+
+    brent = moex_data.commodity_candles.get("BZ=F")
+    if not brent:
+        return _default
+
+    lag = _EXTERNAL_DATA_LAG_BARS
+    min_required = lag + 2
+    if len(brent) < min_required:
+        return _default
+
+    close_prev = float(brent[-lag - 2].close)
+    close_curr = float(brent[-lag - 1].close)
+
+    if close_prev <= 0 or close_curr <= 0:
+        return _default
+
+    brent_return = float(np.clip(np.log(close_curr / close_prev), -0.15, 0.15))
+
+    return {"brent_return": brent_return}
+
+
 def compute_features(
     candles: list[Candle],
     sentiment_score: float = 0.0,  # noqa: ARG001 — kept for backward compatibility
@@ -657,6 +809,9 @@ def compute_features(
     commodity_features = _compute_commodity_features(_moex)
     macro_features = _compute_macro_features(_moex, candle_timestamps=candle_timestamps)
     turnover_features = _compute_turnover_features(_moex)
+    cbr_features = _compute_cbr_features(_moex, candle_timestamps=candle_timestamps)
+    fx_return_features = _compute_fx_return_features(_moex)
+    brent_return_features = _compute_brent_return_features(_moex)
 
     all_features = {
         **core,
@@ -670,6 +825,9 @@ def compute_features(
         **commodity_features,
         **macro_features,
         **turnover_features,
+        **cbr_features,
+        **fx_return_features,
+        **brent_return_features,
     }
 
     feature_df = pd.DataFrame({k: [v] for k, v in all_features.items()})
