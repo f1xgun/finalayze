@@ -19,21 +19,21 @@ Processing order per layer (validated by risk review):
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass, field, replace
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import structlog
 
 from finalayze.core import bond_math
-from finalayze.core.schemas import BondPositionRecord, SignalDirection
+from finalayze.core.schemas import BondPositionRecord, PortfolioLayer, SignalDirection
 from finalayze.execution.broker_base import OrderRequest
 
 if TYPE_CHECKING:
     from finalayze.core.alerts import TelegramAlerter
     from finalayze.core.layer_ledger import LayerLedger
-    from finalayze.core.schemas import LayerConfig, PortfolioLayer, Signal
+    from finalayze.core.schemas import LayerConfig, Signal
     from finalayze.data.fetchers.cbr import MacroSnapshot
     from finalayze.data.macro_cache import MacroCacheService
     from finalayze.execution.broker_router import BrokerRouter
@@ -62,6 +62,42 @@ _BOND_SLIPPAGE_BPS = Decimal(3)
 _BPS_DIVISOR = Decimal(10_000)
 
 _MOEX_MARKET_ID = "moex"
+
+# OFZ rotation: shift from CORE (PK floaters) to STRATEGIC (PD fixed) during cutting cycle
+_OFZ_ROTATION_SHIFT = Decimal("0.15")
+
+
+def apply_ofz_rotation(
+    configs: dict[PortfolioLayer, LayerConfig],
+    as_of: date,
+) -> dict[PortfolioLayer, LayerConfig]:
+    """Adjust CORE/STRATEGIC allocations if CBR cutting cycle detected.
+
+    Cutting cycle = 2+ consecutive CBR rate cuts. When active, shifts 15pp
+    from CORE (PK floaters) to STRATEGIC (PD fixed) to capture duration trade.
+    Reverts to original allocations if latest decision is not "cut".
+    """
+    from finalayze.data.fetchers.cbr import CBR_MEETINGS  # noqa: PLC0415
+
+    past = [m for m in CBR_MEETINGS if m.date <= as_of and m.decision is not None]
+    if len(past) < 2:  # noqa: PLR2004
+        return configs
+
+    last_two = [past[-1].decision, past[-2].decision]
+    if not all(d == "cut" for d in last_two):
+        return configs
+
+    # Apply rotation: shift capital from CORE to STRATEGIC
+    result = dict(configs)
+    result[PortfolioLayer.CORE] = replace(
+        configs[PortfolioLayer.CORE],
+        capital_pct=configs[PortfolioLayer.CORE].capital_pct - _OFZ_ROTATION_SHIFT,
+    )
+    result[PortfolioLayer.STRATEGIC] = replace(
+        configs[PortfolioLayer.STRATEGIC],
+        capital_pct=configs[PortfolioLayer.STRATEGIC].capital_pct + _OFZ_ROTATION_SHIFT,
+    )
+    return result
 
 
 @dataclass
@@ -160,8 +196,16 @@ class BondCycleProcessor:
             self._alerter.send_alert("Bond portfolio HALTED — aggregate drawdown limit reached")
             return BondCycleResult(skipped=True, reason="aggregate breaker halted")
 
+        effective_configs = apply_ofz_rotation(self._layer_configs, datetime.now(tz=UTC).date())
+        if effective_configs != self._layer_configs:
+            _log.info(
+                "ofz_rotation_active",
+                core_pct=str(effective_configs[PortfolioLayer.CORE].capital_pct),
+                strategic_pct=str(effective_configs[PortfolioLayer.STRATEGIC].capital_pct),
+            )
+
         results: list[LayerResult] = []
-        for layer, config in self._layer_configs.items():
+        for layer, config in effective_configs.items():
             try:
                 if not self._layer_breakers[layer].check():
                     results.append(LayerResult(layer=layer, halted=True))
