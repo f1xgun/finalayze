@@ -15,14 +15,17 @@ from decimal import Decimal
 import pytest
 
 from finalayze.risk.position_sizing_pipeline import (
+    BrentGateStep,
     CopulaStep,
     EVTStep,
     HardCapsStep,
     KellyStep,
     PositionSizingPipeline,
+    RubOilRegimeStep,
     SizingContext,
     VolTargetStep,
 )
+from finalayze.risk.regime import MarketRegime, RegimeState
 
 # ---------------------------------------------------------------------------
 # Constants (no magic numbers in assertions)
@@ -253,3 +256,144 @@ class TestPipelineWithEVTAndCopula:
 
         assert isinstance(result, Decimal)
         assert result >= Decimal(0)
+
+
+# ---------------------------------------------------------------------------
+# Mock RubOilRegimeSignal for testing
+# ---------------------------------------------------------------------------
+
+
+class _MockRubOilRegimeSignal:
+    """Mock that returns a configurable RegimeState."""
+
+    def __init__(self, regime_state: RegimeState) -> None:
+        self._state = regime_state
+
+    def get_regime(self, candles: list[object], bar_index: int) -> RegimeState:  # noqa: ARG002
+        return self._state
+
+
+# ---------------------------------------------------------------------------
+# RubOilRegimeStep tests
+# ---------------------------------------------------------------------------
+
+SCALE_NORMAL = Decimal("1.0")
+SCALE_ELEVATED = Decimal("0.5")
+SCALE_CRISIS = Decimal("0.25")
+
+
+class TestRubOilRegimeStep:
+    def test_normal_regime_unchanged(self) -> None:
+        """NORMAL regime (scale=1.0) should leave size unchanged for ru_* segment."""
+        state = RegimeState(
+            regime=MarketRegime.NORMAL,
+            allow_new_longs=True,
+            position_scale=SCALE_NORMAL,
+        )
+        step = RubOilRegimeStep(_MockRubOilRegimeSignal(state), segment_id="ru_blue_chips")
+        ctx = _make_context()
+
+        result = step.adjust(BASE_POSITION, ctx)
+
+        expected = (BASE_POSITION * SCALE_NORMAL).quantize(FOUR_DP)
+        assert result == expected
+
+    def test_elevated_regime_halves(self) -> None:
+        """ELEVATED regime (scale=0.5) should halve position for ru_* segment."""
+        state = RegimeState(
+            regime=MarketRegime.ELEVATED,
+            allow_new_longs=True,
+            position_scale=SCALE_ELEVATED,
+        )
+        step = RubOilRegimeStep(_MockRubOilRegimeSignal(state), segment_id="ru_energy")
+        ctx = _make_context()
+
+        result = step.adjust(BASE_POSITION, ctx)
+
+        expected = (BASE_POSITION * SCALE_ELEVATED).quantize(FOUR_DP)
+        assert result == expected
+
+    def test_crisis_regime_quarters(self) -> None:
+        """CRISIS regime (scale=0.25) should quarter position for ru_* segment."""
+        state = RegimeState(
+            regime=MarketRegime.CRISIS,
+            allow_new_longs=False,
+            position_scale=SCALE_CRISIS,
+        )
+        step = RubOilRegimeStep(_MockRubOilRegimeSignal(state), segment_id="ru_blue_chips")
+        ctx = _make_context()
+
+        result = step.adjust(BASE_POSITION, ctx)
+
+        expected = (BASE_POSITION * SCALE_CRISIS).quantize(FOUR_DP)
+        assert result == expected
+
+    def test_non_ru_segment_passthrough(self) -> None:
+        """Non-ru_* segment should pass through unchanged regardless of regime."""
+        state = RegimeState(
+            regime=MarketRegime.CRISIS,
+            allow_new_longs=False,
+            position_scale=SCALE_CRISIS,
+        )
+        step = RubOilRegimeStep(_MockRubOilRegimeSignal(state), segment_id="us_tech")
+        ctx = _make_context()
+
+        result = step.adjust(BASE_POSITION, ctx)
+
+        assert result == BASE_POSITION
+
+
+# ---------------------------------------------------------------------------
+# BrentGateStep tests
+# ---------------------------------------------------------------------------
+
+BRENT_RUB_THRESHOLD = 5000.0
+BRENT_GATE_SCALE = Decimal("0.5")
+
+
+class TestBrentGateStep:
+    def test_above_threshold_unchanged(self) -> None:
+        """Brent-in-RUB >= 5000 should leave size unchanged for ru_energy."""
+        step = BrentGateStep(brent_rub_price=6000.0, segment_id="ru_energy")
+        ctx = _make_context()
+
+        result = step.adjust(BASE_POSITION, ctx)
+
+        assert result == BASE_POSITION
+
+    def test_below_threshold_halves(self) -> None:
+        """Brent-in-RUB < 5000 should halve position for ru_energy."""
+        step = BrentGateStep(brent_rub_price=4500.0, segment_id="ru_energy")
+        ctx = _make_context()
+
+        result = step.adjust(BASE_POSITION, ctx)
+
+        expected = (BASE_POSITION * BRENT_GATE_SCALE).quantize(FOUR_DP)
+        assert result == expected
+
+    def test_non_energy_segment_unchanged(self) -> None:
+        """Non-ru_energy segment should pass through unchanged."""
+        step = BrentGateStep(brent_rub_price=3000.0, segment_id="ru_blue_chips")
+        ctx = _make_context()
+
+        result = step.adjust(BASE_POSITION, ctx)
+
+        assert result == BASE_POSITION
+
+    def test_missing_data_graceful(self) -> None:
+        """brent_rub=0.0 (missing data) should pass through unchanged."""
+        step = BrentGateStep(brent_rub_price=0.0, segment_id="ru_energy")
+        ctx = _make_context()
+
+        result = step.adjust(BASE_POSITION, ctx)
+
+        assert result == BASE_POSITION
+
+    def test_us_segment_unchanged(self) -> None:
+        """US segment should pass through unchanged even with low Brent."""
+        step = BrentGateStep(brent_rub_price=2000.0, segment_id="us_tech")
+        ctx = _make_context()
+
+        result = step.adjust(BASE_POSITION, ctx)
+
+        assert result == BASE_POSITION

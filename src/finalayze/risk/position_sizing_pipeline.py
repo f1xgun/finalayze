@@ -11,6 +11,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Protocol
 
 from finalayze.risk.evt import EVTRiskEstimator
+from finalayze.risk.rub_oil_regime import RubOilRegimeSignal
 
 _VOL_TARGET_LOWER = Decimal("0.25")
 _VOL_TARGET_UPPER = Decimal("1.5")
@@ -115,6 +116,57 @@ class EVTStep:
         ):
             return (size * _EVT_SCALE_FACTOR).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
         return size
+
+
+_BRENT_RUB_THRESHOLD = 5000.0
+_BRENT_GATE_SCALE = Decimal("0.5")
+
+
+class RubOilRegimeStep:
+    """Scale positions by RUB/oil decorrelation regime for ru_* segments.
+
+    NORMAL (corr > 0.3) -> 1.0x, ELEVATED (0.1-0.3) -> 0.5x, CRISIS (< 0.1) -> 0.25x.
+    Non-ru_* segments pass through unchanged.
+    """
+
+    def __init__(self, regime_signal: RubOilRegimeSignal, segment_id: str) -> None:
+        self._regime_signal = regime_signal
+        self._segment_id = segment_id
+
+    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:  # noqa: ARG002
+        if not self._segment_id.startswith("ru_"):
+            return size
+        state = self._regime_signal.get_regime([], 0)
+        return (size * state.position_scale).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+
+
+class BrentGateStep:
+    """Gate energy sector positions when Brent-in-RUB below threshold.
+
+    When Brent-in-RUB < 5000 RUB/bbl, scale energy positions by 0.5.
+    Only applies to ru_energy segment. Non-energy and missing data pass through.
+    """
+
+    def __init__(
+        self,
+        brent_rub_price: float,
+        segment_id: str,
+        threshold: float = _BRENT_RUB_THRESHOLD,
+        scale_below: Decimal = _BRENT_GATE_SCALE,
+    ) -> None:
+        self._brent_rub = brent_rub_price
+        self._segment_id = segment_id
+        self._threshold = threshold
+        self._scale_below = scale_below
+
+    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:  # noqa: ARG002
+        if self._segment_id != "ru_energy":
+            return size
+        if self._brent_rub <= 0:
+            return size  # graceful degradation: missing data -> no gate
+        if self._brent_rub >= self._threshold:
+            return size
+        return (size * self._scale_below).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
 
 
 _META_LABEL_THRESHOLD = Decimal("0.40")
