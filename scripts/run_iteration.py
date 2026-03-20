@@ -72,6 +72,7 @@ from finalayze.risk.regime import (
     StaticRegimeProvider,
     VIXRegimeProvider,
 )
+from finalayze.risk.rub_oil_regime import RubOilRegimeSignal
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.cbr_calendar import CBRCalendar, CBRRateEvent
 from finalayze.strategies.cbr_strategy_wrapper import CBRStrategyWrapper
@@ -656,6 +657,68 @@ def _normalize_snapshots_to_usd(
     ]
 
 
+def _compute_moex_sizing_data(
+    market_context: MarketContext,
+) -> tuple[float, RubOilRegimeSignal | None]:
+    """Extract Brent-in-RUB price and build RubOilRegimeSignal from MarketContext.
+
+    Returns:
+        (brent_rub_price, rub_oil_regime_signal) -- both may be 0.0/None on missing data.
+    """
+    from finalayze.core.schemas import Candle  # noqa: PLC0415
+
+    moex_data = market_context.moex_data
+    if moex_data is None:
+        return 0.0, None
+
+    # Extract Brent USD candles from commodity_candles["BZ=F"]
+    brent_candles: list[Candle] = []
+    if moex_data.commodity_candles and "BZ=F" in moex_data.commodity_candles:
+        brent_candles = list(moex_data.commodity_candles["BZ=F"])
+
+    # Extract USDRUB rate from fx_rates
+    # fx_rates are FXRate(timestamp, pair, rate) -- NOT Candle objects.
+    # Convert FXRate to synthetic Candle objects for correlation computation.
+    rub_candles: list[Candle] = []
+    usdrub_rate: float = 0.0
+    if moex_data.fx_rates:
+        for fx in moex_data.fx_rates:
+            if fx.pair == "USDRUB":
+                rate_float = float(fx.rate)
+                usdrub_rate = rate_float  # keep last rate for Brent-in-RUB
+                rate_dec = Decimal(str(rate_float))
+                rub_candles.append(
+                    Candle(
+                        symbol="USDRUB",
+                        market_id="cbr",
+                        timeframe="1d",
+                        timestamp=fx.timestamp,
+                        open=rate_dec,
+                        high=rate_dec,
+                        low=rate_dec,
+                        close=rate_dec,
+                        volume=0,
+                    )
+                )
+
+    # Compute Brent-in-RUB: last Brent USD close * last USDRUB rate
+    brent_rub_price = 0.0
+    if brent_candles and usdrub_rate > 0:
+        last_brent_usd = float(brent_candles[-1].close)
+        brent_rub_price = last_brent_usd * usdrub_rate
+
+    # Build RubOilRegimeSignal if both series have enough data
+    regime_signal: RubOilRegimeSignal | None = None
+    _min_series_len = 61  # need window+1 candles for correlation
+    if len(rub_candles) >= _min_series_len and len(brent_candles) >= _min_series_len:
+        regime_signal = RubOilRegimeSignal(
+            rub_candles=rub_candles,
+            oil_candles=brent_candles,
+        )
+
+    return brent_rub_price, regime_signal
+
+
 def _run_symbol(
     symbol: str,
     segment: str,
@@ -669,6 +732,8 @@ def _run_symbol(
     regime_provider: VIXRegimeProvider | HMMRegimeProvider | StaticRegimeProvider | None = None,
     stop_loss_mode: str = "chandelier",
     market_context: MarketContext | None = None,
+    brent_rub_price: float = 0.0,
+    rub_oil_regime_signal: object | None = None,
 ) -> tuple[list[TradeResult], list[PortfolioState], dict[str, Any] | None]:
     """Run backtest for a single symbol. Returns (trades, snapshots, summary)."""
     sym_dir = output_dir / segment / symbol.replace(".", "_")
@@ -695,6 +760,8 @@ def _run_symbol(
                 max_hold_bars=DEFAULT_STRATEGY_HOLD_BARS,
                 transaction_costs=MOEX_COSTS if segment.startswith("ru_") else US_COSTS,
                 exclude_periods=MOEX_2022_BREAK if segment.startswith("ru_") else (),
+                brent_rub_price=brent_rub_price,
+                rub_oil_regime_signal=rub_oil_regime_signal,
             ),
             regime_provider=regime_provider,
         )
@@ -1059,6 +1126,20 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                 print(f"  Regime provider: {type(regime_provider).__name__}")
             print()
 
+            # MOEX sizing data (Phase 9: BrentGateStep + RubOilRegimeStep)
+            brent_rub_price = 0.0
+            rub_oil_regime_signal: RubOilRegimeSignal | None = None
+            if is_moex:
+                brent_rub_price, rub_oil_regime_signal = _compute_moex_sizing_data(
+                    ml_market_context
+                )
+                if brent_rub_price > 0:
+                    print(f"  Brent-in-RUB: {brent_rub_price:,.0f} RUB/bbl")
+                if rub_oil_regime_signal is not None:
+                    print("  RUB/oil regime signal: active")
+                else:
+                    print("  RUB/oil regime signal: disabled (insufficient data)")
+
             segment_trades[segment] = []
             # 1M RUB starting capital for MOEX segments (per user decision)
             segment_cash = Decimal(1_000_000) if segment.startswith("ru_") else cash
@@ -1089,6 +1170,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                     regime_provider=regime_provider,
                     stop_loss_mode=args.stop_loss_mode,
                     market_context=ml_market_context,
+                    brent_rub_price=brent_rub_price,
+                    rub_oil_regime_signal=rub_oil_regime_signal,
                 )
 
                 normalized_trades = _normalize_trades_to_usd(trades, segment)

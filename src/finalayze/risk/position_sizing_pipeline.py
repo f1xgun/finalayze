@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from finalayze.risk.evt import EVTRiskEstimator
-from finalayze.risk.rub_oil_regime import RubOilRegimeSignal
+
+if TYPE_CHECKING:
+    from finalayze.risk.rub_oil_regime import RubOilRegimeSignal
 
 _VOL_TARGET_LOWER = Decimal("0.25")
 _VOL_TARGET_UPPER = Decimal("1.5")
