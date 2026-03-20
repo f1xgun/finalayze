@@ -669,7 +669,7 @@ def _compute_moex_sizing_data(
 
     moex_data = market_context.moex_data
     if moex_data is None:
-        return 0.0, None
+        return 0.0, None, 0.0, ""
 
     # Extract Brent USD candles from commodity_candles["BZ=F"]
     brent_candles: list[Candle] = []
