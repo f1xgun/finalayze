@@ -77,8 +77,8 @@ Plans:
 **Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 10-01-PLAN.md -- CBRRegimeStep and SectorAllocationStep in equity sizing pipeline
-- [ ] 10-02-PLAN.md -- OFZ PK-to-PD rotation trigger in BondCycleProcessor
+- [x] 10-01-PLAN.md -- CBRRegimeStep and SectorAllocationStep in equity sizing pipeline
+- [x] 10-02-PLAN.md -- OFZ PK-to-PD rotation trigger in BondCycleProcessor
 
 ### Phase 11: Advanced Strategies and ML
 **Goal**: Preferred share arbitrage captures pref/ord spread convergence, and ML ensemble operates on ru_* segments with Russian macro features
@@ -116,6 +116,6 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 7. News Pipeline and Go-Live | v1.0 | 3/3 | Complete | 2026-03-15 |
 | 8. Data Foundation | v2.0 | 3/3 | Complete | 2026-03-20 |
 | 9. Strategy Wiring | v2.0 | 2/2 | Complete | 2026-03-20 |
-| 10. Macro Regime | 2/2 | Complete   | 2026-03-20 | - |
+| 10. Macro Regime | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 11. Advanced Strategies and ML | v2.0 | 0/? | Not started | - |
 | 12. Portfolio Assembly | v2.0 | 0/? | Not started | - |
