@@ -393,3 +393,96 @@ class TestBaseInterface:
         assert "min_gap_pct" in params
         assert "max_hold_bars" in params
         assert "min_confidence" in params
+
+
+# ===================================================================
+# Test: Yield-based hold bars
+# ===================================================================
+_HIGH_YIELD_DIVIDEND = 25.0  # 8.3% yield on 300 -> 60 bars
+_MID_YIELD_DIVIDEND = 18.0  # 6.0% yield on 300 -> 40 bars
+_LOW_YIELD_DIVIDEND = 12.0  # 4.0% yield on 300 -> 25 bars
+
+_YIELD_HIGH_THRESHOLD = 8.0
+_YIELD_MID_THRESHOLD = 5.0
+
+_HOLD_BARS_HIGH = 60
+_HOLD_BARS_MID = 40
+_HOLD_BARS_LOW = 25
+
+
+class TestYieldHoldBars:
+    """Yield-based hold bars: higher gap % -> longer hold period."""
+
+    def test_yield_hold_bars_high(self) -> None:
+        """gap_pct >= 8.0 returns 60 hold bars."""
+        assert DividendGapStrategy._yield_hold_bars(_YIELD_HIGH_THRESHOLD) == _HOLD_BARS_HIGH
+        assert DividendGapStrategy._yield_hold_bars(10.0) == _HOLD_BARS_HIGH
+
+    def test_yield_hold_bars_mid(self) -> None:
+        """gap_pct 5.0-7.99 returns 40 hold bars."""
+        assert DividendGapStrategy._yield_hold_bars(_YIELD_MID_THRESHOLD) == _HOLD_BARS_MID
+        assert DividendGapStrategy._yield_hold_bars(7.5) == _HOLD_BARS_MID
+
+    def test_yield_hold_bars_low(self) -> None:
+        """gap_pct < 5.0 returns 25 hold bars."""
+        assert DividendGapStrategy._yield_hold_bars(3.5) == _HOLD_BARS_LOW
+        assert DividendGapStrategy._yield_hold_bars(4.9) == _HOLD_BARS_LOW
+
+    def test_low_yield_sell_at_25_bars(self) -> None:
+        """Position with gap_pct=4.0 should SELL at 25 bars."""
+        exdiv = _exdiv_date()
+        strategy = _make_strategy(max_hold_bars=60)  # safety ceiling
+        strategy.add_dividend(
+            _SYMBOL,
+            DividendEntry(ex_date=exdiv, amount=_LOW_YIELD_DIVIDEND),
+        )
+
+        gap_close = _BASE_PRICE - Decimal(str(_LOW_YIELD_DIVIDEND))
+
+        # Pre-exdiv + ex-div day + 25 bars at gap level (no recovery)
+        prices = [_BASE_PRICE] * _PRE_EXDIV_BARS + [gap_close] + [gap_close] * _HOLD_BARS_LOW
+        start = exdiv - timedelta(days=_PRE_EXDIV_BARS)
+        candles = _make_candles(prices, start)
+
+        # Trigger BUY on ex-div day
+        candles_exdiv = candles[: _PRE_EXDIV_BARS + 1]
+        buy_signal = strategy.generate_signal(
+            symbol=_SYMBOL, candles=candles_exdiv, segment_id=_SEGMENT_ID,
+        )
+        assert buy_signal is not None
+        assert buy_signal.direction == SignalDirection.BUY
+
+        # After 25 bars -> SELL (low yield tier reached)
+        sell_signal = strategy.generate_signal(
+            symbol=_SYMBOL, candles=candles, segment_id=_SEGMENT_ID, has_open_position=True,
+        )
+        assert sell_signal is not None
+        assert sell_signal.direction == SignalDirection.SELL
+
+    def test_high_yield_no_sell_at_25_bars(self) -> None:
+        """Position with gap_pct=8.3% should NOT sell at 25 bars (needs 60)."""
+        exdiv = _exdiv_date()
+        strategy = _make_strategy(max_hold_bars=60)
+        strategy.add_dividend(
+            _SYMBOL,
+            DividendEntry(ex_date=exdiv, amount=_HIGH_YIELD_DIVIDEND),
+        )
+
+        gap_close = _BASE_PRICE - Decimal(str(_HIGH_YIELD_DIVIDEND))
+
+        # Pre-exdiv + ex-div day + 25 bars at gap level (no recovery)
+        prices = [_BASE_PRICE] * _PRE_EXDIV_BARS + [gap_close] + [gap_close] * _HOLD_BARS_LOW
+        start = exdiv - timedelta(days=_PRE_EXDIV_BARS)
+        candles = _make_candles(prices, start)
+
+        # Trigger BUY
+        candles_exdiv = candles[: _PRE_EXDIV_BARS + 1]
+        strategy.generate_signal(
+            symbol=_SYMBOL, candles=candles_exdiv, segment_id=_SEGMENT_ID,
+        )
+
+        # After 25 bars -> should still be holding (None), not SELL
+        signal = strategy.generate_signal(
+            symbol=_SYMBOL, candles=candles, segment_id=_SEGMENT_ID, has_open_position=True,
+        )
+        assert signal is None
