@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: MOEX Profitability
-status: completed
-stopped_at: Completed 08-03-PLAN.md (Phase 08 complete)
-last_updated: "2026-03-20T08:02:25.680Z"
-last_activity: 2026-03-20 -- Completed 08-03 MOEX Dividend Calendar Expansion
+status: in-progress
+stopped_at: Completed 09-02-PLAN.md
+last_updated: "2026-03-20T08:36:27.000Z"
+last_activity: 2026-03-20 -- Completed 09-02 MOEX Sizing Pipeline Steps
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 2
+  completed_plans: 2
   percent: 100
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-20)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 8 -- Data Foundation
+**Current focus:** Phase 9 -- Strategy Wiring
 
 ## Current Position
 
-Phase: 8 of 12 (Data Foundation) -- first phase of v2.0
-Plan: 3 of 3 in current phase (08-01, 08-02, 08-03 complete)
-Status: Phase 08 Complete
-Last activity: 2026-03-20 -- Completed 08-03 MOEX Dividend Calendar Expansion
+Phase: 9 of 12 (Strategy Wiring) -- second phase of v2.0
+Plan: 2 of 2 in current phase (09-01, 09-02 complete)
+Status: Phase 09 Complete
+Last activity: 2026-03-20 -- Completed 09-02 MOEX Sizing Pipeline Steps
 
-Progress: [##########] 100% (phase 08 complete)
+Progress: [##########] 100% (phase 09 complete)
 
 ## Performance Metrics
 
@@ -47,6 +47,7 @@ Progress: [##########] 100% (phase 08 complete)
 | 08    | 01   | 2min     | 2     | 6     |
 | 08    | 02   | 6min     | 2     | 6     |
 | 08    | 03   | 3min     | 3     | 4     |
+| 09    | 02   | 5min     | 3     | 5     |
 
 ## Accumulated Context
 
@@ -67,6 +68,9 @@ Recent decisions affecting current work:
 - [08-03]: DividendEntry status defaults to "paid" for backward compatibility
 - [08-03]: Only "paid" dividends trigger BUY signals -- cancelled/reduced skipped
 - [08-03]: T-Invest API lacks cancelled dividend data -- manual overrides required
+- [09-02]: Pipeline built per-run (not at init) because MOEX steps need segment_id at run() time
+- [09-02]: rub_oil_regime_signal typed as object in BacktestConfig to avoid circular import
+- [09-02]: FXRate objects converted to synthetic Candle objects for RubOilRegimeSignal correlation
 
 ### Pending Todos
 
@@ -81,5 +85,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-20
-Stopped at: Completed 08-03-PLAN.md (Phase 08 complete)
+Stopped at: Completed 09-02-PLAN.md (Phase 09 complete)
 Resume file: None

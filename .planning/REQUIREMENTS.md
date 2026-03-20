@@ -18,8 +18,8 @@ Requirements for MOEX profitability milestone. Each maps to roadmap phases.
 
 - [ ] **STRAT-01**: DividendGapStrategy calendar populated from expanded YAML, `_EVENT_STRATEGIES` bypass added to combiner ADX routing
 - [ ] **STRAT-02**: CBRStrategyWrapper wired into combiner for trading around CBR rate decisions
-- [ ] **STRAT-03**: rub_oil_regime.py integrated into position sizing pipeline as RubOilRegimeStep
-- [ ] **STRAT-04**: BrentGateStep added to sizing pipeline — gates energy sector positions when Brent below threshold
+- [x] **STRAT-03**: rub_oil_regime.py integrated into position sizing pipeline as RubOilRegimeStep
+- [x] **STRAT-04**: BrentGateStep added to sizing pipeline — gates energy sector positions when Brent below threshold
 
 ### Macro Regime
 
@@ -70,8 +70,8 @@ Deferred to v3.0+.
 | DATA-04 | Phase 8 | Complete |
 | STRAT-01 | Phase 9 | Pending |
 | STRAT-02 | Phase 9 | Pending |
-| STRAT-03 | Phase 9 | Pending |
-| STRAT-04 | Phase 9 | Pending |
+| STRAT-03 | Phase 9 | Complete |
+| STRAT-04 | Phase 9 | Complete |
 | MACRO-01 | Phase 10 | Pending |
 | MACRO-02 | Phase 10 | Pending |
 | MACRO-03 | Phase 10 | Pending |
