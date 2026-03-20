@@ -29,7 +29,7 @@ Requirements for MOEX profitability milestone. Each maps to roadmap phases.
 
 ### Advanced Strategies
 
-- [ ] **ADV-01**: Preferred share arbitrage (SBER/SBERP, TATN/TATNP) via adapted PairsStrategy with Kalman filter
+- [x] **ADV-01**: Preferred share arbitrage (SBER/SBERP, TATN/TATNP) via adapted PairsStrategy with Kalman filter
 - [x] **ADV-02**: 10 Russian macro ML features (CBR rate/delta/direction, USDRUB return/zscore/vol, Brent return, IMOEX relative, turnover zscore)
 - [ ] **ADV-03**: ML ensemble enabled for ru_* segments with macro features, reinforcer-only mode
 
@@ -75,7 +75,7 @@ Deferred to v3.0+.
 | MACRO-01 | Phase 10 | Complete |
 | MACRO-02 | Phase 10 | Complete |
 | MACRO-03 | Phase 10 | Complete |
-| ADV-01 | Phase 11 | Pending |
+| ADV-01 | Phase 11 | Complete |
 | ADV-02 | Phase 11 | Complete |
 | ADV-03 | Phase 11 | Pending |
 | PORT-01 | Phase 12 | Pending |
