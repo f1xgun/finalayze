@@ -39,6 +39,7 @@ class DividendEntry:
 
     ex_date: datetime
     amount: float  # dividend per share in local currency
+    status: str = "paid"  # paid | cancelled | reduced
 
 
 @dataclass(slots=True)
@@ -196,10 +197,10 @@ class DividendGapStrategy(BaseStrategy):
         if not dividends:
             return None
 
-        # Find dividend matching the current candle date
+        # Find dividend matching the current candle date (skip cancelled/reduced)
         matching_div: DividendEntry | None = None
         for div in dividends:
-            if div.ex_date.date() == current_date.date():
+            if div.ex_date.date() == current_date.date() and div.status == "paid":
                 matching_div = div
                 break
 

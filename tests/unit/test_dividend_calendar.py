@@ -8,7 +8,7 @@ Validates:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -42,7 +42,7 @@ class TestDividendEntryStatus:
     def test_dividend_entry_accepts_status(self) -> None:
         """DividendEntry with status='cancelled' stores status field."""
         entry = DividendEntry(
-            ex_date=datetime(2022, 6, 30, tzinfo=timezone.utc),
+            ex_date=datetime(2022, 6, 30, tzinfo=UTC),
             amount=52.53,
             status="cancelled",
         )
@@ -51,7 +51,7 @@ class TestDividendEntryStatus:
     def test_dividend_entry_default_status_is_paid(self) -> None:
         """DividendEntry without explicit status defaults to 'paid'."""
         entry = DividendEntry(
-            ex_date=datetime(2023, 5, 10, tzinfo=timezone.utc),
+            ex_date=datetime(2023, 5, 10, tzinfo=UTC),
             amount=25.0,
         )
         assert entry.status == "paid"
@@ -59,7 +59,7 @@ class TestDividendEntryStatus:
     def test_dividend_entry_status_reduced(self) -> None:
         """DividendEntry accepts status='reduced'."""
         entry = DividendEntry(
-            ex_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            ex_date=datetime(2023, 1, 1, tzinfo=UTC),
             amount=10.0,
             status="reduced",
         )
@@ -89,6 +89,7 @@ def _make_candle(
         close=close,
         volume=volume,
         market_id="moex",
+        timeframe="1d",
     )
 
 
@@ -99,13 +100,13 @@ class TestDividendGapSkipsCancelled:
         """generate_signal returns None for cancelled dividend on ex_date."""
         strategy = DividendGapStrategy(min_gap_pct=3.0)
 
-        ex_date = datetime(2022, 6, 30, tzinfo=timezone.utc)
+        ex_date = datetime(2022, 6, 30, tzinfo=UTC)
         entry = DividendEntry(ex_date=ex_date, amount=52.53, status="cancelled")
         strategy.add_dividend("GAZP", entry)
 
         # Pre-exdiv candle (close=500) and ex-div candle (close=450, gap ~10.5%)
         candles = [
-            _make_candle(datetime(2022, 6, 29, tzinfo=timezone.utc), 500.0, symbol="GAZP"),
+            _make_candle(datetime(2022, 6, 29, tzinfo=UTC), 500.0, symbol="GAZP"),
             _make_candle(ex_date, 450.0, symbol="GAZP"),
         ]
 
@@ -120,13 +121,13 @@ class TestDividendGapSkipsCancelled:
         """generate_signal returns BUY for paid dividend with sufficient gap."""
         strategy = DividendGapStrategy(min_gap_pct=3.0)
 
-        ex_date = datetime(2023, 5, 10, tzinfo=timezone.utc)
+        ex_date = datetime(2023, 5, 10, tzinfo=UTC)
         entry = DividendEntry(ex_date=ex_date, amount=25.0, status="paid")
         strategy.add_dividend("SBER", entry)
 
         # Pre-exdiv close=300, dividend=25 -> gap=8.33% > 3% threshold
         candles = [
-            _make_candle(datetime(2023, 5, 9, tzinfo=timezone.utc), 300.0, symbol="SBER"),
+            _make_candle(datetime(2023, 5, 9, tzinfo=UTC), 300.0, symbol="SBER"),
             _make_candle(ex_date, 275.0, symbol="SBER"),
         ]
 
@@ -142,12 +143,12 @@ class TestDividendGapSkipsCancelled:
         """generate_signal returns None for reduced dividend on ex_date."""
         strategy = DividendGapStrategy(min_gap_pct=3.0)
 
-        ex_date = datetime(2023, 1, 15, tzinfo=timezone.utc)
+        ex_date = datetime(2023, 1, 15, tzinfo=UTC)
         entry = DividendEntry(ex_date=ex_date, amount=30.0, status="reduced")
         strategy.add_dividend("TEST", entry)
 
         candles = [
-            _make_candle(datetime(2023, 1, 14, tzinfo=timezone.utc), 200.0, symbol="TEST"),
+            _make_candle(datetime(2023, 1, 14, tzinfo=UTC), 200.0, symbol="TEST"),
             _make_candle(ex_date, 170.0, symbol="TEST"),
         ]
 
@@ -165,7 +166,7 @@ class TestDividendGapSkipsCancelled:
 class TestCalendarYAML:
     """Validate moex_dividends.yaml structure and content."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def calendar(self) -> dict[str, list[dict[str, object]]]:
         """Load the dividend calendar YAML."""
         assert _CALENDAR_PATH.exists(), f"Calendar file not found: {_CALENDAR_PATH}"
@@ -173,19 +174,13 @@ class TestCalendarYAML:
         assert isinstance(data, dict), "Calendar should be a dict"
         return data
 
-    def test_calendar_yaml_structure(
-        self, calendar: dict[str, list[dict[str, object]]]
-    ) -> None:
+    def test_calendar_yaml_structure(self, calendar: dict[str, list[dict[str, object]]]) -> None:
         """Calendar has 20+ symbols, 150+ events, all entries have required fields."""
         symbol_count = len(calendar)
         total_events = sum(len(entries) for entries in calendar.values())
 
-        assert symbol_count >= _MIN_SYMBOLS, (
-            f"Need {_MIN_SYMBOLS}+ symbols, got {symbol_count}"
-        )
-        assert total_events >= _MIN_EVENTS, (
-            f"Need {_MIN_EVENTS}+ events, got {total_events}"
-        )
+        assert symbol_count >= _MIN_SYMBOLS, f"Need {_MIN_SYMBOLS}+ symbols, got {symbol_count}"
+        assert total_events >= _MIN_EVENTS, f"Need {_MIN_EVENTS}+ events, got {total_events}"
 
         # Every entry must have ex_date, amount, status
         for symbol, entries in calendar.items():

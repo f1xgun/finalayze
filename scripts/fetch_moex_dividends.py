@@ -36,6 +36,7 @@ from decimal import Decimal
 from config.segments import DEFAULT_SEGMENTS
 from dotenv import load_dotenv
 from t_tech.invest import AsyncClient
+from t_tech.invest.schemas import InstrumentIdType
 
 # ── Constants ─────────────────────────────────────────────────────────────
 
@@ -134,25 +135,16 @@ async def _fetch_dividends_for_symbol(
 
 async def _resolve_figi(services: object, ticker: str) -> str | None:
     """Resolve a MOEX ticker to FIGI via T-Invest share lookup."""
-    try:
-        resp = await services.instruments.share_by(  # type: ignore[attr-defined]
-            id_type=1,  # INSTRUMENT_ID_TYPE_TICKER
-            class_code="TQBR",
-            id=ticker,
-        )
-        return resp.instrument.figi  # type: ignore[attr-defined]
-    except Exception:
-        # Try TQTF (ETFs) and TQPI (preferred shares)
-        for class_code in ("TQTF", "TQPI"):
-            try:
-                resp = await services.instruments.share_by(  # type: ignore[attr-defined]
-                    id_type=1,
-                    class_code=class_code,
-                    id=ticker,
-                )
-                return resp.instrument.figi  # type: ignore[attr-defined]
-            except Exception:
-                continue
+    for class_code in ("TQBR", "TQTF", "TQPI"):
+        try:
+            resp = await services.instruments.share_by(  # type: ignore[attr-defined]
+                id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_TICKER,
+                class_code=class_code,
+                id=ticker,
+            )
+            return resp.instrument.figi  # type: ignore[attr-defined]
+        except Exception:
+            continue
     return None
 
 

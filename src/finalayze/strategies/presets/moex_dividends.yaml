@@ -1,42 +1,305 @@
 # Historical MOEX dividend last-buy-dates for backtesting
-# Source: Tinkoff Invest API (get_dividends), fetched 2026-03-05
+# Source: Tinkoff Invest API (get_dividends), fetched 2026-03-20
 # ex_date = last buy date (Tinkoff convention); actual ex-div is next trading day
-SBER:
-  - {ex_date: "2023-05-10", amount: 25.0}
-  - {ex_date: "2024-07-10", amount: 33.3}
+# status: paid = dividend paid, cancelled = board recommended but shareholders rejected,
+#         reduced = paid at lower amount than initially recommended
+AFLT:
+  - {ex_date: "2025-07-18", amount: 5.27, status: paid}
+AKRN:
+  - {ex_date: "2020-04-14", amount: 157.0, status: paid}
+  - {ex_date: "2020-06-09", amount: 275.0, status: paid}
+  - {ex_date: "2021-06-08", amount: 30.0, status: paid}
+  - {ex_date: "2021-10-11", amount: 30.0, status: paid}
+  - {ex_date: "2021-12-14", amount: 720.0, status: paid}
+  - {ex_date: "2022-03-09", amount: 240.0, status: paid}
+  - {ex_date: "2024-05-17", amount: 427.0, status: paid}
+  - {ex_date: "2025-06-09", amount: 534.0, status: paid}
+  - {ex_date: "2025-12-09", amount: 189.0, status: paid}
+BSPB:
+  - {ex_date: "2020-12-11", amount: 3.33, status: paid}
+  - {ex_date: "2021-06-07", amount: 4.56, status: paid}
+  - {ex_date: "2022-08-29", amount: 11.81, status: paid}
+  - {ex_date: "2023-05-10", amount: 21.16, status: paid}
+  - {ex_date: "2023-10-09", amount: 19.08, status: paid}
+  - {ex_date: "2024-05-06", amount: 23.37, status: paid}
+  - {ex_date: "2024-09-30", amount: 27.26, status: paid}
+  - {ex_date: "2025-05-05", amount: 29.72, status: paid}
+  - {ex_date: "2025-10-06", amount: 16.61, status: paid}
+CHMF:
+  - {ex_date: "2020-06-16", amount: 27.35, status: paid}
+  - {ex_date: "2020-06-16", amount: 26.26, status: paid}
+  - {ex_date: "2020-09-08", amount: 15.44, status: paid}
+  - {ex_date: "2020-12-08", amount: 37.34, status: paid}
+  - {ex_date: "2021-06-01", amount: 46.77, status: paid}
+  - {ex_date: "2021-06-01", amount: 36.27, status: paid}
+  - {ex_date: "2021-09-02", amount: 84.45, status: paid}
+  - {ex_date: "2021-12-14", amount: 85.93, status: paid}
+  - {ex_date: "2024-06-18", amount: 191.51, status: paid}
+  - {ex_date: "2024-06-18", amount: 38.3, status: paid}
+  - {ex_date: "2024-09-10", amount: 31.06, status: paid}
+  - {ex_date: "2024-12-17", amount: 49.06, status: paid}
+FEES:
+  - {ex_date: "2020-01-13", amount: 0.0088, status: paid}
+  - {ex_date: "2020-05-29", amount: 0.0095, status: paid}
+  - {ex_date: "2021-07-16", amount: 0.0161, status: paid}
+FIVE:
+  - {ex_date: "2020-05-29", amount: 1.3328, status: paid}
+  - {ex_date: "2020-12-18", amount: 0.8083, status: paid}
+  - {ex_date: "2021-05-28", amount: 1.2799, status: paid}
+  - {ex_date: "2021-12-17", amount: 0.8251, status: paid}
+FIXP:
+  - {ex_date: "2021-09-24", amount: 0.1581, status: paid}
+  - {ex_date: "2024-01-26", amount: 9.84, status: paid}
+  - {ex_date: "2024-12-13", amount: 35.3137, status: paid}
+FLOT:
+  - {ex_date: "2021-07-05", amount: 6.67, status: paid}
+  - {ex_date: "2023-07-05", amount: 4.29, status: paid}
+  - {ex_date: "2024-01-05", amount: 6.32, status: paid}
+  - {ex_date: "2024-07-19", amount: 11.27, status: paid}
 GAZP:
-  - {ex_date: "2022-10-10", amount: 51.03}
-LKOH:
-  - {ex_date: "2022-12-20", amount: 537.0}
-  - {ex_date: "2022-12-20", amount: 256.0}
-  - {ex_date: "2023-06-02", amount: 438.0}
-  - {ex_date: "2023-12-14", amount: 447.0}
-  - {ex_date: "2024-05-06", amount: 498.0}
-  - {ex_date: "2024-12-16", amount: 514.0}
+  - {ex_date: "2022-06-30", amount: 52.53, status: cancelled}
 GMKN:
-  - {ex_date: "2022-01-13", amount: 15.2317}
-  - {ex_date: "2022-06-13", amount: 11.6622}
-  - {ex_date: "2023-12-25", amount: 9.1533}
-ROSN:
-  - {ex_date: "2022-07-08", amount: 23.63}
-  - {ex_date: "2023-01-11", amount: 20.39}
-  - {ex_date: "2023-07-10", amount: 17.97}
-  - {ex_date: "2024-01-10", amount: 30.77}
-  - {ex_date: "2024-07-08", amount: 29.01}
-TATN:
-  - {ex_date: "2022-01-07", amount: 9.98}
-  - {ex_date: "2022-07-07", amount: 16.14}
-  - {ex_date: "2022-10-10", amount: 32.71}
-  - {ex_date: "2023-01-09", amount: 6.86}
-  - {ex_date: "2023-07-10", amount: 27.71}
-  - {ex_date: "2023-10-10", amount: 27.54}
-  - {ex_date: "2024-01-08", amount: 35.17}
-  - {ex_date: "2024-07-08", amount: 25.17}
-  - {ex_date: "2024-10-07", amount: 38.2}
+  - {ex_date: "2020-05-25", amount: 5.572, status: paid}
+  - {ex_date: "2020-12-24", amount: 6.2335, status: paid}
+  - {ex_date: "2021-06-01", amount: 10.2122, status: paid}
+  - {ex_date: "2022-01-14", amount: 15.2317, status: paid}
+  - {ex_date: "2022-06-14", amount: 11.6622, status: paid}
+  - {ex_date: "2023-12-26", amount: 9.1533, status: paid}
+HHRU:
+  - {ex_date: "2020-03-26", amount: 0.425, status: paid}
+  - {ex_date: "2021-06-09", amount: 0.4675, status: paid}
+  - {ex_date: "2022-01-24", amount: 0.714, status: paid}
+HYDR:
+  - {ex_date: "2020-10-09", amount: 0.0357, status: paid}
+  - {ex_date: "2021-07-09", amount: 0.053, status: paid}
+  - {ex_date: "2022-07-08", amount: 0.053, status: paid}
+  - {ex_date: "2023-07-11", amount: 0.0503, status: paid}
+LKOH:
+  - {ex_date: "2020-07-10", amount: 350.0, status: paid}
+  - {ex_date: "2020-12-18", amount: 46.0, status: paid}
+  - {ex_date: "2021-07-05", amount: 213.0, status: paid}
+  - {ex_date: "2021-12-21", amount: 340.0, status: paid}
+  - {ex_date: "2022-12-21", amount: 537.0, status: paid}
+  - {ex_date: "2022-12-21", amount: 256.0, status: paid}
+  - {ex_date: "2023-06-05", amount: 438.0, status: paid}
+  - {ex_date: "2023-12-15", amount: 447.0, status: paid}
+  - {ex_date: "2024-05-07", amount: 498.0, status: paid}
+  - {ex_date: "2024-12-17", amount: 514.0, status: paid}
+  - {ex_date: "2025-06-03", amount: 541.0, status: paid}
+MAGN:
+  - {ex_date: "2020-01-15", amount: 1.65, status: paid}
+  - {ex_date: "2020-06-17", amount: 1.507, status: paid}
+  - {ex_date: "2020-09-23", amount: 0.607, status: paid}
+  - {ex_date: "2021-01-14", amount: 2.391, status: paid}
+  - {ex_date: "2021-06-17", amount: 1.795, status: paid}
+  - {ex_date: "2021-06-17", amount: 0.945, status: paid}
+  - {ex_date: "2021-09-27", amount: 3.53, status: paid}
+  - {ex_date: "2022-01-13", amount: 2.663, status: paid}
+  - {ex_date: "2024-06-10", amount: 2.752, status: paid}
+  - {ex_date: "2024-10-17", amount: 2.494, status: paid}
+MGNT:
+  - {ex_date: "2020-01-10", amount: 147.19, status: paid}
+  - {ex_date: "2020-06-19", amount: 157.0, status: paid}
+  - {ex_date: "2021-01-08", amount: 245.31, status: paid}
+  - {ex_date: "2021-06-25", amount: 245.31, status: paid}
+  - {ex_date: "2021-12-31", amount: 294.37, status: paid}
+  - {ex_date: "2024-01-11", amount: 412.13, status: paid}
+  - {ex_date: "2024-07-15", amount: 412.13, status: paid}
+MOEX:
+  - {ex_date: "2020-05-15", amount: 7.93, status: paid}
+  - {ex_date: "2021-05-14", amount: 9.45, status: paid}
+  - {ex_date: "2023-06-16", amount: 4.84, status: paid}
+  - {ex_date: "2024-06-14", amount: 17.35, status: paid}
+  - {ex_date: "2025-07-10", amount: 26.11, status: paid}
+MSNG:
+  - {ex_date: "2020-07-08", amount: 0.1207, status: paid}
+  - {ex_date: "2021-07-05", amount: 0.1794, status: paid}
+  - {ex_date: "2022-07-11", amount: 0.2231, status: paid}
+  - {ex_date: "2023-07-04", amount: 0.1865, status: paid}
+  - {ex_date: "2024-07-09", amount: 0.1604, status: paid}
+MTSS:
+  - {ex_date: "2020-01-10", amount: 13.25, status: paid}
+  - {ex_date: "2020-07-09", amount: 20.57, status: paid}
+  - {ex_date: "2020-10-12", amount: 8.93, status: paid}
+  - {ex_date: "2021-07-08", amount: 26.51, status: paid}
+  - {ex_date: "2021-10-12", amount: 10.55, status: paid}
+  - {ex_date: "2022-07-12", amount: 33.85, status: paid}
+  - {ex_date: "2023-06-29", amount: 34.29, status: paid}
+  - {ex_date: "2024-07-16", amount: 35.0, status: paid}
+  - {ex_date: "2025-07-07", amount: 35.0, status: paid}
+NLMK:
+  - {ex_date: "2020-01-09", amount: 3.22, status: paid}
+  - {ex_date: "2020-06-09", amount: 3.12, status: paid}
+  - {ex_date: "2020-07-13", amount: 3.21, status: paid}
+  - {ex_date: "2020-10-12", amount: 4.75, status: paid}
+  - {ex_date: "2020-12-29", amount: 6.43, status: paid}
+  - {ex_date: "2021-05-11", amount: 7.25, status: paid}
+  - {ex_date: "2021-06-23", amount: 7.71, status: paid}
+  - {ex_date: "2021-09-07", amount: 13.62, status: paid}
+  - {ex_date: "2021-12-07", amount: 13.33, status: paid}
+  - {ex_date: "2024-05-27", amount: 25.43, status: paid}
+NMTP:
+  - {ex_date: "2020-07-28", amount: 1.35, status: paid}
+  - {ex_date: "2021-07-12", amount: 0.06, status: paid}
+  - {ex_date: "2022-07-12", amount: 0.54, status: paid}
+  - {ex_date: "2023-07-12", amount: 0.798, status: paid}
+  - {ex_date: "2024-07-10", amount: 0.772, status: paid}
+  - {ex_date: "2025-07-14", amount: 0.9573, status: paid}
 NVTK:
-  - {ex_date: "2022-05-04", amount: 43.77}
-  - {ex_date: "2022-10-06", amount: 45.0}
-  - {ex_date: "2023-05-02", amount: 60.58}
-  - {ex_date: "2023-10-09", amount: 34.5}
-  - {ex_date: "2024-03-25", amount: 44.09}
-  - {ex_date: "2024-10-10", amount: 35.5}
+  - {ex_date: "2020-05-08", amount: 18.1, status: paid}
+  - {ex_date: "2020-10-12", amount: 11.82, status: paid}
+  - {ex_date: "2021-05-07", amount: 23.74, status: paid}
+  - {ex_date: "2021-10-11", amount: 27.67, status: paid}
+  - {ex_date: "2022-05-05", amount: 43.77, status: paid}
+  - {ex_date: "2022-10-07", amount: 45.0, status: paid}
+  - {ex_date: "2023-05-03", amount: 60.58, status: paid}
+  - {ex_date: "2023-10-10", amount: 34.5, status: paid}
+  - {ex_date: "2024-03-26", amount: 44.09, status: paid}
+  - {ex_date: "2024-10-11", amount: 35.5, status: paid}
+  - {ex_date: "2025-04-28", amount: 46.65, status: paid}
+  - {ex_date: "2025-10-06", amount: 35.5, status: paid}
+OZON:
+  - {ex_date: "2025-12-22", amount: 143.55, status: paid}
+PHOR:
+  - {ex_date: "2020-02-04", amount: 48.0, status: paid}
+  - {ex_date: "2020-06-02", amount: 18.0, status: paid}
+  - {ex_date: "2020-07-06", amount: 78.0, status: paid}
+  - {ex_date: "2020-10-15", amount: 33.0, status: paid}
+  - {ex_date: "2020-12-25", amount: 123.0, status: paid}
+  - {ex_date: "2021-06-07", amount: 63.0, status: paid}
+  - {ex_date: "2021-07-05", amount: 105.0, status: paid}
+  - {ex_date: "2021-09-24", amount: 156.0, status: paid}
+  - {ex_date: "2021-12-20", amount: 234.0, status: paid}
+  - {ex_date: "2022-10-03", amount: 780.0, status: paid}
+  - {ex_date: "2022-12-19", amount: 318.0, status: paid}
+  - {ex_date: "2023-04-04", amount: 465.0, status: paid}
+  - {ex_date: "2023-07-11", amount: 264.0, status: paid}
+  - {ex_date: "2023-12-25", amount: 291.0, status: paid}
+  - {ex_date: "2024-07-11", amount: 294.0, status: paid}
+  - {ex_date: "2024-07-11", amount: 15.0, status: paid}
+  - {ex_date: "2024-09-20", amount: 117.0, status: paid}
+  - {ex_date: "2024-12-20", amount: 126.0, status: paid}
+  - {ex_date: "2025-06-09", amount: 87.0, status: paid}
+  - {ex_date: "2025-10-01", amount: 273.0, status: paid}
+PIKK:
+  - {ex_date: "2020-10-12", amount: 22.71, status: paid}
+  - {ex_date: "2021-05-17", amount: 22.92, status: paid}
+  - {ex_date: "2021-05-17", amount: 22.51, status: paid}
+PLZL:
+  - {ex_date: "2020-08-28", amount: 244.75, status: paid}
+  - {ex_date: "2020-10-20", amount: 240.18, status: paid}
+  - {ex_date: "2021-06-07", amount: 387.15, status: paid}
+  - {ex_date: "2021-10-11", amount: 267.48, status: paid}
+  - {ex_date: "2024-12-13", amount: 130.18, status: paid}
+  - {ex_date: "2025-04-25", amount: 73.0, status: paid}
+  - {ex_date: "2025-10-13", amount: 70.85, status: paid}
+  - {ex_date: "2025-12-22", amount: 36.0, status: paid}
+POLY:
+  - {ex_date: "2020-02-14", amount: 0.2, status: paid}
+  - {ex_date: "2020-05-11", amount: 0.42, status: paid}
+  - {ex_date: "2020-09-04", amount: 0.4, status: paid}
+  - {ex_date: "2021-05-07", amount: 0.89, status: paid}
+  - {ex_date: "2021-09-10", amount: 0.45, status: paid}
+POSI:
+  - {ex_date: "2022-05-06", amount: 14.4, status: paid}
+  - {ex_date: "2022-11-14", amount: 5.16, status: paid}
+  - {ex_date: "2023-04-14", amount: 37.87, status: paid}
+  - {ex_date: "2023-05-22", amount: 18.94, status: paid}
+  - {ex_date: "2023-12-01", amount: 15.8, status: paid}
+  - {ex_date: "2024-04-19", amount: 47.3, status: paid}
+  - {ex_date: "2024-05-24", amount: 51.89, status: paid}
+ROSN:
+  - {ex_date: "2020-06-15", amount: 18.07, status: paid}
+  - {ex_date: "2021-06-15", amount: 6.94, status: paid}
+  - {ex_date: "2021-10-11", amount: 18.03, status: paid}
+  - {ex_date: "2022-07-11", amount: 23.63, status: paid}
+  - {ex_date: "2023-01-12", amount: 20.39, status: paid}
+  - {ex_date: "2023-07-11", amount: 17.97, status: paid}
+  - {ex_date: "2024-01-11", amount: 30.77, status: paid}
+  - {ex_date: "2024-07-09", amount: 29.01, status: paid}
+  - {ex_date: "2025-01-10", amount: 36.47, status: paid}
+  - {ex_date: "2025-07-18", amount: 14.68, status: paid}
+RTKM:
+  - {ex_date: "2020-08-21", amount: 5.0, status: paid}
+  - {ex_date: "2021-07-12", amount: 5.0, status: paid}
+  - {ex_date: "2022-07-20", amount: 4.56, status: paid}
+  - {ex_date: "2023-12-01", amount: 5.4465, status: paid}
+  - {ex_date: "2024-09-27", amount: 6.06, status: paid}
+  - {ex_date: "2025-08-13", amount: 2.71, status: paid}
+RUAL:
+  - {ex_date: "2022-10-20", amount: 0.02, status: paid}
+SBER:
+  - {ex_date: "2020-10-05", amount: 18.7, status: paid}
+  - {ex_date: "2021-05-12", amount: 18.7, status: paid}
+  - {ex_date: "2023-05-11", amount: 25.0, status: paid}
+  - {ex_date: "2024-07-11", amount: 33.3, status: paid}
+  - {ex_date: "2025-07-18", amount: 34.84, status: paid}
+SBERP:
+  - {ex_date: "2020-10-05", amount: 18.7, status: paid}
+  - {ex_date: "2021-05-12", amount: 18.7, status: paid}
+  - {ex_date: "2023-05-11", amount: 25.0, status: paid}
+  - {ex_date: "2024-07-11", amount: 33.3, status: paid}
+  - {ex_date: "2025-07-18", amount: 34.84, status: paid}
+SIBN:
+  - {ex_date: "2020-06-26", amount: 19.82, status: paid}
+  - {ex_date: "2020-12-29", amount: 5.0, status: paid}
+  - {ex_date: "2021-06-25", amount: 10.0, status: paid}
+  - {ex_date: "2021-12-28", amount: 40.0, status: paid}
+  - {ex_date: "2022-07-08", amount: 16.0, status: paid}
+  - {ex_date: "2022-12-30", amount: 69.78, status: paid}
+  - {ex_date: "2023-07-10", amount: 12.16, status: paid}
+  - {ex_date: "2023-12-27", amount: 82.94, status: paid}
+  - {ex_date: "2024-07-08", amount: 19.49, status: paid}
+  - {ex_date: "2024-10-14", amount: 51.96, status: paid}
+  - {ex_date: "2025-07-08", amount: 27.21, status: paid}
+  - {ex_date: "2025-10-13", amount: 17.3, status: paid}
+SMLT:
+  - {ex_date: "2021-07-09", amount: 41.0, status: paid}
+  - {ex_date: "2021-10-15", amount: 41.0, status: paid}
+  - {ex_date: "2022-07-11", amount: 41.0, status: paid}
+  - {ex_date: "2022-10-12", amount: 41.0, status: paid}
+TATN:
+  - {ex_date: "2020-10-12", amount: 9.94, status: paid}
+  - {ex_date: "2021-07-09", amount: 12.3, status: paid}
+  - {ex_date: "2021-10-12", amount: 16.52, status: paid}
+  - {ex_date: "2022-01-10", amount: 9.98, status: paid}
+  - {ex_date: "2022-07-08", amount: 16.14, status: paid}
+  - {ex_date: "2022-10-11", amount: 32.71, status: paid}
+  - {ex_date: "2023-01-10", amount: 6.86, status: paid}
+  - {ex_date: "2023-07-11", amount: 27.71, status: paid}
+  - {ex_date: "2023-10-11", amount: 27.54, status: paid}
+  - {ex_date: "2024-01-09", amount: 35.17, status: paid}
+  - {ex_date: "2024-07-09", amount: 25.17, status: paid}
+  - {ex_date: "2024-10-08", amount: 38.2, status: paid}
+  - {ex_date: "2025-01-07", amount: 17.39, status: paid}
+  - {ex_date: "2025-06-02", amount: 43.11, status: paid}
+  - {ex_date: "2025-10-14", amount: 14.35, status: paid}
+TATNP:
+  - {ex_date: "2020-06-30", amount: 1.0, status: paid}
+  - {ex_date: "2020-10-12", amount: 9.94, status: paid}
+  - {ex_date: "2021-07-09", amount: 12.3, status: paid}
+  - {ex_date: "2021-10-12", amount: 16.52, status: paid}
+  - {ex_date: "2022-01-10", amount: 9.98, status: paid}
+  - {ex_date: "2022-07-08", amount: 16.14, status: paid}
+  - {ex_date: "2022-10-11", amount: 32.71, status: paid}
+  - {ex_date: "2023-01-10", amount: 6.86, status: paid}
+  - {ex_date: "2023-07-11", amount: 27.71, status: paid}
+  - {ex_date: "2023-10-11", amount: 27.54, status: paid}
+  - {ex_date: "2024-01-09", amount: 35.17, status: paid}
+  - {ex_date: "2024-07-09", amount: 25.17, status: paid}
+  - {ex_date: "2024-10-08", amount: 38.2, status: paid}
+  - {ex_date: "2025-01-07", amount: 17.39, status: paid}
+  - {ex_date: "2025-06-02", amount: 43.11, status: paid}
+  - {ex_date: "2025-10-14", amount: 14.35, status: paid}
+TRNFP:
+  - {ex_date: "2020-10-20", amount: 116.122, status: paid}
+  - {ex_date: "2021-07-19", amount: 92.2428, status: paid}
+  - {ex_date: "2022-07-20", amount: 104.9736, status: paid}
+  - {ex_date: "2023-07-20", amount: 166.652, status: paid}
+  - {ex_date: "2024-07-18", amount: 177.2, status: paid}
+  - {ex_date: "2025-07-17", amount: 198.25, status: paid}
+UPRO:
+  - {ex_date: "2020-06-22", amount: 0.111, status: paid}
+  - {ex_date: "2020-12-18", amount: 0.111, status: paid}
+  - {ex_date: "2021-06-22", amount: 0.1269, status: paid}
+  - {ex_date: "2021-12-17", amount: 0.1903, status: paid}
