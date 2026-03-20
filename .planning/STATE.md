@@ -47,6 +47,7 @@ Progress: [##########] 100% (phase 09 complete)
 | 08    | 01   | 2min     | 2     | 6     |
 | 08    | 02   | 6min     | 2     | 6     |
 | 08    | 03   | 3min     | 3     | 4     |
+| 09    | 01   | 7min     | 2     | 7     |
 | 09    | 02   | 5min     | 3     | 5     |
 
 ## Accumulated Context
@@ -68,6 +69,9 @@ Recent decisions affecting current work:
 - [08-03]: DividendEntry status defaults to "paid" for backward compatibility
 - [08-03]: Only "paid" dividends trigger BUY signals -- cancelled/reduced skipped
 - [08-03]: T-Invest API lacks cancelled dividend data -- manual overrides required
+- [09-01]: Event strategies bypass ADX implicitly + explicit is_event flag for clarity
+- [09-01]: Engine hold bar safety ceiling for dividend_gap set to 60 (max of all yield tiers)
+- [09-01]: Event confidence floor 0.40 applied only when event strategy fires
 - [09-02]: Pipeline built per-run (not at init) because MOEX steps need segment_id at run() time
 - [09-02]: rub_oil_regime_signal typed as object in BacktestConfig to avoid circular import
 - [09-02]: FXRate objects converted to synthetic Candle objects for RubOilRegimeSignal correlation
