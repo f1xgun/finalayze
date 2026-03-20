@@ -20,6 +20,9 @@ from finalayze.data.fetchers.cbr import (
     get_last_cbr_decision,
     get_latest_published_cpi_month,
     get_next_cbr_meeting,
+    get_recent_cbr_decisions,
+    get_yield_slope_bps,
+    is_cutting_cycle,
 )
 
 # ── Constants (no magic numbers, ruff PLR2004) ──────────────────────────────
@@ -259,3 +262,81 @@ class TestGetLatestPublishedCPIMonth:
         result = get_latest_published_cpi_month(date(2025, 12, 31))
         assert result is not None
         assert len(result.split("-")) == 2  # noqa: PLR2004
+
+
+# ── get_recent_cbr_decisions tests ─────────────────────────────────────────
+
+
+class TestGetRecentCBRDecisions:
+    """Test get_recent_cbr_decisions helper."""
+
+    def test_two_cuts_oct_2025(self) -> None:
+        """Oct 30 2025: last 2 decisions are 2025-10-24 (cut) and 2025-09-12 (cut)."""
+        result = get_recent_cbr_decisions(date(2025, 10, 30), count=2)
+        assert result == ["cut", "cut"]
+
+    def test_two_holds_mid_2023(self) -> None:
+        """Mid-2023: the holding cycle before July 2023 hike."""
+        result = get_recent_cbr_decisions(date(2023, 6, 15), count=2)
+        assert result == ["hold", "hold"]
+
+    def test_before_all_meetings_returns_empty(self) -> None:
+        result = get_recent_cbr_decisions(date(2020, 1, 1), count=2)
+        assert result == []
+
+    def test_count_three_default(self) -> None:
+        """Default count=3 returns 3 decisions."""
+        result = get_recent_cbr_decisions(date(2025, 12, 31))
+        assert len(result) == 3  # noqa: PLR2004
+
+
+# ── is_cutting_cycle tests ─────────────────────────────────────────────────
+
+
+class TestIsCuttingCycle:
+    """Test is_cutting_cycle helper."""
+
+    def test_cutting_cycle_oct_2025(self) -> None:
+        """Two consecutive cuts by Oct 30 2025 -> True."""
+        assert is_cutting_cycle(date(2025, 10, 30)) is True
+
+    def test_not_cutting_only_one_cut_jul_2025(self) -> None:
+        """Jul 30 2025: only 1 cut so far (2025-07-25), before that was holds -> False."""
+        assert is_cutting_cycle(date(2025, 7, 30)) is False
+
+    def test_not_cutting_holds_mid_2023(self) -> None:
+        """Mid-2023 holds -> not cutting."""
+        assert is_cutting_cycle(date(2023, 6, 15)) is False
+
+    def test_not_cutting_before_all_meetings(self) -> None:
+        """Before all meetings -> False (no decisions)."""
+        assert is_cutting_cycle(date(2020, 1, 1)) is False
+
+
+# ── get_yield_slope_bps tests ──────────────────────────────────────────────
+
+
+YIELD_SLOPE_JUN_2024 = -150.0
+YIELD_SLOPE_MAR_2022 = -250.0
+
+
+class TestGetYieldSlopeBps:
+    """Test get_yield_slope_bps helper."""
+
+    def test_mid_2024(self) -> None:
+        """2024-06-15 -> nearest month 2024-06 = -150.0 bps."""
+        assert get_yield_slope_bps(date(2024, 6, 15)) == YIELD_SLOPE_JUN_2024
+
+    def test_early_2022(self) -> None:
+        """2022-03-15 -> nearest month 2022-03 = -250.0 bps."""
+        assert get_yield_slope_bps(date(2022, 3, 15)) == YIELD_SLOPE_MAR_2022
+
+    def test_no_data_returns_zero(self) -> None:
+        """2021-01-01 -> no data -> 0.0."""
+        assert get_yield_slope_bps(date(2021, 1, 1)) == 0.0
+
+    def test_between_months_uses_earlier(self) -> None:
+        """2022-05-15 -> 2022-04 is the latest key <= 2022-05."""
+        result = get_yield_slope_bps(date(2022, 5, 15))
+        expected = -180.0  # 2022-04 value
+        assert result == expected

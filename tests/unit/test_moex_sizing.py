@@ -115,3 +115,149 @@ def test_position_size_not_tiny_bug_value() -> None:
     assert position > min_acceptable, (
         f"Position {position} is suspiciously small -- likely the old sizing bug"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 4: CBRRegimeStep
+# ---------------------------------------------------------------------------
+
+from finalayze.risk.position_sizing_pipeline import (
+    CBRRegimeStep,
+    SectorAllocationStep,
+    SizingContext,
+)
+
+# Standard SizingContext for step tests
+_TEST_SIZE = Decimal("100000.0000")
+
+
+def _make_context() -> SizingContext:
+    return SizingContext(
+        equity=Decimal(1_000_000),
+        base_position=_TEST_SIZE,
+        max_position_pct=Decimal("0.20"),
+        min_position_size=Decimal("500"),
+        asset_vol=Decimal("0.30"),
+        target_vol=Decimal("0.20"),
+        regime_scale=Decimal("1.0"),
+        correlation_scale=Decimal("1.0"),
+    )
+
+
+# CBRRegimeStep scaling constants
+_STEEPENING_SCALE = Decimal("1.2")
+_FLAT_SCALE = Decimal("1.0")
+_INVERTED_SCALE = Decimal("0.6")
+
+
+class TestCBRRegimeStep:
+    """CBRRegimeStep scales ru_* positions by yield curve slope."""
+
+    def test_steepening_scales_up(self) -> None:
+        """yield_slope_bps=150 -> 1.2x for ru_blue_chips."""
+        step = CBRRegimeStep(yield_slope_bps=150.0, segment_id="ru_blue_chips")
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == (_TEST_SIZE * _STEEPENING_SCALE).quantize(Decimal("0.0001"))
+
+    def test_flat_neutral(self) -> None:
+        """yield_slope_bps=50 -> 1.0x."""
+        step = CBRRegimeStep(yield_slope_bps=50.0, segment_id="ru_blue_chips")
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == (_TEST_SIZE * _FLAT_SCALE).quantize(Decimal("0.0001"))
+
+    def test_inverted_scales_down(self) -> None:
+        """yield_slope_bps=-100 -> 0.6x."""
+        step = CBRRegimeStep(yield_slope_bps=-100.0, segment_id="ru_blue_chips")
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == (_TEST_SIZE * _INVERTED_SCALE).quantize(Decimal("0.0001"))
+
+    def test_non_ru_passthrough(self) -> None:
+        """us_tech -> size unchanged regardless of slope."""
+        step = CBRRegimeStep(yield_slope_bps=-100.0, segment_id="us_tech")
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == _TEST_SIZE
+
+    def test_missing_data_neutral(self) -> None:
+        """yield_slope_bps=0.0 -> 1.0x (missing data graceful)."""
+        step = CBRRegimeStep(yield_slope_bps=0.0, segment_id="ru_energy")
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == (_TEST_SIZE * _FLAT_SCALE).quantize(Decimal("0.0001"))
+
+
+# ---------------------------------------------------------------------------
+# Test 5: SectorAllocationStep
+# ---------------------------------------------------------------------------
+
+# Sector allocation scaling constants
+_ENERGY_OW = Decimal("1.3")
+_ENERGY_UW = Decimal("0.7")
+_ENERGY_NEUTRAL = Decimal("1.0")
+_FINANCE_CUT = Decimal("1.2")
+_FINANCE_HIKE = Decimal("0.8")
+_FINANCE_HOLD = Decimal("1.0")
+
+
+class TestSectorAllocationStep:
+    """SectorAllocationStep scales ru_energy by Brent, ru_finance by CBR direction."""
+
+    def test_energy_high_brent_overweight(self) -> None:
+        """brent_rub=7000 -> 1.3x for ru_energy."""
+        step = SectorAllocationStep(brent_rub_price=7000, cbr_direction="cut", segment_id="ru_energy")
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == (_TEST_SIZE * _ENERGY_OW).quantize(Decimal("0.0001"))
+
+    def test_energy_low_brent_underweight(self) -> None:
+        """brent_rub=3500 -> 0.7x for ru_energy."""
+        step = SectorAllocationStep(
+            brent_rub_price=3500, cbr_direction="cut", segment_id="ru_energy"
+        )
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == (_TEST_SIZE * _ENERGY_UW).quantize(Decimal("0.0001"))
+
+    def test_energy_mid_brent_neutral(self) -> None:
+        """brent_rub=5000 -> 1.0x for ru_energy."""
+        step = SectorAllocationStep(
+            brent_rub_price=5000, cbr_direction="cut", segment_id="ru_energy"
+        )
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == (_TEST_SIZE * _ENERGY_NEUTRAL).quantize(Decimal("0.0001"))
+
+    def test_finance_cut_overweight(self) -> None:
+        """cbr_direction=cut -> 1.2x for ru_finance."""
+        step = SectorAllocationStep(
+            brent_rub_price=5000, cbr_direction="cut", segment_id="ru_finance"
+        )
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == (_TEST_SIZE * _FINANCE_CUT).quantize(Decimal("0.0001"))
+
+    def test_finance_hike_underweight(self) -> None:
+        """cbr_direction=hike -> 0.8x for ru_finance."""
+        step = SectorAllocationStep(
+            brent_rub_price=5000, cbr_direction="hike", segment_id="ru_finance"
+        )
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == (_TEST_SIZE * _FINANCE_HIKE).quantize(Decimal("0.0001"))
+
+    def test_finance_hold_neutral(self) -> None:
+        """cbr_direction=hold -> 1.0x for ru_finance."""
+        step = SectorAllocationStep(
+            brent_rub_price=5000, cbr_direction="hold", segment_id="ru_finance"
+        )
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == (_TEST_SIZE * _FINANCE_HOLD).quantize(Decimal("0.0001"))
+
+    def test_blue_chips_passthrough(self) -> None:
+        """ru_blue_chips -> size unchanged (not energy or finance)."""
+        step = SectorAllocationStep(
+            brent_rub_price=7000, cbr_direction="cut", segment_id="ru_blue_chips"
+        )
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == _TEST_SIZE
+
+    def test_us_tech_passthrough(self) -> None:
+        """us_tech -> size unchanged (not ru_*)."""
+        step = SectorAllocationStep(
+            brent_rub_price=7000, cbr_direction="cut", segment_id="us_tech"
+        )
+        result = step.adjust(_TEST_SIZE, _make_context())
+        assert result == _TEST_SIZE
