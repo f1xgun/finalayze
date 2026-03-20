@@ -18,8 +18,11 @@ from finalayze.core.schemas import (
 )
 from finalayze.ml.features.technical import (
     _EXTERNAL_DATA_LAG_BARS,
+    _compute_brent_return_features,
+    _compute_cbr_features,
     _compute_commodity_features,
     _compute_fx_features,
+    _compute_fx_return_features,
     _compute_macro_features,
     _compute_turnover_features,
     compute_features,
@@ -248,6 +251,282 @@ class TestComputeFeaturesMarketContext:
             "market_turnover_zscore",
         )
         for feat in moex_keys:
+            assert features.get(feat, 0.0) == 0.0
+
+
+class TestCBRFeatures:
+    """Tests for _compute_cbr_features: cbr_rate_level, cbr_rate_delta, cbr_direction_*."""
+
+    def _make_key_rates_varying(self) -> tuple[KeyRateRecord, ...]:
+        """Create key rates with a rate CUT: 0.18 -> 0.16 (delta < 0)."""
+        return (
+            KeyRateRecord(
+                timestamp=datetime(2024, 1, 1, 0, 0, tzinfo=UTC),
+                rate=Decimal("0.18"),
+            ),
+            KeyRateRecord(
+                timestamp=datetime(2024, 2, 1, 0, 0, tzinfo=UTC),
+                rate=Decimal("0.16"),
+            ),
+        )
+
+    def _make_key_rates_hike(self) -> tuple[KeyRateRecord, ...]:
+        """Create key rates with a rate HIKE: 0.16 -> 0.18 (delta > 0)."""
+        return (
+            KeyRateRecord(
+                timestamp=datetime(2024, 1, 1, 0, 0, tzinfo=UTC),
+                rate=Decimal("0.16"),
+            ),
+            KeyRateRecord(
+                timestamp=datetime(2024, 2, 1, 0, 0, tzinfo=UTC),
+                rate=Decimal("0.18"),
+            ),
+        )
+
+    def _make_key_rates_hold(self) -> tuple[KeyRateRecord, ...]:
+        """Create key rates with unchanged rate (hold)."""
+        return (
+            KeyRateRecord(
+                timestamp=datetime(2024, 1, 1, 0, 0, tzinfo=UTC),
+                rate=Decimal("0.16"),
+            ),
+            KeyRateRecord(
+                timestamp=datetime(2024, 2, 1, 0, 0, tzinfo=UTC),
+                rate=Decimal("0.16"),
+            ),
+        )
+
+    def test_returns_defaults_when_none(self) -> None:
+        result = _compute_cbr_features(None)
+        assert result == {
+            "cbr_rate_level": 0.0,
+            "cbr_rate_delta": 0.0,
+            "cbr_direction_cut": 0.0,
+            "cbr_direction_hike": 0.0,
+        }
+
+    def test_returns_defaults_when_empty_key_rates(self) -> None:
+        moex = MoexMarketData(key_rates=())
+        result = _compute_cbr_features(moex)
+        assert result["cbr_rate_level"] == 0.0
+
+    def test_returns_defaults_when_insufficient_data(self) -> None:
+        """Single key rate is insufficient for delta computation."""
+        moex = MoexMarketData(
+            key_rates=(
+                KeyRateRecord(
+                    timestamp=datetime(2024, 1, 1, 0, 0, tzinfo=UTC),
+                    rate=Decimal("0.16"),
+                ),
+            )
+        )
+        result = _compute_cbr_features(moex)
+        assert result["cbr_rate_delta"] == 0.0
+
+    def test_rate_level_returns_last_rate(self) -> None:
+        """cbr_rate_level should be the forward-filled last key rate value."""
+        candle_ts = [
+            datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)
+        ]
+        moex = MoexMarketData(key_rates=self._make_key_rates_varying())
+        result = _compute_cbr_features(moex, candle_timestamps=candle_ts)
+        # Last rate is 0.16
+        assert result["cbr_rate_level"] == pytest.approx(0.16, abs=0.01)
+
+    def test_rate_delta_on_cut(self) -> None:
+        """cbr_rate_delta should be negative when rate was cut (0.18 -> 0.16)."""
+        candle_ts = [
+            datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)
+        ]
+        moex = MoexMarketData(key_rates=self._make_key_rates_varying())
+        result = _compute_cbr_features(moex, candle_timestamps=candle_ts)
+        assert result["cbr_rate_delta"] < 0.0
+
+    def test_direction_cut_on_rate_cut(self) -> None:
+        """When last rate change was negative (cut), cbr_direction_cut=1.0, hike=0.0."""
+        candle_ts = [
+            datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)
+        ]
+        moex = MoexMarketData(key_rates=self._make_key_rates_varying())
+        result = _compute_cbr_features(moex, candle_timestamps=candle_ts)
+        assert result["cbr_direction_cut"] == 1.0
+        assert result["cbr_direction_hike"] == 0.0
+
+    def test_direction_hike_on_rate_hike(self) -> None:
+        """When last rate change was positive (hike), cbr_direction_hike=1.0, cut=0.0."""
+        candle_ts = [
+            datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)
+        ]
+        moex = MoexMarketData(key_rates=self._make_key_rates_hike())
+        result = _compute_cbr_features(moex, candle_timestamps=candle_ts)
+        assert result["cbr_direction_hike"] == 1.0
+        assert result["cbr_direction_cut"] == 0.0
+
+    def test_direction_hold_when_unchanged(self) -> None:
+        """When rate unchanged, both cbr_direction_cut=0.0 and cbr_direction_hike=0.0."""
+        candle_ts = [
+            datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)
+        ]
+        moex = MoexMarketData(key_rates=self._make_key_rates_hold())
+        result = _compute_cbr_features(moex, candle_timestamps=candle_ts)
+        assert result["cbr_direction_cut"] == 0.0
+        assert result["cbr_direction_hike"] == 0.0
+
+
+class TestFXReturnFeatures:
+    """Tests for _compute_fx_return_features: usdrub_return, usdrub_vol."""
+
+    def test_returns_defaults_when_none(self) -> None:
+        result = _compute_fx_return_features(None)
+        assert result == {"usdrub_return": 0.0, "usdrub_vol": 0.0}
+
+    def test_returns_defaults_when_insufficient_data(self) -> None:
+        moex = MoexMarketData(fx_rates=_make_fx_rates(3))
+        result = _compute_fx_return_features(moex)
+        assert result["usdrub_return"] == 0.0
+
+    def test_returns_float_with_sufficient_data(self) -> None:
+        moex = MoexMarketData(fx_rates=_make_fx_rates(30))
+        result = _compute_fx_return_features(moex)
+        assert isinstance(result["usdrub_return"], float)
+        assert isinstance(result["usdrub_vol"], float)
+
+    def test_usdrub_return_is_log_return(self) -> None:
+        """usdrub_return should be log return of USDRUB lagged by 2 bars."""
+        import math
+
+        rates = _make_fx_rates(30)
+        moex = MoexMarketData(fx_rates=rates)
+        result = _compute_fx_return_features(moex)
+        # Expected: log(rates[-3].rate / rates[-4].rate) with lag=2
+        lag = _EXTERNAL_DATA_LAG_BARS
+        expected = math.log(float(rates[-lag - 1].rate) / float(rates[-lag - 2].rate))
+        assert result["usdrub_return"] == pytest.approx(expected, abs=1e-6)
+
+    def test_usdrub_return_clipped(self) -> None:
+        """Extreme FX move should be clipped to [-0.15, 0.15]."""
+        rates = list(_make_fx_rates(30))
+        # Insert extreme rate at position that will be used (lagged)
+        rates[-3] = FXRate(
+            timestamp=rates[-3].timestamp, pair="USDRUB", rate=Decimal("200.00")
+        )
+        rates[-4] = FXRate(
+            timestamp=rates[-4].timestamp, pair="USDRUB", rate=Decimal("85.00")
+        )
+        moex = MoexMarketData(fx_rates=tuple(rates))
+        result = _compute_fx_return_features(moex)
+        assert -0.15 <= result["usdrub_return"] <= 0.15
+
+    def test_usdrub_vol_clipped(self) -> None:
+        """usdrub_vol should be in [0, 0.10]."""
+        moex = MoexMarketData(fx_rates=_make_fx_rates(30))
+        result = _compute_fx_return_features(moex)
+        assert 0.0 <= result["usdrub_vol"] <= 0.10
+
+
+class TestBrentReturnFeatures:
+    """Tests for _compute_brent_return_features: brent_return."""
+
+    def test_returns_default_when_none(self) -> None:
+        result = _compute_brent_return_features(None)
+        assert result == {"brent_return": 0.0}
+
+    def test_returns_default_when_no_brent(self) -> None:
+        moex = MoexMarketData(commodity_candles={})
+        result = _compute_brent_return_features(moex)
+        assert result["brent_return"] == 0.0
+
+    def test_returns_default_when_insufficient_data(self) -> None:
+        brent = tuple(_make_candles(3, "BZ=F"))
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_brent_return_features(moex)
+        assert result["brent_return"] == 0.0
+
+    def test_returns_float_with_data(self) -> None:
+        brent = tuple(_make_candles(30, "BZ=F"))
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_brent_return_features(moex)
+        assert isinstance(result["brent_return"], float)
+
+    def test_brent_return_is_log_return(self) -> None:
+        """brent_return should be log return of Brent lagged by 2 bars."""
+        import math
+
+        brent = tuple(_make_candles(30, "BZ=F"))
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_brent_return_features(moex)
+        lag = _EXTERNAL_DATA_LAG_BARS
+        expected = math.log(float(brent[-lag - 1].close) / float(brent[-lag - 2].close))
+        assert result["brent_return"] == pytest.approx(expected, abs=1e-6)
+
+    def test_brent_return_clipped(self) -> None:
+        """Extreme Brent move should be clipped to [-0.15, 0.15]."""
+        candles = list(_make_candles(30, "BZ=F"))
+        candles[-3] = Candle(
+            symbol="BZ=F",
+            market_id="us",
+            timeframe="1d",
+            timestamp=candles[-3].timestamp,
+            open=Decimal("200"),
+            high=Decimal("210"),
+            low=Decimal("190"),
+            close=Decimal("200"),
+            volume=1000,
+        )
+        candles[-4] = Candle(
+            symbol="BZ=F",
+            market_id="us",
+            timeframe="1d",
+            timestamp=candles[-4].timestamp,
+            open=Decimal("80"),
+            high=Decimal("85"),
+            low=Decimal("75"),
+            close=Decimal("80"),
+            volume=1000,
+        )
+        moex = MoexMarketData(commodity_candles={"BZ=F": tuple(candles)})
+        result = _compute_brent_return_features(moex)
+        assert -0.15 <= result["brent_return"] <= 0.15
+
+
+class TestNewMoexFeaturesInComputeFeatures:
+    """Test that the 7 new MOEX features appear in compute_features() output."""
+
+    def test_new_features_present_with_moex_data(self) -> None:
+        moex = MoexMarketData(
+            fx_rates=_make_fx_rates(80),
+            turnover=_make_turnover(80),
+            key_rates=_make_key_rates(5),
+            commodity_candles={"BZ=F": tuple(_make_candles(80, "BZ=F"))},
+        )
+        candles = _make_candles(100)
+        candle_ts = [c.timestamp for c in candles]
+        ctx = MarketContext(moex_data=moex)
+        features = compute_features(candles, market_context=ctx)
+        new_keys = (
+            "cbr_rate_level",
+            "cbr_rate_delta",
+            "cbr_direction_cut",
+            "cbr_direction_hike",
+            "usdrub_return",
+            "usdrub_vol",
+            "brent_return",
+        )
+        for feat in new_keys:
+            assert feat in features, f"Missing feature: {feat}"
+
+    def test_new_features_default_without_moex_data(self) -> None:
+        features = compute_features(_make_candles(100), market_context=MarketContext())
+        new_keys = (
+            "cbr_rate_level",
+            "cbr_rate_delta",
+            "cbr_direction_cut",
+            "cbr_direction_hike",
+            "usdrub_return",
+            "usdrub_vol",
+            "brent_return",
+        )
+        for feat in new_keys:
             assert features.get(feat, 0.0) == 0.0
 
 
