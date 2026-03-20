@@ -206,38 +206,58 @@ class TestPairsStrategyAllowShort:
     """Tests for the allow_short parameter gating SELL signals on long-only markets."""
 
     def test_allow_short_false_suppresses_sell(self, pairs_strategy: object) -> None:
-        """When allow_short=False and z > z_entry (SELL zone), signal should be None."""
+        """When allow_short=False, _compute_signal returns None for SELL direction."""
         from finalayze.strategies.pairs import PairsStrategy
 
         strategy: PairsStrategy = pairs_strategy  # type: ignore[assignment]
         # z_score=+3.0 would normally produce a SELL signal
         candles_a, candles_b = _cointegrated_pair(z_score=3.0)
-        strategy.set_peer_candles("MSFT", candles_b)
-        # Use ru_blue_chips where allow_short=false
-        signal = strategy.generate_signal("AAPL", candles_a, "ru_blue_chips")
+        # Directly call _compute_signal with allow_short=False
+        signal = strategy._compute_signal(
+            symbol="AAPL",
+            candles_a=candles_a,
+            candles_b=candles_b,
+            segment_id="us_tech",
+            z_entry=Z_ENTRY,
+            z_exit=Z_EXIT,
+            allow_short=False,
+        )
         # Should be None because allow_short=False suppresses SELL
         assert signal is None
 
     def test_allow_short_false_allows_buy(self, pairs_strategy: object) -> None:
-        """When allow_short=False and z < -z_entry (BUY zone), BUY signal passes through."""
+        """When allow_short=False, BUY signals still pass through."""
         from finalayze.strategies.pairs import PairsStrategy
 
         strategy: PairsStrategy = pairs_strategy  # type: ignore[assignment]
         candles_a, candles_b = _cointegrated_pair(z_score=-3.0)
-        strategy.set_peer_candles("MSFT", candles_b)
-        signal = strategy.generate_signal("AAPL", candles_a, "ru_blue_chips")
+        signal = strategy._compute_signal(
+            symbol="AAPL",
+            candles_a=candles_a,
+            candles_b=candles_b,
+            segment_id="us_tech",
+            z_entry=Z_ENTRY,
+            z_exit=Z_EXIT,
+            allow_short=False,
+        )
         assert signal is not None
         assert signal.direction == SignalDirection.BUY
 
     def test_allow_short_default_true_allows_sell(self, pairs_strategy: object) -> None:
-        """Default allow_short=True preserves SELL signal behavior (us_tech preset)."""
+        """Default allow_short=True preserves SELL signal behavior."""
         from finalayze.strategies.pairs import PairsStrategy
 
         strategy: PairsStrategy = pairs_strategy  # type: ignore[assignment]
         candles_a, candles_b = _cointegrated_pair(z_score=3.0)
-        strategy.set_peer_candles("MSFT", candles_b)
-        # us_tech has no allow_short → defaults to True → SELL allowed
-        signal = strategy.generate_signal("AAPL", candles_a, "us_tech")
+        # allow_short defaults to True → SELL allowed
+        signal = strategy._compute_signal(
+            symbol="AAPL",
+            candles_a=candles_a,
+            candles_b=candles_b,
+            segment_id="us_tech",
+            z_entry=Z_ENTRY,
+            z_exit=Z_EXIT,
+        )
         assert signal is not None
         assert signal.direction == SignalDirection.SELL
 

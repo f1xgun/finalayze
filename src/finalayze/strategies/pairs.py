@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -161,6 +162,8 @@ class PairsStrategy(BaseStrategy):
         z_entry = float(cast("float", params.get("z_entry", 2.0)))
         z_exit = float(cast("float", params.get("z_exit", 0.5)))
         use_kalman = bool(params.get("use_kalman", False))
+        allow_short = bool(params.get("allow_short", True))
+        cointegration_start = str(params.get("cointegration_start", "")) or None
 
         for pair in configured_pairs:
             if len(pair) != _PAIR_LENGTH:
@@ -191,6 +194,8 @@ class PairsStrategy(BaseStrategy):
                 z_entry=z_entry,
                 z_exit=z_exit,
                 use_kalman=use_kalman,
+                allow_short=allow_short,
+                cointegration_start=cointegration_start,
             )
             if signal is not None:
                 return signal
@@ -207,8 +212,16 @@ class PairsStrategy(BaseStrategy):
         z_exit: float,
         *,
         use_kalman: bool = False,
+        allow_short: bool = True,
+        cointegration_start: str | None = None,
     ) -> Signal | None:
         """Compute spread z-score and return signal or None."""
+        # Filter candles by cointegration_start date if specified
+        if cointegration_start:
+            cutoff = datetime.fromisoformat(cointegration_start)
+            candles_a = [c for c in candles_a if c.timestamp.replace(tzinfo=None) >= cutoff]
+            candles_b = [c for c in candles_b if c.timestamp.replace(tzinfo=None) >= cutoff]
+
         n = min(len(candles_a), len(candles_b))
         if n < _MIN_CANDLES_FOR_HIST:
             return None
@@ -262,6 +275,10 @@ class PairsStrategy(BaseStrategy):
             direction = SignalDirection.SELL
         else:
             return None  # between z_exit and z_entry — ambiguous zone
+
+        # Long-only constraint: suppress SELL signals when shorting is disallowed
+        if direction == SignalDirection.SELL and not allow_short:
+            return None
 
         confidence = min(1.0, abs(z) / z_entry)
 

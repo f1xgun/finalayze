@@ -522,6 +522,7 @@ DEFAULT_MOEX_INSTRUMENTS: list[Instrument] = [
         market_id="moex",
         name="Tatneft Preferred",
         instrument_type="stock",
+        figi="BBG004S68CP5",
         lot_size=1,
         currency="RUB",
     ),
