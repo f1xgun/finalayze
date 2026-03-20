@@ -60,7 +60,11 @@ Plans:
   3. CBRStrategyWrapper is registered in the combiner and generates signals around CBR rate decision dates
   4. BrentGateStep in the sizing pipeline reduces energy sector position sizes when Brent-in-RUB is below threshold
   5. RubOilRegimeStep in the sizing pipeline scales equity positions based on RUB/oil decorrelation state
-**Plans**: TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 09-01-PLAN.md -- DividendGap/CBR combiner wiring with event strategy bypass and yield-based hold bars
+- [ ] 09-02-PLAN.md -- RubOilRegimeStep and BrentGateStep sizing pipeline integration
 
 ### Phase 10: Macro Regime
 **Goal**: MOEX equity positions are sized according to CBR rate regime, sector allocation rotates based on macro conditions, and OFZ allocation shifts when CBR cutting cycle begins
@@ -106,8 +110,8 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 5. Integration and Telegram | v1.0 | 4/4 | Complete | 2026-03-14 |
 | 6. Sandbox Validation | v1.0 | 4/4 | Complete | 2026-03-15 |
 | 7. News Pipeline and Go-Live | v1.0 | 3/3 | Complete | 2026-03-15 |
-| 8. Data Foundation | 3/3 | Complete   | 2026-03-20 | - |
-| 9. Strategy Wiring | v2.0 | 0/? | Not started | - |
+| 8. Data Foundation | v2.0 | 3/3 | Complete | 2026-03-20 |
+| 9. Strategy Wiring | v2.0 | 0/2 | Not started | - |
 | 10. Macro Regime | v2.0 | 0/? | Not started | - |
 | 11. Advanced Strategies and ML | v2.0 | 0/? | Not started | - |
 | 12. Portfolio Assembly | v2.0 | 0/? | Not started | - |
