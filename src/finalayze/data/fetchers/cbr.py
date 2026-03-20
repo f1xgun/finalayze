@@ -502,6 +502,55 @@ _CPI_DATA: dict[str, Decimal] = {
 }
 
 
+_YIELD_CURVE_SLOPE_BPS: dict[str, float] = {
+    "2022-03": -250.0,
+    "2022-04": -180.0,
+    "2022-06": -50.0,
+    "2022-09": 20.0,
+    "2022-12": 80.0,
+    "2023-03": 120.0,
+    "2023-06": 100.0,
+    "2023-09": -30.0,
+    "2023-12": -80.0,
+    "2024-03": -120.0,
+    "2024-06": -150.0,
+    "2024-09": -200.0,
+    "2024-12": -180.0,
+    "2025-03": -150.0,
+    "2025-06": -100.0,
+    "2025-09": -20.0,
+    "2025-12": 50.0,
+}
+
+
+def get_recent_cbr_decisions(as_of: date, count: int = 3) -> list[str]:
+    """Return the last *count* CBR decisions (most recent first), on or before *as_of*.
+
+    Meetings with ``decision is None`` are skipped.
+    """
+    past = [m for m in CBR_MEETINGS if m.date <= as_of and m.decision is not None]
+    return [m.decision for m in reversed(past[-count:])]
+
+
+def is_cutting_cycle(as_of: date) -> bool:
+    """Return True if the last 2 CBR decisions are both "cut"."""
+    decisions = get_recent_cbr_decisions(as_of, count=2)
+    return len(decisions) >= 2 and all(d == "cut" for d in decisions)  # noqa: PLR2004
+
+
+def get_yield_slope_bps(as_of: date) -> float:
+    """Return the yield curve slope (10Y-2Y) in bps for the month of *as_of*.
+
+    Uses the latest key in ``_YIELD_CURVE_SLOPE_BPS`` that is <= the as_of month.
+    Returns 0.0 if no data available.
+    """
+    target = as_of.strftime("%Y-%m")
+    candidates = [k for k in _YIELD_CURVE_SLOPE_BPS if k <= target]
+    if not candidates:
+        return 0.0
+    return _YIELD_CURVE_SLOPE_BPS[max(candidates)]
+
+
 class MacroContextProvider:
     """Provides point-in-time macro data for bond strategy backtests.
 

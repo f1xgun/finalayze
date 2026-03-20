@@ -171,6 +171,62 @@ class BrentGateStep:
         return (size * self._scale_below).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
 
 
+class CBRRegimeStep:
+    """Scale ru_* equity positions by yield curve slope tier.
+
+    >100bps (steepening) -> 1.2x, 0-100bps (flat) -> 1.0x, <0bps (inverted) -> 0.6x.
+    Non-ru_* segments pass through unchanged.
+    """
+
+    def __init__(self, yield_slope_bps: float, segment_id: str) -> None:
+        self._yield_slope_bps = yield_slope_bps
+        self._segment_id = segment_id
+
+    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:  # noqa: ARG002
+        if not self._segment_id.startswith("ru_"):
+            return size
+        if self._yield_slope_bps > 100:  # noqa: PLR2004
+            scale = Decimal("1.2")
+        elif self._yield_slope_bps < 0:
+            scale = Decimal("0.6")
+        else:
+            scale = Decimal("1.0")
+        return (size * scale).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+
+
+class SectorAllocationStep:
+    """Scale sector-specific ru_* positions by macro conditions.
+
+    ru_energy: Brent-in-RUB thresholds (>6000 -> 1.3x, <4000 -> 0.7x, else 1.0x).
+    ru_finance: CBR direction (cutting -> 1.2x, hiking -> 0.8x, hold -> 1.0x).
+    Other segments pass through unchanged.
+    """
+
+    def __init__(self, brent_rub_price: float, cbr_direction: str, segment_id: str) -> None:
+        self._brent_rub = brent_rub_price
+        self._cbr_direction = cbr_direction
+        self._segment_id = segment_id
+
+    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:  # noqa: ARG002
+        if self._segment_id == "ru_energy":
+            if self._brent_rub > 6000:  # noqa: PLR2004
+                scale = Decimal("1.3")
+            elif self._brent_rub < 4000:  # noqa: PLR2004
+                scale = Decimal("0.7")
+            else:
+                scale = Decimal("1.0")
+        elif self._segment_id == "ru_finance":
+            if self._cbr_direction == "cut":
+                scale = Decimal("1.2")
+            elif self._cbr_direction == "hike":
+                scale = Decimal("0.8")
+            else:
+                scale = Decimal("1.0")
+        else:
+            return size
+        return (size * scale).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+
+
 _META_LABEL_THRESHOLD = Decimal("0.40")
 
 

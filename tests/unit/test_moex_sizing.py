@@ -202,7 +202,9 @@ class TestSectorAllocationStep:
 
     def test_energy_high_brent_overweight(self) -> None:
         """brent_rub=7000 -> 1.3x for ru_energy."""
-        step = SectorAllocationStep(brent_rub_price=7000, cbr_direction="cut", segment_id="ru_energy")
+        step = SectorAllocationStep(
+            brent_rub_price=7000, cbr_direction="cut", segment_id="ru_energy"
+        )
         result = step.adjust(_TEST_SIZE, _make_context())
         assert result == (_TEST_SIZE * _ENERGY_OW).quantize(Decimal("0.0001"))
 
@@ -256,8 +258,6 @@ class TestSectorAllocationStep:
 
     def test_us_tech_passthrough(self) -> None:
         """us_tech -> size unchanged (not ru_*)."""
-        step = SectorAllocationStep(
-            brent_rub_price=7000, cbr_direction="cut", segment_id="us_tech"
-        )
+        step = SectorAllocationStep(brent_rub_price=7000, cbr_direction="cut", segment_id="us_tech")
         result = step.adjust(_TEST_SIZE, _make_context())
         assert result == _TEST_SIZE
