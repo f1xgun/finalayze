@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: MOEX Profitability
-status: completed
-stopped_at: Completed 10-01-PLAN.md (Phase 10 complete)
-last_updated: "2026-03-20T09:24:16.622Z"
-last_activity: 2026-03-20 -- Completed 10-01 CBR Regime and Sector Allocation Steps
+status: executing
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-03-20T20:31:16.084Z"
+last_activity: 2026-03-20 -- Completed 11-01 MOEX Preferred Share Pairs Trading
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
-  percent: 100
+  total_plans: 10
+  completed_plans: 9
+  percent: 20
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-20)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 10 -- Macro Regime
+**Current focus:** Phase 11 -- Advanced Strategies and ML
 
 ## Current Position
 
-Phase: 10 of 12 (Macro Regime) -- third phase of v2.0
-Plan: 2 of 2 in current phase (10-01, 10-02 complete)
-Status: Phase 10 Complete
-Last activity: 2026-03-20 -- Completed 10-01 CBR Regime and Sector Allocation Steps
+Phase: 11 of 12 (Advanced Strategies and ML) -- fourth phase of v2.0
+Plan: 2 of 3 in current phase (11-01, 11-02 complete)
+Status: Phase 11 In Progress
+Last activity: 2026-03-20 -- Completed 11-02 MOEX ML Features
 
-Progress: [##########] 100% (phase 10 complete)
+Progress: [######----] 67% (11-02 complete)
 
 ## Performance Metrics
 
@@ -51,6 +51,8 @@ Progress: [##########] 100% (phase 10 complete)
 | 09    | 02   | 5min     | 3     | 5     |
 | 10    | 01   | 5min     | 2     | 7     |
 | 10    | 02   | 2min     | 1     | 2     |
+| 11    | 01   | 4min     | 1     | 4     |
+| 11    | 02   | 4min     | 2     | 3     |
 
 ## Accumulated Context
 
@@ -82,6 +84,11 @@ Recent decisions affecting current work:
 - [09-02]: Pipeline built per-run (not at init) because MOEX steps need segment_id at run() time
 - [09-02]: rub_oil_regime_signal typed as object in BacktestConfig to avoid circular import
 - [09-02]: FXRate objects converted to synthetic Candle objects for RubOilRegimeSignal correlation
+- [11-01]: allow_short=False suppresses SELL at _compute_signal level for long-only MOEX constraint
+- [11-01]: cointegration_start filters candles before cointegration test to avoid sanction-era structural break
+- [11-01]: Weights rebalanced: -0.03 each from momentum, mean_reversion, rsi2_connors, dual_momentum for 0.12 pairs
+- [Phase 11]: KeyRateRecord.rate is already decimal fraction -- no /100 normalization needed
+- [Phase 11]: IMOEX relative strength already covered by cross-asset relative_strength_21d -- no duplicate
 
 ### Pending Todos
 
@@ -95,6 +102,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20
-Stopped at: Completed 10-01-PLAN.md (Phase 10 complete)
+Last session: 2026-03-20T20:31:16.081Z
+Stopped at: Completed 11-02-PLAN.md
 Resume file: None
