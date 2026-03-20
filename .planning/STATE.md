@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: MOEX Profitability
 status: executing
-stopped_at: Completed 08-02-PLAN.md
-last_updated: "2026-03-19T22:12:00.000Z"
-last_activity: 2026-03-20 -- Completed 08-02 MOEX 2022 Structural Break Exclusion
+stopped_at: Completed 08-03-PLAN.md (Phase 08 complete)
+last_updated: "2026-03-20T07:57:00.000Z"
+last_activity: 2026-03-20 -- Completed 08-03 MOEX Dividend Calendar Expansion
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
-  percent: 67
+  completed_plans: 3
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-20)
 ## Current Position
 
 Phase: 8 of 12 (Data Foundation) -- first phase of v2.0
-Plan: 2 of 3 in current phase (08-01, 08-02 complete)
-Status: Executing
-Last activity: 2026-03-20 -- Completed 08-02 MOEX 2022 Structural Break Exclusion
+Plan: 3 of 3 in current phase (08-01, 08-02, 08-03 complete)
+Status: Phase 08 Complete
+Last activity: 2026-03-20 -- Completed 08-03 MOEX Dividend Calendar Expansion
 
-Progress: [######....] 67% (v2.0 milestone)
+Progress: [##########] 100% (phase 08 complete)
 
 ## Performance Metrics
 
@@ -46,6 +46,7 @@ Progress: [######....] 67% (v2.0 milestone)
 |-------|------|----------|-------|-------|
 | 08    | 01   | 2min     | 2     | 6     |
 | 08    | 02   | 6min     | 2     | 6     |
+| 08    | 03   | 3min     | 3     | 4     |
 
 ## Accumulated Context
 
@@ -63,6 +64,9 @@ Recent decisions affecting current work:
 - [08-01]: Toxic symbols removed (GAZP, VTBR, SNGS, SNGSP, IRAO, ALRS) -- ~60% negative PnL
 - [08-02]: exclude_periods as tuple of string pairs for JSON serializability and frozen dataclass compatibility
 - [08-02]: filter_candles_by_exclusion in stop_loss.py (Layer 4) reused by ATR and chandelier computations
+- [08-03]: DividendEntry status defaults to "paid" for backward compatibility
+- [08-03]: Only "paid" dividends trigger BUY signals -- cancelled/reduced skipped
+- [08-03]: T-Invest API lacks cancelled dividend data -- manual overrides required
 
 ### Pending Todos
 
@@ -77,5 +81,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-20
-Stopped at: Completed 08-02-PLAN.md
+Stopped at: Completed 08-03-PLAN.md (Phase 08 complete)
 Resume file: None

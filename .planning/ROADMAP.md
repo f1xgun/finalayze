@@ -26,7 +26,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 
 **Milestone Goal:** Transform MOEX equity from negative Sharpe to profitable operation through universe cleanup, MOEX-native strategies, macro regime gating, and portfolio-level OFZ/equity allocation.
 
-- [ ] **Phase 8: Data Foundation** - Fix vol target, universe, dividend calendar, and 2022 structural break so all MOEX backtests produce valid results
+- [x] **Phase 8: Data Foundation** - Fix vol target, universe, dividend calendar, and 2022 structural break so all MOEX backtests produce valid results (completed 2026-03-20)
 - [ ] **Phase 9: Strategy Wiring** - Connect existing DividendGap, CBR, and RUB/oil strategies to backtest engine and sizing pipeline
 - [ ] **Phase 10: Macro Regime** - Add CBR regime sizing, OFZ rotation trigger, and sector allocation overlay to position sizing pipeline
 - [ ] **Phase 11: Advanced Strategies and ML** - Preferred share arbitrage and ML ensemble with Russian macro features for ru_* segments
@@ -43,7 +43,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
   2. GAZP, VTBR, SNGS, IRAO, ALRS are excluded from all ru_* segment backtests and no trades are generated for them
   3. Dividend calendar contains 150+ events including cancelled/reduced dividends with a status field distinguishing paid/cancelled/reduced
   4. Walk-forward backtest on any ru_* segment with training window crossing Feb-Mar 2022 excludes the structural break period from vol and ATR calculations
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [ ] 08-01-PLAN.md -- Vol target recalibration (0.40) and toxic symbol removal from MOEX universe
@@ -106,7 +106,7 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 5. Integration and Telegram | v1.0 | 4/4 | Complete | 2026-03-14 |
 | 6. Sandbox Validation | v1.0 | 4/4 | Complete | 2026-03-15 |
 | 7. News Pipeline and Go-Live | v1.0 | 3/3 | Complete | 2026-03-15 |
-| 8. Data Foundation | 2/3 | In Progress|  | - |
+| 8. Data Foundation | 3/3 | Complete   | 2026-03-20 | - |
 | 9. Strategy Wiring | v2.0 | 0/? | Not started | - |
 | 10. Macro Regime | v2.0 | 0/? | Not started | - |
 | 11. Advanced Strategies and ML | v2.0 | 0/? | Not started | - |

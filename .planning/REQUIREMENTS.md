@@ -11,7 +11,7 @@ Requirements for MOEX profitability milestone. Each maps to roadmap phases.
 
 - [x] **DATA-01**: Vol target recalibrated for MOEX segments (0.35-0.45 instead of US-calibrated 0.19)
 - [x] **DATA-02**: Toxic symbols removed from universe (GAZP, VTBR, SNGS, IRAO, ALRS), confidence thresholds raised to 0.38+
-- [ ] **DATA-03**: Dividend calendar expanded to 150+ events including cancelled/reduced dividends via T-Invest API
+- [x] **DATA-03**: Dividend calendar expanded to 150+ events including cancelled/reduced dividends via T-Invest API
 - [x] **DATA-04**: Feb-Mar 2022 structural break excluded from vol/ATR calculations, separate regime classification
 
 ### Strategy Wiring
@@ -66,7 +66,7 @@ Deferred to v3.0+.
 |-------------|-------|--------|
 | DATA-01 | Phase 8 | Complete |
 | DATA-02 | Phase 8 | Complete |
-| DATA-03 | Phase 8 | Pending |
+| DATA-03 | Phase 8 | Complete |
 | DATA-04 | Phase 8 | Complete |
 | STRAT-01 | Phase 9 | Pending |
 | STRAT-02 | Phase 9 | Pending |
