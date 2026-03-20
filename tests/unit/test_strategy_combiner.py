@@ -1118,3 +1118,150 @@ class TestCombinerMarketContext:
         assert tracker.received_context is ctx, (
             "Constructor should propagate MarketContext to strategies"
         )
+
+
+# ===================================================================
+# Test: Event strategy ADX bypass and confidence floor
+# ===================================================================
+_EVENT_CONFIDENCE = 0.45
+_EVENT_WEIGHT = 0.17
+_MOMENTUM_WEIGHT = 0.17
+_MR_WEIGHT = 0.17
+_EVENT_MIN_CONFIDENCE = 0.40
+
+
+class TestEventStrategyBypass:
+    """Event strategies (dividend_gap, cbr_calendar) bypass ADX regime gating."""
+
+    @staticmethod
+    def _base_config(strategies_cfg: dict[str, Any]) -> dict[str, Any]:
+        """Config with regime routing disabled (we mock _compute_adx_regime)."""
+        return {
+            "normalize_mode": "firing",
+            "min_combined_confidence": _EVENT_MIN_CONFIDENCE,
+            "regime_routing": {"enabled": True},
+            "strategies": strategies_cfg,
+        }
+
+    def test_event_strategy_fires_in_trend_regime(self) -> None:
+        """dividend_gap should NOT be skipped in trend regime (ADX bypass)."""
+        sig = _make_signal(SignalDirection.BUY, _EVENT_CONFIDENCE, "dividend_gap")
+        strategies: list[BaseStrategy] = [
+            MockStrategy("dividend_gap", sig),
+            MockStrategy("momentum", None),
+            MockStrategy("mean_reversion", None),
+        ]
+        combiner = StrategyCombiner(strategies)
+        candles = _make_candles()
+        config = self._base_config({
+            "dividend_gap": {"enabled": True, "weight": _EVENT_WEIGHT},
+            "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
+            "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
+        })
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch.object(combiner, "_compute_adx_regime", return_value=(40.0, "trend")),
+        ):
+            result = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        assert result is not None
+        assert "dividend_gap_confidence" in result.features
+
+    def test_event_strategy_fires_in_mr_regime(self) -> None:
+        """cbr_calendar should NOT be skipped in mr regime (ADX bypass)."""
+        sig = _make_signal(SignalDirection.BUY, _EVENT_CONFIDENCE, "cbr_calendar")
+        strategies: list[BaseStrategy] = [
+            MockStrategy("cbr_calendar", sig),
+            MockStrategy("momentum", None),
+            MockStrategy("mean_reversion", None),
+        ]
+        combiner = StrategyCombiner(strategies)
+        candles = _make_candles()
+        config = self._base_config({
+            "cbr_calendar": {"enabled": True, "weight": _EVENT_WEIGHT},
+            "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
+            "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
+        })
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch.object(combiner, "_compute_adx_regime", return_value=(10.0, "mr")),
+        ):
+            result = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        assert result is not None
+        assert "cbr_calendar_confidence" in result.features
+
+    def test_non_event_mr_still_skipped_in_trend(self) -> None:
+        """mean_reversion should still be skipped in trend regime."""
+        mr_sig = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "mean_reversion")
+        strategies: list[BaseStrategy] = [
+            MockStrategy("dividend_gap", None),
+            MockStrategy("momentum", None),
+            MockStrategy("mean_reversion", mr_sig),
+        ]
+        combiner = StrategyCombiner(strategies)
+        candles = _make_candles()
+        config = self._base_config({
+            "dividend_gap": {"enabled": True, "weight": _EVENT_WEIGHT},
+            "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
+            "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
+        })
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch.object(combiner, "_compute_adx_regime", return_value=(40.0, "trend")),
+        ):
+            result = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        # mean_reversion was skipped so no signal fires -> None
+        assert result is None
+
+    def test_non_event_momentum_still_skipped_in_mr(self) -> None:
+        """momentum should still be skipped in mr regime."""
+        mom_sig = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+        strategies: list[BaseStrategy] = [
+            MockStrategy("cbr_calendar", None),
+            MockStrategy("momentum", mom_sig),
+            MockStrategy("mean_reversion", None),
+        ]
+        combiner = StrategyCombiner(strategies)
+        candles = _make_candles()
+        config = self._base_config({
+            "cbr_calendar": {"enabled": True, "weight": _EVENT_WEIGHT},
+            "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
+            "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
+        })
+        with (
+            patch.object(combiner, "_load_config", return_value=config),
+            patch.object(combiner, "_compute_adx_regime", return_value=(10.0, "mr")),
+        ):
+            result = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        assert result is None
+
+    def test_event_only_signal_passes_confidence_floor(self) -> None:
+        """When only event strategy fires with confidence 0.45, combined >= 0.40."""
+        sig = _make_signal(SignalDirection.BUY, _EVENT_CONFIDENCE, "dividend_gap")
+        strategies: list[BaseStrategy] = [
+            MockStrategy("dividend_gap", sig),
+            MockStrategy("momentum", None),
+            MockStrategy("mean_reversion", None),
+        ]
+        combiner = StrategyCombiner(strategies)
+        candles = _make_candles()
+        # Use default min_combined_confidence of 0.50, but event floor should lower to 0.40
+        config: dict[str, Any] = {
+            "normalize_mode": "firing",
+            "min_combined_confidence": 0.50,
+            "regime_routing": {"enabled": False},
+            "strategies": {
+                "dividend_gap": {"enabled": True, "weight": _EVENT_WEIGHT},
+                "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
+                "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
+            },
+        }
+        with patch.object(combiner, "_load_config", return_value=config):
+            result = combiner.generate_signal("AAPL", candles, "us_broad")
+
+        # confidence 0.45 >= event floor 0.40, so signal should pass
+        assert result is not None
+        assert result.confidence >= _EVENT_MIN_CONFIDENCE
