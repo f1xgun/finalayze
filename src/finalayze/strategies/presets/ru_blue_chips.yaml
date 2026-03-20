@@ -10,7 +10,7 @@ regime_routing:
 strategies:
   momentum:
     enabled: true
-    weight: 0.17
+    weight: 0.12
     params:
       rsi_period: 14
       rsi_oversold: 30
@@ -43,7 +43,7 @@ strategies:
       event_types: [geopolitical, sanctions, cbr_rate, commodity_price, earnings]
   mean_reversion:
     enabled: true
-    weight: 0.17
+    weight: 0.12
     params:
       bb_period: 20
       bb_std_dev: 2.5
@@ -69,6 +69,11 @@ strategies:
       min_gap_pct: 3.0
       max_hold_bars: 60
       min_confidence: 0.40
+  cbr_calendar:
+    enabled: true
+    weight: 0.10
+    params:
+      min_confidence: 0.30
   ml_ensemble:
     enabled: false
     weight: 0.00

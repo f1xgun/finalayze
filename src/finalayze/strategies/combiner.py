@@ -38,6 +38,14 @@ _MR_STRATEGIES = frozenset({"mean_reversion", "pairs", "ou_mean_reversion", "rsi
 # Reinforcer-only strategies: can boost other signals but never create standalone trades.
 # When only reinforcer strategies fire, the combined signal is suppressed.
 _REINFORCER_STRATEGIES = frozenset({"ml_ensemble"})
+
+# Event strategies: bypass ADX regime routing (always fire regardless of trend/MR regime).
+# These strategies are calendar-driven, not momentum/MR, so ADX gating is irrelevant.
+_EVENT_STRATEGIES = frozenset({"dividend_gap", "cbr_calendar"})
+
+# Event confidence floor: when an event strategy fires, lower the threshold
+# so that the signal is not diluted below this floor.
+_EVENT_MIN_CONFIDENCE = Decimal("0.40")
 _ADX_TREND_THRESHOLD = 35
 _ADX_MR_THRESHOLD = 15
 
@@ -348,11 +356,12 @@ class StrategyCombiner:
             # ADX regime gating: skip strategies that belong to the wrong pool
             is_trend = strategy_name in _MOMENTUM_STRATEGIES
             is_mr = strategy_name in _MR_STRATEGIES
+            is_event = strategy_name in _EVENT_STRATEGIES
 
-            if regime == "trend" and is_mr:
+            if regime == "trend" and is_mr and not is_event:
                 self._on_strategy_signal(strategy_name, strategy, None, weight)
                 continue  # skip MR strategies in trending market
-            if regime == "mr" and is_trend:
+            if regime == "mr" and is_trend and not is_event:
                 self._on_strategy_signal(strategy_name, strategy, None, weight)
                 continue  # skip trend strategies in range-bound market
 
@@ -451,6 +460,13 @@ class StrategyCombiner:
         threshold = self._effective_threshold(
             config, effective_min_confidence, has_open_position, net
         )
+
+        # Event strategy confidence floor: when an event strategy fires,
+        # lower threshold so calendar-driven signals are not diluted.
+        has_event_firing = bool(firing_names & _EVENT_STRATEGIES)
+        if has_event_firing and threshold > _EVENT_MIN_CONFIDENCE:
+            threshold = _EVENT_MIN_CONFIDENCE
+
         if abs(net) < threshold:
             # Log when strategies fired but combined score was below threshold
             firing = {
