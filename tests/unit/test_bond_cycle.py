@@ -756,3 +756,60 @@ class TestCouponAlertInBondCycle:
         source = inspect.getsource(BondCycleProcessor._process_layer)
         # The coupon reinvestment step should fire an alert
         assert "on_coupon_received" in source or "coupon" in source.lower()
+
+
+# ── OFZ rotation tests ─────────────────────────────────────────────────────
+
+
+from finalayze.core.bond_cycle import apply_ofz_rotation
+
+
+class TestOFZRotation:
+    """Tests for apply_ofz_rotation: shifts CORE/STRATEGIC when CBR cutting cycle detected."""
+
+    def test_ofz_rotation_cutting_cycle(self) -> None:
+        """2+ consecutive cuts -> CORE 0.45->0.30, STRATEGIC 0.275->0.425."""
+        configs = dict(DEFAULT_LAYER_CONFIGS)
+        # 2025-10-30 is after 2025-09-12 cut + 2025-10-24 cut (2 consecutive cuts)
+        result = apply_ofz_rotation(configs, as_of=date(2025, 10, 30))
+        assert result[PortfolioLayer.CORE].capital_pct == Decimal("0.30")
+        assert result[PortfolioLayer.STRATEGIC].capital_pct == Decimal("0.425")
+
+    def test_ofz_rotation_no_cutting_cycle(self) -> None:
+        """All holds in 2024 H1 -> configs unchanged."""
+        configs = dict(DEFAULT_LAYER_CONFIGS)
+        result = apply_ofz_rotation(configs, as_of=date(2024, 6, 15))
+        assert result[PortfolioLayer.CORE].capital_pct == Decimal("0.45")
+        assert result[PortfolioLayer.STRATEGIC].capital_pct == Decimal("0.275")
+
+    def test_ofz_rotation_single_cut_not_cycle(self) -> None:
+        """Only 1 cut on 2025-07-25 -> configs unchanged (need 2+ consecutive)."""
+        configs = dict(DEFAULT_LAYER_CONFIGS)
+        result = apply_ofz_rotation(configs, as_of=date(2025, 7, 30))
+        assert result[PortfolioLayer.CORE].capital_pct == Decimal("0.45")
+        assert result[PortfolioLayer.STRATEGIC].capital_pct == Decimal("0.275")
+
+    def test_ofz_rotation_revert_on_hike(self) -> None:
+        """After 2023-08-15 emergency hike (after holds) -> configs unchanged."""
+        configs = dict(DEFAULT_LAYER_CONFIGS)
+        result = apply_ofz_rotation(configs, as_of=date(2023, 8, 20))
+        assert result[PortfolioLayer.CORE].capital_pct == Decimal("0.45")
+        assert result[PortfolioLayer.STRATEGIC].capital_pct == Decimal("0.275")
+
+    def test_ofz_rotation_preserves_tactical_short(self) -> None:
+        """TACTICAL and SHORT always unchanged regardless of rotation."""
+        configs = dict(DEFAULT_LAYER_CONFIGS)
+        original_tactical = configs[PortfolioLayer.TACTICAL].capital_pct
+        original_short = configs[PortfolioLayer.SHORT].capital_pct
+        # Use cutting cycle date
+        result = apply_ofz_rotation(configs, as_of=date(2025, 10, 30))
+        assert result[PortfolioLayer.TACTICAL].capital_pct == original_tactical
+        assert result[PortfolioLayer.SHORT].capital_pct == original_short
+
+    def test_ofz_rotation_capital_conservation(self) -> None:
+        """Sum of all capital_pct after rotation == sum before."""
+        configs = dict(DEFAULT_LAYER_CONFIGS)
+        original_sum = sum(c.capital_pct for c in configs.values())
+        result = apply_ofz_rotation(configs, as_of=date(2025, 10, 30))
+        rotated_sum = sum(c.capital_pct for c in result.values())
+        assert rotated_sum == original_sum
