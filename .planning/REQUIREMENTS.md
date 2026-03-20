@@ -24,7 +24,7 @@ Requirements for MOEX profitability milestone. Each maps to roadmap phases.
 ### Macro Regime
 
 - [ ] **MACRO-01**: CBRRegimeStep in sizing pipeline — CBR rate level + direction affects equity allocation sizing
-- [ ] **MACRO-02**: OFZ PK-to-PD rotation trigger — detects CBR cutting cycle start for bond allocation shift
+- [x] **MACRO-02**: OFZ PK-to-PD rotation trigger — detects CBR cutting cycle start for bond allocation shift
 - [ ] **MACRO-03**: SectorAllocationStep in sizing pipeline for sector rotation using MOEX sector indices (MOEXOG, MOEXFN, etc.)
 
 ### Advanced Strategies
@@ -73,7 +73,7 @@ Deferred to v3.0+.
 | STRAT-03 | Phase 9 | Complete |
 | STRAT-04 | Phase 9 | Complete |
 | MACRO-01 | Phase 10 | Pending |
-| MACRO-02 | Phase 10 | Pending |
+| MACRO-02 | Phase 10 | Complete |
 | MACRO-03 | Phase 10 | Pending |
 | ADV-01 | Phase 11 | Pending |
 | ADV-02 | Phase 11 | Pending |

@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-03-20)
 
 ## Current Position
 
-Phase: 9 of 12 (Strategy Wiring) -- second phase of v2.0
-Plan: 2 of 2 in current phase (09-01, 09-02 complete)
-Status: Phase 09 Complete
-Last activity: 2026-03-20 -- Completed 09-02 MOEX Sizing Pipeline Steps
+Phase: 10 of 12 (Macro Regime) -- third phase of v2.0
+Plan: 2 of 2 in current phase (10-02 complete, 10-01 in progress)
+Status: In Progress
+Last activity: 2026-03-20 -- Completed 10-02 OFZ PK-to-PD Rotation
 
-Progress: [##########] 100% (phase 09 complete)
+Progress: [#####-----] 50% (1 of 2 plans complete in phase 10)
 
 ## Performance Metrics
 
@@ -49,6 +49,7 @@ Progress: [##########] 100% (phase 09 complete)
 | 08    | 03   | 3min     | 3     | 4     |
 | 09    | 01   | 7min     | 2     | 7     |
 | 09    | 02   | 5min     | 3     | 5     |
+| 10    | 02   | 2min     | 1     | 2     |
 
 ## Accumulated Context
 
@@ -72,6 +73,8 @@ Recent decisions affecting current work:
 - [09-01]: Event strategies bypass ADX implicitly + explicit is_event flag for clarity
 - [09-01]: Engine hold bar safety ceiling for dividend_gap set to 60 (max of all yield tiers)
 - [09-01]: Event confidence floor 0.40 applied only when event strategy fires
+- [10-02]: OFZ rotation uses relative shift (+/-0.15) for capital conservation invariant
+- [10-02]: Deferred CBR_MEETINGS import inside apply_ofz_rotation to avoid circular dependency
 - [09-02]: Pipeline built per-run (not at init) because MOEX steps need segment_id at run() time
 - [09-02]: rub_oil_regime_signal typed as object in BacktestConfig to avoid circular import
 - [09-02]: FXRate objects converted to synthetic Candle objects for RubOilRegimeSignal correlation
@@ -89,5 +92,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-20
-Stopped at: Completed 09-02-PLAN.md (Phase 09 complete)
+Stopped at: Completed 10-02-PLAN.md
 Resume file: None
