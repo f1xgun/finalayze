@@ -203,7 +203,7 @@ _SEGMENT_SYMBOLS: dict[str, list[str]] = {
         "TFC",
     ],
     "us_broad": ["SPY", "QQQ", "DIA", "IWM", "VTI"],
-    "ru_blue_chips": ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK", "PLZL", "MGNT"],
+    "ru_blue_chips": ["SBER", "LKOH", "GMKN", "ROSN", "NVTK", "MGNT", "TATN", "TCSG"],
     "ru_energy": ["ROSN", "TATN", "NVTK", "LKOH", "SNGS", "SIBN"],
     "ru_tech": ["YNDX", "OZON", "VKCO", "CIAN"],
     "ru_finance": ["SBER", "VTBR", "TCSG", "MOEX", "CBOM"],
@@ -876,22 +876,38 @@ _WF_CAL_MONTHS = 2
 _WF_TEST_MONTHS = 4
 _WF_STEP_MONTHS = 3
 
+# MOEX walk-forward: shorter windows to fit within 2-year lookback
+_MOEX_WF_TRAIN_MONTHS = 8
+_MOEX_WF_CAL_MONTHS = 1
+_MOEX_WF_TEST_MONTHS = 3
+_MOEX_WF_STEP_MONTHS = 2
+_MOEX_PURGE_GAP = 40  # half the US purge gap (less data available)
+
 # BH correction (D3)
 _BH_FDR = 0.10
 
 
 def _generate_walk_forward_folds(
     timestamps: list[datetime],
+    segment_id: str | None = None,
 ) -> list[tuple[list[int], list[int], list[int]]]:
     """Generate walk-forward fold indices split by calendar date (D4).
 
     Each fold has: train indices, calibration indices, test indices.
     Purge gaps are applied between splits to prevent label leakage.
+    MOEX segments use shorter windows to fit within 2-year lookback.
 
     Returns list of (train_idx, cal_idx, test_idx) tuples.
     """
     if not timestamps:
         return []
+
+    is_moex = segment_id is not None and _is_moex_segment(segment_id)
+    train_months = _MOEX_WF_TRAIN_MONTHS if is_moex else _WF_TRAIN_MONTHS
+    cal_months = _MOEX_WF_CAL_MONTHS if is_moex else _WF_CAL_MONTHS
+    test_months = _MOEX_WF_TEST_MONTHS if is_moex else _WF_TEST_MONTHS
+    step_months = _MOEX_WF_STEP_MONTHS if is_moex else _WF_STEP_MONTHS
+    purge_gap = _MOEX_PURGE_GAP if is_moex else _PURGE_GAP
 
     start_date = timestamps[0]
     end_date = timestamps[-1]
@@ -900,11 +916,11 @@ def _generate_walk_forward_folds(
     fold_start = start_date
 
     while True:
-        train_end = fold_start + timedelta(days=_WF_TRAIN_MONTHS * 30)
-        purge1_end = train_end + timedelta(days=_PURGE_GAP)
-        cal_end = purge1_end + timedelta(days=_WF_CAL_MONTHS * 30)
-        purge2_end = cal_end + timedelta(days=_PURGE_GAP)
-        test_end = purge2_end + timedelta(days=_WF_TEST_MONTHS * 30)
+        train_end = fold_start + timedelta(days=train_months * 30)
+        purge1_end = train_end + timedelta(days=purge_gap)
+        cal_end = purge1_end + timedelta(days=cal_months * 30)
+        purge2_end = cal_end + timedelta(days=purge_gap)
+        test_end = purge2_end + timedelta(days=test_months * 30)
 
         if test_end > end_date + timedelta(days=1):
             break
@@ -917,7 +933,7 @@ def _generate_walk_forward_folds(
         if train_idx and test_idx:
             folds.append((train_idx, cal_idx, test_idx))
 
-        fold_start += timedelta(days=_WF_STEP_MONTHS * 30)
+        fold_start += timedelta(days=step_months * 30)
 
     return folds
 
@@ -1077,9 +1093,14 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         print(f"[{segment_id}] No samples -- skipping.")
         return None
 
-    folds = _generate_walk_forward_folds(timestamps)
+    folds = _generate_walk_forward_folds(timestamps, segment_id=segment_id)
     if not folds:
-        min_months = _WF_TRAIN_MONTHS + _WF_CAL_MONTHS + _WF_TEST_MONTHS
+        is_moex = _is_moex_segment(segment_id)
+        min_months = (
+            (_MOEX_WF_TRAIN_MONTHS + _MOEX_WF_CAL_MONTHS + _MOEX_WF_TEST_MONTHS)
+            if is_moex
+            else (_WF_TRAIN_MONTHS + _WF_CAL_MONTHS + _WF_TEST_MONTHS)
+        )
         print(f"[{segment_id}] No valid WF folds (need {min_months}+ months of data).")
         return None
 

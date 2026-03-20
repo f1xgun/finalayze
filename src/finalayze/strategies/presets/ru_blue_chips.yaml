@@ -78,8 +78,8 @@ strategies:
     params:
       min_confidence: 0.30
   ml_ensemble:
-    enabled: false
-    weight: 0.00
+    enabled: true
+    weight: 0.10
     params:
       threshold: 0.10
       min_confidence: 0.30
