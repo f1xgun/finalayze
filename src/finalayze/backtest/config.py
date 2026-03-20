@@ -28,7 +28,7 @@ DEFAULT_STRATEGY_HOLD_BARS: dict[str, int] = {
     "event_driven": 63,
     "rsi2_connors": 5,
     "ml_ensemble": 20,
-    "dividend_gap": 15,
+    "dividend_gap": 60,
     "pead": 63,
     "cbr_calendar": 30,
 }
@@ -163,6 +163,12 @@ class BacktestConfig:
     # skipped when computing volatility-based metrics.
     # Format: tuple of (start_date_iso, end_date_iso) inclusive strings.
     exclude_periods: tuple[tuple[str, str], ...] = ()
+
+    # MOEX-specific sizing step data (Phase 9: Strategy Wiring)
+    # RubOilRegimeSignal instance; typed as object to avoid circular import from config.py
+    rub_oil_regime_signal: object | None = None
+    # Brent-in-RUB price for BrentGateStep (0.0 = missing/disabled)
+    brent_rub_price: float = 0.0
 
 
 # MOEX was closed Feb 28 - Mar 24 2022 with extreme dislocation before/after.

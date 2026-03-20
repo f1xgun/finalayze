@@ -41,6 +41,7 @@ from finalayze.risk.position_sizer import (
     compute_realized_vol,
 )
 from finalayze.risk.position_sizing_pipeline import (
+    BrentGateStep,
     CopulaStep,
     EVTStep,
     HardCapsStep,
@@ -48,6 +49,7 @@ from finalayze.risk.position_sizing_pipeline import (
     MetaLabelStep,
     PositionSizingPipeline,
     RegimeStep,
+    RubOilRegimeStep,
     SizingContext,
     VolTargetStep,
 )
@@ -153,15 +155,8 @@ class BacktestEngine:
         # Propagate market context to strategy if it supports it (duck typing)
         if cfg.market_context is not None and hasattr(self._strategy, "set_market_context"):
             self._strategy.set_market_context(cfg.market_context)
-        # Build position sizing pipeline with optional EVT/Copula/MetaLabel steps
-        pipeline_steps = [KellyStep(), VolTargetStep(), RegimeStep()]
-        if self._config.use_copula_scaling:
-            pipeline_steps.append(CopulaStep())
-        if self._config.use_evt_sizing:
-            pipeline_steps.append(EVTStep())
-        pipeline_steps.append(MetaLabelStep())
-        pipeline_steps.append(HardCapsStep())
-        self._sizing_pipeline = PositionSizingPipeline(steps=pipeline_steps)
+        # Sizing pipeline is built per-run (needs segment_id for MOEX steps)
+        self._sizing_pipeline: PositionSizingPipeline | None = None
         self._max_positions_per_segment = cfg.max_positions_per_segment
         self._correlation_cache: dict[tuple[str, str], float] = {}
         self._correlation_update_interval: int = 50
@@ -172,6 +167,31 @@ class BacktestEngine:
     def last_run_summary(self) -> dict[str, object]:
         """Per-symbol strategy activity summary from the most recent run() call."""
         return dict(self._last_run_summary)
+
+    def _build_sizing_pipeline(self, segment_id: str) -> PositionSizingPipeline:
+        """Build position sizing pipeline with optional EVT/Copula/MOEX steps.
+
+        MOEX-specific steps (RubOilRegimeStep, BrentGateStep) are inserted after
+        RegimeStep and before Copula/EVT/MetaLabel/HardCaps. They require segment_id
+        which is only available at run() time.
+
+        Pipeline order: Kelly -> VolTarget -> Regime -> [RubOilRegime] -> [BrentGate]
+            -> [Copula] -> [EVT] -> MetaLabel -> HardCaps
+        """
+        cfg = self._config
+        steps: list[object] = [KellyStep(), VolTargetStep(), RegimeStep()]
+        # MOEX regime steps (Phase 9: Strategy Wiring)
+        if cfg.rub_oil_regime_signal is not None:
+            steps.append(RubOilRegimeStep(cfg.rub_oil_regime_signal, segment_id))
+        if cfg.brent_rub_price > 0:
+            steps.append(BrentGateStep(cfg.brent_rub_price, segment_id))
+        if cfg.use_copula_scaling:
+            steps.append(CopulaStep())
+        if cfg.use_evt_sizing:
+            steps.append(EVTStep())
+        steps.append(MetaLabelStep())
+        steps.append(HardCapsStep())
+        return PositionSizingPipeline(steps=steps)  # type: ignore[arg-type]
 
     def _build_broker(
         self,
@@ -228,6 +248,8 @@ class BacktestEngine:
             max_positions_per_market=self._max_positions,
         )
         broker = self._build_broker(symbol, candles)
+        # Build sizing pipeline per-run (MOEX steps need segment_id)
+        self._sizing_pipeline = self._build_sizing_pipeline(segment_id)
 
         trades: list[TradeResult] = []
         snapshots: list[PortfolioState] = []
@@ -627,6 +649,8 @@ class BacktestEngine:
         _first_sym = symbols[0]
         _first_candles = candles_by_symbol.get(_first_sym, [])
         broker = self._build_broker(_first_sym, _first_candles)
+        # Build sizing pipeline per-run (MOEX steps need segment_id)
+        self._sizing_pipeline = self._build_sizing_pipeline(segment_id)
 
         trades: list[TradeResult] = []
         snapshots: list[PortfolioState] = []
