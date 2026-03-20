@@ -170,6 +170,12 @@ class BacktestConfig:
     # Brent-in-RUB price for BrentGateStep (0.0 = missing/disabled)
     brent_rub_price: float = 0.0
 
+    # Phase 10: Macro Regime sizing step data
+    # Yield curve slope (10Y-2Y) in basis points for CBRRegimeStep (0.0 = missing/disabled)
+    yield_slope_bps: float = 0.0
+    # CBR direction for SectorAllocationStep ("cut", "hold", "hike", "" = missing)
+    cbr_direction: str = ""
+
 
 # MOEX was closed Feb 28 - Mar 24 2022 with extreme dislocation before/after.
 # This period distorts vol estimates 3-5x and teaches false mean-reversion patterns.

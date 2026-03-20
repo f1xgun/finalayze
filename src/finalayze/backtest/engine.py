@@ -42,6 +42,7 @@ from finalayze.risk.position_sizer import (
 )
 from finalayze.risk.position_sizing_pipeline import (
     BrentGateStep,
+    CBRRegimeStep,
     CopulaStep,
     EVTStep,
     HardCapsStep,
@@ -50,6 +51,7 @@ from finalayze.risk.position_sizing_pipeline import (
     PositionSizingPipeline,
     RegimeStep,
     RubOilRegimeStep,
+    SectorAllocationStep,
     SizingContext,
     VolTargetStep,
 )
@@ -185,6 +187,11 @@ class BacktestEngine:
             steps.append(RubOilRegimeStep(cfg.rub_oil_regime_signal, segment_id))
         if cfg.brent_rub_price > 0:
             steps.append(BrentGateStep(cfg.brent_rub_price, segment_id))
+        # Phase 10: Macro regime steps
+        if cfg.yield_slope_bps != 0.0 or segment_id.startswith("ru_"):
+            steps.append(CBRRegimeStep(cfg.yield_slope_bps, segment_id))
+        if cfg.cbr_direction:
+            steps.append(SectorAllocationStep(cfg.brent_rub_price, cfg.cbr_direction, segment_id))
         if cfg.use_copula_scaling:
             steps.append(CopulaStep())
         if cfg.use_evt_sizing:
@@ -304,9 +311,11 @@ class BacktestEngine:
             # (b2) Update Chandelier stops (monotonic ratchet)
             if self._stop_loss_mode == "chandelier" and symbol in chandelier_stops:
                 history_so_far = candles[: i + 1]
-                history_for_atr = filter_candles_by_exclusion(
-                    history_so_far, self._exclude_periods
-                ) if self._exclude_periods else history_so_far
+                history_for_atr = (
+                    filter_candles_by_exclusion(history_so_far, self._exclude_periods)
+                    if self._exclude_periods
+                    else history_so_far
+                )
                 segment_mult = get_chandelier_multiplier(segment_id)
                 candidate = compute_chandelier_stop(
                     history_for_atr,
@@ -705,9 +714,11 @@ class BacktestEngine:
                     sym_candles = candles_by_symbol.get(sym, [])
                     idx = candle_index[sym][ts]
                     history_so_far = sym_candles[: idx + 1]
-                    history_for_atr = filter_candles_by_exclusion(
-                        history_so_far, self._exclude_periods
-                    ) if self._exclude_periods else history_so_far
+                    history_for_atr = (
+                        filter_candles_by_exclusion(history_so_far, self._exclude_periods)
+                        if self._exclude_periods
+                        else history_so_far
+                    )
                     segment_mult = get_chandelier_multiplier(segment_id)
                     candidate = compute_chandelier_stop(
                         history_for_atr, atr_period=22, multiplier=segment_mult

@@ -659,11 +659,11 @@ def _normalize_snapshots_to_usd(
 
 def _compute_moex_sizing_data(
     market_context: MarketContext,
-) -> tuple[float, RubOilRegimeSignal | None]:
-    """Extract Brent-in-RUB price and build RubOilRegimeSignal from MarketContext.
+) -> tuple[float, RubOilRegimeSignal | None, float, str]:
+    """Extract Brent-in-RUB price, RubOilRegimeSignal, yield slope and CBR direction.
 
     Returns:
-        (brent_rub_price, rub_oil_regime_signal) -- both may be 0.0/None on missing data.
+        (brent_rub_price, rub_oil_regime_signal, yield_slope_bps, cbr_direction).
     """
     from finalayze.core.schemas import Candle  # noqa: PLC0415
 
@@ -716,7 +716,21 @@ def _compute_moex_sizing_data(
             oil_candles=brent_candles,
         )
 
-    return brent_rub_price, regime_signal
+    # Phase 10: yield slope and CBR direction
+    from datetime import UTC  # noqa: PLC0415
+    from datetime import datetime as _dt  # noqa: PLC0415
+
+    from finalayze.data.fetchers.cbr import (  # noqa: PLC0415
+        get_last_cbr_decision,
+        get_yield_slope_bps,
+    )
+
+    as_of = _dt.now(tz=UTC).date()
+    yield_slope = get_yield_slope_bps(as_of)
+    last_decision = get_last_cbr_decision(as_of)
+    cbr_dir = last_decision.decision if last_decision and last_decision.decision else ""
+
+    return brent_rub_price, regime_signal, yield_slope, cbr_dir
 
 
 def _run_symbol(
@@ -734,6 +748,8 @@ def _run_symbol(
     market_context: MarketContext | None = None,
     brent_rub_price: float = 0.0,
     rub_oil_regime_signal: object | None = None,
+    yield_slope_bps: float = 0.0,
+    cbr_direction: str = "",
 ) -> tuple[list[TradeResult], list[PortfolioState], dict[str, Any] | None]:
     """Run backtest for a single symbol. Returns (trades, snapshots, summary)."""
     sym_dir = output_dir / segment / symbol.replace(".", "_")
@@ -752,7 +768,9 @@ def _run_symbol(
             config=BacktestConfig(
                 initial_cash=cash,
                 decision_journal=journal,
-                rolling_kelly=RollingKelly(fraction=0.75) if segment.startswith("ru_") else RollingKelly(),
+                rolling_kelly=RollingKelly(fraction=0.75)
+                if segment.startswith("ru_")
+                else RollingKelly(),
                 use_impact_model=True,
                 use_evt_sizing=use_evt_sizing,
                 use_copula_scaling=use_copula_scaling,
@@ -762,6 +780,8 @@ def _run_symbol(
                 exclude_periods=MOEX_2022_BREAK if segment.startswith("ru_") else (),
                 brent_rub_price=brent_rub_price,
                 rub_oil_regime_signal=rub_oil_regime_signal,
+                yield_slope_bps=yield_slope_bps,
+                cbr_direction=cbr_direction,
             ),
             regime_provider=regime_provider,
         )
@@ -1129,9 +1149,11 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             # MOEX sizing data (Phase 9: BrentGateStep + RubOilRegimeStep)
             brent_rub_price = 0.0
             rub_oil_regime_signal: RubOilRegimeSignal | None = None
+            yield_slope_bps = 0.0
+            cbr_direction = ""
             if is_moex:
-                brent_rub_price, rub_oil_regime_signal = _compute_moex_sizing_data(
-                    ml_market_context
+                brent_rub_price, rub_oil_regime_signal, yield_slope_bps, cbr_direction = (
+                    _compute_moex_sizing_data(ml_market_context)
                 )
                 if brent_rub_price > 0:
                     print(f"  Brent-in-RUB: {brent_rub_price:,.0f} RUB/bbl")
@@ -1139,6 +1161,10 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                     print("  RUB/oil regime signal: active")
                 else:
                     print("  RUB/oil regime signal: disabled (insufficient data)")
+                if yield_slope_bps != 0.0:
+                    print(f"  Yield curve slope: {yield_slope_bps:+.0f} bps")
+                if cbr_direction:
+                    print(f"  CBR direction: {cbr_direction}")
 
             segment_trades[segment] = []
             # 1M RUB starting capital for MOEX segments (per user decision)
@@ -1172,6 +1198,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                     market_context=ml_market_context,
                     brent_rub_price=brent_rub_price,
                     rub_oil_regime_signal=rub_oil_regime_signal,
+                    yield_slope_bps=yield_slope_bps,
+                    cbr_direction=cbr_direction,
                 )
 
                 normalized_trades = _normalize_trades_to_usd(trades, segment)
