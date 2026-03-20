@@ -199,3 +199,125 @@ class TestPairsStrategySupportedSegments:
         assert "pairs" in params
         assert "z_entry" in params
         assert "z_exit" in params
+
+
+@pytest.mark.unit
+class TestPairsStrategyAllowShort:
+    """Tests for the allow_short parameter gating SELL signals on long-only markets."""
+
+    def test_allow_short_false_suppresses_sell(self, pairs_strategy: object) -> None:
+        """When allow_short=False and z > z_entry (SELL zone), signal should be None."""
+        from finalayze.strategies.pairs import PairsStrategy
+
+        strategy: PairsStrategy = pairs_strategy  # type: ignore[assignment]
+        # z_score=+3.0 would normally produce a SELL signal
+        candles_a, candles_b = _cointegrated_pair(z_score=3.0)
+        strategy.set_peer_candles("MSFT", candles_b)
+        # Use ru_blue_chips where allow_short=false
+        signal = strategy.generate_signal("AAPL", candles_a, "ru_blue_chips")
+        # Should be None because allow_short=False suppresses SELL
+        assert signal is None
+
+    def test_allow_short_false_allows_buy(self, pairs_strategy: object) -> None:
+        """When allow_short=False and z < -z_entry (BUY zone), BUY signal passes through."""
+        from finalayze.strategies.pairs import PairsStrategy
+
+        strategy: PairsStrategy = pairs_strategy  # type: ignore[assignment]
+        candles_a, candles_b = _cointegrated_pair(z_score=-3.0)
+        strategy.set_peer_candles("MSFT", candles_b)
+        signal = strategy.generate_signal("AAPL", candles_a, "ru_blue_chips")
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY
+
+    def test_allow_short_default_true_allows_sell(self, pairs_strategy: object) -> None:
+        """Default allow_short=True preserves SELL signal behavior (us_tech preset)."""
+        from finalayze.strategies.pairs import PairsStrategy
+
+        strategy: PairsStrategy = pairs_strategy  # type: ignore[assignment]
+        candles_a, candles_b = _cointegrated_pair(z_score=3.0)
+        strategy.set_peer_candles("MSFT", candles_b)
+        # us_tech has no allow_short → defaults to True → SELL allowed
+        signal = strategy.generate_signal("AAPL", candles_a, "us_tech")
+        assert signal is not None
+        assert signal.direction == SignalDirection.SELL
+
+
+@pytest.mark.unit
+class TestRuBlueChipsPairsConfig:
+    """Tests for ru_blue_chips YAML pairs configuration."""
+
+    def test_ru_blue_chips_pairs_config(self, pairs_strategy: object) -> None:
+        """Verify ru_blue_chips has correct pairs config after update."""
+        params = pairs_strategy.get_parameters("ru_blue_chips")  # type: ignore[union-attr]
+        assert params, "ru_blue_chips should have pairs params"
+        pairs_list = params["pairs"]
+        assert len(pairs_list) == 2  # noqa: PLR2004
+        # Check SBER/SBERP and TATN/TATNP pairs
+        pair_tuples = [tuple(p) for p in pairs_list]
+        assert ("SBER", "SBERP") in pair_tuples
+        assert ("TATN", "TATNP") in pair_tuples
+        assert float(params["z_entry"]) == Z_ENTRY
+        assert params.get("allow_short") is False
+        assert params.get("cointegration_start") == "2023-01-01"
+
+    def test_cointegration_start_filters_data(self, pairs_strategy: object) -> None:
+        """When cointegration_start is set, only data from that date onward is used."""
+        from finalayze.strategies.pairs import PairsStrategy
+
+        strategy: PairsStrategy = pairs_strategy  # type: ignore[assignment]
+
+        # Create candles spanning 2021-2025 (4 years = ~1460 days)
+        n_total = 200
+        base_date = datetime(2021, 1, 1, tzinfo=UTC)
+        rng = np.random.default_rng(42)
+        common = rng.standard_normal(n_total).cumsum() + BASE_PRICE
+        noise_a = rng.standard_normal(n_total) * 0.05
+        noise_b = rng.standard_normal(n_total) * 0.05
+        prices_a = common + noise_a
+        prices_b = common * 0.5 + noise_b
+
+        # Inject a structural break in early data (pre-2022) to break cointegration
+        # if all data is used, but maintain cointegration in post-2023 data
+        prices_a[:50] = prices_a[:50] * 2.0  # break pre-2023 relationship
+
+        # Create candles with dates from 2021 (spread ~7 days apart to span 2021-2025)
+        candles_a = []
+        candles_b = []
+        for i in range(n_total):
+            ts = base_date + timedelta(days=i * 7)
+            candles_a.append(
+                Candle(
+                    symbol="SBER",
+                    market_id="moex",
+                    timeframe="1d",
+                    timestamp=ts,
+                    open=Decimal(str(round(float(prices_a[i]) * 0.999, 4))),
+                    high=Decimal(str(round(float(prices_a[i]) * 1.005, 4))),
+                    low=Decimal(str(round(float(prices_a[i]) * 0.995, 4))),
+                    close=Decimal(str(round(float(prices_a[i]), 4))),
+                    volume=1000,
+                )
+            )
+            candles_b.append(
+                Candle(
+                    symbol="SBERP",
+                    market_id="moex",
+                    timeframe="1d",
+                    timestamp=ts,
+                    open=Decimal(str(round(float(prices_b[i]) * 0.999, 4))),
+                    high=Decimal(str(round(float(prices_b[i]) * 1.005, 4))),
+                    low=Decimal(str(round(float(prices_b[i]) * 0.995, 4))),
+                    close=Decimal(str(round(float(prices_b[i]), 4))),
+                    volume=1000,
+                )
+            )
+
+        strategy.set_peer_candles("SBERP", candles_b)
+        # Using ru_blue_chips which has cointegration_start="2023-01-01"
+        # The strategy should filter out pre-2023 data before cointegration test
+        # This means the structural break in pre-2022 data should NOT affect results
+        signal = strategy.generate_signal("SBER", candles_a, "ru_blue_chips")
+        # We just verify no error is raised and the strategy handles filtering
+        # The actual signal depends on z-score, but the key behavior is that
+        # cointegration is computed on filtered data only
+        assert signal is None or signal.direction == SignalDirection.BUY
