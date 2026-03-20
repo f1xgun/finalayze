@@ -74,7 +74,11 @@ Plans:
   1. CBRRegimeStep in the sizing pipeline scales equity positions down during hiking cycles and up during cutting cycles, using OFZ yield curve slope as a leading indicator (not raw CBR announcements)
   2. OFZ PK-to-PD rotation triggers when CBR cutting cycle is detected (2+ consecutive cuts), shifting bond allocation from floating-rate PK to fixed-rate PD
   3. SectorAllocationStep in the sizing pipeline (not in combiner) adjusts sector weights using MOEX sector indices -- energy overweight when Brent elevated, financials sensitive to CBR direction
-**Plans**: TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 10-01-PLAN.md -- CBRRegimeStep and SectorAllocationStep in equity sizing pipeline
+- [ ] 10-02-PLAN.md -- OFZ PK-to-PD rotation trigger in BondCycleProcessor
 
 ### Phase 11: Advanced Strategies and ML
 **Goal**: Preferred share arbitrage captures pref/ord spread convergence, and ML ensemble operates on ru_* segments with Russian macro features
@@ -112,6 +116,6 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 7. News Pipeline and Go-Live | v1.0 | 3/3 | Complete | 2026-03-15 |
 | 8. Data Foundation | v2.0 | 3/3 | Complete | 2026-03-20 |
 | 9. Strategy Wiring | v2.0 | 2/2 | Complete | 2026-03-20 |
-| 10. Macro Regime | v2.0 | 0/? | Not started | - |
+| 10. Macro Regime | v2.0 | 0/2 | Not started | - |
 | 11. Advanced Strategies and ML | v2.0 | 0/? | Not started | - |
 | 12. Portfolio Assembly | v2.0 | 0/? | Not started | - |
