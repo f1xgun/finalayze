@@ -32,6 +32,13 @@ _CONFIDENCE_BASE = 0.45
 _CONFIDENCE_SCALE = 0.06  # per 1% gap above threshold
 _MAX_CONFIDENCE = 0.90
 
+# Yield-based hold bar thresholds and periods
+_HIGH_YIELD_PCT = 8.0
+_MID_YIELD_PCT = 5.0
+_HIGH_YIELD_HOLD_BARS = 60
+_MID_YIELD_HOLD_BARS = 40
+_LOW_YIELD_HOLD_BARS = 25
+
 
 @dataclass(frozen=True, slots=True)
 class DividendEntry:
@@ -50,6 +57,7 @@ class _GapTracker:
     pre_exdiv_close: float
     gap_pct: float
     bars_since_entry: int = 0
+    max_hold_bars: int = 40  # default, overridden by yield tier
 
 
 class DividendGapStrategy(BaseStrategy):
@@ -94,6 +102,21 @@ class DividendGapStrategy(BaseStrategy):
             "max_hold_bars": self._max_hold_bars,
             "min_confidence": self._min_confidence,
         }
+
+    @staticmethod
+    def _yield_hold_bars(gap_pct: float) -> int:
+        """Map dividend yield (gap %) to max hold bars.
+
+        Higher yields get longer recovery windows:
+        - >= 8%: 60 bars (large MOEX dividends need ~3 months)
+        - >= 5%: 40 bars (~2 months)
+        - < 5%: 25 bars (~5 weeks)
+        """
+        if gap_pct >= _HIGH_YIELD_PCT:
+            return _HIGH_YIELD_HOLD_BARS
+        if gap_pct >= _MID_YIELD_PCT:
+            return _MID_YIELD_HOLD_BARS
+        return _LOW_YIELD_HOLD_BARS
 
     def add_dividend(self, symbol: str, entry: DividendEntry) -> None:
         """Register a dividend event in the calendar."""
@@ -160,8 +183,8 @@ class DividendGapStrategy(BaseStrategy):
                     ),
                 )
 
-            # Exit 2: max hold period reached
-            if tracker.bars_since_entry >= self._max_hold_bars:
+            # Exit 2: max hold period reached (per-entry yield-based limit)
+            if tracker.bars_since_entry >= tracker.max_hold_bars:
                 if tracker.gap_pct <= 0:
                     recovery_pct = 0.0
                 else:
@@ -184,7 +207,7 @@ class DividendGapStrategy(BaseStrategy):
                         "recovery_pct": round(recovery_pct, 2),
                     },
                     reasoning=(
-                        f"Max hold ({self._max_hold_bars} bars) reached, "
+                        f"Max hold ({tracker.max_hold_bars} bars) reached, "
                         f"gap recovery {recovery_pct:.1f}%"
                     ),
                 )
@@ -233,11 +256,12 @@ class DividendGapStrategy(BaseStrategy):
         if confidence < self._min_confidence:
             return None
 
-        # Track the gap
+        # Track the gap with yield-based hold bars
         self._active_gaps[symbol] = _GapTracker(
             ex_date=current_date,
             pre_exdiv_close=pre_exdiv_close,
             gap_pct=gap_pct,
+            max_hold_bars=self._yield_hold_bars(gap_pct),
         )
 
         return Signal(

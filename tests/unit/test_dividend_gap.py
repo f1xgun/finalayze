@@ -238,9 +238,10 @@ class TestMaxHoldExit:
     """SELL signal when max_hold_bars reached without gap closure."""
 
     def test_sell_signal_at_max_hold(self) -> None:
-        max_hold = 5  # short max_hold for test
+        # _DIVIDEND_AMOUNT=18 on _BASE_PRICE=300 is 6% yield -> 40 bars tier
+        yield_hold = 40
         exdiv = _exdiv_date()
-        strategy = _make_strategy(max_hold_bars=max_hold)
+        strategy = _make_strategy(max_hold_bars=60)  # safety ceiling
         strategy.add_dividend(
             _SYMBOL,
             DividendEntry(ex_date=exdiv, amount=_DIVIDEND_AMOUNT),
@@ -248,8 +249,8 @@ class TestMaxHoldExit:
 
         gap_close = _BASE_PRICE - Decimal(str(_DIVIDEND_AMOUNT))
 
-        # Pre-exdiv + ex-div day + max_hold bars at gap level (no recovery)
-        prices = [_BASE_PRICE] * _PRE_EXDIV_BARS + [gap_close] + [gap_close] * max_hold
+        # Pre-exdiv + ex-div day + yield_hold bars at gap level (no recovery)
+        prices = [_BASE_PRICE] * _PRE_EXDIV_BARS + [gap_close] + [gap_close] * yield_hold
         start = exdiv - timedelta(days=_PRE_EXDIV_BARS)
         candles = _make_candles(prices, start)
 
@@ -263,7 +264,7 @@ class TestMaxHoldExit:
         assert buy_signal is not None
         assert buy_signal.direction == SignalDirection.BUY
 
-        # After max_hold bars with open position -> SELL
+        # After yield_hold bars with open position -> SELL
         sell_signal = strategy.generate_signal(
             symbol=_SYMBOL,
             candles=candles,
@@ -274,16 +275,16 @@ class TestMaxHoldExit:
         assert sell_signal.direction == SignalDirection.SELL
 
     def test_no_sell_before_max_hold(self) -> None:
-        max_hold = 10
+        # _DIVIDEND_AMOUNT=18 on _BASE_PRICE=300 is 6% -> yield tier 40 bars
         exdiv = _exdiv_date()
-        strategy = _make_strategy(max_hold_bars=max_hold)
+        strategy = _make_strategy(max_hold_bars=60)
         strategy.add_dividend(
             _SYMBOL,
             DividendEntry(ex_date=exdiv, amount=_DIVIDEND_AMOUNT),
         )
 
         gap_close = _BASE_PRICE - Decimal(str(_DIVIDEND_AMOUNT))
-        bars_after = 3  # well before max_hold
+        bars_after = 3  # well before yield tier of 40
 
         prices = [_BASE_PRICE] * _PRE_EXDIV_BARS + [gap_close] + [gap_close] * bars_after
         start = exdiv - timedelta(days=_PRE_EXDIV_BARS)
@@ -297,7 +298,7 @@ class TestMaxHoldExit:
             segment_id=_SEGMENT_ID,
         )
 
-        # Not enough bars for max_hold exit, price still gapped -> HOLD (None)
+        # Not enough bars for yield-tier exit, price still gapped -> HOLD (None)
         signal = strategy.generate_signal(
             symbol=_SYMBOL,
             candles=candles,
