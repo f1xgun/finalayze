@@ -27,7 +27,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 **Milestone Goal:** Transform MOEX equity from negative Sharpe to profitable operation through universe cleanup, MOEX-native strategies, macro regime gating, and portfolio-level OFZ/equity allocation.
 
 - [x] **Phase 8: Data Foundation** - Fix vol target, universe, dividend calendar, and 2022 structural break so all MOEX backtests produce valid results (completed 2026-03-20)
-- [ ] **Phase 9: Strategy Wiring** - Connect existing DividendGap, CBR, and RUB/oil strategies to backtest engine and sizing pipeline
+- [x] **Phase 9: Strategy Wiring** - Connect existing DividendGap, CBR, and RUB/oil strategies to backtest engine and sizing pipeline (completed 2026-03-20)
 - [ ] **Phase 10: Macro Regime** - Add CBR regime sizing, OFZ rotation trigger, and sector allocation overlay to position sizing pipeline
 - [ ] **Phase 11: Advanced Strategies and ML** - Preferred share arbitrage and ML ensemble with Russian macro features for ru_* segments
 - [ ] **Phase 12: Portfolio Assembly** - Joint OFZ + equity backtest with 40/60 allocation and RUB crisis brake
@@ -60,11 +60,11 @@ Plans:
   3. CBRStrategyWrapper is registered in the combiner and generates signals around CBR rate decision dates
   4. BrentGateStep in the sizing pipeline reduces energy sector position sizes when Brent-in-RUB is below threshold
   5. RubOilRegimeStep in the sizing pipeline scales equity positions based on RUB/oil decorrelation state
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 09-01-PLAN.md -- DividendGap/CBR combiner wiring with event strategy bypass and yield-based hold bars
-- [ ] 09-02-PLAN.md -- RubOilRegimeStep and BrentGateStep sizing pipeline integration
+- [x] 09-01-PLAN.md -- DividendGap/CBR combiner wiring with event strategy bypass and yield-based hold bars
+- [x] 09-02-PLAN.md -- RubOilRegimeStep and BrentGateStep sizing pipeline integration
 
 ### Phase 10: Macro Regime
 **Goal**: MOEX equity positions are sized according to CBR rate regime, sector allocation rotates based on macro conditions, and OFZ allocation shifts when CBR cutting cycle begins
@@ -111,7 +111,7 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 6. Sandbox Validation | v1.0 | 4/4 | Complete | 2026-03-15 |
 | 7. News Pipeline and Go-Live | v1.0 | 3/3 | Complete | 2026-03-15 |
 | 8. Data Foundation | v2.0 | 3/3 | Complete | 2026-03-20 |
-| 9. Strategy Wiring | v2.0 | 0/2 | Not started | - |
+| 9. Strategy Wiring | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 10. Macro Regime | v2.0 | 0/? | Not started | - |
 | 11. Advanced Strategies and ML | v2.0 | 0/? | Not started | - |
 | 12. Portfolio Assembly | v2.0 | 0/? | Not started | - |
