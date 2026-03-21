@@ -23,7 +23,9 @@ from finalayze.core.exceptions import ModeError
 from finalayze.core.modes import ModeManager, WorkMode
 
 if TYPE_CHECKING:
+    from finalayze.core.kill_switch import KillSwitch
     from finalayze.execution.tinkoff_broker import TinkoffBroker
+    from finalayze.monitoring.health_monitor import HealthMonitor
 
 _log = structlog.get_logger()
 
@@ -37,6 +39,10 @@ _start_time = datetime.now(UTC)
 
 # Tinkoff broker reference for health probes (set via set_tinkoff_broker)
 _tinkoff_broker: TinkoffBroker | None = None
+
+# Production health monitor and kill switch (set via setter functions)
+_health_monitor: HealthMonitor | None = None
+_kill_switch: KillSwitch | None = None
 
 # Feed freshness tracking: source -> last candle timestamp
 _last_candle_timestamps: dict[str, datetime] = {}
@@ -128,6 +134,29 @@ class ModeRequest(BaseModel):
     confirm_token: str | None = None
 
 
+class ProductionHealthResponse(BaseModel):
+    """Per-component production health status."""
+
+    model_config = ConfigDict(frozen=True)
+    broker_ok: bool
+    feed_fresh: bool
+    loop_alive: bool
+    overall: bool
+    timestamp: str
+    details: dict[str, str]
+
+
+class KillResponse(BaseModel):
+    """Result of KillSwitch activation."""
+
+    model_config = ConfigDict(frozen=True)
+    orders_cancelled: int
+    scheduler_stopped: bool
+    breakers_escalated: int
+    alert_sent: bool
+    elapsed_seconds: float
+
+
 # ── Liveness helpers ─────────────────────────────────────────────────────────
 
 
@@ -162,6 +191,18 @@ def set_tinkoff_broker(broker: TinkoffBroker | None) -> None:
     """Set the TinkoffBroker instance for health probes."""
     global _tinkoff_broker  # noqa: PLW0603
     _tinkoff_broker = broker
+
+
+def set_health_monitor(monitor: HealthMonitor) -> None:
+    """Set the HealthMonitor instance for production health endpoint."""
+    global _health_monitor  # noqa: PLW0603
+    _health_monitor = monitor
+
+
+def set_kill_switch(ks: KillSwitch) -> None:
+    """Set the KillSwitch instance for REST kill endpoint."""
+    global _kill_switch  # noqa: PLW0603
+    _kill_switch = ks
 
 
 def update_feed_timestamp(source: str, ts: datetime) -> None:
@@ -333,3 +374,49 @@ async def set_mode(
     except ModeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ModeResponse(mode=str(mgr.current_mode))
+
+
+# ── Production health & kill endpoints ────────────────────────────────────────
+
+
+@router.get("/health/production", response_model=ProductionHealthResponse)
+async def health_production() -> ProductionHealthResponse:
+    """Per-component production health status. No auth required.
+
+    Returns 200 when all checks pass, 503 when any fail.
+    """
+    if _health_monitor is None:
+        raise HTTPException(status_code=503, detail="Health monitor not configured")
+
+    result = _health_monitor.check_now()
+    overall = result.broker_ok and result.feed_fresh and result.loop_alive
+
+    response = ProductionHealthResponse(
+        broker_ok=result.broker_ok,
+        feed_fresh=result.feed_fresh,
+        loop_alive=result.loop_alive,
+        overall=overall,
+        timestamp=result.timestamp.isoformat(),
+        details=result.details,
+    )
+
+    if not overall:
+        raise HTTPException(status_code=503, detail=response.model_dump())
+
+    return response
+
+
+@router.post("/kill", response_model=KillResponse)
+async def kill_endpoint() -> KillResponse:
+    """Trigger emergency shutdown via REST API. No auth required (internal network)."""
+    if _kill_switch is None:
+        raise HTTPException(status_code=503, detail="Kill switch not configured")
+
+    result = _kill_switch.activate(reason="rest_api")
+    return KillResponse(
+        orders_cancelled=result.orders_cancelled,
+        scheduler_stopped=result.scheduler_stopped,
+        breakers_escalated=result.breakers_escalated,
+        alert_sent=result.alert_sent,
+        elapsed_seconds=result.elapsed_seconds,
+    )

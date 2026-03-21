@@ -171,7 +171,7 @@ class TelegramBotHandler:
 
         await self._alerter._send("\n".join(lines))
 
-    async def handle_stop(self, chat_id: str) -> None:  # noqa: ARG002
+    async def handle_stop(self, chat_id: str) -> None:
         """Emergency stop: halt all trading cycles.
 
         Args:

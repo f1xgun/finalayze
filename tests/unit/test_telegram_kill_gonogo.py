@@ -10,7 +10,6 @@ Validates:
 
 from __future__ import annotations
 
-import sys
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -19,7 +18,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from finalayze.core.telegram_bot import TelegramBotHandler
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -112,7 +110,9 @@ class TestKillCommand:
             await handler.handle_update(_make_update("12345", "CONFIRM"))
 
         ks.activate.assert_called_once()
-        reason = ks.activate.call_args[1].get("reason", ks.activate.call_args[0][0] if ks.activate.call_args[0] else "")
+        call_kwargs = ks.activate.call_args[1]
+        call_args = ks.activate.call_args[0]
+        reason = call_kwargs.get("reason", call_args[0] if call_args else "")
         assert "telegram" in reason or "12345" in reason
 
     @pytest.mark.asyncio
@@ -198,17 +198,18 @@ class TestGoNoGoCommand:
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "finalayze.core.telegram_bot.async_session_factory",
-            mock_factory,
-            create=True,
-        ):
-            # Patch the deferred import
-            with patch.dict(
+        with (
+            patch(
+                "finalayze.core.telegram_bot.async_session_factory",
+                mock_factory,
+                create=True,
+            ),
+            patch.dict(
                 "sys.modules",
                 {"finalayze.core.db": MagicMock(async_session_factory=mock_factory)},
-            ):
-                await handler.handle_update(_make_update("12345", "/gonogo"))
+            ),
+        ):
+            await handler.handle_update(_make_update("12345", "/gonogo"))
 
         reporter.evaluate.assert_called_once()
         msg = handler._alerter._send.call_args[0][0]

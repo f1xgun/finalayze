@@ -43,8 +43,13 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
             _trading_loop_instance = _build_trading_loop(_settings)
             if _trading_loop_instance is not None:
                 # Wire real health probes
-                from finalayze.api.v1.system import set_tinkoff_broker  # noqa: PLC0415
+                from finalayze.api.v1.system import (  # noqa: PLC0415
+                    set_health_monitor,
+                    set_kill_switch,
+                    set_tinkoff_broker,
+                )
                 from finalayze.execution.tinkoff_broker import TinkoffBroker  # noqa: PLC0415
+                from finalayze.monitoring.health_monitor import HealthMonitor  # noqa: PLC0415
 
                 broker_router = getattr(_trading_loop_instance, "_broker_router", None)
                 if broker_router is not None:
@@ -55,6 +60,24 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                             log.info("tinkoff_broker_wired_to_health")
                     except Exception:
                         log.debug("tinkoff_broker_health_wire_skipped", exc_info=True)
+
+                # Wire KillSwitch to REST API
+                kill_switch = getattr(_trading_loop_instance, "_kill_switch", None)
+                if kill_switch is not None:
+                    set_kill_switch(kill_switch)
+                    log.info("kill_switch_wired_to_rest_api")
+
+                # Create and wire HealthMonitor
+                alerter_ref = getattr(_trading_loop_instance, "_alerter_ref", None)
+                if broker_router is not None and alerter_ref is not None:
+                    health_monitor = HealthMonitor(
+                        broker_router=broker_router,
+                        trading_loop=_trading_loop_instance,  # type: ignore[arg-type]
+                        alerter=alerter_ref,
+                    )
+                    set_health_monitor(health_monitor)
+                    health_monitor.start()
+                    log.info("health_monitor_started")
 
                 _trading_loop_thread = threading.Thread(
                     target=_trading_loop_instance.start,  # type: ignore[union-attr]
@@ -69,7 +92,20 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
     yield
 
     # Shutdown
+    # Stop health monitor first
     if _trading_loop_instance is not None:
+        _hm = getattr(_trading_loop_instance, "_health_monitor_ref", None)
+        if _hm is None:
+            # Check if we stored it via set_health_monitor
+            try:
+                from finalayze.api.v1.system import _health_monitor as _hm_ref  # noqa: PLC0415
+
+                if _hm_ref is not None:
+                    _hm_ref.stop()
+                    log.info("health_monitor_stopped")
+            except Exception:
+                log.debug("health_monitor_stop_failed", exc_info=True)
+
         try:
             _trading_loop_instance.stop()  # type: ignore[union-attr]
             log.info("trading_loop_stopped")
@@ -309,6 +345,12 @@ def _build_trading_loop(settings: object) -> object | None:
 
             sandbox_monitor = SandboxMonitorService(alerter=alerter, market_id="moex")
 
+        # ── Kill Switch ───────────────────────────────────────────────
+        from pathlib import Path  # noqa: PLC0415
+
+        from finalayze.core.kill_switch import KillSwitch  # noqa: PLC0415
+
+        # Build TradingLoop first, then create KillSwitch that references it
         # ── Build TradingLoop ────────────────────────────────────────────
         loop = TradingLoop(
             settings=settings,  # type: ignore[arg-type]
@@ -329,6 +371,30 @@ def _build_trading_loop(settings: object) -> object | None:
             combined_analyzer=combined_analyzer,
             sandbox_monitor=sandbox_monitor,
         )
+        # ── Create KillSwitch (after loop exists) ────────────────────
+        kill_switch = KillSwitch(
+            broker_router=broker_router,
+            trading_loop=loop,
+            circuit_breakers=circuit_breakers,
+            alerter=alerter,
+            flag_path=Path(
+                getattr(settings, "kill_switch_flag_path", "/tmp/finalayze_killed"),  # noqa: S108
+            ),
+        )
+
+        if kill_switch.is_killed:
+            log.critical(
+                "system_previously_killed",
+                msg="System was previously killed. Clear flag to restart.",
+                flag_path=str(kill_switch._flag_path),
+            )
+            return None
+
+        # Store kill_switch on loop for access from lifespan
+        loop._kill_switch = kill_switch  # type: ignore[attr-defined]
+        loop._circuit_breakers = circuit_breakers  # type: ignore[attr-defined]
+        loop._alerter_ref = alerter  # type: ignore[attr-defined]
+
         log.info(
             "trading_loop_built",
             markets=broker_router.registered_markets,
