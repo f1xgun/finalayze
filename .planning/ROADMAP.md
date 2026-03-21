@@ -133,7 +133,11 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. BondBacktestEngine applies apply_ofz_rotation when CBR cutting cycle detected, producing different equity curves vs non-rotation baseline
   2. run_portfolio_backtest.py runs real BondBacktestEngine and BacktestEngine (not stubs), producing a merged equity curve with WF Sharpe
-**Plans**: TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 14-01-PLAN.md -- Wire apply_ofz_rotation into BondBacktestEngine (MACRO-02 gap closure)
+- [ ] 14-02-PLAN.md -- Implement real engine calls in run_portfolio_backtest.py (PORT-01/02/03 gap closure)
 
 ## Progress
 
