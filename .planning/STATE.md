@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: MOEX Profitability
-status: in-progress
+status: completed
 stopped_at: Completed 14-02-PLAN.md
-last_updated: "2026-03-21T10:14:30Z"
+last_updated: "2026-03-21T10:16:03.265Z"
 last_activity: 2026-03-21 -- Completed 14-02 Portfolio CLI Real Engine Wiring
 progress:
-  total_phases: 8
+  total_phases: 7
   completed_phases: 6
   total_plans: 16
-  completed_plans: 16
+  completed_plans: 15
   percent: 100
 ---
 

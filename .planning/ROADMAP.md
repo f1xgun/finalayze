@@ -159,4 +159,4 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 14
 | 11. Advanced Strategies and ML | v2.0 | 4/4 | Complete | 2026-03-21 |
 | 12. Portfolio Assembly | v2.0 | 2/2 | Complete | 2026-03-21 |
 | 13. Script Wiring Fixes | 1/1 | Complete    | 2026-03-21 | - |
-| 14. Bond Backtest and Portfolio CLI | 2/2 | Complete   | 2026-03-21 | - |
+| 14. Bond Backtest and Portfolio CLI | 2/2 | Complete    | 2026-03-21 | - |
