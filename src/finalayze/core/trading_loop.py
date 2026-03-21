@@ -193,6 +193,9 @@ class TradingLoop:
         self._scheduler: BackgroundScheduler | None = None
         self._stop_event = threading.Event()
 
+        # Total strategy cycles completed (used by HealthMonitor for liveness)
+        self._total_cycles: int = 0
+
         # Per-cycle portfolio cache: market_id -> PortfolioState
         # Populated at the start of each strategy cycle, cleared at the end.
         self._cycle_portfolio_cache: dict[str, Any] = {}
@@ -369,6 +372,11 @@ class TradingLoop:
             self._async_thread = thread
         future = asyncio.run_coroutine_threadsafe(coro, self._async_loop)
         return future.result(timeout=timeout)
+
+    @property
+    def total_cycles(self) -> int:
+        """Return the total number of strategy cycles completed."""
+        return self._total_cycles
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -990,6 +998,8 @@ class TradingLoop:
     def _strategy_cycle(self) -> None:
         """For each market and instrument, generate a signal and submit orders."""
         import time as _time  # noqa: PLC0415
+
+        self._total_cycles += 1
 
         # 6A.1: Mode gate -- DEBUG mode must not send real orders
         if not self._settings.mode.can_submit_orders():

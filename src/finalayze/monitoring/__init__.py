@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from finalayze.monitoring.anomaly_detector import AnomalyDetector
 from finalayze.monitoring.go_no_go import GateReport, GateThresholds, GateVerdict, GoNoGoReporter
+from finalayze.monitoring.health_monitor import HealthCheckResult, HealthMonitor
 from finalayze.monitoring.sandbox_monitor import CycleMetrics, SandboxMonitorService
 
 __all__ = [
@@ -13,5 +14,7 @@ __all__ = [
     "GateThresholds",
     "GateVerdict",
     "GoNoGoReporter",
+    "HealthCheckResult",
+    "HealthMonitor",
     "SandboxMonitorService",
 ]
