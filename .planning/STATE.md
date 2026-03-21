@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Production Readiness
-status: in_progress
-stopped_at: Completed 17-03-PLAN.md
-last_updated: "2026-03-22T00:00:00Z"
-last_activity: 2026-03-22 -- Completed Plan 17-03 (TelegramBotHandler Wiring Gap Closure)
+status: completed
+stopped_at: Completed 18-01-PLAN.md
+last_updated: "2026-03-21T22:28:32.408Z"
+last_activity: 2026-03-22 -- Completed Plan 18-01 (Sandbox Go/No-Go REST Endpoint)
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
-  percent: 100
+  total_plans: 10
+  completed_plans: 9
+  percent: 90
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-21)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 17 -- Production Operations
+**Current focus:** Phase 18 -- Dashboard and API Integration
 
 ## Current Position
 
-Phase: 17 of 18 (Production Operations)
-Plan: 3 of 3 complete
+Phase: 18 of 18 (Dashboard and API Integration)
+Plan: 1 of 1 complete
 Status: Complete
-Last activity: 2026-03-22 -- Completed Plan 17-03 (TelegramBotHandler Wiring Gap Closure)
+Last activity: 2026-03-22 -- Completed Plan 18-01 (Sandbox Go/No-Go REST Endpoint)
 
-Progress: [██████████] 100% (3/3 plans complete)
+Progress: [█████████░] 90% (9/10 plans complete)
 
 ## Performance Metrics
 
@@ -77,6 +77,8 @@ Key carry-forward decisions for v3.0:
 - Module-level setters (set_health_monitor, set_kill_switch) for REST endpoint state injection
 - Module-level _bot_handler_instance follows _trading_loop_instance pattern for lifespan wiring
 - GoNoGoReporter instantiated from gate_thresholds.yaml in lifespan, not create_app
+- GoNoGoResponse uses string verdict for JSON serialization simplicity
+- Sandbox endpoint wired in both bot-present and bot-absent code paths for standalone API use
 
 ### Pending Todos
 
@@ -90,6 +92,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22
-Stopped at: Completed 17-03-PLAN.md
+Last session: 2026-03-21T22:28:32.405Z
+Stopped at: Completed 18-01-PLAN.md
 Resume file: None

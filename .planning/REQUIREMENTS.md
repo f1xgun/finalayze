@@ -18,7 +18,7 @@ Requirements for production readiness milestone. Each maps to roadmap phases.
 
 - [x] **GATE-01**: GoNoGoReporter evaluates formalized thresholds (uptime ≥99%, fill rate ≥95%, max DD <5%, trades ≥5/5days, signal divergence <50%)
 - [x] **GATE-02**: Gate thresholds derived from walk-forward backtest distribution percentiles, not hardcoded round numbers
-- [ ] **GATE-03**: REST endpoint `/sandbox/gonogo` returns structured pass/fail report with per-criterion breakdown
+- [x] **GATE-03**: REST endpoint `/sandbox/gonogo` returns structured pass/fail report with per-criterion breakdown
 
 ### Gradual Rollout
 
@@ -63,7 +63,7 @@ Deferred to v4.0+.
 | MON-04 | Phase 16 | Complete |
 | GATE-01 | Phase 16 | Complete |
 | GATE-02 | Phase 16 | Complete |
-| GATE-03 | Phase 18 | Pending |
+| GATE-03 | Phase 18 | Complete |
 | ROLL-01 | Phase 15 | Complete |
 | ROLL-02 | Phase 15 | Complete |
 | ROLL-03 | Phase 15 | Complete |
