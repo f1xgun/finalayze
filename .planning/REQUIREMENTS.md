@@ -9,9 +9,9 @@ Requirements for MOEX profitability milestone. Each maps to roadmap phases.
 
 ### Data Foundation
 
-- [x] **DATA-01**: Vol target recalibrated for MOEX segments (0.35-0.45 instead of US-calibrated 0.19)
-- [x] **DATA-02**: Toxic symbols removed from universe (GAZP, VTBR, SNGS, IRAO, ALRS), confidence thresholds raised to 0.38+
-- [x] **DATA-03**: Dividend calendar expanded to 150+ events including cancelled/reduced dividends via T-Invest API
+- [ ] **DATA-01**: Vol target recalibrated for MOEX segments (0.35-0.45 instead of US-calibrated 0.19)
+- [ ] **DATA-02**: Toxic symbols removed from universe (GAZP, VTBR, SNGS, IRAO, ALRS), confidence thresholds raised to 0.38+
+- [ ] **DATA-03**: Dividend calendar expanded to 150+ events including cancelled/reduced dividends via T-Invest API
 - [x] **DATA-04**: Feb-Mar 2022 structural break excluded from vol/ATR calculations, separate regime classification
 
 ### Strategy Wiring
@@ -24,7 +24,7 @@ Requirements for MOEX profitability milestone. Each maps to roadmap phases.
 ### Macro Regime
 
 - [x] **MACRO-01**: CBRRegimeStep in sizing pipeline — CBR rate level + direction affects equity allocation sizing
-- [x] **MACRO-02**: OFZ PK-to-PD rotation trigger — detects CBR cutting cycle start for bond allocation shift
+- [ ] **MACRO-02**: OFZ PK-to-PD rotation trigger — detects CBR cutting cycle start for bond allocation shift
 - [x] **MACRO-03**: SectorAllocationStep in sizing pipeline for sector rotation using MOEX sector indices (MOEXOG, MOEXFN, etc.)
 
 ### Advanced Strategies
@@ -64,16 +64,16 @@ Deferred to v3.0+.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 8 | Complete |
-| DATA-02 | Phase 8 | Complete |
-| DATA-03 | Phase 8 | Complete |
+| DATA-01 | Phase 13 (gap closure) | Pending |
+| DATA-02 | Phase 13 (gap closure) | Pending |
+| DATA-03 | Phase 13 (gap closure) | Pending |
 | DATA-04 | Phase 8 | Complete |
 | STRAT-01 | Phase 9 | Complete |
 | STRAT-02 | Phase 9 | Complete |
 | STRAT-03 | Phase 9 | Complete |
 | STRAT-04 | Phase 9 | Complete |
 | MACRO-01 | Phase 10 | Complete |
-| MACRO-02 | Phase 10 | Complete |
+| MACRO-02 | Phase 14 (gap closure) | Pending |
 | MACRO-03 | Phase 10 | Complete |
 | ADV-01 | Phase 11 | Complete |
 | ADV-02 | Phase 11 | Complete |

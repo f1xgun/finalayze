@@ -31,6 +31,8 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 - [x] **Phase 10: Macro Regime** - Add CBR regime sizing, OFZ rotation trigger, and sector allocation overlay to position sizing pipeline (completed 2026-03-20)
 - [x] **Phase 11: Advanced Strategies and ML** - Preferred share arbitrage and ML ensemble with Russian macro features for ru_* segments (completed 2026-03-21)
 - [x] **Phase 12: Portfolio Assembly** - Joint OFZ + equity backtest with 40/60 allocation and RUB crisis brake (completed 2026-03-21)
+- [ ] **Phase 13: Script Wiring Fixes** - Sync UNIVERSE dict, wire DividendEntry.status in all data paths (gap closure)
+- [ ] **Phase 14: Bond Backtest and Portfolio CLI** - Wire OFZ rotation into bond backtest, implement real engine calls in portfolio CLI (gap closure)
 
 ## Phase Details
 
@@ -110,10 +112,30 @@ Plans:
 - [x] 12-01-PLAN.md -- PortfolioBacktestOrchestrator with 40/60 allocation, rebalancing, and USDRUB crisis brake
 - [x] 12-02-PLAN.md -- Walk-forward Sharpe on merged curve and portfolio backtest CLI script
 
+### Phase 13: Script Wiring Fixes
+**Goal**: All audit integration gaps in run_iteration.py are closed — toxic symbols excluded from UNIVERSE, DividendEntry.status passed in all data paths
+**Depends on**: Phase 12
+**Requirements**: DATA-01, DATA-02, DATA-03
+**Gap Closure:** Closes gaps from v2.0 audit
+**Success Criteria** (what must be TRUE):
+  1. run_iteration.py UNIVERSE dict for all ru_* segments excludes GAZP, VTBR, SNGS, SNGSP, IRAO, ALRS (synced with config/segments.py)
+  2. _setup_dividend_gap_strategy passes status= to DividendEntry constructor in all 3 data loading paths (Tinkoff API, event data JSON, static YAML)
+**Plans**: TBD
+
+### Phase 14: Bond Backtest and Portfolio CLI
+**Goal**: OFZ rotation is exercised in bond backtests and run_portfolio_backtest.py produces real merged equity curves
+**Depends on**: Phase 13
+**Requirements**: MACRO-02, PORT-01, PORT-02, PORT-03
+**Gap Closure:** Closes gaps from v2.0 audit
+**Success Criteria** (what must be TRUE):
+  1. BondBacktestEngine applies apply_ofz_rotation when CBR cutting cycle detected, producing different equity curves vs non-rotation baseline
+  2. run_portfolio_backtest.py runs real BondBacktestEngine and BacktestEngine (not stubs), producing a merged equity curve with WF Sharpe
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
+Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 14
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -129,3 +151,5 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 10. Macro Regime | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 11. Advanced Strategies and ML | v2.0 | 4/4 | Complete | 2026-03-21 |
 | 12. Portfolio Assembly | v2.0 | 2/2 | Complete | 2026-03-21 |
+| 13. Script Wiring Fixes | v2.0 | 0/? | Not started | - |
+| 14. Bond Backtest and Portfolio CLI | v2.0 | 0/? | Not started | - |
