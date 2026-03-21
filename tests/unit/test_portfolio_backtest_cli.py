@@ -109,7 +109,7 @@ class TestRunBondBacktest:
             "run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher
         ), patch("run_portfolio_backtest.build_default_registry"), patch(
             "run_portfolio_backtest.BondBacktestEngine", mock_engine_class
-        ):
+        ), patch("run_portfolio_backtest.BondDurationRotationStrategy"):
             from run_portfolio_backtest import _run_bond_backtest
 
             result = _run_bond_backtest(

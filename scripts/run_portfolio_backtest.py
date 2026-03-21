@@ -14,9 +14,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import traceback
-from datetime import date
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,12 @@ from finalayze.backtest.portfolio_orchestrator import (
     PortfolioBacktestResult,
 )
 
+from finalayze.backtest.bond_engine import BondBacktestConfig, BondBacktestEngine
+from finalayze.core.schemas import Candle, DEFAULT_LAYER_CONFIGS
+from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
+from finalayze.markets.instruments import build_default_registry
+from finalayze.strategies.bond_duration_rotation import BondDurationRotationStrategy
+
 logger = structlog.get_logger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -52,6 +60,16 @@ _DEFAULT_START_DATE = "2023-01-01"
 _DEFAULT_END_DATE = "2024-12-31"
 _WF_SHARPE_TARGET = 0.10
 _WEIGHT_SUM_TOLERANCE = 0.01
+
+# OFZ tickers (same as scripts/validate_ofz_data.py)
+_OFZ_PD_TICKERS = [
+    "SU26238RMFS4", "SU26239RMFS2", "SU26241RMFS8", "SU26243RMFS4",
+    "SU26244RMFS2", "SU26246RMFS7", "SU26252RMFS5", "SU26253RMFS3",
+]
+_OFZ_PK_TICKERS = [
+    "SU29007RMFS0", "SU29008RMFS8", "SU29009RMFS6", "SU29010RMFS4",
+]
+_ALL_OFZ_TICKERS = _OFZ_PD_TICKERS + _OFZ_PK_TICKERS
 
 
 def _parse_args() -> argparse.Namespace:
@@ -91,27 +109,90 @@ def _parse_args() -> argparse.Namespace:
 def _run_bond_backtest(
     bond_capital: float,
     start_date: date,
-    end_date: date,  # noqa: ARG001
+    end_date: date,
 ) -> Any | None:
     """Run bond (OFZ) backtest and return BondBacktestResult or None on failure."""
+    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN", "")
+    if not token:
+        logger.warning("FINALAYZE_TINKOFF_TOKEN not set -- skipping bond backtest")
+        return None
+
     try:
         logger.info(
             "Starting bond backtest",
             capital=bond_capital,
             start=str(start_date),
+            end=str(end_date),
         )
 
-        # Bond engine requires OFZ candle data and macro context -- these
-        # must come from cached data or live T-Bank API.  If unavailable,
-        # we skip the bond component gracefully.
-        logger.warning(
-            "Bond backtest requires OFZ candle data and macro context. "
-            "Ensure data is available via T-Bank API or cache."
+        fetcher = TinkoffFetcher(
+            token=token, registry=build_default_registry(), sandbox=False,
         )
 
-        # Placeholder: in production, load bond data and run engine.run(...)
-        # For now, return None to indicate bond data is not available.
-        return None
+        candles_by_symbol: dict[str, list[Candle]] = {}
+        bond_info_dict: dict[str, Any] = {}
+        coupon_schedule: dict[str, list[Any]] = {}
+
+        for ticker in _ALL_OFZ_TICKERS:
+            logger.debug("fetching_bond_data", ticker=ticker)
+            try:
+                info = fetcher.fetch_bond_info(ticker)
+                raw = fetcher.fetch_bond_candles(info.figi, start_date, end_date)
+                if not raw:
+                    logger.debug("no_candles", ticker=ticker)
+                    continue
+                candles = [
+                    Candle(
+                        symbol=ticker,
+                        market_id="moex",
+                        timeframe="1d",
+                        open=r["close"],
+                        high=r["close"],
+                        low=r["close"],
+                        close=r["close"],
+                        volume=r["volume"],
+                        timestamp=datetime.combine(
+                            r["date"], datetime.min.time(), tzinfo=UTC,
+                        ),
+                    )
+                    for r in raw
+                ]
+                coupons = fetcher.fetch_bond_coupons(info.figi, start_date, end_date)
+                candles_by_symbol[ticker] = candles
+                bond_info_dict[ticker] = info
+                coupon_schedule[ticker] = coupons
+            except Exception:
+                logger.warning(
+                    "bond_data_fetch_failed",
+                    ticker=ticker,
+                    exc=traceback.format_exc(),
+                )
+
+        if not candles_by_symbol:
+            logger.warning("no_bond_data_available")
+            return None
+
+        # Build strategy from bond metadata
+        durations = {sym: Decimal("5") for sym in candles_by_symbol}
+        maturities = {sym: bond_info_dict[sym].maturity_date for sym in candles_by_symbol}
+        coupon_rates = {sym: bond_info_dict[sym].coupon_rate for sym in candles_by_symbol}
+        strategy = BondDurationRotationStrategy(
+            bond_durations=durations,
+            bond_maturities=maturities,
+            coupon_rates=coupon_rates,
+        )
+
+        config = BondBacktestConfig(initial_cash=Decimal(str(int(bond_capital))))
+        engine = BondBacktestEngine(config=config)
+
+        return engine.run(
+            candles_by_symbol=candles_by_symbol,
+            bond_info=bond_info_dict,
+            coupon_schedule=coupon_schedule,
+            strategy_fn=strategy,
+            layer_configs=DEFAULT_LAYER_CONFIGS,
+            as_of_date=end_date,
+        )
 
     except Exception:
         logger.warning(
