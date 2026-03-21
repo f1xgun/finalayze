@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: MOEX Profitability
-status: completed
-stopped_at: Completed 13-01-PLAN.md
-last_updated: "2026-03-21T09:50:15.192Z"
-last_activity: 2026-03-21 -- Completed 13-01 Script Wiring Fixes
+status: in-progress
+stopped_at: Completed 14-01-PLAN.md
+last_updated: "2026-03-21T10:01:08Z"
+last_activity: 2026-03-21 -- Completed 14-01 OFZ Rotation in BondBacktestEngine
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 5
-  total_plans: 14
-  completed_plans: 13
-  percent: 93
+  total_plans: 16
+  completed_plans: 14
+  percent: 88
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-20)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 13 -- Script Wiring Fixes
+**Current focus:** Phase 14 -- Bond Backtest and Portfolio CLI
 
 ## Current Position
 
-Phase: 13 of 13 (Script Wiring Fixes) -- sixth phase of v2.0
-Plan: 1 of 1 in current phase
-Status: Complete
-Last activity: 2026-03-21 -- Completed 13-01 Script Wiring Fixes
+Phase: 14 of 14 (Bond Backtest and Portfolio CLI) -- seventh phase of v2.0
+Plan: 1 of 2 in current phase
+Status: In Progress
+Last activity: 2026-03-21 -- Completed 14-01 OFZ Rotation in BondBacktestEngine
 
-Progress: [█████████░] 93% (Phase 13: 1/1 plans complete)
+Progress: [████████░░] 88% (Phase 14: 1/2 plans complete)
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [█████████░] 93% (Phase 13: 1/1 plans complete)
 | 12    | 01   | 5min     | 1     | 2     |
 | 12    | 02   | 5min     | 2     | 3     |
 | Phase 13 P01 | 2min | 1 tasks | 2 files |
+| 14    | 01   | 3min     | 1     | 2     |
 
 ## Accumulated Context
 
@@ -102,6 +103,7 @@ Recent decisions affecting current work:
 - [12-02]: WF uses 12mo/6mo/3mo windows, slices pre-computed curve (no engine re-runs)
 - [12-02]: RUONIA 15% as risk-free rate for WF excess Sharpe computation
 - [12-02]: Too-short curves (<18 months) return WF Sharpe = 0.0 gracefully
+- [14-01]: Lazy import of apply_ofz_rotation inside run() to avoid circular dependency with bond_cycle.py
 
 ### Pending Todos
 
@@ -115,6 +117,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T09:49:31.954Z
-Stopped at: Completed 13-01-PLAN.md
+Last session: 2026-03-21T10:01:08Z
+Stopped at: Completed 14-01-PLAN.md
 Resume file: None

@@ -136,7 +136,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 14-01-PLAN.md -- Wire apply_ofz_rotation into BondBacktestEngine (MACRO-02 gap closure)
+- [x] 14-01-PLAN.md -- Wire apply_ofz_rotation into BondBacktestEngine (MACRO-02 gap closure)
 - [ ] 14-02-PLAN.md -- Implement real engine calls in run_portfolio_backtest.py (PORT-01/02/03 gap closure)
 
 ## Progress
@@ -159,4 +159,4 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 14
 | 11. Advanced Strategies and ML | v2.0 | 4/4 | Complete | 2026-03-21 |
 | 12. Portfolio Assembly | v2.0 | 2/2 | Complete | 2026-03-21 |
 | 13. Script Wiring Fixes | 1/1 | Complete    | 2026-03-21 | - |
-| 14. Bond Backtest and Portfolio CLI | v2.0 | 0/? | Not started | - |
+| 14. Bond Backtest and Portfolio CLI | v2.0 | 1/2 | In Progress | - |
