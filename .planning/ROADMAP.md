@@ -57,7 +57,11 @@ Full details: `.planning/milestones/v2.0-ROADMAP.md`
   1. Operator can set FINALAYZE_ROLLOUT_PHASE=MINIMAL and the system starts with 3% max position, 1% daily loss, 2% DD auto-stop limits enforced by PreTradeChecker and CircuitBreaker
   2. Operator can switch rollout phase to STANDARD or FULL and risk limits adjust accordingly without code changes
   3. Capital ladder validation script confirms that position sizing produces valid MOEX lot sizes at 50K, 150K, 500K, and 2.5M RUB capital tiers
-**Plans**: TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 15-01-PLAN.md -- RolloutPhase enum, RolloutLimits dataclass, Settings integration
+- [ ] 15-02-PLAN.md -- Risk wiring (PreTradeChecker/CircuitBreaker/LossLimitTracker), cross-market bug fix, capital ladder script
 
 ### Phase 16: Sandbox Monitoring and Go/No-Go Gate
 **Goal**: System collects sandbox execution metrics and produces a structured go/no-go evaluation report with calibrated thresholds
@@ -97,7 +101,7 @@ Full details: `.planning/milestones/v2.0-ROADMAP.md`
 |-------|-----------|-------|--------|-----------|
 | 1-7 | v1.0 | 22/22 | Complete | 2026-03-19 |
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
-| 15. Schemas, Config, Rollout | v3.0 | 0/TBD | Not started | - |
+| 15. Schemas, Config, Rollout | v3.0 | 0/2 | Planning | - |
 | 16. Monitoring and Gate | v3.0 | 0/TBD | Not started | - |
 | 17. Production Operations | v3.0 | 0/TBD | Not started | - |
 | 18. Dashboard and API | v3.0 | 0/TBD | Not started | - |
