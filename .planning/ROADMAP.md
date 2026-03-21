@@ -4,6 +4,7 @@
 
 - ✅ **v1.0 MOEX MVP** -- Phases 1-7 (shipped 2026-03-19)
 - ✅ **v2.0 MOEX Profitability** -- Phases 8-14 (shipped 2026-03-21)
+- **v3.0 Production Readiness** -- Phases 15-18 (in progress)
 
 ## Phases
 
@@ -37,9 +38,66 @@ Full details: `.planning/milestones/v2.0-ROADMAP.md`
 
 </details>
 
+### v3.0 Production Readiness (In Progress)
+
+**Milestone Goal:** Validate system in sandbox with formalized metrics, define go/no-go gate criteria calibrated from backtest distributions, launch on minimal capital with tightened risk limits, and operate with production health monitoring and emergency kill switch.
+
+- [ ] **Phase 15: Schemas, Config, and Rollout Foundation** - Pydantic schemas, RolloutPhase config, DB migration, rollout risk wiring
+- [ ] **Phase 16: Sandbox Monitoring and Go/No-Go Gate** - Metric collection, slippage capture, gate evaluation, anomaly detection
+- [ ] **Phase 17: Production Operations** - Kill switch, health monitoring, alert taxonomy, Telegram bot commands
+- [ ] **Phase 18: Dashboard and API Integration** - Streamlit sandbox page, REST endpoints for gate and metrics
+
+## Phase Details
+
+### Phase 15: Schemas, Config, and Rollout Foundation
+**Goal**: System has all data types, rollout configuration, and risk layer wiring needed by monitoring and operations phases
+**Depends on**: Phase 14 (v2.0 complete)
+**Requirements**: ROLL-01, ROLL-02, ROLL-03
+**Success Criteria** (what must be TRUE):
+  1. Operator can set FINALAYZE_ROLLOUT_PHASE=MINIMAL and the system starts with 3% max position, 1% daily loss, 2% DD auto-stop limits enforced by PreTradeChecker and CircuitBreaker
+  2. Operator can switch rollout phase to STANDARD or FULL and risk limits adjust accordingly without code changes
+  3. Capital ladder validation script confirms that position sizing produces valid MOEX lot sizes at 50K, 150K, 500K, and 2.5M RUB capital tiers
+**Plans**: TBD
+
+### Phase 16: Sandbox Monitoring and Go/No-Go Gate
+**Goal**: System collects sandbox execution metrics and produces a structured go/no-go evaluation report with calibrated thresholds
+**Depends on**: Phase 15
+**Requirements**: MON-01, MON-02, MON-04, GATE-01, GATE-02
+**Success Criteria** (what must be TRUE):
+  1. After each TradingLoop cycle, SandboxMonitorService persists trade count, P&L, equity, fill rate, and uptime to TimescaleDB and metrics are queryable
+  2. Slippage is captured as the difference between expected price at signal time and fill price at execution, measured in basis points, for every sandbox order
+  3. GoNoGoReporter evaluates 8 configurable thresholds (uptime, fill rate, max DD, trades, signal frequency, critical errors, slippage, signal divergence) and returns a structured PROCEED/DEFER/ABORT report with per-criterion pass/fail
+  4. Gate thresholds are derived from walk-forward backtest distribution percentiles stored in config, not hardcoded round numbers
+  5. Anomaly detector sends Telegram alerts when drawdown exceeds 2-sigma, fill rate drops below 90%, or slippage exceeds 50bps
+**Plans**: TBD
+
+### Phase 17: Production Operations
+**Goal**: Operator can monitor system health, receive tiered alerts without fatigue, and halt all trading within 30 seconds via kill switch
+**Depends on**: Phase 15
+**Requirements**: OPS-01, OPS-02, OPS-03, OPS-04
+**Success Criteria** (what must be TRUE):
+  1. Kill switch cancels all pending broker orders, stops TradingLoop scheduler, escalates CircuitBreakers to LIQUIDATE, and sends Telegram CRITICAL alert -- all within 30 seconds of activation
+  2. Health monitor pings broker, checks feed freshness, and reports status every 5 minutes; two consecutive missed heartbeats trigger an automatic Telegram alert
+  3. Alerts follow a 3-tier taxonomy (critical/warning/info) integrated into TelegramMonitor priority queue so that critical alerts are never delayed by info-level messages
+  4. Telegram bot responds to /kill (triggers kill switch) and /gonogo (runs gate report and returns structured result)
+**Plans**: TBD
+
+### Phase 18: Dashboard and API Integration
+**Goal**: Sandbox validation progress and gate results are accessible via Streamlit dashboard and REST API
+**Depends on**: Phase 16, Phase 17
+**Requirements**: MON-03, GATE-03
+**Success Criteria** (what must be TRUE):
+  1. Streamlit sandbox dashboard page displays real-time trade log, equity curve, uptime percentage, fill rate, and slippage histogram sourced from TimescaleDB metrics
+  2. REST endpoint GET /sandbox/gonogo returns a JSON pass/fail report with per-criterion breakdown matching GoNoGoReporter output
+**Plans**: TBD
+
 ## Progress
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
 | 1-7 | v1.0 | 22/22 | Complete | 2026-03-19 |
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
+| 15. Schemas, Config, Rollout | v3.0 | 0/TBD | Not started | - |
+| 16. Monitoring and Gate | v3.0 | 0/TBD | Not started | - |
+| 17. Production Operations | v3.0 | 0/TBD | Not started | - |
+| 18. Dashboard and API | v3.0 | 0/TBD | Not started | - |

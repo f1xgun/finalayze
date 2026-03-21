@@ -57,25 +57,26 @@ Deferred to v4.0+.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MON-01 | TBD | Pending |
-| MON-02 | TBD | Pending |
-| MON-03 | TBD | Pending |
-| MON-04 | TBD | Pending |
-| GATE-01 | TBD | Pending |
-| GATE-02 | TBD | Pending |
-| GATE-03 | TBD | Pending |
-| ROLL-01 | TBD | Pending |
-| ROLL-02 | TBD | Pending |
-| ROLL-03 | TBD | Pending |
-| OPS-01 | TBD | Pending |
-| OPS-02 | TBD | Pending |
-| OPS-03 | TBD | Pending |
-| OPS-04 | TBD | Pending |
+| MON-01 | Phase 16 | Pending |
+| MON-02 | Phase 16 | Pending |
+| MON-03 | Phase 18 | Pending |
+| MON-04 | Phase 16 | Pending |
+| GATE-01 | Phase 16 | Pending |
+| GATE-02 | Phase 16 | Pending |
+| GATE-03 | Phase 18 | Pending |
+| ROLL-01 | Phase 15 | Pending |
+| ROLL-02 | Phase 15 | Pending |
+| ROLL-03 | Phase 15 | Pending |
+| OPS-01 | Phase 17 | Pending |
+| OPS-02 | Phase 17 | Pending |
+| OPS-03 | Phase 17 | Pending |
+| OPS-04 | Phase 17 | Pending |
 
 **Coverage:**
 - v3.0 requirements: 14 total
-- Mapped to phases: 0
-- Unmapped: 14
+- Mapped to phases: 14
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-21*
+*Traceability updated: 2026-03-21*
