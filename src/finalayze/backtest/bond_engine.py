@@ -12,6 +12,7 @@ BacktestEngine because bond mechanics are fundamentally different:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
@@ -23,6 +24,8 @@ from finalayze.core.bond_math import dirty_price, dv01, modified_duration, nkd, 
 from finalayze.core.schemas import (
     Candle,
     CouponPayment,
+    LayerConfig,
+    PortfolioLayer,
     Signal,
     SignalDirection,
     TradeResult,
@@ -33,8 +36,6 @@ from finalayze.risk.yield_stop import YieldStop
 from finalayze.strategies.bond_duration_rotation import CBRRegime, classify_regime
 
 if TYPE_CHECKING:
-    from datetime import date
-
     from finalayze.backtest.costs import TransactionCosts
     from finalayze.core.schemas import BondInfo
     from finalayze.data.fetchers.cbr import MacroContextProvider
@@ -109,6 +110,7 @@ class BondBacktestResult:
     trade_count: int
     win_rate: Decimal
     profit_factor: Decimal
+    ofz_rotation_active: bool = False
 
 
 class BondBacktestEngine:
@@ -133,6 +135,8 @@ class BondBacktestEngine:
         strategy_fn: Any,  # BondStrategyFn -- use Any to accept plain callables
         nkd_series: dict[str, dict[date, Decimal]] | None = None,
         macro_provider: MacroContextProvider | None = None,
+        layer_configs: dict[PortfolioLayer, LayerConfig] | None = None,
+        as_of_date: date | None = None,
     ) -> BondBacktestResult:
         """Run bond backtest.
 
@@ -155,8 +159,24 @@ class BondBacktestEngine:
 
         # Align all symbols to common date index
         all_dates = self._build_date_index(candles_by_symbol)
+
+        # OFZ rotation check
+        rotation_active = False
+        if layer_configs is not None:
+            from finalayze.core.bond_cycle import apply_ofz_rotation  # noqa: PLC0415
+
+            _as_of = as_of_date or (all_dates[-1] if all_dates else datetime.now(tz=UTC).date())
+            effective = apply_ofz_rotation(layer_configs, _as_of)
+            rotation_active = effective != layer_configs
+            if rotation_active:
+                logger.info(
+                    "ofz_rotation_active",
+                    core_pct=str(effective[PortfolioLayer.CORE].capital_pct),
+                    strategic_pct=str(effective[PortfolioLayer.STRATEGIC].capital_pct),
+                )
+
         if not all_dates:
-            return self._empty_result()
+            return self._empty_result(rotation_active=rotation_active)
 
         # Initialize broker with coupon schedule
         broker = BondSimulatedBroker(
@@ -249,7 +269,14 @@ class BondBacktestEngine:
                     trades.append(trade)
             positions.clear()
 
-        return self._build_result(trades, equity_curve, dates_out, broker, cfg.initial_cash)
+        return self._build_result(
+            trades,
+            equity_curve,
+            dates_out,
+            broker,
+            cfg.initial_cash,
+            rotation_active=rotation_active,
+        )
 
     # ------------------------------------------------------------------
     # Bar-level processing helpers (extracted to reduce branch count)
@@ -741,10 +768,12 @@ class BondBacktestEngine:
         dates: list[date],
         broker: BondSimulatedBroker,
         initial_cash: Decimal,
+        *,
+        rotation_active: bool = False,
     ) -> BondBacktestResult:
         """Compute final metrics from trades and equity curve."""
         if not equity_curve:
-            return self._empty_result()
+            return self._empty_result(rotation_active=rotation_active)
 
         final_equity = equity_curve[-1]
         total_return_pct = (
@@ -771,9 +800,10 @@ class BondBacktestEngine:
             trade_count=len(trades),
             win_rate=win_rate,
             profit_factor=profit_factor,
+            ofz_rotation_active=rotation_active,
         )
 
-    def _empty_result(self) -> BondBacktestResult:
+    def _empty_result(self, *, rotation_active: bool = False) -> BondBacktestResult:
         """Return empty result when no data."""
         return BondBacktestResult(
             trades=[],
@@ -788,6 +818,7 @@ class BondBacktestEngine:
             trade_count=0,
             win_rate=Decimal(0),
             profit_factor=Decimal(0),
+            ofz_rotation_active=rotation_active,
         )
 
     @staticmethod

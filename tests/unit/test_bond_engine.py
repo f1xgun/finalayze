@@ -904,7 +904,7 @@ class TestBondEngineOFZRotation:
         from finalayze.core.schemas import DEFAULT_LAYER_CONFIGS
 
         # Monkeypatch CBR_MEETINGS to empty (no cuts at all)
-        monkeypatch.setattr("finalayze.core.bond_cycle.CBR_MEETINGS", ())
+        monkeypatch.setattr("finalayze.data.fetchers.cbr.CBR_MEETINGS", ())
 
         engine = BondBacktestEngine()
         prices = [85.0] * 10
@@ -931,7 +931,7 @@ class TestBondEngineOFZRotation:
             CBRMeeting(date(2024, 6, 1), "core", "cut", Decimal("15.00")),
             CBRMeeting(date(2024, 7, 1), "core", "cut", Decimal("14.00")),
         )
-        monkeypatch.setattr("finalayze.core.bond_cycle.CBR_MEETINGS", fake_meetings)
+        monkeypatch.setattr("finalayze.data.fetchers.cbr.CBR_MEETINGS", fake_meetings)
 
         engine = BondBacktestEngine()
         prices = [85.0] * 10
