@@ -31,7 +31,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 - [x] **Phase 10: Macro Regime** - Add CBR regime sizing, OFZ rotation trigger, and sector allocation overlay to position sizing pipeline (completed 2026-03-20)
 - [x] **Phase 11: Advanced Strategies and ML** - Preferred share arbitrage and ML ensemble with Russian macro features for ru_* segments (completed 2026-03-21)
 - [x] **Phase 12: Portfolio Assembly** - Joint OFZ + equity backtest with 40/60 allocation and RUB crisis brake (completed 2026-03-21)
-- [ ] **Phase 13: Script Wiring Fixes** - Sync UNIVERSE dict, wire DividendEntry.status in all data paths (gap closure)
+- [x] **Phase 13: Script Wiring Fixes** - Sync UNIVERSE dict, wire DividendEntry.status in all data paths (gap closure) (completed 2026-03-21)
 - [ ] **Phase 14: Bond Backtest and Portfolio CLI** - Wire OFZ rotation into bond backtest, implement real engine calls in portfolio CLI (gap closure)
 
 ## Phase Details
@@ -120,7 +120,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. run_iteration.py UNIVERSE dict for all ru_* segments excludes GAZP, VTBR, SNGS, SNGSP, IRAO, ALRS (synced with config/segments.py)
   2. _setup_dividend_gap_strategy passes status= to DividendEntry constructor in all 3 data loading paths (Tinkoff API, event data JSON, static YAML)
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
 - [ ] 13-01-PLAN.md -- Sync UNIVERSE dict (remove toxic symbols) and wire DividendEntry.status in all 3 data paths
@@ -154,5 +154,5 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 14
 | 10. Macro Regime | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 11. Advanced Strategies and ML | v2.0 | 4/4 | Complete | 2026-03-21 |
 | 12. Portfolio Assembly | v2.0 | 2/2 | Complete | 2026-03-21 |
-| 13. Script Wiring Fixes | v2.0 | 0/1 | Not started | - |
+| 13. Script Wiring Fixes | 1/1 | Complete   | 2026-03-21 | - |
 | 14. Bond Backtest and Portfolio CLI | v2.0 | 0/? | Not started | - |

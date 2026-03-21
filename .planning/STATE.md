@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: MOEX Profitability
-status: executing
-stopped_at: Completed 12-02-PLAN.md
-last_updated: "2026-03-21T09:27:18.553Z"
-last_activity: 2026-03-21 -- Completed 12-02 Walk-Forward Sharpe & Portfolio CLI
+status: completed
+stopped_at: Completed 13-01-PLAN.md
+last_updated: "2026-03-21T09:49:31.957Z"
+last_activity: 2026-03-21 -- Completed 13-01 Script Wiring Fixes
 progress:
-  total_phases: 5
-  completed_phases: 4
-  total_plans: 13
-  completed_plans: 12
-  percent: 100
+  total_phases: 7
+  completed_phases: 5
+  total_plans: 14
+  completed_plans: 13
+  percent: 93
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-20)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 12 -- Portfolio Assembly
+**Current focus:** Phase 13 -- Script Wiring Fixes
 
 ## Current Position
 
-Phase: 12 of 12 (Portfolio Assembly) -- fifth phase of v2.0
-Plan: 2 of 2 in current phase
-Status: In Progress
-Last activity: 2026-03-21 -- Completed 12-02 Walk-Forward Sharpe & Portfolio CLI
+Phase: 13 of 13 (Script Wiring Fixes) -- sixth phase of v2.0
+Plan: 1 of 1 in current phase
+Status: Complete
+Last activity: 2026-03-21 -- Completed 13-01 Script Wiring Fixes
 
-Progress: [##########] 100% (Phase 12: 2/2 plans complete)
+Progress: [█████████░] 93% (Phase 13: 1/1 plans complete)
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [##########] 100% (Phase 12: 2/2 plans complete)
 | 11    | 03   | 15min    | 2     | 2     |
 | 12    | 01   | 5min     | 1     | 2     |
 | 12    | 02   | 5min     | 2     | 3     |
+| Phase 13 P01 | 2min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21
-Stopped at: Completed 12-02-PLAN.md
+Last session: 2026-03-21T09:49:31.954Z
+Stopped at: Completed 13-01-PLAN.md
 Resume file: None
