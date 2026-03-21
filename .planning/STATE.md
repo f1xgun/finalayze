@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: MOEX Profitability
 status: in-progress
-stopped_at: Completed 14-01-PLAN.md
-last_updated: "2026-03-21T10:01:08Z"
-last_activity: 2026-03-21 -- Completed 14-01 OFZ Rotation in BondBacktestEngine
+stopped_at: Completed 14-02-PLAN.md
+last_updated: "2026-03-21T10:14:30Z"
+last_activity: 2026-03-21 -- Completed 14-02 Portfolio CLI Real Engine Wiring
 progress:
   total_phases: 8
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 16
-  completed_plans: 14
-  percent: 88
+  completed_plans: 16
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-20)
 ## Current Position
 
 Phase: 14 of 14 (Bond Backtest and Portfolio CLI) -- seventh phase of v2.0
-Plan: 1 of 2 in current phase
-Status: In Progress
-Last activity: 2026-03-21 -- Completed 14-01 OFZ Rotation in BondBacktestEngine
+Plan: 2 of 2 in current phase
+Status: Complete
+Last activity: 2026-03-21 -- Completed 14-02 Portfolio CLI Real Engine Wiring
 
-Progress: [████████░░] 88% (Phase 14: 1/2 plans complete)
+Progress: [██████████] 100% (Phase 14: 2/2 plans complete)
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [████████░░] 88% (Phase 14: 1/2 plans complete)
 | 12    | 02   | 5min     | 2     | 3     |
 | Phase 13 P01 | 2min | 1 tasks | 2 files |
 | 14    | 01   | 3min     | 1     | 2     |
+| 14    | 02   | 10min    | 2     | 2     |
 
 ## Accumulated Context
 
@@ -104,6 +105,9 @@ Recent decisions affecting current work:
 - [12-02]: RUONIA 15% as risk-free rate for WF excess Sharpe computation
 - [12-02]: Too-short curves (<18 months) return WF Sharpe = 0.0 gracefully
 - [14-01]: Lazy import of apply_ofz_rotation inside run() to avoid circular dependency with bond_cycle.py
+- [14-02]: USDRUB fetched via fetch_bond_candles with FIGI BBG0013HGFT4 (USD000UTSTOM)
+- [14-02]: BondDurationRotationStrategy needs bond_maturities and coupon_rates from BondInfo
+- [14-02]: Equity backtest uses DualMomentum + MeanReversion with equal allocation
 
 ### Pending Todos
 
@@ -117,6 +121,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T10:01:08Z
-Stopped at: Completed 14-01-PLAN.md
+Last session: 2026-03-21T10:14:30Z
+Stopped at: Completed 14-02-PLAN.md
 Resume file: None
