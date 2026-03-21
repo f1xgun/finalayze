@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Production Readiness
 status: in_progress
-stopped_at: Completed 17-01-PLAN.md
-last_updated: "2026-03-22T00:26:38Z"
-last_activity: 2026-03-22 -- Completed Plan 17-01 (KillSwitch & HealthMonitor)
+stopped_at: Completed 17-02-PLAN.md
+last_updated: "2026-03-22T00:34:07Z"
+last_activity: 2026-03-22 -- Completed Plan 17-02 (Telegram Commands & REST Endpoints)
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 6
-  percent: 85
+  completed_plans: 7
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-21)
 ## Current Position
 
 Phase: 17 of 18 (Production Operations)
-Plan: 1 of 2 complete
-Status: In Progress
-Last activity: 2026-03-22 -- Completed Plan 17-01 (KillSwitch & HealthMonitor)
+Plan: 2 of 2 complete
+Status: Complete
+Last activity: 2026-03-22 -- Completed Plan 17-02 (Telegram Commands & REST Endpoints)
 
-Progress: [█████-----] 50% (1/2 plans complete)
+Progress: [██████████] 100% (2/2 plans complete)
 
 ## Performance Metrics
 
@@ -68,6 +68,13 @@ Key carry-forward decisions for v3.0:
 - Per-order try/except in kill switch cancel loop -- single broker failure never aborts shutdown
 - HealthMonitor feed freshness via externally-updated timestamp (update_feed_timestamp)
 - Loop liveness treats 0->0 cycles as not-started (avoids false alerts on startup)
+- 30s monotonic timeout for /kill confirmation prevents stale confirmations
+- CONFIRM text checked before command dispatch in handle_update
+- Kill flag checked in _build_trading_loop -- returns None to prevent restart
+- HealthMonitor created in lifespan() not _build_trading_loop() since it needs running loop
+- GoNoGoReporter uses deferred DB session import via async_session_factory
+- Health endpoint returns 503 HTTPException with body when unhealthy
+- Module-level setters (set_health_monitor, set_kill_switch) for REST endpoint state injection
 
 ### Pending Todos
 
@@ -82,5 +89,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed 17-01-PLAN.md
+Stopped at: Completed 17-02-PLAN.md
 Resume file: None

@@ -31,7 +31,7 @@ Requirements for production readiness milestone. Each maps to roadmap phases.
 - [x] **OPS-01**: Kill switch cancels all open orders at broker, stops TradingLoop, sends Telegram critical alert — response time <30 seconds
 - [x] **OPS-02**: Health check heartbeat every 5 minutes, REST `/health/production` endpoint, auto-alert on 2 missed heartbeats
 - [x] **OPS-03**: 3-tier alert taxonomy (critical/warning/info) integrated into TelegramMonitor priority queue to prevent alert fatigue
-- [ ] **OPS-04**: Telegram bot `/kill` command triggers kill switch, `/gonogo` command runs gate report
+- [x] **OPS-04**: Telegram bot `/kill` command triggers kill switch, `/gonogo` command runs gate report
 
 ## Future Requirements
 
@@ -70,7 +70,7 @@ Deferred to v4.0+.
 | OPS-01 | Phase 17 | Complete |
 | OPS-02 | Phase 17 | Complete |
 | OPS-03 | Phase 17 | Complete |
-| OPS-04 | Phase 17 | Pending |
+| OPS-04 | Phase 17 | Complete |
 
 **Coverage:**
 - v3.0 requirements: 14 total

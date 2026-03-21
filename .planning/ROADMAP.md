@@ -44,7 +44,7 @@ Full details: `.planning/milestones/v2.0-ROADMAP.md`
 
 - [x] **Phase 15: Schemas, Config, and Rollout Foundation** - Pydantic schemas, RolloutPhase config, DB migration, rollout risk wiring (completed 2026-03-21)
 - [x] **Phase 16: Sandbox Monitoring and Go/No-Go Gate** - Metric collection, slippage capture, gate evaluation, anomaly detection (completed 2026-03-21)
-- [ ] **Phase 17: Production Operations** - Kill switch, health monitoring, alert taxonomy, Telegram bot commands
+- [x] **Phase 17: Production Operations** - Kill switch, health monitoring, alert taxonomy, Telegram bot commands (completed 2026-03-21)
 - [ ] **Phase 18: Dashboard and API Integration** - Streamlit sandbox page, REST endpoints for gate and metrics
 
 ## Phase Details
@@ -89,7 +89,7 @@ Plans:
   2. Health monitor pings broker, checks feed freshness, and reports status every 5 minutes; two consecutive missed heartbeats trigger an automatic Telegram alert
   3. Alerts follow a 3-tier taxonomy (critical/warning/info) integrated into TelegramMonitor priority queue so that critical alerts are never delayed by info-level messages
   4. Telegram bot responds to /kill (triggers kill switch) and /gonogo (runs gate report and returns structured result)
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 17-01-PLAN.md -- KillSwitch orchestrator, HealthMonitor service, Settings extensions
@@ -112,5 +112,5 @@ Plans:
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
 | 15. Schemas, Config, Rollout | 2/2 | Complete    | 2026-03-21 | - |
 | 16. Monitoring and Gate | 3/3 | Complete    | 2026-03-21 | - |
-| 17. Production Operations | 1/2 | In Progress|  | - |
+| 17. Production Operations | 2/2 | Complete   | 2026-03-21 | - |
 | 18. Dashboard and API | v3.0 | 0/TBD | Not started | - |
