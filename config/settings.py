@@ -104,7 +104,11 @@ class Settings(BaseSettings):
     # Telegram extensions (Plan 03 prep)
     telegram_webhook_secret: str = ""  # FINALAYZE_TELEGRAM_WEBHOOK_SECRET
     telegram_allowed_chat_ids: list[str] = []  # FINALAYZE_TELEGRAM_ALLOWED_CHAT_IDS
+    telegram_admin_chat_id: str = ""  # FINALAYZE_TELEGRAM_ADMIN_CHAT_ID
     weekly_digest_hour_utc: int = 16  # FINALAYZE_WEEKLY_DIGEST_HOUR_UTC (Sunday 19:00 MSK)
+
+    # Kill switch
+    kill_switch_flag_path: str = "/tmp/finalayze_killed"  # FINALAYZE_KILL_SWITCH_FLAG_PATH
 
     # News pipeline (Phase 7)
     news_rss_urls: list[str] = [
