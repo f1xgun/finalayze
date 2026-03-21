@@ -12,6 +12,16 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
+## Current Milestone: v3.0 Production Readiness
+
+**Goal:** Validate system in sandbox, define go/no-go gate criteria, launch on minimal capital with tightened risk limits, then scale to target capital with production monitoring.
+
+**Target features:**
+- Sandbox monitoring dashboard with automated metric collection (trade log, P&L, uptime, slippage)
+- Go/No-Go gate with formalized thresholds (uptime ≥99%, fill rate ≥95%, DD <5%, signal divergence <50%)
+- Gradual rollout on 50-100K RUB with tightened limits (3% max position, 1% daily loss, 2% DD auto-stop)
+- Production operations: anomaly alerts, health check, kill switch, capital scaling
+
 ## Requirements
 
 ### Validated
@@ -68,7 +78,11 @@ operating 24/7 without human intervention beyond initial configuration and monit
 
 <!-- Next milestone scope — TBD -->
 
-(No active requirements — start next milestone with `/gsd:new-milestone`)
+- [ ] Sandbox monitoring dashboard with real-time trade/metric collection
+- [ ] Automated go/no-go gate report with pass/fail thresholds
+- [ ] Gradual rollout configuration (tightened limits for minimal capital)
+- [ ] Production health monitoring and kill switch
+- [ ] Capital scaling from minimal to target after validation period
 
 ### Out of Scope
 
@@ -143,4 +157,4 @@ Portfolio assembly complete (40/60 OFZ/equity, crisis brake, WF Sharpe).
 | Sector allocation in sizing (not combiner) | Architectural constraint from requirements | ✓ Good — clean separation of concerns |
 
 ---
-*Last updated: 2026-03-21 after v2.0 milestone completion*
+*Last updated: 2026-03-21 after v3.0 milestone start*

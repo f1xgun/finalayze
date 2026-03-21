@@ -1,113 +1,50 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: MOEX Profitability
-status: completed
-stopped_at: Completed 14-02-PLAN.md
-last_updated: "2026-03-21T10:17:34.248Z"
-last_activity: 2026-03-21 -- Completed 14-02 Portfolio CLI Real Engine Wiring
+milestone: v3.0
+milestone_name: Production Readiness
+status: defining_requirements
+stopped_at: Defining requirements for v3.0
+last_updated: "2026-03-21"
+last_activity: 2026-03-21 -- Milestone v3.0 started
 progress:
-  total_phases: 7
-  completed_phases: 6
-  total_plans: 16
-  completed_plans: 15
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-20)
+See: .planning/PROJECT.md (updated 2026-03-21)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 14 -- Bond Backtest and Portfolio CLI
+**Current focus:** Defining requirements for v3.0 Production Readiness
 
 ## Current Position
 
-Phase: 14 of 14 (Bond Backtest and Portfolio CLI) -- seventh phase of v2.0
-Plan: 2 of 2 in current phase
-Status: Complete
-Last activity: 2026-03-21 -- Completed 14-02 Portfolio CLI Real Engine Wiring
-
-Progress: [██████████] 100% (Phase 14: 2/2 plans complete)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-21 — Milestone v3.0 started
 
 ## Performance Metrics
 
-**Velocity (v1.0):**
-
-- Total plans completed: 22
-- Average duration: ~45 min
-- Total execution time: ~16.5 hours
-
-**Velocity (v2.0):**
-
-| Phase | Plan | Duration | Tasks | Files |
-|-------|------|----------|-------|-------|
-| 08    | 01   | 2min     | 2     | 6     |
-| 08    | 02   | 6min     | 2     | 6     |
-| 08    | 03   | 3min     | 3     | 4     |
-| 09    | 01   | 7min     | 2     | 7     |
-| 09    | 02   | 5min     | 3     | 5     |
-| 10    | 01   | 5min     | 2     | 7     |
-| 10    | 02   | 2min     | 1     | 2     |
-| 11    | 01   | 4min     | 1     | 4     |
-| 11    | 02   | 4min     | 2     | 3     |
-| 11    | 03   | 15min    | 2     | 2     |
-| 12    | 01   | 5min     | 1     | 2     |
-| 12    | 02   | 5min     | 2     | 3     |
-| Phase 13 P01 | 2min | 1 tasks | 2 files |
-| 14    | 01   | 3min     | 1     | 2     |
-| 14    | 02   | 10min    | 2     | 2     |
+**Velocity (v1.0):** 22 plans, ~45 min avg, ~16.5 hours total
+**Velocity (v2.0):** 16 plans, ~5 min avg, ~78 min total
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- [v2.0]: MOEX-only focus -- US market deferred
-- [v2.0]: Universe surgery first -- toxic symbols account for ~60% negative PnL
-- [v2.0]: Dividend gap as primary alpha -- 70%+ documented closure rate on blue chips
-- [v2.0]: Sector rotation MUST be in sizing pipeline, NOT combiner (architectural constraint)
-- [v1.0]: OFZ-PK carry ENABLED (Sharpe +1.14) -- portfolio foundation for v2.0
-- [08-01]: vol_target 0.40 for MOEX (was 0.19-0.22) -- matches 35-45% annualized vol
-- [08-01]: Toxic symbols removed (GAZP, VTBR, SNGS, SNGSP, IRAO, ALRS) -- ~60% negative PnL
-- [08-02]: exclude_periods as tuple of string pairs for JSON serializability and frozen dataclass compatibility
-- [08-02]: filter_candles_by_exclusion in stop_loss.py (Layer 4) reused by ATR and chandelier computations
-- [08-03]: DividendEntry status defaults to "paid" for backward compatibility
-- [08-03]: Only "paid" dividends trigger BUY signals -- cancelled/reduced skipped
-- [08-03]: T-Invest API lacks cancelled dividend data -- manual overrides required
-- [09-01]: Event strategies bypass ADX implicitly + explicit is_event flag for clarity
-- [09-01]: Engine hold bar safety ceiling for dividend_gap set to 60 (max of all yield tiers)
-- [09-01]: Event confidence floor 0.40 applied only when event strategy fires
-- [10-01]: Yield curve slope data is static dict for backtest reproducibility
-- [10-01]: CBRRegimeStep inserted after BrentGate, before Copula/EVT/MetaLabel/HardCaps
-- [10-01]: SectorAllocationStep handles only ru_energy and ru_finance; others pass through
-- [10-02]: OFZ rotation uses relative shift (+/-0.15) for capital conservation invariant
-- [10-02]: Deferred CBR_MEETINGS import inside apply_ofz_rotation to avoid circular dependency
-- [09-02]: Pipeline built per-run (not at init) because MOEX steps need segment_id at run() time
-- [09-02]: rub_oil_regime_signal typed as object in BacktestConfig to avoid circular import
-- [09-02]: FXRate objects converted to synthetic Candle objects for RubOilRegimeSignal correlation
-- [11-01]: allow_short=False suppresses SELL at _compute_signal level for long-only MOEX constraint
-- [11-01]: cointegration_start filters candles before cointegration test to avoid sanction-era structural break
-- [11-01]: Weights rebalanced: -0.03 each from momentum, mean_reversion, rsi2_connors, dual_momentum for 0.12 pairs
-- [Phase 11]: KeyRateRecord.rate is already decimal fraction -- no /100 normalization needed
-- [Phase 11]: IMOEX relative strength already covered by cross-asset relative_strength_21d -- no duplicate
-- [11-03]: MOEX walk-forward uses 8mo/1mo/3mo (shorter than US 12/2/4) due to limited post-2022 data
-- [11-03]: GAZP->TATN, PLZL->TCSG substitution in ML training (toxic/missing FIGI)
-- [11-03]: Quality gates failed but reinforcer-only mode (weight=0.10) is safe -- ML boosts, not creates signals
-- [12-01]: Engines receive pre-split capital; orchestrator sums raw curves (not weighted)
-- [12-01]: Rebalancing adjusts scale factors at month boundaries when drift > 5%
-- [12-01]: USDRUB crisis brake: 80/20 shift when 20-bar FX return > 15%, no hysteresis
-- [12-02]: WF uses 12mo/6mo/3mo windows, slices pre-computed curve (no engine re-runs)
-- [12-02]: RUONIA 15% as risk-free rate for WF excess Sharpe computation
-- [12-02]: Too-short curves (<18 months) return WF Sharpe = 0.0 gracefully
-- [14-01]: Lazy import of apply_ofz_rotation inside run() to avoid circular dependency with bond_cycle.py
-- [14-02]: USDRUB fetched via fetch_bond_candles with FIGI BBG0013HGFT4 (USD000UTSTOM)
-- [14-02]: BondDurationRotationStrategy needs bond_maturities and coupon_rates from BondInfo
-- [14-02]: Equity backtest uses DualMomentum + MeanReversion with equal allocation
+Decisions from v1.0 and v2.0 are archived in milestones/.
+Key carry-forward decisions for v3.0:
+- OFZ-PK carry Sharpe +1.14 — portfolio foundation
+- ML reinforcer-only for MOEX (quality gates infeasible for small datasets)
+- 40/60 OFZ/equity allocation with USDRUB crisis brake
+- FINALAYZE_TINKOFF_TOKEN required for all MOEX data operations
 
 ### Pending Todos
 
@@ -115,12 +52,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- MOEX sector index tickers (MOEXOG, MOEXFN) need live API validation before Phase 10
-- OFZ yield curve slope data source unclear -- research needed before Phase 10
-- Preferred share cointegration must be validated on post-2022 data before Phase 11
+- Sandbox needs to run 5+ days to collect meaningful metrics
+- MOEX sector index tickers (MOEXOG, MOEXFN) still unvalidated against live API
+- ML quality gates remain infeasible for small MOEX datasets (accuracy cap at 0.55)
 
 ## Session Continuity
 
-Last session: 2026-03-21T10:14:30Z
-Stopped at: Completed 14-02-PLAN.md
+Last session: 2026-03-21
+Stopped at: Defining requirements for v3.0
 Resume file: None
