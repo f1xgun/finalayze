@@ -88,7 +88,7 @@ Plans:
   1. Preferred share arbitrage strategy generates long-only trades on SBER/SBERP and TATN/TATNP pairs when spread z-score exceeds 2.0, with cointegration validated on post-2022 data
   2. 10 Russian macro ML features (CBR rate level/delta/direction, USDRUB return/zscore/vol, Brent return, IMOEX relative, turnover zscore) are computed per bar and available to the ML pipeline
   3. ML ensemble is enabled for at least one ru_* segment in reinforcer-only mode, with quality gates passing on 2024-2025 calm-period validation data
-**Plans:** 4 plans (3 complete + 1 gap closure)
+**Plans:** 3/4 plans complete
 
 Plans:
 - [x] 11-01-PLAN.md -- Preferred share arbitrage (allow_short, pairs preset, TATNP FIGI)
@@ -123,5 +123,5 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 8. Data Foundation | v2.0 | 3/3 | Complete | 2026-03-20 |
 | 9. Strategy Wiring | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 10. Macro Regime | v2.0 | 2/2 | Complete | 2026-03-20 |
-| 11. Advanced Strategies and ML | v2.0 | 3/4 | Gap closure | - |
+| 11. Advanced Strategies and ML | v2.0 | 4/4 | Complete | 2026-03-21 |
 | 12. Portfolio Assembly | v2.0 | 0/? | Not started | - |
