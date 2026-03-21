@@ -31,3 +31,9 @@ def test_risk_render_importable() -> None:
     from finalayze.dashboard.pages import risk
 
     assert callable(risk.render)
+
+
+def test_sandbox_render_importable() -> None:
+    from finalayze.dashboard.pages import sandbox
+
+    assert callable(sandbox.render)
