@@ -45,7 +45,7 @@ Full details: `.planning/milestones/v2.0-ROADMAP.md`
 - [x] **Phase 15: Schemas, Config, and Rollout Foundation** - Pydantic schemas, RolloutPhase config, DB migration, rollout risk wiring (completed 2026-03-21)
 - [x] **Phase 16: Sandbox Monitoring and Go/No-Go Gate** - Metric collection, slippage capture, gate evaluation, anomaly detection (completed 2026-03-21)
 - [x] **Phase 17: Production Operations** - Kill switch, health monitoring, alert taxonomy, Telegram bot commands (completed 2026-03-21)
-- [ ] **Phase 18: Dashboard and API Integration** - Streamlit sandbox page, REST endpoints for gate and metrics
+- [x] **Phase 18: Dashboard and API Integration** - Streamlit sandbox page, REST endpoints for gate and metrics (completed 2026-03-21)
 
 ## Phase Details
 
@@ -102,7 +102,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Streamlit sandbox dashboard page displays real-time trade log, equity curve, uptime percentage, fill rate, and slippage histogram sourced from TimescaleDB metrics
   2. REST endpoint GET /sandbox/gonogo returns a JSON pass/fail report with per-criterion breakdown matching GoNoGoReporter output
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 18-01-PLAN.md -- REST endpoint /sandbox/gonogo with Pydantic response models, tests, main.py wiring
@@ -117,4 +117,4 @@ Plans:
 | 15. Schemas, Config, Rollout | 2/2 | Complete    | 2026-03-21 | - |
 | 16. Monitoring and Gate | 3/3 | Complete    | 2026-03-21 | - |
 | 17. Production Operations | 3/3 | Complete    | 2026-03-21 | - |
-| 18. Dashboard and API | 1/2 | In Progress|  | - |
+| 18. Dashboard and API | 2/2 | Complete   | 2026-03-21 | - |

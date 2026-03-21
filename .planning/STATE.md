@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Production Readiness
 status: completed
-stopped_at: Completed 18-01-PLAN.md
-last_updated: "2026-03-21T22:28:32.408Z"
-last_activity: 2026-03-22 -- Completed Plan 18-01 (Sandbox Go/No-Go REST Endpoint)
+stopped_at: Completed 18-02-PLAN.md
+last_updated: "2026-03-21T22:33:00.000Z"
+last_activity: 2026-03-22 -- Completed Plan 18-02 (Sandbox Dashboard Page)
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 10
-  completed_plans: 9
-  percent: 90
+  completed_plans: 10
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-21)
 ## Current Position
 
 Phase: 18 of 18 (Dashboard and API Integration)
-Plan: 1 of 1 complete
+Plan: 2 of 2 complete
 Status: Complete
-Last activity: 2026-03-22 -- Completed Plan 18-01 (Sandbox Go/No-Go REST Endpoint)
+Last activity: 2026-03-22 -- Completed Plan 18-02 (Sandbox Dashboard Page)
 
-Progress: [█████████░] 90% (9/10 plans complete)
+Progress: [██████████] 100% (10/10 plans complete)
 
 ## Performance Metrics
 
@@ -79,6 +79,8 @@ Key carry-forward decisions for v3.0:
 - GoNoGoReporter instantiated from gate_thresholds.yaml in lifespan, not create_app
 - GoNoGoResponse uses string verdict for JSON serialization simplicity
 - Sandbox endpoint wired in both bot-present and bot-absent code paths for standalone API use
+- Top-level imports for sqlalchemy.select and SandboxMetricRow in sandbox.py (ruff PLC0415 compliance)
+- Plotly subplots for equity+drawdown overlay (shared x-axis, better visual correlation)
 
 ### Pending Todos
 
@@ -92,6 +94,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T22:28:32.405Z
-Stopped at: Completed 18-01-PLAN.md
+Last session: 2026-03-21T22:33:00Z
+Stopped at: Completed 18-02-PLAN.md
 Resume file: None

@@ -11,7 +11,7 @@ Requirements for production readiness milestone. Each maps to roadmap phases.
 
 - [x] **MON-01**: SandboxMonitorService collects per-cycle metrics (trades, P&L, equity, fill rate, uptime) and persists to TimescaleDB
 - [x] **MON-02**: Slippage capture records expected_price at signal time vs fill_price at execution, computes realized slippage in bps
-- [ ] **MON-03**: Streamlit sandbox dashboard page shows real-time trade log, equity curve, uptime %, fill rate, slippage histogram
+- [x] **MON-03**: Streamlit sandbox dashboard page shows real-time trade log, equity curve, uptime %, fill rate, slippage histogram
 - [x] **MON-04**: Anomaly detector triggers Telegram alerts on drawdown spikes (>2σ), fill rate drops (<90%), and slippage outliers (>50bps)
 
 ### Go/No-Go Gate
@@ -59,7 +59,7 @@ Deferred to v4.0+.
 |-------------|-------|--------|
 | MON-01 | Phase 16 | Complete |
 | MON-02 | Phase 16 | Complete |
-| MON-03 | Phase 18 | Pending |
+| MON-03 | Phase 18 | Complete |
 | MON-04 | Phase 16 | Complete |
 | GATE-01 | Phase 16 | Complete |
 | GATE-02 | Phase 16 | Complete |
