@@ -1,5 +1,14 @@
 # Milestones
 
+## v2.0 MOEX Profitability (Shipped: 2026-03-21)
+
+**Phases completed:** 7 phases, 16 plans, 0 tasks
+
+**Key accomplishments:**
+- (none recorded)
+
+---
+
 ## v1.0 MOEX MVP (Shipped: 2026-03-19)
 
 **Phases completed:** 7 phases, 22 plans

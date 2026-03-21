@@ -12,18 +12,6 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
-## Current Milestone: v2.0 MOEX Profitability
-
-**Goal:** Transform MOEX equity from consistently negative Sharpe to profitable operation through universe cleanup, MOEX-native strategies (dividend gap, CBR regime, sector rotation), and ML with Russian macro features.
-
-**Target features:**
-- Universe surgery: remove toxic symbols (GAZP, VTBR, SNGS, IRAO, ALRS), raise confidence thresholds
-- Dividend gap closure as primary MOEX equity alpha engine (expand from 43 to 150+ events)
-- CBR rate and macro regime gating for equity positions
-- MOEX-specific sector rotation (Brent-gated energy, CBR-sensitive financials)
-- ML ensemble for MOEX with Russian macro features (CBR rate, USDRUB, Brent, IMOEX relative)
-- Portfolio assembly: OFZ carry 40% + equity 60%, RUB crisis brake
-
 ## Requirements
 
 ### Validated
@@ -64,21 +52,23 @@ operating 24/7 without human intervention beyond initial configuration and monit
 - ✓ event_driven strategy enabled on all ru_* segments (15% weight) — v1.0
 - ✓ Go-live configuration with real_confirmed guard — v1.0
 - ✓ 3,651 tests — v1.0
+- ✓ Universe cleanup: toxic symbols removed, confidence thresholds raised — v2.0
+- ✓ Dividend gap closure strategy with expanded calendar (150+ events) — v2.0
+- ✓ Preferred share arbitrage (SBER/SBERP, TATN/TATNP) with Kalman filter — v2.0
+- ✓ CBR rate regime gating via yield curve slope — v2.0
+- ✓ Brent price gate for energy sector (BrentGateStep) — v2.0
+- ✓ RUB/oil decorrelation regime in sizing pipeline — v2.0
+- ✓ OFZ PK→PD rotation on CBR cutting cycle — v2.0
+- ✓ Sector allocation (energy Brent-tiered, financials CBR-sensitive) — v2.0
+- ✓ ML ensemble for ru_blue_chips with 10 Russian macro features — v2.0
+- ✓ Portfolio-level allocation (40% OFZ + 60% equity) with USDRUB crisis brake — v2.0
+- ✓ PortfolioBacktestOrchestrator with walk-forward Sharpe — v2.0
 
 ### Active
 
-<!-- v2.0 MOEX Profitability scope -->
+<!-- Next milestone scope — TBD -->
 
-- [ ] Universe cleanup: remove structurally broken symbols, raise confidence thresholds
-- [ ] Dividend gap closure strategy as primary MOEX equity alpha engine
-- [ ] Preferred share arbitrage (SBER/SBERP, TATN/TATNP, SNGS/SNGSP)
-- [ ] CBR rate regime gating for equity and bond allocation
-- [ ] Brent price gate for energy sector momentum
-- [ ] RUB/oil decorrelation regime wiring into position sizing
-- [ ] OFZ PK→PD rotation trigger (CBR cutting cycle detection)
-- [ ] MOEX-specific sector rotation strategy (replace US-calibrated momentum)
-- [ ] ML ensemble for ru_* segments with Russian macro features
-- [ ] Portfolio-level allocation (40% OFZ + 60% equity) with RUB crisis brake
+(No active requirements — start next milestone with `/gsd:new-milestone`)
 
 ### Out of Scope
 
@@ -93,19 +83,24 @@ operating 24/7 without human intervention beyond initial configuration and monit
 
 ## Context
 
-### Current State (v1.0 shipped)
+### Current State (v2.0 shipped)
 
-Codebase: ~400 Python files, 35,199 LOC, 3,651 tests.
+Codebase: ~430 Python files, 36,789 LOC.
 Tech stack: Python 3.12, FastAPI, SQLAlchemy 2.0 async, PostgreSQL+TimescaleDB, Redis,
 XGBoost, LightGBM, CatBoost, PyTorch, pandas-ta, QuantLib, feedparser, Telethon.
 
-All v1.0 MOEX MVP requirements shipped. System ready for sandbox deployment and controlled go-live.
+v2.0 shipped: MOEX equity profitability overhaul complete. 7 phases (8-14), 16 plans.
+Data foundation fixed (vol target, toxic symbols, dividend calendar, 2022 exclusion).
+5 MOEX-native strategies wired (dividend gap, CBR, pairs, sector allocation, RUB/oil regime).
+ML ensemble enabled for ru_blue_chips (10 macro features, reinforcer-only).
+Portfolio assembly complete (40/60 OFZ/equity, crisis brake, WF Sharpe).
 
 ### Known Issues
-- MOEX walk-forward Sharpe still negative on aggregate (individual symbols profitable)
+- ML quality gates fail for small MOEX datasets (accuracy cap at 0.55 for n_eff<20)
+- ML us_tech quality gates regressed after schema v3 bump (brier/class_balance strict)
 - event_driven strategy shows 0 backtest trades (expected — needs live news)
-- RSS URLs (Interfax, TASS) need live validation at deployment
-- Nyquist validation partial (3/7 phases fully compliant)
+- Portfolio CLI requires FINALAYZE_TINKOFF_TOKEN for real data
+- Walk-forward Sharpe on blended portfolio not yet validated with live data
 
 ### Data Sources
 - **Market data:** T-Invest gRPC API (candles, instruments, dividends)
@@ -140,10 +135,12 @@ All v1.0 MOEX MVP requirements shipped. System ready for sandbox deployment and 
 | OpenRouter free model for LLM | Cost efficiency for news analysis | ✓ Good — avoids per-call charges |
 | Three-quarter Kelly for MOEX | Larger positions for less liquid market | ⚠️ Revisit — monitor in live trading |
 
-| MOEX-only focus for v2.0 | MOEX equity needs fixing; US already works | — Pending |
-| Universe surgery first | Toxic symbols (GAZP, VTBR, SNGS) account for 60% negative PnL | — Pending |
-| Dividend gap as primary alpha | Documented 70%+ gap closure on MOEX blue chips within 30-60 days | — Pending |
-| OFZ carry as portfolio foundation | Sharpe +1.14, provides 20% base return at 21% CBR rate | ✓ Good |
+| MOEX-only focus for v2.0 | MOEX equity needs fixing; US already works | ✓ Good — focused delivery in 2 days |
+| Universe surgery first | Toxic symbols (GAZP, VTBR, SNGS) account for 60% negative PnL | ✓ Good — removed from all segments |
+| Dividend gap as primary alpha | Documented 70%+ gap closure on MOEX blue chips within 30-60 days | ✓ Good — yield-based hold bars + event bypass |
+| OFZ carry as portfolio foundation | Sharpe +1.14, provides 20% base return at 21% CBR rate | ✓ Good — 40/60 allocation with crisis brake |
+| ML reinforcer-only for MOEX | Quality gates infeasible for small datasets | ⚠️ Revisit — cap threshold helps but gates still strict |
+| Sector allocation in sizing (not combiner) | Architectural constraint from requirements | ✓ Good — clean separation of concerns |
 
 ---
-*Last updated: 2026-03-20 after v2.0 milestone start*
+*Last updated: 2026-03-21 after v2.0 milestone completion*
