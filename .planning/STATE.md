@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Production Readiness
-status: ready_to_plan
-stopped_at: Roadmap created for v3.0, ready to plan Phase 15
-last_updated: "2026-03-21"
-last_activity: 2026-03-21 -- Roadmap created for v3.0 (4 phases, 14 requirements)
+status: executing
+stopped_at: Completed 15-01-PLAN.md
+last_updated: "2026-03-21T20:13:07Z"
+last_activity: 2026-03-21 -- Completed Plan 15-01 (Rollout Schemas)
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 2
+  completed_plans: 1
+  percent: 50
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-21)
 ## Current Position
 
 Phase: 15 of 18 (Schemas, Config, and Rollout Foundation)
-Plan: --
-Status: Ready to plan
-Last activity: 2026-03-21 -- Roadmap created for v3.0 Production Readiness
+Plan: 1 of 2 complete
+Status: Executing
+Last activity: 2026-03-21 -- Completed Plan 15-01 (Rollout Schemas)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -43,6 +43,9 @@ Progress: [░░░░░░░░░░] 0%
 
 Decisions from v1.0 and v2.0 are archived in milestones/.
 Key carry-forward decisions for v3.0:
+
+- Frozen dataclass (not Pydantic) for RolloutLimits -- immutable config, no validation overhead
+- Deferred import in effective_risk_limits() to avoid circular config->risk->core->config dependency
 - OFZ-PK carry Sharpe +1.14 -- portfolio foundation
 - ML reinforcer-only for MOEX (quality gates infeasible for small datasets)
 - 40/60 OFZ/equity allocation with USDRUB crisis brake
@@ -63,5 +66,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-21
-Stopped at: Roadmap created for v3.0, ready to plan Phase 15
+Stopped at: Completed 15-01-PLAN.md
 Resume file: None

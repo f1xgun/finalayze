@@ -22,7 +22,7 @@ Requirements for production readiness milestone. Each maps to roadmap phases.
 
 ### Gradual Rollout
 
-- [ ] **ROLL-01**: RolloutPhase enum (MINIMAL/STANDARD/FULL) with per-phase capital and position limits in Settings
+- [x] **ROLL-01**: RolloutPhase enum (MINIMAL/STANDARD/FULL) with per-phase capital and position limits in Settings
 - [ ] **ROLL-02**: PreTradeChecker and CircuitBreaker respect RolloutPhase limits (3% max position at MINIMAL, 1% daily loss, 2% DD auto-stop)
 - [ ] **ROLL-03**: Capital ladder validation confirms position sizing produces valid lot sizes at each tier (50K/150K/500K/2.5M RUB)
 
@@ -64,7 +64,7 @@ Deferred to v4.0+.
 | GATE-01 | Phase 16 | Pending |
 | GATE-02 | Phase 16 | Pending |
 | GATE-03 | Phase 18 | Pending |
-| ROLL-01 | Phase 15 | Pending |
+| ROLL-01 | Phase 15 | Complete |
 | ROLL-02 | Phase 15 | Pending |
 | ROLL-03 | Phase 15 | Pending |
 | OPS-01 | Phase 17 | Pending |
