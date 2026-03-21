@@ -192,29 +192,23 @@ UNIVERSE: dict[str, list[str]] = {
     "ru_blue_chips": [
         "SBER",
         "LKOH",
-        "GAZP",
         "YNDX",
         "MGNT",
-        "ALRS",
-        "VTBR",
         "POLY",
         "NVTK",
         "MTLR",
     ],
     "ru_energy": [
         "LKOH",
-        "GAZP",
         "ROSN",
         "NVTK",
         "TATN",
-        "SNGS",
         "TRNFP",
         "BANEP",
     ],
     "ru_finance": [
         "SBER",
         "SBERP",
-        "VTBR",
         "TCSG",
         "CBOM",
         "BSPB",
@@ -389,7 +383,7 @@ def _setup_dividend_gap_strategy(  # noqa: PLR0912
                 for div in divs:
                     strategy.add_dividend(
                         symbol,
-                        DividendEntry(ex_date=div["ex_date"], amount=div["amount"]),
+                        DividendEntry(ex_date=div["ex_date"], amount=div["amount"], status="paid"),
                     )
                     count += 1
             except Exception:
@@ -408,6 +402,7 @@ def _setup_dividend_gap_strategy(  # noqa: PLR0912
                     DividendEntry(
                         ex_date=datetime.strptime(entry["ex_date"], "%Y-%m-%d").replace(tzinfo=UTC),
                         amount=float(entry["amount"]),
+                        status=entry.get("status", "paid"),
                     ),
                 )
                 count += 1
@@ -433,7 +428,11 @@ def _setup_dividend_gap_strategy(  # noqa: PLR0912
                     if start <= ex_date <= end:
                         strategy.add_dividend(
                             symbol,
-                            DividendEntry(ex_date=ex_date, amount=float(entry["amount"])),
+                            DividendEntry(
+                                ex_date=ex_date,
+                                amount=float(entry["amount"]),
+                                status=entry.get("status", "paid"),
+                            ),
                         )
                         count += 1
 

@@ -74,7 +74,7 @@ class TestDividendEntryStatusWiring:
         )
 
         assert strategy is not None
-        divs = strategy._dividends["SBER"]
+        divs = strategy._calendar["SBER"]
         assert len(divs) == 1
         assert divs[0].status == "paid"
 
@@ -103,7 +103,7 @@ class TestDividendEntryStatusWiring:
         )
 
         assert strategy is not None
-        divs = strategy._dividends["SBER"]
+        divs = strategy._calendar["SBER"]
         assert len(divs) == 2
         assert divs[0].status == "cancelled"
         assert divs[1].status == "paid"
@@ -135,7 +135,7 @@ class TestDividendEntryStatusWiring:
             )
 
         assert strategy is not None
-        divs = strategy._dividends["SBER"]
+        divs = strategy._calendar["SBER"]
         assert len(divs) == 2
         assert divs[0].status == "reduced"
         assert divs[1].status == "paid"
