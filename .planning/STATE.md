@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Production Readiness
 status: executing
-stopped_at: Completed 15-01-PLAN.md
-last_updated: "2026-03-21T20:13:07Z"
-last_activity: 2026-03-21 -- Completed Plan 15-01 (Rollout Schemas)
+stopped_at: Completed 15-02-PLAN.md
+last_updated: "2026-03-21T20:20:23Z"
+last_activity: 2026-03-21 -- Completed Plan 15-02 (Rollout Wiring)
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
-  percent: 50
+  completed_plans: 2
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-21)
 ## Current Position
 
 Phase: 15 of 18 (Schemas, Config, and Rollout Foundation)
-Plan: 1 of 2 complete
-Status: Executing
-Last activity: 2026-03-21 -- Completed Plan 15-01 (Rollout Schemas)
+Plan: 2 of 2 complete
+Status: Phase 15 Complete
+Last activity: 2026-03-21 -- Completed Plan 15-02 (Rollout Wiring)
 
-Progress: [█████░░░░░] 50%
+Progress: [██████████] 100% (Phase 15 complete)
 
 ## Performance Metrics
 
@@ -46,6 +46,8 @@ Key carry-forward decisions for v3.0:
 
 - Frozen dataclass (not Pydantic) for RolloutLimits -- immutable config, no validation overhead
 - Deferred import in effective_risk_limits() to avoid circular config->risk->core->config dependency
+- CrossMarketCircuitBreaker uses default 0.10 with no args (not rollout-specific value)
+- Risk component init reads from effective_risk_limits() not raw settings fields
 - OFZ-PK carry Sharpe +1.14 -- portfolio foundation
 - ML reinforcer-only for MOEX (quality gates infeasible for small datasets)
 - 40/60 OFZ/equity allocation with USDRUB crisis brake
@@ -66,5 +68,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-21
-Stopped at: Completed 15-01-PLAN.md
+Stopped at: Completed 15-02-PLAN.md (Phase 15 complete)
 Resume file: None
