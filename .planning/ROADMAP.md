@@ -120,7 +120,10 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. run_iteration.py UNIVERSE dict for all ru_* segments excludes GAZP, VTBR, SNGS, SNGSP, IRAO, ALRS (synced with config/segments.py)
   2. _setup_dividend_gap_strategy passes status= to DividendEntry constructor in all 3 data loading paths (Tinkoff API, event data JSON, static YAML)
-**Plans**: TBD
+**Plans:** 1 plan
+
+Plans:
+- [ ] 13-01-PLAN.md -- Sync UNIVERSE dict (remove toxic symbols) and wire DividendEntry.status in all 3 data paths
 
 ### Phase 14: Bond Backtest and Portfolio CLI
 **Goal**: OFZ rotation is exercised in bond backtests and run_portfolio_backtest.py produces real merged equity curves
@@ -151,5 +154,5 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 14
 | 10. Macro Regime | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 11. Advanced Strategies and ML | v2.0 | 4/4 | Complete | 2026-03-21 |
 | 12. Portfolio Assembly | v2.0 | 2/2 | Complete | 2026-03-21 |
-| 13. Script Wiring Fixes | v2.0 | 0/? | Not started | - |
+| 13. Script Wiring Fixes | v2.0 | 0/1 | Not started | - |
 | 14. Bond Backtest and Portfolio CLI | v2.0 | 0/? | Not started | - |
