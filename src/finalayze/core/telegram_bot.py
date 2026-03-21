@@ -1,16 +1,18 @@
 """Telegram bot handler for webhook-based commands (Layer 6 boundary).
 
-Provides read-only commands for querying system state via Telegram:
+Provides commands for querying and controlling system state via Telegram:
   - /status: portfolio positions, equity, P&L per market
   - /breakers: circuit breaker states for all layers
-
-No trading commands are exposed -- this is read-only per design decision.
+  - /stop: halt all trading cycles
+  - /kill: emergency shutdown with 30s confirmation (admin-only)
+  - /gonogo: run go/no-go gate evaluation
 
 See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 """
 
 from __future__ import annotations
 
+import time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -20,7 +22,9 @@ if TYPE_CHECKING:
     from config.settings import Settings
 
     from finalayze.core.alerts import TelegramAlerter
+    from finalayze.core.kill_switch import KillSwitch
     from finalayze.execution.broker_router import BrokerRouter
+    from finalayze.monitoring.go_no_go import GoNoGoReporter
     from finalayze.risk.circuit_breaker import CircuitBreaker
 
 _log = structlog.get_logger()
@@ -35,6 +39,9 @@ class TelegramBotHandler:
     (bypasses queue for immediate feedback).
     """
 
+    _KILL_CONFIRM_TIMEOUT_S = 30
+    _KILL_CLEANUP_THRESHOLD_S = 60
+
     def __init__(
         self,
         alerter: TelegramAlerter,
@@ -43,6 +50,8 @@ class TelegramBotHandler:
         settings: Settings,
         bond_processor: object | None = None,
         trading_loop: object | None = None,
+        kill_switch: KillSwitch | None = None,
+        go_no_go_reporter: GoNoGoReporter | None = None,
     ) -> None:
         self._alerter = alerter
         self._broker_router = broker_router
@@ -50,11 +59,16 @@ class TelegramBotHandler:
         self._settings = settings
         self._bond_processor = bond_processor
         self._trading_loop = trading_loop
+        self._kill_switch = kill_switch
+        self._go_no_go_reporter = go_no_go_reporter
+        self._pending_kill: dict[str, float] = {}
 
         self._commands: dict[str, Any] = {
             "/status": self.handle_status,
             "/breakers": self.handle_breakers,
             "/stop": self.handle_stop,
+            "/kill": self.handle_kill,
+            "/gonogo": self.handle_gonogo,
         }
 
     async def handle_update(self, update: dict[str, Any]) -> dict[str, str]:
@@ -80,6 +94,13 @@ class TelegramBotHandler:
         if chat_id not in allowed:
             _log.debug("telegram_chat_id_rejected", chat_id=chat_id)
             return {"ok": "ignored"}
+
+        # Clean up expired kill confirmations (>60s old)
+        self._cleanup_expired_kills()
+
+        # Check for CONFIRM text (non-command kill confirmation)
+        if text.upper() == "CONFIRM" and chat_id in self._pending_kill:
+            return await self._handle_kill_confirm(chat_id)
 
         # Extract command (first word)
         command = text.split()[0] if text else ""
@@ -215,3 +236,110 @@ class TelegramBotHandler:
                 _log.debug("telegram_breakers_bonds_failed")
 
         await self._alerter._send("\n".join(lines))
+
+    async def handle_kill(self, chat_id: str) -> None:
+        """Start emergency kill confirmation flow (admin-only).
+
+        Requires admin chat_id. Stores pending confirmation state with
+        monotonic timestamp. User must send CONFIRM within 30s.
+        """
+        admin_id = getattr(self._settings, "telegram_admin_chat_id", "")
+        if chat_id != admin_id:
+            await self._alerter._send("Unauthorized: /kill requires admin access")
+            return
+
+        if self._kill_switch is None:
+            await self._alerter._send("Kill switch not configured")
+            return
+
+        self._pending_kill[chat_id] = time.monotonic()
+        await self._alerter._send(
+            "<b>KILL SWITCH</b>\n\n"
+            "Type CONFIRM to kill all trading within 30s"
+        )
+
+    async def handle_gonogo(self, chat_id: str) -> None:  # noqa: ARG002
+        """Run go/no-go gate evaluation and send formatted report.
+
+        Calls GoNoGoReporter.evaluate() and formats the GateReport with
+        verdict emoji and per-criterion pass/fail indicators.
+        """
+        if self._go_no_go_reporter is None:
+            await self._alerter._send("Go/no-go reporter not configured")
+            return
+
+        try:
+            from finalayze.core.db import async_session_factory  # noqa: PLC0415
+
+            async with async_session_factory() as session:
+                report = await self._go_no_go_reporter.evaluate(session)
+        except Exception:
+            _log.exception("telegram_gonogo_db_failed")
+            try:
+                report = await self._go_no_go_reporter.evaluate(None)  # type: ignore[arg-type]
+            except Exception:
+                await self._alerter._send("Go/no-go evaluation failed (no DB connection)")
+                return
+
+        verdict_emoji = {
+            "PROCEED": "\u2705",
+            "DEFER": "\u26a0\ufe0f",
+            "ABORT": "\u274c",
+        }
+        emoji = verdict_emoji.get(str(report.verdict), "\u2753")
+
+        lines = [f"{emoji} <b>Go/No-Go: {report.verdict}</b>"]
+        lines.append(f"Sandbox days: {report.sandbox_days}")
+        lines.append("")
+
+        for c in report.criteria:
+            c_emoji = "\u2705" if c.passed else "\u274c"
+            lines.append(
+                f"{c_emoji} {c.name}: {c.actual:.1f} / {c.threshold:.1f} {c.unit}"
+            )
+
+        lines.append(f"\n{report.reason}")
+
+        await self._alerter._send("\n".join(lines))
+
+    async def _handle_kill_confirm(self, chat_id: str) -> dict[str, str]:
+        """Process CONFIRM text for pending kill switch activation."""
+        started_at = self._pending_kill.pop(chat_id, None)
+        if started_at is None:
+            return {"ok": "no_command"}
+
+        elapsed = time.monotonic() - started_at
+        if elapsed > self._KILL_CONFIRM_TIMEOUT_S:
+            await self._alerter._send(
+                "Confirmation expired. Send /kill again."
+            )
+            return {"ok": "processed"}
+
+        if self._kill_switch is None:
+            await self._alerter._send("Kill switch not configured")
+            return {"ok": "error"}
+
+        try:
+            result = self._kill_switch.activate(reason=f"telegram:{chat_id}")
+            await self._alerter._send(
+                f"<b>KILL SWITCH ACTIVATED</b>\n\n"
+                f"Orders cancelled: {result.orders_cancelled}\n"
+                f"Scheduler stopped: {result.scheduler_stopped}\n"
+                f"Breakers escalated: {result.breakers_escalated}\n"
+                f"Elapsed: {result.elapsed_seconds:.2f}s"
+            )
+            return {"ok": "processed"}
+        except Exception:
+            _log.exception("telegram_kill_confirm_failed")
+            await self._alerter._send("Kill switch activation failed. Check logs.")
+            return {"ok": "error"}
+
+    def _cleanup_expired_kills(self) -> None:
+        """Remove pending kill confirmations older than 60s."""
+        now = time.monotonic()
+        expired = [
+            cid for cid, ts in self._pending_kill.items()
+            if now - ts > self._KILL_CLEANUP_THRESHOLD_S
+        ]
+        for cid in expired:
+            del self._pending_kill[cid]
