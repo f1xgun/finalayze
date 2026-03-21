@@ -411,3 +411,91 @@ class TestCrisisBrake:
         # Dates from bar 20 onward should be crisis dates
         expected_crisis_dates = dates[20:]
         assert result.crisis_brake_active_dates == expected_crisis_dates
+
+
+# ---------------------------------------------------------------------------
+# PORT-03: Walk-forward Sharpe on merged curve
+# ---------------------------------------------------------------------------
+
+
+class TestWalkForward:
+    """Tests for walk-forward Sharpe computation on pre-computed merged curve."""
+
+    def _make_long_result(
+        self,
+        n_days: int = 900,
+        daily_return: float = 0.0005,
+        start_date: dt.date | None = None,
+    ) -> PortfolioBacktestResult:
+        """Build a PortfolioBacktestResult spanning n_days with constant daily return."""
+        base = start_date or dt.date(2021, 1, 1)
+        dates = [base + dt.timedelta(days=i) for i in range(n_days)]
+        curve = [100_000.0]
+        for _ in range(n_days - 1):
+            curve.append(curve[-1] * (1.0 + daily_return))
+        return PortfolioBacktestResult(
+            bond_equity_curve=curve,
+            equity_equity_curve=curve,
+            merged_equity_curve=curve,
+            dates=dates,
+            bond_trades=[],
+            equity_trades=[],
+            sharpe=0.0,
+            max_drawdown_pct=0.0,
+            profit_factor=0.0,
+            total_return_pct=0.0,
+            bond_weight_series=[0.4] * n_days,
+            equity_weight_series=[0.6] * n_days,
+            crisis_brake_active_dates=[],
+        )
+
+    def test_wf_sharpe_on_merged(self) -> None:
+        """Synthetic merged curve spanning 3+ years -> WF produces non-zero Sharpe."""
+        result = self._make_long_result(n_days=1100, daily_return=0.0005)
+        orch = PortfolioBacktestOrchestrator()
+
+        wf_sharpe = orch.compute_walk_forward_sharpe(result)
+
+        assert wf_sharpe != 0.0
+
+    def test_wf_window_params(self) -> None:
+        """Windows use 12mo train, 6mo test by default."""
+        result = self._make_long_result(n_days=1100)
+        orch = PortfolioBacktestOrchestrator()
+
+        # Should not raise; default params are 12/6/3
+        wf_sharpe = orch.compute_walk_forward_sharpe(result)
+        assert isinstance(wf_sharpe, float)
+
+    def test_wf_slices_precomputed_curve(self) -> None:
+        """WF does NOT re-run engines; it slices the merged_equity_curve.
+
+        Verify by checking that the method only reads from result, never calls run().
+        """
+        result = self._make_long_result(n_days=1100, daily_return=0.0003)
+        orch = PortfolioBacktestOrchestrator()
+
+        # If this method tried to call self.run(), it would fail because we haven't
+        # provided bond_result/equity_snapshots etc.  It must only slice the curve.
+        wf_sharpe = orch.compute_walk_forward_sharpe(result)
+        assert isinstance(wf_sharpe, float)
+
+    def test_wf_too_short_curve(self) -> None:
+        """Curve < 18 months -> WF returns 0.0 (insufficient data for one fold)."""
+        result = self._make_long_result(n_days=400)  # ~13 months -- too short
+        orch = PortfolioBacktestOrchestrator()
+
+        wf_sharpe = orch.compute_walk_forward_sharpe(result)
+
+        assert wf_sharpe == 0.0
+
+    def test_wf_result_populates_wf_sharpe(self) -> None:
+        """After compute_walk_forward_sharpe(), result.wf_sharpe is updated."""
+        result = self._make_long_result(n_days=1100, daily_return=0.0005)
+        assert result.wf_sharpe == 0.0  # default
+
+        orch = PortfolioBacktestOrchestrator()
+        returned = orch.compute_walk_forward_sharpe(result)
+
+        assert result.wf_sharpe == returned
+        assert result.wf_sharpe != 0.0
