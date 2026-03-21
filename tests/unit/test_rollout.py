@@ -99,9 +99,7 @@ class TestSettingsRolloutIntegration:
         s = Settings()
         assert s.rollout_phase == RolloutPhase.FULL
 
-    def test_settings_rollout_phase_env_override(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_settings_rollout_phase_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("FINALAYZE_ROLLOUT_PHASE", "minimal")
         from config.settings import Settings
 
@@ -116,9 +114,7 @@ class TestSettingsRolloutIntegration:
         limits = s.effective_risk_limits()
         assert limits == ROLLOUT_LIMITS[RolloutPhase.FULL]
 
-    def test_effective_risk_limits_minimal(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_effective_risk_limits_minimal(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("FINALAYZE_ROLLOUT_PHASE", "minimal")
         from config.settings import Settings
 
@@ -126,9 +122,7 @@ class TestSettingsRolloutIntegration:
         limits = s.effective_risk_limits()
         assert limits.max_position_pct == Decimal("0.03")
 
-    def test_effective_risk_limits_standard(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_effective_risk_limits_standard(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("FINALAYZE_ROLLOUT_PHASE", "standard")
         from config.settings import Settings
 
@@ -150,9 +144,9 @@ class TestRolloutWiring:
             max_positions_per_market=5,
         )
         result = checker.check(
-            order_value=Decimal("4000"),
-            portfolio_equity=Decimal("100000"),
-            available_cash=Decimal("100000"),
+            order_value=Decimal(4000),
+            portfolio_equity=Decimal(100000),
+            available_cash=Decimal(100000),
             open_position_count=0,
             market_id="moex",
             dt=self._MOEX_OPEN,
@@ -167,9 +161,9 @@ class TestRolloutWiring:
             max_positions_per_market=5,
         )
         result = checker.check(
-            order_value=Decimal("2500"),
-            portfolio_equity=Decimal("100000"),
-            available_cash=Decimal("100000"),
+            order_value=Decimal(2500),
+            portfolio_equity=Decimal(100000),
+            available_cash=Decimal(100000),
             open_position_count=0,
             market_id="moex",
             dt=self._MOEX_OPEN,
@@ -184,8 +178,8 @@ class TestRolloutWiring:
             l2_threshold=0.02,
             l3_threshold=0.03,
         )
-        baseline = Decimal("100000")
-        current = Decimal("97900")  # 2.1% drawdown
+        baseline = Decimal(100000)
+        current = Decimal(97900)  # 2.1% drawdown
         level = cb.check(current, baseline)
         assert level == CircuitLevel.HALTED
 
@@ -197,8 +191,8 @@ class TestRolloutWiring:
             l2_threshold=0.10,
             l3_threshold=0.15,
         )
-        baseline = Decimal("100000")
-        current = Decimal("97900")  # 2.1% drawdown
+        baseline = Decimal(100000)
+        current = Decimal(97900)  # 2.1% drawdown
         level = cb.check(current, baseline)
         assert level == CircuitLevel.NORMAL
 
@@ -206,9 +200,9 @@ class TestRolloutWiring:
         """LossLimitTracker with 1% daily limit should halt at 1% loss."""
         tracker = LossLimitTracker(daily_loss_limit_pct=1.0)  # 1% in percent form
         now = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
-        tracker.reset_day(now, Decimal("100000"))
+        tracker.reset_day(now, Decimal(100000))
         # 1.1% loss should trigger halt
-        assert tracker.is_halted(now, Decimal("98900"))
+        assert tracker.is_halted(now, Decimal(98900))
 
     def test_cross_market_breaker_default(self) -> None:
         """CrossMarketCircuitBreaker default halt_threshold should be 0.10, not 0.80."""
