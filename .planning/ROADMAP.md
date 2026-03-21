@@ -107,8 +107,8 @@ Plans:
 **Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 12-01-PLAN.md -- PortfolioBacktestOrchestrator with 40/60 allocation, rebalancing, and USDRUB crisis brake
-- [ ] 12-02-PLAN.md -- Walk-forward Sharpe on merged curve and portfolio backtest CLI script
+- [x] 12-01-PLAN.md -- PortfolioBacktestOrchestrator with 40/60 allocation, rebalancing, and USDRUB crisis brake
+- [x] 12-02-PLAN.md -- Walk-forward Sharpe on merged curve and portfolio backtest CLI script
 
 ## Progress
 
@@ -128,4 +128,4 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 9. Strategy Wiring | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 10. Macro Regime | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 11. Advanced Strategies and ML | v2.0 | 4/4 | Complete | 2026-03-21 |
-| 12. Portfolio Assembly | 2/2 | Complete   | 2026-03-21 | - |
+| 12. Portfolio Assembly | v2.0 | 2/2 | Complete | 2026-03-21 |
