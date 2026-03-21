@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from finalayze.core.modes import RolloutPhase
 from finalayze.risk.rollout import ROLLOUT_LIMITS, RolloutLimits
 
@@ -27,8 +29,6 @@ class TestRolloutPhaseEnum:
 class TestRolloutLimitsFrozen:
     def test_rollout_limits_is_frozen_dataclass(self) -> None:
         limits = ROLLOUT_LIMITS[RolloutPhase.FULL]
-        import pytest
-
         with pytest.raises(AttributeError):
             limits.max_position_pct = Decimal("0.99")  # type: ignore[misc]
 
@@ -82,3 +82,52 @@ class TestRolloutLimitsMapping:
         assert limits.circuit_breaker_l3 == 0.15
         assert limits.max_sector_concentration_pct == Decimal("0.40")
         assert limits.min_cash_reserve_pct == Decimal("0.20")
+
+
+class TestSettingsRolloutIntegration:
+    """Tests for Settings.rollout_phase and effective_risk_limits()."""
+
+    def test_settings_rollout_phase_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Default rollout_phase is FULL (backward compatible)."""
+        monkeypatch.delenv("FINALAYZE_ROLLOUT_PHASE", raising=False)
+        from config.settings import Settings
+
+        s = Settings()
+        assert s.rollout_phase == RolloutPhase.FULL
+
+    def test_settings_rollout_phase_env_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FINALAYZE_ROLLOUT_PHASE", "minimal")
+        from config.settings import Settings
+
+        s = Settings()
+        assert s.rollout_phase == RolloutPhase.MINIMAL
+
+    def test_effective_risk_limits_full(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("FINALAYZE_ROLLOUT_PHASE", raising=False)
+        from config.settings import Settings
+
+        s = Settings()
+        limits = s.effective_risk_limits()
+        assert limits == ROLLOUT_LIMITS[RolloutPhase.FULL]
+
+    def test_effective_risk_limits_minimal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FINALAYZE_ROLLOUT_PHASE", "minimal")
+        from config.settings import Settings
+
+        s = Settings()
+        limits = s.effective_risk_limits()
+        assert limits.max_position_pct == Decimal("0.03")
+
+    def test_effective_risk_limits_standard(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FINALAYZE_ROLLOUT_PHASE", "standard")
+        from config.settings import Settings
+
+        s = Settings()
+        limits = s.effective_risk_limits()
+        assert limits.circuit_breaker_l2 == 0.05

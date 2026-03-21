@@ -6,12 +6,15 @@ See docs/architecture/OVERVIEW.md for configuration details.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
-from finalayze.core.modes import WorkMode
+from finalayze.core.modes import RolloutPhase, WorkMode
+
+if TYPE_CHECKING:
+    from finalayze.risk.rollout import RolloutLimits
 
 
 class Settings(BaseSettings):
@@ -66,8 +69,13 @@ class Settings(BaseSettings):
 
     # LLM
     llm_model: str = "meta-llama/llama-3.1-8b-instruct:free"
-    llm_provider: Literal["openrouter", "openai", "anthropic"] = "openrouter"
+    llm_provider: Literal["openrouter", "openai", "anthropic", "deepseek", "groq"] = "openrouter"
     llm_api_key: str = ""  # API key for selected provider
+    llm_max_rpm: int = 0  # FINALAYZE_LLM_MAX_RPM — max requests/min (0 = unlimited)
+    # Fallback LLM: used when primary provider returns rate limit errors
+    llm_fallback_provider: str = ""  # FINALAYZE_LLM_FALLBACK_PROVIDER
+    llm_fallback_model: str = ""  # FINALAYZE_LLM_FALLBACK_MODEL
+    llm_fallback_api_key: str = ""  # FINALAYZE_LLM_FALLBACK_API_KEY
 
     # Cycle intervals (restart required to apply changes)
     news_cycle_minutes: int = 30  # FINALAYZE_NEWS_CYCLE_MINUTES
@@ -107,6 +115,9 @@ class Settings(BaseSettings):
     news_poll_interval_minutes: int = 5  # FINALAYZE_NEWS_POLL_INTERVAL_MINUTES
     telegram_channels: list[str] = []  # FINALAYZE_TELEGRAM_CHANNELS
 
+    # Rollout
+    rollout_phase: RolloutPhase = RolloutPhase.FULL  # FINALAYZE_ROLLOUT_PHASE
+
     # Safety
     real_confirmed: bool = False
 
@@ -118,6 +129,12 @@ class Settings(BaseSettings):
     real_token: str = ""  # FINALAYZE_REAL_TOKEN — required to switch to REAL mode via API
 
     model_config = {"env_prefix": "FINALAYZE_", "env_file": ".env", "extra": "ignore"}
+
+    def effective_risk_limits(self) -> RolloutLimits:
+        """Return risk limits for the current rollout phase."""
+        from finalayze.risk.rollout import ROLLOUT_LIMITS  # noqa: PLC0415
+
+        return ROLLOUT_LIMITS[self.rollout_phase]
 
     @model_validator(mode="after")
     def validate_mode_requirements(self) -> Settings:
