@@ -102,7 +102,11 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Streamlit sandbox dashboard page displays real-time trade log, equity curve, uptime percentage, fill rate, and slippage histogram sourced from TimescaleDB metrics
   2. REST endpoint GET /sandbox/gonogo returns a JSON pass/fail report with per-criterion breakdown matching GoNoGoReporter output
-**Plans**: TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 18-01-PLAN.md -- REST endpoint /sandbox/gonogo with Pydantic response models, tests, main.py wiring
+- [ ] 18-02-PLAN.md -- Streamlit sandbox dashboard page (5 sections), sandbox metrics endpoint, API client extensions
 
 ## Progress
 
@@ -112,5 +116,5 @@ Plans:
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
 | 15. Schemas, Config, Rollout | 2/2 | Complete    | 2026-03-21 | - |
 | 16. Monitoring and Gate | 3/3 | Complete    | 2026-03-21 | - |
-| 17. Production Operations | 3/3 | Complete   | 2026-03-21 | - |
-| 18. Dashboard and API | v3.0 | 0/TBD | Not started | - |
+| 17. Production Operations | 3/3 | Complete    | 2026-03-21 | - |
+| 18. Dashboard and API | v3.0 | 0/2 | Not started | - |
