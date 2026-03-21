@@ -38,16 +38,21 @@ setup_logging(WorkMode.TEST)
 
 import structlog
 
+from finalayze.backtest.bond_engine import BondBacktestConfig, BondBacktestEngine
+from finalayze.backtest.config import DEFAULT_STRATEGY_HOLD_BARS, MOEX_2022_BREAK, BacktestConfig
+from finalayze.backtest.costs import MOEX_COSTS
+from finalayze.backtest.engine import BacktestEngine
+from finalayze.backtest.journaling_combiner import JournalingStrategyCombiner
 from finalayze.backtest.portfolio_orchestrator import (
     PortfolioBacktestOrchestrator,
     PortfolioBacktestResult,
 )
-
-from finalayze.backtest.bond_engine import BondBacktestConfig, BondBacktestEngine
-from finalayze.core.schemas import Candle, DEFAULT_LAYER_CONFIGS
+from finalayze.core.schemas import DEFAULT_LAYER_CONFIGS, Candle
 from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
 from finalayze.markets.instruments import build_default_registry
 from finalayze.strategies.bond_duration_rotation import BondDurationRotationStrategy
+from finalayze.strategies.dual_momentum import DualMomentumStrategy
+from finalayze.strategies.mean_reversion import MeanReversionStrategy
 
 logger = structlog.get_logger(__name__)
 
@@ -63,13 +68,46 @@ _WEIGHT_SUM_TOLERANCE = 0.01
 
 # OFZ tickers (same as scripts/validate_ofz_data.py)
 _OFZ_PD_TICKERS = [
-    "SU26238RMFS4", "SU26239RMFS2", "SU26241RMFS8", "SU26243RMFS4",
-    "SU26244RMFS2", "SU26246RMFS7", "SU26252RMFS5", "SU26253RMFS3",
+    "SU26238RMFS4",
+    "SU26239RMFS2",
+    "SU26241RMFS8",
+    "SU26243RMFS4",
+    "SU26244RMFS2",
+    "SU26246RMFS7",
+    "SU26252RMFS5",
+    "SU26253RMFS3",
 ]
 _OFZ_PK_TICKERS = [
-    "SU29007RMFS0", "SU29008RMFS8", "SU29009RMFS6", "SU29010RMFS4",
+    "SU29007RMFS0",
+    "SU29008RMFS8",
+    "SU29009RMFS6",
+    "SU29010RMFS4",
 ]
 _ALL_OFZ_TICKERS = _OFZ_PD_TICKERS + _OFZ_PK_TICKERS
+
+_EQUITY_SEGMENT = "ru_blue_chips"
+_EQUITY_SYMBOLS = [
+    "SBER",
+    "LKOH",
+    "GMKN",
+    "NVTK",
+    "ROSN",
+    "TATN",
+    "MGNT",
+    "YNDX",
+    "AFKS",
+    "CHMF",
+    "NLMK",
+    "MAGN",
+    "MOEX",
+    "OZON",
+    "POSI",
+    "SBERP",
+    "TATNP",
+    "PLZL",
+]
+
+_USDRUB_FIGI = "BBG0013HGFT4"  # USD000UTSTOM spot on MOEX
 
 
 def _parse_args() -> argparse.Namespace:
@@ -126,7 +164,9 @@ def _run_bond_backtest(
         )
 
         fetcher = TinkoffFetcher(
-            token=token, registry=build_default_registry(), sandbox=False,
+            token=token,
+            registry=build_default_registry(),
+            sandbox=False,
         )
 
         candles_by_symbol: dict[str, list[Candle]] = {}
@@ -152,7 +192,9 @@ def _run_bond_backtest(
                         close=r["close"],
                         volume=r["volume"],
                         timestamp=datetime.combine(
-                            r["date"], datetime.min.time(), tzinfo=UTC,
+                            r["date"],
+                            datetime.min.time(),
+                            tzinfo=UTC,
                         ),
                     )
                     for r in raw
@@ -173,7 +215,7 @@ def _run_bond_backtest(
             return None
 
         # Build strategy from bond metadata
-        durations = {sym: Decimal("5") for sym in candles_by_symbol}
+        durations = {sym: Decimal(5) for sym in candles_by_symbol}
         maturities = {sym: bond_info_dict[sym].maturity_date for sym in candles_by_symbol}
         coupon_rates = {sym: bond_info_dict[sym].coupon_rate for sym in candles_by_symbol}
         strategy = BondDurationRotationStrategy(
@@ -208,6 +250,11 @@ def _run_equity_backtest(
     end_date: date,
 ) -> tuple[list[Any], list[Any]] | None:
     """Run equity backtest for ru_blue_chips and return (trades, snapshots) or None."""
+    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN", "")
+    if not token:
+        logger.warning("FINALAYZE_TINKOFF_TOKEN not set -- skipping equity backtest")
+        return None
+
     try:
         logger.info(
             "Starting equity backtest",
@@ -216,15 +263,60 @@ def _run_equity_backtest(
             end=str(end_date),
         )
 
-        # Equity engine requires MOEX candle data from T-Bank API.
-        # If unavailable, we skip the equity component gracefully.
-        logger.warning(
-            "Equity backtest requires MOEX candle data. "
-            "Ensure FINALAYZE_TINKOFF_TOKEN is set and data is cached."
+        fetcher = TinkoffFetcher(
+            token=token,
+            registry=build_default_registry(),
+            sandbox=False,
         )
 
-        # Placeholder: in production, load equity data and run BacktestEngine.run(...)
-        return None
+        all_trades: list[Any] = []
+        all_snapshots: list[Any] = []
+
+        per_symbol_capital = equity_capital / max(len(_EQUITY_SYMBOLS), 1)
+
+        for symbol in _EQUITY_SYMBOLS:
+            logger.debug("fetching_equity_candles", symbol=symbol)
+            try:
+                start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=UTC)
+                end_dt = datetime.combine(end_date, datetime.max.time(), tzinfo=UTC)
+                candles = fetcher.fetch_candles(symbol, start_dt, end_dt)
+                if not candles:
+                    logger.debug("no_equity_candles", symbol=symbol)
+                    continue
+
+                strategies = [DualMomentumStrategy(), MeanReversionStrategy()]
+                combiner = JournalingStrategyCombiner(
+                    strategies=strategies,
+                    allocation_mode="equal",
+                )
+                engine = BacktestEngine(
+                    config=BacktestConfig(
+                        initial_cash=Decimal(str(int(per_symbol_capital))),
+                        transaction_costs=MOEX_COSTS,
+                        exclude_periods=MOEX_2022_BREAK,
+                        max_hold_bars=DEFAULT_STRATEGY_HOLD_BARS,
+                    ),
+                    strategy=combiner,
+                )
+                trades, snapshots = engine.run(
+                    symbol=symbol,
+                    segment_id=_EQUITY_SEGMENT,
+                    candles=candles,
+                )
+                all_trades.extend(trades)
+                all_snapshots.extend(snapshots)
+            except Exception:
+                logger.warning(
+                    "equity_symbol_failed",
+                    symbol=symbol,
+                    exc=traceback.format_exc(),
+                )
+
+        if not all_snapshots:
+            logger.warning("no_equity_snapshots_produced")
+            return None
+
+        return all_trades, all_snapshots
 
     except Exception:
         logger.warning(
@@ -238,13 +330,24 @@ def _extract_usdrub_series(
     end_date: date,
 ) -> list[tuple[date, float]]:
     """Extract USDRUB FX series from T-Bank data or return empty list."""
+    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN", "")
+    if not token:
+        logger.warning("FINALAYZE_TINKOFF_TOKEN not set -- cannot fetch USDRUB")
+        return []
+
     try:
         logger.info("Extracting USDRUB series", start=str(start_date), end=str(end_date))
 
-        # In production, load from MarketContext.moex_data.fx_rates
-        # FXRate(timestamp, pair, rate) -> filter pair == "USDRUB"
-        logger.warning("USDRUB data requires T-Bank API. Returning empty series.")
-        return []
+        fetcher = TinkoffFetcher(
+            token=token,
+            registry=build_default_registry(),
+            sandbox=False,
+        )
+        raw = fetcher.fetch_bond_candles(_USDRUB_FIGI, start_date, end_date)
+        if not raw:
+            logger.warning("usdrub_candles_empty")
+            return []
+        return [(r["date"], float(r["close"])) for r in raw]
 
     except Exception:
         logger.warning("USDRUB extraction failed", exc=traceback.format_exc())
