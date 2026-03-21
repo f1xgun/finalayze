@@ -41,6 +41,19 @@ class WorkMode(StrEnum):
         return self == WorkMode.REAL
 
 
+class RolloutPhase(StrEnum):
+    """Gradual rollout phases with progressive risk limits.
+
+    MINIMAL  -- first live deployment: ultra-conservative limits
+    STANDARD -- stability proven: moderate limits
+    FULL     -- full production: normal limits (matches existing defaults)
+    """
+
+    MINIMAL = "minimal"
+    STANDARD = "standard"
+    FULL = "full"
+
+
 class ModeManager:
     """Runtime manager that tracks and validates mode transitions.
 
