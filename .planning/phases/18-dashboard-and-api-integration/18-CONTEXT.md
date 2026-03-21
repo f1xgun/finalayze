@@ -62,7 +62,7 @@ This phase delivers a Streamlit sandbox dashboard page (trade log, equity curve,
 
 - Dashboard should show last 7 days of sandbox metrics by default with date range selector
 - Equity curve should include drawdown overlay
-- Trade log table should be sortable with columns: timestamp, symbol, side, quantity, price, slippage_bps
+- Metrics table should be sortable with columns: timestamp, trade_count, pnl_rub, equity_rub, fill_rate, max_slippage_bps (sourced from SandboxMetricRow aggregate cycle data)
 - Slippage histogram should show distribution with 50bps threshold line
 
 </specifics>

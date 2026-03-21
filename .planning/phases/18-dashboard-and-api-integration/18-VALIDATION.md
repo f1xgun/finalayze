@@ -19,7 +19,7 @@ created: 2026-03-21
 |----------|-------|
 | **Framework** | pytest 7.x |
 | **Config file** | pyproject.toml |
-| **Quick run command** | `uv run pytest tests/unit/test_sandbox_dashboard.py tests/unit/test_sandbox_gonogo_endpoint.py -x -q` |
+| **Quick run command** | `uv run pytest tests/unit/test_api_sandbox.py tests/unit/test_dashboard_pages.py -x -q` |
 | **Full suite command** | `uv run pytest tests/ -x -q` |
 | **Estimated runtime** | ~30 seconds |
 
@@ -38,8 +38,8 @@ created: 2026-03-21
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 18-01-01 | 01 | 1 | GATE-03 | unit | `uv run pytest tests/unit/test_sandbox_gonogo_endpoint.py -x -q` | ❌ W0 | ⬜ pending |
-| 18-02-01 | 02 | 1 | MON-03 | unit | `uv run pytest tests/unit/test_sandbox_dashboard.py -x -q` | ❌ W0 | ⬜ pending |
+| 18-01-01 | 01 | 1 | GATE-03 | unit | `uv run pytest tests/unit/test_api_sandbox.py -x -q` | ❌ W0 | ⬜ pending |
+| 18-02-01 | 02 | 1 | MON-03 | unit | `uv run pytest tests/unit/test_dashboard_pages.py -x -q` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -47,8 +47,9 @@ created: 2026-03-21
 
 ## Wave 0 Requirements
 
-- [ ] `tests/unit/test_sandbox_gonogo_endpoint.py` — stubs for GATE-03
-- [ ] `tests/unit/test_sandbox_dashboard.py` — stubs for MON-03
+- [ ] `tests/unit/test_api_sandbox.py` — stubs for GATE-03
+
+*`tests/unit/test_dashboard_pages.py` already exists — add sandbox test cases.*
 
 ---
 
