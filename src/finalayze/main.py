@@ -90,6 +90,13 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                             go_no_go_reporter = GoNoGoReporter(_thresholds, market_id="moex")
                             _bot_handler_instance._go_no_go_reporter = go_no_go_reporter  # type: ignore[union-attr]
                             log.info("go_no_go_reporter_wired_to_telegram_bot")
+
+                            from finalayze.api.v1.sandbox import (  # noqa: PLC0415
+                                set_go_no_go_reporter as set_sandbox_reporter,
+                            )
+
+                            set_sandbox_reporter(go_no_go_reporter)
+                            log.info("go_no_go_reporter_wired_to_sandbox_endpoint")
                     except Exception:
                         log.debug("go_no_go_reporter_wire_failed", exc_info=True)
 
@@ -101,6 +108,28 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                         _bot_handler_instance._circuit_breakers = circuit_breakers_ref  # type: ignore[union-attr]
                         _bot_handler_instance._trading_loop = _trading_loop_instance  # type: ignore[union-attr]
                         log.info("bot_handler_fully_wired")
+
+                # Wire GoNoGoReporter to sandbox endpoint even without Telegram bot
+                if _bot_handler_instance is None:
+                    try:
+                        from pathlib import Path as _Path2  # noqa: PLC0415
+
+                        from finalayze.api.v1.sandbox import (  # noqa: PLC0415
+                            set_go_no_go_reporter as set_sandbox_reporter,
+                        )
+                        from finalayze.monitoring.go_no_go import (  # noqa: PLC0415
+                            GateThresholds,
+                            GoNoGoReporter,
+                        )
+
+                        _gate_cfg2 = _Path2("config/gate_thresholds.yaml")
+                        if _gate_cfg2.exists():
+                            _thresholds2 = GateThresholds.from_yaml(_gate_cfg2)
+                            go_no_go_reporter = GoNoGoReporter(_thresholds2, market_id="moex")
+                            set_sandbox_reporter(go_no_go_reporter)
+                            log.info("go_no_go_reporter_wired_to_sandbox_endpoint")
+                    except Exception:
+                        log.debug("go_no_go_reporter_sandbox_wire_failed", exc_info=True)
 
                 # Create and wire HealthMonitor
                 alerter_ref = getattr(_trading_loop_instance, "_alerter_ref", None)
