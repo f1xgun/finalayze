@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Production Readiness
 status: in_progress
-stopped_at: Completed 16-03-PLAN.md
-last_updated: "2026-03-21T20:58:07.000Z"
-last_activity: 2026-03-21 -- Completed Plan 16-03 (TradingLoop Integration)
+stopped_at: Completed 17-01-PLAN.md
+last_updated: "2026-03-22T00:26:38Z"
+last_activity: 2026-03-22 -- Completed Plan 17-01 (KillSwitch & HealthMonitor)
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 100
+  completed_phases: 2
+  total_plans: 7
+  completed_plans: 6
+  percent: 85
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-21)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 16 -- Sandbox Monitoring and Go/No-Go Gate
+**Current focus:** Phase 17 -- Production Operations
 
 ## Current Position
 
-Phase: 16 of 18 (Sandbox Monitoring and Go/No-Go Gate)
-Plan: 3 of 3 complete
-Status: Phase Complete
-Last activity: 2026-03-21 -- Completed Plan 16-03 (TradingLoop Integration)
+Phase: 17 of 18 (Production Operations)
+Plan: 1 of 2 complete
+Status: In Progress
+Last activity: 2026-03-22 -- Completed Plan 17-01 (KillSwitch & HealthMonitor)
 
-Progress: [██████████] 100% (3/3 plans complete)
+Progress: [█████-----] 50% (1/2 plans complete)
 
 ## Performance Metrics
 
@@ -64,6 +64,10 @@ Key carry-forward decisions for v3.0:
 - Slippage computed as (fill_price - last_close) / last_close * 10000 bps in _submit_order
 - SandboxMonitorService wired via TYPE_CHECKING import to avoid circular deps
 - settings.mode (not work_mode) used for SANDBOX condition in main.py
+- KillSwitch uses deferred imports for CircuitLevel/AlertPriority to maintain layer boundaries
+- Per-order try/except in kill switch cancel loop -- single broker failure never aborts shutdown
+- HealthMonitor feed freshness via externally-updated timestamp (update_feed_timestamp)
+- Loop liveness treats 0->0 cycles as not-started (avoids false alerts on startup)
 
 ### Pending Todos
 
@@ -77,6 +81,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21
-Stopped at: Completed 16-03-PLAN.md (Phase 16 complete)
+Last session: 2026-03-22
+Stopped at: Completed 17-01-PLAN.md
 Resume file: None
