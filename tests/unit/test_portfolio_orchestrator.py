@@ -424,15 +424,23 @@ class TestWalkForward:
     def _make_long_result(
         self,
         n_days: int = 900,
-        daily_return: float = 0.0005,
+        daily_return: float = 0.001,
         start_date: dt.date | None = None,
     ) -> PortfolioBacktestResult:
-        """Build a PortfolioBacktestResult spanning n_days with constant daily return."""
+        """Build a PortfolioBacktestResult spanning n_days with varying daily return.
+
+        Adds small oscillation to avoid zero-stdev edge case (constant returns
+        produce stdev=0 -> Sharpe=0 regardless of mean).
+        """
+        import math
+
         base = start_date or dt.date(2021, 1, 1)
         dates = [base + dt.timedelta(days=i) for i in range(n_days)]
         curve = [100_000.0]
-        for _ in range(n_days - 1):
-            curve.append(curve[-1] * (1.0 + daily_return))
+        for i in range(n_days - 1):
+            # Add small oscillation so stdev is non-zero
+            r = daily_return + 0.0002 * math.sin(i * 0.1)
+            curve.append(curve[-1] * (1.0 + r))
         return PortfolioBacktestResult(
             bond_equity_curve=curve,
             equity_equity_curve=curve,

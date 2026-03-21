@@ -11,6 +11,11 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from finalayze.backtest.bond_walk_forward import (
+    _compute_excess_sharpe_from_equity,
+    generate_wf_windows,
+)
+
 if TYPE_CHECKING:
     from datetime import date
 
@@ -124,6 +129,65 @@ class PortfolioBacktestOrchestrator:
             equity_weight_series=equity_weight_series,
             crisis_brake_active_dates=crisis_dates,
         )
+
+    def compute_walk_forward_sharpe(
+        self,
+        result: PortfolioBacktestResult,
+        train_months: int = 12,
+        test_months: int = 6,
+        step_months: int = 3,
+        risk_free_annual_pct: float = _DEFAULT_RISK_FREE_PCT,
+    ) -> float:
+        """Compute walk-forward Sharpe on the pre-computed merged equity curve.
+
+        Slices the merged curve into 12mo-train / 6mo-test windows and computes
+        excess Sharpe on each OOS slice.  Does NOT re-run engines -- purely
+        analytical.
+
+        Returns the average OOS excess Sharpe across folds, or 0.0 if the curve
+        is too short for even one fold.  Also sets ``result.wf_sharpe``.
+        """
+        if len(result.dates) < _MIN_CURVE_LEN:
+            result.wf_sharpe = 0.0
+            return 0.0
+
+        windows = generate_wf_windows(
+            result.dates[0],
+            result.dates[-1],
+            train_months=train_months,
+            test_months=test_months,
+            step_months=step_months,
+        )
+
+        if not windows:
+            result.wf_sharpe = 0.0
+            return 0.0
+
+        # Build date -> index lookup for fast slicing
+        date_to_idx: dict[date, int] = {d: i for i, d in enumerate(result.dates)}
+
+        oos_sharpes: list[float] = []
+        for _train_start, _train_end, test_start, test_end in windows:
+            # Find indices for the test period
+            test_indices = [
+                date_to_idx[d]
+                for d in result.dates
+                if test_start <= d <= test_end and d in date_to_idx
+            ]
+            if len(test_indices) < _MIN_CURVE_LEN:
+                continue
+
+            test_equity = [result.merged_equity_curve[i] for i in test_indices]
+            oos_sharpe = _compute_excess_sharpe_from_equity(test_equity, risk_free_annual_pct)
+            oos_sharpes.append(oos_sharpe)
+
+        if not oos_sharpes:
+            result.wf_sharpe = 0.0
+            return 0.0
+
+        avg_sharpe = sum(oos_sharpes) / len(oos_sharpes)
+        result.wf_sharpe = avg_sharpe
+        return avg_sharpe
 
     # ------------------------------------------------------------------
     # Private helpers
