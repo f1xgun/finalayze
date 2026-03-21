@@ -1,0 +1,35 @@
+gate:
+  min_sandbox_days: 5
+  criteria:
+    uptime_pct:
+      threshold: 99.0
+      critical: true
+      source: engineering default
+    fill_rate_pct:
+      threshold: 95.0
+      critical: true
+      source: engineering default
+    max_drawdown_pct:
+      threshold: 2.27
+      critical: true
+      source: p90 of wf_max_drawdown from history.jsonl
+    min_trades_5d:
+      threshold: 18.0
+      critical: false
+      source: p10 of trade_count / walk-forward periods from history.jsonl
+    signal_frequency_per_day:
+      threshold: 1.0
+      critical: false
+      source: engineering default
+    critical_errors_pct:
+      threshold: 1.0
+      critical: true
+      source: engineering default
+    max_slippage_bps:
+      threshold: 50.0
+      critical: false
+      source: engineering default
+    signal_divergence_pct:
+      threshold: 50.0
+      critical: false
+      source: engineering default
