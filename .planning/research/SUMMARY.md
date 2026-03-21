@@ -1,255 +1,291 @@
 # Project Research Summary
 
-**Project:** v2.0 MOEX Profitability
-**Domain:** MOEX-native equity alpha — dividend gap, CBR regime overlay, sector rotation, preferred share arbitrage, Russian macro ML features
-**Researched:** 2026-03-20
-**Confidence:** MEDIUM-HIGH (stack + architecture: HIGH from direct codebase inspection; features + pitfalls: MEDIUM on MOEX-specific domain knowledge)
+**Project:** Finalayze MOEX MVP — v3.0 Production Readiness
+**Domain:** Sandbox monitoring, go/no-go gate automation, gradual rollout, production health operations
+**Researched:** 2026-03-21
+**Confidence:** HIGH
 
 ## Executive Summary
 
-The v2.0 MOEX profitability milestone is a focused extension of an already-working system, not a greenfield build. The existing Python 3.12 codebase already contains all required libraries, data fetchers, strategy framework hooks, and ML pipeline infrastructure. Every planned feature — dividend gap expansion, CBR regime gating, sector rotation, preferred share arbitrage, and MOEX-specific ML features — can be implemented using the current dependency set with zero new pip packages. The only genuinely new external data is MOEX sector index candles (8 tickers: MOEXOG, MOEXFN, MOEXMM, etc.), fetched via the already-operational `MoexISSFetcher`. Work is purely at the application layer: new strategy modules, ML feature extensions, combiner configuration, and risk pipeline wiring.
+Finalayze v3.0 is a production readiness milestone for an existing autonomous MOEX trading system. The system already has a rich v2.0 foundation — Prometheus metrics, structured logging, CircuitBreaker, PreTradeChecker, TelegramAlerter, APScheduler cycles, and a Streamlit dashboard — so the work is not building an observability stack from scratch. It is building the decision layer on top of that stack: formalized go/no-go gate logic, slippage capture to feed that gate, gradual rollout configuration, and emergency kill switch capability. The recommended approach is to add a new `monitoring/` module at Layer 6 (same plane as `api/`), implement the gate as a pure function for testability, configure rollout phases as frozen dataclasses at Layer 1, and make minimal additive modifications to existing components. At most 2-3 new pip packages are required (Jinja2, WeasyPrint for PDF reports; aiogram for Telegram bot commands) — zero if PDF archiving is deferred.
 
-The recommended build sequence is dictated by a hard dependency chain. Data and parameter foundations must be fixed first — the current codebase has three confirmed problems invalidating all MOEX backtest results: (1) `vol_target: 0.19` (US-calibrated) destroys MOEX position sizes because MOEX blue chip volatility is 35-60% annualized, not 19%; (2) the dividend calendar has only 43 events, all of which are paid dividends (cancelled events like GAZP 2022 are missing, introducing look-ahead bias); and (3) the Feb-Mar 2022 MOEX closure distorts vol estimates 3-5x and teaches false mean-reversion patterns. These problems account for a substantial portion of the 104 rejected backtest iterations and must be resolved before any new strategy work begins. After the data foundation is clean, existing-but-unconnected strategies should be wired (DividendGapStrategy calendar, CBRStrategyWrapper, rub_oil_regime), then new macro-gated strategies added, and finally portfolio-level allocation and ML features layered on.
+The critical risk for v3.0 is false confidence from sandbox metrics. Tinkoff's sandbox fills orders at the last price with 100% synthetic fill rate, so sandbox P&L will appear 0.3-1.5% better than live execution on illiquid MOEX instruments. The go/no-go gate must focus on what sandbox CAN validate reliably — uptime, signal-direction correctness, absence of critical errors — and thresholds must be derived from walk-forward backtest distribution percentiles, not round numbers. The go-live decision is always a human decision: the system generates a structured report with PROCEED/DEFER/ABORT recommendation; the operator reviews it and initiates the mode transition with an existing confirmation token.
 
-The highest-severity architectural risk is sector rotation placement. Sector rotation is a portfolio-level signal that must NOT enter the per-symbol `StrategyCombiner` — doing so creates contradictory symbol-level signals, monthly rebalancing whipsaw, and backtest overfitting. It must be implemented as a `SectorAllocationStep` in `PositionSizingPipeline`. If built wrong, recovery cost is HIGH (full architectural refactor). CBR regime gating has a subtler risk: using the CBR announcement date as a trading signal is lagging (the market prices decisions 1-3 weeks in advance via OFZ yield curve movements); the regime signal must be OFZ curve slope and RUONIA spread, not raw rate decisions.
+Research also surfaced a parallel v2.0 MOEX strategy improvement workstream with data-integrity prerequisites that must be resolved before any new strategy backtesting is valid. The current codebase has three confirmed problems invalidating all MOEX backtest results: vol_target 0.19 is US-calibrated (MOEX needs 0.35-0.40); the dividend calendar has only 43 events and excludes cancelled dividends, introducing look-ahead bias; and Feb-Mar 2022 MOEX closure contaminates walk-forward training with artificially distorted volatility. These are quick fixes with high impact and must come before strategy work. The highest architectural risk in the v2.0 stream is sector rotation — it must be implemented as a SectorAllocationStep in the PositionSizingPipeline, not as a combiner strategy; implementing it in the wrong layer carries a HIGH recovery cost.
 
 ## Key Findings
 
 ### Recommended Stack
 
-Zero new packages required. The codebase already provides every building block needed for v2.0. See `.planning/research/STACK.md` for full module mapping and the "What NOT to Add" table.
+v3.0 requires minimal new dependencies. The entire monitoring and health-pulse infrastructure already exists. See `.planning/research/STACK.md` for the full audit of existing capabilities.
 
-**Core technologies (all existing — no new pip installs):**
-- `t-tech-investments` gRPC SDK: MOEX candles, dividends, instruments — the only valid source for MOEX tickers; `TinkoffFetcher.get_dividends()` already operational
-- `CBRFetcher` + `MacroSnapshot` + `MacroCacheService`: CBR key rate, USDRUB, CPI, RUONIA — already operational; `MacroSnapshot` needs two new fields (`brent_close`, `usdrub_daily_change`)
-- `MoexISSFetcher`: MOEX ISS API for IMOEX and any sector index — needs sector tickers added (MOEXOG, MOEXFN, MOEXMM, MOEXCN, MOEXTL, MOEXCH, MOEXEU, MOEXIT)
-- `PairsStrategy` + `statsmodels`: Kalman hedge ratio + Engle-Granger cointegration — needs MOEX pref/ord pair configuration (SBER/SBERP, TATN/TATNP)
-- `XGBoost` + `LightGBM` + `CatBoost` + `ml/features/technical.py`: ML ensemble with 45 features — needs 10 new MOEX macro features (`cbr_key_rate_level`, `cbr_rate_delta_3m`, `usdrub_return_20d`, `usdrub_zscore_60d`, `brent_return_20d`, `brent_rub_spread`, `imoex_relative_21d`, `moex_turnover_zscore`, plus 2 more)
-- `QuantLib`: bond math already in use for OFZ allocation layer
+**Core technologies (new additions only):**
+- `Jinja2 >= 3.1.4`: HTML template rendering for gate reports — already a transitive dependency via FastAPI/Starlette; just make it explicit in pyproject.toml
+- `weasyprint >= 68.1`: HTML-to-PDF conversion for archiving go/no-go reports — best Python option in 2025, no Chromium, CSS3 support; can be omitted entirely if PDF archiving is not required
+- `aiogram >= 3.17.0`: Async-native Telegram bot command handling for /kill, /rollout, /gonogo — optional; raw httpx POST is sufficient if interactive conversation FSM is not needed
+- `types-Jinja2 >= 3.1.0`: mypy stubs for Jinja2 (dev dependency only)
 
-**Only new application-layer data schema addition:** `MoexMarketData.sector_index_candles: dict[str, tuple[Candle, ...]]` field.
+**Stack decision rule:** If PDF report archiving is not required, v3.0 adds zero new pip packages. All monitoring primitives (metrics, alerting, scheduling, health checks, kill switch) are already installed.
+
+**What NOT to add:** OpenTelemetry (overkill for a single-process system), Celery (mismatches APScheduler single-process model), external feature flag services (rollout is capital/risk limit progression, not code path toggling), Datadog/NewRelic/Sentry APMs (external SaaS with sensitive trading data egress), ADTK/darts for anomaly detection (unmaintained or too heavy; rolling z-score with numpy is sufficient).
 
 ### Expected Features
 
-See `.planning/research/FEATURES.md` for full details including per-symbol dividend gap closure statistics (ROSN: same-day, LKOH: ~10 days, TATN: 19-255 days bimodal) and CBR rate impact mechanics (8 meetings/year, 100-200bps moves vs. Fed's 25bps).
+See `.planning/research/FEATURES.md` for the full feature table with prioritization matrix and dependency graph.
 
-**Must have (table stakes for positive MOEX Sharpe — P0/P1):**
-- Universe cleanup — remove GAZP, VTBR, SNGS, IRAO, ALRS from active segments (account for ~60% of negative PnL)
-- `vol_target` recalibration — update ru_*.yaml from 0.19 to 0.35-0.40; quick fix, high impact
-- Expanded dividend calendar — 150+ events from T-Invest API including ALL board recommendations and cancelled events (not just paid dividends)
-- Dividend gap strategy tuning — per-symbol `max_hold_bars`, regime filter, closure-rate-based confidence scaling
-- CBR rate regime gating — wire existing `cbr_calendar.py` into combiner (code exists, not connected)
-- Brent energy gate — wire existing `rub_oil_regime.py` into combiner for energy sector (code exists, not connected)
-- RUB crisis brake — halt new equity longs when RUB/oil correlation < 0.1
+**Must have (table stakes — blocks go-live without these):**
+- Formalized go/no-go gate with configurable thresholds — current gate has 4 hardcoded criteria; need 8 configurable criteria including uptime %, fill rate, mean slippage, and signal frequency
+- Slippage capture in sandbox — expected_price at signal generation time vs. actual fill price; required to populate slippage gate criterion
+- Gradual rollout tightened risk limits config — `RolloutPhase` profiles (minimal_50k: 3% max position, 1% daily loss, 2% DD auto-stop) consumed by PreTradeChecker and CircuitBreaker
+- Production health heartbeat alert — silent TradingLoop crash undetected for hours without this; timer check + Telegram CRITICAL alert
+- REST API kill switch POST /system/stop — Telegram /stop exists but CI and scripts need a programmatic equivalent
 
-**Should have (competitive differentiators — P2):**
-- Preferred share arbitrage (SBER/SBERP, TATN/TATNP) — configure existing `PairsStrategy` for MOEX pref/ord pairs; long-only constraint (T-Invest retail cannot short)
-- Brent-conditional sector rotation — as a `SectorAllocationStep` in sizing pipeline, NOT a combiner signal
-- CBR meeting pre-positioning — extend `generate_cbr_signal()` for pre-meeting entry on financials when cut is expected; requires manual consensus rate input (8x/year)
+**Should have (P2 — add during or after sandbox validation period):**
+- Sandbox dashboard validation progress page — Streamlit page showing per-criterion progress bars and per-day equity chart; manual JSONL report is acceptable for MVP
+- Automated gate evaluation on daily schedule — APScheduler job at 19:00 MSK; manual run is acceptable for MVP
+- Strategy signal-frequency anomaly alert — detects silent strategy failure via Prometheus strategy_signal_count counters
+- Post-live slippage report vs. backtest comparison — weekly Telegram message; needs 5-10 real trades before first run
 
-**Defer to v2.1+ (require positive equity Sharpe baseline first — P3):**
-- ML ensemble with Russian macro features — 10 new features are designed and ready; defer until clean baseline data exists; overfitting risk is high on 3-year MOEX history
-- OFZ PK-to-PD rotation — existing OFZ-PK carry Sharpe is already +1.14; rotation is optimization, not MVP
-- Portfolio-level allocation optimizer — implement simple fixed 40/60 OFZ/equity split first
+**Defer to v3.1+:**
+- Signal divergence tracker (shadow backtest engine per cycle) — too compute-intensive for the trading loop hot path; needs separate architectural design
+- Capital scaling confirmation flow — manual confirmation token is acceptable for the first 30 days live; automate after stable live data
 
-**Anti-features (explicitly excluded):**
-- Intraday dividend gap scalping — gap closure is a multi-day phenomenon; daily bars are correct
-- Automated CBR consensus scraping — fragile; use manual YAML input (8x/year = acceptable burden)
-- Full sector rotation optimizer — overfitting trap on short post-2022 MOEX history; use binary gates instead
-- Preferred share short-selling — T-Invest retail cannot short; long-only on undervalued leg only
-- ML with sanctions text features — N=3 sanctions events is insufficient for ML; use rub_oil_regime as proxy
+**Anti-features (specifically avoid):**
+- Fully automated sandbox-to-live promotion — any system that promotes itself to real money without a human checkpoint is a liability
+- Automated position liquidation on gate FAIL — adds state management complexity with no benefit in sandbox; high-risk in live (slippage, incomplete fills)
+- Per-cycle shadow backtest for signal divergence — adds 30-60 seconds compute per cycle, starves the main trading loop
+- Multi-account capital splitting — Tinkoff Invest does not support multi-account management via one API token
+
+**Go/no-go gate expansion (current hardcoded vs. v3.0 configurable target):**
+
+| Criterion | Current (hardcoded) | v3.0 Target (configurable) |
+|-----------|---------------------|----------------------------|
+| Minimum trading days | >= 5 | >= 10 (two full MOEX weeks) |
+| Max drawdown | < 5.0% | < 5.0% configurable; tighten to 3% for phase 1 live |
+| Round-trip fills | >= 10 | >= 20 (statistical minimum) |
+| Critical errors | == 0 | == 0 (keep) |
+| Uptime % | Not measured | >= 99% (actual cycles / expected cycles) |
+| Fill rate | Not measured | >= 95% (orders_filled / orders_submitted) |
+| Mean slippage | Not measured | < 30 bps |
+| Signal frequency | Not measured | >= 1 signal per enabled strategy per 5 days |
 
 ### Architecture Approach
 
-The 7-layer dependency architecture (L0 types → L6 orchestration) requires no structural changes. All new components slot into existing layers without violating downward-only import rules. The key design constraint is that strategies receive macro context via `**kwargs` to `generate_signal()` using the existing `regime_state` kwarg pattern — never by importing from L2 directly. This is enforced by passing a `MacroSnapshot` object through the backtest engine's `_process_bar()` method. See `.planning/research/ARCHITECTURE.md` for complete component boundaries, data flow diagrams, layer violation analysis, and the explicit anti-pattern list.
+The architecture adds a new `monitoring/` top-level module at Layer 6 and makes minimal additive modifications to existing components. See `.planning/research/ARCHITECTURE.md` for full data-flow diagrams, component specifications, and anti-pattern analysis.
 
-**Major new and modified components:**
+**New module structure:**
+```
+src/finalayze/monitoring/   # NEW — Layer 6, same plane as api/
+    sandbox_monitor.py      # SandboxMonitorService: collect metrics, persist to TimescaleDB
+    gonogo.py               # GoNoGoReporter: pure evaluation function, no side effects
+    anomaly.py              # AnomalyDetector: z-score alerting on equity/slippage/signals
+    health_monitor.py       # ProductionHealthMonitor: 5-minute health pulse
+    kill_switch.py          # KillSwitch: halt-all with order cancellation sequence
 
-| Component | Layer | Type | Key Responsibility |
-|-----------|-------|------|--------------------|
-| `DividendCalendarLoader` | L2 | New | Bulk-load ex-div dates from Tinkoff for all ru_* symbols; populates `DividendGapStrategy` before backtest |
-| `SectorClassifier` | L2 | New | Maps symbols to sectors from static YAML; avoids hardcoded `if symbol in [...]` anti-pattern |
-| `PreferredShareMapper` | L2 | New | Maps common/preferred share FIGIs (SBER↔SBERP, TATN↔TATNP) |
-| `MacroSnapshot` | L2 | Extend | Add `brent_close`, `usdrub_daily_change` fields for macro-gated strategies |
-| `CBRRegimeStep` + `BrentGateStep` | L4 | New | Add to `PositionSizingPipeline`; scale positions by CBR cycle and Brent price — do NOT block signals entirely |
-| `SectorRotationStrategy` / `SectorAllocationStep` | L4 | New | Portfolio-level sizing overlay in pipeline, NOT a combiner signal |
-| `PreferredShareArbStrategy` | L4 | New | Long-only spread convergence on pref/ord pairs; extends `PairsStrategy` pattern |
-| `PortfolioAllocator` | L4 | New | 40% OFZ / 60% equity capital split with RUB crisis brake |
-| `PortfolioBacktestOrchestrator` | L5 | New | Runs bond + equity engines separately, merges PnL at portfolio level |
+config/rollout.py           # NEW — Layer 1: RolloutPhase frozen dataclasses, env var resolver
+api/v1/sandbox.py           # NEW: GET /sandbox/metrics, GET /sandbox/gonogo
+alembic/versions/XXX.py     # NEW migration: sandbox_metrics TimescaleDB hypertable
+```
 
-**Suggested build order within each phase** (from ARCHITECTURE.md §"Suggested Build Order"):
-Phase 1: Data (DividendCalendarLoader, SectorClassifier, PreferredShareMapper, MacroSnapshot extensions) → Phase 2: Wire existing strategies (DividendGap calendar, CBRStrategyWrapper, rub_oil_regime sizing) → Phase 3: New strategies (SectorAllocationStep, PreferredShareArbStrategy, CBRRegimeStep, BrentGateStep) → Phase 4: Portfolio layer (PortfolioAllocator, RUBCrisisBrake, PortfolioBacktestOrchestrator).
+**Major components and their responsibilities:**
+1. `SandboxMonitorService` — reads ValidationLogger JSONL (fast append-only write path), aggregates daily metric snapshots, persists SandboxMetricSnapshot to TimescaleDB (queryable read path)
+2. `GoNoGoReporter` — pure function: takes list of SandboxMetricSnapshot and configurable thresholds, applies 8 gate rules, returns frozen GoNoGoReport with PROCEED/DEFER/ABORT recommendation; no side effects, trivially testable
+3. `RolloutPhase` in `config/rollout.py` — frozen dataclasses with named profiles (minimal_50k, scale_200k, target_500k) and per-phase risk parameter overrides; active phase resolved from FINALAYZE_ROLLOUT_PHASE env var at startup; validated by Pydantic
+4. `ProductionHealthMonitor` — 5-minute APScheduler job: broker ping, ValidationLogger feed freshness, Redis ping, circuit breaker level; sends Telegram IMPORTANT alert on degradation
+5. `KillSwitch.activate(reason)` — strict sequence: (1) set _stop_event to halt scheduler, (2) escalate all CircuitBreakers to LIQUIDATE, (3) cancel pending orders via BrokerRouter, (4) send CRITICAL Telegram alert, (5) set kill_switch_active Prometheus gauge
+
+**Existing components modified (all additive, None-default to preserve existing behavior):**
+- `CycleLogEntry` — 3 optional None-default fields: fill_rate_pct, avg_slippage_bps, signal_divergence_pct
+- `PreTradeChecker` — accept optional `rollout_phase: RolloutPhase | None = None` for position limit overrides
+- `CircuitBreaker` — accept optional `rollout_phase: RolloutPhase | None = None` for threshold overrides
+- `TradingLoop` — add `_health_pulse_cycle()` APScheduler job; add `activate_kill_switch()` method
+- `TelegramBotHandler` — add /gonogo, /health, /killswitch to existing command dispatch table
+- `MetricsCollector` — add ~5 new Prometheus gauges (fill_rate, kill_switch_active, rollout_phase, health_pulse_status, signal_divergence)
+
+**Suggested build order (dictated by dependency chain):**
+1. Schema and config foundation (GoNoGoReport, SandboxMetricSnapshot, HealthCheckResult schemas; RolloutPhase dataclasses; DB migration — zero behavior change)
+2. Risk layer rollout wiring (CircuitBreaker and PreTradeChecker accept optional rollout_phase)
+3. Monitoring services (SandboxMonitorService, GoNoGoReporter, AnomalyDetector, ProductionHealthMonitor)
+4. API endpoints (GET /sandbox/metrics, GET /sandbox/gonogo; thin wrappers over Phase 3 services)
+5. TradingLoop and Telegram extensions (health pulse job, kill switch, new bot commands — highest regression risk, done last)
+6. Streamlit dashboard pages (optional — Telegram commands provide equivalent operational visibility)
 
 ### Critical Pitfalls
 
-Full analysis with detection criteria, recovery costs, and phase mapping in `.planning/research/PITFALLS.md`. Seven critical pitfalls identified.
+PITFALLS.md covers two research domains. See `.planning/research/PITFALLS.md` for full analysis including detection signals, recovery costs, and phase-specific warnings.
 
-1. **Look-ahead bias in dividend calendar** — YAML contains only paid dividends; cancelled events (GAZP 2022: 52.53 RUB recommended, rejected) are missing. Backtest win rate appears >85% when real rate is ~65-75%. Fix: rebuild calendar with `status: paid|cancelled|reduced` field; include ALL board recommendations 2020-2025. Must resolve in Phase 1 before any dividend gap backtesting.
+**Top pitfalls — v3.0 production readiness:**
 
-2. **Vol target 0.19 destroys MOEX position sizes** — US-calibrated target vs. MOEX's 35-60% annualized vol causes VolTargetStep to hit the 0.25x floor on 60-70% of MOEX trades. Positions too small to overcome transaction costs. Fix: set `vol_target: 0.35-0.40` in ru_*.yaml. Quick config change, do in Phase 1.
+1. **Sandbox gives false confidence because Tinkoff fills are synthetic** — Sandbox always fills at last price with 100% fill rate. Live MOEX execution on illiquid instruments will be 0.3-1.5% worse. Sandbox P&L must NOT be the primary gate criterion. Track "simulated slippage" (sandbox fill price vs. MOEX ISS mid-price at signal time) to measure the gap explicitly. Zero fill rejections over 30 sandbox days is a warning sign, not a positive indicator.
 
-3. **Survivorship bias from 2022 MOEX structural break** — Feb-Mar 2022 closure + circuit breakers distort vol 3-5x and teach false mean-reversion patterns on MOEX-supported price floors. Fix: add `exclude_periods: [("2022-02-24", "2022-04-01")]` to `BacktestConfig`; remove toxic symbols first; never train walk-forward across the sanctions break.
+2. **Go/no-go thresholds invented, not calibrated against backtest distributions** — A 5% DD gate will permanently block go-live if the system naturally produces 6% drawdown during sideways MOEX markets. Derive each threshold from walk-forward percentiles from existing PortfolioBacktestOrchestrator results. Separate "blocking" gates (uptime, signal direction) from "advisory" gates (slippage, fill rate).
 
-4. **CBR rate regime timing error** — Using the CBR announcement as a trading signal is lagging; the market prices decisions 1-3 weeks in advance. Buying on "CBR cut" announcement buys AFTER the rally. Fix: use OFZ yield curve slope (2Y-10Y spread) and RUONIA-OIS spread as leading indicators; only trade the *surprise* component (actual vs. market-implied rate) on announcement day.
+3. **Kill switch that only stops the scheduler leaves pending broker orders live** — Pending MOEX limit orders remain valid until market close. Strict sequence required: stop accepting cycles, escalate CircuitBreakers to LIQUIDATE, cancel all pending orders via BrokerRouter, then shut down scheduler. If order cancellation fails, log and continue — the LIQUIDATE circuit state prevents new orders.
 
-5. **Dividend gap signals diluted by ADX combiner routing** — `dividend_gap` is not in `_MOMENTUM_STRATEGIES` or `_MR_STRATEGIES` frozensets; its classification is accidental. On ex-div days, other strategies generate HOLD/SELL that average down the BUY below `min_combined_confidence`. Fix: create `_EVENT_STRATEGIES = frozenset({"dividend_gap", "cbr_calendar", "event_driven"})` that bypasses ADX routing; or give dividend_gap weight >= 0.40 on MOEX segments.
+4. **Monitoring logic embedded in TradingLoop** — TradingLoop is already 500+ lines with 20+ injected dependencies. Adding monitoring creates scheduler contention (a slow health check delays trade execution) and untestable circular coupling. Monitoring services must be standalone with separate APScheduler jobs.
 
-6. **Sector rotation in the wrong architectural layer** — Sector rotation is a portfolio-level allocation signal; forcing it into the per-symbol combiner creates contradictory signals (sector says "buy energy", technicals say "sell ROSN"), monthly whipsaw on rebalance day, and backtest overfitting to macro events. Fix: implement as `SectorAllocationStep` in `PositionSizingPipeline`. Recovery cost if built wrong: HIGH (architectural refactor).
+5. **Automated go/no-go block at real mode startup** — Creates a chicken-and-egg problem and hides root cause of failures. The existing `real_confirmed` environment variable guard is the correct automated safety. Go/no-go is an on-demand report that the operator reviews before initiating mode transition.
 
-7. **T+1 settlement date confusion** — `DividendGapStrategy` triggers on `ex_date` from YAML, but Tinkoff's "ex_date" is actually the last buy date; the actual price gap appears the NEXT bar. Fix: rename YAML field to `last_buy_date`; strategy buys one bar after. Easy fix but must be correct before any dividend gap backtest.
+**Top pitfalls — v2.0 MOEX strategy improvements:**
 
-**Additional pitfalls to track (moderate):**
-- Pitfall 7: Overfitting to 2022-2024 CBR hiking cycle — regime parameters calibrated on crisis data won't fire in normal markets
-- Pitfall 10: Preferred share spread non-stationarity — SBERP briefly exceeded SBER in 2022; use z-score window excluding crisis period; entry threshold > 2 std (not 1.5)
-- Pitfall 11: Brent gate must use Brent-in-RUB (Brent * USDRUB), not USD Brent; apply 1-day lag
-- Pitfall 12: `DEFAULT_STRATEGY_HOLD_BARS["dividend_gap"]` = 15 conflicts with strategy's 60-bar expectation; engine will force-close positions before gap closes
-- Pitfall 14: Multiplicative sizing steps (vol target × regime × sector) compound to pipeline floor; cap total scale or use additive sector adjustment
+1. **Look-ahead bias in dividend gap backtests** — The dividend YAML has only paid dividends; cancelled events (GAZP 2022: 52.53 RUB recommended, rejected by shareholders) are missing. Backtest win rate appears >85% when the real rate including cancellations is ~65-75%. Fix: expand from 43 to 150+ events with a `status: paid|cancelled|reduced` field; include ALL board recommendations, not just successful payments.
+
+2. **Survivorship bias from 2022 MOEX sanctions structural break** — Feb-Mar 2022 included a 25-day trading halt, artificial circuit breakers, and government-supported price floors. Any strategy calibrated on this data learns false patterns. Fix: add `exclude_periods: [("2022-02-24", "2022-04-01")]` to BacktestConfig; remove toxic symbols (GAZP, VTBR, SNGS) from active universe; never train walk-forward across the structural break.
+
+3. **Vol target 0.19 systematically undersizes all MOEX positions** — US-calibrated target vs. MOEX's 0.35-0.60 annualized volatility causes VolTargetStep to hit the 0.25x floor on 60-70% of MOEX trades. Positions are too small to overcome transaction costs. Fix: set MOEX vol_target to 0.35-0.40 for ru_blue_chips in preset YAMLs. Quick config change, high impact.
+
+4. **CBR rate regime timing error** — The market prices CBR decisions 1-3 weeks before announcement via the OFZ yield curve. Buying on the announcement buys AFTER the rally, then holds through mean-reversion. Fix: use OFZ yield curve slope (2Y-10Y spread) and RUONIA-OIS spread as leading indicators; only trade the surprise component (actual minus market-implied rate) on announcement day.
+
+5. **Sector rotation forced into per-symbol combiner** — Sector rotation operates at portfolio level; the combiner operates per-symbol per-bar. Forcing it in creates contradictory signals, monthly whipsaw at rebalance, and backtest overfitting to macro events. Fix: implement as SectorAllocationStep in PositionSizingPipeline. Recovery cost if built in the wrong layer: HIGH — requires architectural refactor.
 
 ## Implications for Roadmap
 
-Based on combined research, a 4-phase structure is strongly indicated by the dependency chain. Each phase must complete before the next can produce valid results. The architecture research (ARCHITECTURE.md §"Suggested Build Order") and pitfall research (PITFALLS.md §"Phase-Specific Warnings") both independently converge on the same ordering.
+Research across both streams points to a sequential structure within each stream and a clear dependency ordering between them. The v3.0 production readiness path has a well-specified 5-6 phase build order driven by dependency chains. The v2.0 MOEX strategy path has a 4-phase structure where data integrity must precede all strategy work.
 
-### Phase 1: Data Foundation and Parameter Cleanup
+### Phase 1: Schema, Config Foundation, and Data Integrity
 
-**Rationale:** All current MOEX backtest results are invalid due to vol_target miscalibration, toxic symbols, 2022 data contamination, and a dividend calendar with only paid events. This is the root cause of 104 rejected iterations. No new strategy work will produce reliable signal until these are fixed. This phase has zero dependencies on other new work and unblocks everything downstream.
+**Rationale:** Schema definitions at Layer 0/1 must exist before any service can produce or consume them (zero behavior change, all existing tests pass). MOEX data integrity problems invalidate all backtest results regardless of strategy quality — they must be resolved before any strategy work produces reliable signal.
 
-**Delivers:** Clean baseline — valid walk-forward results for existing ru_* segments, properly sized positions (5-15% of equity instead of 0.5-2%), toxic symbols removed from active universe, 150+ event dividend calendar ready for Phase 2 use.
+**Delivers (v3.0):** `GoNoGoReport`, `GoNoGoGateResult`, `SandboxMetricSnapshot`, `HealthCheckResult` frozen Pydantic schemas; `CycleLogEntry` extended with 3 optional None-default fields; `RolloutPhase` dataclasses with named profiles; `sandbox_metrics` TimescaleDB hypertable migration
 
-**Addresses features (from FEATURES.md):**
-- Universe cleanup: GAZP, VTBR, SNGS, IRAO, ALRS removal
-- `vol_target` recalibration: all ru_*.yaml presets updated (0.19 → 0.35-0.40)
-- Dividend calendar expansion: 43 → 150+ events with `status: paid|cancelled|reduced` field
-- `exclude_periods` for Feb-Mar 2022 in `BacktestConfig`
-- `event_driven` strategy disabled in backtest presets (no live news feed; phantom signals)
-- `DEFAULT_STRATEGY_HOLD_BARS["dividend_gap"]` aligned to 60 bars (not 15)
+**Delivers (v2.0):** Toxic symbols removed from MOEX segments (GAZP, VTBR, SNGS, IRAO, ALRS); dividend calendar expanded from 43 to 150+ events with `status` field and cancelled events; `exclude_periods` in BacktestConfig for Feb-Mar 2022; `vol_target` recalibrated to 0.35-0.40 in ru_*.yaml presets; `event_driven` disabled in backtest configs; `DEFAULT_STRATEGY_HOLD_BARS["dividend_gap"]` aligned to 60
 
-**Avoids pitfalls:** 1 (look-ahead), 2 (vol target), 3 (survivorship), 9 (phantom event_driven), 12 (hold bar mismatch)
+**Avoids:** Look-ahead bias (Pitfall 1 v2.0), survivorship bias (Pitfall 2 v2.0), vol undersizing (Pitfall 3 v2.0), phantom event_driven signals in backtest (Pitfall 9 v2.0)
 
-**Research flag:** Standard patterns. All tasks are configuration updates and data wiring against documented APIs. No research phase needed.
+**Research flag:** Standard patterns — Pydantic models, Alembic migration, YAML config updates, T-Invest API calls against documented endpoints. No research phase needed.
 
----
+### Phase 2: Risk Layer Wiring and Core Monitoring Services
 
-### Phase 2: Wire Existing Strategies into Backtest Engine
+**Rationale:** Risk layer rollout wiring (Phase 2 in ARCHITECTURE.md build order) must be validated in isolation before TradingLoop integration. Monitoring services depend on Phase 1 schemas and can be built and tested as standalone units before touching the live trading path. DividendGapStrategy wiring belongs here because it has data dependencies from Phase 1 and is the highest-confidence MOEX alpha source.
 
-**Rationale:** `DividendGapStrategy`, `CBRStrategyWrapper`, and `rub_oil_regime.py` all exist in the codebase but are not connected to the backtest engine or position sizing pipeline. The dividend gap strategy is the highest expected-alpha feature (documented 70%+ closure rate for ROSN/LKOH). Wiring existing code before adding new code is the correct sequencing — validate the highest-confidence signals first.
+**Delivers (v3.0):** CircuitBreaker and PreTradeChecker accept optional rollout_phase param (None preserves existing behavior); SandboxMonitorService with TimescaleDB persistence and JSONL read logic; GoNoGoReporter pure function with configurable threshold evaluation; AnomalyDetector z-score alerting on equity moves and fill rate drops
 
-**Delivers:** Dividend gap strategy generating real trades in backtests using 150+ event calendar; CBR event contrarian signals active in combiner; RUB/oil regime signal wired into `PositionSizingPipeline`; baseline MOEX walk-forward Sharpe with positive equity component.
+**Delivers (v2.0):** DividendGapStrategy with corrected T+1 settlement date handling (last_buy_date vs. ex-date renamed and logic fixed); combiner `_EVENT_STRATEGIES` frozenset bypass so dividend signals are not diluted by ADX routing; rub_oil_regime.py wired into PositionSizingPipeline as a regime scale step
 
-**Addresses features (from FEATURES.md):**
-- `DividendCalendarLoader` (L2 new) + calendar population in `run_iteration.py`
-- Combiner `_EVENT_STRATEGIES` bypass so dividend_gap is not diluted by ADX routing
-- T+1 settlement date fix: rename YAML `ex_date` → `last_buy_date`; buy one bar after
-- Per-symbol `max_hold_bars` for dividend gap (ROSN: 2, LKOH: 15, TATN: 30)
-- Closure-rate-based confidence scaling (ROSN/LKOH > 80% → high confidence; GAZP → exclude)
-- `CBRStrategyWrapper` registration in combiner with appropriate weight
-- `rub_oil_regime.py` wired into `PositionSizingPipeline` as regime scale step
+**Addresses:** Formalized go/no-go gate (table stakes), gradual rollout tightened risk limits (table stakes), dividend gap correctness
 
-**Avoids pitfalls:** 5 (combiner dilution of dividend signals), 8 (sparse calendar → starvation), 12 (hold bar mismatch), 13 (T+1 settlement confusion)
+**Avoids:** Combiner diluting dividend signals (Pitfall 5 v2.0), T+1 settlement timing confusion (Pitfall 13 v2.0), monitoring logic in TradingLoop (anti-pattern from ARCHITECTURE.md)
 
-**Research flag:** Standard patterns. Wiring follows established combiner registration and sizing pipeline step patterns. Calendar initialization follows the `populate_calendar()` pattern already in the strategy.
+**Research flag:** Standard patterns — sizing pipeline step extension, combiner frozenset addition, pure service with existing JSONL and TimescaleDB infrastructure. No research phase needed.
 
----
+### Phase 3: API Endpoints, Kill Switch, and Health Monitoring
 
-### Phase 3: New Macro-Gated Strategies
+**Rationale:** API endpoints are thin wrappers over Phase 2 services — lowest-risk API change, follows established sub-router pattern. Kill switch and health pulse extend TradingLoop (the highest-regression-risk change) and are done after all dependencies are tested. CBR regime wiring belongs here because it requires a new OFZ data source and is a Phase 3 deliverable per PITFALLS.md.
 
-**Rationale:** With a clean baseline and working dividend gap strategy providing a positive Sharpe reference point, macro regime overlays and new strategies can be validated independently and incrementally. The architectural decision for sector rotation placement (sizing pipeline, not combiner) must be made explicit before a single line of code is written to avoid the HIGH-cost recovery scenario.
+**Delivers (v3.0):** GET /sandbox/metrics and GET /sandbox/gonogo REST endpoints; ProductionHealthMonitor 5-minute APScheduler job with broker ping and feed freshness checks; KillSwitch with strict order-cancellation sequence; TradingLoop extended with `_health_pulse_cycle()` and `activate_kill_switch()`; TelegramBotHandler extended with /gonogo, /health, /killswitch commands; MetricsCollector extended with ~5 new Prometheus gauges; REST API kill switch POST /api/v1/system/killswitch
 
-**Delivers:** Brent-conditional energy gating, CBR regime equity sizing adjustment, MOEX sector rotation as sizing overlay, preferred share arbitrage for SBER/SBERP and TATN/TATNP. `MacroSnapshot` extended with `brent_close` and `usdrub_daily_change` fields passed per-bar through backtest engine.
+**Delivers (v2.0):** CBR regime integration using OFZ yield curve slope as leading indicator (not CBR announcement date); MacroSnapshot extended with brent_close and usdrub_daily_change fields; BacktestEngine passes MacroSnapshot through `_process_bar()` to strategy kwargs
 
-**Addresses features (from FEATURES.md):**
-- `MacroSnapshot` extension: `brent_close`, `usdrub_daily_change` fields
-- `BacktestEngine._process_bar()`: pass `macro_snapshot` to strategy `**kwargs`
-- `CBRRegimeStep` in `PositionSizingPipeline`: scale equity positions 0.6x (hiking) or 1.2x (cutting)
-- `BrentGateStep` in `PositionSizingPipeline`: using Brent-in-RUB (not USD Brent), 1-day lag
-- `SectorAllocationStep` in `PositionSizingPipeline` (NOT in combiner): energy overweight when Brent > $75, underweight when < $60
-- `SectorClassifier` (L2): static YAML mapping of symbols to sectors
-- `PreferredShareArbStrategy`: long-only spread convergence on SBER/SBERP, TATN/TATNP; entry threshold z > 2.0 (not 1.5); window excludes 2022 crisis
-- CBR leading indicator: OFZ yield curve slope (2Y-10Y spread) and RUONIA-OIS spread, NOT raw CBR announcement
+**Addresses:** REST API kill switch (table stakes), production health heartbeat (table stakes), CBR regime timing error (Pitfall 4 v2.0)
 
-**Avoids pitfalls:** 4 (CBR timing error), 6 (sector rotation in wrong layer), 7 (crisis overfitting), 10 (pref share constant spread assumption), 11 (Brent wrong currency/lag), 14 (multiplicative sizing floor)
+**Avoids:** Kill switch that only stops the scheduler (v3.0 Pitfall P3), CBR timing error (v2.0 Pitfall 4)
 
-**Research flag:** Needs `/gsd:research-phase` for CBR leading indicator design. OFZ yield curve slope data source (MOEX ISS or separate endpoint), RUONIA-OIS spread availability, and whether pre-meeting consensus rate input is achievable via YAML are open questions that require research before implementation.
+**Research flag:** CBR leading indicator design needs `/gsd:research-phase`. OFZ yield curve slope data source (MOEX ISS endpoint availability), RUONIA-OIS spread availability, and integration approach are open questions before implementation.
 
----
+### Phase 4: Sector Rotation, Sizing Pipeline, and Preferred Share Arbitrage
 
-### Phase 4: Portfolio Assembly and ML Extension
+**Rationale:** Sector rotation requires an explicit architectural decision (sizing step, not combiner strategy) and depends on clean universe (Phase 1) and calibrated vol target (Phase 1). Must be designed carefully — building it in the wrong layer has HIGH recovery cost. SectorAllocationStep must be analyzed alongside existing multiplicative sizing reduction to avoid MOEX positions clustering at the pipeline floor.
 
-**Rationale:** Portfolio-level OFZ/equity allocation and ML macro features both require a working equity baseline with positive walk-forward Sharpe. The 40/60 OFZ/equity split composes existing components. ML macro features extend the operational `technical.py` pipeline but carry high overfitting risk on 3-year MOEX history — defer until there is a clean baseline to validate against.
+**Delivers (v2.0):** SectorAllocationStep in PositionSizingPipeline (NOT in StrategyCombiner) with 20-day linear weight transition; SectorClassifier at Layer 2 with static YAML symbol-to-sector mapping; Brent-in-RUB gate (BZ=F * USDRUB, 1-day lag) for energy sector; PreferredShareArbStrategy (long-only spread convergence on SBER/SBERP, TATN/TATNP; entry threshold z > 2.0; window excludes 2022 crisis period); multiplicative sizing reduction cap at pipeline level
 
-**Delivers:** Combined OFZ + equity portfolio backtest with aggregate Sharpe, DD, PF across both engines. 10 new Russian macro ML features enabled for ru_* segments where quality gates pass. OFZ PK-to-PD rotation triggered when CBR cuts >= 2 consecutive meetings.
+**Addresses:** Sector rotation alpha on MOEX blue chips
 
-**Addresses features (from FEATURES.md):**
-- `PortfolioAllocator`: 40% OFZ, 60% equity, with RUB crisis brake (shift to 80% OFZ on USDRUB spike > 5% in 5 days)
-- `RUBCrisisBrake`: wired to existing `rub_oil_regime.py` crisis detection
-- `PortfolioBacktestOrchestrator`: separate bond + equity engines run independently, monthly rebalance, merged PnL timeseries
-- `_compute_moex_macro_features_extended()` in `ml/features/technical.py`: 10 new features (cbr_key_rate_level, cbr_rate_delta_3m, cbr_rate_direction, usdrub_return_20d, usdrub_zscore_60d, usdrub_vol_20d, brent_return_20d, brent_rub_spread, imoex_relative_21d, moex_turnover_zscore)
-- ML walk-forward training: exclude Feb-Mar 2022; validate quality gates on 2024-2025 calm data; pool features across sectors to address sample size constraint
+**Avoids:** Sector rotation in wrong layer (Pitfall 6 v2.0 — HIGH recovery cost), Brent gate wrong currency/lag (Pitfall 11 v2.0), multiplicative sizing floor (Pitfall 14 v2.0), preferred share constant spread assumption (Pitfall 10 v2.0)
 
-**Avoids pitfalls:** Pitfall 7 (crisis overfitting in ML), phase-5 warning (OFZ + equity currency double-counting; track allocations separately with independent circuit breakers)
+**Research flag:** Quantitative research needed on MOEX sector momentum validity and whether 3 years of post-2022 data is sufficient to avoid Pitfall 7 (overfitting to crisis). Preferred share cointegration test on post-2022 data must be run before implementing PreferredShareArbStrategy — if cointegration fails, skip the strategy.
 
-**Research flag:** Needs `/gsd:research-phase` for portfolio orchestrator design — specifically, how monthly rebalancing is modeled in the backtest (cash transfer mechanics between bond and equity engine) and PnL merging methodology. ML transfer learning from US model to MOEX to address the 3-year vs. 10-year sample size gap is also a research question.
+### Phase 5: Dashboard, Automated Gate, and MOEX ML
 
----
+**Rationale:** Dashboard pages and automated gate scheduling are read-only consumers of Phase 2-3 services and can be built any time after Phase 3 without affecting trading functionality. MOEX ML enablement depends on clean data (Phase 1), regime infrastructure (Phase 3), and a demonstrated positive equity baseline to validate against.
+
+**Delivers (v3.0):** Streamlit sandbox validation progress page with per-criterion progress bars and per-day equity chart; automated daily gate evaluation via APScheduler job at 19:00 MSK; strategy signal-frequency anomaly alert via Prometheus counters; post-live slippage vs. backtest comparison weekly Telegram report
+
+**Delivers (v2.0):** 10 new MOEX macro ML features (cbr_key_rate_level, cbr_rate_delta_3m, cbr_rate_direction, usdrub_return_20d, usdrub_zscore_60d, usdrub_vol_20d, brent_return_20d, brent_rub_spread, imoex_relative_21d, moex_turnover_zscore) gated by quality gates; ML walk-forward training excluding Feb-Mar 2022 with validation on 2024-2025 calm data
+
+**Addresses:** Automated gate evaluation (P2 feature), signal anomaly detection (P2 feature), MOEX ML alpha
+
+**Avoids:** Overfitting to 2022 crisis regime in ML (Pitfall 7 v2.0), MOEX ML on insufficient training samples
+
+**Research flag:** MOEX ML with < 3 years of clean post-2022 data has insufficient sample volume. Research on transfer learning from US model and pooled-sector feature approaches is needed before implementation. Portfolio orchestrator design (for OFZ/equity combined backtest) also needs research on monthly rebalancing mechanics.
 
 ### Phase Ordering Rationale
 
-- Phase 1 before all else: data and parameter problems invalidate results regardless of strategy quality. Cannot tune or validate any strategy on broken foundations.
-- Phase 2 before Phase 3: existing-but-unconnected strategies are higher-confidence alpha sources than new strategies. Dividend gap has documented 70%+ closure rates; wire it before adding new complexity. Clean equity baseline from Phase 2 is also a prerequisite for validating Phase 3 macro overlays.
-- Phase 3 before Phase 4: `MacroSnapshot` extensions (Phase 3) are direct dependencies for ML macro features (Phase 4). Portfolio allocator also requires equity strategies to demonstrate positive individual Sharpe before composing them.
-- Sector rotation is a HARD architectural constraint: it must be a sizing step, not a combiner signal. This is the single most important design decision from the research and must be resolved before a line of Phase 3 code is written.
+- Schema and config must precede all service code — Layer 0/1 before Layer 4/6 (fundamental dependency direction)
+- Data integrity prerequisites (Phase 1 v2.0) are not optional — backtesting with dirty data invalidates all iteration results and makes them incomparable to v2.0 baselines; 104 rejected iterations partially traced to these problems
+- Risk layer wiring in isolation (Phase 2) before TradingLoop integration (Phase 3) limits regression surface to the most critical path changes
+- Sector rotation (Phase 4) is deferred because its architectural decision must not be made under time pressure and has the highest recovery cost if built incorrectly — the codebase must have a confirmed positive MOEX equity baseline before adding this complexity
+- Dashboard and automation (Phase 5) are genuinely optional for go-live — Telegram commands provide equivalent operational visibility for a single-operator system
 
 ### Research Flags
 
-Needs `/gsd:research-phase` during planning:
-- **Phase 3 (CBR leading indicator):** OFZ yield curve slope data source (MOEX ISS vs. separate API), RUONIA-OIS spread availability, pre-meeting consensus rate input mechanism — all open questions before implementation
-- **Phase 4 (portfolio orchestrator):** Monthly rebalancing mechanics in backtest (cash transfer between bond/equity engines), PnL merging methodology, and ML transfer learning from US to MOEX model for sample size mitigation
+Phases needing `/gsd:research-phase` during planning:
 
-Standard patterns (skip research-phase):
-- **Phase 1:** Pure configuration updates and T-Invest API calls against documented endpoints — all patterns established in existing codebase
-- **Phase 2:** Strategy wiring follows existing combiner registration, calendar initialization, and sizing pipeline step patterns — all precedented in codebase
+- **Phase 3 (CBR leading indicator):** OFZ yield curve slope data source (MOEX ISS vs. separate endpoint), RUONIA-OIS spread availability, and pre-meeting consensus rate input mechanism are all open questions before CBR regime implementation
+- **Phase 3 (Kill switch order cancellation):** BrokerRouter.cancel_all_pending() interface needs verification; BrokerBase may need extension; needs targeted API research before implementation
+- **Phase 4 (Sector rotation alpha validation):** Whether MOEX sector momentum is statistically significant on 3 years of post-2022 data is unvalidated; academic threshold sources needed to avoid overfitting to 2022 crisis
+- **Phase 5 (MOEX ML sample size):** Transfer learning from US model to MOEX to address the 3-year vs. 10-year training data gap; pooled-sector feature approach; validation methodology on limited clean data
+
+Phases with standard patterns (skip research-phase):
+
+- **Phase 1:** Pydantic schema additions, Alembic migration, YAML config updates, T-Invest API calls — all patterns established in codebase
+- **Phase 2:** Sizing pipeline step addition, combiner frozenset extension, pure service with JSONL and TimescaleDB — all precedented in codebase
+- **Phase 4 (preferred share arb):** Extends existing PairsStrategy pattern with MOEX-specific config — standard if cointegration test passes
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Verified every feature against pyproject.toml and existing modules; zero new packages required; all building blocks confirmed in codebase |
-| Features | MEDIUM | Dividend closure statistics from financial media (spydell, finam.ru); CBR sector impact from Forbes.ru/RBC; magnitude figures (0.6-0.8 Brent correlation, 5-15% pref/ord spread) need live validation |
-| Architecture | HIGH | Derived from direct codebase inspection of combiner.py, position_sizing_pipeline.py, engine.py, dividend_gap.py, cbr_calendar.py, schemas.py; all layer boundaries confirmed; no layer violations in proposed design |
-| Pitfalls | HIGH (structural) / MEDIUM (MOEX domain) | Structural pitfalls (vol target, T+1 settlement, combiner routing, sector rotation layer) verified in code; MOEX domain pitfalls (pref share spread dynamics, Brent correlation lag) are research-informed estimates needing empirical validation |
+| Stack (v3.0) | HIGH | Direct codebase audit. Every existing capability verified against source. New package versions confirmed on PyPI. Zero ambiguity on what exists vs. what is new. |
+| Features (v3.0) | HIGH | Based on direct codebase audit of existing validation scripts + industry sources on trading system go-live requirements. Anti-features clearly identified with explicit rationale. |
+| Architecture (v3.0) | HIGH | Layer-by-layer analysis of all 6 layers. Component boundaries verified against existing interfaces (TradingLoop, CircuitBreaker, PreTradeChecker, TelegramBotHandler). Dependency chain confirmed. |
+| Pitfalls (v3.0) | HIGH (confirmed) / MEDIUM (severity quantification) | Pitfalls confirmed against codebase. Severity of sandbox false confidence on live MOEX execution quality (0.3-1.5% worse fills) is estimated from market microstructure knowledge, not measured. |
+| Stack (v2.0) | HIGH | Zero new packages required; all building blocks confirmed in codebase against pyproject.toml. |
+| Features (v2.0) | MEDIUM | Dividend closure statistics from financial media; CBR sector impact magnitudes from Forbes.ru/RBC; these require live empirical validation. |
+| Architecture (v2.0) | HIGH | Derived from direct inspection of combiner.py, position_sizing_pipeline.py, engine.py, dividend_gap.py, cbr_calendar.py, rub_oil_regime.py; all layer boundaries confirmed. |
+| Pitfalls (v2.0) | HIGH (structural) / MEDIUM (MOEX domain) | Structural pitfalls (vol target, T+1 settlement, combiner routing, sector rotation layer) verified in code. MOEX domain pitfalls (CBR pricing timing, Brent correlation lag) are research-informed estimates. |
 
-**Overall confidence:** MEDIUM-HIGH
+**Overall confidence:** HIGH for v3.0 execution plan. MEDIUM-HIGH for v2.0 MOEX strategy alpha projections.
 
 ### Gaps to Address
 
-- **MOEX sector index ticker availability:** ISS API confirmed for index candles (tested with IMOEX), but specific sector tickers (MOEXOG, MOEXFN, MOEXMM) need live API validation in Phase 1 before any sector rotation work begins. If a sector index is unavailable, sector rotation must fall back to symbol-level classification.
-- **T-Invest `get_dividends()` batch performance:** Per-symbol dividend fetch is operational; batch performance for 50+ symbols is untested. Rate limit is 600 requests/minute; 50 symbols = ~50 API calls, safely within limit, but must be validated empirically in Phase 1.
-- **OFZ yield curve slope data source:** Pre-meeting CBR positioning and the CBR leading indicator design require OFZ 2Y-10Y yield data. It is unclear whether this is available via MOEX ISS or requires a separate source. This is the key open question for Phase 3 CBR regime design.
-- **Brent-energy correlation lag:** Research indicates 1-3 day lag for MOEX energy stocks vs. Brent, but optimal lag should be verified empirically in Phase 3 before hardcoding the gate parameter.
-- **Preferred share spread stationarity post-2022:** SBER/SBERP spread was non-stationary in 2022 (preferred briefly exceeded common during retail buying surge). Cointegration tests must be run on post-2022 data only before implementing pref arb in Phase 3. If cointegration fails, skip the strategy.
+- **Slippage budget quantification:** The 0.3-1.5% live slippage estimate for MOEX mid-caps needs validation against actual MOEX ISS order book data before finalizing go/no-go slippage threshold. This is a Phase 2 task, not a planning blocker.
+- **Go/no-go threshold calibration:** The specific thresholds (uptime >= 99%, fill rate >= 95%, DD < 5%) need validation against walk-forward backtest distribution percentiles from existing PortfolioBacktestOrchestrator results. This is a Phase 2 deliverable.
+- **OFZ yield curve data source:** CBR regime overlay (Phase 3 v2.0) requires OFZ 2Y-10Y yield data. MOEX ISS provides OFZ yield data but integration is unverified. This is the key open question for Phase 3 planning.
+- **Preferred share spread stationarity post-2022:** SBER/SBERP spread was non-stationary in 2022 (preferred briefly exceeded common). Cointegration test on post-2022 data must be run before Phase 4 preferred arb implementation — if cointegration fails, skip the strategy entirely.
+- **MOEX sector index ticker availability via ISS:** MOEX ISS confirmed for IMOEX; specific sector tickers (MOEXOG, MOEXFN, MOEXMM) need live API validation before Phase 4 sector rotation implementation.
 
 ## Sources
 
-### Primary (HIGH confidence — official sources and direct codebase inspection)
-- Codebase: `src/finalayze/strategies/dividend_gap.py`, `cbr_calendar.py`, `rub_oil_regime.py`, `combiner.py`, `position_sizing_pipeline.py`, `backtest/engine.py`, `data/fetchers/cbr.py`, `ml/features/technical.py`, `strategies/presets/ru_*.yaml`, `config/segments.py`
-- CBR official calendar: https://www.cbr.ru/eng/dkp/cal_mp/
+### Primary (HIGH confidence)
+
+- Codebase direct inspection: `src/finalayze/` all 6 layers — `api/metrics.py`, `core/validation_logger.py`, `core/trading_loop.py`, `core/telegram_bot.py`, `risk/circuit_breaker.py`, `risk/pre_trade_check.py`, `risk/position_sizing_pipeline.py`, `execution/sandbox_tracker.py`, `strategies/combiner.py`, `strategies/dividend_gap.py`, `strategies/presets/ru_blue_chips.yaml`, `risk/rub_oil_regime.py`, `backtest/config.py`, `config/segments.py`, `pyproject.toml`
+- WeasyPrint v68.1: https://pypi.org/project/weasyprint/ (released 2025-01-30)
+- Jinja2 v3.1.6: https://pypi.org/project/Jinja2/
+- APScheduler 4.x pre-release status: https://github.com/agronholm/apscheduler/issues/465
+- aiogram v3: https://docs.aiogram.dev/en/latest/
 - CBR key rate history: https://cbr.ru/eng/hd_base/KeyRate/
-- MOEX ISS API reference: https://iss.moex.com/iss/reference/
-- MOEX sector indices listing: https://www.moex.com/en/indices
-- T-Invest API: `t-tech-investments` package proto definitions
+- MOEX ISS API: https://iss.moex.com/iss/reference/
+- T-Invest API: t-tech-investments gRPC SDK proto definitions
 
-### Secondary (MEDIUM confidence — financial media with quantitative data)
-- Dividend gap closure statistics (2007-2017): https://spydell.livejournal.com/642950.html
-- Dividend gap recent data (2024-2025): https://www.finam.ru/publications/item/istoricheski-lukoyl-i-tatneft-obladayut-potentsialom-bystrogo-vosstanovleniya-posle-dividendnogo-gepa-20250604-0900/
+### Secondary (MEDIUM confidence)
+
+- FIA Best Practices for Automated Trading Risk Controls: https://www.fia.org/fia/articles/fia-releases-best-practices-automated-trading-risk-controls-and-system-safeguards
+- NYIF: Trading System Kill Switch: https://www.nyif.com/articles/trading-system-kill-switch-panacea-or-pandoras-box
+- Eventus: Algo Monitoring Real-Time Oversight: https://www.eventus.com/algo-monitoring-real-time-oversight-for-automated-ever-evolving-markets/
+- MOEX dividend calendar: https://www.moex.com/ru/listing/dividend-yield.aspx
+- Smart-Lab dividend calendar: https://smart-lab.ru/dividends/
+- Dividend gap closure statistics (2024-2025): https://www.finam.ru/publications/item/istoricheski-lukoyl-i-tatneft-obladayut-potentsialom-bystrogo-vosstanovleniya-posle-dividendnogo-gepa-20250604-0900/
 - CBR rate cut sector impact: https://www.forbes.ru/investicii/543288-raduznye-nadezdy-kakie-akcii-vyrastut-iz-za-snizenia-stavki-cb
-- CBR rate and financials: https://www.rbc.ru/quote/news/article/68497aae9a794711e7402f87
-- ML on MOEX stocks (multimodal approach): https://arxiv.org/html/2503.08696
-- MOEX 2022 crisis: Bloomberg (Russian Stocks Slump Most on Record, 2022-02-24)
+- Common pitfalls of sector rotation: https://www.gwcindia.in/gigapro/blog/common-pitfalls-of-sector-rotation-and-how-to-avoid-them/
+- Sector Rotation Myth (Molchanov 2024): https://onlinelibrary.wiley.com/doi/10.1002/ijfe.2882
+- MOEX 2022 crisis structural break: Bloomberg (Russian Stocks Slump Most on Record, 2022-02-24)
 
-### Tertiary (LOW confidence — general context, needs live validation)
-- Brent-MOEX energy correlation magnitude (0.6-0.8) — based on general market knowledge; needs empirical validation against training data
-- Preferred share spread ranges (SBER/SBERP: 5-15%, TATN/TATNP: 5-10%) — historical patterns; current levels require live check
-- MOEX short-selling restrictions for retail T-Invest accounts — based on T-Invest documentation; may have changed in 2025-2026
+### Tertiary (LOW confidence)
+
+- Live MOEX slippage estimates (0.3-1.5% for illiquid instruments) — estimated from market microstructure knowledge; needs empirical validation during sandbox period
+- Brent-MOEX energy correlation magnitude (0.6-0.8) and 1-3 day lag — general market knowledge; needs empirical validation against training data
+- Preferred share spread ranges (SBER/SBERP: 5-15%) — historical patterns; current levels require live cointegration check on post-2022 data
 
 ---
-*Research completed: 2026-03-20*
+*Research completed: 2026-03-21*
 *Ready for roadmap: yes*

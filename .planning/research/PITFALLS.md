@@ -446,3 +446,322 @@ The sizing pipeline already has `RegimeStep` (scale by regime_scale, floor 0.15)
 ---
 *Pitfalls research for: v2.0 MOEX Equity Profitability -- dividend gap, CBR regime, sector rotation*
 *Researched: 2026-03-20*
+
+---
+---
+
+# Production Readiness Pitfalls: v3.0 Monitoring, Go/No-Go Gates, and Gradual Rollout
+
+**Domain:** Adding sandbox monitoring, go/no-go gates, gradual capital scaling, and production ops to existing autonomous MOEX trading system
+**Researched:** 2026-03-21
+**Confidence:** HIGH (confirmed against existing codebase) / MEDIUM (industry patterns from research)
+
+---
+
+## Critical Pitfalls
+
+### Pitfall P1: Sandbox Gives False Confidence Because Tinkoff Fills Are Synthetic
+
+**What goes wrong:**
+The Tinkoff Invest sandbox fills market orders at the "last price" -- not the actual order book. When the system moves to live with 50-100K RUB, actual fills on illiquid MOEX mid-caps (TATN, LKOH, preferred shares) will be 0.3-1.5% worse than sandbox. If go/no-go thresholds are calibrated against sandbox slippage, the system will appear to pass and then immediately underperform on live capital. The existing `SandboxPortfolioTracker` compensates for missing dividends and coupons, but it does NOT compensate for the execution quality gap.
+
+**Why it happens:**
+Developers trust sandbox metrics at face value. The shadow ledger in `sandbox_tracker.py` correctly adjusts for coupon/dividend income but leaves fill quality uncorrected. Sandbox fill rate is always 100% (synthetic). Live fill rate on limit orders for MOEX bonds can be 60-80% in thin markets.
+
+**How to avoid:**
+- Track two separate fill-quality metrics during sandbox: (a) sandbox reported fill price and (b) independently captured MOEX ISS mid-price at order submission time. Measure the spread as "simulated slippage."
+- Set go/no-go fill-rate threshold based on limit orders only (ignore market order fill rate, which is trivially 100% in both modes).
+- Add an explicit "slippage budget" metric: expected slippage from `impact.py` vs. observed spread. Flag any divergence > 0.3%.
+- Do NOT use sandbox P&L as the primary go/no-go gate. Use it only for signal correctness validation.
+
+**Warning signs:**
+- Sandbox Sharpe > backtest walk-forward Sharpe by more than 20%: likely means sandbox is not applying realistic execution costs.
+- Zero fill rejections in sandbox over 30 days: impossible in real MOEX limit order markets.
+- OFZ bond trades show 100% fill on thin coupon days in sandbox.
+
+**Phase to address:** Sandbox monitoring phase (Phase 1). Define slippage simulation methodology before any go/no-go thresholds are finalized.
+
+---
+
+### Pitfall P2: Go/No-Go Thresholds Are Invented, Not Calibrated Against Backtest Distributions
+
+**What goes wrong:**
+The project defines go/no-go thresholds as: uptime >= 99%, fill rate >= 95%, DD < 5%, signal divergence < 50%. These numbers are plausible but arbitrary. If backtest walk-forward data shows the system naturally produces 6% peak drawdown during sideways MOEX markets, a 5% DD gate will permanently block go-live even when the system is behaving as designed. Alternatively, thresholds too loose let a broken system through.
+
+**Why it happens:**
+Teams set thresholds based on intuition or generic benchmarks without referencing actual backtest distribution of the same metrics. They then either never reach go-live (thresholds too tight) or pass a broken system (thresholds too loose).
+
+**How to avoid:**
+- Derive each threshold from walk-forward backtest percentiles, not from generic guides. For DD: use the 90th-percentile 30-day drawdown from `PortfolioBacktestOrchestrator` walk-forward results as the go/no-go cap, not a round number.
+- For signal divergence: define "divergence" precisely -- is it the difference in signal direction (buy/sell/hold) or in position size? A 50% divergence in direction is catastrophic; 50% divergence in position size is recoverable.
+- Run the go/no-go gate logic against historical backtest periods first to validate the thresholds produce the right verdict on known-good and known-bad periods.
+- Separate "blocking" thresholds (any failure = no-go) from "advisory" thresholds (failures trigger review, not automatic block). Uptime and signal-direction divergence should be blocking; slippage and fill rate should be advisory.
+
+**Warning signs:**
+- First sandbox run fails go/no-go on day 1: thresholds likely too tight relative to expected variance.
+- Signal divergence never exceeds 5% in sandbox: threshold is too loose to detect bugs.
+- The go/no-go report is binary pass/fail with no trend data: cannot distinguish "improving" from "stuck."
+
+**Phase to address:** Go/no-go gate design phase (Phase 2). Calibrate thresholds against existing walk-forward results before writing the gate logic.
+
+---
+
+### Pitfall P3: Kill Switch Has Activation Lag That Allows Additional Losses
+
+**What goes wrong:**
+The system already has a 3-level `CircuitBreaker` (CAUTION/HALTED/LIQUIDATE) and Telegram `/stop` command. Adding a "kill switch" for production sounds straightforward. The failure mode is that the kill switch (a) requires human Telegram action during a fast-moving loss, (b) has no guaranteed propagation to the `TradingLoop` between cycles, or (c) kills positions but leaves open limit orders sitting in the order book. A 30-second cycle gap on MOEX during a flash crash is not negligible.
+
+**Why it happens:**
+Kill switches are built for normal conditions. The code path from Telegram command to `TradingLoop` cancellation to open order purge to position flattening has multiple async handoffs. Each one adds latency. If the loop is mid-cycle processing bonds when the kill arrives, it may complete the current bond cycle before honouring the kill. Industry case studies confirm real-world kill switch response times of 30+ minutes without automated backing.
+
+**How to avoid:**
+- Implement the kill switch as a shared asyncio `Event` checked at the top of EVERY cycle iteration, not just at cycle entry. The existing `TradingLoop` must have a cooperative cancellation point after each instrument processed, not just at loop start.
+- Kill switch must call `cancel_all_open_orders()` via `TinkoffBroker` as its FIRST action, before attempting position flattening. Open limit orders on MOEX persist until explicitly cancelled.
+- Test kill switch activation while a bond cycle is mid-execution (not just during idle state).
+- Log the time from kill signal received to last order cancelled and last position flat -- this is the "kill latency" metric. Target < 5 seconds.
+- The existing LIQUIDATE circuit level is close to this but is triggered by drawdown, not by operator command. The kill switch is a separate code path that must be tested independently.
+
+**Warning signs:**
+- Telegram `/stop` command acknowledged but positions not flat 60 seconds later.
+- Kill switch tested only in idle state, never mid-cycle.
+- Open limit orders visible in Tinkoff dashboard after kill switch fires.
+
+**Phase to address:** Production operations phase (Phase 3). Kill switch must be implemented before any live capital is deployed.
+
+---
+
+### Pitfall P4: Gradual Capital Scaling Creates Position-Size Discontinuities
+
+**What goes wrong:**
+Starting at 50-100K RUB with tightened risk limits (3% max position, 1% daily loss cap) and then scaling to 500K-2.5M RUB seems like a simple parameter change. In practice, the `PositionSizingPipeline` has a 15% pipeline floor. At 50K RUB with 3% max position, the minimum position is 225 RUB (fractional lots on MOEX). At 500K RUB with the same pipeline floor, minimum position is 2,250 RUB. The floor arithmetic changes the effective minimum lot count. Some MOEX instruments (OFZ bonds) have a minimum lot of 1,000 RUB nominal, so the viable instrument set changes as capital scales.
+
+**Why it happens:**
+Risk parameters are designed for a target capital level, not for a 10x capital range. Teams test at target capital and assume smaller capital "just works." The pipeline floor, half-Kelly sizing, and MOEX lot size constraints interact in non-obvious ways at small capital.
+
+**How to avoid:**
+- Define a capital-scaling ladder with explicit parameter sets for each step (50K, 150K, 500K, 2.5M RUB), not a single "tightened limits" mode.
+- For each capital level, run the position sizing pipeline against the full instrument universe and verify: (a) no instrument produces a sub-lot position that would be rounded to zero, (b) pipeline floor does not produce positions that violate the per-instrument max position %, (c) OFZ bond lot sizes are respected.
+- Include a scaling test in the go/no-go gate: simulate one trading cycle at the next capital tier before authorizing the move up.
+- Document the minimum viable capital for each instrument in the universe. Instruments below threshold should be gated out at small capital levels.
+
+**Warning signs:**
+- Position sizes round to 0 for instruments after pipeline floor is applied at small capital.
+- Bond orders rejected by Tinkoff due to minimum lot violation.
+- Consecutive profitable days required for capital scaling increase are never reached because trade count is too low at small capital to generate a statistically meaningful sample.
+
+**Phase to address:** Gradual rollout phase (Phase 4). Capital ladder must be defined and position-size arithmetic validated before first live deposit.
+
+---
+
+### Pitfall P5: Metric Collection Misses the Sandbox-to-Live Drift Window
+
+**What goes wrong:**
+The team collects metrics during sandbox validation: P&L, uptime, fill rate, slippage. Then they go live and shut down sandbox. The critical missing metric is the sandbox-to-live signal divergence during the transition period itself -- the window when live capital is deployed but the sandbox is still running in parallel. If the system generates a BUY signal in sandbox but a HOLD in live for the same symbol on the same bar, that divergence must be captured immediately. Without parallel operation for at least 10-20 trading days, teams have no way to distinguish "live underperformance from execution" versus "live underperformance from signal bug."
+
+**Why it happens:**
+Running sandbox and live in parallel requires careful state management (separate circuit breaker instances, separate equity tracking, separate Telegram channels). Teams shut down sandbox when they go live to reduce complexity, losing the most valuable diagnostic tool.
+
+**How to avoid:**
+- Design the monitoring system to support simultaneous sandbox + live operation with separate metric streams but a shared signal comparison report.
+- Define "signal divergence" as a first-class metric: for each bar, compare sandbox signal direction with live signal direction for all symbols. Log divergences immediately, not in batch.
+- Keep sandbox running for at least 20 trading days after go-live before decommissioning it.
+- Signal divergence > 5% on any single day should trigger automatic investigation, not just logging.
+
+**Warning signs:**
+- Sandbox is shut down on the day of go-live.
+- Signal comparison is done manually by reading logs, not via automated divergence report.
+- No dedicated Telegram channel or dashboard panel for sandbox vs. live comparison.
+
+**Phase to address:** Sandbox monitoring phase (Phase 1) -- parallel operation must be designed in from the start, not retrofitted.
+
+---
+
+### Pitfall P6: Anomaly Alerts Produce Alert Fatigue and Get Ignored
+
+**What goes wrong:**
+Production anomaly monitoring for a daily-bar trading system on MOEX will naturally produce alerts during: (a) MOEX market holidays, (b) T-Invest API maintenance windows (typically Sunday mornings), (c) CBR rate announcement days with elevated volatility, (d) extended trading sessions. If all anomalies produce the same-priority Telegram alert, operators tune them out within a week. The system already has a `TelegramMonitor` with a priority queue -- but the anomaly detection layer must respect that queue hierarchy, not dump all alerts at CRITICAL.
+
+**Why it happens:**
+Anomaly detection is added as a layer on top of existing monitoring without integrating into the existing priority queue. All new alerts default to the highest priority to ensure visibility. Industry data shows > 71% of anomaly alerts in production financial systems are false positives. Within days, operators are ignoring all Telegram messages.
+
+**How to avoid:**
+- Classify anomaly alerts into three tiers before implementation: (1) CRITICAL = kill switch needed (equity loss > threshold, order rejected by broker), (2) WARNING = investigation needed within 1 hour (slippage > budget, signal divergence spike), (3) INFO = note for end-of-day review (metric drifted within acceptable range).
+- Integrate with the existing `TelegramMonitor` priority queue instead of creating a separate alert path.
+- Add "quiet hours" suppression for known maintenance windows: T-Invest API maintenance (Sunday 02:00-06:00 MSK), MOEX pre-market hours.
+- Implement alert deduplication: if the same anomaly fires every 5 minutes, collapse to one alert per hour with a count.
+
+**Warning signs:**
+- More than 5 Telegram alerts per day during normal operation.
+- Same alert type firing repeatedly without operator action.
+- Operators disabling Telegram notifications to reduce noise.
+
+**Phase to address:** Production health monitoring phase (Phase 3). Alert taxonomy must be defined before any alerts are implemented.
+
+---
+
+### Pitfall P7: Circuit Breaker Thresholds Are Not Adjusted for Small Capital
+
+**What goes wrong:**
+The existing `CircuitBreaker` uses L1=5%, L2=10%, L3=15% daily drawdown thresholds. These were calibrated for a system with 500K+ RUB where a 5% loss is 25,000 RUB -- a meaningful signal. At 50-100K RUB with tightened risk limits, a single bad trade on a volatile MOEX instrument can produce a 5% intraday loss from pure mark-to-market noise (a 3% position in TATN dropping 1.5% intraday = 4.5% portfolio impact). The circuit breaker will fire CAUTION on normal volatility, halving position sizes and raising confidence thresholds -- which may prevent the system from generating any recovery trades.
+
+**Why it happens:**
+Circuit breaker thresholds are designed once and never revisited for different capital levels. The go-live documentation says "tightened limits" but teams focus on max-position-size and daily-loss-cap without updating the circuit breaker calibration.
+
+**How to avoid:**
+- Define circuit breaker thresholds as a function of capital tier, not fixed values. At 50K RUB: L1=3%, L2=6%, L3=10%. At 500K+ RUB: use existing L1=5%, L2=10%, L3=15%.
+- Or: use the daily loss cap (1% of capital) as the L1 threshold by construction -- if the 1% daily cap is the hard stop, the circuit breaker CAUTION should trigger at 0.7% to give early warning before the cap is hit.
+- Validate circuit breaker sensitivity during sandbox by deliberately injecting drawdown scenarios and verifying the system responds proportionally.
+
+**Warning signs:**
+- Circuit breaker fires CAUTION on the first day of live trading without a clear P&L cause.
+- System halts trading after a single losing position on a normal MOEX day.
+- CAUTION triggers every day, making the metric meaningless.
+
+**Phase to address:** Gradual rollout phase (Phase 4). Circuit breaker thresholds must be in the capital-ladder parameter set.
+
+---
+
+### Pitfall P8: Health Check Does Not Cover the Full Dependency Stack
+
+**What goes wrong:**
+Teams add a `/health` endpoint that returns "OK" if the FastAPI app is responding. This passes while: (a) the T-Invest gRPC connection is silently broken, (b) the CBR XML API is returning stale rate data, (c) the Redis cache has stale IMOEX data, (d) the MOEX ISS connection is timing out and the system is trading on yesterday's index levels. The system appears healthy but is making decisions with stale inputs. Stale data does not cause exceptions -- it silently produces wrong signals.
+
+**Why it happens:**
+Health checks are added at the API layer. The data dependency stack (gRPC, REST, Redis, PostgreSQL) is only partially exercised. This is a well-known pattern: liveness check (is the process alive?) vs. readiness check (are all dependencies fresh?).
+
+**How to avoid:**
+- Implement a deep health check that verifies data freshness, not just connectivity: (a) T-Invest gRPC: last successful candle fetch < 30 minutes ago during market hours, (b) CBR rate: data age < 24 hours, (c) MOEX ISS: IMOEX data age < 60 minutes during market hours, (d) PostgreSQL: last successful write < 10 minutes during active cycle.
+- Distinguish "liveness" (process is running) from "readiness" (all data sources fresh and within tolerance).
+- Add a staleness alert that fires BEFORE the next trading cycle if any data source is stale. A trade executed on stale data is harder to recover from than a missed trade.
+- The existing `structlog` already captures data fetch events -- add a last-fetch timestamp tracker per data source to feed the health check.
+
+**Warning signs:**
+- Health check passes but no trades executed for 2+ trading days without explanation.
+- CBR rate shown in dashboard has not updated since last CBR meeting date.
+- Health check response time < 10ms (it is not actually checking any downstream dependencies).
+
+**Phase to address:** Production health monitoring phase (Phase 3). Deep health check architecture must be designed before any live deployment.
+
+---
+
+## Technical Debt Patterns
+
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Use sandbox P&L as go/no-go primary metric | Simple, single number | Overestimates real performance due to synthetic fills | Never -- always separate execution quality from signal quality |
+| Single alert channel for all anomaly types | Fast to implement | Alert fatigue within 1 week | Never in production |
+| Fixed circuit breaker thresholds across capital tiers | No code change needed | Fires too early at small capital, too late at large capital | Never for MOEX where lot sizes vary significantly |
+| Shut down sandbox when going live | Reduces complexity | Lose parallel comparison baseline | Acceptable after 30+ trading days of stable live operation |
+| Binary pass/fail go/no-go gate | Simple to communicate | Cannot distinguish "improving" from "stuck at 49% pass" | Acceptable if trend data is logged separately |
+| Health check at API layer only | Fast to build | Misses data staleness, the most common silent failure mode | Only during initial sandbox phase |
+| One capital level for gradual rollout | Simpler parameter set | Position arithmetic breaks at extreme ends | Never -- define at least 3 capital tiers |
+
+---
+
+## Integration Gotchas (v3.0 Production Ops)
+
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| T-Invest gRPC (sandbox) | Treat sandbox fills as equivalent to live fills | Capture MOEX ISS mid-price at order time; compute simulated slippage separately |
+| T-Invest gRPC (live) | Assume market orders fill instantly at current price | Log fill_price from OrderResult and compare to signal_price; measure actual slippage per trade |
+| T-Invest gRPC (live) | Forget that the old `invest-public-api.tinkoff.ru` domain is deprecated | Always pass `target="invest-public-api.tbank.ru:443"` -- already fixed in `tinkoff_data.py` but must be verified in every new broker instantiation |
+| MOEX ISS REST API | Use ISS data for real-time price during trading hours | ISS has 15-minute delay; use T-Invest streaming for intraday prices, ISS only for EOD validation |
+| CBR XML API | Poll CBR on every cycle | CBR rates change at scheduled meetings; cache with 6-hour TTL and alert on cache miss |
+| Telegram Bot | Send all alerts via the same bot token without rate limiting | Telegram rate limits (30 messages/second) will be hit if anomaly detection fires in burst; use the existing priority queue and throttle |
+| Redis cache | Assume Redis holds current data if no exception thrown | Check TTL on cached keys in health check; expired but not-yet-evicted keys can return stale data |
+| PostgreSQL TimescaleDB | Use synchronous writes in the monitoring loop | Async write queue must be non-blocking; a DB write failure must not halt the trading cycle |
+
+---
+
+## Performance Traps
+
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| Collecting all metrics on every bar | Monitoring adds 200ms+ per bar to cycle time | Collect high-frequency metrics (order fill, equity) every bar; collect aggregate metrics (Sharpe, PF) daily | At > 50 symbols in universe |
+| Storing raw signal data in PostgreSQL without retention policy | DB grows unbounded; query latency increases | TimescaleDB automatic retention: keep raw bars 90 days, aggregated daily metrics permanently | After 6 months of operation |
+| Comparing sandbox vs. live signals in-process | Shared state risks contamination between modes | Use separate process or async task for comparison; communicate via database or queue | Immediately -- single off-by-one bug corrupts both comparisons |
+| Telegram metric reports generated synchronously | Report generation blocks trading cycle | Pre-compute reports on a background schedule; Telegram send is fire-and-forget | During heavy market open volatility |
+| Kill switch implemented as a database flag | DB latency (5-50ms) means kill is not truly immediate | Use asyncio Event checked in the hot loop; database flag is for persistence only | During flash crashes with rapid position changes |
+
+---
+
+## Security Mistakes
+
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Kill switch accessible without authentication | Any Telegram user can halt trading | Restrict `/stop` and kill switch Telegram commands to specific user IDs; verify for new kill switch implementation |
+| Metric dashboard exposes position sizes and P&L publicly | Reveals trading strategy and sizing to market participants | Require authentication on Streamlit dashboard; add API key header to all `/api/v1/` endpoints |
+| Go/no-go gate report contains raw T-Invest API responses | Leaks FIGI codes, position details | Sanitize report output; log raw API responses to secure internal log only |
+| Capital scaling automation without audit trail | Cannot reconstruct why capital was increased | Every capital scaling event must write to an immutable audit log with: timestamp, trigger metric, value at trigger, operator confirmation |
+| Storing T-Invest token in monitoring config | Token rotation requires config redeploy | Load token from environment variable at runtime; monitor token expiry and alert 7 days before |
+
+---
+
+## UX Pitfalls (Operator Experience)
+
+| Pitfall | Operator Impact | Better Approach |
+|---------|-----------------|-----------------|
+| Go/no-go report is a wall of numbers | Operator cannot quickly determine pass/fail status | Use traffic-light summary at the top: GREEN/YELLOW/RED per metric, detail below |
+| Sandbox dashboard shows sandbox P&L without noting it excludes slippage | Operator over-trusts sandbox results | Always label sandbox P&L as "adjusted P&L (excludes live slippage)" |
+| Capital scaling requires manual code change | Friction causes delayed scaling or delayed de-scaling | Provide a CLI command: `finalayze scale-capital --tier 2` that validates arithmetic before applying |
+| Kill switch is only accessible via Telegram | Kill switch unavailable if Telegram API is down | Add a secondary kill switch via the existing REST API `/api/v1/kill` protected by API key |
+| No "what happened today" summary | Operator must read raw logs to understand daily activity | Automated end-of-day Telegram summary: trades executed, P&L, circuit breaker events, data quality issues |
+
+---
+
+## "Looks Done But Isn't" Checklist (v3.0)
+
+- [ ] **Sandbox go/no-go gate:** Often missing calibration against backtest percentiles -- verify thresholds derived from `PortfolioBacktestOrchestrator` walk-forward data, not from generic benchmarks.
+- [ ] **Kill switch:** Often missing open-order cancellation -- verify `cancel_all_open_orders()` is called before position flattening, not after.
+- [ ] **Health check:** Often missing data staleness verification -- verify each data source has a last-fetch timestamp checked against a freshness threshold.
+- [ ] **Circuit breaker for small capital:** Often uses production thresholds -- verify thresholds are defined per capital tier.
+- [ ] **Alert taxonomy:** Often all alerts at same priority -- verify CRITICAL/WARNING/INFO tiers are defined and respected by `TelegramMonitor` priority queue.
+- [ ] **Parallel sandbox + live operation:** Often sandbox is shut down at go-live -- verify sandbox continues running for 20+ trading days post go-live for signal comparison.
+- [ ] **Slippage tracking:** Often relies on sandbox-reported fills -- verify independent mid-price capture at order submission time.
+- [ ] **Capital scaling:** Often a single parameter change -- verify position sizing arithmetic validated for each capital tier before each step up.
+- [ ] **Audit trail:** Often missing for scaling decisions -- verify every capital scaling event writes to immutable log with trigger metrics and operator confirmation.
+
+---
+
+## Recovery Strategies (v3.0)
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| Sandbox metrics used as go/no-go baseline, live underperforms | MEDIUM | Run 10-day live parallel with sandbox; compute slippage delta; adjust thresholds; no code change needed if delta is stable |
+| Go/no-go thresholds too tight, system never reaches go-live | LOW | Derive new thresholds from walk-forward backtest; document rationale; re-run gate |
+| Kill switch has activation lag, additional losses incurred | HIGH | Immediately halt all trading; review order book for uncancelled orders; reconcile positions manually via Tinkoff dashboard; add sync cancellation before next deployment |
+| Capital scaling too fast, drawdown exceeds L2 circuit breaker | MEDIUM | Activate HALTED level manually; reduce capital to previous tier; wait 2 profitable days for circuit breaker reset per existing `_L2_PROFITABLE_DAYS_REQUIRED` logic |
+| Alert fatigue, critical alert ignored | HIGH | Review last 7 days of ignored alerts for missed signals; redesign alert taxonomy before re-enabling monitoring |
+| Health check misses stale data, wrong signals executed | HIGH | Cross-check executed trades against manual MOEX ISS data for the affected period; quantify PnL impact; add data staleness check as blocking pre-cycle check |
+
+---
+
+## Pitfall-to-Phase Mapping (v3.0)
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| Sandbox false confidence from synthetic fills (P1) | Phase 1: Sandbox monitoring | Verify slippage simulation methodology documented; mid-price capture implemented |
+| Arbitrary go/no-go thresholds (P2) | Phase 2: Go/no-go gate design | Run gate logic against historical backtest periods; verify calibration rationale |
+| Kill switch activation lag (P3) | Phase 3: Production ops | Test kill switch mid-cycle; measure kill latency; verify open order cancellation |
+| Position-size discontinuities at capital tiers (P4) | Phase 4: Gradual rollout | Run sizing pipeline against full universe at each capital tier before deploying |
+| Missing sandbox-to-live comparison window (P5) | Phase 1: Sandbox monitoring | Verify sandbox continues post go-live; signal divergence report automated |
+| Alert fatigue (P6) | Phase 3: Production ops | Verify alert taxonomy; count daily alerts in first 5 days of operation |
+| Circuit breaker miscalibrated for small capital (P7) | Phase 4: Gradual rollout | Validate circuit breaker sensitivity per capital tier in sandbox before live deposit |
+| Health check misses data staleness (P8) | Phase 3: Production ops | Each data source has freshness check; health check fails if any source stale |
+
+---
+
+## Sources (v3.0)
+
+- Existing codebase: `src/finalayze/execution/sandbox_tracker.py`, `src/finalayze/risk/circuit_breaker.py`, `src/finalayze/risk/pre_trade_check.py` -- confirms what infrastructure exists and where gaps are
+- `.planning/PROJECT.md` -- v3.0 milestone requirements and system constraints
+- [False Confidence in Systematic Trading (SSRN/ML Quants 2025)](https://mlquants.substack.com/p/false-confidence-in-systematic-trading) -- sandbox/live performance gap patterns
+- [FIA Best Practices for Automated Trading Risk Controls (2024)](https://www.fia.org/sites/default/files/2024-07/FIA_WP_AUTOMATED%20TRADING%20RISK%20CONTROLS_FINAL_0.pdf) -- kill switch implementation requirements
+- [Systemic failures in algorithmic trading (PMC)](https://pmc.ncbi.nlm.nih.gov/articles/PMC8978471/) -- kill switch activation lag case study (30-minute real-world response time)
+- [Alert Fatigue Mitigation in Anomaly Detection](https://ciajournal.com/index.php/jcia/article/download/28/29) -- alert taxonomy and deduplication approaches
+- [Algorithmic Trading Overfitting -- PickMyTrade](https://blog.pickmytrade.trade/algorithmic-trading-overfitting-backtest-failure/) -- sandbox-to-live divergence patterns
+- [QuantStart: Successful Backtesting Part II](https://www.quantstart.com/articles/Successful-Backtesting-of-Algorithmic-Trading-Strategies-Part-II/) -- slippage and fill rate measurement methodology
+
+---
+*Pitfalls research for: v3.0 Production Monitoring, Go/No-Go Gates, and Gradual Capital Rollout*
+*Researched: 2026-03-21*

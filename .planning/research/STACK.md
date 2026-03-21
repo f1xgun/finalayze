@@ -1,303 +1,193 @@
-# Stack Research: v2.0 MOEX Profitability
+# Stack Research: v3.0 Production Readiness
 
-**Domain:** MOEX-native profitable strategies, ML with Russian macro features
-**Researched:** 2026-03-20
-**Confidence:** HIGH (all recommendations verified against existing codebase)
+**Domain:** Sandbox monitoring, go/no-go gate automation, gradual rollout, production health monitoring
+**Researched:** 2026-03-21
+**Confidence:** HIGH (based on direct codebase audit + verified library docs)
 
-## Context: What Already Exists (v1.0 stack)
+## Context: What Already Exists (v2.0 stack)
 
-The existing codebase (Python 3.12, async-first, uv) already provides:
-- `t-tech-investments` gRPC SDK -- candles, instruments, dividends (`tinkoff_data.py`)
-- `CBRFetcher` -- key rate (SOAP XML), FX rates (REST XML), yield curve, CPI data
-- `MacroSnapshot` + `MacroCacheService` -- key_rate, USDRUB, CPI, RUONIA cached daily
-- `MoexISSFetcher` -- IMOEX index candles, market turnover
-- `yfinance` -- Brent crude (`BZ=F`) already in `MoexMarketData.commodity_candles`
-- `PairsStrategy` -- Kalman filter + Engle-Granger cointegration spread z-score
-- `DividendGapStrategy` -- basic gap closure with `DividendEntry`/`_GapTracker`
-- `CBRCalendar` + `CBRStrategyWrapper` -- CBR rate event contrarian signals
-- `rub_oil_regime.py` -- RUB/oil decorrelation regime detection
-- `commodity_currency.py` -- Brent-RUB premium for energy exporters
-- ML features: `brent_zscore_60d`, `real_rate_zscore` (45 features total)
-- `statsmodels` (cointegration), `pandas-ta`, `numpy`, `scipy`, `hmmlearn`, `arch`
-- `XGBoost`, `LightGBM`, `CatBoost`, `PyTorch` -- ML ensemble pipeline
-- `QuantLib` -- bond math (YTM, duration, convexity)
-- `Telethon` -- Telegram channel reader
-- `feedparser` -- RSS parsing (RBC, Interfax, TASS)
-- `aiogram` / Telegram alerting
-- Full strategy framework: `BaseStrategy`, `StrategyCombiner`, ADX routing, presets
+The system already provides — do NOT re-implement or re-add:
+
+- `prometheus-client` + `prometheus-fastapi-instrumentator` — Prometheus metrics (MetricsCollector with 15+ business metrics already defined)
+- `structlog` — structured JSON logging (already used everywhere)
+- `apscheduler>=3.10.4` — APScheduler (BackgroundScheduler for news/strategy/daily-reset cycles in TradingLoop)
+- `streamlit>=1.41.0` — Dashboard with 5 pages (portfolio, risk, signals, trades, system_status)
+- `FastAPI` + 20+ REST endpoints — health, portfolio, trades, risk, signals, ML, system
+- `redis>=5.2.0` — Redis Streams event bus (EventBus) + RedisCache
+- `sqlalchemy[asyncio]` + `asyncpg` + TimescaleDB — async ORM with CycleLogEntry in JSONL
+- `httpx` — HTTP client (used for Telegram alerts)
+- `python-telegram-bot` (via TelegramAlerter) — priority-queue alerting already live
+- `CircuitBreaker` — 3-level escalation (CAUTION 5%, HALTED 10%, LIQUIDATE 15%)
+- `PreTradeChecker` — 11-check pre-trade risk gate
+- `ValidationLogger` — append-only JSONL cycle log (`results/validation/cycles.jsonl`)
+- `core/modes.py` — WorkMode enum (DEBUG/SANDBOX/TEST/REAL) + real_confirmed guard
 
 ---
 
-## Key Finding: Zero New Dependencies Required
+## Key Finding: Minimal New Dependencies
 
-All v2.0 MOEX profitability features can be built using the existing dependency set. The work is purely at the application layer: new strategy modules, ML feature extensions, combiner configuration, and risk pipeline wiring.
-
----
-
-## Recommended Stack (Application-Layer Additions Only)
-
-### New Modules to Create
-
-| New Module | Purpose | Existing Deps Used | Complexity |
-|-----------|---------|-------------------|------------|
-| `strategies/moex_sector_rotation.py` | Sector rotation using MOEX ISS sector indices | `MoexISSFetcher`, `pandas`, `numpy` | Medium |
-| `strategies/pref_arb.py` OR extend `pairs.py` | Preferred share arbitrage (SBER/SBERP) | `statsmodels.coint`, `numpy` (existing `PairsStrategy`) | Low |
-| `risk/cbr_regime_gate.py` | CBR rate regime classification + equity gating | `MacroSnapshot`, `MacroCacheService` | Low |
-| `risk/portfolio_allocator.py` | 40% OFZ + 60% equity with RUB crisis brake | `CircuitBreaker`, `MacroSnapshot`, `rub_oil_regime` | Medium |
-| Extend `ml/features/technical.py` | 10 new Russian macro ML features | `MoexMarketData` (existing schema) | Medium |
-| Extend `strategies/dividend_gap.py` | Expand dividend events, regime filtering | `TinkoffFetcher.get_dividends()`, existing strategy | Medium |
-| Extend `data/loader.py` | Fetch MOEX sector index candles | `MoexISSFetcher` (existing) | Low |
-
-### Existing Modules to Extend
-
-| Existing Module | Extension | What Changes |
-|----------------|-----------|-------------|
-| `strategies/combiner.py` | Add Brent gate for ru_energy, CBR regime gate for all ru_* | New hook logic in `_on_generate_start()` |
-| `strategies/pairs.py` | Configure for MOEX preferred/common pairs | Add pair definitions, adjust Kalman parameters |
-| `strategies/dividend_gap.py` | Expand from 43 to 150+ events, add regime filter | Batch dividend fetch, sector-conditional entry |
-| `ml/features/technical.py` | Add 10 macro features (see table below) | New `_compute_moex_macro_features()` function |
-| `data/loader.py` | Fetch MOEX sector index candles | Add `_fetch_sector_indices()` method |
-| `config/segments.py` | Add new strategies to `active_strategies` lists | YAML preset weights |
-| `strategies/presets/*.yaml` | Add weights for dividend_gap, sector_rotation, pairs | Configuration only |
+v3.0 requires exactly **three new pip packages** and **one optional infrastructure component** (Grafana). All monitoring primitives already exist. New work is: report generation, automated gate evaluation logic, and rollout configuration — not new observability infrastructure.
 
 ---
 
-## Detailed Stack Decisions by Feature
+## New Dependencies Required
 
-### 1. Dividend Gap Closure Expansion
+### Core Technologies (New)
 
-**Decision:** Extend existing `DividendGapStrategy`, no new deps.
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| `Jinja2` | `>=3.1.4` | HTML template rendering for go/no-go gate reports | Already a transitive dep via FastAPI/Starlette; making it explicit. Jinja2 is the standard Python templating library — no learning curve, familiar to all Python devs. Renders HTML gate reports with pass/fail table, metric charts embeds. Latest stable is 3.1.6. |
+| `weasyprint` | `>=68.1` | Convert Jinja2-rendered HTML → PDF for go/no-go archive | Best HTML-to-PDF for Python in 2025: CSS3 support, no Chromium required, BSD license, Python-native. v68.1 released 2025-01-30. Requires Python 3.10+. Alternative `reportlab` requires building PDFs programmatically — far higher development cost for formatted reports. |
+| `aiogram` | `>=3.17.0` | Telegram bot interactive commands for kill switch + gate triggers | aiogram v3 is async-native, strictly typed, pydantic v2 compatible. Current TelegramAlerter uses raw `httpx` calls (fire-and-forget); aiogram adds proper command handling (/kill, /rollout, /gonogo) with FSM. aiogram v3 superseded v2 in 2023 and is now the community standard. **Note:** If only kill switch needs bot command (not conversation FSM), raw httpx POST to setWebhook is sufficient and aiogram can be deferred. |
 
-**What exists:**
-- `strategies/dividend_gap.py`: `DividendEntry`, `_GapTracker`, gap closure logic
-- `TinkoffFetcher`: already wired for `instruments.get_dividends()` per symbol
-- Strategy framework: `BaseStrategy` interface, combiner integration
+### Supporting Libraries (New)
 
-**What to build:**
-- `DividendCalendar` class: batch-load historical dividends for all MOEX blue chips
-- Regime filter: skip entries during CRISIS regime (use existing `rub_oil_regime`)
-- Sector-conditional entry: skip energy dividends when Brent < $55
-- Historical dividend persistence in TimescaleDB (use existing `alembic` migrations)
+| Library | Version | Purpose | When to Use |
+|---------|---------|---------|-------------|
+| `types-Jinja2` | `>=3.1.0` | mypy stubs for Jinja2 | Add to dev dependencies; required for strict mypy compliance |
 
-**Why no new deps:** T-Invest gRPC already provides `get_dividends()`. All filtering uses existing regime/commodity modules.
+### Infrastructure Components (No New Python Package)
 
-### 2. CBR Rate Regime Gating
+| Component | How Deployed | Purpose | Why Not a Pip Package |
+|-----------|-------------|---------|----------------------|
+| Grafana | Docker Compose service | Dashboard for Prometheus metrics (already being scraped) | Grafana is a standalone service, not a Python library. Prometheus already exports metrics — Grafana just adds a visualization layer. Configure with pre-built dashboards. |
+| Grafana Loki + Alloy | Docker Compose service (optional) | Centralized log aggregation for structlog JSON output | Optional for v3.0. structlog already writes JSON; Alloy (replacement for Promtail) tails and ships to Loki. No Python code changes required — pure infrastructure. Defer if operational complexity exceeds value at launch scale. |
 
-**Decision:** New `risk/cbr_regime_gate.py`, no new deps.
+---
 
-**What exists:**
-- `CBRFetcher.fetch_key_rate()` -- fetches full key rate history
-- `MacroSnapshot.key_rate`, `MacroSnapshot.last_cbr_decision` -- point-in-time macro state
-- `MacroCacheService` -- daily refresh, CBR-day force-refresh
-- `CBR_MEETINGS` -- static calendar of CBR rate decisions with surprise detection
+## Existing Libraries That Cover New v3.0 Needs
 
-**What to build:**
-- `CBRRegimeGate` class with three regimes:
-  - EASING: last 2+ decisions were cuts, or rate delta 3m < -100bps
-  - HOLD: rate unchanged for 2+ meetings
-  - TIGHTENING: last 2+ decisions were hikes, or rate delta 3m > +100bps
-- Wire into `StrategyCombiner._on_generate_start()` hook:
-  - TIGHTENING: suppress financials (SBER, VTBR), boost defensive sectors
-  - EASING: boost financials, suppress OFZ PD duration (rates falling = bond rally handled by carry)
-- Uses only existing `MacroSnapshot` fields. No new data sources.
+No new library needed for these — the existing stack already supports them:
 
-### 3. Brent-Conditional Energy Trading
+| v3.0 Need | Existing Capability | Where |
+|-----------|-------------------|-------|
+| Sandbox metric collection | `MetricsCollector` + `ValidationLogger` | `api/metrics.py`, `core/validation_logger.py` |
+| Uptime tracking | `prometheus-client` `Counter`/`Gauge` | `api/metrics.py` |
+| Fill rate monitoring | `trades_total` + `order_rejection_total` Counters | `api/metrics.py` |
+| Slippage measurement | `trade_slippage_bps` Histogram | `api/metrics.py` |
+| Signal divergence (sandbox vs backtest) | `strategy_signal_count` Counter | `api/metrics.py` |
+| Drawdown monitoring | `drawdown_pct` / `max_drawdown_pct` Gauges | `api/metrics.py` + `risk/drawdown_monitor.py` |
+| Kill switch command | Extend existing `CircuitBreaker.reset_manual()` + Telegram `/stop` in `telegram_bot.py` | `core/telegram_bot.py`, `risk/circuit_breaker.py` |
+| Tightened risk limits (gradual rollout) | `PreTradeChecker` + `CircuitBreaker` thresholds configurable in `Settings` | `risk/pre_trade_check.py`, `config/settings.py` |
+| Scheduled metric evaluation | `apscheduler` `BackgroundScheduler` (already running) | `core/trading_loop.py` |
+| Health check endpoints | `/api/v1/health` already exists | `api/v1/system.py` |
+| Anomaly detection for trading metrics | `statsmodels` STL decomposition OR simple z-score from `numpy` | `statsmodels` already installed |
+| Go/no-go threshold evaluation | Pure Python — compare metric values to configured thresholds | New module `core/gonogo.py` |
+| Capital scaling configuration | `Settings` + `SegmentConfig` already pydantic-configurable | `config/settings.py`, `config/segments.py` |
+| Database persistence for gate results | `SQLAlchemy` async ORM + existing alembic migrations | `core/db.py` |
 
-**Decision:** Logic in combiner hook, no new module needed.
+---
 
-**What exists:**
-- `MarketContext.moex_data.commodity_candles["BZ=F"]` -- Brent candles
-- `commodity_currency_premium()` in `risk/commodity_currency.py` -- spread signal
-- `brent_zscore_60d` ML feature in `technical.py`
+## Recommended Architecture for New Modules
 
-**What to build:**
-- Gate in `StrategyCombiner._on_generate_start()` for `ru_energy` segment:
-  - Brent 20d return < -15%: suppress all energy longs
-  - Brent 20d return > +10%: boost energy signal confidence by 20%
-  - Brent < $55 absolute: block energy entries entirely
-- Computation uses existing `commodity_candles` data path. No new fetcher needed.
+### Module Map for v3.0
 
-### 4. Preferred Share Arbitrage
+```
+core/gonogo.py           — GateEvaluator: threshold checks, pass/fail, result schema
+core/sandbox_reporter.py — SandboxMetricCollector: queries ValidationLogger + Prometheus API
+core/rollout_config.py   — RolloutPhase: capital limits, position limits, tightened circuit breaker thresholds
+api/v1/gonogo.py         — REST endpoint: GET /api/v1/gonogo/status, POST /api/v1/gonogo/evaluate
+```
 
-**Decision:** Extend existing `PairsStrategy`, no new deps.
+### New Library Integration Points
 
-**What exists:**
-- `PairsStrategy` with Kalman filter hedge ratio, cointegration test, z-score spread
-- `set_peer_candles(symbol, candles)` API for providing counterpart data
-- `statsmodels.tsa.stattools.coint` already imported
+**Jinja2** — in `core/sandbox_reporter.py`:
+```python
+from jinja2 import Environment, FileSystemLoader
+# Render HTML from templates/gonogo_report.html.j2 with metric dict
+# Then pass to weasyprint for PDF archive
+```
 
-**What to build:**
-- MOEX pair definitions (configuration, not code):
-  - SBER/SBERP (ru_finance): structural discount ~5-8%, widens pre-dividend
-  - TATN/TATNP (ru_energy): structural discount ~10-15%
-  - SNGS/SNGSP (ru_energy): driven by hidden FX reserves
-- Kalman parameter tuning for MOEX pairs:
-  - Wider z-score entry bands (2.5 vs 2.0) due to lower liquidity
-  - Larger observation noise R (0.01 vs 0.001) for MOEX spreads
-  - Seasonal dividend adjustment: preferred/common spread widens before record date
-- Wire peer candle loading in backtest engine to ensure both legs available
+**WeasyPrint** — in `core/sandbox_reporter.py`:
+```python
+from weasyprint import HTML
+# HTML(string=rendered_html).write_pdf("reports/gonogo_2026-03-21.pdf")
+```
 
-**Key consideration:** `PairsStrategy.generate_signal()` currently requires peer candles via `set_peer_candles()`. The backtest engine needs to call this for each pair leg. This is a wiring issue in `backtest/engine.py`, not a library issue.
+**aiogram (if adopted)** — in `core/telegram_bot.py`:
+```python
+# Replace raw httpx Telegram calls with aiogram Router
+# Add CommandHandler for /kill, /rollout <phase>, /gonogo
+```
 
-### 5. MOEX Sector Rotation
+---
 
-**Decision:** New `strategies/moex_sector_rotation.py`, no new deps.
+## Alternatives Considered
 
-**What exists:**
-- `MoexISSFetcher` fetches any MOEX index candles (tested with IMOEX)
-- `MarketDataLoader` orchestrates ambient data loading
-- ADX regime routing in combiner
-
-**What to build:**
-- Fetch 8 MOEX sector index candles via `MoexISSFetcher`:
-  ```
-  MOEXOG (Oil&Gas), MOEXFN (Finance), MOEXMM (Metals),
-  MOEXCN (Consumer), MOEXTL (Telecom), MOEXCH (Chemicals),
-  MOEXEU (Utilities), MOEXIT (IT)
-  ```
-- `MoexSectorRotationStrategy(BaseStrategy)`:
-  - Compute 21-day relative strength vs IMOEX for each sector
-  - Rank sectors, overweight top 3, underweight bottom 3
-  - CBR-conditioned: financials boost during EASING, energy boost when Brent rising
-- Extend `MarketDataLoader._load_moex()` to fetch sector index candles
-- Store in `MoexMarketData` (add `sector_index_candles: dict[str, tuple[Candle, ...]]`)
-
-**Why no new deps:** `MoexISSFetcher` already handles MOEX ISS API pagination, timezone conversion, and retry logic. Just needs different ticker symbols.
-
-### 6. ML with Russian Macro Features
-
-**Decision:** Extend `ml/features/technical.py`, no new deps.
-
-**What exists:**
-- `_compute_commodity_features()` returns `brent_zscore_60d`
-- `_compute_macro_features()` returns `real_rate_zscore`
-- `MoexMarketData` carries `fx_rates`, `key_rates`, `commodity_candles`, `turnover`
-- `MarketContext` carries `benchmark_candles` (IMOEX)
-- Feature selection pipeline, sequential bootstrapping, quality gates
-
-**New features to add (10 features):**
-
-| Feature Name | Formula | Data Source | Rationale |
-|-------------|---------|-------------|-----------|
-| `cbr_key_rate_level` | Current rate normalized to [0,1] range (rate/30) | `key_rates` | Rate level affects all MOEX sectors differently |
-| `cbr_rate_delta_3m` | rate_now - rate_3months_ago | `key_rates` | Direction of monetary policy |
-| `cbr_rate_direction` | +1 hiking, 0 hold, -1 cutting (from last 2 decisions) | `key_rates` | Categorical regime indicator |
-| `usdrub_return_20d` | 20-day log return of USDRUB | `fx_rates` | RUB weakness/strength signal |
-| `usdrub_zscore_60d` | 60-day z-score of USDRUB level | `fx_rates` | Mean-reversion signal for FX |
-| `usdrub_vol_20d` | 20-day realized vol of USDRUB (annualized) | `fx_rates` | FX stress indicator |
-| `brent_return_20d` | 20-day log return of Brent | `commodity_candles` | Energy sector leading indicator |
-| `brent_rub_spread` | brent_return_20d - usdrub_return_20d | Both | Commodity-currency decorrelation signal |
-| `imoex_relative_21d` | stock_return_21d / imoex_return_21d | `benchmark_candles` | Relative strength vs market |
-| `moex_turnover_zscore` | 60-day z-score of MOEX market turnover | `turnover` | Liquidity/sentiment indicator |
-
-**Implementation:** Add `_compute_moex_macro_features_extended()` function, called from `compute_features()` when `moex_data is not None`. Follows existing pattern of `_compute_commodity_features()`.
-
-### 7. Portfolio Allocation (40% OFZ + 60% Equity)
-
-**Decision:** New `risk/portfolio_allocator.py`, no new deps.
-
-**What exists:**
-- `PortfolioLayer` enum (CORE/STRATEGIC/TACTICAL/SHORT)
-- `CircuitBreaker` with 3-level escalation
-- `rub_oil_regime.py` -- CRISIS detection
-- `MacroSnapshot` -- key_rate, USDRUB
-- Per-segment `max_allocation_pct` in `SegmentConfig`
-
-**What to build:**
-- `PortfolioAllocator` class:
-  - Normal: 40% OFZ (ru_ofz_pk + ru_ofz_pd), 60% equity (all ru_* stock segments)
-  - RUB crisis: 80% OFZ, 20% equity (triggered by `rub_oil_regime` CRISIS)
-  - Rate cutting cycle: shift OFZ from PK to PD (duration exposure for capital gains)
-- Wire into `TradingLoop` strategy cycle and backtest engine
+| Recommended | Alternative | Why Alternative Was Rejected |
+|-------------|-------------|------------------------------|
+| `weasyprint` for PDF | `reportlab` | ReportLab requires building PDFs programmatically (canvas API). For formatted HTML reports with tables and conditional colors, HTML→PDF via WeasyPrint takes 1/5 the code. ReportLab excels at programmatic chart-heavy documents — not our use case. |
+| `weasyprint` for PDF | `playwright` (headless Chrome) | Playwright gives pixel-perfect Chrome rendering but adds a 150MB+ browser dependency, complexity for CI, and is overkill for a daily/weekly text report. WeasyPrint's CSS3 support covers all needed formatting. |
+| `Jinja2` for templates | `mako` or `chameleon` | Jinja2 is already a transitive dependency, has the largest community, and is the FastAPI template standard. No reason to add a second templating engine. |
+| Simple Python z-score for anomaly detection | `adtk` (0.6.2) or `darts` | ADTK last released 2020, no longer actively maintained. Darts is a heavy ML forecasting library (adds >500MB). Trading metric anomalies (drawdown spikes, slippage outliers) can be detected reliably with a rolling z-score using `numpy` + `pandas` — both already installed. Custom implementation is 20 lines and has no dependency risk. |
+| APScheduler 3.x (existing) | APScheduler 4.x | APScheduler 4.x is still in alpha/pre-release as of 2025-03-21 (v4.0a4). API changed completely (Task/Schedule/Job split), async context manager required, job stores redesigned. Stable 3.x (3.11.2) works and is already integrated in TradingLoop. Upgrade is non-trivial and adds no value for v3.0 goals. |
+| `aiogram` v3 for bot | python-telegram-bot | python-telegram-bot v20+ is also async-native and well maintained. Either works. aiogram is lighter. The choice matters only if interactive conversation FSM is needed (unlikely for v3.0). |
+| Grafana for dashboards | Add new Streamlit pages | The Streamlit dashboard is appropriate for ad-hoc operator views. Grafana excels at time-series panels with alerting rules driven by existing Prometheus metrics — no code changes required on the Python side, just dashboard JSON configuration. Both can coexist. |
 
 ---
 
 ## What NOT to Add
 
-| Avoid | Why | Already Have |
+| Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `moexalgo` | Third-party MOEX wrapper, adds complexity, not maintained | `MoexISSFetcher` (direct ISS API) |
-| `investpy` | Deprecated, Investing.com blocked scraping | `CBRFetcher` + `MoexISSFetcher` |
-| `ta-lib` (C library) | Requires system-level install, pandas-ta covers all needed indicators | `pandas-ta` (already installed) |
-| `zipline` / `backtrader` | Entire backtesting frameworks, conflict with existing engine | Custom `backtest/engine.py` |
-| New async HTTP client (aiohttp) | Would duplicate existing HTTP capability | `httpx` (already installed) |
-| `sklearn` feature engineering | Custom features needed for MOEX-specific signals | Manual feature computation in `technical.py` |
-| Any new ML framework | Existing ensemble (XGB+LGBM+CatBoost) is sufficient | `ml/models/` (already operational) |
-| `fredapi` / US macro data | US market is out of scope for v2.0 | N/A |
+| `opentelemetry` SDK | OpenTelemetry traces are overkill for a single-process trading system. Adds 10+ packages, significant config complexity. | `structlog` + Prometheus metrics already cover all observability needs |
+| `celery` (already installed but unused) | Celery adds a distributed task queue architecture that mismatches the single-process APScheduler loop. Would require separate worker processes. | `apscheduler` `BackgroundScheduler` (already integrated in TradingLoop) |
+| Feature flag libraries (Unleash, LaunchDarkly, Statsig) | External feature flag services introduce an external runtime dependency. "Gradual rollout" for a trading system means capital/risk limit progression, not code path toggling. | `rollout_config.py` with `RolloutPhase` enum (MINIMAL / STANDARD / FULL) controlled via Settings |
+| `datadog`, `newrelic`, `sentry` APMs | External SaaS observability platforms add cost and data egress of sensitive trading data. | `prometheus-client` + Grafana (self-hosted) |
+| `pandas-profiling` / `ydata-profiling` | Heavy profiling tool for data science EDA, not live trading metrics. | Custom metric summaries in `sandbox_reporter.py` |
+| `darts` or `prophet` for anomaly detection | Forecasting frameworks with heavy dependencies (PyTorch, Stan). Rolling z-score with numpy is sufficient and has no new dep. | `numpy` + `pandas` rolling statistics (already installed) |
+| `fastapi-health` / `fastapi-healthchecks` | Thin wrappers that add minimal value over the existing `/api/v1/health` endpoint. | Extend `api/v1/system.py` directly |
 
 ---
 
-## Data Pipeline: New vs Existing
+## Stack Patterns by Variant
 
-| Data Need | Already Fetched? | Source | Action |
-|-----------|-----------------|--------|--------|
-| Historical dividends (150+ events) | Partially (per-symbol on demand) | T-Invest gRPC | Batch fetch for all blue chips, cache results |
-| CBR key rate history | YES | CBR SOAP API | Already in `MacroSnapshot` |
-| USDRUB daily rates | YES | CBR REST API | Already in `MoexMarketData.fx_rates` |
-| Brent crude daily | YES | yfinance `BZ=F` | Already in `commodity_candles` |
-| MOEX sector indices (8 tickers) | **NO** | MOEX ISS | **New: fetch MOEXOG, MOEXFN, MOEXMM, etc.** |
-| IMOEX index | YES | MOEX ISS | Already used as benchmark |
-| MOEX turnover | YES | MOEX ISS | Already in `MoexMarketData.turnover` |
-| CPI YoY data | YES (static) | Hardcoded in `cbr.py` | Update static table through 2026 |
+**If go/no-go gate runs daily (automated, no human trigger):**
+- Use APScheduler to call `GateEvaluator.evaluate()` each morning before market open
+- Results stored in TimescaleDB via alembic migration (new `gonogo_results` table)
+- Telegram alert dispatched via existing TelegramAlerter
 
-**Only truly new data to fetch:** MOEX sector index candles (8 indices via existing `MoexISSFetcher`).
+**If go/no-go gate requires human confirmation before capital scaling:**
+- Add Telegram bot command `/gonogo confirm` (requires aiogram OR raw httpx webhook)
+- GateEvaluator returns PENDING state until operator responds
+- Capital scaling in `RolloutPhase` only advances after confirmation
+
+**If PDF report archiving is required:**
+- Use `weasyprint` + `Jinja2` (2 new deps)
+- Reports saved to `reports/` directory and linked in Telegram message
+
+**If PDF report is not required (HTML summary in Telegram only):**
+- Skip `weasyprint` entirely — render Jinja2 HTML, strip to plaintext for Telegram
+- Zero new pip packages for v3.0
 
 ---
 
-## Schema Additions
+## Version Compatibility
 
-### MoexMarketData (extend existing dataclass)
-
-```python
-@dataclass(frozen=True)
-class MoexMarketData:
-    fx_rates: tuple[FXRate, ...] | None = None
-    key_rates: tuple[KeyRateRecord, ...] | None = None
-    commodity_candles: dict[str, tuple[Candle, ...]] | None = None
-    turnover: tuple[TurnoverRecord, ...] | None = None
-    # NEW for v2.0:
-    sector_index_candles: dict[str, tuple[Candle, ...]] | None = None  # "MOEXOG" -> candles
-```
-
-### Strategy Preset Updates (YAML)
-
-```yaml
-# strategies/presets/ru_blue_chips.yaml -- add:
-dividend_gap: 0.25         # primary alpha engine
-sector_rotation: 0.15      # MOEX sector momentum
-
-# strategies/presets/ru_energy.yaml -- add:
-dividend_gap: 0.25         # high-yield energy dividends
-pairs: 0.10                # TATN/TATNP, SNGS/SNGSP arb
-
-# strategies/presets/ru_finance.yaml -- add:
-dividend_gap: 0.20         # SBER dividend gap
-cbr_calendar: 0.15         # increase weight (CBR-sensitive)
-pairs: 0.10                # SBER/SBERP arb
-```
-
-### MOEX Sector Index Constants
-
-```python
-MOEX_SECTOR_INDICES: dict[str, str] = {
-    "energy": "MOEXOG",
-    "finance": "MOEXFN",
-    "metals": "MOEXMM",
-    "consumer": "MOEXCN",
-    "telecom": "MOEXTL",
-    "chemicals": "MOEXCH",
-    "utilities": "MOEXEU",
-    "tech": "MOEXIT",
-}
-```
+| Package | Compatible With | Notes |
+|---------|-----------------|-------|
+| `weasyprint>=68.1` | Python 3.10+ | Confirmed. Our baseline is Python 3.12 — no issue. |
+| `Jinja2>=3.1.4` | FastAPI 0.115+ (uses Jinja2 as dep) | Already transitively installed. Just make explicit in pyproject.toml. |
+| `aiogram>=3.17.0` | Python 3.9+, asyncio | Not conflicting with existing async stack. aiogram v3 uses aiohttp internally (does NOT conflict with httpx). |
+| All existing deps | Unchanged | v3.0 adds at most 2-3 pip packages. No version bumps to existing packages required. |
 
 ---
 
 ## Installation
 
 ```bash
-# No new packages to install. Existing stack covers all v2.0 needs.
-uv sync  # ensure current deps are up to date
+# New production dependencies
+uv add "jinja2>=3.1.4" "weasyprint>=68.1"
+
+# New dev dependencies (mypy stubs)
+uv add --dev "types-Jinja2>=3.1.0"
+
+# Optional: Telegram bot interactive commands
+uv add "aiogram>=3.17.0"
+
+# Infrastructure (Docker Compose additions — no Python package)
+# Add grafana service to docker-compose.yml (points at existing Prometheus)
+# Add loki + alloy services if log aggregation is required (optional)
 ```
 
 ---
@@ -306,24 +196,28 @@ uv sync  # ensure current deps are up to date
 
 | Area | Confidence | Rationale |
 |------|------------|-----------|
-| Zero new pip deps | HIGH | Verified every feature against pyproject.toml and existing modules |
-| CBR data availability | HIGH | CBRFetcher already operational with SOAP/REST XML |
-| PairsStrategy reuse for pref arb | HIGH | Code reviewed, Kalman + cointegration confirmed working |
-| MOEX ISS sector indices | MEDIUM | ISS API confirmed for index candles, but specific sector tickers (MOEXOG, MOEXFN) need live validation |
-| ML macro features feasibility | HIGH | All data sources already in MoexMarketData schema |
-| Dividend event expansion | MEDIUM | T-Invest supports get_dividends(), but batch perf for 50+ symbols untested |
-| Portfolio allocator | HIGH | All building blocks exist (CircuitBreaker, regime, MacroSnapshot) |
+| Zero new deps for monitoring core | HIGH | Direct codebase audit: MetricsCollector, ValidationLogger, CircuitBreaker, PreTradeChecker all cover monitoring needs |
+| Jinja2 is already a transitive dep | HIGH | FastAPI 0.115 depends on Starlette which depends on Jinja2 — it is already installed, just needs to be made explicit |
+| WeasyPrint v68.1 for PDF | HIGH | Official PyPI page confirmed current version (2025-01-30 release), Python 3.10+ requirement met |
+| APScheduler 3.x is stable choice | HIGH | 4.x is pre-release alpha; 3.x is proven and already integrated |
+| aiogram v3 async compatibility | MEDIUM | No conflict found, but not verified in this codebase's asyncio event loop setup. May need testing with APScheduler's BackgroundScheduler thread model. |
+| Grafana infrastructure (no code) | HIGH | Standard Prometheus→Grafana pipeline, no Python changes needed |
+| Rolling z-score sufficient for anomaly detection | HIGH | Trading metric anomalies (drawdown, slippage) are step-function events detectable by simple threshold; no ML-based anomaly detection needed |
+| RolloutPhase config vs feature flags | HIGH | Capital/position limit progression is configuration, not code path toggling — external feature flag services are mismatched for this use case |
 
 ---
 
 ## Sources
 
-- Codebase review: `pyproject.toml`, all modules in `src/finalayze/` listed above
-- MOEX ISS API reference: `https://iss.moex.com/iss/reference/` (sector index availability)
-- CBR API: `https://www.cbr.ru/scripts/XML_dynamic.asp` (already used by CBRFetcher)
-- T-Invest API: `t-tech-investments` package proto definitions
-- MOEX sector indices: `https://www.moex.com/en/indices` (index list)
+- Codebase audit: `src/finalayze/api/metrics.py`, `src/finalayze/core/validation_logger.py`, `src/finalayze/risk/circuit_breaker.py`, `src/finalayze/core/telegram_bot.py`, `pyproject.toml`
+- WeasyPrint current version: https://pypi.org/project/weasyprint/ (v68.1, released 2025-01-30)
+- Jinja2 current version: https://pypi.org/project/Jinja2/ (v3.1.6)
+- APScheduler 4.x status: https://github.com/agronholm/apscheduler/issues/465 (still pre-release as of 2025)
+- Grafana Loki + Alloy: https://grafana.com/docs/loki/latest/ (Alloy replaced Promtail for log collection)
+- aiogram v3: https://docs.aiogram.dev/en/latest/ (async-native, Pydantic v2 compatible)
+- ADTK maintenance status: https://github.com/arundo/adtk (last release 2020 — not recommended)
+- WeasyPrint vs ReportLab comparison: https://dev.to/claudeprime/generate-pdfs-in-python-weasyprint-vs-reportlab-ifi
 
 ---
-*Stack research for: v2.0 MOEX Profitability -- dividend gap, CBR regime, sector rotation, pref arb, ML macro*
-*Researched: 2026-03-20*
+*Stack research for: v3.0 Production Readiness — sandbox monitoring, go/no-go gates, gradual rollout, production health*
+*Researched: 2026-03-21*

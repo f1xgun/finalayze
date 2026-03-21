@@ -1,395 +1,496 @@
-# Architecture: MOEX Profitability Integration
+# Architecture Research
 
-**Domain:** MOEX-native strategies, macro regime gating, portfolio-level allocation
-**Researched:** 2026-03-20
-**Confidence:** HIGH -- derived from direct inspection of existing codebase (dividend_gap.py, cbr_calendar.py, rub_oil_regime.py, combiner.py, position_sizing_pipeline.py, backtest engine, schemas, and all relevant modules)
+**Domain:** Production monitoring and go-live validation for autonomous MOEX trading system
+**Researched:** 2026-03-21
+**Confidence:** HIGH — based on direct codebase inspection of all 6 layers
 
-## Recommended Architecture
+## Standard Architecture
 
-The v2.0 MOEX profitability features integrate into the existing 7-layer architecture without violating layer boundaries. No new layers needed. The design principle is: **new strategies extend BaseStrategy (L4), new regime providers implement RegimeProvider protocol (L4), new data fetchers go to L2, and portfolio allocation is a new L4/L5 orchestrator**.
+### System Overview
 
-### Integration Overview
-
-```
-Layer 2: Data
-  CBRFetcher (EXISTING) ── key rates, FX
-  MoexISSFetcher (EXISTING) ── IMOEX, turnover
-  YFinanceFetcher (EXISTING) ── Brent BZ=F
-  TinkoffFetcher (EXISTING) ── dividends, candles
-  + BrentDataProvider (NEW) ── wraps yfinance Brent with caching
-  + DividendCalendarLoader (NEW) ── bulk load ex-div dates from Tinkoff
-  + PreferredShareMapper (NEW) ── SBER↔SBERP FIGI mapping
-
-Layer 4: Strategy / Risk
-  STRATEGIES:
-    DividendGapStrategy (EXISTING) ── needs calendar wiring
-    CBRStrategyWrapper (EXISTING) ── needs combiner registration
-    + SectorRotationStrategy (NEW) ── Brent-gated energy, CBR-gated finance
-    + PreferredShareArbStrategy (NEW) ── common/pref spread convergence
-  RISK:
-    RubOilRegimeSignal (EXISTING) ── needs wiring into backtest
-    + CBRRegimeGate (NEW) ── hiking=restrict equity, cutting=allow
-    + BrentConditionGate (NEW) ── Brent < $60 blocks energy longs
-    + PortfolioAllocator (NEW) ── 40% OFZ / 60% equity capital split
-    + RUBCrisisBrake (NEW) ── USDRUB spike blocks all equity
-
-Layer 5: Execution / Backtest
-  BacktestEngine (MODIFY) ── pass macro context per bar
-  + PortfolioBacktestOrchestrator (NEW) ── run bond + equity backtests, merge
-```
-
-### Component Boundaries
-
-| Component | Layer | Responsibility | Communicates With |
-|-----------|-------|---------------|-------------------|
-| `DividendCalendarLoader` | L2 | Bulk-load ex-div dates from Tinkoff API for all ru_* symbols | TinkoffFetcher, DividendGapStrategy |
-| `BrentDataProvider` | L2 | Provide Brent candles (yfinance BZ=F) with caching | YFinanceFetcher, SectorRotationStrategy |
-| `PreferredShareMapper` | L2 | Map common↔preferred share FIGIs (SBER/SBERP etc.) | InstrumentRegistry, PreferredShareArbStrategy |
-| `CBRRegimeGate` | L4 | CBR hiking/cutting cycle → regime state for equity gating | MacroContextProvider, PositionSizingPipeline |
-| `BrentConditionGate` | L4 | Brent price threshold → energy sector position gate | BrentDataProvider, SectorRotationStrategy |
-| `SectorRotationStrategy` | L4 | MOEX sector rotation: energy=Brent-gated, finance=CBR-gated | BrentConditionGate, CBRRegimeGate, StrategyCombiner |
-| `PreferredShareArbStrategy` | L4 | Trade common/pref spread when it exceeds historical norms | PreferredShareMapper, StrategyCombiner |
-| `PortfolioAllocator` | L4 | Split capital 40% OFZ / 60% equity, enforce caps | PositionSizingPipeline, BacktestEngine |
-| `RUBCrisisBrake` | L4 | USDRUB > threshold → block all equity, shift to OFZ | RubOilRegimeSignal, PortfolioAllocator |
-| `PortfolioBacktestOrchestrator` | L5 | Run bond + equity backtests separately, merge PnL | BacktestEngine, BondBacktestEngine, PerformanceAnalyzer |
-
-### Data Flow
-
-#### 1. Macro Context Per Bar (new flow)
-
-The backtest engine currently receives a `RegimeProvider` and `MarketContext` at init time. For v2.0, strategies need **per-bar macro data** (CBR rate, Brent price, USDRUB) that changes during the backtest window.
+Current state (v2.0) — what exists today:
 
 ```
-MacroContextProvider (EXISTING, L2)
-  + get_snapshot(as_of: date) -> MacroSnapshot
-    ├── key_rate: from CBR meeting calendar
-    ├── ruonia_7d_avg: proxy from key_rate
-    ├── cpi_yoy: from Rosstat publication dates
-    ├── brent_close: NEW - from Brent candle series
-    └── usdrub: from CBR FX rates
-
-BacktestEngine._process_bar():
-  macro = self._macro_provider.get_snapshot(candle.timestamp.date())
-  signal = strategy.generate_signal(
-      symbol, candles, segment_id,
-      regime_state=regime_state,
-      macro_snapshot=macro,         # NEW kwarg
-  )
+Layer 6 (API/Dashboard/Loop)
++--------------------------------------------------------------------+
+|  FastAPI REST (20+ endpoints)  | Streamlit Dashboard | TradingLoop  |
+|  /api/v1/{health,portfolio,    | auth gate + 5 pages | APScheduler  |
+|   trades,signals,risk,ml,news} |                     | 3 cycles:    |
+|  Prometheus /metrics           |                     |  news_cycle  |
+|  TelegramBotHandler            |                     |  strategy_   |
+|   (/status, /breakers, /stop)  |                     |   cycle      |
+|  MetricsCollector              |                     |  daily_reset |
++--------------------------------------------------------------------+
+                    | reads from / calls into
+Layer 5 (Execution)
++--------------------------------------------------------------------+
+|  BrokerRouter -> TinkoffBroker (live/sandbox)                      |
+|               -> AlpacaBroker                                      |
+|               -> SimulatedBroker                                   |
+|  SandboxPortfolioTracker (shadow ledger: coupons + dividends)      |
+|  RetryPolicy, impact.py                                            |
++--------------------------------------------------------------------+
+Layer 4 (Strategy/Risk)
++--------------------------------------------------------------------+
+|  StrategyCombiner + ADX routing | CircuitBreaker (L1/L2/L3)       |
+|  8 strategies (5 enabled)       | PreTradeChecker (11 checks)      |
+|  Optuna presets per segment     | PositionSizingPipeline           |
++--------------------------------------------------------------------+
+Layer 0-3 (Core/Config/Data/Analysis/ML)
++--------------------------------------------------------------------+
+|  schemas.py, events.py        | TinkoffFetcher, MoexISSFetcher     |
+|  ValidationLogger (JSONL)     | MacroCacheService, CBRFetcher      |
+|  TelegramAlerter (3 priority) | ML ensemble (XGB+LGBM+CatBoost)   |
+|  alerts.py                    | CombinedNewsAnalyzer               |
++--------------------------------------------------------------------+
 ```
 
-**Key design decision:** Pass `MacroSnapshot` via `**kwargs` to `generate_signal()` rather than changing the BaseStrategy interface. The existing `**kwargs` pattern (used by `regime_state` already) avoids breaking all 8+ strategy implementations.
-
-#### 2. Dividend Gap Calendar Wiring
+Target state (v3.0) — new components annotated:
 
 ```
-BEFORE (current):
-  DividendGapStrategy._calendar is empty dict
-  → 0 trades in backtest
-
-AFTER:
-  DividendCalendarLoader.load_all(symbols, start, end)
-    → TinkoffFetcher.get_dividends(figi) for each symbol
-    → Returns dict[str, list[DividendEntry]]
-
-  BacktestEngine/run_iteration.py:
-    calendar_data = loader.load_all(symbols, start, end)
-    dividend_strategy.populate_calendar(calendar_data)
-    → DividendGapStrategy._calendar populated before run()
+Layer 6 (API/Dashboard/Loop)
++--------------------------------------------------------------------+
+|  [EXISTING]               [NEW]                  [MODIFIED]        |
+|  FastAPI REST             monitoring/             TradingLoop       |
+|  TelegramBotHandler        sandbox_monitor.py     + _health_pulse   |
+|  Streamlit Dashboard       gonogo.py              + kill_switch     |
+|  TradingLoop               anomaly.py            TelegramBotHandler |
+|  Prometheus /metrics       health_monitor.py      + /gonogo        |
+|                            kill_switch.py         + /health        |
+|                           api/v1/sandbox.py       + /killswitch    |
+|                           MetricsCollector        MetricsCollector  |
+|                            (extended)             (5 new gauges)   |
++--------------------------------------------------------------------+
+Layer 4 (Strategy/Risk) — minimal parameter additions
++--------------------------------------------------------------------+
+|  [EXISTING]                         [MODIFIED]                     |
+|  CircuitBreaker, PreTradeChecker    accept RolloutPhase param       |
+|  PositionSizingPipeline             (tighter limits for minimal     |
+|  SandboxPortfolioTracker             capital phase)                 |
++--------------------------------------------------------------------+
+Layer 0-1 (Core Schemas + Config) — new types only
++--------------------------------------------------------------------+
+|  [EXISTING]                         [NEW]                          |
+|  CycleLogEntry, ValidationLogger    GoNoGoReport, GoNoGoGateResult  |
+|  PortfolioState, TradeResult        SandboxMetricSnapshot          |
+|  Signal, Candle                     HealthCheckResult              |
+|  config/settings.py                 config/rollout.py              |
+|  config/modes.py                    RolloutPhase (named profiles)   |
++--------------------------------------------------------------------+
 ```
 
-**Integration point:** `run_iteration.py` (L5 script) populates the calendar before `engine.run()`. This keeps the strategy stateless w.r.t. data fetching (L4 never imports L2).
+### Component Responsibilities
 
-#### 3. Sector Rotation Signal Flow
+| Component | New/Modified/Existing | Responsibility | Layer |
+|-----------|----------------------|----------------|-------|
+| `SandboxMonitorService` | NEW | Collect sandbox metrics on a schedule: equity curve, P&L, fill rate, slippage, uptime. Persist to TimescaleDB. | 6 |
+| `GoNoGoReporter` | NEW | Evaluate gate thresholds against collected metrics. Produce structured pass/fail report with per-gate detail. Pure function: no side effects. | 6 |
+| `GradualRolloutConfig` / `RolloutPhase` | NEW | Named config profiles (minimal_50k, scale_200k, target_500k) with per-profile risk parameter overrides. Mode-gated: only active in real mode. | 1 |
+| `ProductionHealthMonitor` | NEW | Periodic health pulse: broker ping, data feed freshness, component status. Alerts on degradation. | 6 |
+| `AnomalyDetector` | NEW | Z-score alerting on sudden equity moves, fill rate drops, abnormal signal frequency. | 6 |
+| `KillSwitch` | NEW | Immediate halt via Telegram /killswitch or API. Stops scheduler, cancels open orders, escalates circuit breakers, alerts. | 6 |
+| `/api/v1/sandbox.py` | NEW | REST endpoints: GET /sandbox/metrics, GET /sandbox/gonogo | 6 |
+| `TradingLoop` | MODIFIED | Add `_health_pulse_cycle()` APScheduler job. Add `activate_kill_switch()`. | 6 |
+| `TelegramBotHandler` | MODIFIED | Add /gonogo, /health, /killswitch commands to existing dispatch map. | 6 |
+| `MetricsCollector` | MODIFIED | Add ~5 new Prometheus gauges: fill_rate, signal_divergence, health_pulse_status, kill_switch_active, rollout_phase. | 6 |
+| `CircuitBreaker` | MODIFIED | Accept optional `rollout_phase: RolloutPhase` constructor param for threshold overrides. None = existing behavior. | 4 |
+| `PreTradeChecker` | MODIFIED | Accept optional `rollout_phase: RolloutPhase` to override max_position_pct. None = existing behavior. | 4 |
+| `ValidationLogger` / `CycleLogEntry` | MODIFIED | Extend CycleLogEntry with 3 optional fields: fill_rate_pct, avg_slippage_bps, signal_divergence_pct. Defaults None. | 0 |
+| `GoNoGoReport` schema | NEW | Frozen Pydantic model: gate results list, overall pass/fail, recommendation, raw metrics. | 0 |
+| `SandboxMetricSnapshot` schema | NEW | Frozen Pydantic model: daily aggregate (date, uptime_pct, fill_rate_pct, avg_slippage_bps, drawdown_pct, signal_divergence_pct). | 0 |
 
-```
-SectorRotationStrategy.generate_signal(symbol, candles, segment_id, **kwargs):
-  1. Determine symbol's sector (energy, finance, other)
-  2. If energy sector:
-     brent = kwargs.get("macro_snapshot").brent_close
-     if brent < BRENT_FLOOR → return None (block)
-     if brent > BRENT_MOMENTUM_THRESHOLD → boost confidence
-  3. If finance sector:
-     cbr_decision = kwargs.get("macro_snapshot").last_cbr_decision
-     if decision == "hike" → return None (block new longs)
-     if decision == "cut" → boost confidence
-  4. Apply relative IMOEX momentum (sector vs index)
-  5. Return Signal with direction + adjusted confidence
-```
+## Recommended Project Structure
 
-**Combiner integration:** SectorRotationStrategy extends BaseStrategy, registered in combiner alongside existing strategies. Preset YAML weights control its influence per segment.
-
-#### 4. Preferred Share Arbitrage Flow
-
-```
-PreferredShareArbStrategy.generate_signal(symbol, candles, segment_id, **kwargs):
-  1. Check if symbol is in a common/pref pair (SBER/SBERP, TATN/TATNP, SNGS/SNGSP)
-  2. Get counterpart candles from kwargs["pair_candles"]
-  3. Compute spread = common_price / pref_price
-  4. Compare to rolling mean spread (60-day window)
-  5. If spread > mean + 1.5*std → BUY pref, SELL common
-  6. If spread < mean - 1.5*std → BUY common, SELL pref
-  7. Exit when spread reverts to mean
-```
-
-**Data requirement:** The engine must provide both common and preferred candles simultaneously. This requires a multi-symbol context, which the current per-symbol backtest loop does not support natively.
-
-**Solution:** Run PreferredShareArbStrategy as a **pairs-style strategy** (like the existing `pairs.py`). The strategy receives the primary symbol's candles and fetches the counterpart from a pre-loaded dict passed via `set_market_context()`.
-
-#### 5. Portfolio-Level Allocation Flow
+New files only (additions to existing tree):
 
 ```
-PortfolioAllocator:
-  total_capital = 2_000_000 RUB
-
-  OFZ allocation = 40% = 800K
-    → BondBacktestEngine runs OFZ carry + CBR event strategies
-    → PnL from bond layer
-
-  Equity allocation = 60% = 1_200K
-    → BacktestEngine runs equity strategies per segment
-    → Position sizing capped at equity_allocation, not total_capital
-
-  RUB Crisis Brake:
-    if usdrub_daily_change > 5% OR rub_oil_corr < 0.1:
-      equity_allocation = max(20%, equity_allocation * 0.5)
-      ofz_allocation = total_capital - equity_allocation
-      → Shift capital to OFZ carry
-
-  Rebalance:
-    Monthly: check actual vs target allocation
-    If drift > 5%: rebalance
-
-PortfolioBacktestOrchestrator:
-  1. Split initial_cash: 40% → bond engine, 60% → equity engine
-  2. Run both engines independently
-  3. Monthly rebalance: transfer PnL drift back to target weights
-  4. Merge PortfolioState timeseries
-  5. Compute aggregate Sharpe, DD, PF across combined portfolio
+src/finalayze/
+|
++-- core/
+|   +-- schemas.py              # MODIFIED: GoNoGoReport, SandboxMetricSnapshot,
+|   |                           #   HealthCheckResult (new frozen models)
+|   +-- validation_logger.py    # MODIFIED: CycleLogEntry +3 optional fields
+|
++-- monitoring/                 # NEW top-level module (Layer 6, same plane as api/)
+|   +-- __init__.py
+|   +-- CLAUDE.md
+|   +-- sandbox_monitor.py      # SandboxMonitorService
+|   +-- gonogo.py               # GoNoGoReporter (pure function)
+|   +-- anomaly.py              # AnomalyDetector (z-score alerting)
+|   +-- health_monitor.py       # ProductionHealthMonitor (periodic pulse)
+|   +-- kill_switch.py          # KillSwitch (halt-all sequence)
+|
++-- api/v1/
+|   +-- sandbox.py              # NEW: GET /sandbox/metrics, GET /sandbox/gonogo
+|   +-- system.py               # MODIFIED: add /health/production endpoint
+|   +-- router.py               # MODIFIED: include_router(sandbox.router)
+|
++-- config/
+|   +-- rollout.py              # NEW: RolloutPhase dataclasses, ROLLOUT_PHASES dict,
+|                               #   env var resolver (FINALAYZE_ROLLOUT_PHASE)
+|
+alembic/versions/
++-- XXXX_add_sandbox_metrics.py # NEW migration: sandbox_metrics hypertable
 ```
 
-## Patterns to Follow
+### Structure Rationale
 
-### Pattern 1: Macro-Gated Strategy (Strategy receives macro via kwargs)
+- **`monitoring/` as a new top-level module:** Keeps sandbox monitoring, go/no-go, anomaly detection, and health pulse grouped by concern. All are Layer 6 — they read from layers 0-5 but nothing reads from them. Avoids polluting `core/`, `api/`, or `execution/` with cross-cutting concerns. Mirrors the existing separation: `api/` handles HTTP interface, `monitoring/` handles operational intelligence.
 
-**What:** Strategies that depend on macro conditions (Brent, CBR, USDRUB) receive a `MacroSnapshot` through the existing `**kwargs` mechanism in `generate_signal()`.
+- **`config/rollout.py` at Layer 1:** Rollout profiles are pure configuration — named presets of risk parameters. Belongs with `settings.py` and `segments.py`. Consumed by Layer 4 (CircuitBreaker, PreTradeChecker) and Layer 6 (TradingLoop). No upward imports. Validated at startup via Pydantic.
 
-**When:** Any strategy that needs CBR rate, Brent price, or FX data for signal generation.
+- **Schema additions in `core/schemas.py`:** All new data types are frozen Pydantic models at Layer 0, importable from any layer without violating the dependency hierarchy.
 
-**Why:** Avoids changing BaseStrategy ABC signature. Already precedented by `regime_state` kwarg in DividendGapStrategy.
+- **`ValidationLogger` extended in-place:** CycleLogEntry is already the per-cycle data carrier. Adding optional fields (default None) is backward compatible. Existing JSONL files remain parseable by old and new code.
 
+## Architectural Patterns
+
+### Pattern 1: Metric Collection via Existing ValidationLogger + DB Persistence
+
+**What:** `SandboxMonitorService` reads from `ValidationLogger` (JSONL), aggregates daily metrics, and persists `SandboxMetricSnapshot` to TimescaleDB. The JSONL log is the primary write path (fast, append-only). TimescaleDB is the reporting read path (queryable, time-series optimized).
+
+**When to use:** Throughout the sandbox validation period (2-4 weeks before go-live). Runs daily as an APScheduler job or on-demand via API.
+
+**Trade-offs:** Two storage layers add slight complexity, but they serve different purposes. JSONL is near-zero-latency for TradingLoop writes. TimescaleDB supports time-range queries for trend analysis and dashboard display. Not using only TimescaleDB avoids adding a synchronous DB write to the strategy cycle hot path.
+
+**Example:**
 ```python
-class SectorRotationStrategy(BaseStrategy):
-    def generate_signal(
+# monitoring/sandbox_monitor.py (Layer 6)
+class SandboxMonitorService:
+    def __init__(
         self,
-        symbol: str,
-        candles: list[Candle],
-        segment_id: str,
-        sentiment_score: float = 0.0,
-        has_open_position: bool = False,
-        **kwargs: object,
-    ) -> Signal | None:
-        macro: MacroSnapshot | None = kwargs.get("macro_snapshot")
-        if macro is None:
-            return None  # Cannot operate without macro context
+        validation_logger: ValidationLogger,
+        broker: SandboxPortfolioTracker,
+        session_factory: AsyncSessionFactory,
+    ) -> None: ...
 
-        sector = self._get_sector(symbol)
-        if sector == "energy" and macro.brent_close is not None:
-            if float(macro.brent_close) < self._brent_floor:
-                return None  # Block energy longs when Brent is low
-        # ... signal logic
+    async def collect_daily_snapshot(self, date: date) -> SandboxMetricSnapshot:
+        entries = self._validation_logger.get_entries()
+        today_entries = [e for e in entries if e.timestamp.date() == date]
+        snapshot = SandboxMetricSnapshot(
+            date=date,
+            uptime_pct=self._compute_uptime(today_entries),
+            fill_rate_pct=self._compute_fill_rate(today_entries),
+            avg_slippage_bps=self._compute_slippage(today_entries),
+            drawdown_pct=float(self._broker.shadow_portfolio().equity),
+            signal_divergence_pct=self._compute_divergence(today_entries),
+        )
+        await self._persist(snapshot)
+        return snapshot
 ```
 
-### Pattern 2: Regime Gate as Sizing Step (PositionSizingStep protocol)
+### Pattern 2: Go/No-Go as Pure Evaluation Function
 
-**What:** New macro conditions (CBR regime, Brent gate) plug into the position sizing pipeline as additional `PositionSizingStep` implementations.
+**What:** `GoNoGoReporter.evaluate(snapshots: list[SandboxMetricSnapshot]) -> GoNoGoReport` is a pure function — no side effects, no broker calls, no DB writes. Takes collected snapshots, applies threshold rules, returns a structured report.
 
-**When:** Conditions that should scale position size rather than block signals entirely.
+**When to use:** Called by `GET /api/v1/sandbox/gonogo` on demand and by `/gonogo` Telegram command. The operator reads the report and makes the human decision to proceed.
 
-**Why:** Follows existing pipeline architecture. CBR hiking cycle should reduce equity sizing, not eliminate all signals.
+**Trade-offs:** Pure function is trivially testable (parametrize threshold values). Requires SandboxMonitorService to have already persisted the data. The reporter never reads from the broker directly — eliminates runtime coupling to live systems.
 
+**Example:**
 ```python
-class CBRRegimeStep:
-    """Scale equity positions based on CBR rate cycle."""
+# core/schemas.py (Layer 0)
+class GoNoGoGateResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    gate: str            # "uptime", "fill_rate", "drawdown", "signal_divergence"
+    threshold: float
+    actual: float
+    passed: bool
+    detail: str
 
-    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:
-        if context.cbr_regime == "hiking":
-            return (size * Decimal("0.6")).quantize(_FOUR_DP)
-        if context.cbr_regime == "cutting":
-            return (size * Decimal("1.2")).quantize(_FOUR_DP)  # more aggressive
-        return size  # "hold" = neutral
+class GoNoGoReport(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    generated_at: datetime
+    period_days: int
+    overall_pass: bool
+    gates: list[GoNoGoGateResult]
+    recommendation: str  # "PROCEED", "DEFER", "ABORT"
 ```
 
-**Pipeline order:** Kelly -> VolTarget -> Regime -> **CBRRegime** -> **BrentGate** -> MetaLabel -> HardCaps
+### Pattern 3: Kill Switch as TradingLoop State Flag
 
-### Pattern 3: Calendar-Driven Strategy Initialization
+**What:** `KillSwitch.activate(reason)` sets a shared `threading.Event` on TradingLoop (reusing the existing `_stop_event` pattern), cancels broker orders, escalates circuit breakers to LIQUIDATE, and sends a CRITICAL Telegram alert.
 
-**What:** Strategies that depend on calendar data (dividend dates, CBR meetings) are populated before the backtest run, not during.
+**When to use:** Emergency only. One-way: manual recovery required via mode transition API.
 
-**When:** DividendGapStrategy, CBRStrategyWrapper.
+**Trade-offs:** `threading.Event` is the mechanism TradingLoop already uses for graceful shutdown. Reusing it avoids new synchronization primitives. The key addition is order cancellation before shutdown — without it, pending orders remain live at the broker.
 
-**Why:** Keeps strategy logic (L4) separate from data fetching (L2). The orchestration script (L5+) wires them together.
-
+**Example:**
 ```python
-# In run_iteration.py (orchestration layer):
-dividend_loader = DividendCalendarLoader(tinkoff_fetcher)
-calendar_data = dividend_loader.load_all(symbols, start, end)
-
-dividend_strategy = DividendGapStrategy(min_gap_pct=3.0, max_hold_bars=60)
-for symbol, entries in calendar_data.items():
-    for entry in entries:
-        dividend_strategy.add_dividend(symbol, entry)
+# core/trading_loop.py (MODIFIED)
+class TradingLoop:
+    def activate_kill_switch(self, reason: str) -> None:
+        """Immediately halt all trading. Manual recovery required."""
+        self._stop_event.set()
+        self._kill_switch_active = True
+        # Escalate all circuit breakers
+        for cb in self._circuit_breakers.values():
+            cb.override_level(CircuitLevel.LIQUIDATE)
+        # Cancel pending orders via BrokerRouter
+        for market_id, broker in self._broker_router.brokers.items():
+            try:
+                broker.cancel_all_pending()
+            except Exception:
+                _log.exception("kill_switch.cancel_failed", market=market_id)
+        # Alert (fire-and-forget into async queue)
+        asyncio.run_coroutine_threadsafe(
+            self._alerter.send_critical(f"KILL SWITCH ACTIVATED: {reason}"),
+            self._async_loop,
+        )
 ```
 
-### Pattern 4: Multi-Asset Backtest via Orchestrator
+### Pattern 4: Gradual Rollout as Named Config Profiles
 
-**What:** Run bond and equity backtests separately with independent engines, then merge results at the portfolio level.
+**What:** `config/rollout.py` defines frozen `RolloutPhase` dataclasses with risk parameter overrides. Active phase resolved from `FINALAYZE_ROLLOUT_PHASE` env var at startup. `PreTradeChecker` and `CircuitBreaker` accept an optional phase to override their limits.
 
-**When:** Portfolio-level allocation (40% OFZ + 60% equity).
+**When to use:** After go/no-go gate passes. Start `minimal_50k` (3% max position, 1% daily loss, 2% DD auto-stop), scale to `target_500k` after N profitable weeks via env var change + restart.
 
-**Why:** Bond and equity backtests have fundamentally different engines (BondBacktestEngine vs BacktestEngine). Merging at the PnL level avoids coupling them.
+**Trade-offs:** Config-driven means no code changes for phase transitions. Validated by Pydantic at startup. Avoids runtime mutation of live risk parameters. The None-default on both risk components means zero behavioral change for all existing tests and sandbox mode.
 
+**Example:**
 ```python
-class PortfolioBacktestOrchestrator:
-    def run(self, equity_candles, bond_candles, total_capital):
-        bond_capital = total_capital * Decimal("0.40")
-        equity_capital = total_capital * Decimal("0.60")
+# config/rollout.py (Layer 1 — NEW)
+from __future__ import annotations
+import dataclasses
+from decimal import Decimal
 
-        bond_result = self._bond_engine.run(bond_candles, bond_capital)
-        equity_result = self._equity_engine.run(equity_candles, equity_capital)
+@dataclasses.dataclass(frozen=True)
+class RolloutPhase:
+    name: str
+    capital_rub: Decimal
+    max_position_pct: Decimal    # 0.03 for minimal vs 0.05 for target
+    daily_loss_limit_pct: Decimal
+    dd_auto_stop_pct: Decimal
 
-        return self._merge_results(bond_result, equity_result)
+ROLLOUT_PHASES: dict[str, RolloutPhase] = {
+    "minimal_50k":  RolloutPhase("minimal_50k",   Decimal("50000"),  Decimal("0.03"), Decimal("0.01"), Decimal("0.02")),
+    "scale_200k":   RolloutPhase("scale_200k",   Decimal("200000"),  Decimal("0.04"), Decimal("0.02"), Decimal("0.05")),
+    "target_500k":  RolloutPhase("target_500k",  Decimal("500000"),  Decimal("0.05"), Decimal("0.03"), Decimal("0.10")),
+}
+
+def get_active_phase() -> RolloutPhase | None:
+    import os
+    name = os.environ.get("FINALAYZE_ROLLOUT_PHASE")
+    return ROLLOUT_PHASES.get(name) if name else None
 ```
 
-## Anti-Patterns to Avoid
+## Data Flow
 
-### Anti-Pattern 1: Strategy Fetching Its Own Data
-**What:** A strategy class importing from L2 to fetch Brent prices or CBR rates directly.
-**Why bad:** Violates layer boundaries (L4 cannot import L2 for data fetching). Creates hidden I/O in signal generation. Makes backtesting non-deterministic.
-**Instead:** Pass all external data via `MacroSnapshot` kwarg or `set_market_context()`.
-
-### Anti-Pattern 2: Single Monolithic Backtest Engine for Bond+Equity
-**What:** Modifying BacktestEngine to handle both bond and equity logic internally.
-**Why bad:** Bond and equity have different signal interfaces (BondCarryStrategy does not extend BaseStrategy), different risk parameters, different cost models. Coupling them creates a god object.
-**Instead:** Use PortfolioBacktestOrchestrator to run separate engines and merge results.
-
-### Anti-Pattern 3: Hardcoded Sector Classification
-**What:** `if symbol in ["LKOH", "ROSN", "TATN"]: sector = "energy"` scattered through strategy code.
-**Why bad:** Fragile, duplicated, breaks when universe changes.
-**Instead:** Create a `SectorClassifier` in L2 that maps symbols to sectors using InstrumentRegistry or a static YAML. Strategies receive sector as metadata.
-
-### Anti-Pattern 4: Look-Ahead in Macro Data
-**What:** Using today's CBR rate or Brent close to make decisions about yesterday's bar.
-**Why bad:** Overfits backtests, creates phantom alpha that vanishes in live trading.
-**Instead:** MacroContextProvider already enforces point-in-time access. All new macro features (Brent, USDRUB) must respect publication dates. Use `as_of` date pattern.
-
-### Anti-Pattern 5: Portfolio Rebalancing Inside Position Sizing
-**What:** Putting OFZ/equity capital split logic inside `PositionSizingPipeline`.
-**Why bad:** Sizing pipeline operates per-position. Portfolio allocation is a cross-asset concern that must see total equity and all positions simultaneously.
-**Instead:** PortfolioAllocator sits above the sizing pipeline, setting `equity` in `SizingContext` to the allocated capital (not total portfolio).
-
-## New vs Modified Components
-
-### New Components (must be created)
-
-| Component | File | Layer | Complexity |
-|-----------|------|-------|------------|
-| `DividendCalendarLoader` | `data/dividend_calendar.py` | L2 | Low |
-| `BrentDataProvider` | Extension of MarketDataLoader | L2 | Low |
-| `PreferredShareMapper` | `data/preferred_shares.py` | L2 | Low |
-| `SectorClassifier` | `data/sector_classifier.py` | L2 | Low |
-| `SectorRotationStrategy` | `strategies/sector_rotation.py` | L4 | Medium |
-| `PreferredShareArbStrategy` | `strategies/preferred_arb.py` | L4 | Medium |
-| `CBRRegimeStep` | Addition to `risk/position_sizing_pipeline.py` | L4 | Low |
-| `BrentGateStep` | Addition to `risk/position_sizing_pipeline.py` | L4 | Low |
-| `PortfolioAllocator` | `risk/portfolio_allocator.py` | L4 | Medium |
-| `RUBCrisisBrake` | `risk/rub_crisis_brake.py` | L4 | Low |
-| `PortfolioBacktestOrchestrator` | `backtest/portfolio_orchestrator.py` | L5 | High |
-
-### Modified Components (extend existing)
-
-| Component | File | Change | Complexity |
-|-----------|------|--------|------------|
-| `MacroSnapshot` | `data/fetchers/cbr.py` | Add `brent_close`, `usdrub_daily_change` fields | Low |
-| `MacroContextProvider` | `data/fetchers/cbr.py` | Populate Brent and USDRUB from candle series | Low |
-| `SizingContext` | `risk/position_sizing_pipeline.py` | Add `cbr_regime`, `brent_price` fields | Low |
-| `BacktestEngine._process_bar()` | `backtest/engine.py` | Pass `macro_snapshot` to strategy kwargs | Low |
-| `StrategyCombiner` | `strategies/combiner.py` | Register new strategies, pass macro kwargs | Low |
-| YAML presets (`ru_*.yaml`) | `strategies/presets/` | Add weights for `sector_rotation`, `preferred_arb`, `dividend_gap` | Low |
-| `run_iteration.py` | `scripts/` | Wire DividendCalendarLoader, macro provider | Medium |
-| `MarketDataLoader._load_moex()` | `data/loader.py` | Include Brent candles in MarketContext | Low |
-
-## Suggested Build Order (Dependency Chain)
-
-The build order must respect both layer dependencies and feature dependencies:
+### Sandbox Monitoring Collection Flow
 
 ```
-Phase 1: Data Foundation (L2)
-  1.1 DividendCalendarLoader — needed by DividendGapStrategy wiring
-  1.2 SectorClassifier — needed by SectorRotationStrategy
-  1.3 PreferredShareMapper — needed by PreferredShareArbStrategy
-  1.4 MacroSnapshot extensions (Brent, USDRUB) — needed by all macro-gated strategies
-
-Phase 2: Strategy Implementation (L4)
-  2.1 Wire DividendGapStrategy calendar (EXISTING strategy, just needs data)
-  2.2 CBRRegimeStep + BrentGateStep in sizing pipeline
-  2.3 SectorRotationStrategy (depends on 1.2, 1.4)
-  2.4 PreferredShareArbStrategy (depends on 1.3)
-  2.5 Wire CBRStrategyWrapper into combiner (EXISTING strategy)
-  2.6 Wire RubOilRegimeSignal into backtest regime provider (EXISTING)
-
-Phase 3: Portfolio Allocation (L4-L5)
-  3.1 PortfolioAllocator (40/60 split)
-  3.2 RUBCrisisBrake
-  3.3 PortfolioBacktestOrchestrator
-
-Phase 4: Integration & Backtest (L5)
-  4.1 Update run_iteration.py to wire all new components
-  4.2 Update YAML presets with new strategy weights
-  4.3 Run walk-forward backtests per segment
-  4.4 Run combined portfolio backtest
+TradingLoop._strategy_cycle()
+    |
+    | (per cycle, existing)
+    v
+ValidationLogger.log_cycle(CycleLogEntry)  -->  results/validation/cycles.jsonl
+    |
+    | (daily, new APScheduler job OR on-demand via API)
+    v
+SandboxMonitorService.collect_daily_snapshot(date)
+    |-- reads: ValidationLogger.get_entries() [JSONL]
+    |-- reads: SandboxPortfolioTracker.shadow_portfolio()
+    v
+SandboxMetricSnapshot
+    |-- persists to: TimescaleDB sandbox_metrics hypertable
+    |-- records to: MetricsCollector.record_sandbox_snapshot()
 ```
 
-**Phase ordering rationale:**
-- Phase 1 first because all strategies depend on data providers.
-- Phase 2 next because strategies can be individually backtested.
-- Phase 3 after strategies work individually, because portfolio allocation composes them.
-- Phase 4 last because integration requires all components to exist.
+### Go/No-Go Report Flow
 
-**Within Phase 2:** DividendGapStrategy wiring (2.1) first because it is the highest expected-alpha feature (documented 70%+ gap closure) and the strategy already exists -- just needs data. Sizing pipeline steps (2.2) next because they affect all equity strategies. SectorRotation (2.3) before PreferredArb (2.4) because sector rotation applies broadly while arb is niche.
+```
+GET /api/v1/sandbox/gonogo  OR  Telegram /gonogo
+    |
+    v
+SandboxMonitorService.get_snapshots(period_days=14)  [reads TimescaleDB]
+    |
+    v
+GoNoGoReporter.evaluate(snapshots)  [pure function]
+    |-- gate 1: uptime_pct >= 0.99? (MOEX market hours covered)
+    |-- gate 2: fill_rate_pct >= 0.95? (filled / submitted orders)
+    |-- gate 3: max_drawdown_pct < 0.05? (peak-to-trough on shadow_equity)
+    |-- gate 4: signal_divergence_pct < 0.50? (distribution vs backtest)
+    v
+GoNoGoReport(overall_pass, gates, recommendation)
+    |-- returns as JSON  (API endpoint)
+    |-- formats as Telegram message  (bot command)
+```
 
-## Layer Violation Analysis
+### Production Health Pulse Flow
 
-All proposed components respect the 7-layer dependency rules:
+```
+TradingLoop._health_pulse_cycle()  [NEW APScheduler job, every 5 min]
+    |
+    v
+ProductionHealthMonitor.check()
+    |-- TinkoffBroker.get_portfolio()  (broker liveness, 5s timeout)
+    |-- ValidationLogger: last entry timestamp < 15 min? (feed freshness)
+    |-- CircuitBreaker.level  (risk state)
+    |-- Redis ping  (cache health)
+    v
+HealthCheckResult(status, components, degraded_components)
+    |-- if degraded: TelegramAlerter.send_critical() [IMPORTANT priority]
+    |-- always: MetricsCollector.record_health_pulse()
+    v
+Prometheus: finalayze_health_pulse_status{component="..."}
+```
 
-| New Component | Layer | Imports From | Violation? |
-|---------------|-------|-------------|------------|
-| DividendCalendarLoader | L2 | L0 (schemas), L1 (config) | No |
-| SectorClassifier | L2 | L0 (schemas) | No |
-| SectorRotationStrategy | L4 | L0 (schemas), L4 (base) | No |
-| PreferredShareArbStrategy | L4 | L0 (schemas), L4 (base) | No |
-| CBRRegimeStep | L4 | L0 (Decimal), L4 (SizingContext) | No |
-| PortfolioAllocator | L4 | L0 (Decimal), L4 (SizingContext) | No |
-| PortfolioBacktestOrchestrator | L5 | L0-L5 | No |
+### Kill Switch Activation Flow
 
-**No upward imports proposed.** All macro data flows downward from L2 to L4 via `MacroSnapshot` kwarg.
+```
+Telegram /killswitch  OR  POST /api/v1/system/killswitch
+    |
+    v
+TradingLoop.activate_kill_switch(reason)
+    |-- (1) _stop_event.set()              [halts scheduler from accepting new cycles]
+    |-- (2) _kill_switch_active = True     [prevents restart]
+    |-- (3) CircuitBreakers -> LIQUIDATE   [existing liquidation path runs if cycle in progress]
+    |-- (4) BrokerRouter.cancel_pending()  [cancel open orders at broker]
+    |-- (5) TelegramAlerter.send_critical("KILL SWITCH: {reason}")
+    |-- (6) MetricsCollector.set_kill_switch_active(True)
+    v
+Prometheus alert: finalayze_kill_switch_active == 1  -->  Alertmanager  -->  Telegram
+```
 
-## Scalability Considerations
+## Integration Points
 
-| Concern | Current (5 symbols) | At 30 symbols | At 150+ dividend events |
-|---------|---------------------|---------------|------------------------|
-| Dividend calendar loading | N/A (empty) | 30 Tinkoff API calls | ~150 events, <1MB RAM |
-| Brent data | Already fetched via yfinance | Same (single series) | Same |
-| Preferred pair backtesting | N/A | 3 pairs = 6 symbols | 3 pairs, negligible |
-| Portfolio orchestrator | N/A | 2 engines (bond+equity) | 2 engines, linear time |
-| MacroSnapshot per bar | ~1K bars | ~1K bars | O(1) lookup per bar |
+### New vs. Existing: Clear Boundaries
 
-The dominant cost is the Tinkoff API calls for dividend data. With 30 symbols and 3 years of history, this is ~90 API calls total -- well within rate limits.
+| New Component | Reads From (existing) | Writes To (existing) | Does NOT touch |
+|---|---|---|---|
+| `SandboxMonitorService` | `ValidationLogger`, `SandboxPortfolioTracker` | TimescaleDB, `MetricsCollector` | TradingLoop directly, strategies, risk |
+| `GoNoGoReporter` | TimescaleDB snapshots | Nothing (pure function) | Broker, execution, strategies |
+| `ProductionHealthMonitor` | `TinkoffBroker`, `ValidationLogger`, Redis, `CircuitBreaker` | `TelegramAlerter`, `MetricsCollector` | Strategies, ML, data fetchers |
+| `KillSwitch` | Nothing | `TradingLoop._stop_event`, `CircuitBreaker`, `BrokerRouter`, `TelegramAlerter` | Data layer, ML, API read paths |
+| `GradualRolloutConfig` | env var `FINALAYZE_ROLLOUT_PHASE` | `PreTradeChecker`, `CircuitBreaker` (at construction only) | Nothing above Layer 4 |
+| `/api/v1/sandbox` | `SandboxMonitorService`, `GoNoGoReporter` | Nothing (read-only endpoints) | TradingLoop directly |
+
+### Modified Existing Components
+
+| Component | Modification | Regression Risk |
+|---|---|---|
+| `CycleLogEntry` in `validation_logger.py` | Add 3 optional fields with None defaults. Old JSONL files still parse. | LOW |
+| `TradingLoop` | Add 1 new APScheduler job (`_health_pulse_cycle`). Add `activate_kill_switch()` method. | MEDIUM — scheduler modification; must not affect existing news/strategy/daily_reset cycles. Test scheduling isolation. |
+| `TelegramBotHandler` | Add 3 new commands to `_commands` dict. Existing commands unaffected. | LOW — additive dispatch table extension |
+| `PreTradeChecker` | Add `rollout_phase: RolloutPhase | None = None` param. None preserves existing behavior. | LOW — optional param, all existing call sites pass None implicitly |
+| `CircuitBreaker` | Add `rollout_phase: RolloutPhase | None = None` constructor param. | LOW — optional param |
+| `MetricsCollector` | Add ~5 new static gauge registrations. No existing gauge touched. | LOW — Prometheus registry is additive |
+| `api/v1/router.py` | `include_router(sandbox.router)`. Existing routes unaffected. | LOW |
+
+### External Service Boundaries
+
+| Service | Integration Pattern | v3.0 Notes |
+|---------|---------------------|------------|
+| Tinkoff Sandbox gRPC | Existing `TinkoffBroker(sandbox=True)` via `SandboxPortfolioTracker` | No new integration; SandboxMonitorService reads from SandboxPortfolioTracker only |
+| Tinkoff Live gRPC | Existing `TinkoffBroker(sandbox=False)` | Kill switch calls `cancel_order()` on all open orders via BrokerRouter |
+| TimescaleDB | New `sandbox_metrics` hypertable via existing async SQLAlchemy session factory | One new Alembic migration; uses existing `get_async_session_factory()` |
+| Telegram Bot API | Existing `TelegramAlerter` priority queue + new bot commands | 3 new commands: /gonogo, /health, /killswitch; existing /status, /breakers, /stop unchanged |
+| Prometheus | Extended `MetricsCollector` with ~5 new gauges | Existing /metrics endpoint; no new scrape configuration |
+
+## Anti-Patterns
+
+### Anti-Pattern 1: Monitoring Logic Embedded in TradingLoop
+
+**What people do:** Add go/no-go evaluation, metric aggregation, and health pulse directly inside TradingLoop's `strategy_cycle` or `daily_reset`.
+
+**Why it's wrong:** TradingLoop is already a 500+ line orchestrator with 20+ injected dependencies. Adding monitoring concerns creates untestable code, circular coupling between execution and reporting, and scheduler contention (a slow health check delays trade execution on the same thread pool).
+
+**Do this instead:** `SandboxMonitorService` and `ProductionHealthMonitor` are standalone services with separate APScheduler jobs. TradingLoop only calls `validation_logger.log_cycle()` (already implemented) — monitoring services read from the logger independently via `get_entries()`.
+
+### Anti-Pattern 2: Automated Go/No-Go Block at Real Mode Startup
+
+**What people do:** Evaluate go/no-go thresholds inside `ModeManager.transition_to(REAL)`, refusing to start if gates don't pass.
+
+**Why it's wrong:** The go/no-go decision is a human decision, not a machine gate. Automated blocking at startup creates a chicken-and-egg problem. It also hides the root cause of failures. The existing `real_confirmed` environment variable guard is the correct automated safety.
+
+**Do this instead:** Go/no-go is an on-demand report via `GET /api/v1/sandbox/gonogo`. The operator reviews it, then initiates the mode transition via `POST /api/v1/mode {mode: "real", confirm_token: "..."}`. The confirmation token gate already enforces human intent.
+
+### Anti-Pattern 3: Kill Switch That Only Stops the Scheduler
+
+**What people do:** Kill switch calls `scheduler.shutdown()` and considers the job done.
+
+**Why it's wrong:** Pending orders remain live at the broker. In MOEX, a limit order placed during the morning session remains valid until market close. A network partition between scheduler shutdown and order cancellation leaves uncontrolled positions overnight.
+
+**Do this instead:** Kill switch follows a strict sequence: (1) stop accepting new cycles, (2) escalate circuit breakers to LIQUIDATE, (3) cancel all pending orders via `BrokerRouter`, (4) alert, (5) shut down scheduler. Step 3 is the critical step. If the broker cancel fails, log and continue — the LIQUIDATE circuit state ensures no new orders are placed.
+
+### Anti-Pattern 4: Signal Divergence Computed Per-Bar Against Backtest Files
+
+**What people do:** On every strategy cycle, load backtest CSV output, find the row matching today's date, compare sandbox signal against backtest signal.
+
+**Why it's wrong:** Backtest output files are not indexed for live lookup. Parsing CSV/JSONL on every cycle (every few minutes) adds latency, creates fragile file path coupling, and the comparison is meaningless at bar level (sandbox uses live prices, backtest uses historical — they will always differ on individual bars).
+
+**Do this instead:** Signal divergence is a daily aggregate metric computed by `SandboxMonitorService`. It compares the rolling distribution of signal directions (fraction BUY / SELL / HOLD) in sandbox cycles over the past N days against backtest summary statistics stored in `results/iterations/`. The divergence metric detects structural regime shifts, not individual bar differences.
+
+## Suggested Build Order
+
+The build order is dictated by the dependency chain — each phase unlocks the next with no circular dependencies.
+
+### Phase 1: Schema and Config Foundation (zero behavior change)
+
+1. `core/schemas.py` — add `GoNoGoReport`, `GoNoGoGateResult`, `SandboxMetricSnapshot`, `HealthCheckResult` schemas
+2. `core/validation_logger.py` — extend `CycleLogEntry` with 3 optional None-default fields
+3. `config/rollout.py` — `RolloutPhase` dataclasses, `ROLLOUT_PHASES` dict, `get_active_phase()` resolver
+4. Alembic migration — `sandbox_metrics` hypertable (date, uptime_pct, fill_rate_pct, avg_slippage_bps, drawdown_pct, signal_divergence_pct)
+
+Rationale: Schemas must exist before any service can produce or consume them. Rollout config must exist before risk layer can be modified. All existing tests pass unchanged — no behavior change.
+
+### Phase 2: Risk Layer Rollout Wiring (tightened limits)
+
+5. `risk/circuit_breaker.py` — accept optional `rollout_phase` for threshold overrides
+6. `risk/pre_trade_check.py` — accept optional `rollout_phase` for `max_position_pct`, `daily_loss_limit`
+7. Unit tests for rollout-phase-aware risk limits (parametrize phases)
+
+Rationale: Risk limits must be validated as tighter before any production deployment. Isolated to Layer 4 with no Layer 5/6 dependencies. Tests confirm that `minimal_50k` profile enforces 3% max position vs the default 5%.
+
+### Phase 3: Monitoring Services
+
+8. `monitoring/sandbox_monitor.py` — `SandboxMonitorService` (metric collection, DB persistence)
+9. `monitoring/gonogo.py` — `GoNoGoReporter` (pure threshold evaluation)
+10. `monitoring/anomaly.py` — `AnomalyDetector` (z-score alerting)
+11. `monitoring/health_monitor.py` — `ProductionHealthMonitor` (periodic pulse)
+12. Tests: SandboxMonitorService (DB integration with async fixtures), GoNoGoReporter (unit, pure function parametrized by thresholds)
+
+Rationale: Services depend on schemas from Phase 1 and read from existing ValidationLogger + SandboxPortfolioTracker. Pure services with no effect on TradingLoop — safe to build and test in isolation.
+
+### Phase 4: API Endpoints
+
+13. `api/v1/sandbox.py` — `GET /sandbox/metrics`, `GET /sandbox/gonogo`
+14. `api/v1/system.py` — extend with `/health/production`
+15. `api/v1/router.py` — `include_router(sandbox.router)`
+16. API integration tests
+
+Rationale: Endpoints are thin wrappers over monitoring services. Services must exist first. Follows the existing sub-router pattern — lowest-risk change in the API layer.
+
+### Phase 5: TradingLoop and Telegram Extensions (highest-risk change, done last)
+
+17. `monitoring/kill_switch.py` — `KillSwitch` class
+18. `core/trading_loop.py` — add `_health_pulse_cycle()` APScheduler job, `activate_kill_switch()`, wire rollout phase at construction
+19. `core/telegram_bot.py` — add `/gonogo`, `/health`, `/killswitch` commands
+20. Integration tests for kill switch sequence (mock broker, assert cancel_order called, assert LIQUIDATE set)
+
+Rationale: TradingLoop modification is the highest-regression-risk change — done last so all dependencies are tested. Kill switch sequence tested with mocked broker before wiring into the live scheduler. APScheduler job isolation tested to confirm no interference with existing cycles.
+
+### Phase 6: Streamlit Dashboard Pages (optional)
+
+21. `dashboard/pages/sandbox_validation.py` — sandbox metrics timeline, go/no-go gate status
+22. `dashboard/pages/production_health.py` — health pulse history, kill switch status
+
+Rationale: Dashboard pages are read-only API consumers. Can be built any time after Phase 4 without affecting trading functionality. Mark as optional for the milestone — Telegram commands provide equivalent operational visibility.
 
 ## Sources
 
-- Direct codebase inspection: `dividend_gap.py`, `cbr_calendar.py`, `cbr_event.py`, `cbr_strategy_wrapper.py`, `rub_oil_regime.py`, `regime.py`, `position_sizing_pipeline.py`, `combiner.py`, `engine.py`, `loader.py`, `schemas.py`, `bond_carry.py`
-- Existing CBR meeting calendar: `data/fetchers/cbr.py` (2022-2026, 40+ meetings)
-- Existing CPI publication dates: `data/fetchers/cbr.py` (2024-2025, Rosstat lag-aware)
-- MOEX segment presets: `strategies/presets/ru_*.yaml` (6 MOEX equity + 2 OFZ segments)
-- PortfolioLayer enum: `core/schemas.py` (CORE/STRATEGIC/TACTICAL/SHORT)
-- LayerConfig defaults: 45% CORE + 27.5% STRATEGIC + 17.5% TACTICAL + 10% SHORT
+- Direct inspection: `src/finalayze/` codebase — all 6 layers, all modified files
+- `src/finalayze/core/validation_logger.py` — existing CycleLogEntry schema and JSONL write pattern
+- `src/finalayze/execution/sandbox_tracker.py` — SandboxPortfolioTracker shadow ledger and BrokerBase interface
+- `src/finalayze/core/trading_loop.py` — APScheduler cycle structure, _stop_event threading pattern, async_loop pattern
+- `src/finalayze/core/telegram_bot.py` — command dispatch table, whitelist pattern
+- `src/finalayze/api/metrics.py` — existing Prometheus gauge/counter/histogram registrations
+- `src/finalayze/risk/circuit_breaker.py` — L1/L2/L3 threshold, sticky escalation, override_level()
+- `src/finalayze/risk/pre_trade_check.py` — 11-check pipeline, max_position_pct parameter
+- `docs/operations/GO_LIVE_CHECKLIST.md` — existing go-live procedure and real_confirmed guard
+- `docs/operations/MONITORING.md` — existing Prometheus metrics and alert rules
+- `.planning/PROJECT.md` — v3.0 milestone requirements (uptime >= 99%, fill rate >= 95%, DD < 5%, signal divergence < 50%)
+
+---
+*Architecture research for: production monitoring and go-live validation for autonomous MOEX trading system*
+*Researched: 2026-03-21*
