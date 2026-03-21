@@ -878,3 +878,72 @@ class TestBondEngineMacroWiring:
         post_meeting = date(2024, 10, 25)
         if post_meeting in snapshots_by_date:
             assert snapshots_by_date[post_meeting]["key_rate"] == Decimal("21.00")
+
+
+# ---------------------------------------------------------------------------
+# Test 14: OFZ rotation wiring in BondBacktestEngine
+# ---------------------------------------------------------------------------
+
+
+class TestBondEngineOFZRotation:
+    """OFZ rotation wiring: apply_ofz_rotation called when layer_configs provided."""
+
+    def test_ofz_rotation_inactive_by_default(self) -> None:
+        """Without layer_configs, ofz_rotation_active is False."""
+        engine = BondBacktestEngine()
+        result = engine.run(
+            candles_by_symbol={},
+            bond_info={},
+            coupon_schedule={},
+            strategy_fn=_never_buy_strategy,
+        )
+        assert result.ofz_rotation_active is False
+
+    def test_ofz_rotation_inactive_no_cuts(self, monkeypatch: Any) -> None:
+        """With layer_configs but no CBR cuts, ofz_rotation_active is False."""
+        from finalayze.core.schemas import DEFAULT_LAYER_CONFIGS
+
+        # Monkeypatch CBR_MEETINGS to empty (no cuts at all)
+        monkeypatch.setattr("finalayze.core.bond_cycle.CBR_MEETINGS", ())
+
+        engine = BondBacktestEngine()
+        prices = [85.0] * 10
+        candles = _make_bond_candles(_SYMBOL, prices, date(2025, 1, 6))
+        coupons = _make_coupon_schedule(_FIGI, [date(2025, 6, 11)])
+
+        result = engine.run(
+            candles_by_symbol={_SYMBOL: candles},
+            bond_info={_SYMBOL: _BOND_INFO},
+            coupon_schedule={_SYMBOL: coupons},
+            strategy_fn=_never_buy_strategy,
+            layer_configs=DEFAULT_LAYER_CONFIGS,
+            as_of_date=date(2025, 1, 20),
+        )
+        assert result.ofz_rotation_active is False
+
+    def test_ofz_rotation_active_two_consecutive_cuts(self, monkeypatch: Any) -> None:
+        """With 2 consecutive CBR cuts before as_of_date, ofz_rotation_active is True."""
+        from finalayze.core.schemas import DEFAULT_LAYER_CONFIGS
+        from finalayze.data.fetchers.cbr import CBRMeeting
+
+        # Monkeypatch CBR_MEETINGS with two consecutive cuts
+        fake_meetings = (
+            CBRMeeting(date(2024, 6, 1), "core", "cut", Decimal("15.00")),
+            CBRMeeting(date(2024, 7, 1), "core", "cut", Decimal("14.00")),
+        )
+        monkeypatch.setattr("finalayze.core.bond_cycle.CBR_MEETINGS", fake_meetings)
+
+        engine = BondBacktestEngine()
+        prices = [85.0] * 10
+        candles = _make_bond_candles(_SYMBOL, prices, date(2025, 1, 6))
+        coupons = _make_coupon_schedule(_FIGI, [date(2025, 6, 11)])
+
+        result = engine.run(
+            candles_by_symbol={_SYMBOL: candles},
+            bond_info={_SYMBOL: _BOND_INFO},
+            coupon_schedule={_SYMBOL: coupons},
+            strategy_fn=_never_buy_strategy,
+            layer_configs=DEFAULT_LAYER_CONFIGS,
+            as_of_date=date(2025, 1, 20),
+        )
+        assert result.ofz_rotation_active is True
