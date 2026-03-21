@@ -1,92 +1,81 @@
-# Requirements: Finalayze v2.0 MOEX Profitability
+# Requirements: Finalayze v3.0 Production Readiness
 
-**Defined:** 2026-03-20
+**Defined:** 2026-03-21
 **Core Value:** Autonomous profitable MOEX trading with acceptable risk limits
 
-## v2.0 Requirements
+## v3.0 Requirements
 
-Requirements for MOEX profitability milestone. Each maps to roadmap phases.
+Requirements for production readiness milestone. Each maps to roadmap phases.
 
-### Data Foundation
+### Sandbox Monitoring
 
-- [x] **DATA-01**: Vol target recalibrated for MOEX segments (0.35-0.45 instead of US-calibrated 0.19)
-- [x] **DATA-02**: Toxic symbols removed from universe (GAZP, VTBR, SNGS, IRAO, ALRS), confidence thresholds raised to 0.38+
-- [x] **DATA-03**: Dividend calendar expanded to 150+ events including cancelled/reduced dividends via T-Invest API
-- [x] **DATA-04**: Feb-Mar 2022 structural break excluded from vol/ATR calculations, separate regime classification
+- [ ] **MON-01**: SandboxMonitorService collects per-cycle metrics (trades, P&L, equity, fill rate, uptime) and persists to TimescaleDB
+- [ ] **MON-02**: Slippage capture records expected_price at signal time vs fill_price at execution, computes realized slippage in bps
+- [ ] **MON-03**: Streamlit sandbox dashboard page shows real-time trade log, equity curve, uptime %, fill rate, slippage histogram
+- [ ] **MON-04**: Anomaly detector triggers Telegram alerts on drawdown spikes (>2σ), fill rate drops (<90%), and slippage outliers (>50bps)
 
-### Strategy Wiring
+### Go/No-Go Gate
 
-- [x] **STRAT-01**: DividendGapStrategy calendar populated from expanded YAML, `_EVENT_STRATEGIES` bypass added to combiner ADX routing
-- [x] **STRAT-02**: CBRStrategyWrapper wired into combiner for trading around CBR rate decisions
-- [x] **STRAT-03**: rub_oil_regime.py integrated into position sizing pipeline as RubOilRegimeStep
-- [x] **STRAT-04**: BrentGateStep added to sizing pipeline — gates energy sector positions when Brent below threshold
+- [ ] **GATE-01**: GoNoGoReporter evaluates formalized thresholds (uptime ≥99%, fill rate ≥95%, max DD <5%, trades ≥5/5days, signal divergence <50%)
+- [ ] **GATE-02**: Gate thresholds derived from walk-forward backtest distribution percentiles, not hardcoded round numbers
+- [ ] **GATE-03**: REST endpoint `/sandbox/gonogo` returns structured pass/fail report with per-criterion breakdown
 
-### Macro Regime
+### Gradual Rollout
 
-- [x] **MACRO-01**: CBRRegimeStep in sizing pipeline — CBR rate level + direction affects equity allocation sizing
-- [x] **MACRO-02**: OFZ PK-to-PD rotation trigger — detects CBR cutting cycle start for bond allocation shift
-- [x] **MACRO-03**: SectorAllocationStep in sizing pipeline for sector rotation using MOEX sector indices (MOEXOG, MOEXFN, etc.)
+- [ ] **ROLL-01**: RolloutPhase enum (MINIMAL/STANDARD/FULL) with per-phase capital and position limits in Settings
+- [ ] **ROLL-02**: PreTradeChecker and CircuitBreaker respect RolloutPhase limits (3% max position at MINIMAL, 1% daily loss, 2% DD auto-stop)
+- [ ] **ROLL-03**: Capital ladder validation confirms position sizing produces valid lot sizes at each tier (50K/150K/500K/2.5M RUB)
 
-### Advanced Strategies
+### Production Operations
 
-- [x] **ADV-01**: Preferred share arbitrage (SBER/SBERP, TATN/TATNP) via adapted PairsStrategy with Kalman filter
-- [x] **ADV-02**: 10 Russian macro ML features (CBR rate/delta/direction, USDRUB return/zscore/vol, Brent return, IMOEX relative, turnover zscore)
-- [x] **ADV-03**: ML ensemble enabled for ru_* segments with macro features, reinforcer-only mode
-
-### Portfolio Assembly
-
-- [x] **PORT-01**: PortfolioBacktestOrchestrator for joint equity + OFZ backtest with merged equity curve
-- [x] **PORT-02**: Portfolio allocation 40% OFZ carry + 60% equity with RUB crisis brake (USD/RUB +15% over 20 bars -> freeze equity)
-- [x] **PORT-03**: Blended MOEX portfolio walk-forward Sharpe >= +0.10 (combined equity + OFZ)
+- [ ] **OPS-01**: Kill switch cancels all open orders at broker, stops TradingLoop, sends Telegram critical alert — response time <30 seconds
+- [ ] **OPS-02**: Health check heartbeat every 5 minutes, REST `/health/production` endpoint, auto-alert on 2 missed heartbeats
+- [ ] **OPS-03**: 3-tier alert taxonomy (critical/warning/info) integrated into TelegramMonitor priority queue to prevent alert fatigue
+- [ ] **OPS-04**: Telegram bot `/kill` command triggers kill switch, `/gonogo` command runs gate report
 
 ## Future Requirements
 
-Deferred to v3.0+.
+Deferred to v4.0+.
 
 ### Expansion
 
 - **EXP-01**: Multi-account support (multiple Tinkoff portfolios)
 - **EXP-02**: Tax optimization (NDFL calculation, IIS deductions)
 - **EXP-03**: Cross-market correlations (MOEX vs US for hedging)
-- **EXP-04**: OFZ yield curve bootstrapping from CBR zero-coupon curve
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| US market development | MOEX-only focus for v2.0 |
-| Derivatives/futures | Complexity too high for current stage |
-| Intraday trading (< daily bars) | System architecture is daily/swing |
-| New pip dependencies | Research confirmed zero needed |
-| Full sector rotation optimizer | Simple allocation step sufficient; optimizer is overfit risk |
+| Automated live promotion without human checkpoint | Go/no-go is advisory — human decides |
+| Per-cycle shadow backtest | Compute cost too high for real-time operation |
+| Multi-account rollout | Tinkoff API doesn't support it |
+| Mobile monitoring app | Telegram + Streamlit dashboard sufficient |
+| Advanced ML anomaly detection (LSTM/Prophet) | Rolling z-score sufficient for step-function events |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 13 (gap closure) | Complete |
-| DATA-02 | Phase 13 (gap closure) | Complete |
-| DATA-03 | Phase 13 (gap closure) | Complete |
-| DATA-04 | Phase 8 | Complete |
-| STRAT-01 | Phase 9 | Complete |
-| STRAT-02 | Phase 9 | Complete |
-| STRAT-03 | Phase 9 | Complete |
-| STRAT-04 | Phase 9 | Complete |
-| MACRO-01 | Phase 10 | Complete |
-| MACRO-02 | Phase 14 (gap closure) | Complete |
-| MACRO-03 | Phase 10 | Complete |
-| ADV-01 | Phase 11 | Complete |
-| ADV-02 | Phase 11 | Complete |
-| ADV-03 | Phase 11 | Complete |
-| PORT-01 | Phase 12 | Complete |
-| PORT-02 | Phase 12 | Complete |
-| PORT-03 | Phase 12 | Complete |
+| MON-01 | TBD | Pending |
+| MON-02 | TBD | Pending |
+| MON-03 | TBD | Pending |
+| MON-04 | TBD | Pending |
+| GATE-01 | TBD | Pending |
+| GATE-02 | TBD | Pending |
+| GATE-03 | TBD | Pending |
+| ROLL-01 | TBD | Pending |
+| ROLL-02 | TBD | Pending |
+| ROLL-03 | TBD | Pending |
+| OPS-01 | TBD | Pending |
+| OPS-02 | TBD | Pending |
+| OPS-03 | TBD | Pending |
+| OPS-04 | TBD | Pending |
 
 **Coverage:**
-- v2.0 requirements: 17 total
-- Mapped to phases: 17
-- Unmapped: 0
+- v3.0 requirements: 14 total
+- Mapped to phases: 0
+- Unmapped: 14
 
 ---
-*Requirements defined: 2026-03-20*
-*Last updated: 2026-03-20 after roadmap creation*
+*Requirements defined: 2026-03-21*
