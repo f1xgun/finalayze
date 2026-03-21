@@ -30,7 +30,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 - [x] **Phase 9: Strategy Wiring** - Connect existing DividendGap, CBR, and RUB/oil strategies to backtest engine and sizing pipeline (completed 2026-03-20)
 - [x] **Phase 10: Macro Regime** - Add CBR regime sizing, OFZ rotation trigger, and sector allocation overlay to position sizing pipeline (completed 2026-03-20)
 - [x] **Phase 11: Advanced Strategies and ML** - Preferred share arbitrage and ML ensemble with Russian macro features for ru_* segments (completed 2026-03-21)
-- [ ] **Phase 12: Portfolio Assembly** - Joint OFZ + equity backtest with 40/60 allocation and RUB crisis brake
+- [x] **Phase 12: Portfolio Assembly** - Joint OFZ + equity backtest with 40/60 allocation and RUB crisis brake (completed 2026-03-21)
 
 ## Phase Details
 
@@ -104,7 +104,7 @@ Plans:
   1. PortfolioBacktestOrchestrator runs bond and equity engines jointly, producing a merged equity curve with aggregate Sharpe, max drawdown, and profit factor metrics
   2. Portfolio allocation enforces 40% OFZ carry + 60% equity split with monthly rebalancing, and RUB crisis brake shifts to 80% OFZ when USD/RUB spikes more than 15% over 20 bars
   3. Blended MOEX portfolio walk-forward Sharpe is >= +0.10 across the combined OFZ + equity curve
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 12-01-PLAN.md -- PortfolioBacktestOrchestrator with 40/60 allocation, rebalancing, and USDRUB crisis brake
@@ -128,4 +128,4 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 9. Strategy Wiring | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 10. Macro Regime | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 11. Advanced Strategies and ML | v2.0 | 4/4 | Complete | 2026-03-21 |
-| 12. Portfolio Assembly | 1/2 | In Progress|  | - |
+| 12. Portfolio Assembly | 2/2 | Complete   | 2026-03-21 | - |

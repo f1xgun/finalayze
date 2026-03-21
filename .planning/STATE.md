@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-20)
 ## Current Position
 
 Phase: 12 of 12 (Portfolio Assembly) -- fifth phase of v2.0
-Plan: 1 of 3 in current phase
+Plan: 2 of 2 in current phase
 Status: In Progress
-Last activity: 2026-03-21 -- Completed 12-01 Portfolio Orchestrator
+Last activity: 2026-03-21 -- Completed 12-02 Walk-Forward Sharpe & Portfolio CLI
 
-Progress: [###-------] 33% (Phase 12: 1/3 plans complete)
+Progress: [##########] 100% (Phase 12: 2/2 plans complete)
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Progress: [###-------] 33% (Phase 12: 1/3 plans complete)
 | 11    | 02   | 4min     | 2     | 3     |
 | 11    | 03   | 15min    | 2     | 2     |
 | 12    | 01   | 5min     | 1     | 2     |
+| 12    | 02   | 5min     | 2     | 3     |
 
 ## Accumulated Context
 
@@ -97,6 +98,9 @@ Recent decisions affecting current work:
 - [12-01]: Engines receive pre-split capital; orchestrator sums raw curves (not weighted)
 - [12-01]: Rebalancing adjusts scale factors at month boundaries when drift > 5%
 - [12-01]: USDRUB crisis brake: 80/20 shift when 20-bar FX return > 15%, no hysteresis
+- [12-02]: WF uses 12mo/6mo/3mo windows, slices pre-computed curve (no engine re-runs)
+- [12-02]: RUONIA 15% as risk-free rate for WF excess Sharpe computation
+- [12-02]: Too-short curves (<18 months) return WF Sharpe = 0.0 gracefully
 
 ### Pending Todos
 
@@ -111,5 +115,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-21
-Stopped at: Completed 12-01-PLAN.md
+Stopped at: Completed 12-02-PLAN.md
 Resume file: None
