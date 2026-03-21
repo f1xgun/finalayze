@@ -104,7 +104,11 @@ Plans:
   1. PortfolioBacktestOrchestrator runs bond and equity engines jointly, producing a merged equity curve with aggregate Sharpe, max drawdown, and profit factor metrics
   2. Portfolio allocation enforces 40% OFZ carry + 60% equity split with monthly rebalancing, and RUB crisis brake shifts to 80% OFZ when USD/RUB spikes more than 15% over 20 bars
   3. Blended MOEX portfolio walk-forward Sharpe is >= +0.10 across the combined OFZ + equity curve
-**Plans**: TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 12-01-PLAN.md -- PortfolioBacktestOrchestrator with 40/60 allocation, rebalancing, and USDRUB crisis brake
+- [ ] 12-02-PLAN.md -- Walk-forward Sharpe on merged curve and portfolio backtest CLI script
 
 ## Progress
 
@@ -124,4 +128,4 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 9. Strategy Wiring | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 10. Macro Regime | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 11. Advanced Strategies and ML | v2.0 | 4/4 | Complete | 2026-03-21 |
-| 12. Portfolio Assembly | v2.0 | 0/? | Not started | - |
+| 12. Portfolio Assembly | v2.0 | 0/2 | Not started | - |
