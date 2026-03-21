@@ -73,7 +73,7 @@ Plans:
   3. GoNoGoReporter evaluates 8 configurable thresholds (uptime, fill rate, max DD, trades, signal frequency, critical errors, slippage, signal divergence) and returns a structured PROCEED/DEFER/ABORT report with per-criterion pass/fail
   4. Gate thresholds are derived from walk-forward backtest distribution percentiles stored in config, not hardcoded round numbers
   5. Anomaly detector sends Telegram alerts when drawdown exceeds 2-sigma, fill rate drops below 90%, or slippage exceeds 50bps
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] 16-01-PLAN.md -- SandboxMonitorService, AnomalyDetector, SandboxMetricRow ORM, migration 005
@@ -107,6 +107,6 @@ Plans:
 | 1-7 | v1.0 | 22/22 | Complete | 2026-03-19 |
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
 | 15. Schemas, Config, Rollout | 2/2 | Complete    | 2026-03-21 | - |
-| 16. Monitoring and Gate | v3.0 | 0/3 | Not started | - |
+| 16. Monitoring and Gate | 2/3 | In Progress|  | - |
 | 17. Production Operations | v3.0 | 0/TBD | Not started | - |
 | 18. Dashboard and API | v3.0 | 0/TBD | Not started | - |
