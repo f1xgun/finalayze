@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from finalayze.markets.fx_service import FXRateService
     from finalayze.markets.instruments import Instrument, InstrumentRegistry
     from finalayze.ml.registry import MLModelRegistry
+    from finalayze.monitoring.sandbox_monitor import SandboxMonitorService
     from finalayze.risk.circuit_breaker import (
         CircuitBreaker,
         CircuitLevel,
@@ -119,6 +120,7 @@ class TradingLoop:
         telegram_reader: TelegramChannelReader | None = None,
         entity_extractor: EntityExtractor | None = None,
         combined_analyzer: CombinedNewsAnalyzer | None = None,
+        sandbox_monitor: SandboxMonitorService | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
@@ -151,6 +153,7 @@ class TradingLoop:
         self._telegram_reader = telegram_reader
         self._entity_extractor = entity_extractor
         self._combined_analyzer = combined_analyzer
+        self._sandbox_monitor = sandbox_monitor
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -1048,6 +1051,34 @@ class TradingLoop:
                     equity_rub=round(equity_rub, 2),
                     drawdown_pct=round(drawdown_pct, 4),
                 )
+
+                # Sandbox monitoring: persist cycle metrics
+                if self._sandbox_monitor is not None:
+                    from finalayze.monitoring.sandbox_monitor import CycleMetrics  # noqa: PLC0415
+
+                    cycle_metrics = CycleMetrics(
+                        timestamp=self._now(),
+                        trade_count=self._cycle_orders_filled,
+                        pnl_rub=Decimal(
+                            str(equity_rub - self._baseline_equities.get("moex", equity_rub))
+                        ),
+                        equity_rub=Decimal(str(equity_rub)),
+                        fill_rate=(
+                            self._cycle_orders_filled / max(self._cycle_orders_submitted, 1)
+                        ),
+                        uptime_cycles=self._sandbox_monitor.cycle_count + 1,
+                        signals_generated=self._cycle_signals_generated,
+                        errors_caught=self._cycle_errors_caught,
+                        max_slippage_bps=max(
+                            self._sandbox_monitor.slippage_buffer, default=0.0
+                        ),
+                        avg_slippage_bps=(
+                            sum(self._sandbox_monitor.slippage_buffer)
+                            / max(len(self._sandbox_monitor.slippage_buffer), 1)
+                        ),
+                        drawdown_pct=drawdown_pct,
+                    )
+                    self._sandbox_monitor.on_cycle_complete(cycle_metrics)
             except Exception:
                 _log.debug("validation_logger_failed", exc_info=True)
 
@@ -1464,12 +1495,29 @@ class TradingLoop:
                     market=market_id,
                 )
                 self._alerter.on_trade_filled(result, market_id, broker=market_id)
+
+                # Compute slippage in bps
+                expected_price = candles[-1].close if candles else None
+                if (
+                    result.fill_price is not None
+                    and expected_price is not None
+                    and expected_price > 0
+                ):
+                    slippage_bps = float(
+                        (result.fill_price - expected_price) / expected_price * 10000
+                    )
+                else:
+                    slippage_bps = 0.0
+
+                if self._sandbox_monitor is not None:
+                    self._sandbox_monitor.record_slippage(slippage_bps)
+
                 from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
 
                 MetricsCollector.record_trade(
                     market=market_id,
                     side=order.side.lower(),
-                    slippage_bps=0.0,
+                    slippage_bps=slippage_bps,
                     fill_latency_seconds=0.0,
                 )
                 # Wire stop-loss on BUY fill + track entry price for Kelly

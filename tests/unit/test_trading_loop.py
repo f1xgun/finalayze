@@ -720,3 +720,79 @@ class TestTradingLoopThreadSafety:
         t1.join(timeout=5)
         t2.join(timeout=5)
         assert not errors
+
+
+class TestSandboxMonitorIntegration:
+    """Tests for SandboxMonitorService integration in TradingLoop."""
+
+    def _make_buy_signal(self) -> Signal:
+        return Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+
+    def test_trading_loop_accepts_sandbox_monitor_none(self) -> None:
+        """TradingLoop should accept sandbox_monitor=None (backward compatible)."""
+        loop = _make_trading_loop()
+        assert loop._sandbox_monitor is None  # type: ignore[attr-defined]
+
+    def test_trading_loop_accepts_sandbox_monitor(self) -> None:
+        """TradingLoop should store sandbox_monitor when provided."""
+        monitor = MagicMock()
+        settings = _make_settings()
+        loop = TradingLoop(
+            settings=settings,  # type: ignore[arg-type]
+            fetchers={MARKET_US: MagicMock()},
+            news_fetcher=MagicMock(),
+            news_analyzer=MagicMock(),
+            event_classifier=MagicMock(),
+            impact_estimator=MagicMock(),
+            strategy=MagicMock(),
+            broker_router=MagicMock(),
+            circuit_breakers={},
+            cross_market_breaker=MagicMock(spec=CrossMarketCircuitBreaker),
+            alerter=MagicMock(spec=TelegramAlerter),
+            instrument_registry=_make_registry(),
+            sandbox_monitor=monitor,
+        )
+        assert loop._sandbox_monitor is monitor  # type: ignore[attr-defined]
+
+    def test_submit_order_records_slippage(self) -> None:
+        """When sandbox_monitor is set and order fills with candles, record_slippage is called."""
+        signal = self._make_buy_signal()
+        loop = _make_trading_loop(signal=signal, fill=True)
+        monitor = MagicMock()
+        loop._sandbox_monitor = monitor  # type: ignore[attr-defined]
+
+        candles = _make_candles()
+        order = loop._OrderRequest(symbol=SYMBOL_AAPL, side="BUY", quantity=ORDER_QTY)  # type: ignore[attr-defined]
+        loop._submit_order(order, MARKET_US, candles=candles)  # type: ignore[attr-defined]
+
+        monitor.record_slippage.assert_called_once()
+        # fill_price == candle close == 150.00, so slippage should be 0.0
+        call_args = monitor.record_slippage.call_args[0]
+        assert call_args[0] == 0.0
+
+    def test_strategy_cycle_calls_on_cycle_complete(self) -> None:
+        """When sandbox_monitor is set, _strategy_cycle finally calls on_cycle_complete."""
+        signal = self._make_buy_signal()
+        loop = _make_trading_loop(signal=signal)
+        monitor = MagicMock()
+        monitor.cycle_count = 0
+        monitor.slippage_buffer = []
+        loop._sandbox_monitor = monitor  # type: ignore[attr-defined]
+
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+
+        monitor.on_cycle_complete.assert_called_once()
+        metrics = monitor.on_cycle_complete.call_args[0][0]
+        assert hasattr(metrics, "trade_count")
+        assert hasattr(metrics, "equity_rub")

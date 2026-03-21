@@ -214,12 +214,14 @@ class TelegramAlerter:
     def on_trade_filled(self, result: OrderResult, market_id: str, broker: str) -> None:
         """Alert on a successful order fill.
 
-        Example: ``BUY AAPL x10 @ $150.00 (Alpaca paper)``
+        Example: ``BUY SBER x10 @ ₽280.50 (moex sandbox)``
         """
         price = result.fill_price if result.fill_price is not None else Decimal(0)
+        currency_symbol = "₽" if "moex" in market_id else "$"
         text = (
             f"\U0001f7e2 {result.side} <b>{result.symbol}</b> "
-            f"\xd7{result.quantity} @ <code>${price:.2f}</code> ({broker} {market_id})"
+            f"\xd7{result.quantity} @ <code>{currency_symbol}{price:.2f}</code>"
+            f" ({broker} {market_id})"
         )
         self.send_alert(text, priority=AlertPriority.IMPORTANT)
 
@@ -371,6 +373,21 @@ class TelegramAlerter:
     def on_shutdown(self) -> None:
         """Alert on system shutdown."""
         self.send_alert("\u23f9\ufe0f Finalayze stopped", priority=AlertPriority.INFO)
+
+    def on_anomaly_detected(self, metric: str, value: float, threshold: float) -> None:
+        """Alert on sandbox anomaly detection."""
+        text = (
+            f"\U0001f6a8 Sandbox anomaly: <b>{metric}</b> "
+            f"= <code>{value:.2f}</code> (threshold: {threshold:.2f})"
+        )
+        self.send_alert(text, priority=AlertPriority.CRITICAL)
+
+    def on_go_nogo_decision(self, verdict: str, reason: str) -> None:
+        """Alert on go/no-go gate evaluation result."""
+        emoji_map = {"PROCEED": "\u2705", "DEFER": "\u23f3", "ABORT": "\u274c"}
+        emoji = emoji_map.get(verdict, "\u2753")
+        text = f"{emoji} Go/No-Go: <b>{verdict}</b>\n{reason}"
+        self.send_alert(text, priority=AlertPriority.IMPORTANT)
 
     def on_error(self, component: str, message: str) -> None:
         """Alert on system errors.

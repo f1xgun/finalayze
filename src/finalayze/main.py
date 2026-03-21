@@ -302,6 +302,13 @@ def _build_trading_loop(settings: object) -> object | None:
         _tg_channels = getattr(settings, "telegram_channels", []) or []
         telegram_reader = TelegramChannelReader(channels=_tg_channels) if _tg_channels else None
 
+        # ── Sandbox Monitoring ─────────────────────────────────────────
+        sandbox_monitor = None
+        if settings.mode == WorkMode.SANDBOX:
+            from finalayze.monitoring.sandbox_monitor import SandboxMonitorService  # noqa: PLC0415
+
+            sandbox_monitor = SandboxMonitorService(alerter=alerter, market_id="moex")
+
         # ── Build TradingLoop ────────────────────────────────────────────
         loop = TradingLoop(
             settings=settings,  # type: ignore[arg-type]
@@ -320,6 +327,7 @@ def _build_trading_loop(settings: object) -> object | None:
             telegram_reader=telegram_reader,
             entity_extractor=entity_extractor,
             combined_analyzer=combined_analyzer,
+            sandbox_monitor=sandbox_monitor,
         )
         log.info(
             "trading_loop_built",
