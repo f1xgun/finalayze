@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: MOEX Profitability
 status: executing
-stopped_at: Completed 11-02-PLAN.md
-last_updated: "2026-03-20T20:31:16.084Z"
-last_activity: 2026-03-20 -- Completed 11-01 MOEX Preferred Share Pairs Trading
+stopped_at: Completed 11-03-PLAN.md
+last_updated: "2026-03-21T07:28:04.144Z"
+last_activity: 2026-03-21 -- Completed 11-03 ML Ensemble Enablement for ru_blue_chips
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 10
-  completed_plans: 9
-  percent: 20
+  completed_plans: 10
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-20)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 11 -- Advanced Strategies and ML
+**Current focus:** Phase 12 -- Portfolio Assembly
 
 ## Current Position
 
-Phase: 11 of 12 (Advanced Strategies and ML) -- fourth phase of v2.0
-Plan: 2 of 3 in current phase (11-01, 11-02 complete)
-Status: Phase 11 In Progress
-Last activity: 2026-03-20 -- Completed 11-02 MOEX ML Features
+Phase: 12 of 12 (Portfolio Assembly) -- fifth phase of v2.0
+Plan: 0 of ? in current phase
+Status: Phase 11 Complete, Phase 12 Not Started
+Last activity: 2026-03-21 -- Completed 11-03 ML Ensemble Enablement for ru_blue_chips
 
-Progress: [######----] 67% (11-02 complete)
+Progress: [##########] 100% (Phase 11 complete)
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [######----] 67% (11-02 complete)
 | 10    | 02   | 2min     | 1     | 2     |
 | 11    | 01   | 4min     | 1     | 4     |
 | 11    | 02   | 4min     | 2     | 3     |
+| 11    | 03   | 15min    | 2     | 2     |
 
 ## Accumulated Context
 
@@ -89,6 +90,9 @@ Recent decisions affecting current work:
 - [11-01]: Weights rebalanced: -0.03 each from momentum, mean_reversion, rsi2_connors, dual_momentum for 0.12 pairs
 - [Phase 11]: KeyRateRecord.rate is already decimal fraction -- no /100 normalization needed
 - [Phase 11]: IMOEX relative strength already covered by cross-asset relative_strength_21d -- no duplicate
+- [11-03]: MOEX walk-forward uses 8mo/1mo/3mo (shorter than US 12/2/4) due to limited post-2022 data
+- [11-03]: GAZP->TATN, PLZL->TCSG substitution in ML training (toxic/missing FIGI)
+- [11-03]: Quality gates failed but reinforcer-only mode (weight=0.10) is safe -- ML boosts, not creates signals
 
 ### Pending Todos
 
@@ -102,6 +106,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T20:31:16.081Z
-Stopped at: Completed 11-02-PLAN.md
+Last session: 2026-03-21
+Stopped at: Completed 11-03-PLAN.md (Phase 11 complete)
 Resume file: None

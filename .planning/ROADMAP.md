@@ -29,7 +29,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 - [x] **Phase 8: Data Foundation** - Fix vol target, universe, dividend calendar, and 2022 structural break so all MOEX backtests produce valid results (completed 2026-03-20)
 - [x] **Phase 9: Strategy Wiring** - Connect existing DividendGap, CBR, and RUB/oil strategies to backtest engine and sizing pipeline (completed 2026-03-20)
 - [x] **Phase 10: Macro Regime** - Add CBR regime sizing, OFZ rotation trigger, and sector allocation overlay to position sizing pipeline (completed 2026-03-20)
-- [ ] **Phase 11: Advanced Strategies and ML** - Preferred share arbitrage and ML ensemble with Russian macro features for ru_* segments
+- [x] **Phase 11: Advanced Strategies and ML** - Preferred share arbitrage and ML ensemble with Russian macro features for ru_* segments (completed 2026-03-21)
 - [ ] **Phase 12: Portfolio Assembly** - Joint OFZ + equity backtest with 40/60 allocation and RUB crisis brake
 
 ## Phase Details
@@ -88,12 +88,12 @@ Plans:
   1. Preferred share arbitrage strategy generates long-only trades on SBER/SBERP and TATN/TATNP pairs when spread z-score exceeds 2.0, with cointegration validated on post-2022 data
   2. 10 Russian macro ML features (CBR rate level/delta/direction, USDRUB return/zscore/vol, Brent return, IMOEX relative, turnover zscore) are computed per bar and available to the ML pipeline
   3. ML ensemble is enabled for at least one ru_* segment in reinforcer-only mode, with quality gates passing on 2024-2025 calm-period validation data
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
-- [ ] 11-01-PLAN.md -- Preferred share arbitrage (allow_short, pairs preset, TATNP FIGI)
-- [ ] 11-02-PLAN.md -- 7 new Russian macro ML features (CBR/FX/Brent) and schema version bump
-- [ ] 11-03-PLAN.md -- ML ensemble enablement for ru_blue_chips (training + quality gates)
+- [x] 11-01-PLAN.md -- Preferred share arbitrage (allow_short, pairs preset, TATNP FIGI)
+- [x] 11-02-PLAN.md -- 7 new Russian macro ML features (CBR/FX/Brent) and schema version bump
+- [x] 11-03-PLAN.md -- ML ensemble enablement for ru_blue_chips (training + quality gates)
 
 ### Phase 12: Portfolio Assembly
 **Goal**: Combined OFZ + equity portfolio operates as a single system with aggregate risk management and walk-forward Sharpe >= +0.10
@@ -122,5 +122,5 @@ Phases execute in numeric order: 8 -> 8.1 -> ... -> 9 -> ... -> 12
 | 8. Data Foundation | v2.0 | 3/3 | Complete | 2026-03-20 |
 | 9. Strategy Wiring | v2.0 | 2/2 | Complete | 2026-03-20 |
 | 10. Macro Regime | v2.0 | 2/2 | Complete | 2026-03-20 |
-| 11. Advanced Strategies and ML | 2/3 | In Progress|  | - |
+| 11. Advanced Strategies and ML | v2.0 | 3/3 | Complete | 2026-03-21 |
 | 12. Portfolio Assembly | v2.0 | 0/? | Not started | - |
