@@ -1,12 +1,16 @@
-"""Tests for rollout phase configuration (ROLL-01)."""
+"""Tests for rollout phase configuration (ROLL-01, ROLL-02, ROLL-03)."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
 from finalayze.core.modes import RolloutPhase
+from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
+from finalayze.risk.loss_limits import LossLimitTracker
+from finalayze.risk.pre_trade_check import PreTradeChecker
 from finalayze.risk.rollout import ROLLOUT_LIMITS, RolloutLimits
 
 
@@ -131,3 +135,83 @@ class TestSettingsRolloutIntegration:
         s = Settings()
         limits = s.effective_risk_limits()
         assert limits.circuit_breaker_l2 == 0.05
+
+
+class TestRolloutWiring:
+    """Tests for wiring rollout limits into risk components (ROLL-02)."""
+
+    # MOEX market hours: 07:00-15:45 UTC
+    _MOEX_OPEN = datetime(2026, 3, 23, 10, 0, 0, tzinfo=UTC)  # Monday 10:00 UTC
+
+    def test_pretrade_minimal_position_cap(self) -> None:
+        """MINIMAL limits (3% max position) should reject 4% position."""
+        checker = PreTradeChecker(
+            max_position_pct=Decimal("0.03"),
+            max_positions_per_market=5,
+        )
+        result = checker.check(
+            order_value=Decimal("4000"),
+            portfolio_equity=Decimal("100000"),
+            available_cash=Decimal("100000"),
+            open_position_count=0,
+            market_id="moex",
+            dt=self._MOEX_OPEN,
+        )
+        assert not result.passed
+        assert any("position" in v.lower() or "exposure" in v.lower() for v in result.violations)
+
+    def test_pretrade_minimal_position_pass(self) -> None:
+        """MINIMAL limits (3% max position) should allow 2.5% position."""
+        checker = PreTradeChecker(
+            max_position_pct=Decimal("0.03"),
+            max_positions_per_market=5,
+        )
+        result = checker.check(
+            order_value=Decimal("2500"),
+            portfolio_equity=Decimal("100000"),
+            available_cash=Decimal("100000"),
+            open_position_count=0,
+            market_id="moex",
+            dt=self._MOEX_OPEN,
+        )
+        assert result.passed
+
+    def test_circuit_breaker_minimal_dd(self) -> None:
+        """MINIMAL CB l2=0.02 should HALT at 2.1% drawdown."""
+        cb = CircuitBreaker(
+            market_id="moex",
+            l1_threshold=0.01,
+            l2_threshold=0.02,
+            l3_threshold=0.03,
+        )
+        baseline = Decimal("100000")
+        current = Decimal("97900")  # 2.1% drawdown
+        level = cb.check(current, baseline)
+        assert level == CircuitLevel.HALTED
+
+    def test_circuit_breaker_full_dd(self) -> None:
+        """FULL CB l2=0.10 should stay NORMAL at 2.1% drawdown."""
+        cb = CircuitBreaker(
+            market_id="moex",
+            l1_threshold=0.05,
+            l2_threshold=0.10,
+            l3_threshold=0.15,
+        )
+        baseline = Decimal("100000")
+        current = Decimal("97900")  # 2.1% drawdown
+        level = cb.check(current, baseline)
+        assert level == CircuitLevel.NORMAL
+
+    def test_loss_limit_minimal(self) -> None:
+        """LossLimitTracker with 1% daily limit should halt at 1% loss."""
+        tracker = LossLimitTracker(daily_loss_limit_pct=1.0)  # 1% in percent form
+        now = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
+        tracker.reset_day(now, Decimal("100000"))
+        # 1.1% loss should trigger halt
+        assert tracker.is_halted(now, Decimal("98900"))
+
+    def test_cross_market_breaker_default(self) -> None:
+        """CrossMarketCircuitBreaker default halt_threshold should be 0.10, not 0.80."""
+        breaker = CrossMarketCircuitBreaker()
+        # Internal threshold should be 0.10 (10% drawdown)
+        assert breaker._threshold == Decimal("0.10")

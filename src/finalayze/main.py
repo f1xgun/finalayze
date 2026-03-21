@@ -127,18 +127,24 @@ def _build_trading_loop(settings: object) -> object | None:
         moex_segments = [s for s in DEFAULT_SEGMENTS if s.market == "moex"]
         for seg in moex_segments:
             for sym in seg.symbols:
-                registry.register(Instrument(
-                    symbol=sym, market_id="moex", name=sym,
-                    instrument_type=seg.instrument_type,
-                    currency=seg.currency, segment_id=seg.segment_id,
-                ))
+                registry.register(
+                    Instrument(
+                        symbol=sym,
+                        market_id="moex",
+                        name=sym,
+                        instrument_type=seg.instrument_type,
+                        currency=seg.currency,
+                        segment_id=seg.segment_id,
+                    )
+                )
 
         # Discover MOEX shares via T-Bank API for FIGI resolution
         if tinkoff_token:
             from t_tech.invest import AsyncClient  # noqa: PLC0415
 
             target = (
-                "sandbox-invest-public-api.tbank.ru:443" if is_sandbox
+                "sandbox-invest-public-api.tbank.ru:443"
+                if is_sandbox
                 else "invest-public-api.tbank.ru:443"
             )
 
@@ -152,10 +158,14 @@ def _build_trading_loop(settings: object) -> object | None:
                             continue
                         if getattr(share, "class_code", "") != "TQBR":
                             continue
-                        discovered.append({
-                            "ticker": share.ticker, "figi": share.figi,
-                            "name": share.name, "lot": share.lot,
-                        })
+                        discovered.append(
+                            {
+                                "ticker": share.ticker,
+                                "figi": share.figi,
+                                "name": share.name,
+                                "lot": share.lot,
+                            }
+                        )
                 return discovered
 
             # Can't use asyncio.run() inside uvicorn (event loop already running).
@@ -176,21 +186,27 @@ def _build_trading_loop(settings: object) -> object | None:
                         existing = registry.get(sym, "moex")
                     except Exception:
                         continue
-                    registry.register(Instrument(
-                        symbol=existing.symbol, market_id="moex",
-                        name=str(share["name"]),
-                        instrument_type=existing.instrument_type,
-                        figi=str(share["figi"]),
-                        lot_size=int(share["lot"]),
-                        currency=existing.currency, segment_id=existing.segment_id,
-                    ))
+                    registry.register(
+                        Instrument(
+                            symbol=existing.symbol,
+                            market_id="moex",
+                            name=str(share["name"]),
+                            instrument_type=existing.instrument_type,
+                            figi=str(share["figi"]),
+                            lot_size=int(share["lot"]),
+                            currency=existing.currency,
+                            segment_id=existing.segment_id,
+                        )
+                    )
             log.info("moex_shares_discovered", count=len(all_shares))
 
         # ── Data Fetcher ─────────────────────────────────────────────────
         fetchers: dict[str, object] = {}
         if tinkoff_token:
             tinkoff_fetcher = TinkoffFetcher(
-                token=tinkoff_token, registry=registry, sandbox=is_sandbox,
+                token=tinkoff_token,
+                registry=registry,
+                sandbox=is_sandbox,
             )
             fetchers["moex"] = tinkoff_fetcher
 
@@ -199,34 +215,39 @@ def _build_trading_loop(settings: object) -> object | None:
         brokers: dict[str, TinkoffBroker] = {}
         if tinkoff_token:
             brokers["moex"] = TinkoffBroker(
-                token=tinkoff_token, registry=registry,
-                sandbox=is_sandbox, retry_policy=retry_policy,
+                token=tinkoff_token,
+                registry=registry,
+                sandbox=is_sandbox,
+                retry_policy=retry_policy,
             )
             brokers["moex_bonds"] = TinkoffBroker(
-                token=tinkoff_token, registry=registry,
-                sandbox=is_sandbox, retry_policy=retry_policy,
+                token=tinkoff_token,
+                registry=registry,
+                sandbox=is_sandbox,
+                retry_policy=retry_policy,
             )
         broker_router = BrokerRouter(brokers=brokers)
 
         # ── Strategies ───────────────────────────────────────────────────
         strategies_list = [
-            MomentumStrategy(), DualMomentumStrategy(),
-            MeanReversionStrategy(), RSI2ConnorsStrategy(),
+            MomentumStrategy(),
+            DualMomentumStrategy(),
+            MeanReversionStrategy(),
+            RSI2ConnorsStrategy(),
         ]
         combiner = StrategyCombiner(strategies=strategies_list)
 
         # ── Risk ─────────────────────────────────────────────────────────
+        _limits = settings.effective_risk_limits()
         circuit_breakers: dict[str, CircuitBreaker] = {
             "moex": CircuitBreaker(
                 market_id="moex",
-                l1_threshold=getattr(settings, "circuit_breaker_l1", 0.05),
-                l2_threshold=getattr(settings, "circuit_breaker_l2", 0.10),
-                l3_threshold=getattr(settings, "circuit_breaker_l3", 0.15),
+                l1_threshold=_limits.circuit_breaker_l1,
+                l2_threshold=_limits.circuit_breaker_l2,
+                l3_threshold=_limits.circuit_breaker_l3,
             ),
         }
-        cross_market_breaker = CrossMarketCircuitBreaker(
-            halt_threshold=getattr(settings, "max_cross_market_exposure_pct", 0.80),
-        )
+        cross_market_breaker = CrossMarketCircuitBreaker()  # uses _DEFAULT_CROSS_HALT=0.10
 
         # ── Alerting ────────────────────────────────────────────────────
         alerter = TelegramAlerter(
@@ -241,21 +262,27 @@ def _build_trading_loop(settings: object) -> object | None:
             async def complete(self, prompt: str, system: str) -> str:  # noqa: ARG002
                 return '{"sentiment": 0.0, "confidence": 0.0, "reasoning": "stub"}'
 
-        _has_llm = bool(getattr(settings, "llm_api_key", "") or
-                        getattr(settings, "anthropic_api_key", ""))
+        _has_llm = bool(
+            getattr(settings, "llm_api_key", "") or getattr(settings, "anthropic_api_key", "")
+        )
         if _has_llm:
             from finalayze.analysis.llm_client import create_llm_client  # noqa: PLC0415
+
             llm_client = create_llm_client(settings)
         else:
             llm_client = _StubLLMClient()
 
         news_analyzer = NewsAnalyzer(llm_client=llm_client)
         event_classifier = EventClassifier(llm_client=llm_client)
+        from finalayze.analysis.combined_analyzer import CombinedNewsAnalyzer  # noqa: PLC0415
+
+        combined_analyzer = CombinedNewsAnalyzer(llm_client=llm_client)
         impact_estimator = ImpactEstimator()
         _has_news = bool(getattr(settings, "newsapi_api_key", ""))
         news_fetcher = (
             NewsApiFetcher(api_key=settings.newsapi_api_key)  # type: ignore[union-attr]
-            if _has_news else NewsApiFetcher(api_key="")
+            if _has_news
+            else NewsApiFetcher(api_key="")
         )
 
         # ── Entity Extractor (LLM-based MOEX ticker extraction) ──────────
@@ -273,11 +300,7 @@ def _build_trading_loop(settings: object) -> object | None:
         rss_fetcher = RssNewsFetcher(feed_urls=_rss_urls) if _rss_urls else None
 
         _tg_channels = getattr(settings, "telegram_channels", []) or []
-        telegram_reader = (
-            TelegramChannelReader(channels=_tg_channels)
-            if _tg_channels
-            else None
-        )
+        telegram_reader = TelegramChannelReader(channels=_tg_channels) if _tg_channels else None
 
         # ── Build TradingLoop ────────────────────────────────────────────
         loop = TradingLoop(
@@ -296,6 +319,7 @@ def _build_trading_loop(settings: object) -> object | None:
             rss_fetcher=rss_fetcher,
             telegram_reader=telegram_reader,
             entity_extractor=entity_extractor,
+            combined_analyzer=combined_analyzer,
         )
         log.info(
             "trading_loop_built",

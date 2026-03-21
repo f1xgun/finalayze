@@ -40,6 +40,7 @@ from finalayze.markets.currency import CurrencyConverter
 if TYPE_CHECKING:
     from config.settings import Settings
 
+    from finalayze.analysis.combined_analyzer import CombinedNewsAnalyzer
     from finalayze.analysis.entity_extractor import EntityExtractor
     from finalayze.analysis.event_classifier import EventClassifier, EventType
     from finalayze.analysis.impact_estimator import ImpactEstimator
@@ -117,6 +118,7 @@ class TradingLoop:
         rss_fetcher: RssNewsFetcher | None = None,
         telegram_reader: TelegramChannelReader | None = None,
         entity_extractor: EntityExtractor | None = None,
+        combined_analyzer: CombinedNewsAnalyzer | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
@@ -148,6 +150,7 @@ class TradingLoop:
         self._rss_fetcher = rss_fetcher
         self._telegram_reader = telegram_reader
         self._entity_extractor = entity_extractor
+        self._combined_analyzer = combined_analyzer
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -165,14 +168,16 @@ class TradingLoop:
         # Risk management components
         # 6A.7: Wire PDTTracker into PreTradeChecker
         self._pdt_tracker = PDTTracker()
+        _limits = settings.effective_risk_limits()
         self._pre_trade_checker = PreTradeChecker(
-            max_position_pct=Decimal(str(settings.max_position_pct)),
-            max_positions_per_market=settings.max_positions_per_market,
+            max_position_pct=_limits.max_position_pct,
+            max_positions_per_market=_limits.max_positions_per_market,
             pdt_tracker=self._pdt_tracker,
+            max_sector_concentration_pct=_limits.max_sector_concentration_pct,
+            min_cash_reserve_pct=_limits.min_cash_reserve_pct,
         )
-        _raw_loss_limit = getattr(settings, "daily_loss_limit_pct", 0.05)
         self._loss_limit_tracker = LossLimitTracker(
-            daily_loss_limit_pct=float(_raw_loss_limit) * 100,  # pct -> percent
+            daily_loss_limit_pct=_limits.daily_loss_limit_pct * 100,  # fraction -> percent
         )
         self._kelly_sizer = RollingKelly(
             fraction=getattr(settings, "kelly_fraction", 0.5),
@@ -347,14 +352,12 @@ class TradingLoop:
 
     # ── Async helper ────────────────────────────────────────────────────────
 
-    def _run_async(self, coro: Any) -> Any:
+    def _run_async(self, coro: Any, *, timeout: int = 30) -> Any:
         """Run an async coroutine on a persistent background event loop.
 
         Lazily creates a daemon thread with its own event loop on first call.
-        Uses ``run_coroutine_threadsafe`` with a 30-second timeout so the
-        caller is never blocked indefinitely.
+        Default 30-second timeout; batch operations may pass a larger value.
         """
-        _async_timeout = 30
         if self._async_loop is None or self._async_loop.is_closed():
             loop = asyncio.new_event_loop()
             self._async_loop = loop
@@ -362,7 +365,7 @@ class TradingLoop:
             thread.start()
             self._async_thread = thread
         future = asyncio.run_coroutine_threadsafe(coro, self._async_loop)
-        return future.result(timeout=_async_timeout)
+        return future.result(timeout=timeout)
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -375,6 +378,7 @@ class TradingLoop:
         executors: dict[str, APSThreadPoolExecutor] = {
             "default": APSThreadPoolExecutor(max_workers=4),
             "retrain": APSThreadPoolExecutor(max_workers=1),
+            "news": APSThreadPoolExecutor(max_workers=1),
         }
 
         # APScheduler SQLAlchemyJobStore requires picklable job targets.
@@ -403,6 +407,9 @@ class TradingLoop:
             minutes=news_interval,
             id="news_cycle",
             replace_existing=True,
+            executor="news",
+            coalesce=True,
+            max_instances=1,
         )
         self._scheduler.add_job(
             self._strategy_cycle,
@@ -410,6 +417,8 @@ class TradingLoop:
             minutes=self._settings.strategy_cycle_minutes,
             id="strategy_cycle",
             replace_existing=True,
+            misfire_grace_time=300,
+            coalesce=True,
         )
         self._scheduler.add_job(
             self._daily_reset,
@@ -477,6 +486,16 @@ class TradingLoop:
         # Reconcile in-flight orders from previous session before trading
         self._reconcile_inflight_orders()
 
+        # Preflight checks: gRPC connectivity, macro data, bond cycle gating
+        self._preflight_check()
+
+        # Always send startup alert (preflight may fail, but app is running)
+        cb_keys = self._circuit_breakers if hasattr(self, "_circuit_breakers") else {}
+        markets = list(cb_keys.keys())
+        instruments = sum(len(self._registry.list_by_market(m)) for m in self._fetchers)
+        mode = str(self._settings.mode) if self._settings else "unknown"
+        self._alerter.on_startup(mode, markets, instruments)
+
         self._scheduler.start()
         _log.info(
             "trading_loop_started",
@@ -484,7 +503,46 @@ class TradingLoop:
             strategy_cycle_minutes=self._settings.strategy_cycle_minutes,
             daily_reset_hour_utc=self._settings.daily_reset_hour_utc,
         )
+        # Initialize Prometheus metrics with current portfolio state so Grafana
+        # shows data immediately, not only after the first strategy cycle (60 min).
+        self._init_metrics()
+        # Schedule first strategy cycle after 30s (not 60 min) so we get
+        # fast feedback at startup, but after news cycle has started.
+        self._scheduler.modify_job(
+            "strategy_cycle",
+            next_run_time=datetime.now(UTC) + timedelta(seconds=30),
+        )
         self._stop_event.wait()
+
+    def _init_metrics(self) -> None:
+        """Seed Prometheus gauges with current portfolio state at startup.
+
+        Without this, Grafana shows 'No data' until the first strategy cycle
+        (up to 60 minutes after startup).
+        """
+        from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
+        for market_id in self._fetchers:
+            try:
+                broker = self._broker_router.route(market_id)
+                portfolio = broker.get_portfolio()
+                equity = getattr(portfolio, "equity", None) or getattr(
+                    portfolio, "total_value", None
+                )
+                if equity is not None:
+                    MetricsCollector.set_portfolio_equity(market_id, float(equity))
+                    if market_id in ("moex", "moex_bonds"):
+                        MetricsCollector.set_portfolio_equity_rub(float(equity))
+                positions = getattr(portfolio, "positions", None)
+                if positions is not None:
+                    MetricsCollector.set_open_positions(market_id, len(positions))
+            except Exception:
+                _log.debug("init_metrics_portfolio_failed", market_id=market_id)
+            # Circuit breaker: default to NORMAL
+            MetricsCollector.set_circuit_breaker_level(market_id, 0)
+            # Drawdown: default to 0
+            MetricsCollector.set_drawdown(market_id, 0.0)
+        _log.info("metrics_initialized", markets=list(self._fetchers.keys()))
 
     def stop(self) -> None:
         """Gracefully shut down scheduler, async loop, and connections."""
@@ -634,11 +692,6 @@ class TradingLoop:
                 checks_ok = False
 
         if checks_ok:
-            cb_keys = self._circuit_breakers if hasattr(self, "_circuit_breakers") else {}
-            markets = list(cb_keys.keys())
-            instruments = len(self._registry.list_by_market("moex")) if self._registry else 0
-            mode = str(self._settings.mode) if self._settings else "unknown"
-            self._alerter.on_startup(mode, markets, instruments)
             return True
 
         # Independent degradation: disable bond, equity continues
@@ -717,36 +770,144 @@ class TradingLoop:
             from_date = now - timedelta(hours=_NEWS_LOOKBACK_HOURS)
             try:
                 articles = self._news_fetcher.fetch_news(
-                    query=_NEWS_QUERY, from_date=from_date, to_date=now,
+                    query=_NEWS_QUERY,
+                    from_date=from_date,
+                    to_date=now,
                 )
             except Exception:
                 _log.warning("news_legacy_fetch_failed", exc_info=True)
                 return
 
-        # Entity extraction: enrich articles with MOEX tickers
-        if self._entity_extractor is not None:
-            for i, article in enumerate(articles):
-                try:
-                    tickers = self._run_async(self._entity_extractor.extract(article))
-                    if tickers:
-                        articles[i] = article.model_copy(update={"symbols": tickers})
-                except Exception:
-                    _log.debug("entity_extraction_failed", article_id=str(article.id))
+        # Entity extraction: enrich articles with MOEX tickers (parallel)
+        # Large timeout: with rate-limited LLM, batches may take minutes.
+        _batch_timeout = 1800
+        enriched_count = 0
+        if self._entity_extractor is not None and articles:
+            articles = self._run_async(
+                self._extract_entities_batch(articles), timeout=_batch_timeout
+            )
+            enriched_count = sum(1 for a in articles if a.symbols)
 
-        # Process through existing pipeline
-        for article in articles:
-            try:
-                self._process_news_article(article)
-            except Exception:
-                _log.exception("news_article_processing_failed", article_id=str(article.id))
+        # Process through existing pipeline (parallel)
+        processed_ok = 0
+        processed_fail = 0
+        if articles:
+            processed_ok, processed_fail, _ = self._run_async(
+                self._process_articles_batch(articles), timeout=_batch_timeout
+            )
+
+        # Single summary line for the entire news cycle
+        log_fn = _log.info if processed_fail == 0 else _log.warning
+        log_fn(
+            "news_cycle_complete",
+            articles=len(articles),
+            enriched=enriched_count,
+            processed_ok=processed_ok,
+            processed_fail=processed_fail,
+        )
 
     async def _analyze_article(self, article: NewsArticle) -> tuple[SentimentResult, EventType]:
-        """Run sentiment analysis and event classification concurrently."""
+        """Analyze article for sentiment and event type.
+
+        Uses CombinedNewsAnalyzer (1 LLM call) if available, otherwise
+        falls back to separate NewsAnalyzer + EventClassifier (2 calls).
+        """
+        if self._combined_analyzer is not None:
+            return await self._combined_analyzer.analyze(article)
         sentiment, event = await asyncio.gather(
             self._news_analyzer.analyze(article),
             self._event_classifier.classify(article),
         )
         return sentiment, event
+
+    async def _extract_entities_batch(self, articles: list[NewsArticle]) -> list[NewsArticle]:
+        """Extract entities from all articles concurrently with bounded concurrency."""
+        sem = asyncio.Semaphore(5)  # max 5 concurrent LLM calls
+        entity_extractor = self._entity_extractor
+        assert entity_extractor is not None, (
+            "ExtractEntitiesBatch called when entity_extractor is None"
+        )
+
+        async def _extract_one(idx: int, article: NewsArticle) -> tuple[int, NewsArticle]:
+            async with sem:
+                try:
+                    tickers = await entity_extractor.extract(article)
+                    if tickers:
+                        return idx, article.model_copy(update={"symbols": tickers})
+                except Exception:
+                    _log.debug("entity_extraction_failed", article_id=str(article.id))
+                return idx, article
+
+        results = await asyncio.gather(*[_extract_one(i, a) for i, a in enumerate(articles)])
+        # Preserve order
+        updated = list(articles)
+        for idx, art in results:
+            updated[idx] = art
+        return updated
+
+    async def _process_articles_batch(self, articles: list[NewsArticle]) -> tuple[int, int, str]:
+        """Process all articles concurrently with bounded concurrency.
+
+        Uses an inline circuit breaker: after 5 consecutive LLM failures,
+        remaining articles are skipped to avoid wasting minutes on retries.
+
+        Returns:
+            (ok_count, fail_count, last_error_type) for summary logging.
+        """
+        sem = asyncio.Semaphore(5)
+        ok_count = 0
+        fail_count = 0
+        last_error = ""
+        consecutive_failures = 0
+        _fail_threshold = 5
+
+        async def _process_one(article: NewsArticle) -> bool:
+            nonlocal consecutive_failures, last_error
+            # Circuit breaker: skip remaining articles after N consecutive failures
+            if consecutive_failures >= _fail_threshold:
+                return False
+            async with sem:
+                try:
+                    sentiment, event = await self._analyze_article(article)
+                    active_segments = self._collect_active_segments()
+                    impacts = self._impact_estimator.estimate(
+                        article, event, sentiment, active_segments
+                    )
+                    redis_updates: list[tuple[str, float]] = []
+                    with self._sentiment_lock:
+                        for impact in impacts:
+                            existing = self._sentiment_cache.get(
+                                impact.segment_id, _DEFAULT_SENTIMENT
+                            )
+                            new_score = existing * 0.7 + impact.sentiment * 0.3
+                            self._sentiment_cache[impact.segment_id] = new_score
+                            redis_updates.append((impact.segment_id, new_score))
+                    if self._cache is not None:
+                        for segment_id, score in redis_updates:
+                            try:
+                                await self._cache.set_sentiment(segment_id, score)
+                            except Exception:
+                                _log.debug("Failed to write sentiment to Redis cache")
+                    consecutive_failures = 0
+                    return True
+                except Exception as exc:
+                    consecutive_failures += 1
+                    last_error = type(exc).__name__
+                    if consecutive_failures == _fail_threshold:
+                        _log.warning(
+                            "news_processing_circuit_opened",
+                            error=last_error,
+                            consecutive_failures=consecutive_failures,
+                        )
+                    return False
+
+        results = await asyncio.gather(*[_process_one(a) for a in articles])
+        for success in results:
+            if success:
+                ok_count += 1
+            else:
+                fail_count += 1
+        return ok_count, fail_count, last_error
 
     def _process_news_article(self, article: NewsArticle) -> None:
         """Analyze a single article and update sentiment cache."""
@@ -870,6 +1031,23 @@ class TradingLoop:
                     circuit_breaker_level=cb_level,
                 )
                 self._validation_logger.log_cycle(entry)
+                holds = (
+                    self._cycle_instruments_processed
+                    - self._cycle_signals_generated
+                    - self._cycle_errors_caught
+                )
+                _log.info(
+                    "strategy_cycle_summary",
+                    duration_ms=duration_ms,
+                    instruments=self._cycle_instruments_processed,
+                    holds=max(holds, 0),
+                    signals=self._cycle_signals_generated,
+                    orders=self._cycle_orders_submitted,
+                    fills=self._cycle_orders_filled,
+                    errors=self._cycle_errors_caught,
+                    equity_rub=round(equity_rub, 2),
+                    drawdown_pct=round(drawdown_pct, 4),
+                )
             except Exception:
                 _log.debug("validation_logger_failed", exc_info=True)
 
@@ -1044,13 +1222,27 @@ class TradingLoop:
         now: datetime,
     ) -> None:
         """Fetch candles, generate signal, and submit order for one instrument."""
+        from finalayze.core.exceptions import InstrumentNotFoundError  # noqa: PLC0415
+
+        # Skip instruments without FIGI (delisted shares, bonds handled by bond_cycle)
+        figi = getattr(instrument, "figi", None)
+        if not figi:
+            _log.debug("skip_no_figi", symbol=instrument.symbol)
+            return
+
         seg_id = getattr(instrument, "segment_id", "") or "us_tech"
         try:
+            # Convert limit (bar count) to date range for fetcher API
+            end = now
+            start = end - timedelta(days=_CANDLE_LOOKBACK * 2)  # ~2x for weekends/holidays
             candles: list[Candle] = fetcher.fetch_candles(  # type: ignore[attr-defined]
                 symbol=instrument.symbol,
-                market_id=market_id,
-                limit=_CANDLE_LOOKBACK,
+                start=start,
+                end=end,
             )
+        except InstrumentNotFoundError:
+            _log.debug("skip_instrument_not_found", symbol=instrument.symbol)
+            return
         except Exception:
             _log.exception("_strategy_cycle: failed to fetch candles for %s", instrument.symbol)
             self._cycle_errors_caught += 1
@@ -1074,6 +1266,7 @@ class TradingLoop:
             has_open_position=has_open_position,
         )
         if signal is None:
+            _log.debug("signal_hold", symbol=instrument.symbol, segment=seg_id)
             return
 
         self._cycle_signals_generated += 1
@@ -1086,11 +1279,17 @@ class TradingLoop:
             direction=signal.direction.value,
         )
 
-        _log.debug(
-            "_process_instrument: signal=%s sentiment_score=%.3f symbol=%s",
-            signal.direction,
-            sentiment_score,
-            instrument.symbol,
+        _log.info(
+            "signal_generated",
+            symbol=instrument.symbol,
+            direction=signal.direction.value,
+            strategy=signal.strategy_name,
+            confidence=round(signal.confidence, 3),
+            sentiment=round(sentiment_score, 3),
+            segment=seg_id,
+            has_position=has_open_position,
+            reasoning=signal.reasoning,
+            features={k: round(v, 4) for k, v in signal.features.items()} or None,
         )
 
         portfolio = self._get_cached_portfolio(market_id)
@@ -1116,6 +1315,13 @@ class TradingLoop:
             kelly_fraction,
         )
         if order is None:
+            _log.info(
+                "order_sizing_zero",
+                symbol=instrument.symbol,
+                direction=signal.direction.value,
+                strategy=signal.strategy_name,
+                reason="position size rounded to zero",
+            )
             return
 
         # #141: Run PreTradeChecker before submitting
@@ -1177,13 +1383,28 @@ class TradingLoop:
         )
 
         if not pre_result.passed:
-            _log.warning(
-                "_process_instrument: pre-trade check failed for %s: %s",
-                instrument.symbol,
-                pre_result.violations,
+            _log.info(
+                "pre_trade_rejected",
+                symbol=instrument.symbol,
+                direction=signal.direction.value,
+                strategy=signal.strategy_name,
+                violations=pre_result.violations,
             )
             return
 
+        price = candles[-1].close if candles else _ZERO
+        _log.info(
+            "order_submitted",
+            symbol=instrument.symbol,
+            direction=order.side,
+            quantity=int(order.quantity),
+            price=float(price),
+            value_rub=float(order.quantity * price),
+            kelly=float(kelly_fraction),
+            equity=float(portfolio.equity),
+            strategy=signal.strategy_name,
+            market=market_id,
+        )
         self._submit_order(order, market_id, candles=candles)
         self._cycle_orders_submitted += 1
 
@@ -1393,10 +1614,12 @@ class TradingLoop:
 
         for instrument in instruments:
             try:
+                retrain_end = self._now()
+                retrain_start = retrain_end - timedelta(days=500 * 2)
                 candles = fetcher.fetch_candles(  # type: ignore[attr-defined]
                     symbol=instrument.symbol,
-                    market_id=market_id,
-                    limit=500,  # fetch more data for training
+                    start=retrain_start,
+                    end=retrain_end,
                 )
             except Exception:
                 _log.warning("_retrain: failed to fetch candles for %s", instrument.symbol)
@@ -1588,7 +1811,7 @@ class TradingLoop:
                 self._persist_snapshots_async(baselines, now),
             )
         except Exception:
-            _log.debug("_persist_equity_snapshots: DB persistence failed")
+            _log.warning("equity_snapshot_persist_failed", exc_info=True)
 
     async def _persist_snapshots_async(
         self,
@@ -1627,12 +1850,26 @@ class TradingLoop:
         """Load latest equity snapshots from DB on startup.
 
         If snapshots exist for today, use them as baselines.
-        Otherwise current broker equity becomes the baseline.
+        Otherwise current broker equity becomes the baseline and is
+        persisted so subsequent restarts within the same day find it.
         """
         try:
             self._run_async(self._load_baseline_async())
         except Exception:
-            _log.warning("load_baseline_from_db: failed to load from DB, using broker equity")
+            _log.info(
+                "baseline_from_broker",
+                reason="no DB snapshots for today, persisting current equity",
+            )
+            # Persist current broker equity so next restart finds it
+            baselines: dict[str, Decimal] = {}
+            for market_id in self._fetchers:
+                equity = self._get_market_equity(market_id)
+                if equity is not None:
+                    baselines[market_id] = equity
+                    self._baseline_equities[market_id] = equity
+            if baselines:
+                now = datetime.now(UTC)
+                self._persist_equity_snapshots(baselines, now)
 
     async def _load_baseline_async(self) -> None:
         """Async helper to query today's equity snapshots from TimescaleDB.
@@ -1671,6 +1908,9 @@ class TradingLoop:
         for row in rows:
             self._baseline_equities[row.market_id] = row.equity
             loaded += 1
+        if loaded == 0:
+            msg = "no snapshots for today"
+            raise ValueError(msg)
 
         if loaded:
             _log.info("baselines_loaded_from_db", count=loaded)

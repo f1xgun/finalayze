@@ -18,6 +18,7 @@ from finalayze.core.trading_loop import TradingLoop
 from finalayze.execution.broker_base import OrderResult
 from finalayze.markets.instruments import Instrument, InstrumentRegistry
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
+from finalayze.risk.rollout import ROLLOUT_LIMITS, RolloutLimits
 
 # ── Module-level constants ──────────────────────────────────────────────────
 # A Monday during US market hours (14:30 UTC = 10:30 ET)
@@ -89,6 +90,10 @@ def _make_settings(
     s.daily_loss_limit_pct = 0.03
     s.max_cross_market_exposure_pct = 0.80
     s.mode = mode
+    from finalayze.core.modes import RolloutPhase
+
+    s.rollout_phase = RolloutPhase.FULL
+    s.effective_risk_limits = MagicMock(return_value=ROLLOUT_LIMITS[RolloutPhase.FULL])
     return s
 
 
@@ -100,6 +105,7 @@ def _make_registry() -> InstrumentRegistry:
             market_id=MARKET_US,
             name="Apple Inc.",
             segment_id=SEGMENT_US_TECH,
+            figi="BBG000B9XRY4",
         )
     )
     return reg
