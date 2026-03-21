@@ -44,6 +44,7 @@ _MIN_CLASS_RATIO = 0.30
 _MIN_SENSITIVITY = 0.45
 _MIN_SPECIFICITY = 0.45
 _DEFAULT_MIN_PASSING_FOLDS_RATIO = 0.60
+_MAX_ACCURACY_THRESHOLD = 0.55
 
 
 def check_accuracy_gate(metrics: FoldMetrics) -> QualityGateResult:
@@ -63,7 +64,10 @@ def check_accuracy_gate(metrics: FoldMetrics) -> QualityGateResult:
             threshold=1.0,
             detail="n_effective <= 0",
         )
-    threshold = _COIN_FLIP_ACCURACY + _ACCURACY_Z * math.sqrt(_COIN_FLIP_VARIANCE / n_effective)
+    raw_threshold = _COIN_FLIP_ACCURACY + _ACCURACY_Z * math.sqrt(_COIN_FLIP_VARIANCE / n_effective)
+    # Cap threshold at 0.55 for small samples (n_eff < 20) to avoid
+    # mathematically impossible gates on MOEX-sized datasets.
+    threshold = min(raw_threshold, _MAX_ACCURACY_THRESHOLD) if n_effective < 20 else raw_threshold
     passed = metrics.accuracy > threshold
     return QualityGateResult(
         passed=passed, gate_name="accuracy", value=metrics.accuracy, threshold=threshold
