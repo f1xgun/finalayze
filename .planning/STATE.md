@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Production Readiness
 status: in_progress
-stopped_at: Completed 16-02-PLAN.md
-last_updated: "2026-03-21T20:51:32.000Z"
-last_activity: 2026-03-21 -- Completed Plan 16-02 (GoNoGoReporter)
+stopped_at: Completed 16-03-PLAN.md
+last_updated: "2026-03-21T20:58:07.000Z"
+last_activity: 2026-03-21 -- Completed Plan 16-03 (TradingLoop Integration)
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 3
-  completed_plans: 2
-  percent: 66
+  completed_plans: 3
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-21)
 ## Current Position
 
 Phase: 16 of 18 (Sandbox Monitoring and Go/No-Go Gate)
-Plan: 2 of 3 complete
-Status: In Progress
-Last activity: 2026-03-21 -- Completed Plan 16-02 (GoNoGoReporter)
+Plan: 3 of 3 complete
+Status: Phase Complete
+Last activity: 2026-03-21 -- Completed Plan 16-03 (TradingLoop Integration)
 
-Progress: [██████░░░░] 66% (2/3 plans complete)
+Progress: [██████████] 100% (3/3 plans complete)
 
 ## Performance Metrics
 
@@ -61,6 +61,9 @@ Key carry-forward decisions for v3.0:
 - Signal divergence check is placeholder (always passes) -- no backtest comparison data yet
 - max_drawdown_pct threshold = 2.27% (p90 from 105 backtest entries)
 - min_trades_5d threshold = 18 (p10 of trade_count / 6 WF periods)
+- Slippage computed as (fill_price - last_close) / last_close * 10000 bps in _submit_order
+- SandboxMonitorService wired via TYPE_CHECKING import to avoid circular deps
+- settings.mode (not work_mode) used for SANDBOX condition in main.py
 
 ### Pending Todos
 
@@ -75,5 +78,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-21
-Stopped at: Completed 16-02-PLAN.md
+Stopped at: Completed 16-03-PLAN.md (Phase 16 complete)
 Resume file: None

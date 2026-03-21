@@ -43,7 +43,7 @@ Full details: `.planning/milestones/v2.0-ROADMAP.md`
 **Milestone Goal:** Validate system in sandbox with formalized metrics, define go/no-go gate criteria calibrated from backtest distributions, launch on minimal capital with tightened risk limits, and operate with production health monitoring and emergency kill switch.
 
 - [x] **Phase 15: Schemas, Config, and Rollout Foundation** - Pydantic schemas, RolloutPhase config, DB migration, rollout risk wiring (completed 2026-03-21)
-- [ ] **Phase 16: Sandbox Monitoring and Go/No-Go Gate** - Metric collection, slippage capture, gate evaluation, anomaly detection
+- [x] **Phase 16: Sandbox Monitoring and Go/No-Go Gate** - Metric collection, slippage capture, gate evaluation, anomaly detection (completed 2026-03-21)
 - [ ] **Phase 17: Production Operations** - Kill switch, health monitoring, alert taxonomy, Telegram bot commands
 - [ ] **Phase 18: Dashboard and API Integration** - Streamlit sandbox page, REST endpoints for gate and metrics
 
@@ -73,7 +73,7 @@ Plans:
   3. GoNoGoReporter evaluates 8 configurable thresholds (uptime, fill rate, max DD, trades, signal frequency, critical errors, slippage, signal divergence) and returns a structured PROCEED/DEFER/ABORT report with per-criterion pass/fail
   4. Gate thresholds are derived from walk-forward backtest distribution percentiles stored in config, not hardcoded round numbers
   5. Anomaly detector sends Telegram alerts when drawdown exceeds 2-sigma, fill rate drops below 90%, or slippage exceeds 50bps
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [ ] 16-01-PLAN.md -- SandboxMonitorService, AnomalyDetector, SandboxMetricRow ORM, migration 005
@@ -107,6 +107,6 @@ Plans:
 | 1-7 | v1.0 | 22/22 | Complete | 2026-03-19 |
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
 | 15. Schemas, Config, Rollout | 2/2 | Complete    | 2026-03-21 | - |
-| 16. Monitoring and Gate | 2/3 | In Progress|  | - |
+| 16. Monitoring and Gate | 3/3 | Complete   | 2026-03-21 | - |
 | 17. Production Operations | v3.0 | 0/TBD | Not started | - |
 | 18. Dashboard and API | v3.0 | 0/TBD | Not started | - |
