@@ -19,7 +19,7 @@ created: 2026-03-21
 |----------|-------|
 | **Framework** | pytest 7.x |
 | **Config file** | pyproject.toml |
-| **Quick run command** | `uv run pytest tests/unit/test_sandbox_monitor.py tests/unit/test_gonogo.py tests/unit/test_anomaly_detector.py -x -q` |
+| **Quick run command** | `uv run pytest tests/unit/test_sandbox_monitor.py tests/unit/test_go_no_go.py tests/unit/test_anomaly_detector.py -x -q` |
 | **Full suite command** | `uv run pytest tests/ -x -q` |
 | **Estimated runtime** | ~45 seconds |
 
@@ -40,7 +40,7 @@ created: 2026-03-21
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
 | 16-01-01 | 01 | 1 | MON-01 | unit | `uv run pytest tests/unit/test_sandbox_monitor.py -x -q` | ❌ W0 | ⬜ pending |
 | 16-01-02 | 01 | 1 | MON-02 | unit | `uv run pytest tests/unit/test_sandbox_monitor.py -x -q` | ❌ W0 | ⬜ pending |
-| 16-02-01 | 02 | 2 | GATE-01, GATE-02 | unit | `uv run pytest tests/unit/test_gonogo.py -x -q` | ❌ W0 | ⬜ pending |
+| 16-02-01 | 02 | 1 | GATE-01, GATE-02 | unit | `uv run pytest tests/unit/test_go_no_go.py -x -q` | ❌ W0 | ⬜ pending |
 | 16-03-01 | 03 | 2 | MON-04 | unit | `uv run pytest tests/unit/test_anomaly_detector.py -x -q` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
@@ -50,7 +50,7 @@ created: 2026-03-21
 ## Wave 0 Requirements
 
 - [ ] `tests/unit/test_sandbox_monitor.py` — stubs for MON-01, MON-02
-- [ ] `tests/unit/test_gonogo.py` — stubs for GATE-01, GATE-02
+- [ ] `tests/unit/test_go_no_go.py` — stubs for GATE-01, GATE-02
 - [ ] `tests/unit/test_anomaly_detector.py` — stubs for MON-04
 
 *Existing test infrastructure covers TelegramAlerter and MetricsCollector.*
