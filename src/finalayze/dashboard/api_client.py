@@ -179,3 +179,22 @@ def post_risk_override(
 
 def get_ml_status(base_url: str, api_key: str) -> dict[str, object]:
     return ApiClient(base_url, api_key).get("/api/v1/ml/status").json()
+
+
+def get_sandbox_metrics(
+    base_url: str,
+    api_key: str,
+    days: int = 7,
+    market_id: str = "moex",
+) -> list[dict[str, object]]:
+    """Fetch sandbox metric rows for the given date range and market."""
+    params: dict[str, object] = {"days": days, "market_id": market_id}
+    result = ApiClient(base_url, api_key).get("/api/v1/sandbox/metrics", params=params).json()
+    if isinstance(result, list):
+        return result  # type: ignore[return-value]
+    return []
+
+
+def get_sandbox_gonogo(base_url: str, api_key: str) -> dict[str, object]:
+    """Fetch sandbox go/no-go gate evaluation report."""
+    return ApiClient(base_url, api_key).get("/api/v1/sandbox/gonogo").json()
