@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-20)
 ## Current Position
 
 Phase: 12 of 12 (Portfolio Assembly) -- fifth phase of v2.0
-Plan: 0 of ? in current phase
-Status: Phase 11 Complete, Phase 12 Not Started
-Last activity: 2026-03-21 -- Completed 11-03 ML Ensemble Enablement for ru_blue_chips
+Plan: 1 of 3 in current phase
+Status: In Progress
+Last activity: 2026-03-21 -- Completed 12-01 Portfolio Orchestrator
 
-Progress: [##########] 100% (Phase 11 complete)
+Progress: [###-------] 33% (Phase 12: 1/3 plans complete)
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [##########] 100% (Phase 11 complete)
 | 11    | 01   | 4min     | 1     | 4     |
 | 11    | 02   | 4min     | 2     | 3     |
 | 11    | 03   | 15min    | 2     | 2     |
+| 12    | 01   | 5min     | 1     | 2     |
 
 ## Accumulated Context
 
@@ -93,6 +94,9 @@ Recent decisions affecting current work:
 - [11-03]: MOEX walk-forward uses 8mo/1mo/3mo (shorter than US 12/2/4) due to limited post-2022 data
 - [11-03]: GAZP->TATN, PLZL->TCSG substitution in ML training (toxic/missing FIGI)
 - [11-03]: Quality gates failed but reinforcer-only mode (weight=0.10) is safe -- ML boosts, not creates signals
+- [12-01]: Engines receive pre-split capital; orchestrator sums raw curves (not weighted)
+- [12-01]: Rebalancing adjusts scale factors at month boundaries when drift > 5%
+- [12-01]: USDRUB crisis brake: 80/20 shift when 20-bar FX return > 15%, no hysteresis
 
 ### Pending Todos
 
@@ -107,5 +111,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-21
-Stopped at: Completed 11-03-PLAN.md (Phase 11 complete)
+Stopped at: Completed 12-01-PLAN.md
 Resume file: None

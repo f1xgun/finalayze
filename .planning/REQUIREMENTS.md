@@ -35,8 +35,8 @@ Requirements for MOEX profitability milestone. Each maps to roadmap phases.
 
 ### Portfolio Assembly
 
-- [ ] **PORT-01**: PortfolioBacktestOrchestrator for joint equity + OFZ backtest with merged equity curve
-- [ ] **PORT-02**: Portfolio allocation 40% OFZ carry + 60% equity with RUB crisis brake (USD/RUB +15% over 20 bars -> freeze equity)
+- [x] **PORT-01**: PortfolioBacktestOrchestrator for joint equity + OFZ backtest with merged equity curve
+- [x] **PORT-02**: Portfolio allocation 40% OFZ carry + 60% equity with RUB crisis brake (USD/RUB +15% over 20 bars -> freeze equity)
 - [ ] **PORT-03**: Blended MOEX portfolio walk-forward Sharpe >= +0.10 (combined equity + OFZ)
 
 ## Future Requirements
@@ -78,8 +78,8 @@ Deferred to v3.0+.
 | ADV-01 | Phase 11 | Complete |
 | ADV-02 | Phase 11 | Complete |
 | ADV-03 | Phase 11 | Complete |
-| PORT-01 | Phase 12 | Pending |
-| PORT-02 | Phase 12 | Pending |
+| PORT-01 | Phase 12 | Complete |
+| PORT-02 | Phase 12 | Complete |
 | PORT-03 | Phase 12 | Pending |
 
 **Coverage:**
