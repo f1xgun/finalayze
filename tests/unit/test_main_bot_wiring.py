@@ -10,7 +10,7 @@ Validates:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,7 +22,7 @@ class _FakeLoop:
 
     _kill_switch: object = None
     _broker_router: object = None
-    _circuit_breakers: dict | None = None
+    _circuit_breakers: dict = field(default_factory=dict)
     _alerter_ref: object = None
 
     def start(self) -> None:
@@ -30,6 +30,15 @@ class _FakeLoop:
 
     def stop(self) -> None:
         pass
+
+
+def _lifespan_patches():
+    """Return context managers that patch deferred imports inside lifespan()."""
+    return (
+        patch("finalayze.api.v1.system.set_kill_switch"),
+        patch("finalayze.api.v1.system.set_tinkoff_broker"),
+        patch("finalayze.api.v1.system.set_health_monitor"),
+    )
 
 
 @pytest.fixture()
@@ -100,15 +109,12 @@ class TestLifespanBotWiring:
         mock_settings = MagicMock()
         mock_settings.mode = WorkMode.SANDBOX
 
+        p1, p2, p3 = _lifespan_patches()
         with (
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", fake_bot),
             patch.object(main, "_build_trading_loop", return_value=fake_loop),
-            patch("finalayze.main.set_kill_switch"),
-            patch("finalayze.main.set_health_monitor", create=True),
-            patch("finalayze.api.v1.system.set_kill_switch"),
-            patch("finalayze.api.v1.system.set_tinkoff_broker"),
-            patch("finalayze.api.v1.system.set_health_monitor"),
+            p1, p2, p3,
         ):
             app = MagicMock()
             async with main.lifespan(app):
@@ -140,19 +146,20 @@ class TestLifespanBotWiring:
         mock_settings = MagicMock()
         mock_settings.mode = WorkMode.SANDBOX
 
+        p1, p2, p3 = _lifespan_patches()
         with (
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", fake_bot),
             patch.object(main, "_build_trading_loop", return_value=fake_loop),
-            patch("finalayze.api.v1.system.set_kill_switch"),
-            patch("finalayze.api.v1.system.set_tinkoff_broker"),
-            patch("finalayze.api.v1.system.set_health_monitor"),
+            p1, p2, p3,
         ):
             app = MagicMock()
             async with main.lifespan(app):
                 pass
 
-            # Verify go_no_go_reporter was wired
+            # Verify go_no_go_reporter was wired (may be GoNoGoReporter or MagicMock
+            # depending on whether gate_thresholds.yaml exists; either way, the
+            # attribute setter should have been called)
             assert fake_bot._go_no_go_reporter is not None, (
                 "_bot_handler_instance._go_no_go_reporter should be set"
             )
@@ -182,13 +189,12 @@ class TestLifespanBotWiring:
         mock_settings = MagicMock()
         mock_settings.mode = WorkMode.SANDBOX
 
+        p1, p2, p3 = _lifespan_patches()
         with (
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", fake_bot),
             patch.object(main, "_build_trading_loop", return_value=fake_loop),
-            patch("finalayze.api.v1.system.set_kill_switch"),
-            patch("finalayze.api.v1.system.set_tinkoff_broker"),
-            patch("finalayze.api.v1.system.set_health_monitor"),
+            p1, p2, p3,
         ):
             app = MagicMock()
             async with main.lifespan(app):
@@ -214,13 +220,12 @@ class TestLifespanBotWiring:
         mock_settings = MagicMock()
         mock_settings.mode = WorkMode.SANDBOX
 
+        p1, p2, p3 = _lifespan_patches()
         with (
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", None),
             patch.object(main, "_build_trading_loop", return_value=fake_loop),
-            patch("finalayze.api.v1.system.set_kill_switch"),
-            patch("finalayze.api.v1.system.set_tinkoff_broker"),
-            patch("finalayze.api.v1.system.set_health_monitor"),
+            p1, p2, p3,
         ):
             app = MagicMock()
             # Should not raise

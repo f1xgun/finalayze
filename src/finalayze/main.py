@@ -30,6 +30,9 @@ log = structlog.get_logger()
 _trading_loop_instance: object | None = None
 _trading_loop_thread: threading.Thread | None = None
 
+# Module-level reference for Telegram bot handler (wired in lifespan)
+_bot_handler_instance: object | None = None
+
 
 @asynccontextmanager
 async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
@@ -66,6 +69,38 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                 if kill_switch is not None:
                     set_kill_switch(kill_switch)
                     log.info("kill_switch_wired_to_rest_api")
+
+                # Wire KillSwitch and GoNoGoReporter to Telegram bot handler
+                if _bot_handler_instance is not None:
+                    if kill_switch is not None:
+                        _bot_handler_instance._kill_switch = kill_switch  # type: ignore[union-attr]
+                        log.info("kill_switch_wired_to_telegram_bot")
+
+                    try:
+                        from pathlib import Path as _Path  # noqa: PLC0415
+
+                        from finalayze.monitoring.go_no_go import (  # noqa: PLC0415
+                            GateThresholds,
+                            GoNoGoReporter,
+                        )
+
+                        _gate_cfg = _Path("config/gate_thresholds.yaml")
+                        if _gate_cfg.exists():
+                            _thresholds = GateThresholds.from_yaml(_gate_cfg)
+                            go_no_go_reporter = GoNoGoReporter(_thresholds, market_id="moex")
+                            _bot_handler_instance._go_no_go_reporter = go_no_go_reporter  # type: ignore[union-attr]
+                            log.info("go_no_go_reporter_wired_to_telegram_bot")
+                    except Exception:
+                        log.debug("go_no_go_reporter_wire_failed", exc_info=True)
+
+                    if broker_router is not None:
+                        _bot_handler_instance._broker_router = broker_router  # type: ignore[union-attr]
+                        circuit_breakers_ref = getattr(
+                            _trading_loop_instance, "_circuit_breakers", {}
+                        )
+                        _bot_handler_instance._circuit_breakers = circuit_breakers_ref  # type: ignore[union-attr]
+                        _bot_handler_instance._trading_loop = _trading_loop_instance  # type: ignore[union-attr]
+                        log.info("bot_handler_fully_wired")
 
                 # Create and wire HealthMonitor
                 alerter_ref = getattr(_trading_loop_instance, "_alerter_ref", None)
@@ -427,12 +462,14 @@ def create_app() -> FastAPI:
         from finalayze.core.telegram_bot import TelegramBotHandler  # noqa: PLC0415
 
         alerter = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
+        global _bot_handler_instance  # noqa: PLW0603
         bot_handler = TelegramBotHandler(
             alerter=alerter,
             broker_router=None,  # type: ignore[arg-type] -- wired in TradingLoop startup
             circuit_breakers={},
             settings=settings,  # type: ignore[arg-type]
         )
+        _bot_handler_instance = bot_handler
         telegram_router = create_telegram_router(bot_handler, settings.telegram_webhook_secret)
         application.include_router(telegram_router)
         log.info("telegram_webhook_mounted", path="/api/telegram/webhook")
