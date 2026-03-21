@@ -344,3 +344,22 @@ class PortfolioSnapshot(Base):
     daily_pnl: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     drawdown_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
     mode: Mapped[str | None] = mapped_column(String(10))
+
+
+class SandboxMetricRow(Base):
+    """Sandbox monitoring metrics persisted per cycle (TimescaleDB hypertable)."""
+
+    __tablename__ = "sandbox_metrics"
+
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    market_id: Mapped[str] = mapped_column(String(10), primary_key=True)
+    trade_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pnl_rub: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    equity_rub: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    fill_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    uptime_cycles: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    signals_generated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    errors_caught: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_slippage_bps: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    avg_slippage_bps: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    drawdown_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
