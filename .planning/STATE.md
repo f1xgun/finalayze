@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Production Readiness
 status: in_progress
-stopped_at: Completed 17-02-PLAN.md
-last_updated: "2026-03-22T00:34:07Z"
-last_activity: 2026-03-22 -- Completed Plan 17-02 (Telegram Commands & REST Endpoints)
+stopped_at: Completed 17-03-PLAN.md
+last_updated: "2026-03-22T00:00:00Z"
+last_activity: 2026-03-22 -- Completed Plan 17-03 (TelegramBotHandler Wiring Gap Closure)
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 8
+  completed_plans: 8
   percent: 100
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-21)
 ## Current Position
 
 Phase: 17 of 18 (Production Operations)
-Plan: 2 of 2 complete
+Plan: 3 of 3 complete
 Status: Complete
-Last activity: 2026-03-22 -- Completed Plan 17-02 (Telegram Commands & REST Endpoints)
+Last activity: 2026-03-22 -- Completed Plan 17-03 (TelegramBotHandler Wiring Gap Closure)
 
-Progress: [██████████] 100% (2/2 plans complete)
+Progress: [██████████] 100% (3/3 plans complete)
 
 ## Performance Metrics
 
@@ -75,6 +75,8 @@ Key carry-forward decisions for v3.0:
 - GoNoGoReporter uses deferred DB session import via async_session_factory
 - Health endpoint returns 503 HTTPException with body when unhealthy
 - Module-level setters (set_health_monitor, set_kill_switch) for REST endpoint state injection
+- Module-level _bot_handler_instance follows _trading_loop_instance pattern for lifespan wiring
+- GoNoGoReporter instantiated from gate_thresholds.yaml in lifespan, not create_app
 
 ### Pending Todos
 
@@ -89,5 +91,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed 17-02-PLAN.md
+Stopped at: Completed 17-03-PLAN.md
 Resume file: None

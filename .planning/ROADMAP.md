@@ -89,7 +89,7 @@ Plans:
   2. Health monitor pings broker, checks feed freshness, and reports status every 5 minutes; two consecutive missed heartbeats trigger an automatic Telegram alert
   3. Alerts follow a 3-tier taxonomy (critical/warning/info) integrated into TelegramMonitor priority queue so that critical alerts are never delayed by info-level messages
   4. Telegram bot responds to /kill (triggers kill switch) and /gonogo (runs gate report and returns structured result)
-**Plans:** 2/2 plans complete
+**Plans:** 3/3 plans complete
 
 Plans:
 - [ ] 17-01-PLAN.md -- KillSwitch orchestrator, HealthMonitor service, Settings extensions
@@ -112,5 +112,5 @@ Plans:
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
 | 15. Schemas, Config, Rollout | 2/2 | Complete    | 2026-03-21 | - |
 | 16. Monitoring and Gate | 3/3 | Complete    | 2026-03-21 | - |
-| 17. Production Operations | 2/2 | Complete   | 2026-03-21 | - |
+| 17. Production Operations | 3/3 | Complete   | 2026-03-21 | - |
 | 18. Dashboard and API | v3.0 | 0/TBD | Not started | - |
