@@ -73,7 +73,10 @@ Full details: `.planning/milestones/v3.0-ROADMAP.md`
   4. macro_cache database session uses async-with context manager and issues rollback on exception -- connection pool leak under error conditions is eliminated
   5. Telegram /gonogo command imports and runs successfully (OPS-04 integration fix verified by test)
   6. HealthMonitor.update_feed_timestamp() is called by TradingLoop after each data fetch cycle -- feed freshness monitoring is operational
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 19-01-PLAN.md -- Fix TinkoffBroker lock types, event loop TOCTOU, and macro_cache session leak
+- [ ] 19-02-PLAN.md -- Atomic stop-loss, /gonogo import verification, feed timestamp wiring
 
 ### Phase 20: Async Correctness and Resource Management
 **Goal**: All async code paths are non-blocking and all external resources (gRPC channels, HTTP clients) have explicit lifecycle management
@@ -126,7 +129,7 @@ Note: Phase 21 depends on Phase 19 (not 20), so 20 and 21 could run in parallel 
 | 1-7 | v1.0 | 22/22 | Complete | 2026-03-19 |
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
-| 19. Concurrency Safety | v4.0 | 0/TBD | Not started | - |
+| 19. Concurrency Safety | v4.0 | 0/2 | Planned | - |
 | 20. Async and Resources | v4.0 | 0/TBD | Not started | - |
 | 21. Error Handling | v4.0 | 0/TBD | Not started | - |
 | 22. Layer Cleanup | v4.0 | 0/TBD | Not started | - |
