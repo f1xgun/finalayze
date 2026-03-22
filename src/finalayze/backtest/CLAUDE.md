@@ -4,7 +4,9 @@
 Historical backtesting engine with walk-forward optimization, performance analysis, Monte Carlo simulation, and decision journaling.
 
 ## Layer
-Layer 4-5 boundary -- imports from strategies (L4), risk (L4), and execution (L5). Architecturally a consumer of lower layers.
+Cross-cutting test infrastructure (Layer 4-5). Imports from strategies (L4), risk (L4), and simulated execution (L5). Does NOT import from API (L6) or monitoring (L6). Bond engine imports apply_ofz_rotation from orchestration (L5).
+
+Import rule: backtest/ may import from L0-L5. Must NOT import from L6 (api/, monitoring/, dashboard/).
 
 ## Key Files
 - `engine.py` -- BacktestEngine: iterates candles, generates signals via JournalingStrategyCombiner, applies risk checks, executes via SimulatedBroker. Grace bar (skip stop on fill candle). Catastrophic drop override at 15%.
