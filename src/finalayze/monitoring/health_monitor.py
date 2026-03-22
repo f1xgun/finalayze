@@ -18,7 +18,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 if TYPE_CHECKING:
-    from finalayze.core.alerts import TelegramAlerter
+    from finalayze.api.alerts import TelegramAlerter
     from finalayze.orchestration.trading_loop import TradingLoop
     from finalayze.execution.broker_router import BrokerRouter
 
@@ -126,7 +126,7 @@ class HealthMonitor:
 
     def _heartbeat(self) -> None:
         """Run health check and manage failure counter / alerting."""
-        from finalayze.core.alerts import AlertPriority  # noqa: PLC0415
+        from finalayze.api.alerts import AlertPriority  # noqa: PLC0415
 
         result = self.check_now()
         all_ok = result.broker_ok and result.feed_fresh and result.loop_alive

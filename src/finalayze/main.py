@@ -217,7 +217,7 @@ def _build_trading_loop(settings: object) -> object | None:
         from finalayze.analysis.event_classifier import EventClassifier  # noqa: PLC0415
         from finalayze.analysis.impact_estimator import ImpactEstimator  # noqa: PLC0415
         from finalayze.analysis.news_analyzer import NewsAnalyzer  # noqa: PLC0415
-        from finalayze.core.alerts import TelegramAlerter  # noqa: PLC0415
+        from finalayze.api.alerts import TelegramAlerter  # noqa: PLC0415
         from finalayze.orchestration.trading_loop import TradingLoop  # noqa: PLC0415
         from finalayze.data.fetchers.newsapi import NewsApiFetcher  # noqa: PLC0415
         from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
@@ -511,8 +511,8 @@ def create_app() -> FastAPI:
     # Mount Telegram webhook router when bot token and webhook secret are configured
     if settings.telegram_bot_token and settings.telegram_webhook_secret:
         from finalayze.api.v1.telegram import create_telegram_router  # noqa: PLC0415
-        from finalayze.core.alerts import TelegramAlerter  # noqa: PLC0415
-        from finalayze.core.telegram_bot import TelegramBotHandler  # noqa: PLC0415
+        from finalayze.api.alerts import TelegramAlerter  # noqa: PLC0415
+        from finalayze.api.telegram_bot import TelegramBotHandler  # noqa: PLC0415
 
         alerter = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
         global _bot_handler_instance  # noqa: PLW0603

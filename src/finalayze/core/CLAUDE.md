@@ -1,10 +1,18 @@
 # Core
 
 ## Purpose
-Foundation layer providing shared schemas, exceptions, event bus, work modes, database access, Telegram alerts, and the top-level trading loop orchestrator.
+Foundation layer providing shared schemas, exceptions, event bus, work modes, database access, and validation logging.
 
 ## Layer
-Layer 0 -- Types & Schemas. Zero project imports allowed (only Pydantic, stdlib). Exception: `trading_loop.py` and `alerts.py` are architecturally Layer 6 but live here for import convenience; they use deferred/TYPE_CHECKING imports for upper layers.
+Layer 0 -- Types & Schemas. Zero project imports allowed (only Pydantic, stdlib).
+
+## Moved Modules (Phase 22)
+- `trading_loop.py` -> `orchestration/trading_loop.py` (Layer 5)
+- `bond_cycle.py` -> `orchestration/bond_cycle.py` (Layer 5)
+- `alerts.py` -> `api/alerts.py` (Layer 6)
+- `telegram_bot.py` -> `api/telegram_bot.py` (Layer 6)
+
+Backward-compatible shim modules remain in core/ for existing imports.
 
 ## Key Files
 - `schemas.py` -- Pydantic models: Candle, Signal, TradeResult, PortfolioState, BacktestResult, NewsArticle, SentimentResult, BondInfo, MarketContext, IterationMetrics, LayerConfig
@@ -12,11 +20,12 @@ Layer 0 -- Types & Schemas. Zero project imports allowed (only Pydantic, stdlib)
 - `modes.py` -- WorkMode enum (DEBUG/SANDBOX/TEST/REAL) and ModeManager
 - `events.py` -- Redis Streams event bus (EventBus with XADD/XREAD/consumer groups)
 - `db.py` -- SQLAlchemy 2.0 async engine/session factory, `get_db()` FastAPI dependency
-- `alerts.py` -- TelegramAlerter with priority queue, rate limiting (20 msg/min), batching
-- `trading_loop.py` -- APScheduler-based live loop: news_cycle, strategy_cycle, daily_reset
 - `models.py` -- SQLAlchemy ORM models
 - `clock.py` -- Time abstraction for testability
 - `validation_logger.py` -- Structured cycle logging for validation
+- `kill_switch.py` -- Emergency shutdown orchestrator (Layer 0/6 boundary)
+- `layer_ledger.py` -- Per-layer cash, positions, drawdown tracking
+- `bond_math.py` -- Bond math utilities (YTM, duration, convexity)
 
 ## Public API
 - `Signal`, `Candle`, `TradeResult`, `PortfolioState`, `BacktestResult` -- core data types
@@ -25,8 +34,6 @@ Layer 0 -- Types & Schemas. Zero project imports allowed (only Pydantic, stdlib)
 - `FinalayzeError` and subclasses -- exception hierarchy
 - `WorkMode`, `ModeManager` -- operating mode control
 - `EventBus` -- async Redis Streams pub/sub
-- `TelegramAlerter` -- alert dispatch (no-op when token is empty)
-- `TradingLoop` -- live trading orchestrator
 
 ## Contracts
 - Input: All timestamps must be UTC-aware (validated by Pydantic validators)
@@ -39,6 +46,6 @@ Layer 0 -- Types & Schemas. Zero project imports allowed (only Pydantic, stdlib)
 
 ## Common Patterns
 - `from __future__ import annotations` in every file
-- Use `TYPE_CHECKING` guard for imports from upper layers (especially in alerts.py, trading_loop.py)
+- Use `TYPE_CHECKING` guard for imports from upper layers
 - All Pydantic models use `model_config = ConfigDict(frozen=True)`
 - Decimal for monetary values, float for probabilities/ratios

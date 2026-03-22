@@ -42,7 +42,6 @@ if TYPE_CHECKING:
     from finalayze.analysis.impact_estimator import ImpactEstimator
     from finalayze.analysis.news_analyzer import NewsAnalyzer
     from finalayze.api.alerts import TelegramAlerter
-    from finalayze.orchestration.bond_cycle import BondCycleProcessor
     from finalayze.core.events import EventBus
     from finalayze.core.schemas import Candle, PortfolioState, SentimentResult, Signal  # noqa: F401
     from finalayze.data.cache import RedisCache
@@ -56,6 +55,7 @@ if TYPE_CHECKING:
     from finalayze.markets.instruments import Instrument, InstrumentRegistry
     from finalayze.ml.registry import MLModelRegistry
     from finalayze.monitoring.sandbox_monitor import SandboxMonitorService
+    from finalayze.orchestration.bond_cycle import BondCycleProcessor
     from finalayze.risk.circuit_breaker import (
         CircuitBreaker,
         CircuitLevel,
@@ -92,7 +92,7 @@ class TradingLoop:
     Designed for TEST / SANDBOX modes. Will gate on WorkMode in real mode.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0915
         self,
         settings: Settings,
         fetchers: dict[str, object],
@@ -1279,7 +1279,7 @@ class TradingLoop:
         broker = self._broker_router.route(market_id)
         return side == "SELL" and broker.has_position(symbol)
 
-    def _process_instrument(  # noqa: PLR0915
+    def _process_instrument(  # noqa: PLR0911, PLR0912, PLR0915
         self,
         instrument: Instrument,
         market_id: str,

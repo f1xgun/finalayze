@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 if TYPE_CHECKING:
-    from finalayze.core.alerts import TelegramAlerter
+    from finalayze.api.alerts import TelegramAlerter
     from finalayze.orchestration.trading_loop import TradingLoop
     from finalayze.execution.broker_router import BrokerRouter
     from finalayze.risk.circuit_breaker import CircuitBreaker
@@ -76,7 +76,7 @@ class KillSwitch:
         Returns:
             KillSwitchResult summarizing what was done and how long it took.
         """
-        from finalayze.core.alerts import AlertPriority  # noqa: PLC0415
+        from finalayze.api.alerts import AlertPriority  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
 
         start = time.monotonic()

@@ -18,7 +18,7 @@ import structlog
 from finalayze.core.schemas import BondPositionRecord
 
 if TYPE_CHECKING:
-    from finalayze.core.alerts import TelegramAlerter
+    from finalayze.api.alerts import TelegramAlerter
     from finalayze.core.models import LayerLedgerModel
     from finalayze.core.schemas import PortfolioState
     from finalayze.markets.instruments import InstrumentRegistry

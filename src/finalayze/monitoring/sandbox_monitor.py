@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 if TYPE_CHECKING:
-    from finalayze.core.alerts import TelegramAlerter
+    from finalayze.api.alerts import TelegramAlerter
 
 _log = structlog.get_logger()
 

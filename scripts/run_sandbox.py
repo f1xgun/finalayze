@@ -313,7 +313,7 @@ cross_market_breaker = CrossMarketCircuitBreaker(
 
 # ── Alerting ─────────────────────────────────────────────────────────────
 
-from finalayze.core.alerts import TelegramAlerter
+from finalayze.api.alerts import TelegramAlerter
 
 alerter = TelegramAlerter(
     bot_token=settings.telegram_bot_token,

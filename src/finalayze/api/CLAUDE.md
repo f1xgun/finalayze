@@ -17,11 +17,15 @@ Layer 6 -- API / Dashboard. Can import from all layers 0-5.
 - `v1/news.py` -- News feed, sentiment analysis endpoints
 - `v1/auth.py` -- API key authentication middleware
 - `v1/telegram.py` -- Telegram webhook router for bot commands
+- `alerts.py` -- TelegramAlerter with priority queue, rate limiting (20 msg/min), batching (moved from core/ in Phase 22)
+- `telegram_bot.py` -- TelegramBotHandler for webhook-based commands: /status, /breakers, /stop, /kill, /gonogo (moved from core/ in Phase 22)
 - `metrics.py` -- Prometheus MetricsCollector: portfolio equity, trade counts, slippage histograms, drawdown gauges, signal counters
 
 ## Public API
 - `api_router` -- FastAPI APIRouter with all v1 endpoints mounted
 - `MetricsCollector` -- static methods for recording Prometheus metrics (set_portfolio_equity, record_trade, etc.)
+- `TelegramAlerter` -- alert dispatch (no-op when token is empty)
+- `TelegramBotHandler` -- webhook command handler
 
 ## Contracts
 - Input: HTTP requests with API key auth, JSON request bodies

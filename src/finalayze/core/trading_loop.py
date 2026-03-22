@@ -1,8 +1,16 @@
 """Backward-compatibility shim -- trading_loop moved to finalayze.orchestration.trading_loop.
 
-This module re-exports all public names so that existing ``from finalayze.core.trading_loop import ...``
-statements continue to work. New code should import from ``finalayze.orchestration.trading_loop``.
+Makes ``finalayze.core.trading_loop`` an alias for the canonical module so that
+both ``from finalayze.core.trading_loop import X`` and
+``patch("finalayze.core.trading_loop.X")`` continue to work transparently.
 """
 
-from finalayze.orchestration.trading_loop import *  # noqa: F401, F403
-from finalayze.orchestration.trading_loop import TradingLoop as TradingLoop  # explicit re-export
+from __future__ import annotations
+
+import sys
+
+import finalayze.orchestration.trading_loop as _canonical
+
+# Register the canonical module under the old name so that all attribute
+# lookups (including unittest.mock.patch targets) resolve correctly.
+sys.modules[__name__] = _canonical

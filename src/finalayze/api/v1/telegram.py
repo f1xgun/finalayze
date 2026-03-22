@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, HTTPException, Request
 
 if TYPE_CHECKING:
-    from finalayze.core.telegram_bot import TelegramBotHandler
+    from finalayze.api.telegram_bot import TelegramBotHandler
 
 
 def create_telegram_router(

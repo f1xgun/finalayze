@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 if TYPE_CHECKING:
-    from finalayze.core.alerts import TelegramAlerter
+    from finalayze.api.alerts import TelegramAlerter
     from finalayze.monitoring.sandbox_monitor import CycleMetrics
 
 _log = structlog.get_logger()
@@ -96,6 +96,6 @@ class AnomalyDetector:
         msg = f"Sandbox anomaly: {metric} = {value:.2f} (threshold: {threshold:.2f})"
         _log.warning("sandbox_anomaly", metric=metric, value=value, threshold=threshold)
         if self._alerter is not None:
-            from finalayze.core.alerts import AlertPriority  # noqa: PLC0415
+            from finalayze.api.alerts import AlertPriority  # noqa: PLC0415
 
             self._alerter.send_alert(msg, priority=AlertPriority.CRITICAL)
