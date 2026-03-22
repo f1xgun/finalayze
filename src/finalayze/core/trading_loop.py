@@ -1581,14 +1581,17 @@ class TradingLoop:
         """Check if current price has breached the stop-loss for a symbol.
 
         If price <= stop_loss_price, submit a SELL market order immediately.
-        Clears the stop-loss entry after triggering to avoid duplicate orders.
+        The entire check-sell-remove is atomic under _stop_loss_lock to prevent
+        double-sell from concurrent threads (CONC-01).
         """
         with self._stop_loss_lock:
             stop_price = self._stop_loss_prices.get(symbol)
-        if stop_price is None:
-            return
+            if stop_price is None:
+                return
 
-        if current_price <= stop_price:
+            if current_price > stop_price:
+                return
+
             _log.warning(
                 "_check_stop_losses: stop triggered for %s @ %s (stop=%s)",
                 symbol,
@@ -1603,13 +1606,14 @@ class TradingLoop:
                 try:
                     broker.submit_order(order)
                 except Exception:
-                    _log.exception("_check_stop_losses: failed to submit stop-loss for %s", symbol)
-                    return
+                    _log.exception(
+                        "_check_stop_losses: failed to submit stop-loss for %s", symbol
+                    )
+                    return  # Don't clear stop price -- retry next cycle
                 # Update Kelly with stop-loss exit
                 self._update_kelly(symbol, current_price)
-            # Clear stop-loss after trigger
-            with self._stop_loss_lock:
-                self._stop_loss_prices.pop(symbol, None)
+            # Clear stop-loss after successful trigger (or zero position)
+            self._stop_loss_prices.pop(symbol, None)
 
     def _update_kelly(self, symbol: str, fill_price: Decimal) -> None:
         """Compute P&L from entry price and feed a TradeRecord to RollingKelly."""
