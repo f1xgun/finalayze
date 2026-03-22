@@ -4,12 +4,13 @@
 
 - ✅ **v1.0 MOEX MVP** -- Phases 1-7 (shipped 2026-03-19)
 - ✅ **v2.0 MOEX Profitability** -- Phases 8-14 (shipped 2026-03-21)
-- **v3.0 Production Readiness** -- Phases 15-18 (in progress)
+- ✅ **v3.0 Production Readiness** -- Phases 15-18 (shipped 2026-03-22)
+- 🚧 **v4.0 Architecture Hardening** -- Phases 19-22 (in progress)
 
 ## Phases
 
 <details>
-<summary>v1.0 MOEX MVP (Phases 1-7) -- SHIPPED 2026-03-19</summary>
+<summary>✅ v1.0 MOEX MVP (Phases 1-7) -- SHIPPED 2026-03-19</summary>
 
 - [x] Phase 1: MOEX Equity Foundation (2/2 plans) -- completed 2026-03-14
 - [x] Phase 2: MOEX Equity Validation (3/3 plans) -- completed 2026-03-14
@@ -24,7 +25,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 </details>
 
 <details>
-<summary>v2.0 MOEX Profitability (Phases 8-14) -- SHIPPED 2026-03-21</summary>
+<summary>✅ v2.0 MOEX Profitability (Phases 8-14) -- SHIPPED 2026-03-21</summary>
 
 - [x] Phase 8: Data Foundation (3/3 plans) -- completed 2026-03-20
 - [x] Phase 9: Strategy Wiring (2/2 plans) -- completed 2026-03-20
@@ -38,83 +39,94 @@ Full details: `.planning/milestones/v2.0-ROADMAP.md`
 
 </details>
 
-### v3.0 Production Readiness (In Progress)
+<details>
+<summary>✅ v3.0 Production Readiness (Phases 15-18) -- SHIPPED 2026-03-22</summary>
 
-**Milestone Goal:** Validate system in sandbox with formalized metrics, define go/no-go gate criteria calibrated from backtest distributions, launch on minimal capital with tightened risk limits, and operate with production health monitoring and emergency kill switch.
+- [x] Phase 15: Schemas, Config, and Rollout Foundation (2/2 plans) -- completed 2026-03-21
+- [x] Phase 16: Sandbox Monitoring and Go/No-Go Gate (3/3 plans) -- completed 2026-03-21
+- [x] Phase 17: Production Operations (3/3 plans) -- completed 2026-03-21
+- [x] Phase 18: Dashboard and API Integration (2/2 plans) -- completed 2026-03-21
 
-- [x] **Phase 15: Schemas, Config, and Rollout Foundation** - Pydantic schemas, RolloutPhase config, DB migration, rollout risk wiring (completed 2026-03-21)
-- [x] **Phase 16: Sandbox Monitoring and Go/No-Go Gate** - Metric collection, slippage capture, gate evaluation, anomaly detection (completed 2026-03-21)
-- [x] **Phase 17: Production Operations** - Kill switch, health monitoring, alert taxonomy, Telegram bot commands (completed 2026-03-21)
-- [x] **Phase 18: Dashboard and API Integration** - Streamlit sandbox page, REST endpoints for gate and metrics (completed 2026-03-21)
+Full details: `.planning/milestones/v3.0-ROADMAP.md`
+
+</details>
+
+### v4.0 Architecture Hardening (In Progress)
+
+**Milestone Goal:** Fix critical architectural defects discovered in comprehensive audit -- concurrency bugs that risk money loss, async correctness issues that cause silent degradation, error handling gaps that mask failures, and dependency layer violations that hinder maintainability.
+
+- [ ] **Phase 19: Concurrency Safety and Integration Fixes** - Fix money-losing race conditions, lock misuse, session leaks, and v3.0 integration gaps
+- [ ] **Phase 20: Async Correctness and Resource Management** - Fix blocking calls in async paths, coroutine discard bugs, and resource lifecycle gaps
+- [ ] **Phase 21: Error Handling Hardening** - Fix NaN propagation, exception suppression, silent degradation, and API security gap
+- [ ] **Phase 22: Dependency Layer Cleanup** - Extract orchestrators from core/, assign module layers, remove dead infrastructure
 
 ## Phase Details
 
-### Phase 15: Schemas, Config, and Rollout Foundation
-**Goal**: System has all data types, rollout configuration, and risk layer wiring needed by monitoring and operations phases
-**Depends on**: Phase 14 (v2.0 complete)
-**Requirements**: ROLL-01, ROLL-02, ROLL-03
+### Phase 19: Concurrency Safety and Integration Fixes
+**Goal**: Trading system has no race conditions that can cause double-sells, deadlocks, or connection pool exhaustion -- and v3.0 integration gaps are closed
+**Depends on**: Phase 18 (v3.0 complete)
+**Requirements**: CONC-01, CONC-02, CONC-03, CONC-04, INT-01, INT-02
 **Success Criteria** (what must be TRUE):
-  1. Operator can set FINALAYZE_ROLLOUT_PHASE=MINIMAL and the system starts with 3% max position, 1% daily loss, 2% DD auto-stop limits enforced by PreTradeChecker and CircuitBreaker
-  2. Operator can switch rollout phase to STANDARD or FULL and risk limits adjust accordingly without code changes
-  3. Capital ladder validation script confirms that position sizing produces valid MOEX lot sizes at 50K, 150K, 500K, and 2.5M RUB capital tiers
-**Plans:** 2/2 plans complete
+  1. Stop-loss sell for a symbol acquires an async lock before checking position and releasing after order submission -- concurrent signals for the same symbol are serialized, eliminating double-sell
+  2. TinkoffBroker uses asyncio.Lock for all async code paths -- threading.Lock is not used anywhere in async broker methods
+  3. TinkoffBroker event loop initialization uses a thread-safe pattern (e.g., asyncio.get_running_loop or lazy init with threading.Lock guard) -- no TOCTOU race on _loop attribute
+  4. macro_cache database session uses async-with context manager and issues rollback on exception -- connection pool leak under error conditions is eliminated
+  5. Telegram /gonogo command imports and runs successfully (OPS-04 integration fix verified by test)
+  6. HealthMonitor.update_feed_timestamp() is called by TradingLoop after each data fetch cycle -- feed freshness monitoring is operational
+**Plans**: TBD
 
-Plans:
-- [ ] 15-01-PLAN.md -- RolloutPhase enum, RolloutLimits dataclass, Settings integration
-- [ ] 15-02-PLAN.md -- Risk wiring (PreTradeChecker/CircuitBreaker/LossLimitTracker), cross-market bug fix, capital ladder script
-
-### Phase 16: Sandbox Monitoring and Go/No-Go Gate
-**Goal**: System collects sandbox execution metrics and produces a structured go/no-go evaluation report with calibrated thresholds
-**Depends on**: Phase 15
-**Requirements**: MON-01, MON-02, MON-04, GATE-01, GATE-02
+### Phase 20: Async Correctness and Resource Management
+**Goal**: All async code paths are non-blocking and all external resources (gRPC channels, HTTP clients) have explicit lifecycle management
+**Depends on**: Phase 19
+**Requirements**: ASYNC-01, ASYNC-02, ASYNC-03, ASYNC-04, RES-01, RES-02, RES-03
 **Success Criteria** (what must be TRUE):
-  1. After each TradingLoop cycle, SandboxMonitorService persists trade count, P&L, equity, fill rate, and uptime to TimescaleDB and metrics are queryable
-  2. Slippage is captured as the difference between expected price at signal time and fill price at execution, measured in basis points, for every sandbox order
-  3. GoNoGoReporter evaluates 8 configurable thresholds (uptime, fill rate, max DD, trades, signal frequency, critical errors, slippage, signal divergence) and returns a structured PROCEED/DEFER/ABORT report with per-criterion pass/fail
-  4. Gate thresholds are derived from walk-forward backtest distribution percentiles stored in config, not hardcoded round numbers
-  5. Anomaly detector sends Telegram alerts when drawdown exceeds 2-sigma, fill rate drops below 90%, or slippage exceeds 50bps
-**Plans:** 3/3 plans complete
+  1. gRPC reconnect uses asyncio.sleep or a background task instead of time.sleep(300) -- APScheduler thread pool is never starved by a 5-minute blocking sleep
+  2. RetryPolicy.aexecute() checks if fn() returns a coroutine and awaits it -- coroutine objects are never silently discarded
+  3. Portfolio API endpoint wraps synchronous broker calls with run_in_executor -- FastAPI event loop latency is not blocked by broker I/O
+  4. SandboxMonitorService persistence does not call asyncio.run() from within APScheduler threads -- no nested event loop errors
+  5. TinkoffBroker.close() logs cleanup exceptions with structured context (resource name, error type) instead of bare except: pass
+  6. TinkoffFetcher gRPC calls have a configurable timeout parameter (default 60s) -- no indefinite hang on unresponsive gRPC server
+  7. httpx clients in alerts.py and fetcher modules are explicitly closed during application shutdown
+**Plans**: TBD
 
-Plans:
-- [ ] 16-01-PLAN.md -- SandboxMonitorService, AnomalyDetector, SandboxMetricRow ORM, migration 005
-- [ ] 16-02-PLAN.md -- GoNoGoReporter, gate thresholds YAML, derivation script
-- [ ] 16-03-PLAN.md -- TradingLoop wiring, TelegramAlerter extensions, main.py integration
-
-### Phase 17: Production Operations
-**Goal**: Operator can monitor system health, receive tiered alerts without fatigue, and halt all trading within 30 seconds via kill switch
-**Depends on**: Phase 15
-**Requirements**: OPS-01, OPS-02, OPS-03, OPS-04
+### Phase 21: Error Handling Hardening
+**Goal**: Failures in GARCH, EventBus, data fetchers, and trading loops are visible through logs and alerts -- no silent degradation or NaN propagation
+**Depends on**: Phase 19
+**Requirements**: ERR-01, ERR-02, ERR-03, ERR-04, ERR-05, API-01
 **Success Criteria** (what must be TRUE):
-  1. Kill switch cancels all pending broker orders, stops TradingLoop scheduler, escalates CircuitBreakers to LIQUIDATE, and sends Telegram CRITICAL alert -- all within 30 seconds of activation
-  2. Health monitor pings broker, checks feed freshness, and reports status every 5 minutes; two consecutive missed heartbeats trigger an automatic Telegram alert
-  3. Alerts follow a 3-tier taxonomy (critical/warning/info) integrated into TelegramMonitor priority queue so that critical alerts are never delayed by info-level messages
-  4. Telegram bot responds to /kill (triggers kill switch) and /gonogo (runs gate report and returns structured result)
-**Plans:** 3/3 plans complete
+  1. When GARCH model fitting fails or produces NaN, the volatility module returns historical rolling volatility as fallback and logs a warning -- NaN never reaches the position sizing pipeline
+  2. EventBus.create_group catches only redis.ResponseError (not bare Exception) -- unexpected Redis errors are logged and re-raised
+  3. TinkoffFetcher logs failures with structured fields: ticker, timeframe, error_type, and request_id -- operators can filter and diagnose data issues
+  4. TradingLoop increments a consecutive error counter per cycle type; after N consecutive failures (configurable, default 3), a Telegram warning alert is sent
+  5. BondCycleProcessor logs escalated error after threshold consecutive gRPC failures per cycle -- systematic broker issues are visible in logs
+  6. POST /kill endpoint requires X-API-Key header matching a configured secret -- unauthenticated requests receive 401
+**Plans**: TBD
 
-Plans:
-- [ ] 17-01-PLAN.md -- KillSwitch orchestrator, HealthMonitor service, Settings extensions
-- [ ] 17-02-PLAN.md -- Telegram /kill and /gonogo commands, REST endpoints, main.py wiring
-
-### Phase 18: Dashboard and API Integration
-**Goal**: Sandbox validation progress and gate results are accessible via Streamlit dashboard and REST API
-**Depends on**: Phase 16, Phase 17
-**Requirements**: MON-03, GATE-03
+### Phase 22: Dependency Layer Cleanup
+**Goal**: core/ contains only Layer 0 types and schemas; orchestration logic lives in a dedicated module; dead infrastructure is removed
+**Depends on**: Phase 20, Phase 21
+**Requirements**: LAYER-01, LAYER-02, LAYER-03, LAYER-04, DEAD-01, DEAD-02
 **Success Criteria** (what must be TRUE):
-  1. Streamlit sandbox dashboard page displays real-time trade log, equity curve, uptime percentage, fill rate, and slippage histogram sourced from TimescaleDB metrics
-  2. REST endpoint GET /sandbox/gonogo returns a JSON pass/fail report with per-criterion breakdown matching GoNoGoReporter output
-**Plans:** 2/2 plans complete
-
-Plans:
-- [ ] 18-01-PLAN.md -- REST endpoint /sandbox/gonogo with Pydantic response models, tests, main.py wiring
-- [ ] 18-02-PLAN.md -- Streamlit sandbox dashboard page (5 sections), sandbox metrics endpoint, API client extensions
+  1. trading_loop.py and bond_cycle.py are importable from a new orchestration/ module (not core/) -- core/ has no files that import from Layer 3+ modules
+  2. telegram_bot.py and alerts.py reside under an appropriate Layer 6 module -- core/ does not contain API/dashboard layer code
+  3. MetricsCollector is injected into TradingLoop via constructor parameter -- TradingLoop has no direct import of monitoring/ or api/ modules
+  4. backtest/ and monitoring/ modules have layer assignments documented in their respective CLAUDE.md files and confirmed by import analysis
+  5. Event bus stream constants (STREAM_MARKET_DATA, STREAM_SIGNALS, STREAM_EXECUTION) are either wired to actual consumers or removed -- no dead pub/sub infrastructure
+  6. Stub API endpoints (/signals, /trades, /news, /ml/status) either serve real data or return 501 Not Implemented with a clear message
+**Plans**: TBD
 
 ## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 19 -> 20 -> 21 -> 22
+Note: Phase 21 depends on Phase 19 (not 20), so 20 and 21 could run in parallel if needed.
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
 | 1-7 | v1.0 | 22/22 | Complete | 2026-03-19 |
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
-| 15. Schemas, Config, Rollout | 2/2 | Complete    | 2026-03-21 | - |
-| 16. Monitoring and Gate | 3/3 | Complete    | 2026-03-21 | - |
-| 17. Production Operations | 3/3 | Complete    | 2026-03-21 | - |
-| 18. Dashboard and API | 2/2 | Complete    | 2026-03-21 | - |
+| 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
+| 19. Concurrency Safety | v4.0 | 0/TBD | Not started | - |
+| 20. Async and Resources | v4.0 | 0/TBD | Not started | - |
+| 21. Error Handling | v4.0 | 0/TBD | Not started | - |
+| 22. Layer Cleanup | v4.0 | 0/TBD | Not started | - |
