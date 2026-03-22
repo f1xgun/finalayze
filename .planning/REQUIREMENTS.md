@@ -18,7 +18,7 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 
 - [ ] **ASYNC-01**: gRPC reconnect uses non-blocking sleep (asyncio.sleep or dedicated thread) — APScheduler thread pool not starved
 - [ ] **ASYNC-02**: RetryPolicy.aexecute() properly awaits coroutine functions — no silent coroutine discard
-- [ ] **ASYNC-03**: Portfolio API endpoint runs broker calls via run_in_executor — FastAPI event loop not blocked
+- [x] **ASYNC-03**: Portfolio API endpoint runs broker calls via run_in_executor — FastAPI event loop not blocked
 - [ ] **ASYNC-04**: sandbox_monitor uses async-safe persistence — no asyncio.run() blocking APScheduler threads
 
 ### Error Handling
@@ -47,8 +47,8 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 
 ### Resource Management
 
-- [ ] **RES-01**: TinkoffBroker.close() logs cleanup failures instead of suppressing all exceptions
-- [ ] **RES-02**: TinkoffFetcher gRPC calls have configurable timeout (default 60s) — no indefinite hang
+- [x] **RES-01**: TinkoffBroker.close() logs cleanup failures instead of suppressing all exceptions
+- [x] **RES-02**: TinkoffFetcher gRPC calls have configurable timeout (default 60s) — no indefinite hang
 - [x] **RES-03**: httpx clients in alerts.py and fetchers are explicitly closed on shutdown
 
 ### Integration Bug Fixes
@@ -88,7 +88,7 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 | CONC-04 | Phase 19 | Complete |
 | ASYNC-01 | Phase 20 | Pending |
 | ASYNC-02 | Phase 20 | Pending |
-| ASYNC-03 | Phase 20 | Pending |
+| ASYNC-03 | Phase 20 | Complete |
 | ASYNC-04 | Phase 20 | Pending |
 | ERR-01 | Phase 21 | Pending |
 | ERR-02 | Phase 21 | Pending |
@@ -102,8 +102,8 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 | API-01 | Phase 21 | Pending |
 | DEAD-01 | Phase 22 | Pending |
 | DEAD-02 | Phase 22 | Pending |
-| RES-01 | Phase 20 | Pending |
-| RES-02 | Phase 20 | Pending |
+| RES-01 | Phase 20 | Complete |
+| RES-02 | Phase 20 | Complete |
 | RES-03 | Phase 20 | Complete |
 | INT-01 | Phase 19 | Complete |
 | INT-02 | Phase 19 | Complete |
