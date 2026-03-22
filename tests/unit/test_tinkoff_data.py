@@ -275,3 +275,68 @@ class TestTinkoffFetcherSandboxClientSelection:
         mock_cls.assert_called_once()
         call_kwargs = mock_cls.call_args
         assert "sandbox" not in str(call_kwargs)  # production target
+
+
+class TestTinkoffFetcherErrorTypeLogging:
+    """ERR-03: Verify structured error logging includes error_type field."""
+
+    def test_fetch_candles_logs_error_type(self) -> None:
+        """fetch_candles exception log must include error_type field."""
+        with patch(
+            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
+            side_effect=RuntimeError("gRPC error"),
+        ), patch("finalayze.data.fetchers.tinkoff_data._log") as mock_log:
+            fetcher = _make_fetcher()
+            start = datetime(2024, 1, 1, tzinfo=UTC)
+            end = datetime(2024, 2, 1, tzinfo=UTC)
+            with pytest.raises(DataFetchError):
+                fetcher.fetch_candles(SBER_SYMBOL, start, end)
+            mock_log.exception.assert_called_once()
+            call_kwargs = mock_log.exception.call_args
+            assert call_kwargs[1].get("error_type") == "RuntimeError"
+            assert call_kwargs[1].get("timeframe") == "1d"
+
+    def test_fetch_all_bonds_logs_error_type(self) -> None:
+        """fetch_all_bonds exception log must include error_type field."""
+        with patch(
+            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
+            side_effect=ConnectionError("connection lost"),
+        ), patch("finalayze.data.fetchers.tinkoff_data._log") as mock_log:
+            fetcher = _make_fetcher()
+            result = fetcher.fetch_all_bonds()
+            assert result == []
+            mock_log.exception.assert_called_once()
+            call_kwargs = mock_log.exception.call_args
+            assert call_kwargs[1].get("error_type") == "ConnectionError"
+
+    def test_fetch_amortization_logs_error_type(self) -> None:
+        """fetch_amortization_schedule exception log must include error_type and instrument_id."""
+        with patch(
+            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
+            side_effect=ValueError("bad data"),
+        ), patch("finalayze.data.fetchers.tinkoff_data._log") as mock_log:
+            fetcher = _make_fetcher()
+            result = fetcher.fetch_amortization_schedule("test-instrument-id")
+            assert result == []
+            mock_log.exception.assert_called_once()
+            call_kwargs = mock_log.exception.call_args
+            assert call_kwargs[1].get("error_type") == "ValueError"
+            assert call_kwargs[1].get("instrument_id") == "test-instrument-id"
+
+    def test_fetch_bond_candles_logs_error_type(self) -> None:
+        """fetch_bond_candles exception log must include error_type and figi."""
+        from datetime import date as date_type
+
+        with patch(
+            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
+            side_effect=TimeoutError("timed out"),
+        ), patch("finalayze.data.fetchers.tinkoff_data._log") as mock_log:
+            fetcher = _make_fetcher()
+            result = fetcher.fetch_bond_candles(
+                "BBG00FAKE123", date_type(2024, 1, 1), date_type(2024, 2, 1)
+            )
+            assert result == []
+            mock_log.exception.assert_called_once()
+            call_kwargs = mock_log.exception.call_args
+            assert call_kwargs[1].get("error_type") == "TimeoutError"
+            assert call_kwargs[1].get("figi") == "BBG00FAKE123"

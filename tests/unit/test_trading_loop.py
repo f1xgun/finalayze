@@ -796,3 +796,119 @@ class TestSandboxMonitorIntegration:
         metrics = monitor.on_cycle_complete.call_args[0][0]
         assert hasattr(metrics, "trade_count")
         assert hasattr(metrics, "equity_rub")
+
+
+class TestConsecutiveCycleErrors:
+    """ERR-04: TradingLoop sends Telegram alert after 3 consecutive cycle failures."""
+
+    MAX_CONSECUTIVE = 3
+
+    def _make_buy_signal(self) -> Signal:
+        return Signal(
+            strategy_name="combined",
+            symbol=SYMBOL_AAPL,
+            market_id=MARKET_US,
+            segment_id=SEGMENT_US_TECH,
+            direction=SignalDirection.BUY,
+            confidence=0.75,
+            features={},
+            reasoning="test signal",
+        )
+
+    def test_equity_counter_increments_on_failure(self) -> None:
+        """_consecutive_equity_errors increments on _strategy_cycle failure."""
+        loop = _make_trading_loop()
+        assert loop._consecutive_equity_errors == 0  # type: ignore[attr-defined]
+        with (
+            patch.object(loop, "_strategy_cycle_impl", side_effect=RuntimeError("boom")),
+            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+        assert loop._consecutive_equity_errors == 1  # type: ignore[attr-defined]
+
+    def test_equity_counter_resets_on_success(self) -> None:
+        """_consecutive_equity_errors resets to 0 on successful cycle."""
+        loop = _make_trading_loop()
+        loop._consecutive_equity_errors = 2  # type: ignore[attr-defined]
+        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+        assert loop._consecutive_equity_errors == 0  # type: ignore[attr-defined]
+
+    def test_equity_alert_after_3_consecutive_failures(self) -> None:
+        """Telegram alert sent after 3 consecutive equity cycle failures."""
+        loop = _make_trading_loop()
+        with (
+            patch.object(loop, "_strategy_cycle_impl", side_effect=RuntimeError("boom")),
+            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            for _ in range(self.MAX_CONSECUTIVE):
+                loop._strategy_cycle()  # type: ignore[attr-defined]
+        loop._alerter.send_alert.assert_called()  # type: ignore[attr-defined]
+        alert_msg = loop._alerter.send_alert.call_args[0][0]  # type: ignore[attr-defined]
+        assert "consecutive" in alert_msg.lower()
+        assert "equity" in alert_msg.lower()
+
+    def test_equity_no_alert_before_threshold(self) -> None:
+        """No Telegram alert before reaching 3 consecutive failures."""
+        loop = _make_trading_loop()
+        with (
+            patch.object(loop, "_strategy_cycle_impl", side_effect=RuntimeError("boom")),
+            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            for _ in range(self.MAX_CONSECUTIVE - 1):
+                loop._strategy_cycle()  # type: ignore[attr-defined]
+        loop._alerter.send_alert.assert_not_called()  # type: ignore[attr-defined]
+
+    def test_bond_counter_increments_on_failure(self) -> None:
+        """_consecutive_bond_errors increments on _bond_cycle failure."""
+        loop = _make_trading_loop()
+        bond_proc = MagicMock()
+        bond_proc.run_cycle.side_effect = RuntimeError("bond fail")
+        loop._bond_processor = bond_proc  # type: ignore[attr-defined]
+        assert loop._consecutive_bond_errors == 0  # type: ignore[attr-defined]
+        with (
+            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            patch("finalayze.core.trading_loop.is_moex_trading_day", return_value=True),
+        ):
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._bond_cycle()  # type: ignore[attr-defined]
+        assert loop._consecutive_bond_errors == 1  # type: ignore[attr-defined]
+
+    def test_bond_counter_resets_on_success(self) -> None:
+        """_consecutive_bond_errors resets to 0 on successful bond cycle."""
+        from finalayze.core.bond_cycle import BondCycleResult
+
+        loop = _make_trading_loop()
+        bond_proc = MagicMock()
+        bond_proc.run_cycle.return_value = BondCycleResult()
+        loop._bond_processor = bond_proc  # type: ignore[attr-defined]
+        loop._consecutive_bond_errors = 2  # type: ignore[attr-defined]
+        with (
+            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            patch("finalayze.core.trading_loop.is_moex_trading_day", return_value=True),
+        ):
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            loop._bond_cycle()  # type: ignore[attr-defined]
+        assert loop._consecutive_bond_errors == 0  # type: ignore[attr-defined]
+
+    def test_bond_alert_after_3_consecutive_failures(self) -> None:
+        """Telegram alert sent after 3 consecutive bond cycle failures."""
+        loop = _make_trading_loop()
+        bond_proc = MagicMock()
+        bond_proc.run_cycle.side_effect = RuntimeError("bond fail")
+        loop._bond_processor = bond_proc  # type: ignore[attr-defined]
+        with (
+            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            patch("finalayze.core.trading_loop.is_moex_trading_day", return_value=True),
+        ):
+            mock_dt.now.return_value = _MARKET_OPEN_DT
+            for _ in range(self.MAX_CONSECUTIVE):
+                loop._bond_cycle()  # type: ignore[attr-defined]
+        loop._alerter.send_alert.assert_called()  # type: ignore[attr-defined]
+        alert_msg = loop._alerter.send_alert.call_args[0][0]  # type: ignore[attr-defined]
+        assert "consecutive" in alert_msg.lower()
+        assert "bond" in alert_msg.lower()
