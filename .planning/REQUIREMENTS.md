@@ -25,9 +25,9 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 
 - [x] **ERR-01**: GARCH failure returns historical volatility fallback (not NaN) and logs warning — NaN never propagates to sizing pipeline
 - [x] **ERR-02**: EventBus.create_group suppresses only redis.ResponseError — Redis connectivity failures are logged and raised
-- [ ] **ERR-03**: Tinkoff data fetcher failures are logged with structured context (ticker, timeframe, error type)
-- [ ] **ERR-04**: trading_loop consecutive error counter triggers Telegram alert after N failures — silent degradation detected
-- [ ] **ERR-05**: bond_cycle per-cycle error counter escalates to error log after threshold — systematic gRPC failures visible
+- [x] **ERR-03**: Tinkoff data fetcher failures are logged with structured context (ticker, timeframe, error type)
+- [x] **ERR-04**: trading_loop consecutive error counter triggers Telegram alert after N failures — silent degradation detected
+- [x] **ERR-05**: bond_cycle per-cycle error counter escalates to error log after threshold — systematic gRPC failures visible
 
 ### Dependency Layers
 
@@ -92,9 +92,9 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 | ASYNC-04 | Phase 20 | Complete |
 | ERR-01 | Phase 21 | Complete |
 | ERR-02 | Phase 21 | Complete |
-| ERR-03 | Phase 21 | Pending |
-| ERR-04 | Phase 21 | Pending |
-| ERR-05 | Phase 21 | Pending |
+| ERR-03 | Phase 21 | Complete |
+| ERR-04 | Phase 21 | Complete |
+| ERR-05 | Phase 21 | Complete |
 | LAYER-01 | Phase 22 | Pending |
 | LAYER-02 | Phase 22 | Pending |
 | LAYER-03 | Phase 22 | Pending |

@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: Architecture Hardening
-status: Ready to execute
-stopped_at: Completed 21-01-PLAN.md
-last_updated: "2026-03-22T21:01:10.091Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 21-02-PLAN.md
+last_updated: "2026-03-22T21:03:46.181Z"
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Project State
@@ -58,6 +58,7 @@ Key carry-forward decisions for v4.0:
 - [Phase 21]: GARCH returns NaN only for < 2 data points; all other failures use rolling vol fallback
 - [Phase 21]: EventBus uses try/except redis.ResponseError instead of contextlib.suppress(Exception)
 - [Phase 21]: POST /kill endpoint now requires X-API-Key authentication
+- [Phase 21]: Used AlertPriority.CRITICAL for consecutive failure alerts; per-layer error tracking in BondCycleProcessor; threshold of 3 consecutive failures
 
 ### Pending Todos
 
@@ -71,6 +72,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T21:01:10.088Z
-Stopped at: Completed 21-01-PLAN.md
+Last session: 2026-03-22T21:03:46.178Z
+Stopped at: Completed 21-02-PLAN.md
 Resume file: None

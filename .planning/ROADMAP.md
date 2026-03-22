@@ -57,7 +57,7 @@ Full details: `.planning/milestones/v3.0-ROADMAP.md`
 
 - [x] **Phase 19: Concurrency Safety and Integration Fixes** - Fix money-losing race conditions, lock misuse, session leaks, and v3.0 integration gaps (completed 2026-03-22)
 - [x] **Phase 20: Async Correctness and Resource Management** - Fix blocking calls in async paths, coroutine discard bugs, and resource lifecycle gaps (completed 2026-03-22)
-- [ ] **Phase 21: Error Handling Hardening** - Fix NaN propagation, exception suppression, silent degradation, and API security gap
+- [x] **Phase 21: Error Handling Hardening** - Fix NaN propagation, exception suppression, silent degradation, and API security gap (completed 2026-03-22)
 - [ ] **Phase 22: Dependency Layer Cleanup** - Extract orchestrators from core/, assign module layers, remove dead infrastructure
 
 ## Phase Details
@@ -110,7 +110,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 21-01-PLAN.md -- GARCH NaN fallback, EventBus exception narrowing, /kill auth
-- [ ] 21-02-PLAN.md -- TinkoffFetcher structured logging, TradingLoop and BondCycle consecutive error counters
+- [x] 21-02-PLAN.md -- TinkoffFetcher structured logging, TradingLoop and BondCycle consecutive error counters
 
 ### Phase 22: Dependency Layer Cleanup
 **Goal**: core/ contains only Layer 0 types and schemas; orchestration logic lives in a dedicated module; dead infrastructure is removed
@@ -138,5 +138,5 @@ Note: Phase 21 depends on Phase 19 (not 20), so 20 and 21 could run in parallel 
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
 | 19. Concurrency Safety | v4.0 | 2/2 | Complete    | 2026-03-22 |
 | 20. Async and Resources | v4.0 | 3/3 | Complete    | 2026-03-22 |
-| 21. Error Handling | v4.0 | 1/2 | In Progress|  |
+| 21. Error Handling | v4.0 | 2/2 | Complete   | 2026-03-22 |
 | 22. Layer Cleanup | v4.0 | 0/TBD | Not started | - |
