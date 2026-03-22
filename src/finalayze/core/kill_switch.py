@@ -25,7 +25,7 @@ import structlog
 
 if TYPE_CHECKING:
     from finalayze.core.alerts import TelegramAlerter
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.orchestration.trading_loop import TradingLoop
     from finalayze.execution.broker_router import BrokerRouter
     from finalayze.risk.circuit_breaker import CircuitBreaker
 

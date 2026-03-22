@@ -163,7 +163,7 @@ class BondBacktestEngine:
         # OFZ rotation check
         rotation_active = False
         if layer_configs is not None:
-            from finalayze.core.bond_cycle import apply_ofz_rotation  # noqa: PLC0415
+            from finalayze.orchestration.bond_cycle import apply_ofz_rotation  # noqa: PLC0415
 
             _as_of = as_of_date or (all_dates[-1] if all_dates else datetime.now(tz=UTC).date())
             effective = apply_ofz_rotation(layer_configs, _as_of)

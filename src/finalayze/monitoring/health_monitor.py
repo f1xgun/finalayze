@@ -19,7 +19,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 if TYPE_CHECKING:
     from finalayze.core.alerts import TelegramAlerter
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.orchestration.trading_loop import TradingLoop
     from finalayze.execution.broker_router import BrokerRouter
 
 _log = structlog.get_logger()

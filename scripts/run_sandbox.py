@@ -391,7 +391,7 @@ if settings.ml_enabled:
 import datetime as _dt
 from decimal import Decimal as _Decimal
 
-from finalayze.core.bond_cycle import BondCycleProcessor
+from finalayze.orchestration.bond_cycle import BondCycleProcessor
 from finalayze.core.layer_ledger import LayerLedger
 from finalayze.core.schemas import DEFAULT_LAYER_CONFIGS, PortfolioLayer
 from finalayze.data.fetchers.cbr import MacroContextProvider
@@ -506,7 +506,7 @@ _log.info(
 
 # ── Trading Loop ─────────────────────────────────────────────────────────
 
-from finalayze.core.trading_loop import TradingLoop
+from finalayze.orchestration.trading_loop import TradingLoop
 
 loop = TradingLoop(
     settings=settings,
