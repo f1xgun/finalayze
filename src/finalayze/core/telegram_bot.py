@@ -269,9 +269,9 @@ class TelegramBotHandler:
             return
 
         try:
-            from finalayze.core.db import async_session_factory  # noqa: PLC0415
+            from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
 
-            async with async_session_factory() as session:
+            async with get_async_session_factory()() as session:
                 report = await self._go_no_go_reporter.evaluate(session)
         except Exception:
             _log.exception("telegram_gonogo_db_failed")

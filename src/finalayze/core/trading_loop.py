@@ -121,6 +121,7 @@ class TradingLoop:
         entity_extractor: EntityExtractor | None = None,
         combined_analyzer: CombinedNewsAnalyzer | None = None,
         sandbox_monitor: SandboxMonitorService | None = None,
+        health_monitor: object | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
@@ -154,6 +155,7 @@ class TradingLoop:
         self._entity_extractor = entity_extractor
         self._combined_analyzer = combined_analyzer
         self._sandbox_monitor = sandbox_monitor
+        self._health_monitor = health_monitor
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -1288,6 +1290,12 @@ class TradingLoop:
             _log.exception("_strategy_cycle: failed to fetch candles for %s", instrument.symbol)
             self._cycle_errors_caught += 1
             return
+
+        # Update health monitor feed timestamp on successful fetch
+        if candles and self._health_monitor is not None:
+            _update = getattr(self._health_monitor, "update_feed_timestamp", None)
+            if _update is not None:
+                _update(now)
 
         # #157/#182: Check stop-losses against latest candle price
         if candles:

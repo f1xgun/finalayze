@@ -140,6 +140,9 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                         alerter=alerter_ref,
                     )
                     set_health_monitor(health_monitor)
+                    # Wire health monitor into trading loop for feed timestamp updates
+                    if _trading_loop_instance is not None:
+                        _trading_loop_instance._health_monitor = health_monitor  # type: ignore[union-attr]
                     health_monitor.start()
                     log.info("health_monitor_started")
 
