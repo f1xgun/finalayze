@@ -84,34 +84,30 @@ class TestOpenRouterClient:
         assert mock_cls.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_retry_succeeds_on_second_attempt(self) -> None:
-        """When SDK raises LLMError once, client retries and returns on second attempt."""
+    async def test_rate_limit_error_propagates_immediately(self) -> None:
+        """RateLimitError propagates without retry (FallbackLLMClient handles it)."""
         with patch("openai.AsyncOpenAI") as mock_cls:
             mock_openai = MagicMock()
             mock_openai.chat = MagicMock()
             mock_openai.chat.completions = MagicMock()
 
-            mock_choice = MagicMock()
-            mock_choice.message.content = _RESPONSE
-            mock_completion = MagicMock()
-            mock_completion.choices = [mock_choice]
-
-            # First call raises openai.OpenAIError, second succeeds
-            mock_openai.chat.completions.create = AsyncMock(
-                side_effect=[openai.OpenAIError("transient"), mock_completion]
+            rate_resp = MagicMock(status_code=429, headers={})
+            rate_err = openai.RateLimitError(
+                message="rate limited", response=rate_resp, body=None
             )
+            mock_openai.chat.completions.create = AsyncMock(side_effect=rate_err)
             mock_cls.return_value = mock_openai
 
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                client = OpenRouterClient(api_key="test-key", model="llama-3")
-                result = await client.complete(_PROMPT, _SYSTEM)
+            client = OpenRouterClient(api_key="test-key", model="llama-3")
+            with pytest.raises(LLMRateLimitError):
+                await client.complete(_PROMPT, _SYSTEM)
 
-        assert result == _RESPONSE
-        assert mock_openai.chat.completions.create.call_count == _EXPECTED_CALLS_ON_SECOND_ATTEMPT
+        # Only 1 call — no retries, fast-fail for FallbackLLMClient to handle
+        assert mock_openai.chat.completions.create.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_raises_llm_error_after_all_retries_exhausted(self) -> None:
-        """When SDK raises on every attempt, LLMError is raised after 3 attempts."""
+    async def test_raises_llm_error_immediately_no_retry(self) -> None:
+        """Non-rate-limit errors (402, 500) fail fast without retry."""
         with patch("openai.AsyncOpenAI") as mock_cls:
             mock_openai = MagicMock()
             mock_openai.chat = MagicMock()
@@ -121,16 +117,16 @@ class TestOpenRouterClient:
             )
             mock_cls.return_value = mock_openai
 
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                client = OpenRouterClient(api_key="test-key", model="llama-3")
-                with pytest.raises(LLMError):
-                    await client.complete(_PROMPT, _SYSTEM)
+            client = OpenRouterClient(api_key="test-key", model="llama-3")
+            with pytest.raises(LLMError):
+                await client.complete(_PROMPT, _SYSTEM)
 
-        assert mock_openai.chat.completions.create.call_count == _MAX_RETRIES
+        # Only 1 call — no retries for non-rate-limit errors
+        assert mock_openai.chat.completions.create.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_rate_limit_retries_and_raises_after_exhaustion(self) -> None:
-        """LLMRateLimitError is retried and re-raised after all attempts fail."""
+    async def test_rate_limit_raises_immediately_no_retry(self) -> None:
+        """LLMRateLimitError propagates immediately — no retries."""
         with patch("openai.AsyncOpenAI") as mock_cls:
             mock_openai = MagicMock()
             mock_openai.chat = MagicMock()
@@ -140,14 +136,12 @@ class TestOpenRouterClient:
             )
             mock_cls.return_value = mock_openai
 
-            with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-                client = OpenRouterClient(api_key="test-key", model="llama-3")
-                with pytest.raises(LLMRateLimitError):
-                    await client.complete(_PROMPT, _SYSTEM)
+            client = OpenRouterClient(api_key="test-key", model="llama-3")
+            with pytest.raises(LLMRateLimitError):
+                await client.complete(_PROMPT, _SYSTEM)
 
-        # Sleep called between retries: _MAX_RETRIES - 1 times
-        assert mock_sleep.call_count == _MAX_RETRIES - 1
-        assert mock_openai.chat.completions.create.call_count == _MAX_RETRIES
+        # Single call, no retries
+        assert mock_openai.chat.completions.create.call_count == 1
 
 
 # ── #147: Bounded LRU cache ──────────────────────────────────────────────────
@@ -210,19 +204,28 @@ class TestBoundedLRUCache:
 class TestCreateLLMClientFactory:
     def test_openrouter_provider_returns_openrouter_client(self) -> None:
         with patch("openai.AsyncOpenAI"):
-            settings = Settings(llm_provider="openrouter", llm_api_key="key", llm_model="model")
+            settings = Settings(
+                llm_provider="openrouter", llm_api_key="key", llm_model="model",
+                llm_fallback_provider="", llm_fallback_api_key="",
+            )
             client = create_llm_client(settings)
         assert isinstance(client, OpenRouterClient)
 
     def test_openai_provider_returns_openai_client(self) -> None:
         with patch("openai.AsyncOpenAI"):
-            settings = Settings(llm_provider="openai", llm_api_key="key", llm_model="gpt-4o")
+            settings = Settings(
+                llm_provider="openai", llm_api_key="key", llm_model="gpt-4o",
+                llm_fallback_provider="", llm_fallback_api_key="",
+            )
             client = create_llm_client(settings)
         assert isinstance(client, OpenAIClient)
 
     def test_anthropic_provider_returns_anthropic_client(self) -> None:
         with patch("anthropic.AsyncAnthropic"):
-            settings = Settings(llm_provider="anthropic", llm_api_key="key", llm_model="claude-3")
+            settings = Settings(
+                llm_provider="anthropic", llm_api_key="key", llm_model="claude-3",
+                llm_fallback_provider="", llm_fallback_api_key="",
+            )
             client = create_llm_client(settings)
         assert isinstance(client, AnthropicClient)
 

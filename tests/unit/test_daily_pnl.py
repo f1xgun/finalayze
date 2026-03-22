@@ -222,8 +222,8 @@ class TestEquitySnapshotPersistence:
         assert loop._baseline_equities["moex"] == Decimal("3000000")
 
     @pytest.mark.asyncio
-    async def test_load_baseline_async_no_rows_leaves_unchanged(self) -> None:
-        """_load_baseline_async with no rows for today leaves _baseline_equities unchanged."""
+    async def test_load_baseline_async_no_rows_raises_value_error(self) -> None:
+        """_load_baseline_async with no rows for today raises ValueError."""
         from finalayze.core.trading_loop import TradingLoop
 
         loop = MagicMock(spec=TradingLoop)
@@ -242,11 +242,8 @@ class TestEquitySnapshotPersistence:
         with patch(
             "finalayze.core.db.get_async_session_factory",
             return_value=mock_factory,
-        ):
+        ), pytest.raises(ValueError, match="no snapshots for today"):
             await TradingLoop._load_baseline_async(loop)
-
-        # Should remain unchanged
-        assert loop._baseline_equities == original
 
     def test_load_baseline_from_db_called_in_start(self) -> None:
         """_load_baseline_from_db is called during start() before scheduler begins."""

@@ -77,6 +77,14 @@ _FEATURE_NAMES = {
     "brent_zscore_60d",
     "real_rate_zscore",
     "market_turnover_zscore",
+    # Macro features (default 0.0 when no macro data provided)
+    "cbr_rate_level",
+    "cbr_rate_delta",
+    "cbr_direction_cut",
+    "cbr_direction_hike",
+    "usdrub_return",
+    "usdrub_vol",
+    "brent_return",
 }
 _N_FEATURES = len(_FEATURE_NAMES)
 

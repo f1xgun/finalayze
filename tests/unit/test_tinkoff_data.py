@@ -175,8 +175,8 @@ class TestTinkoffFetcherSandboxClientSelection:
         mock_client.market_data.get_candles = AsyncMock(return_value=mock_response)
         return mock_client
 
-    def test_sandbox_true_uses_sandbox_client(self) -> None:
-        """When sandbox=True, _get_client must use AsyncSandboxClient."""
+    def test_sandbox_true_uses_sandbox_target(self) -> None:
+        """When sandbox=True, AsyncClient must be called with sandbox target."""
         fake_candle = _make_fake_candle(
             open_u=OPEN_PRICE,
             open_n=0,
@@ -191,26 +191,20 @@ class TestTinkoffFetcherSandboxClientSelection:
         )
 
         mock_client = self._make_client_mock(fake_candle)
-        mock_sandbox_cls = MagicMock(return_value=mock_client)
-        mock_prod_cls = MagicMock()
+        mock_cls = MagicMock(return_value=mock_client)
 
-        with (
-            patch(
-                "finalayze.data.fetchers.tinkoff_data.AsyncSandboxClient",
-                mock_sandbox_cls,
-            ),
-            patch(
-                "finalayze.data.fetchers.tinkoff_data.AsyncClient",
-                mock_prod_cls,
-            ),
+        with patch(
+            "finalayze.data.fetchers.tinkoff_data.AsyncClient",
+            mock_cls,
         ):
             fetcher = _make_fetcher(sandbox=True)
             start = datetime(2024, 1, 1, tzinfo=UTC)
             end = datetime(2024, 2, 1, tzinfo=UTC)
             fetcher.fetch_candles(SBER_SYMBOL, start, end, timeframe="1d")
 
-        mock_sandbox_cls.assert_called_once()
-        mock_prod_cls.assert_not_called()
+        mock_cls.assert_called_once()
+        call_kwargs = mock_cls.call_args
+        assert "sandbox" in str(call_kwargs)  # target contains "sandbox"
 
     def test_sandbox_false_uses_production_client(self) -> None:
         """When sandbox=False, _get_client must use AsyncClient (production)."""
@@ -228,23 +222,17 @@ class TestTinkoffFetcherSandboxClientSelection:
         )
 
         mock_client = self._make_client_mock(fake_candle)
-        mock_prod_cls = MagicMock(return_value=mock_client)
-        mock_sandbox_cls = MagicMock()
+        mock_cls = MagicMock(return_value=mock_client)
 
-        with (
-            patch(
-                "finalayze.data.fetchers.tinkoff_data.AsyncClient",
-                mock_prod_cls,
-            ),
-            patch(
-                "finalayze.data.fetchers.tinkoff_data.AsyncSandboxClient",
-                mock_sandbox_cls,
-            ),
+        with patch(
+            "finalayze.data.fetchers.tinkoff_data.AsyncClient",
+            mock_cls,
         ):
             fetcher = _make_fetcher(sandbox=False)
             start = datetime(2024, 1, 1, tzinfo=UTC)
             end = datetime(2024, 2, 1, tzinfo=UTC)
             fetcher.fetch_candles(SBER_SYMBOL, start, end, timeframe="1d")
 
-        mock_prod_cls.assert_called_once()
-        mock_sandbox_cls.assert_not_called()
+        mock_cls.assert_called_once()
+        call_kwargs = mock_cls.call_args
+        assert "sandbox" not in str(call_kwargs)  # production target

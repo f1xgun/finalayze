@@ -88,6 +88,7 @@ def _make_registry() -> InstrumentRegistry:
             market_id=MARKET_US,
             name="Apple Inc.",
             segment_id=SEGMENT_US_TECH,
+            figi="BBG_TEST_AAPL",
         )
     )
     return reg
@@ -97,6 +98,7 @@ def _make_settings(**overrides: object) -> MagicMock:
     from config.settings import Settings
 
     from finalayze.core.modes import WorkMode
+    from finalayze.risk.rollout import ROLLOUT_LIMITS, RolloutLimits
 
     s = MagicMock(spec=Settings)
     s.news_cycle_minutes = 30
@@ -108,6 +110,11 @@ def _make_settings(**overrides: object) -> MagicMock:
     s.daily_loss_limit_pct = 0.03
     s.max_cross_market_exposure_pct = 0.80
     s.mode = WorkMode.SANDBOX
+    from finalayze.core.modes import RolloutPhase
+
+    s.effective_risk_limits = MagicMock(
+        return_value=ROLLOUT_LIMITS[RolloutPhase.FULL],
+    )
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -847,19 +854,19 @@ class TestTinkoffBrokerAccountId:
         mock_result.executed_order_price.units = 270
         mock_result.executed_order_price.nano = 0
 
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run") as mock_run:
+        broker = TinkoffBroker(
+            token="fake_token",  # noqa: S106
+            registry=registry,
+            sandbox=True,
+        )
+        with patch.object(broker, "_run_async") as mock_run:
             # First call: get_accounts, Second call: post_order
             mock_run.side_effect = [mock_accounts_response, mock_result]
-            broker = TinkoffBroker(
-                token="fake_token",  # noqa: S106
-                registry=registry,
-                sandbox=True,
-            )
             order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
             result = broker.submit_order(order)
 
         # Account ID should have been fetched and used (not empty string)
-        assert broker._account_id == "test-account-123"  # type: ignore[attr-defined]
+        assert broker._account_id == "test-account-123"
         assert result.filled is True
 
     def test_portfolio_uses_fetched_account_id(self) -> None:
@@ -882,13 +889,13 @@ class TestTinkoffBrokerAccountId:
         mock_portfolio.total_amount_portfolio.nano = 0
         mock_portfolio.positions = []
 
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run") as mock_run:
+        broker = TinkoffBroker(
+            token="fake_token",  # noqa: S106
+            registry=registry,
+            sandbox=True,
+        )
+        with patch.object(broker, "_run_async") as mock_run:
             mock_run.side_effect = [mock_accounts_response, mock_portfolio]
-            broker = TinkoffBroker(
-                token="fake_token",  # noqa: S106
-                registry=registry,
-                sandbox=True,
-            )
             broker.get_portfolio()
 
-        assert broker._account_id == "acct-456"  # type: ignore[attr-defined]
+        assert broker._account_id == "acct-456"

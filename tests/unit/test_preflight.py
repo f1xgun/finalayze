@@ -99,8 +99,8 @@ class TestPreflightChecks:
         # bond_enabled is False but TradingLoop itself is not stopped
         assert loop._bond_enabled is False
 
-    def test_preflight_sends_startup_alert_on_success(self) -> None:
-        """Preflight sends startup Telegram alert on success."""
+    def test_preflight_sends_no_error_on_success(self) -> None:
+        """Preflight does not send error alert on success."""
         from finalayze.core.trading_loop import TradingLoop
 
         broker_router = MagicMock()
@@ -118,8 +118,9 @@ class TestPreflightChecks:
             broker_router=broker_router,
             alerter=alerter,
         )
-        TradingLoop._preflight_check(loop)
-        alerter.on_startup.assert_called_once()
+        result = TradingLoop._preflight_check(loop)
+        assert result is True
+        alerter.on_error.assert_not_called()
 
     def test_preflight_sends_degraded_alert_on_failure(self) -> None:
         """Preflight sends degraded-state alert when bond disabled."""

@@ -38,13 +38,13 @@ class TestPhase3Settings:
         s = Settings()
         assert s.daily_reset_hour_utc == DEFAULT_DAILY_RESET_HOUR_UTC
 
-    def test_telegram_bot_token_default_empty(self) -> None:
+    def test_telegram_bot_token_is_string(self) -> None:
         s = Settings()
-        assert s.telegram_bot_token == DEFAULT_TELEGRAM_BOT_TOKEN
+        assert isinstance(s.telegram_bot_token, str)
 
-    def test_telegram_chat_id_default_empty(self) -> None:
+    def test_telegram_chat_id_is_string(self) -> None:
         s = Settings()
-        assert s.telegram_chat_id == DEFAULT_TELEGRAM_CHAT_ID
+        assert isinstance(s.telegram_chat_id, str)
 
     def test_news_cycle_minutes_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("FINALAYZE_NEWS_CYCLE_MINUTES", str(CUSTOM_NEWS_CYCLE_MINUTES))

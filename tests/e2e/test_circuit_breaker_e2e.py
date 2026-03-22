@@ -191,12 +191,12 @@ def _make_trading_loop(
     cross_breaker = CrossMarketCircuitBreaker()
 
     us_fetcher = MagicMock()
-    us_fetcher.fetch_candles.side_effect = lambda symbol, market_id, limit: (
+    us_fetcher.fetch_candles.side_effect = lambda symbol, **kwargs: (
         _make_buy_signal_candles(symbol, "us")
     )
 
     moex_fetcher = MagicMock()
-    moex_fetcher.fetch_candles.side_effect = lambda symbol, market_id, limit: (
+    moex_fetcher.fetch_candles.side_effect = lambda symbol, **kwargs: (
         _make_buy_signal_candles(symbol, "moex")
     )
 
@@ -244,7 +244,21 @@ def _make_trading_loop(
 
 @pytest.fixture
 def instrument_registry() -> InstrumentRegistry:
-    return build_default_registry()
+    from finalayze.markets.instruments import Instrument
+
+    registry = build_default_registry()
+    # Patch US instruments with dummy FIGIs so _process_instrument doesn't skip them
+    for inst in list(registry._instruments.values()):
+        if inst.market_id == "us" and not inst.figi:
+            registry._instruments[inst.symbol] = Instrument(
+                symbol=inst.symbol,
+                market_id=inst.market_id,
+                name=inst.name,
+                segment_id=inst.segment_id,
+                lot_size=inst.lot_size,
+                figi=f"BBG_TEST_{inst.symbol}",
+            )
+    return registry
 
 
 @pytest.fixture

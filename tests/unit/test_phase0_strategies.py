@@ -124,12 +124,13 @@ class TestMOEXPresetRecalibration:
         bb_std = data["strategies"]["mean_reversion"]["params"]["bb_std_dev"]
         assert bb_std == 2.8  # noqa: PLR2004
 
-    def test_ru_energy_momentum_disabled(self) -> None:
-        """ru_energy momentum should be disabled (MOEX is mean-reverting)."""
+    def test_ru_energy_momentum_enabled(self) -> None:
+        """ru_energy momentum should be enabled with sector-specific weight."""
         data = _load_preset("ru_energy")
         momentum_cfg = data["strategies"]["momentum"]
-        assert momentum_cfg["enabled"] is False
-        assert momentum_cfg["weight"] == 0.00  # noqa: PLR2004
+        assert momentum_cfg["enabled"] is True
+        _expected_weight = 0.17
+        assert momentum_cfg["weight"] == _expected_weight
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
     def test_ru_normalize_firing(self, segment_id: str) -> None:
@@ -154,22 +155,27 @@ class TestMOEXPresetRecalibration:
         assert mr_params["rsi_overbought_mr"] == rsi_expected
 
     def test_ru_blue_chips_weights(self) -> None:
-        """ru_blue_chips: momentum disabled, mean_reversion=0.30 (MR-focused for MOEX)."""
+        """ru_blue_chips: momentum enabled, balanced weights."""
         data = _load_preset("ru_blue_chips")
         strategies = data["strategies"]
-        assert strategies["momentum"]["enabled"] is False
-        assert strategies["mean_reversion"]["weight"] == 0.30  # noqa: PLR2004
+        assert strategies["momentum"]["enabled"] is True
+        _expected_momentum_weight = 0.09
+        _expected_mr_weight = 0.09
+        assert strategies["momentum"]["weight"] == _expected_momentum_weight
+        assert strategies["mean_reversion"]["weight"] == _expected_mr_weight
 
     def test_ru_energy_mean_reversion_weight(self) -> None:
-        """ru_energy: mean_reversion=0.30 (MR-focused for MOEX)."""
+        """ru_energy: mean_reversion=0.10."""
         data = _load_preset("ru_energy")
-        assert data["strategies"]["mean_reversion"]["weight"] == 0.30  # noqa: PLR2004
+        _expected_mr_weight = 0.10
+        assert data["strategies"]["mean_reversion"]["weight"] == _expected_mr_weight
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
     def test_ru_min_combined_confidence(self, segment_id: str) -> None:
-        """All RU presets: min_combined_confidence=0.30 (lowered for ADX routing)."""
+        """All RU presets: min_combined_confidence=0.38 (tuned for ADX routing)."""
         data = _load_preset(segment_id)
-        assert data["min_combined_confidence"] == 0.30  # noqa: PLR2004
+        _expected_confidence = 0.38
+        assert data["min_combined_confidence"] == _expected_confidence
 
     @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
     def test_ru_trend_filter_enabled(self, segment_id: str) -> None:

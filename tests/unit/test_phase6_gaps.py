@@ -375,39 +375,44 @@ class TestTinkoffRunAsync:
 
     def test_creates_new_loop_when_none(self) -> None:
         from finalayze.execution.tinkoff_broker import TinkoffBroker
+        from finalayze.markets.instruments import DEFAULT_MOEX_INSTRUMENTS, InstrumentRegistry
 
-        broker = MagicMock(spec=TinkoffBroker)
-        broker._loop = None
+        registry = InstrumentRegistry()
+        for inst in DEFAULT_MOEX_INSTRUMENTS:
+            registry.register(inst)
+        broker = TinkoffBroker(token="fake", registry=registry, sandbox=True)  # noqa: S106
+        assert broker._loop is None
 
         async def _dummy() -> str:
             return "ok"
 
-        with patch("asyncio.new_event_loop") as mock_new_loop:
-            mock_loop = MagicMock()
-            mock_loop.run_until_complete.return_value = "ok"
-            mock_loop.is_closed.return_value = False
-            mock_new_loop.return_value = mock_loop
-
-            result = TinkoffBroker._run_async(broker, _dummy())
-            mock_new_loop.assert_called_once()
-            assert result == "ok"
+        result = TinkoffBroker._run_async(broker, _dummy())
+        assert result == "ok"
+        assert broker._loop is not None
+        # Cleanup
+        broker._loop.call_soon_threadsafe(broker._loop.stop)
 
     def test_reuses_existing_loop(self) -> None:
         from finalayze.execution.tinkoff_broker import TinkoffBroker
+        from finalayze.markets.instruments import DEFAULT_MOEX_INSTRUMENTS, InstrumentRegistry
 
-        broker = MagicMock(spec=TinkoffBroker)
-        mock_loop = MagicMock()
-        mock_loop.is_closed.return_value = False
-        mock_loop.run_until_complete.return_value = "ok"
-        broker._loop = mock_loop
+        registry = InstrumentRegistry()
+        for inst in DEFAULT_MOEX_INSTRUMENTS:
+            registry.register(inst)
+        broker = TinkoffBroker(token="fake", registry=registry, sandbox=True)  # noqa: S106
 
         async def _dummy() -> str:
             return "ok"
 
-        with patch("asyncio.new_event_loop") as mock_new:
-            result = TinkoffBroker._run_async(broker, _dummy())
-            mock_new.assert_not_called()
-            assert result == "ok"
+        # First call creates the loop
+        TinkoffBroker._run_async(broker, _dummy())
+        first_loop = broker._loop
+
+        # Second call reuses it
+        TinkoffBroker._run_async(broker, _dummy())
+        assert broker._loop is first_loop
+        # Cleanup
+        broker._loop.call_soon_threadsafe(broker._loop.stop)
 
 
 class TestMakeBondBroker:

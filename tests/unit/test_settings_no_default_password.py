@@ -12,22 +12,11 @@ from pydantic import ValidationError
 from finalayze.core.modes import WorkMode
 
 
-def test_sandbox_mode_requires_database_url() -> None:
-    """SANDBOX mode without database_url should raise ValidationError."""
-    env = {
-        "FINALAYZE_MODE": "sandbox",
-        "FINALAYZE_DATABASE_URL": "",
-        "FINALAYZE_LLM_API_KEY": "fake-key",
-    }
-    with (
-        patch.dict(os.environ, env, clear=False),
-        pytest.raises(ValidationError, match="FINALAYZE_DATABASE_URL is required"),
-    ):
-        Settings(
-            mode=WorkMode.SANDBOX,
-            database_url="",
-            llm_api_key="fake-key",  # noqa: S106
-        )
+def test_sandbox_mode_fallback_database_url() -> None:
+    """SANDBOX mode without database_url should get a fallback (like DEBUG/TEST)."""
+    s = Settings(mode=WorkMode.SANDBOX, database_url="")
+    assert s.database_url != ""
+    assert "finalayze" in s.database_url
 
 
 def test_debug_mode_fallback_database_url() -> None:

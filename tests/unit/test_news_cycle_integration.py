@@ -85,13 +85,14 @@ class TestNewsCycleRss:
         rss.fetch_news.return_value = articles
 
         loop = _make_loop(rss_fetcher=rss)
-        # Mock _process_news_article to track calls
-        loop._process_news_article = MagicMock()  # type: ignore[attr-defined]
+        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         rss.fetch_news.assert_called_once()
-        assert loop._process_news_article.call_count == 2  # type: ignore[attr-defined]
+        loop._process_articles_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        assert len(processed) == 2
 
     def test_rss_failure_does_not_block_telegram(self) -> None:
         """RSS failure does not prevent Telegram fetch."""
@@ -103,12 +104,14 @@ class TestNewsCycleRss:
         tg.fetch_recent_messages = AsyncMock(return_value=tg_articles)
 
         loop = _make_loop(rss_fetcher=rss, telegram_reader=tg)
-        loop._process_news_article = MagicMock()  # type: ignore[attr-defined]
+        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         # Telegram articles should still be processed
-        assert loop._process_news_article.call_count == 1  # type: ignore[attr-defined]
+        loop._process_articles_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        assert len(processed) == 1
 
 
 class TestNewsCycleTelegram:
@@ -121,11 +124,13 @@ class TestNewsCycleTelegram:
         tg.fetch_recent_messages = AsyncMock(return_value=tg_articles)
 
         loop = _make_loop(telegram_reader=tg)
-        loop._process_news_article = MagicMock()  # type: ignore[attr-defined]
+        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
-        assert loop._process_news_article.call_count == 1  # type: ignore[attr-defined]
+        loop._process_articles_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        assert len(processed) == 1
 
     def test_telegram_failure_does_not_block_rss(self) -> None:
         """Telegram failure does not prevent RSS fetch."""
@@ -137,12 +142,14 @@ class TestNewsCycleTelegram:
         tg.fetch_recent_messages = AsyncMock(side_effect=RuntimeError("TG down"))
 
         loop = _make_loop(rss_fetcher=rss, telegram_reader=tg)
-        loop._process_news_article = MagicMock()  # type: ignore[attr-defined]
+        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         # RSS articles should still be processed
-        assert loop._process_news_article.call_count == 1  # type: ignore[attr-defined]
+        loop._process_articles_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        assert len(processed) == 1
 
 
 class TestEntityExtraction:
@@ -158,14 +165,14 @@ class TestEntityExtraction:
         extractor.extract = AsyncMock(return_value=["SBER"])
 
         loop = _make_loop(rss_fetcher=rss, entity_extractor=extractor)
-        loop._process_news_article = MagicMock()  # type: ignore[attr-defined]
+        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         extractor.extract.assert_called_once()
-        # The processed article should have symbols populated
-        processed_article = loop._process_news_article.call_args[0][0]  # type: ignore[attr-defined]
-        assert processed_article.symbols == ["SBER"]
+        # The processed articles should have symbols populated
+        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        assert processed[0].symbols == ["SBER"]
 
 
 class TestNewsCycleInterval:
@@ -220,9 +227,11 @@ class TestLegacyFallback:
         legacy.fetch_news.return_value = legacy_articles
 
         loop = _make_loop(news_fetcher=legacy)
-        loop._process_news_article = MagicMock()  # type: ignore[attr-defined]
+        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         legacy.fetch_news.assert_called_once()
-        assert loop._process_news_article.call_count == 1  # type: ignore[attr-defined]
+        loop._process_articles_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        assert len(processed) == 1

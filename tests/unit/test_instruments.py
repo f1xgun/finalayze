@@ -26,7 +26,7 @@ UNKNOWN_MARKET = "unknown"
 
 EXPECTED_DEFAULT_SYMBOLS = {"AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "SPY", "QQQ"}
 EXPECTED_DEFAULT_US_COUNT = 7
-EXPECTED_DEFAULT_COUNT = 37  # 7 US + 18 MOEX stocks + 12 OFZ bonds
+EXPECTED_DEFAULT_COUNT = 68  # 7 US + 49 MOEX stocks + 12 OFZ bonds
 EXPECTED_COUNT_AFTER_TWO = 2
 
 
@@ -113,41 +113,30 @@ def test_len() -> None:
     assert len(registry) == EXPECTED_COUNT_AFTER_TWO
 
 
-EXPECTED_MOEX_STOCK_COUNT = 18
+EXPECTED_MOEX_STOCK_COUNT = 49
 EXPECTED_MOEX_OFZ_COUNT = 12
-EXPECTED_MOEX_INSTRUMENT_COUNT = 30  # 18 stocks + 12 OFZ bonds
+EXPECTED_MOEX_INSTRUMENT_COUNT = 61  # 49 stocks + 12 OFZ bonds
+# Number of statically-defined instruments with hardcoded FIGIs
+EXPECTED_MOEX_WITH_FIGI = 31  # 19 stocks with FIGI + 12 OFZ bonds
 EXPECTED_MOEX_SYMBOLS = {
-    "SBER",
-    "SBERP",
-    "GAZP",
-    "LKOH",
-    "GMKN",
-    "YNDX",
-    "NVTK",
-    "ROSN",
-    "VTBR",
-    "TATN",
-    "SNGS",
-    "ALRS",
-    "MGNT",
-    "POLY",
-    "IRAO",
-    "TRNFP",
-    "OZON",
-    "MOEX",
+    # Original blue chips
+    "SBER", "SBERP", "GAZP", "LKOH", "GMKN", "YNDX", "NVTK", "ROSN",
+    "VTBR", "TATN", "SNGS", "ALRS", "MGNT", "POLY", "IRAO", "TRNFP",
+    "OZON", "MOEX",
+    # Finance / Tech / Energy expansions
+    "TCSG", "VKCO", "CBOM", "BSPB", "HHRU", "POSI",
+    "SNGSP", "SIBN", "TATNP",
+    # Metals & Mining
+    "CHMF", "NLMK", "MAGN", "PLZL", "RUAL", "MTLR",
+    # Consumer / Telecom / Utilities
+    "FIVE", "FIXP", "LENT", "MTSS", "RTKM",
+    "HYDR", "FEES", "MSNG", "UPRO",
+    # Construction / Chemicals / Transport
+    "PIKK", "SMLT", "PHOR", "AKRN", "AFLT", "FLOT", "NMTP",
     # OFZ bonds
-    "SU26238RMFS4",
-    "SU26239RMFS2",
-    "SU26241RMFS8",
-    "SU26243RMFS4",
-    "SU26244RMFS2",
-    "SU26246RMFS7",
-    "SU26252RMFS5",
-    "SU26253RMFS3",
-    "SU29007RMFS0",
-    "SU29008RMFS8",
-    "SU29009RMFS6",
-    "SU29010RMFS4",
+    "SU26238RMFS4", "SU26239RMFS2", "SU26241RMFS8", "SU26243RMFS4",
+    "SU26244RMFS2", "SU26246RMFS7", "SU26252RMFS5", "SU26253RMFS3",
+    "SU29007RMFS0", "SU29008RMFS8", "SU29009RMFS6", "SU29010RMFS4",
 }
 
 
@@ -158,11 +147,15 @@ def test_default_registry_includes_moex_instruments() -> None:
     assert len(moex_instruments) == EXPECTED_MOEX_INSTRUMENT_COUNT
 
 
-def test_moex_instruments_have_figi() -> None:
-    """All MOEX instruments must have a non-empty FIGI identifier."""
+def test_moex_instruments_with_static_figi() -> None:
+    """MOEX instruments with hardcoded FIGIs must have non-empty values.
+
+    New instruments added without FIGIs get them resolved at runtime via T-Bank API.
+    """
     registry = build_default_registry()
-    for inst in registry.list_by_market("moex"):
-        assert inst.figi is not None, f"{inst.symbol} missing FIGI"
+    with_figi = [inst for inst in registry.list_by_market("moex") if inst.figi is not None]
+    assert len(with_figi) == EXPECTED_MOEX_WITH_FIGI
+    for inst in with_figi:
         assert inst.figi != "", f"{inst.symbol} has empty FIGI"
 
 

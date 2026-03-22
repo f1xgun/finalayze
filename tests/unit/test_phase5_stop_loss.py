@@ -35,16 +35,6 @@ def _make_trading_loop() -> MagicMock:
     """Create a minimal TradingLoop-like object for testing _submit_order."""
     from finalayze.core.trading_loop import TradingLoop
 
-    settings = MagicMock()
-    settings.news_cycle_minutes = 30
-    settings.strategy_cycle_minutes = 60
-    settings.daily_reset_hour_utc = 0
-    settings.mode = "test"
-    settings.max_position_pct = 0.20
-    settings.max_positions_per_market = 10
-    settings.daily_loss_limit_pct = 0.05
-    settings.kelly_fraction = 0.5
-
     import threading
 
     loop = MagicMock(spec=TradingLoop)
@@ -53,6 +43,9 @@ def _make_trading_loop() -> MagicMock:
     loop._entry_prices = {}
     loop._broker_router = MagicMock()
     loop._alerter = MagicMock()
+    loop._sandbox_monitor = None
+    loop._cycle_orders_filled = 0
+    loop._cycle_errors_caught = 0
     loop._submit_order = TradingLoop._submit_order.__get__(loop)
 
     # Store OrderRequest class for the method

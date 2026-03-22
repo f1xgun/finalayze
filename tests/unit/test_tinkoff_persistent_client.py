@@ -26,7 +26,7 @@ class TestTinkoffBrokerPersistentClient:
     def test_get_client_returns_same_instance(self) -> None:
         """Two calls to _get_client should return the same object."""
         broker = TinkoffBroker(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
-        with patch("finalayze.execution.tinkoff_broker.AsyncSandboxClient") as mock_cls:
+        with patch("finalayze.execution.tinkoff_broker.AsyncClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
@@ -41,7 +41,7 @@ class TestTinkoffBrokerPersistentClient:
     def test_close_clears_client(self) -> None:
         """close() should set _client to None."""
         broker = TinkoffBroker(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
-        with patch("finalayze.execution.tinkoff_broker.AsyncSandboxClient") as mock_cls:
+        with patch("finalayze.execution.tinkoff_broker.AsyncClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
@@ -56,9 +56,9 @@ class TestTinkoffFetcherClientCreation:
     """Verify TinkoffFetcher _make_client creates correct client types."""
 
     def test_make_client_sandbox_uses_sandbox_client(self) -> None:
-        """sandbox=True should create AsyncSandboxClient."""
+        """sandbox=True should create AsyncClient with sandbox target."""
         fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
-        with patch("finalayze.data.fetchers.tinkoff_data.AsyncSandboxClient") as mock_cls:
+        with patch("finalayze.data.fetchers.tinkoff_data.AsyncClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
@@ -68,7 +68,7 @@ class TestTinkoffFetcherClientCreation:
     def test_make_client_creates_fresh_instance_each_call(self) -> None:
         """Each _make_client call should create a new instance (no caching)."""
         fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
-        with patch("finalayze.data.fetchers.tinkoff_data.AsyncSandboxClient") as mock_cls:
+        with patch("finalayze.data.fetchers.tinkoff_data.AsyncClient") as mock_cls:
             client1 = fetcher._make_client()
             client2 = fetcher._make_client()
 
@@ -80,7 +80,7 @@ class TestTinkoffFetcherClientCreation:
         fetcher.close()  # should not raise
 
     def test_live_mode_uses_async_client(self) -> None:
-        """sandbox=False should use AsyncClient, not AsyncSandboxClient."""
+        """sandbox=False should use AsyncClient with production target."""
         fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=False)
         with patch("finalayze.data.fetchers.tinkoff_data.AsyncClient") as mock_cls:
             mock_client = MagicMock()

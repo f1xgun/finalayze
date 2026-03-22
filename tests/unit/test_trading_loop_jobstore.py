@@ -101,12 +101,10 @@ class TestTradingLoopJobStore:
             assert "default" not in call_kwargs["jobstores"]
 
     @patch("finalayze.core.trading_loop.BackgroundScheduler")
-    def test_jobstore_uses_sync_url(self, mock_scheduler_cls: MagicMock) -> None:
-        """SQLAlchemyJobStore uses sync DB URL (asyncpg stripped)."""
+    def test_jobstore_uses_memory(self, mock_scheduler_cls: MagicMock) -> None:
+        """TradingLoop uses MemoryJobStore (SQLAlchemy jobstore dropped due to pickling)."""
         mock_scheduler = MagicMock()
         mock_scheduler_cls.return_value = mock_scheduler
-
-        mock_jobstore = MagicMock()
 
         loop = self._make_trading_loop()
 
@@ -114,20 +112,13 @@ class TestTradingLoopJobStore:
             patch.object(loop, "_load_baseline_from_db"),
             patch.object(loop, "_reconcile_inflight_orders"),
             patch.object(loop, "_stop_event") as mock_stop,
-            patch(
-                "finalayze.core.trading_loop.SQLAlchemyJobStore",
-                return_value=mock_jobstore,
-            ) as mock_js_cls,
         ):
             mock_stop.wait.side_effect = lambda: None
             loop.start()  # type: ignore[union-attr]
 
-        # SQLAlchemyJobStore should have been called with sync URL
-        mock_js_cls.assert_called_once()
-        call_kwargs = mock_js_cls.call_args.kwargs
-        url = call_kwargs.get("url", "")
-        assert "+asyncpg" not in url, f"URL still has asyncpg: {url}"
-        assert "postgresql://" in url
+        # BackgroundScheduler should be created without explicit jobstores
+        call_kwargs = mock_scheduler_cls.call_args.kwargs
+        assert "jobstores" not in call_kwargs
 
     @patch("finalayze.core.trading_loop.BackgroundScheduler")
     def test_expected_job_ids(self, mock_scheduler_cls: MagicMock) -> None:

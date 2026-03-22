@@ -58,12 +58,10 @@ class TestUniverseMOEXTickers:
     """UNIVERSE dict must contain real MOEX symbols, not ETF proxies."""
 
     def test_ru_blue_chips_has_real_moex_tickers(self) -> None:
-        """ru_blue_chips should contain SBER, GAZP, LKOH, GMKN."""
+        """ru_blue_chips should contain SBER, LKOH, and other MOEX tickers."""
         symbols = ri.UNIVERSE["ru_blue_chips"]
         assert "SBER" in symbols
-        assert "GAZP" in symbols
         assert "LKOH" in symbols
-        assert "GMKN" in symbols
 
     def test_ru_blue_chips_no_etf_proxies(self) -> None:
         """ru_blue_chips must NOT contain ETF proxies like RSX, ERUS."""

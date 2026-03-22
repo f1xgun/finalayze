@@ -34,6 +34,15 @@ def _make_broker(sandbox: bool = True) -> TinkoffBroker:
     return TinkoffBroker(token="fake_token", registry=_make_registry(), sandbox=sandbox)  # noqa: S106
 
 
+def _mock_accounts(account_id: str = "acc-sandbox-001") -> MagicMock:
+    """Helper to create a mock accounts response."""
+    accounts_resp = MagicMock()
+    account = MagicMock()
+    account.id = account_id
+    accounts_resp.accounts = [account]
+    return accounts_resp
+
+
 class TestTinkoffBrokerSubmitOrder:
     def test_buy_order_success(self) -> None:
         mock_result = MagicMock()
@@ -42,13 +51,13 @@ class TestTinkoffBrokerSubmitOrder:
         mock_result.executed_order_price.nano = 0
         mock_result.lots_executed = 1
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=mock_result,
-        ):
-            broker = _make_broker()
-            order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
-            result = broker.submit_order(order)
+        broker = _make_broker()
+        # Mock _run_async to return fake gRPC responses (accounts + order)
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
+            side_effect=[_mock_accounts(), mock_result],
+        )
+        order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
+        result = broker.submit_order(order)
 
         assert result.filled is True
         assert result.symbol == "SBER"
@@ -62,14 +71,13 @@ class TestTinkoffBrokerSubmitOrder:
             broker.submit_order(order)
 
     def test_api_error_raises_broker_error(self) -> None:
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
+        broker = _make_broker()
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("gRPC unavailable"),
-        ):
-            broker = _make_broker()
-            order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
-            with pytest.raises(BrokerError, match="gRPC unavailable"):
-                broker.submit_order(order)
+        )
+        order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
+        with pytest.raises(BrokerError, match="gRPC unavailable"):
+            broker.submit_order(order)
 
     def test_fill_candle_ignored(self) -> None:
         """TinkoffBroker ignores fill_candle (live broker)."""
@@ -79,13 +87,11 @@ class TestTinkoffBrokerSubmitOrder:
         mock_result.executed_order_price.nano = 0
         mock_result.lots_executed = 1
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=mock_result,
-        ):
-            broker = _make_broker()
-            order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
-            result = broker.submit_order(order, fill_candle=None)
+        broker = _make_broker()
+        broker._account_id = "acc-sandbox-001"
+        broker._run_async = MagicMock(return_value=mock_result)  # type: ignore[method-assign]
+        order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
+        result = broker.submit_order(order, fill_candle=None)
         assert result.filled is True
 
     def test_lot_size_rounding(self) -> None:
@@ -93,19 +99,17 @@ class TestTinkoffBrokerSubmitOrder:
 
         SBER has lot_size=10. Requesting qty=15 -> actual qty=10.
         """
+        mock_result = MagicMock()
+        mock_result.order_id = "ord-789"
+        mock_result.executed_order_price.units = 270
+        mock_result.executed_order_price.nano = 0
+        mock_result.lots_executed = 1
 
-        def capture_run(coro: object) -> MagicMock:
-            mock_result = MagicMock()
-            mock_result.order_id = "ord-789"
-            mock_result.executed_order_price.units = 270
-            mock_result.executed_order_price.nano = 0
-            mock_result.lots_executed = 1
-            return mock_result
-
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run", side_effect=capture_run):
-            broker = _make_broker()
-            order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(15))
-            result = broker.submit_order(order)
+        broker = _make_broker()
+        broker._account_id = "acc-sandbox-001"
+        broker._run_async = MagicMock(return_value=mock_result)  # type: ignore[method-assign]
+        order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(15))
+        result = broker.submit_order(order)
 
         # filled=True but actual quantity rounded to 10
         assert result.filled is True
@@ -115,22 +119,17 @@ class TestTinkoffBrokerSubmitOrder:
 class TestTinkoffBrokerSubmitOrderSell:
     def test_sell_order_success(self) -> None:
         """SELL order path — side='SELL' should succeed and return correct side."""
+        mock_result = MagicMock()
+        mock_result.order_id = "ord-sell-1"
+        mock_result.executed_order_price.units = 270
+        mock_result.executed_order_price.nano = 0
+        mock_result.lots_executed = 1
 
-        def capture_run(coro: object) -> MagicMock:
-            mock_result = MagicMock()
-            mock_result.order_id = "ord-sell-1"
-            mock_result.executed_order_price.units = 270
-            mock_result.executed_order_price.nano = 0
-            mock_result.lots_executed = 1
-            return mock_result
-
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=capture_run,
-        ):
-            broker = _make_broker()
-            order = OrderRequest(symbol="SBER", side="SELL", quantity=Decimal(10))
-            result = broker.submit_order(order)
+        broker = _make_broker()
+        broker._account_id = "acc-sandbox-001"
+        broker._run_async = MagicMock(return_value=mock_result)  # type: ignore[method-assign]
+        order = OrderRequest(symbol="SBER", side="SELL", quantity=Decimal(10))
+        result = broker.submit_order(order)
 
         assert result.filled is True
         assert result.symbol == "SBER"
@@ -158,23 +157,20 @@ class TestTinkoffBrokerGetPortfolio:
         mock_portfolio.total_amount_portfolio.nano = 0
         mock_portfolio.positions = []
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=mock_portfolio,
-        ):
-            broker = _make_broker()
-            portfolio = broker.get_portfolio()
+        broker = _make_broker()
+        broker._account_id = "acc-sandbox-001"
+        broker._run_async = MagicMock(return_value=mock_portfolio)  # type: ignore[method-assign]
+        portfolio = broker.get_portfolio()
 
         assert portfolio.equity == Decimal(1000000)
 
     def test_portfolio_api_error_raises(self) -> None:
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
+        broker = _make_broker()
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("gRPC timeout"),
-        ):
-            broker = _make_broker()
-            with pytest.raises(BrokerError):
-                broker.get_portfolio()
+        )
+        with pytest.raises(BrokerError):
+            broker.get_portfolio()
 
 
 class TestTinkoffBrokerHasPosition:
@@ -186,6 +182,7 @@ class TestTinkoffBrokerHasPosition:
         mock_pos.figi = figi
         mock_pos.quantity.units = qty_units
         mock_pos.quantity.nano = 0
+        mock_pos.instrument_type = "share"
         mock_portfolio.positions = [mock_pos]
         return mock_portfolio
 
@@ -193,12 +190,10 @@ class TestTinkoffBrokerHasPosition:
         """has_position returns True when portfolio contains the instrument's FIGI."""
         mock_portfolio = self._mock_portfolio(SBER_FIGI, qty_units=10)
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=mock_portfolio,
-        ):
-            broker = _make_broker()
-            result = broker.has_position("SBER")
+        broker = _make_broker()
+        broker._account_id = "acc-sandbox-001"
+        broker._run_async = MagicMock(return_value=mock_portfolio)  # type: ignore[method-assign]
+        result = broker.has_position("SBER")
 
         assert result is True
 
@@ -209,12 +204,10 @@ class TestTinkoffBrokerHasPosition:
         mock_portfolio.total_amount_portfolio.nano = 0
         mock_portfolio.positions = []
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=mock_portfolio,
-        ):
-            broker = _make_broker()
-            result = broker.has_position("SBER")
+        broker = _make_broker()
+        broker._account_id = "acc-sandbox-001"
+        broker._run_async = MagicMock(return_value=mock_portfolio)  # type: ignore[method-assign]
+        result = broker.has_position("SBER")
 
         assert result is False
 
@@ -245,49 +238,38 @@ class TestTinkoffBrokerGetPositions:
         mock_pos.figi = SBER_FIGI
         mock_pos.quantity.units = 20
         mock_pos.quantity.nano = 0
+        mock_pos.instrument_type = "share"
         mock_portfolio.positions = [mock_pos]
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=mock_portfolio,
-        ):
-            broker = _make_broker()
-            positions = broker.get_positions()
+        broker = _make_broker()
+        broker._account_id = "acc-sandbox-001"
+        broker._run_async = MagicMock(return_value=mock_portfolio)  # type: ignore[method-assign]
+        positions = broker.get_positions()
 
         assert SBER_FIGI in positions
         assert positions[SBER_FIGI] == Decimal(20)
 
 
 class TestTinkoffBrokerCancelOrder:
-    def _mock_accounts(self) -> MagicMock:
-        mock_accounts_response = MagicMock()
-        mock_account = MagicMock()
-        mock_account.id = "test-account-id"
-        mock_accounts_response.accounts = [mock_account]
-        return mock_accounts_response
-
     def test_cancel_order_success(self) -> None:
         """cancel_order completes without error when SDK call succeeds."""
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=[self._mock_accounts(), None],
-        ) as mock_run:
-            broker = _make_broker()
-            broker.cancel_order("order-abc-123")
+        broker = _make_broker()
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
+            side_effect=[_mock_accounts(), None],
+        )
+        broker.cancel_order("order-abc-123")
 
         # First call: get_accounts, second call: cancel_order
-        assert mock_run.call_count == 2
+        assert broker._run_async.call_count == 2  # type: ignore[attr-defined]
 
     def test_cancel_order_api_error_raises(self) -> None:
         """cancel_order raises BrokerError when SDK call fails."""
-        accounts_response = self._mock_accounts()
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=[accounts_response, RuntimeError("gRPC cancel failed")],
-        ):
-            broker = _make_broker()
-            with pytest.raises(BrokerError, match="gRPC cancel failed"):
-                broker.cancel_order("order-xyz")
+        broker = _make_broker()
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
+            side_effect=[_mock_accounts(), RuntimeError("gRPC cancel failed")],
+        )
+        with pytest.raises(BrokerError, match="gRPC cancel failed"):
+            broker.cancel_order("order-xyz")
 
 
 _EXPECTED_LIVE_TARGET = "invest-public-api.tbank.ru:443"
@@ -366,16 +348,8 @@ class TestOrderResultOrderId:
 class TestTinkoffBrokerGetLastPrices:
     """Tests for get_last_prices method."""
 
-    def _mock_accounts(self) -> MagicMock:
-        mock_accounts_response = MagicMock()
-        mock_account = MagicMock()
-        mock_account.id = "test-account-id"
-        mock_accounts_response.accounts = [mock_account]
-        return mock_accounts_response
-
     def test_get_last_prices_returns_symbol_to_decimal(self) -> None:
         """get_last_prices returns dict mapping symbol to Decimal price."""
-        # Mock GetLastPrices response
         mock_price_item = MagicMock()
         mock_price_item.figi = SBER_FIGI
         mock_price_item.price.units = 270
@@ -384,12 +358,11 @@ class TestTinkoffBrokerGetLastPrices:
         mock_response = MagicMock()
         mock_response.last_prices = [mock_price_item]
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=[self._mock_accounts(), mock_response],
-        ):
-            broker = _make_broker()
-            result = broker.get_last_prices(["SBER"])
+        broker = _make_broker()
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
+            side_effect=[_mock_accounts(), mock_response],
+        )
+        result = broker.get_last_prices(["SBER"])
 
         assert "SBER" in result
         assert result["SBER"] == Decimal("270.5")
@@ -404,12 +377,11 @@ class TestTinkoffBrokerGetLastPrices:
         mock_response = MagicMock()
         mock_response.last_prices = [mock_price_item]
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=[self._mock_accounts(), mock_response],
-        ):
-            broker = _make_broker()
-            result = broker.get_last_prices(["SBER"])
+        broker = _make_broker()
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
+            side_effect=[_mock_accounts(), mock_response],
+        )
+        result = broker.get_last_prices(["SBER"])
 
         # Key should be symbol, not FIGI
         assert SBER_FIGI not in result
@@ -418,24 +390,16 @@ class TestTinkoffBrokerGetLastPrices:
     def test_get_last_prices_unknown_symbol_skipped(self) -> None:
         """Symbols not in registry are skipped without error."""
         broker = _make_broker()
-        # "UNKNOWN" is not in registry, should not break
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=[self._mock_accounts(), MagicMock(last_prices=[])],
-        ):
-            result = broker.get_last_prices(["UNKNOWN_BOND_XYZ"])
+        broker._account_id = "acc-sandbox-001"
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
+            return_value=MagicMock(last_prices=[]),
+        )
+        result = broker.get_last_prices(["UNKNOWN_BOND_XYZ"])
         assert result == {}
 
 
 class TestTinkoffBrokerGetOrderState:
     """Tests for get_order_state method."""
-
-    def _mock_accounts(self) -> MagicMock:
-        mock_accounts_response = MagicMock()
-        mock_account = MagicMock()
-        mock_account.id = "test-account-id"
-        mock_accounts_response.accounts = [mock_account]
-        return mock_accounts_response
 
     def test_get_order_state_filled(self) -> None:
         """get_order_state returns OrderStateResult for a filled order."""
@@ -445,12 +409,11 @@ class TestTinkoffBrokerGetOrderState:
         mock_state.executed_order_price.units = 95
         mock_state.executed_order_price.nano = 200_000_000
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=[self._mock_accounts(), mock_state],
-        ):
-            broker = _make_broker()
-            result = broker.get_order_state("ord-123")
+        broker = _make_broker()
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
+            side_effect=[_mock_accounts(), mock_state],
+        )
+        result = broker.get_order_state("ord-123")
 
         assert isinstance(result, OrderStateResult)
         assert result.order_id == "ord-123"
@@ -467,12 +430,11 @@ class TestTinkoffBrokerGetOrderState:
         mock_state.executed_order_price.units = 0
         mock_state.executed_order_price.nano = 0
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=[self._mock_accounts(), mock_state],
-        ):
-            broker = _make_broker()
-            result = broker.get_order_state("ord-456")
+        broker = _make_broker()
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
+            side_effect=[_mock_accounts(), mock_state],
+        )
+        result = broker.get_order_state("ord-456")
 
         assert result.is_terminal is False
         assert result.execution_status == "new"
@@ -485,12 +447,11 @@ class TestTinkoffBrokerGetOrderState:
         mock_state.executed_order_price.units = 96
         mock_state.executed_order_price.nano = 0
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=[self._mock_accounts(), mock_state],
-        ):
-            broker = _make_broker()
-            result = broker.get_order_state("ord-789")
+        broker = _make_broker()
+        broker._run_async = MagicMock(  # type: ignore[method-assign]
+            side_effect=[_mock_accounts(), mock_state],
+        )
+        result = broker.get_order_state("ord-789")
 
         assert result.execution_status == "partially_fill"
         assert result.filled_quantity == Decimal(3)
@@ -507,13 +468,11 @@ class TestTinkoffBrokerSubmitOrderReturnsOrderId:
         mock_result.executed_order_price.nano = 0
         mock_result.lots_executed = 1
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=mock_result,
-        ):
-            broker = _make_broker()
-            order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
-            result = broker.submit_order(order)
+        broker = _make_broker()
+        broker._account_id = "acc-sandbox-001"
+        broker._run_async = MagicMock(return_value=mock_result)  # type: ignore[method-assign]
+        order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
+        result = broker.submit_order(order)
 
         assert result.order_id == "new-order-id-42"
         assert result.filled is True

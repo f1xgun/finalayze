@@ -57,7 +57,7 @@ class TestGetOpenOrders:
             _make_order_mock("ord-cancelled", status=3),  # cancelled
         ]
 
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run", return_value=mock_response):
+        with patch.object(broker, "_run_async", return_value=mock_response):
             orders = broker.get_open_orders()
 
         # Only "new" and "partially_fill" are non-terminal
@@ -74,7 +74,7 @@ class TestGetOpenOrders:
             _make_order_mock("ord-1", status=4, lots_executed=0, price_units=0),
         ]
 
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run", return_value=mock_response):
+        with patch.object(broker, "_run_async", return_value=mock_response):
             orders = broker.get_open_orders()
 
         assert len(orders) == 1
@@ -87,10 +87,7 @@ class TestGetOpenOrders:
         """get_open_orders() should return empty list on API failure."""
         broker = _make_broker()
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=RuntimeError("gRPC error"),
-        ):
+        with patch.object(broker, "_run_async", side_effect=RuntimeError("gRPC error")):
             orders = broker.get_open_orders()
 
         assert orders == []
@@ -101,7 +98,7 @@ class TestGetOpenOrders:
         mock_response = MagicMock()
         mock_response.orders = []
 
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run", return_value=mock_response):
+        with patch.object(broker, "_run_async", return_value=mock_response):
             orders = broker.get_open_orders()
 
         assert orders == []
@@ -114,7 +111,7 @@ class TestGetOpenOrders:
             _make_order_mock("ord-p", status=2, lots_executed=5, price_units=150, price_nano=500_000_000),
         ]
 
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run", return_value=mock_response):
+        with patch.object(broker, "_run_async", return_value=mock_response):
             orders = broker.get_open_orders()
 
         assert len(orders) == 1
@@ -130,7 +127,7 @@ class TestCancelOrderBool:
         """cancel_order_safe() should return True on successful cancel."""
         broker = _make_broker()
 
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run", return_value=None):
+        with patch.object(broker, "_run_async", return_value=None):
             result = broker.cancel_order_safe("ord-1")
 
         assert result is True
@@ -139,10 +136,7 @@ class TestCancelOrderBool:
         """cancel_order_safe() should return False on API failure."""
         broker = _make_broker()
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            side_effect=RuntimeError("cancel failed"),
-        ):
+        with patch.object(broker, "_run_async", side_effect=RuntimeError("cancel failed")):
             result = broker.cancel_order_safe("ord-1")
 
         assert result is False

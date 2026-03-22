@@ -59,11 +59,9 @@ class TestGetPortfolioCash:
 
         mock_portfolio = _make_portfolio(total_equity, 0, [rub_pos, usd_pos])
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=mock_portfolio,
-        ):
-            broker = _make_broker()
+        broker = _make_broker()
+        broker._account_id = "test-account"
+        with patch.object(broker, "_run_async", return_value=mock_portfolio):
             portfolio = broker.get_portfolio()
 
         expected_cash = Decimal(100_000) + Decimal(5_000)
@@ -81,11 +79,9 @@ class TestGetPortfolioCash:
 
         mock_portfolio = _make_portfolio(total_equity, 0, [share_pos, currency_pos])
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=mock_portfolio,
-        ):
-            broker = _make_broker()
+        broker = _make_broker()
+        broker._account_id = "test-account"
+        with patch.object(broker, "_run_async", return_value=mock_portfolio):
             portfolio = broker.get_portfolio()
 
         assert portfolio.cash == Decimal(50_000)
@@ -99,11 +95,9 @@ class TestGetPortfolioCash:
 
         mock_portfolio = _make_portfolio(total_equity, 0, [share_pos])
 
-        with patch(
-            "finalayze.execution.tinkoff_broker.asyncio.run",
-            return_value=mock_portfolio,
-        ):
-            broker = _make_broker()
+        broker = _make_broker()
+        broker._account_id = "test-account"
+        with patch.object(broker, "_run_async", return_value=mock_portfolio):
             portfolio = broker.get_portfolio()
 
         assert portfolio.cash == Decimal(0)
