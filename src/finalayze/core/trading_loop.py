@@ -1293,9 +1293,7 @@ class TradingLoop:
 
         # Update health monitor feed timestamp on successful fetch
         if candles and self._health_monitor is not None:
-            _update = getattr(self._health_monitor, "update_feed_timestamp", None)
-            if _update is not None:
-                _update(now)
+            self._health_monitor.update_feed_timestamp(now)
 
         # #157/#182: Check stop-losses against latest candle price
         if candles:

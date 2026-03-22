@@ -85,14 +85,16 @@ class TestFeedTimestampWiring:
     def test_no_getattr_for_update_feed_timestamp(self) -> None:
         """The code must NOT use getattr to call update_feed_timestamp."""
         import inspect
+        import re
 
         from finalayze.core.trading_loop import TradingLoop
 
         source = inspect.getsource(TradingLoop._process_instrument)
 
         # Check that getattr(..., "update_feed_timestamp", ...) pattern is absent
-        assert 'getattr' not in source or 'update_feed_timestamp' not in source, (
-            "Found getattr + update_feed_timestamp in _process_instrument -- "
+        pattern = r'getattr\([^)]*update_feed_timestamp[^)]*\)'
+        assert not re.search(pattern, source), (
+            "Found getattr(..., 'update_feed_timestamp', ...) in _process_instrument -- "
             "should call self._health_monitor.update_feed_timestamp(now) directly"
         )
 
