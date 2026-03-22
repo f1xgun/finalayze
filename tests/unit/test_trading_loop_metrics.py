@@ -1,9 +1,13 @@
-"""Tests for MetricsCollector wiring in TradingLoop (6D.9)."""
+"""Tests for MetricsCollector wiring in TradingLoop (6D.9).
+
+MetricsCollector is now injected via constructor (self._metrics).
+Tests inject a MagicMock as the metrics_collector to verify calls.
+"""
 
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,7 +19,8 @@ class TestSubmitOrderMetrics:
         """MetricsCollector.record_trade called when order is filled."""
         from finalayze.core.trading_loop import TradingLoop
 
-        loop = _make_loop_stub()
+        mc = MagicMock()
+        loop = _make_loop_stub(metrics=mc)
         order = MagicMock()
         order.side = "BUY"
         order.symbol = "AAPL"
@@ -25,8 +30,7 @@ class TestSubmitOrderMetrics:
         result.fill_price = Decimal("150.00")
         loop._broker_router.submit.return_value = result
 
-        with patch("finalayze.api.metrics.MetricsCollector") as mc:
-            TradingLoop._submit_order(loop, order, "us", candles=[_fake_candle()])
+        TradingLoop._submit_order(loop, order, "us", candles=[_fake_candle()])
 
         mc.record_trade.assert_called_once()
         call_kwargs = mc.record_trade.call_args
@@ -36,7 +40,8 @@ class TestSubmitOrderMetrics:
         """MetricsCollector.record_rejection called when order is not filled."""
         from finalayze.core.trading_loop import TradingLoop
 
-        loop = _make_loop_stub()
+        mc = MagicMock()
+        loop = _make_loop_stub(metrics=mc)
         order = MagicMock()
         order.side = "BUY"
         order.symbol = "AAPL"
@@ -46,8 +51,7 @@ class TestSubmitOrderMetrics:
         result.reason = "insufficient funds"
         loop._broker_router.submit.return_value = result
 
-        with patch("finalayze.api.metrics.MetricsCollector") as mc:
-            TradingLoop._submit_order(loop, order, "us")
+        TradingLoop._submit_order(loop, order, "us")
 
         mc.record_rejection.assert_called_once()
 
@@ -59,7 +63,8 @@ class TestProcessInstrumentMetrics:
         from finalayze.core.schemas import SignalDirection
         from finalayze.core.trading_loop import TradingLoop
 
-        loop = _make_loop_stub()
+        mc = MagicMock()
+        loop = _make_loop_stub(metrics=mc)
 
         signal = MagicMock()
         signal.direction = SignalDirection.BUY
@@ -82,7 +87,7 @@ class TestProcessInstrumentMetrics:
         pre_result.passed = True
         loop._pre_trade_checker.check.return_value = pre_result
 
-        # Mock portfolio via cache — bind the real _get_cached_portfolio method
+        # Mock portfolio via cache -- bind the real _get_cached_portfolio method
         portfolio = MagicMock()
         portfolio.cash = Decimal(10000)
         portfolio.equity = Decimal(10000)
@@ -102,10 +107,9 @@ class TestProcessInstrumentMetrics:
         submit_result.fill_price = Decimal("150.00")
         loop._broker_router.submit.return_value = submit_result
 
-        with patch("finalayze.api.metrics.MetricsCollector") as mc:
-            TradingLoop._process_instrument(
-                loop, instrument, "us", CircuitLevel.NORMAL, fetcher, MagicMock()
-            )
+        TradingLoop._process_instrument(
+            loop, instrument, "us", CircuitLevel.NORMAL, fetcher, MagicMock()
+        )
 
         mc.record_signal.assert_called_once()
 
@@ -117,15 +121,15 @@ class TestMarketCycleMetrics:
         from finalayze.core.trading_loop import TradingLoop
         from finalayze.risk.circuit_breaker import CircuitLevel
 
-        loop = _make_loop_stub()
+        mc = MagicMock()
+        loop = _make_loop_stub(metrics=mc)
         loop._registry.list_by_market.return_value = []  # no instruments
 
         market_equities = {"us": Decimal(50000)}
 
-        with patch("finalayze.api.metrics.MetricsCollector") as mc:
-            TradingLoop._process_market_cycle(
-                loop, "us", CircuitLevel.NORMAL, market_equities, MagicMock()
-            )
+        TradingLoop._process_market_cycle(
+            loop, "us", CircuitLevel.NORMAL, market_equities, MagicMock()
+        )
 
         mc.set_portfolio_equity.assert_called_once_with("us", 50000.0)
         mc.set_circuit_breaker_level.assert_called_once()
@@ -144,7 +148,7 @@ def _fake_candle() -> MagicMock:
     return c
 
 
-def _make_loop_stub() -> MagicMock:
+def _make_loop_stub(*, metrics: MagicMock | None = None) -> MagicMock:
     """Create a MagicMock that acts as a TradingLoop instance with enough attributes."""
     import threading
 
@@ -161,6 +165,7 @@ def _make_loop_stub() -> MagicMock:
     loop._cache = None
     loop._event_bus = None
     loop._fx_service = None
+    loop._metrics = metrics
     loop._alerter = MagicMock()
     loop._broker_router = MagicMock()
     loop._strategy = MagicMock()

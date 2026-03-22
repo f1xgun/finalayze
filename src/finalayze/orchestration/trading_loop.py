@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from finalayze.analysis.impact_estimator import ImpactEstimator
     from finalayze.analysis.news_analyzer import NewsAnalyzer
     from finalayze.api.alerts import TelegramAlerter
+    from finalayze.api.metrics import MetricsCollector
     from finalayze.core.events import EventBus
     from finalayze.core.schemas import Candle, PortfolioState, SentimentResult, Signal  # noqa: F401
     from finalayze.data.cache import RedisCache
@@ -118,6 +119,7 @@ class TradingLoop:
         combined_analyzer: CombinedNewsAnalyzer | None = None,
         sandbox_monitor: SandboxMonitorService | None = None,
         health_monitor: object | None = None,
+        metrics_collector: type[MetricsCollector] | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
@@ -152,6 +154,7 @@ class TradingLoop:
         self._combined_analyzer = combined_analyzer
         self._sandbox_monitor = sandbox_monitor
         self._health_monitor = health_monitor
+        self._metrics = metrics_collector
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -534,7 +537,8 @@ class TradingLoop:
         Without this, Grafana shows 'No data' until the first strategy cycle
         (up to 60 minutes after startup).
         """
-        from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+        if not self._metrics:
+            return
 
         for market_id in self._fetchers:
             try:
@@ -544,18 +548,18 @@ class TradingLoop:
                     portfolio, "total_value", None
                 )
                 if equity is not None:
-                    MetricsCollector.set_portfolio_equity(market_id, float(equity))
+                    self._metrics.set_portfolio_equity(market_id, float(equity))
                     if market_id in ("moex", "moex_bonds"):
-                        MetricsCollector.set_portfolio_equity_rub(float(equity))
+                        self._metrics.set_portfolio_equity_rub(float(equity))
                 positions = getattr(portfolio, "positions", None)
                 if positions is not None:
-                    MetricsCollector.set_open_positions(market_id, len(positions))
+                    self._metrics.set_open_positions(market_id, len(positions))
             except Exception:
                 _log.debug("init_metrics_portfolio_failed", market_id=market_id)
             # Circuit breaker: default to NORMAL
-            MetricsCollector.set_circuit_breaker_level(market_id, 0)
+            self._metrics.set_circuit_breaker_level(market_id, 0)
             # Drawdown: default to 0
-            MetricsCollector.set_drawdown(market_id, 0.0)
+            self._metrics.set_drawdown(market_id, 0.0)
         _log.info("metrics_initialized", markets=list(self._fetchers.keys()))
 
     def stop(self) -> None:
@@ -1199,12 +1203,10 @@ class TradingLoop:
 
         # Update Prometheus metrics after processing all instruments
         equity = market_equities.get(market_id)
-        if equity is not None:
-            from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
-
-            MetricsCollector.set_portfolio_equity(market_id, float(equity))
+        if equity is not None and self._metrics:
+            self._metrics.set_portfolio_equity(market_id, float(equity))
             cb_level_numeric = {"normal": 0, "caution": 1, "halted": 2, "liquidate": 3}
-            MetricsCollector.set_circuit_breaker_level(
+            self._metrics.set_circuit_breaker_level(
                 market_id, cb_level_numeric.get(level.value, 0)
             )
 
@@ -1341,13 +1343,12 @@ class TradingLoop:
 
         self._cycle_signals_generated += 1
 
-        from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
-
-        MetricsCollector.record_signal(
-            market=market_id,
-            strategy=signal.strategy_name,
-            direction=signal.direction.value,
-        )
+        if self._metrics:
+            self._metrics.record_signal(
+                market=market_id,
+                strategy=signal.strategy_name,
+                direction=signal.direction.value,
+            )
 
         _log.info(
             "signal_generated",
@@ -1551,14 +1552,13 @@ class TradingLoop:
                 if self._sandbox_monitor is not None:
                     self._sandbox_monitor.record_slippage(slippage_bps)
 
-                from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
-
-                MetricsCollector.record_trade(
-                    market=market_id,
-                    side=order.side.lower(),
-                    slippage_bps=slippage_bps,
-                    fill_latency_seconds=0.0,
-                )
+                if self._metrics:
+                    self._metrics.record_trade(
+                        market=market_id,
+                        side=order.side.lower(),
+                        slippage_bps=slippage_bps,
+                        fill_latency_seconds=0.0,
+                    )
                 # Wire stop-loss on BUY fill + track entry price for Kelly
                 if order.side == "BUY" and candles and result.fill_price is not None:
                     self._entry_prices[order.symbol] = result.fill_price
@@ -1584,11 +1584,10 @@ class TradingLoop:
                     market=market_id,
                 )
                 self._alerter.on_trade_rejected(order, result.reason)
-                from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
-
-                MetricsCollector.record_rejection(
-                    market=market_id, reason=result.reason or "unknown"
-                )
+                if self._metrics:
+                    self._metrics.record_rejection(
+                        market=market_id, reason=result.reason or "unknown"
+                    )
         except Exception:
             _log.exception("_strategy_cycle: order submission failed for %s", order.symbol)
             self._cycle_errors_caught += 1
@@ -1840,12 +1839,11 @@ class TradingLoop:
             self._loss_limit_tracker.reset_week(now, total_equity)
 
         # Update Prometheus metrics
-        from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
-
-        for market_id, equity in new_baselines.items():
-            pnl_val = market_pnl.get(market_id, _ZERO)
-            MetricsCollector.set_daily_pnl(market_id, float(pnl_val))
-            MetricsCollector.set_portfolio_equity(market_id, float(equity))
+        if self._metrics:
+            for market_id, equity in new_baselines.items():
+                pnl_val = market_pnl.get(market_id, _ZERO)
+                self._metrics.set_daily_pnl(market_id, float(pnl_val))
+                self._metrics.set_portfolio_equity(market_id, float(equity))
 
         # Top 3 movers by absolute P&L %
         top_movers = self._compute_top_movers()

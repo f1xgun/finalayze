@@ -440,6 +440,8 @@ def _build_trading_loop(settings: object) -> object | None:
 
         # Build TradingLoop first, then create KillSwitch that references it
         # ── Build TradingLoop ────────────────────────────────────────────
+        from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
         loop = TradingLoop(
             settings=settings,  # type: ignore[arg-type]
             fetchers=fetchers,
@@ -458,6 +460,7 @@ def _build_trading_loop(settings: object) -> object | None:
             entity_extractor=entity_extractor,
             combined_analyzer=combined_analyzer,
             sandbox_monitor=sandbox_monitor,
+            metrics_collector=MetricsCollector,
         )
         # ── Create KillSwitch (after loop exists) ────────────────────
         kill_switch = KillSwitch(
