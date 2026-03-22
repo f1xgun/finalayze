@@ -183,6 +183,8 @@ class BondCycleProcessor:
         self._fetcher = fetcher
         self._alerter = alerter
         self._ml_registry = ml_registry
+        self._consecutive_layer_errors: dict[str, int] = {}
+        self._layer_error_threshold: int = 3
 
     def run_cycle(self) -> BondCycleResult:
         """Execute one bond trading cycle across all layers. SYNC."""
@@ -206,14 +208,30 @@ class BondCycleProcessor:
 
         results: list[LayerResult] = []
         for layer, config in effective_configs.items():
+            layer_key = layer.value
             try:
                 if not self._layer_breakers[layer].check():
                     results.append(LayerResult(layer=layer, halted=True))
                     continue
                 result = self._process_layer(layer, config, macro)
+                self._consecutive_layer_errors[layer_key] = 0
                 results.append(result)
             except Exception:
-                _log.exception("bond_layer_failed", layer=layer.value)
+                self._consecutive_layer_errors[layer_key] = (
+                    self._consecutive_layer_errors.get(layer_key, 0) + 1
+                )
+                count = self._consecutive_layer_errors[layer_key]
+                if count >= self._layer_error_threshold:
+                    _log.error(
+                        "bond_layer_consecutive_failures",
+                        layer=layer_key,
+                        consecutive_count=count,
+                        threshold=self._layer_error_threshold,
+                    )
+                else:
+                    _log.exception(
+                        "bond_layer_failed", layer=layer_key, consecutive_count=count
+                    )
                 results.append(LayerResult(layer=layer, error=True))
 
         return BondCycleResult(layer_results=results)
