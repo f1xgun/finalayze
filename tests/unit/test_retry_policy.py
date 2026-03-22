@@ -173,3 +173,44 @@ class TestAsyncRetry:
         with pytest.raises(InsufficientFundsError):
             await policy.aexecute(fn)
         fn.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_coroutine_fn_awaited(self) -> None:
+        """aexecute() must await coroutine-returning (async) functions."""
+        policy = RetryPolicy(max_retries=_MAX_RETRIES)
+
+        async def async_fn() -> str:
+            return "async_result"
+
+        result = await policy.aexecute(async_fn)
+        assert result == "async_result"
+
+    @pytest.mark.asyncio
+    async def test_async_coroutine_fn_retried(self) -> None:
+        """aexecute() retries async fns that raise retryable exceptions."""
+        policy = RetryPolicy(max_retries=2, base_delay=0.001)
+        call_count = 0
+
+        async def flaky_async_fn() -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionError("down")
+            return "recovered"
+
+        with patch("finalayze.execution.retry.asyncio.sleep"):
+            result = await policy.aexecute(flaky_async_fn)
+        assert result == "recovered"
+        expected_calls = 2
+        assert call_count == expected_calls
+
+    @pytest.mark.asyncio
+    async def test_async_coroutine_fn_non_retryable(self) -> None:
+        """aexecute() raises immediately for non-retryable exceptions from async fns."""
+        policy = RetryPolicy(max_retries=_MAX_RETRIES)
+
+        async def bad_async_fn() -> str:
+            raise InsufficientFundsError("no funds")
+
+        with pytest.raises(InsufficientFundsError, match="no funds"):
+            await policy.aexecute(bad_async_fn)

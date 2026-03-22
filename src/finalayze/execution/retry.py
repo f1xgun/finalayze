@@ -93,11 +93,18 @@ class RetryPolicy:
         raise type(last_exc)(msg) from last_exc
 
     async def aexecute(self, fn: Callable[[], _T]) -> _T:
-        """Execute ``fn`` with async retry logic (non-blocking sleep)."""
+        """Execute ``fn`` with async retry logic (non-blocking sleep).
+
+        Handles both sync and async callables: if ``fn()`` returns a
+        coroutine, it is awaited before returning.
+        """
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
             try:
-                return fn()
+                result = fn()
+                if asyncio.iscoroutine(result):
+                    result = await result
+                return result  # type: ignore[return-value]
             except self._non_retryable:
                 raise
             except _RETRYABLE_EXCEPTIONS as exc:
