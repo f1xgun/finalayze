@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: Architecture Hardening
-status: Ready to execute
-stopped_at: Completed 22-01-PLAN.md
-last_updated: "2026-03-22T21:32:57.941Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 22-02-PLAN.md
+last_updated: "2026-03-22T21:39:28.677Z"
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 10
-  completed_plans: 9
+  completed_plans: 10
 ---
 
 # Project State
@@ -62,6 +62,7 @@ Key carry-forward decisions for v4.0:
 - [Phase 22]: Removed MarketDataEvent and SignalEvent classes -- unused in src/, tests updated to use local _TestEvent
 - [Phase 22]: Kept Pydantic response models on 501 endpoints for OpenAPI documentation
 - [Phase 22]: Used sys.modules aliasing for backward-compat module shims -- transparent to unittest.mock.patch
+- [Phase 22]: MetricsCollector injected as type (class ref) not instance -- all methods are static; guarded with if self._metrics
 
 ### Pending Todos
 
@@ -75,6 +76,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T21:32:57.937Z
-Stopped at: Completed 22-01-PLAN.md
+Last session: 2026-03-22T21:39:28.673Z
+Stopped at: Completed 22-02-PLAN.md
 Resume file: None

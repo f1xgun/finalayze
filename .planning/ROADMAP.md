@@ -58,7 +58,7 @@ Full details: `.planning/milestones/v3.0-ROADMAP.md`
 - [x] **Phase 19: Concurrency Safety and Integration Fixes** - Fix money-losing race conditions, lock misuse, session leaks, and v3.0 integration gaps (completed 2026-03-22)
 - [x] **Phase 20: Async Correctness and Resource Management** - Fix blocking calls in async paths, coroutine discard bugs, and resource lifecycle gaps (completed 2026-03-22)
 - [x] **Phase 21: Error Handling Hardening** - Fix NaN propagation, exception suppression, silent degradation, and API security gap (completed 2026-03-22)
-- [ ] **Phase 22: Dependency Layer Cleanup** - Extract orchestrators from core/, assign module layers, remove dead infrastructure
+- [x] **Phase 22: Dependency Layer Cleanup** - Extract orchestrators from core/, assign module layers, remove dead infrastructure (completed 2026-03-22)
 
 ## Phase Details
 
@@ -126,7 +126,7 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 22-01-PLAN.md -- Move orchestration files (trading_loop, bond_cycle) and notification files (alerts, telegram_bot) to correct layers
-- [ ] 22-02-PLAN.md -- Inject MetricsCollector via constructor, document layer assignments for backtest/ and monitoring/
+- [x] 22-02-PLAN.md -- Inject MetricsCollector via constructor, document layer assignments for backtest/ and monitoring/
 - [x] 22-03-PLAN.md -- Remove dead event bus streams, convert stub API endpoints to 501
 
 ## Progress
@@ -143,4 +143,4 @@ Note: Phase 21 depends on Phase 19 (not 20), so 20 and 21 could run in parallel 
 | 19. Concurrency Safety | v4.0 | 2/2 | Complete    | 2026-03-22 |
 | 20. Async and Resources | v4.0 | 3/3 | Complete    | 2026-03-22 |
 | 21. Error Handling | v4.0 | 2/2 | Complete    | 2026-03-22 |
-| 22. Layer Cleanup | v4.0 | 2/3 | In Progress|  |
+| 22. Layer Cleanup | v4.0 | 3/3 | Complete   | 2026-03-22 |

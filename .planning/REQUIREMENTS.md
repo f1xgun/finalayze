@@ -33,8 +33,8 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 
 - [x] **LAYER-01**: trading_loop.py and bond_cycle.py moved from core/ to dedicated orchestration module — core/ contains only L0 types
 - [x] **LAYER-02**: telegram_bot.py and alerts.py moved from core/ to appropriate layer (L6 API/Dashboard)
-- [ ] **LAYER-03**: MetricsCollector injected into trading loop via constructor — no direct import from L6
-- [ ] **LAYER-04**: backtest/ and monitoring/ have documented layer assignments
+- [x] **LAYER-03**: MetricsCollector injected into trading loop via constructor — no direct import from L6
+- [x] **LAYER-04**: backtest/ and monitoring/ have documented layer assignments
 
 ### API Security
 
@@ -97,8 +97,8 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 | ERR-05 | Phase 21 | Complete |
 | LAYER-01 | Phase 22 | Complete |
 | LAYER-02 | Phase 22 | Complete |
-| LAYER-03 | Phase 22 | Pending |
-| LAYER-04 | Phase 22 | Pending |
+| LAYER-03 | Phase 22 | Complete |
+| LAYER-04 | Phase 22 | Complete |
 | API-01 | Phase 21 | Complete |
 | DEAD-01 | Phase 22 | Complete |
 | DEAD-02 | Phase 22 | Complete |
