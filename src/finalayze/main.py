@@ -181,6 +181,27 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
     if _trading_loop_thread is not None and _trading_loop_thread.is_alive():
         _trading_loop_thread.join(timeout=10)
 
+    # Close TelegramAlerter httpx clients to prevent resource leaks
+    # Trading loop alerter (first instance)
+    if _trading_loop_instance is not None:
+        alerter_ref = getattr(_trading_loop_instance, "_alerter_ref", None)
+        if alerter_ref is not None and hasattr(alerter_ref, "close"):
+            try:
+                await alerter_ref.close()
+                log.info("trading_loop_alerter_closed")
+            except Exception:
+                log.debug("trading_loop_alerter_close_failed", exc_info=True)
+
+    # Bot handler alerter (second instance)
+    if _bot_handler_instance is not None:
+        bot_alerter = getattr(_bot_handler_instance, "_alerter", None)
+        if bot_alerter is not None and hasattr(bot_alerter, "close"):
+            try:
+                await bot_alerter.close()
+                log.info("bot_handler_alerter_closed")
+            except Exception:
+                log.debug("bot_handler_alerter_close_failed", exc_info=True)
+
 
 def _build_trading_loop(settings: object) -> object | None:
     """Build TradingLoop with all dependencies. Returns None on failure.

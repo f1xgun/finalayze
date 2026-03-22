@@ -198,13 +198,20 @@ class TelegramAlerter:
         self._chat_id = chat_id
         self._client: httpx.AsyncClient = httpx.AsyncClient(timeout=10)
         self._queue: TelegramMessageQueue | None = None
+        self._closed: bool = False
 
     def set_queue(self, queue: TelegramMessageQueue) -> None:
         """Attach a message queue for rate limiting and batching."""
         self._queue = queue
 
     async def close(self) -> None:
-        """Shut down persistent httpx client and queue."""
+        """Shut down persistent httpx client and queue.
+
+        Idempotent: safe to call multiple times. The second call is a no-op.
+        """
+        if self._closed:
+            return
+        self._closed = True
         if self._queue is not None:
             await self._queue.stop()
         await self._client.aclose()
