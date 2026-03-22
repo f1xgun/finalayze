@@ -12,31 +12,9 @@ from pydantic import BaseModel
 _log = structlog.get_logger()
 
 
-class MarketDataEvent(BaseModel):
-    """Event carrying a serialized OHLCV candle for a symbol."""
-
-    symbol: str
-    market_id: str
-    candle: dict[str, object]  # serialized Candle fields
-
-
-class SignalEvent(BaseModel):
-    """Event carrying a trading signal produced by a strategy."""
-
-    strategy_name: str
-    symbol: str
-    market_id: str
-    segment_id: str
-    direction: str
-    confidence: float
-
-
 class EventBus:
     """Async event bus backed by Redis Streams (XADD / XREAD)."""
 
-    STREAM_MARKET_DATA = "market_data"
-    STREAM_SIGNALS = "signals"
-    STREAM_EXECUTION = "execution"
     STREAM_COUPONS = "coupons"
 
     def __init__(self, redis_url: str = "redis://localhost:6379/0") -> None:

@@ -6,11 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from finalayze.core.events import (
-    EventBus,
-    MarketDataEvent,
-    SignalEvent,
-)
+from pydantic import BaseModel
+
+from finalayze.core.events import EventBus
 
 # ── Constants (ruff PLR2004: no magic numbers) ──────────────────────────
 
@@ -27,57 +25,11 @@ READ_COUNT = 5
 READ_LAST_ID = "0"
 
 
-# ── MarketDataEvent ──────────────────────────────────────────────────────
+class _TestEvent(BaseModel):
+    """Lightweight event model used only in tests."""
 
-
-class TestMarketDataEvent:
-    def test_create_market_data_event(self) -> None:
-        candle = {"open": "100.0", "close": "101.0", "high": "102.0", "low": "99.0", "volume": 1000}
-        event = MarketDataEvent(symbol=TEST_SYMBOL, market_id=TEST_MARKET_ID, candle=candle)
-        assert event.symbol == TEST_SYMBOL
-        assert event.market_id == TEST_MARKET_ID
-        assert event.candle == candle
-
-    def test_market_data_event_serializes_to_json(self) -> None:
-        candle = {"open": "150.0", "close": "151.0"}
-        event = MarketDataEvent(symbol=TEST_SYMBOL, market_id=TEST_MARKET_ID, candle=candle)
-        json_str = event.model_dump_json()
-        assert TEST_SYMBOL in json_str
-        assert TEST_MARKET_ID in json_str
-
-
-# ── SignalEvent ──────────────────────────────────────────────────────────
-
-
-class TestSignalEvent:
-    def test_create_signal_event(self) -> None:
-        event = SignalEvent(
-            strategy_name=TEST_STRATEGY,
-            symbol=TEST_SYMBOL,
-            market_id=TEST_MARKET_ID,
-            segment_id=TEST_SEGMENT_ID,
-            direction=TEST_DIRECTION,
-            confidence=TEST_CONFIDENCE,
-        )
-        assert event.strategy_name == TEST_STRATEGY
-        assert event.symbol == TEST_SYMBOL
-        assert event.market_id == TEST_MARKET_ID
-        assert event.segment_id == TEST_SEGMENT_ID
-        assert event.direction == TEST_DIRECTION
-        assert event.confidence == TEST_CONFIDENCE
-
-    def test_signal_event_serializes_to_json(self) -> None:
-        event = SignalEvent(
-            strategy_name=TEST_STRATEGY,
-            symbol=TEST_SYMBOL,
-            market_id=TEST_MARKET_ID,
-            segment_id=TEST_SEGMENT_ID,
-            direction=TEST_DIRECTION,
-            confidence=TEST_CONFIDENCE,
-        )
-        json_str = event.model_dump_json()
-        assert TEST_STRATEGY in json_str
-        assert TEST_SYMBOL in json_str
+    symbol: str
+    label: str
 
 
 # ── EventBus ─────────────────────────────────────────────────────────────
@@ -101,11 +53,7 @@ class TestEventBus:
     async def test_publish_calls_xadd_with_correct_stream(
         self, event_bus: EventBus, mock_redis: AsyncMock
     ) -> None:
-        event = MarketDataEvent(
-            symbol=TEST_SYMBOL,
-            market_id=TEST_MARKET_ID,
-            candle={"close": "100.0"},
-        )
+        event = _TestEvent(symbol=TEST_SYMBOL, label="candle")
         await event_bus.publish(TEST_STREAM, event)
         mock_redis.xadd.assert_called_once()
         call_args = mock_redis.xadd.call_args
@@ -115,29 +63,18 @@ class TestEventBus:
     async def test_publish_includes_event_type_in_payload(
         self, event_bus: EventBus, mock_redis: AsyncMock
     ) -> None:
-        event = MarketDataEvent(
-            symbol=TEST_SYMBOL,
-            market_id=TEST_MARKET_ID,
-            candle={"close": "100.0"},
-        )
+        event = _TestEvent(symbol=TEST_SYMBOL, label="candle")
         await event_bus.publish(TEST_STREAM, event)
         call_args = mock_redis.xadd.call_args
         data = call_args[0][1]
         assert "type" in data
-        assert data["type"] == "MarketDataEvent"
+        assert data["type"] == "_TestEvent"
 
     @pytest.mark.asyncio
     async def test_publish_includes_json_payload(
         self, event_bus: EventBus, mock_redis: AsyncMock
     ) -> None:
-        event = SignalEvent(
-            strategy_name=TEST_STRATEGY,
-            symbol=TEST_SYMBOL,
-            market_id=TEST_MARKET_ID,
-            segment_id=TEST_SEGMENT_ID,
-            direction=TEST_DIRECTION,
-            confidence=TEST_CONFIDENCE,
-        )
+        event = _TestEvent(symbol=TEST_SYMBOL, label=TEST_STRATEGY)
         await event_bus.publish(TEST_STREAM, event)
         call_args = mock_redis.xadd.call_args
         data = call_args[0][1]
@@ -149,11 +86,7 @@ class TestEventBus:
     async def test_publish_returns_message_id(
         self, event_bus: EventBus, mock_redis: AsyncMock
     ) -> None:
-        event = MarketDataEvent(
-            symbol=TEST_SYMBOL,
-            market_id=TEST_MARKET_ID,
-            candle={},
-        )
+        event = _TestEvent(symbol=TEST_SYMBOL, label="test")
         msg_id = await event_bus.publish(TEST_STREAM, event)
         assert msg_id == TEST_MSG_ID
 
@@ -183,24 +116,27 @@ class TestEventBus:
         self, event_bus: EventBus, mock_redis: AsyncMock
     ) -> None:
         raw_messages = [
-            (TEST_STREAM, [(TEST_MSG_ID, {"type": "MarketDataEvent", "payload": "{}"})])
+            (TEST_STREAM, [(TEST_MSG_ID, {"type": "_TestEvent", "payload": "{}"})])
         ]
         mock_redis.xread.return_value = raw_messages
         result = await event_bus.read(TEST_STREAM, count=READ_COUNT)
         assert len(result) == 1
         msg_id, fields = result[0]
         assert msg_id == TEST_MSG_ID
-        assert fields["type"] == "MarketDataEvent"
+        assert fields["type"] == "_TestEvent"
 
     @pytest.mark.asyncio
     async def test_close_calls_aclose(self, event_bus: EventBus, mock_redis: AsyncMock) -> None:
         await event_bus.close()
         mock_redis.aclose.assert_called_once()
 
-    def test_stream_constants_are_defined(self) -> None:
-        assert EventBus.STREAM_MARKET_DATA == "market_data"
-        assert EventBus.STREAM_SIGNALS == "signals"
-        assert EventBus.STREAM_EXECUTION == "execution"
+    def test_stream_coupons_constant_is_defined(self) -> None:
+        assert EventBus.STREAM_COUPONS == "coupons"
+
+    def test_dead_stream_constants_removed(self) -> None:
+        assert not hasattr(EventBus, "STREAM_MARKET_DATA")
+        assert not hasattr(EventBus, "STREAM_SIGNALS")
+        assert not hasattr(EventBus, "STREAM_EXECUTION")
 
     def test_default_redis_url(self) -> None:
         with patch("finalayze.core.events.redis.asyncio.from_url") as mock_from_url:
