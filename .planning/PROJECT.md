@@ -12,15 +12,11 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
-## Current Milestone: v3.0 Production Readiness
+## Current State: v3.0 shipped
 
-**Goal:** Validate system in sandbox, define go/no-go gate criteria, launch on minimal capital with tightened risk limits, then scale to target capital with production monitoring.
-
-**Target features:**
-- Sandbox monitoring dashboard with automated metric collection (trade log, P&L, uptime, slippage)
-- Go/No-Go gate with formalized thresholds (uptime ≥99%, fill rate ≥95%, DD <5%, signal divergence <50%)
-- Gradual rollout on 50-100K RUB with tightened limits (3% max position, 1% daily loss, 2% DD auto-stop)
-- Production operations: anomaly alerts, health check, kill switch, capital scaling
+v3.0 Production Readiness shipped 2026-03-22. 4 phases, 10 plans, +5,097 LOC.
+Sandbox monitoring, Go/No-Go gate, kill switch, health monitor, and dashboard all operational.
+Two known integration bugs accepted (Telegram /gonogo import, HealthMonitor feed freshness wiring).
 
 ## Requirements
 
@@ -74,14 +70,18 @@ operating 24/7 without human intervention beyond initial configuration and monit
 - ✓ Portfolio-level allocation (40% OFZ + 60% equity) with USDRUB crisis brake — v2.0
 - ✓ PortfolioBacktestOrchestrator with walk-forward Sharpe — v2.0
 
+- ✓ Sandbox monitoring dashboard with real-time metric collection — v3.0
+- ✓ Automated go/no-go gate report with pass/fail thresholds — v3.0
+- ✓ Gradual rollout configuration (tightened limits for minimal capital) — v3.0
+- ✓ Production health monitoring and kill switch — v3.0
+- ✓ Capital ladder validation at 50K/150K/500K/2.5M RUB tiers — v3.0
+
 ### Active
 
 <!-- Next milestone scope — TBD -->
 
-- [ ] Sandbox monitoring dashboard with real-time trade/metric collection
-- [ ] Automated go/no-go gate report with pass/fail thresholds
-- [ ] Gradual rollout configuration (tightened limits for minimal capital)
-- [ ] Production health monitoring and kill switch
+- [ ] Fix Telegram /gonogo import bug (OPS-04 integration gap)
+- [ ] Wire HealthMonitor.update_feed_timestamp() into TradingLoop (OPS-02 gap)
 - [ ] Capital scaling from minimal to target after validation period
 
 ### Out of Scope
@@ -91,23 +91,24 @@ operating 24/7 without human intervention beyond initial configuration and monit
 - Mobile app — Streamlit dashboard + Telegram alerts sufficient
 - Cryptocurrency — not available on MOEX
 - Custom ML model training UI — CLI scripts sufficient
-- US market development — deferred, MOEX-only focus for v2.0
-- Multi-account support — deferred to v3.0
-- Tax optimization (NDFL, IIS) — deferred to v3.0
+- US market development — deferred, MOEX-only focus
+- Multi-account support — deferred to v4.0+
+- Tax optimization (NDFL, IIS) — deferred to v4.0+
 
 ## Context
 
-### Current State (v2.0 shipped)
+### Current State (v3.0 shipped)
 
-Codebase: ~430 Python files, 36,789 LOC.
+Codebase: ~460 Python files, ~42,000 LOC.
 Tech stack: Python 3.12, FastAPI, SQLAlchemy 2.0 async, PostgreSQL+TimescaleDB, Redis,
 XGBoost, LightGBM, CatBoost, PyTorch, pandas-ta, QuantLib, feedparser, Telethon.
 
-v2.0 shipped: MOEX equity profitability overhaul complete. 7 phases (8-14), 16 plans.
-Data foundation fixed (vol target, toxic symbols, dividend calendar, 2022 exclusion).
-5 MOEX-native strategies wired (dividend gap, CBR, pairs, sector allocation, RUB/oil regime).
-ML ensemble enabled for ru_blue_chips (10 macro features, reinforcer-only).
-Portfolio assembly complete (40/60 OFZ/equity, crisis brake, WF Sharpe).
+v3.0 shipped: Production readiness infrastructure complete. 4 phases (15-18), 10 plans.
+Rollout phase system (MINIMAL/STANDARD/FULL) with risk limit overrides.
+SandboxMonitorService persists per-cycle metrics to TimescaleDB.
+GoNoGoReporter evaluates 8 criteria with backtest-derived thresholds.
+KillSwitch + HealthMonitor + Telegram /kill and /gonogo commands.
+Streamlit sandbox dashboard + REST /sandbox/gonogo endpoint.
 
 ### Known Issues
 - ML quality gates fail for small MOEX datasets (accuracy cap at 0.55 for n_eff<20)
@@ -148,6 +149,10 @@ Portfolio assembly complete (40/60 OFZ/equity, crisis brake, WF Sharpe).
 | OFZ carry strategy (not duration rotation) | Carry positive Sharpe, duration negative in hiking cycle | ✓ Good — ru_ofz_pk Sharpe +1.14 |
 | OpenRouter free model for LLM | Cost efficiency for news analysis | ✓ Good — avoids per-call charges |
 | Three-quarter Kelly for MOEX | Larger positions for less liquid market | ⚠️ Revisit — monitor in live trading |
+| Rollout phases for gradual capital | Safety for first live deployment | ✓ Good — MINIMAL/STANDARD/FULL with env var override |
+| Standalone monitoring services | Not embedded in TradingLoop (per research) | ✓ Good — clean separation, testable |
+| Go/no-go is advisory, not automated | Human decides live promotion | ✓ Good — PROCEED/DEFER/ABORT report |
+| File-based kill flag | Works even when DB is down | ✓ Good — persistent across restarts |
 
 | MOEX-only focus for v2.0 | MOEX equity needs fixing; US already works | ✓ Good — focused delivery in 2 days |
 | Universe surgery first | Toxic symbols (GAZP, VTBR, SNGS) account for 60% negative PnL | ✓ Good — removed from all segments |
@@ -157,4 +162,4 @@ Portfolio assembly complete (40/60 OFZ/equity, crisis brake, WF Sharpe).
 | Sector allocation in sizing (not combiner) | Architectural constraint from requirements | ✓ Good — clean separation of concerns |
 
 ---
-*Last updated: 2026-03-21 after v3.0 milestone start*
+*Last updated: 2026-03-22 after v3.0 milestone shipped*
