@@ -164,6 +164,45 @@ class TestTinkoffFetchCandles:
             fetcher.fetch_candles(SBER_SYMBOL, start, end, timeframe="5m")
 
 
+class TestTinkoffFetcherGrpcTimeout:
+    """Tests for configurable gRPC timeout on TinkoffFetcher."""
+
+    def test_default_timeout_is_60(self) -> None:
+        """Default gRPC timeout must be 60 seconds."""
+        fetcher = _make_fetcher()
+        assert fetcher._grpc_timeout == 60.0
+
+    def test_custom_timeout_via_constructor(self) -> None:
+        """Custom timeout can be passed via constructor parameter."""
+        registry = _make_registry()
+        fetcher = TinkoffFetcher(
+            token=FAKE_TOKEN, registry=registry, sandbox=True, grpc_timeout=30.0
+        )
+        assert fetcher._grpc_timeout == 30.0
+
+    def test_fetch_async_uses_wait_for_with_timeout(self) -> None:
+        """_fetch_async must wrap gRPC call with asyncio.wait_for(timeout=self._grpc_timeout)."""
+        import inspect
+
+        source = inspect.getsource(TinkoffFetcher._fetch_async)
+        assert "wait_for" in source, "_fetch_async must use asyncio.wait_for"
+        assert "timeout" in source, "_fetch_async must pass timeout parameter"
+
+    def test_timeout_error_converted_to_data_fetch_error(self) -> None:
+        """asyncio.TimeoutError from wait_for must be converted to DataFetchError."""
+        import asyncio as _asyncio
+
+        with patch(
+            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
+            side_effect=_asyncio.TimeoutError(),
+        ):
+            fetcher = _make_fetcher()
+            start = datetime(2024, 1, 1, tzinfo=UTC)
+            end = datetime(2024, 2, 1, tzinfo=UTC)
+            with pytest.raises(DataFetchError, match="timeout"):
+                fetcher.fetch_candles(SBER_SYMBOL, start, end)
+
+
 class TestTinkoffFetcherSandboxClientSelection:
     """Verify that sandbox flag controls which AsyncClient class is used."""
 

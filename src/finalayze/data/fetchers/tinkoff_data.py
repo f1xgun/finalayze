@@ -70,11 +70,13 @@ class TinkoffFetcher(BaseFetcher):
         *,
         sandbox: bool = True,
         rate_limiter: RateLimiter | None = None,
+        grpc_timeout: float = 60.0,
     ) -> None:
         self._token = token
         self._registry = registry
         self._sandbox = sandbox
         self._rate_limiter = rate_limiter
+        self._grpc_timeout = grpc_timeout
 
     def _make_client(self) -> AsyncClient:
         """Create a new async client instance.
@@ -111,6 +113,12 @@ class TinkoffFetcher(BaseFetcher):
             raw_candles = asyncio.run(self._fetch_async(figi, start, end, interval))
         except InstrumentNotFoundError:
             raise
+        except asyncio.TimeoutError as exc:
+            _log.error(
+                "candle_fetch_timeout", symbol=symbol, figi=figi, timeout_s=self._grpc_timeout
+            )
+            msg = f"Tinkoff gRPC timeout ({self._grpc_timeout}s) fetching {symbol}"
+            raise DataFetchError(msg) from exc
         except Exception as exc:
             _log.exception("candle_fetch_failed", symbol=symbol, figi=figi)
             msg = f"Tinkoff gRPC error fetching {symbol}: {exc}"
@@ -134,11 +142,14 @@ class TinkoffFetcher(BaseFetcher):
         """
         client = self._make_client()
         async with client as services:
-            response = await services.market_data.get_candles(
-                figi=figi,
-                from_=start,
-                to=end,
-                interval=interval,
+            response = await asyncio.wait_for(
+                services.market_data.get_candles(
+                    figi=figi,
+                    from_=start,
+                    to=end,
+                    interval=interval,
+                ),
+                timeout=self._grpc_timeout,
             )
             return list(response.candles)
 
