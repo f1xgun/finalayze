@@ -90,7 +90,11 @@ Plans:
   5. TinkoffBroker.close() logs cleanup exceptions with structured context (resource name, error type) instead of bare except: pass
   6. TinkoffFetcher gRPC calls have a configurable timeout parameter (default 60s) -- no indefinite hang on unresponsive gRPC server
   7. httpx clients in alerts.py and fetcher modules are explicitly closed during application shutdown
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 20-01-PLAN.md -- Fix gRPC reconnect blocking sleep, RetryPolicy coroutine discard, sandbox monitor asyncio.run
+- [ ] 20-02-PLAN.md -- Portfolio run_in_executor, TinkoffBroker.close() logging, TinkoffFetcher gRPC timeout
+- [ ] 20-03-PLAN.md -- Wire TelegramAlerter httpx client shutdown into application lifespan
 
 ### Phase 21: Error Handling Hardening
 **Goal**: Failures in GARCH, EventBus, data fetchers, and trading loops are visible through logs and alerts -- no silent degradation or NaN propagation
@@ -130,6 +134,6 @@ Note: Phase 21 depends on Phase 19 (not 20), so 20 and 21 could run in parallel 
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
 | 19. Concurrency Safety | v4.0 | 2/2 | Complete    | 2026-03-22 |
-| 20. Async and Resources | v4.0 | 0/TBD | Not started | - |
+| 20. Async and Resources | v4.0 | 0/3 | Not started | - |
 | 21. Error Handling | v4.0 | 0/TBD | Not started | - |
 | 22. Layer Cleanup | v4.0 | 0/TBD | Not started | - |
