@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from finalayze.api.v1.auth import api_key_auth
@@ -51,9 +51,11 @@ async def list_signals(
     segment: str | None = None,  # noqa: ARG001
     limit: int = 50,  # noqa: ARG001
 ) -> SignalsResponse:
-    return SignalsResponse(signals=[])
+    """List trading signals. Not yet implemented."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")
 
 
 @router.get("/strategies/performance", response_model=StrategiesResponse)
 async def strategies_performance() -> StrategiesResponse:
-    return StrategiesResponse(strategies=[])
+    """Strategy performance metrics. Not yet implemented."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")

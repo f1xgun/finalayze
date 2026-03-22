@@ -13,10 +13,10 @@ def _auth() -> dict[str, str]:
     return {"X-API-Key": Settings().api_key}
 
 
-def test_trades_list_returns_200() -> None:
+def test_trades_list_returns_501() -> None:
     resp = TestClient(create_app()).get("/api/v1/trades", headers=_auth())
-    assert resp.status_code == 200
-    assert "trades" in resp.json()
+    assert resp.status_code == 501
+    assert resp.json()["detail"] == "Not yet implemented"
 
 
 def test_trades_list_requires_auth() -> None:
@@ -24,12 +24,13 @@ def test_trades_list_requires_auth() -> None:
     assert resp.status_code == 401
 
 
-def test_trades_analytics_returns_200() -> None:
+def test_trades_analytics_returns_501() -> None:
     resp = TestClient(create_app()).get("/api/v1/trades/analytics", headers=_auth())
-    assert resp.status_code == 200
-    assert "avg_slippage_bps" in resp.json()
+    assert resp.status_code == 501
+    assert resp.json()["detail"] == "Not yet implemented"
 
 
-def test_trade_detail_returns_404_for_unknown() -> None:
+def test_trade_detail_returns_501() -> None:
     resp = TestClient(create_app()).get(f"/api/v1/trades/{uuid.uuid4()}", headers=_auth())
-    assert resp.status_code == 404
+    assert resp.status_code == 501
+    assert resp.json()["detail"] == "Not yet implemented"

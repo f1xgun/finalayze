@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from finalayze.api.v1.auth import api_key_auth
@@ -34,4 +34,5 @@ async def list_news(
     scope: str | None = None,  # noqa: ARG001
     limit: int = 20,  # noqa: ARG001
 ) -> NewsResponse:
-    return NewsResponse(articles=[])
+    """List news articles. Not yet implemented."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")

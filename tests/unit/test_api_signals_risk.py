@@ -13,16 +13,16 @@ def _h() -> dict[str, str]:
     return {"X-API-Key": Settings().api_key}
 
 
-def test_signals_list_200() -> None:
+def test_signals_list_501() -> None:
     resp = TestClient(create_app()).get("/api/v1/signals", headers=_h())
-    assert resp.status_code == 200
-    assert "signals" in resp.json()
+    assert resp.status_code == 501
+    assert resp.json()["detail"] == "Not yet implemented"
 
 
-def test_strategies_performance_200() -> None:
+def test_strategies_performance_501() -> None:
     resp = TestClient(create_app()).get("/api/v1/strategies/performance", headers=_h())
-    assert resp.status_code == 200
-    assert "strategies" in resp.json()
+    assert resp.status_code == 501
+    assert resp.json()["detail"] == "Not yet implemented"
 
 
 def test_risk_status_200() -> None:
@@ -45,16 +45,16 @@ def test_risk_override_requires_auth() -> None:
     assert resp.status_code == 401
 
 
-def test_ml_status_200() -> None:
+def test_ml_status_501() -> None:
     resp = TestClient(create_app()).get("/api/v1/ml/status", headers=_h())
-    assert resp.status_code == 200
-    assert "models" in resp.json()
+    assert resp.status_code == 501
+    assert resp.json()["detail"] == "Not yet implemented"
 
 
-def test_news_list_200() -> None:
+def test_news_list_501() -> None:
     resp = TestClient(create_app()).get("/api/v1/news", headers=_h())
-    assert resp.status_code == 200
-    assert "articles" in resp.json()
+    assert resp.status_code == 501
+    assert resp.json()["detail"] == "Not yet implemented"
 
 
 def test_risk_override_valid_applies() -> None:

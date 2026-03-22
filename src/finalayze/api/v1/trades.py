@@ -47,26 +47,20 @@ async def list_trades(
     symbol: str | None = None,  # noqa: ARG001
     limit: int = 100,  # noqa: ARG001
 ) -> TradesResponse:
-    """Trade history. Reads from orders table (stub: returns empty)."""
-    return TradesResponse(trades=[], total=0)
+    """Trade history. Not yet implemented."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")
 
 
 @router.get("/analytics", response_model=TradeAnalytics)
 async def trade_analytics(
     market: str | None = None,  # noqa: ARG001
-    period: int = 7,
+    period: int = 7,  # noqa: ARG001
 ) -> TradeAnalytics:
-    """Slippage and fill latency stats."""
-    return TradeAnalytics(
-        period_days=period,
-        total_trades=0,
-        avg_slippage_bps=None,
-        avg_fill_latency_ms=None,
-        rejection_rate_pct=None,
-    )
+    """Slippage and fill latency stats. Not yet implemented."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")
 
 
 @router.get("/{trade_id}", response_model=TradeEntry)
-async def get_trade(trade_id: str) -> TradeEntry:
-    """Single trade detail for audit drill-down."""
-    raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+async def get_trade(trade_id: str) -> TradeEntry:  # noqa: ARG001
+    """Single trade detail. Not yet implemented."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")

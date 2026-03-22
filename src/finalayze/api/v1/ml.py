@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from finalayze.api.v1.auth import api_key_auth
@@ -30,4 +30,5 @@ class MLStatusResponse(BaseModel):
 
 @router.get("/status", response_model=MLStatusResponse)
 async def ml_status() -> MLStatusResponse:
-    return MLStatusResponse(models=[])
+    """ML model status. Not yet implemented."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")
