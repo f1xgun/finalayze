@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: Architecture Hardening
-status: unknown
-stopped_at: Completed 21-02-PLAN.md
-last_updated: "2026-03-22T21:07:56.544Z"
+status: Ready to execute
+stopped_at: Completed 22-01-PLAN.md
+last_updated: "2026-03-22T21:32:57.941Z"
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 10
+  completed_plans: 9
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 21 — error-handling-hardening
+**Current focus:** Phase 22 — dependency-layer-cleanup
 
 ## Current Position
 
-Phase: 22
-Plan: Not started
+Phase: 22 (dependency-layer-cleanup) — EXECUTING
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -59,6 +59,9 @@ Key carry-forward decisions for v4.0:
 - [Phase 21]: EventBus uses try/except redis.ResponseError instead of contextlib.suppress(Exception)
 - [Phase 21]: POST /kill endpoint now requires X-API-Key authentication
 - [Phase 21]: Used AlertPriority.CRITICAL for consecutive failure alerts; per-layer error tracking in BondCycleProcessor; threshold of 3 consecutive failures
+- [Phase 22]: Removed MarketDataEvent and SignalEvent classes -- unused in src/, tests updated to use local _TestEvent
+- [Phase 22]: Kept Pydantic response models on 501 endpoints for OpenAPI documentation
+- [Phase 22]: Used sys.modules aliasing for backward-compat module shims -- transparent to unittest.mock.patch
 
 ### Pending Todos
 
@@ -72,6 +75,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T21:03:46.178Z
-Stopped at: Completed 21-02-PLAN.md
+Last session: 2026-03-22T21:32:57.937Z
+Stopped at: Completed 22-01-PLAN.md
 Resume file: None
