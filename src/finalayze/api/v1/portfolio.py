@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 from typing import Any
 
@@ -103,7 +104,8 @@ async def get_portfolio(request: Request) -> PortfolioResponse:
         market_id = market_def.id
         try:
             broker = broker_router.route(market_id)
-            p = broker.get_portfolio()
+            loop = asyncio.get_running_loop()
+            p = await loop.run_in_executor(None, broker.get_portfolio)
             equity = float(p.equity)
             cash = float(p.cash)
             markets.append(
