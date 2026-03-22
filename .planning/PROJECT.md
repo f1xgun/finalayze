@@ -12,23 +12,14 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
-## Current Milestone: v4.0 Architecture Hardening
+## Current State: v4.0 shipped
 
-**Goal:** Fix critical architectural defects found in comprehensive audit — dependency layer violations, async correctness bugs, dead infrastructure, error handling gaps that risk money loss or silent degradation.
-
-**Target areas:**
-- Critical concurrency bugs (stop-loss double-sell, async retry, session leaks)
-- Async correctness (blocking sleeps, threading.Lock in async, TOCTOU races)
-- Dependency layer cleanup (extract orchestrators from core/, assign missing layers)
-- Error handling hardening (GARCH NaN propagation, overly broad exception suppression)
-- Dead code removal (unused event bus infrastructure)
-- API correctness (blocking broker calls in async endpoints, unauthenticated /kill)
-
-## Current State: v3.0 shipped
-
-v3.0 Production Readiness shipped 2026-03-22. 4 phases, 10 plans, +5,097 LOC.
-Sandbox monitoring, Go/No-Go gate, kill switch, health monitor, and dashboard all operational.
-Two known integration bugs accepted (Telegram /gonogo import, HealthMonitor feed freshness wiring).
+v4.0 Architecture Hardening shipped 2026-03-22. 4 phases, 10 plans.
+Fixed concurrency bugs (stop-loss TOCTOU, async lock, session leak), async correctness
+(non-blocking reconnect, coroutine-aware retry, run_in_executor), error handling
+(GARCH NaN fallback, EventBus narrowed catch, consecutive error alerting, /kill auth),
+and dependency layers (orchestration/ extraction, MetricsCollector DI, dead code removal).
+v3.0 integration gaps closed (Telegram /gonogo import, HealthMonitor feed freshness).
 
 ## Requirements
 
@@ -88,25 +79,36 @@ Two known integration bugs accepted (Telegram /gonogo import, HealthMonitor feed
 - ✓ Production health monitoring and kill switch — v3.0
 - ✓ Capital ladder validation at 50K/150K/500K/2.5M RUB tiers — v3.0
 
+- ✓ Stop-loss atomicity (no double-sell TOCTOU race) — v4.0
+- ✓ asyncio.Lock in async broker paths (no threading.Lock deadlock) — v4.0
+- ✓ Thread-safe event loop initialization — v4.0
+- ✓ macro_cache session scoping with async-with — v4.0
+- ✓ Non-blocking gRPC reconnect (asyncio.sleep, not time.sleep) — v4.0
+- ✓ Coroutine-aware RetryPolicy.aexecute() — v4.0
+- ✓ Portfolio API run_in_executor (non-blocking FastAPI) — v4.0
+- ✓ Async-safe sandbox monitor persistence — v4.0
+- ✓ GARCH NaN fallback with rolling volatility — v4.0
+- ✓ EventBus narrowed exception handling (redis.ResponseError only) — v4.0
+- ✓ Structured TinkoffFetcher error logging — v4.0
+- ✓ Consecutive error alerting in TradingLoop and BondCycle — v4.0
+- ✓ POST /kill authentication via X-API-Key — v4.0
+- ✓ Orchestration module extraction (core/ → orchestration/) — v4.0
+- ✓ MetricsCollector dependency injection — v4.0
+- ✓ Dead event bus streams removed — v4.0
+- ✓ Stub API endpoints return 501 Not Implemented — v4.0
+- ✓ TinkoffBroker.close() structured logging — v4.0
+- ✓ TinkoffFetcher configurable gRPC timeout — v4.0
+- ✓ httpx client lifecycle management — v4.0
+- ✓ Telegram /gonogo import fixed — v4.0
+- ✓ HealthMonitor feed freshness wired — v4.0
+
 ### Active
 
-<!-- v4.0 Architecture Hardening -->
+<!-- Next milestone scope — TBD -->
 
-- [ ] Fix stop-loss TOCTOU race condition (potential double-sell)
-- [ ] Fix async retry bugs (sync fn() in aexecute, blocking sleep in execute)
-- [ ] Fix macro_cache session leak (no async with, no rollback)
-- [ ] Fix TinkoffBroker threading.Lock in async code (latent deadlock)
-- [ ] Fix TinkoffBroker TOCTOU race on event loop creation
-- [ ] Fix GARCH NaN propagation into sizing pipeline
-- [ ] Fix EventBus suppress(Exception) — narrow to suppress(ResponseError)
-- [ ] Fix portfolio API endpoint blocking event loop (sync broker calls)
-- [ ] Replace time.sleep(300) in gRPC reconnect with non-blocking approach
-- [ ] Add authentication to POST /kill endpoint
-- [ ] Extract trading_loop.py and bond_cycle.py from core/ to orchestration/
-- [ ] Remove or productionize dead event bus infrastructure
-- [ ] Assign layers to backtest/ and monitoring/ modules
-- [ ] Fix Telegram /gonogo import bug (OPS-04 integration gap)
-- [ ] Wire HealthMonitor.update_feed_timestamp() into TradingLoop (OPS-02 gap)
+- [ ] Capital scaling from minimal to target after validation period
+- [ ] Migrate 99 test files from core.trading_loop shim to canonical orchestration.trading_loop imports
+- [ ] Inject _alerter_ref via TradingLoop constructor (currently attribute mutation)
 
 ### Out of Scope
 
@@ -116,30 +118,30 @@ Two known integration bugs accepted (Telegram /gonogo import, HealthMonitor feed
 - Cryptocurrency — not available on MOEX
 - Custom ML model training UI — CLI scripts sufficient
 - US market development — deferred, MOEX-only focus
-- Multi-account support — deferred to v4.0+
-- Tax optimization (NDFL, IIS) — deferred to v4.0+
+- Multi-account support — deferred to v5.0+
+- Tax optimization (NDFL, IIS) — deferred to v5.0+
 
 ## Context
 
-### Current State (v3.0 shipped)
+### Current State (v4.0 shipped)
 
-Codebase: ~460 Python files, ~42,000 LOC.
+Codebase: ~470 Python files, ~39,000 LOC (reduced by dead code removal).
 Tech stack: Python 3.12, FastAPI, SQLAlchemy 2.0 async, PostgreSQL+TimescaleDB, Redis,
 XGBoost, LightGBM, CatBoost, PyTorch, pandas-ta, QuantLib, feedparser, Telethon.
 
-v3.0 shipped: Production readiness infrastructure complete. 4 phases (15-18), 10 plans.
-Rollout phase system (MINIMAL/STANDARD/FULL) with risk limit overrides.
-SandboxMonitorService persists per-cycle metrics to TimescaleDB.
-GoNoGoReporter evaluates 8 criteria with backtest-derived thresholds.
-KillSwitch + HealthMonitor + Telegram /kill and /gonogo commands.
-Streamlit sandbox dashboard + REST /sandbox/gonogo endpoint.
+v4.0 shipped: Architecture hardening complete. 4 phases (19-22), 10 plans, ~70 new tests.
+Orchestration module extracted from core/ (trading_loop.py, bond_cycle.py → orchestration/).
+Notifications moved to API layer (alerts.py, telegram_bot.py → api/).
+MetricsCollector injected via constructor. Dead event bus streams removed.
+All concurrency bugs fixed. All async paths non-blocking. Error handling hardened.
 
 ### Known Issues
 - ML quality gates fail for small MOEX datasets (accuracy cap at 0.55 for n_eff<20)
-- ML us_tech quality gates regressed after schema v3 bump (brier/class_balance strict)
 - event_driven strategy shows 0 backtest trades (expected — needs live news)
 - Portfolio CLI requires FINALAYZE_TINKOFF_TOKEN for real data
 - Walk-forward Sharpe on blended portfolio not yet validated with live data
+- 99 test files still use core.trading_loop shim (functional but should migrate)
+- _alerter_ref set via attribute mutation, not constructor injection
 
 ### Data Sources
 - **Market data:** T-Invest gRPC API (candles, instruments, dividends)
@@ -184,6 +186,11 @@ Streamlit sandbox dashboard + REST /sandbox/gonogo endpoint.
 | OFZ carry as portfolio foundation | Sharpe +1.14, provides 20% base return at 21% CBR rate | ✓ Good — 40/60 allocation with crisis brake |
 | ML reinforcer-only for MOEX | Quality gates infeasible for small datasets | ⚠️ Revisit — cap threshold helps but gates still strict |
 | Sector allocation in sizing (not combiner) | Architectural constraint from requirements | ✓ Good — clean separation of concerns |
+| sys.modules shims for backward compat | Avoid updating 99+ test imports during module move | ✓ Good — zero-breakage migration, shims transparent |
+| MetricsCollector via constructor DI | Eliminate 6 deferred L6 imports in TradingLoop | ✓ Good — clean layer boundary |
+| asyncio.Lock for async, threading.Lock for sync | Separate lock types for separate execution contexts | ✓ Good — eliminates latent deadlock |
+| GARCH rolling vol fallback over NaN | NaN propagation through sizing pipeline is dangerous | ✓ Good — safe fallback with warning logged |
+| 501 Not Implemented for stub endpoints | Empty 200 responses mislead API consumers | ✓ Good — clear signal that feature is pending |
 
 ---
-*Last updated: 2026-03-22 after v4.0 milestone started*
+*Last updated: 2026-03-22 after v4.0 milestone shipped*
