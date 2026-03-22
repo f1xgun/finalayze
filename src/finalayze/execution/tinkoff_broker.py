@@ -12,7 +12,6 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import math
 import os
 import threading
@@ -126,14 +125,29 @@ class TinkoffBroker(BrokerBase):
     def close(self) -> None:
         """Close the persistent gRPC channel and event loop."""
         if self._client is not None:
-            with contextlib.suppress(Exception):
-                if self._loop and not self._loop.is_closed():
+            if self._loop and not self._loop.is_closed():
+                try:
                     future = asyncio.run_coroutine_threadsafe(
                         self._client.__aexit__(None, None, None),  # type: ignore[no-untyped-call]
                         self._loop,
                     )
                     future.result(timeout=5)
+                except Exception as exc:
+                    _log.warning(
+                        "grpc_channel_close_failed",
+                        resource="grpc_client",
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
+                try:
                     self._loop.call_soon_threadsafe(self._loop.stop)
+                except Exception as exc:
+                    _log.warning(
+                        "event_loop_stop_failed",
+                        resource="event_loop",
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
             self._client = None
             self._services = None
             self._loop = None
