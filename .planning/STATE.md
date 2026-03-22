@@ -2,16 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: Architecture Hardening
-status: ready_to_plan
-stopped_at: null
-last_updated: "2026-03-22T14:00:00.000Z"
-last_activity: 2026-03-22 -- Roadmap created for v4.0
+status: Phase complete — ready for verification
+stopped_at: Completed 19-01-PLAN.md
+last_updated: "2026-03-22T20:24:31.553Z"
 progress:
   total_phases: 4
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 2
+  completed_plans: 2
 ---
 
 # Project State
@@ -21,20 +19,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** v4.0 Architecture Hardening -- Phase 19 ready to plan
+**Current focus:** Phase 19 — concurrency-safety-and-integration-fixes
 
 ## Current Position
 
-Phase: 19 of 22 (Concurrency Safety and Integration Fixes)
-Plan: --
-Status: Ready to plan
-Last activity: 2026-03-22 -- Roadmap created (4 phases, 25 requirements mapped)
-
-Progress: [░░░░░░░░░░] 0%
+Phase: 19 (concurrency-safety-and-integration-fixes) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 0 (v4.0) / 48 (all milestones)
 - Average duration: --
 - Total execution time: --
@@ -50,6 +45,7 @@ Key carry-forward decisions for v4.0:
 - KillSwitch uses deferred imports for CircuitLevel/AlertPriority to maintain layer boundaries
 - File-based kill flag works even when DB is down
 - Fire-and-forget DB persistence for metrics -- never crash the trading loop
+- [Phase 19]: Keep _client_lock as threading.Lock for sync _get_client (APScheduler compat); separate _loop_init_lock for event loop init guard
 
 ### Pending Todos
 
@@ -63,6 +59,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22
-Stopped at: Roadmap created, Phase 19 ready to plan
+Last session: 2026-03-22T20:24:10.402Z
+Stopped at: Completed 19-01-PLAN.md
 Resume file: None

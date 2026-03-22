@@ -10,9 +10,9 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 ### Concurrency Safety
 
 - [ ] **CONC-01**: Stop-loss check-and-sell is atomic under a single lock — no double-sell possible for the same symbol
-- [ ] **CONC-02**: TinkoffBroker uses asyncio.Lock (not threading.Lock) for async code paths, eliminating latent deadlock
-- [ ] **CONC-03**: TinkoffBroker event loop creation is thread-safe — no TOCTOU race on _loop initialization
-- [ ] **CONC-04**: macro_cache session is properly scoped with async-with and rollback on error — no connection pool leak
+- [x] **CONC-02**: TinkoffBroker uses asyncio.Lock (not threading.Lock) for async code paths, eliminating latent deadlock
+- [x] **CONC-03**: TinkoffBroker event loop creation is thread-safe — no TOCTOU race on _loop initialization
+- [x] **CONC-04**: macro_cache session is properly scoped with async-with and rollback on error — no connection pool leak
 
 ### Async Correctness
 
@@ -83,9 +83,9 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | CONC-01 | Phase 19 | Pending |
-| CONC-02 | Phase 19 | Pending |
-| CONC-03 | Phase 19 | Pending |
-| CONC-04 | Phase 19 | Pending |
+| CONC-02 | Phase 19 | Complete |
+| CONC-03 | Phase 19 | Complete |
+| CONC-04 | Phase 19 | Complete |
 | ASYNC-01 | Phase 20 | Pending |
 | ASYNC-02 | Phase 20 | Pending |
 | ASYNC-03 | Phase 20 | Pending |
