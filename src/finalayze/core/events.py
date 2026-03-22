@@ -5,9 +5,13 @@ See docs/architecture/DATA_FLOW.md for event flow details.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import redis.asyncio
 import structlog
-from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 _log = structlog.get_logger()
 
