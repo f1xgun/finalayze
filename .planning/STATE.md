@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: Architecture Hardening
-status: Ready to execute
-stopped_at: Completed 20-02-PLAN.md
-last_updated: "2026-03-22T20:46:44.509Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 20-01-PLAN.md
+last_updated: "2026-03-22T20:47:44.573Z"
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State
@@ -52,6 +52,9 @@ Key carry-forward decisions for v4.0:
 - [Phase 20]: Used default ThreadPoolExecutor for run_in_executor in portfolio API -- appropriate for I/O-bound broker calls
 - [Phase 20]: Split close() cleanup into separate try/except blocks for __aexit__ and loop.stop -- independent failure handling
 - [Phase 20]: Default gRPC timeout 60s for TinkoffFetcher -- balances MOEX latency with hang prevention
+- [Phase 20]: Used _stop_event.wait(timeout=) for gRPC reconnect delay instead of time.sleep
+- [Phase 20]: Used asyncio.iscoroutine() in aexecute for dual sync/async callable support
+- [Phase 20]: Lazy background event loop thread for SandboxMonitor persistence replacing asyncio.run()
 
 ### Pending Todos
 
@@ -65,6 +68,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T20:46:44.506Z
-Stopped at: Completed 20-02-PLAN.md
+Last session: 2026-03-22T20:47:44.570Z
+Stopped at: Completed 20-01-PLAN.md
 Resume file: None

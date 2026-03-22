@@ -16,10 +16,10 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 
 ### Async Correctness
 
-- [ ] **ASYNC-01**: gRPC reconnect uses non-blocking sleep (asyncio.sleep or dedicated thread) — APScheduler thread pool not starved
-- [ ] **ASYNC-02**: RetryPolicy.aexecute() properly awaits coroutine functions — no silent coroutine discard
+- [x] **ASYNC-01**: gRPC reconnect uses non-blocking sleep (asyncio.sleep or dedicated thread) — APScheduler thread pool not starved
+- [x] **ASYNC-02**: RetryPolicy.aexecute() properly awaits coroutine functions — no silent coroutine discard
 - [x] **ASYNC-03**: Portfolio API endpoint runs broker calls via run_in_executor — FastAPI event loop not blocked
-- [ ] **ASYNC-04**: sandbox_monitor uses async-safe persistence — no asyncio.run() blocking APScheduler threads
+- [x] **ASYNC-04**: sandbox_monitor uses async-safe persistence — no asyncio.run() blocking APScheduler threads
 
 ### Error Handling
 
@@ -86,10 +86,10 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 | CONC-02 | Phase 19 | Complete |
 | CONC-03 | Phase 19 | Complete |
 | CONC-04 | Phase 19 | Complete |
-| ASYNC-01 | Phase 20 | Pending |
-| ASYNC-02 | Phase 20 | Pending |
+| ASYNC-01 | Phase 20 | Complete |
+| ASYNC-02 | Phase 20 | Complete |
 | ASYNC-03 | Phase 20 | Complete |
-| ASYNC-04 | Phase 20 | Pending |
+| ASYNC-04 | Phase 20 | Complete |
 | ERR-01 | Phase 21 | Pending |
 | ERR-02 | Phase 21 | Pending |
 | ERR-03 | Phase 21 | Pending |
