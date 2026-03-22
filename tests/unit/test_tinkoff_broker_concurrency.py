@@ -19,7 +19,7 @@ from finalayze.execution.tinkoff_broker import TinkoffBroker
 def _make_broker() -> TinkoffBroker:
     """Create a TinkoffBroker with dummy args for inspection."""
     registry = MagicMock()
-    return TinkoffBroker(token="test-token", registry=registry, sandbox=True)
+    return TinkoffBroker(token="test-token", registry=registry, sandbox=True)  # noqa: S106
 
 
 class TestAsyncLockType:
@@ -33,7 +33,8 @@ class TestAsyncLockType:
     def test_client_lock_is_threading_lock(self) -> None:
         """Sync _get_client must still use threading.Lock."""
         broker = _make_broker()
-        assert type(broker._client_lock).__name__ == "_RLock" or "lock" in type(broker._client_lock).__name__.lower()
+        lock_name = type(broker._client_lock).__name__.lower()
+        assert "_rlock" in lock_name or "lock" in lock_name
         # threading.Lock() returns a _thread.lock object
         assert hasattr(broker._client_lock, "acquire")
         assert hasattr(broker._client_lock, "release")

@@ -78,6 +78,7 @@ class MacroCacheService:
         """Persist a MacroSnapshot to the database.
 
         Creates a MacroSnapshotModel and commits it via the async session factory.
+        Uses async-with to ensure session is always closed (rollback on error).
         """
         now = datetime.now(tz=UTC)
         model = MacroSnapshotModel(
@@ -95,10 +96,13 @@ class MacroCacheService:
             usdrub=snapshot.usdrub,
             ofzin_indexation_coefficient=snapshot.ofzin_indexation_coefficient,
         )
-        session = await self._db_session_factory()
-        session.add(model)
-        await session.commit()
-        _log.info("macro_snapshot_persisted", timestamp=str(now))
+        try:
+            async with self._db_session_factory() as session:
+                session.add(model)
+                await session.commit()
+            _log.info("macro_snapshot_persisted", timestamp=str(now))
+        except Exception:
+            _log.warning("macro_snapshot_persist_db_failed", timestamp=str(now))
 
     def get(self) -> MacroSnapshot | None:
         """Return cached snapshot. None only before first refresh."""
