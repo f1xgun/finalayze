@@ -49,7 +49,7 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 
 - [ ] **RES-01**: TinkoffBroker.close() logs cleanup failures instead of suppressing all exceptions
 - [ ] **RES-02**: TinkoffFetcher gRPC calls have configurable timeout (default 60s) — no indefinite hang
-- [ ] **RES-03**: httpx clients in alerts.py and fetchers are explicitly closed on shutdown
+- [x] **RES-03**: httpx clients in alerts.py and fetchers are explicitly closed on shutdown
 
 ### Integration Bug Fixes
 
@@ -104,7 +104,7 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 | DEAD-02 | Phase 22 | Pending |
 | RES-01 | Phase 20 | Pending |
 | RES-02 | Phase 20 | Pending |
-| RES-03 | Phase 20 | Pending |
+| RES-03 | Phase 20 | Complete |
 | INT-01 | Phase 19 | Complete |
 | INT-02 | Phase 19 | Complete |
 

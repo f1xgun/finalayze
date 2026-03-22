@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: Architecture Hardening
-status: unknown
-stopped_at: Completed 19-02-PLAN.md
-last_updated: "2026-03-22T20:28:13.169Z"
+status: Ready to execute
+stopped_at: Completed 20-03-PLAN.md
+last_updated: "2026-03-22T20:44:08.758Z"
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 5
+  completed_plans: 3
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 19 — concurrency-safety-and-integration-fixes
+**Current focus:** Phase 20 — async-correctness-and-resource-management
 
 ## Current Position
 
-Phase: 20
-Plan: Not started
+Phase: 20 (async-correctness-and-resource-management) — EXECUTING
+Plan: 2 of 3
 
 ## Performance Metrics
 
@@ -48,6 +48,7 @@ Key carry-forward decisions for v4.0:
 - [Phase 19]: Keep _client_lock as threading.Lock for sync _get_client (APScheduler compat); separate _loop_init_lock for event loop init guard
 - [Phase 19]: Stop-loss check-and-sell made atomic under single lock hold to prevent double-sell TOCTOU race
 - [Phase 19]: Replaced getattr indirection with direct call for critical monitoring APIs
+- [Phase 20]: Idempotent TelegramAlerter.close() via _closed flag; both instances closed in lifespan shutdown
 
 ### Pending Todos
 
@@ -61,6 +62,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T20:24:40.233Z
-Stopped at: Completed 19-02-PLAN.md
+Last session: 2026-03-22T20:44:08.754Z
+Stopped at: Completed 20-03-PLAN.md
 Resume file: None
