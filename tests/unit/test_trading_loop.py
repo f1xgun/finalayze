@@ -863,6 +863,15 @@ class TestConsecutiveCycleErrors:
                 loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._alerter.send_alert.assert_not_called()  # type: ignore[attr-defined]
 
+    def _run_bond_cycle(self, loop: TradingLoop) -> None:
+        """Helper to run bond cycle bypassing market hours/trading day gates."""
+        with (
+            patch.object(loop, "_now", return_value=_MARKET_OPEN_DT),
+            patch.object(loop, "_is_market_open", return_value=True),
+            patch("finalayze.data.moex_calendar.is_moex_trading_day", return_value=True),
+        ):
+            loop._bond_cycle()  # type: ignore[attr-defined]
+
     def test_bond_counter_increments_on_failure(self) -> None:
         """_consecutive_bond_errors increments on _bond_cycle failure."""
         loop = _make_trading_loop()
@@ -870,12 +879,7 @@ class TestConsecutiveCycleErrors:
         bond_proc.run_cycle.side_effect = RuntimeError("bond fail")
         loop._bond_processor = bond_proc  # type: ignore[attr-defined]
         assert loop._consecutive_bond_errors == 0  # type: ignore[attr-defined]
-        with (
-            patch("finalayze.core.trading_loop.datetime") as mock_dt,
-            patch("finalayze.core.trading_loop.is_moex_trading_day", return_value=True),
-        ):
-            mock_dt.now.return_value = _MARKET_OPEN_DT
-            loop._bond_cycle()  # type: ignore[attr-defined]
+        self._run_bond_cycle(loop)
         assert loop._consecutive_bond_errors == 1  # type: ignore[attr-defined]
 
     def test_bond_counter_resets_on_success(self) -> None:
@@ -887,12 +891,7 @@ class TestConsecutiveCycleErrors:
         bond_proc.run_cycle.return_value = BondCycleResult()
         loop._bond_processor = bond_proc  # type: ignore[attr-defined]
         loop._consecutive_bond_errors = 2  # type: ignore[attr-defined]
-        with (
-            patch("finalayze.core.trading_loop.datetime") as mock_dt,
-            patch("finalayze.core.trading_loop.is_moex_trading_day", return_value=True),
-        ):
-            mock_dt.now.return_value = _MARKET_OPEN_DT
-            loop._bond_cycle()  # type: ignore[attr-defined]
+        self._run_bond_cycle(loop)
         assert loop._consecutive_bond_errors == 0  # type: ignore[attr-defined]
 
     def test_bond_alert_after_3_consecutive_failures(self) -> None:
@@ -901,13 +900,8 @@ class TestConsecutiveCycleErrors:
         bond_proc = MagicMock()
         bond_proc.run_cycle.side_effect = RuntimeError("bond fail")
         loop._bond_processor = bond_proc  # type: ignore[attr-defined]
-        with (
-            patch("finalayze.core.trading_loop.datetime") as mock_dt,
-            patch("finalayze.core.trading_loop.is_moex_trading_day", return_value=True),
-        ):
-            mock_dt.now.return_value = _MARKET_OPEN_DT
-            for _ in range(self.MAX_CONSECUTIVE):
-                loop._bond_cycle()  # type: ignore[attr-defined]
+        for _ in range(self.MAX_CONSECUTIVE):
+            self._run_bond_cycle(loop)
         loop._alerter.send_alert.assert_called()  # type: ignore[attr-defined]
         alert_msg = loop._alerter.send_alert.call_args[0][0]  # type: ignore[attr-defined]
         assert "consecutive" in alert_msg.lower()

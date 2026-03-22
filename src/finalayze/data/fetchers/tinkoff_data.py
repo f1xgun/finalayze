@@ -120,7 +120,13 @@ class TinkoffFetcher(BaseFetcher):
             msg = f"Tinkoff gRPC timeout ({self._grpc_timeout}s) fetching {symbol}"
             raise DataFetchError(msg) from exc
         except Exception as exc:
-            _log.exception("candle_fetch_failed", symbol=symbol, figi=figi)
+            _log.exception(
+                "candle_fetch_failed",
+                symbol=symbol,
+                figi=figi,
+                timeframe=timeframe,
+                error_type=type(exc).__name__,
+            )
             msg = f"Tinkoff gRPC error fetching {symbol}: {exc}"
             raise DataFetchError(msg) from exc
 
@@ -246,8 +252,8 @@ class TinkoffFetcher(BaseFetcher):
             self._rate_limiter.acquire()
         try:
             return asyncio.run(self._fetch_all_bonds_async())
-        except Exception:
-            _log.exception("fetch_all_bonds_failed")
+        except Exception as exc:
+            _log.exception("fetch_all_bonds_failed", error_type=type(exc).__name__)
             return []
 
     async def _fetch_all_bonds_async(self) -> list[dict[str, Any]]:
@@ -324,8 +330,12 @@ class TinkoffFetcher(BaseFetcher):
             self._rate_limiter.acquire()
         try:
             return asyncio.run(self._fetch_amortization_async(instrument_id))
-        except Exception:
-            _log.exception("fetch_amortization_failed", instrument_id=instrument_id)
+        except Exception as exc:
+            _log.exception(
+                "fetch_amortization_failed",
+                instrument_id=instrument_id,
+                error_type=type(exc).__name__,
+            )
             return []
 
     async def _fetch_amortization_async(self, instrument_id: str) -> list[dict[str, Any]]:
@@ -385,8 +395,10 @@ class TinkoffFetcher(BaseFetcher):
 
         try:
             return asyncio.run(self._fetch_bond_candles_async(figi, from_date, to_date, interval))
-        except Exception:
-            _log.exception("bond_candle_fetch_failed", figi=figi)
+        except Exception as exc:
+            _log.exception(
+                "bond_candle_fetch_failed", figi=figi, error_type=type(exc).__name__
+            )
             return []
 
     async def _fetch_bond_candles_async(

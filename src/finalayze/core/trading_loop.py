@@ -224,6 +224,11 @@ class TradingLoop:
         # Peak equity for drawdown calculation (sandbox mode)
         self._peak_equity_rub: float = 0.0
 
+        # Consecutive cycle error counters for alerting (ERR-04)
+        self._consecutive_equity_errors: int = 0
+        self._consecutive_bond_errors: int = 0
+        self._MAX_CONSECUTIVE_ERRORS: int = 3
+
     def _reset_cycle_counters(self) -> None:
         """Reset per-cycle counters for CycleLogEntry tracking."""
         self._cycle_instruments_processed: int = 0
@@ -636,10 +641,19 @@ class TradingLoop:
         try:
             result = self._bond_processor.run_cycle()
             _log.info("bond_cycle_complete", **result.to_log_dict())
+            self._consecutive_bond_errors = 0
         except Exception:
             errors_caught = 1
+            self._consecutive_bond_errors += 1
             _log.exception("bond_cycle_failed")
             self._alerter.on_error("BondCycleProcessor", "bond_cycle_failed")
+            if self._consecutive_bond_errors >= self._MAX_CONSECUTIVE_ERRORS:
+                from finalayze.core.alerts import AlertPriority  # noqa: PLC0415
+
+                self._alerter.send_alert(
+                    f"ALERT: {self._consecutive_bond_errors} consecutive bond cycle failures",
+                    priority=AlertPriority.CRITICAL,
+                )
         finally:
             try:
                 duration_ms = int((_time.monotonic() - cycle_start) * 1000)
@@ -1014,8 +1028,21 @@ class TradingLoop:
         cycle_start = _time.monotonic()
         self._cycle_portfolio_cache.clear()
         self._reset_cycle_counters()
+        _cycle_failed = False
         try:
             self._strategy_cycle_impl()
+            self._consecutive_equity_errors = 0
+        except Exception:
+            _cycle_failed = True
+            self._consecutive_equity_errors += 1
+            _log.exception("strategy_cycle_impl_failed")
+            if self._consecutive_equity_errors >= self._MAX_CONSECUTIVE_ERRORS:
+                from finalayze.core.alerts import AlertPriority  # noqa: PLC0415
+
+                self._alerter.send_alert(
+                    f"ALERT: {self._consecutive_equity_errors} consecutive equity cycle failures",
+                    priority=AlertPriority.CRITICAL,
+                )
         finally:
             self._cycle_portfolio_cache.clear()
             # Log cycle metrics
