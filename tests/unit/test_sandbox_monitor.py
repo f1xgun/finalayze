@@ -143,6 +143,54 @@ class TestSandboxMetricRow:
         assert "market_id" in pk_cols
 
 
+class TestRunAsyncSafe:
+    """Test _run_async_safe uses background event loop, not asyncio.run()."""
+
+    def test_does_not_call_asyncio_run(self) -> None:
+        """_run_async_safe must NOT use asyncio.run()."""
+        svc = SandboxMonitorService()
+
+        async def dummy_coro() -> None:
+            pass
+
+        with patch("asyncio.run") as mock_run:
+            svc._run_async_safe(dummy_coro())
+        mock_run.assert_not_called()
+
+    def test_uses_run_coroutine_threadsafe(self) -> None:
+        """_run_async_safe should use run_coroutine_threadsafe with a background loop."""
+        svc = SandboxMonitorService()
+
+        async def dummy_coro() -> None:
+            pass
+
+        with patch("asyncio.run_coroutine_threadsafe") as mock_rcts:
+            mock_future = MagicMock()
+            mock_rcts.return_value = mock_future
+            svc._run_async_safe(dummy_coro())
+        mock_rcts.assert_called_once()
+
+    def test_persistence_errors_caught_not_raised(self) -> None:
+        """Errors in _run_async_safe are caught and logged, never raised."""
+        svc = SandboxMonitorService()
+
+        async def failing_coro() -> None:
+            raise RuntimeError("db down")
+
+        # Should not raise
+        svc._run_async_safe(failing_coro())
+
+    def test_on_cycle_complete_dispatches_persist(self) -> None:
+        """on_cycle_complete calls _persist_metrics which dispatches async work."""
+        svc = SandboxMonitorService()
+        svc._anomaly_detector = MagicMock()
+        svc._anomaly_detector.check = MagicMock(return_value=[])
+        metrics = _make_metrics()
+        with patch.object(svc, "_persist_metrics") as mock_persist:
+            svc.on_cycle_complete(metrics)
+        mock_persist.assert_called_once_with(metrics)
+
+
 class TestPersistMetricsAsync:
     """Test async persistence path with mocked DB."""
 

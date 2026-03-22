@@ -7,6 +7,7 @@ Captures CycleMetrics after each TradingLoop cycle, persists to TimescaleDB
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003
 from decimal import Decimal
@@ -47,6 +48,9 @@ class SandboxMonitorService:
     market_id:
         Market identifier used when persisting rows (default ``"moex"``).
     """
+
+    _persist_loop: asyncio.AbstractEventLoop | None = None
+    _persist_lock: threading.Lock = threading.Lock()
 
     def __init__(
         self,
@@ -114,10 +118,34 @@ class SandboxMonitorService:
             await session.commit()
         _log.info("sandbox_metrics_persisted", market_id=self._market_id)
 
-    @staticmethod
-    def _run_async_safe(coro: object) -> None:
-        """Run a coroutine from sync context, swallowing errors."""
+    def _get_persist_loop(self) -> asyncio.AbstractEventLoop:
+        """Return (lazily-created) background event loop for persistence."""
+        if self.__class__._persist_loop is None or self.__class__._persist_loop.is_closed():
+            with self._persist_lock:
+                if self.__class__._persist_loop is None or self.__class__._persist_loop.is_closed():
+                    loop = asyncio.new_event_loop()
+                    t = threading.Thread(
+                        target=loop.run_forever,
+                        daemon=True,
+                        name="sandbox-persist",
+                    )
+                    t.start()
+                    self.__class__._persist_loop = loop
+        return self.__class__._persist_loop  # type: ignore[return-value]
+
+    def _run_async_safe(self, coro: object) -> None:
+        """Run a coroutine from sync context via background event loop.
+
+        Safe to call from APScheduler thread context (no ``asyncio.run()``).
+        Errors are caught and logged, never raised.
+        """
         try:
-            asyncio.run(coro)  # type: ignore[arg-type]
+            loop = self._get_persist_loop()
+            future = asyncio.run_coroutine_threadsafe(
+                coro,  # type: ignore[arg-type]
+                loop,
+            )
+            _PERSIST_TIMEOUT_S = 10  # noqa: N806
+            future.result(timeout=_PERSIST_TIMEOUT_S)
         except Exception:
             _log.warning("sandbox_metrics_persist_failed", exc_info=True)
