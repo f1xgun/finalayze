@@ -289,9 +289,9 @@ class TradingLoop:
                 f"for {broker_name} (delay {round(actual_delay)}s)",
             )
 
-            import time as _time  # noqa: PLC0415
-
-            _time.sleep(actual_delay)
+            if self._stop_event.wait(timeout=actual_delay):
+                _log.info("grpc_reconnect_cancelled", broker=broker_name)
+                return False
 
             if broker.reconnect_client():
                 _log.info("grpc_reconnected", broker=broker_name, attempt=attempt)
