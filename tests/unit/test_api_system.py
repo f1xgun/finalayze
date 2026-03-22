@@ -57,6 +57,48 @@ def test_system_errors_returns_list() -> None:
     assert isinstance(resp.json(), list)
 
 
+def test_kill_endpoint_requires_api_key() -> None:
+    """POST /kill without X-API-Key header returns 401."""
+    from fastapi.testclient import TestClient
+
+    from finalayze.main import create_app
+
+    resp = TestClient(create_app()).post("/api/v1/kill")
+    assert resp.status_code == HTTP_401
+
+
+def test_kill_endpoint_rejects_wrong_api_key() -> None:
+    """POST /kill with wrong X-API-Key returns 401."""
+    from fastapi.testclient import TestClient
+
+    from finalayze.main import create_app
+
+    resp = TestClient(create_app()).post(
+        "/api/v1/kill",
+        headers={"X-API-Key": "wrong-key-12345"},
+    )
+    assert resp.status_code == HTTP_401
+
+
+def test_kill_endpoint_accepts_valid_api_key() -> None:
+    """POST /kill with valid X-API-Key and configured kill_switch returns 200 or 503."""
+    from config.settings import Settings
+    from fastapi.testclient import TestClient
+
+    from finalayze.main import create_app
+
+    key = Settings().api_key
+    resp = TestClient(create_app()).post(
+        "/api/v1/kill",
+        headers={"X-API-Key": key},
+    )
+    # 503 is expected because kill_switch is not configured in test env
+    # But crucially it's NOT 401 -- auth passed
+    HTTP_503 = 503
+    assert resp.status_code == HTTP_503
+    assert "Kill switch not configured" in resp.json()["detail"]
+
+
 def test_set_mode_real_requires_confirm_token() -> None:
     from config.settings import Settings
     from fastapi.testclient import TestClient

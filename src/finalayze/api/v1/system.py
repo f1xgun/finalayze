@@ -406,9 +406,9 @@ async def health_production() -> ProductionHealthResponse:
     return response
 
 
-@router.post("/kill", response_model=KillResponse)
+@router.post("/kill", response_model=KillResponse, dependencies=[Depends(api_key_auth)])
 async def kill_endpoint() -> KillResponse:
-    """Trigger emergency shutdown via REST API. No auth required (internal network)."""
+    """Trigger emergency shutdown via REST API. Requires X-API-Key authentication."""
     if _kill_switch is None:
         raise HTTPException(status_code=503, detail="Kill switch not configured")
 
