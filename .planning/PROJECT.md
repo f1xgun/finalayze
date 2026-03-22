@@ -12,6 +12,18 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
+## Current Milestone: v4.0 Architecture Hardening
+
+**Goal:** Fix critical architectural defects found in comprehensive audit — dependency layer violations, async correctness bugs, dead infrastructure, error handling gaps that risk money loss or silent degradation.
+
+**Target areas:**
+- Critical concurrency bugs (stop-loss double-sell, async retry, session leaks)
+- Async correctness (blocking sleeps, threading.Lock in async, TOCTOU races)
+- Dependency layer cleanup (extract orchestrators from core/, assign missing layers)
+- Error handling hardening (GARCH NaN propagation, overly broad exception suppression)
+- Dead code removal (unused event bus infrastructure)
+- API correctness (blocking broker calls in async endpoints, unauthenticated /kill)
+
 ## Current State: v3.0 shipped
 
 v3.0 Production Readiness shipped 2026-03-22. 4 phases, 10 plans, +5,097 LOC.
@@ -78,11 +90,23 @@ Two known integration bugs accepted (Telegram /gonogo import, HealthMonitor feed
 
 ### Active
 
-<!-- Next milestone scope — TBD -->
+<!-- v4.0 Architecture Hardening -->
 
+- [ ] Fix stop-loss TOCTOU race condition (potential double-sell)
+- [ ] Fix async retry bugs (sync fn() in aexecute, blocking sleep in execute)
+- [ ] Fix macro_cache session leak (no async with, no rollback)
+- [ ] Fix TinkoffBroker threading.Lock in async code (latent deadlock)
+- [ ] Fix TinkoffBroker TOCTOU race on event loop creation
+- [ ] Fix GARCH NaN propagation into sizing pipeline
+- [ ] Fix EventBus suppress(Exception) — narrow to suppress(ResponseError)
+- [ ] Fix portfolio API endpoint blocking event loop (sync broker calls)
+- [ ] Replace time.sleep(300) in gRPC reconnect with non-blocking approach
+- [ ] Add authentication to POST /kill endpoint
+- [ ] Extract trading_loop.py and bond_cycle.py from core/ to orchestration/
+- [ ] Remove or productionize dead event bus infrastructure
+- [ ] Assign layers to backtest/ and monitoring/ modules
 - [ ] Fix Telegram /gonogo import bug (OPS-04 integration gap)
 - [ ] Wire HealthMonitor.update_feed_timestamp() into TradingLoop (OPS-02 gap)
-- [ ] Capital scaling from minimal to target after validation period
 
 ### Out of Scope
 
@@ -162,4 +186,4 @@ Streamlit sandbox dashboard + REST /sandbox/gonogo endpoint.
 | Sector allocation in sizing (not combiner) | Architectural constraint from requirements | ✓ Good — clean separation of concerns |
 
 ---
-*Last updated: 2026-03-22 after v3.0 milestone shipped*
+*Last updated: 2026-03-22 after v4.0 milestone started*
