@@ -89,10 +89,15 @@ class TinkoffBroker(BrokerBase):
         self._account_id: str = ""  # populated lazily on first API call
         self._client: AsyncClient | None = None
         self._services: object | None = None  # AsyncServices from __aenter__
-        self._client_lock = threading.Lock()
-        # Persistent event loop for gRPC — asyncio.run() closes the loop
-        # after each call, killing the gRPC channel. We keep one loop alive.
+        self._client_lock = threading.Lock()  # for sync _get_client only
+        self._async_lock = asyncio.Lock()  # for async _get_services_async
+        # Persistent background event loop for gRPC — asyncio.run() closes the
+        # loop after each call, killing the gRPC channel. We keep a daemon thread
+        # with its own loop alive. Uses run_coroutine_threadsafe() so it's safe
+        # to call from any thread (APScheduler, uvicorn, etc.).
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_thread: threading.Thread | None = None
+        self._loop_init_lock = threading.Lock()  # guards event loop creation
 
     async def _get_services_async(self) -> object:
         """Return the persistent AsyncServices, creating client lazily.
@@ -101,7 +106,7 @@ class TinkoffBroker(BrokerBase):
         which provides .users, .orders, .operations, .market_data etc.
         """
         if self._services is None:
-            with self._client_lock:
+            async with self._async_lock:
                 if self._services is None:  # double-check
                     target = _TBANK_GRPC_SANDBOX_TARGET if self._sandbox else _TBANK_GRPC_TARGET
                     self._client = AsyncClient(self._token, target=target)
@@ -123,23 +128,35 @@ class TinkoffBroker(BrokerBase):
         if self._client is not None:
             with contextlib.suppress(Exception):
                 if self._loop and not self._loop.is_closed():
-                    self._loop.run_until_complete(
-                        self._client.__aexit__(None, None, None)  # type: ignore[no-untyped-call]
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._client.__aexit__(None, None, None),  # type: ignore[no-untyped-call]
+                        self._loop,
                     )
-                    self._loop.close()
+                    future.result(timeout=5)
+                    self._loop.call_soon_threadsafe(self._loop.stop)
             self._client = None
             self._services = None
             self._loop = None
+            self._loop_thread = None
 
     def _run_async(self, coro: object) -> object:
-        """Run an async coroutine on the persistent event loop.
+        """Run an async coroutine on a persistent background event loop.
 
-        Unlike asyncio.run(), this keeps the loop alive so gRPC channels
-        survive across multiple calls.
+        Uses run_coroutine_threadsafe() so it's safe to call from any thread
+        (APScheduler workers, uvicorn, init code). The background loop stays
+        alive so gRPC channels survive across multiple calls.
         """
+        _timeout = 30
         if self._loop is None or self._loop.is_closed():
-            self._loop = asyncio.new_event_loop()
-        return self._loop.run_until_complete(coro)  # type: ignore[arg-type]
+            with self._loop_init_lock:
+                if self._loop is None or self._loop.is_closed():  # double-check
+                    loop = asyncio.new_event_loop()
+                    self._loop = loop
+                    thread = threading.Thread(target=loop.run_forever, daemon=True)
+                    thread.start()
+                    self._loop_thread = thread
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)  # type: ignore[arg-type]
+        return future.result(timeout=_timeout)
 
     def _call(self, fn: object) -> object:
         """Execute fn with retry if a RetryPolicy is configured."""
