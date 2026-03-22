@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: Architecture Hardening
 status: Phase complete — ready for verification
-stopped_at: Completed 19-01-PLAN.md
-last_updated: "2026-03-22T20:24:31.553Z"
+stopped_at: Completed 19-02-PLAN.md
+last_updated: "2026-03-22T20:24:40.237Z"
 progress:
   total_phases: 4
   completed_phases: 1
@@ -46,6 +46,8 @@ Key carry-forward decisions for v4.0:
 - File-based kill flag works even when DB is down
 - Fire-and-forget DB persistence for metrics -- never crash the trading loop
 - [Phase 19]: Keep _client_lock as threading.Lock for sync _get_client (APScheduler compat); separate _loop_init_lock for event loop init guard
+- [Phase 19]: Stop-loss check-and-sell made atomic under single lock hold to prevent double-sell TOCTOU race
+- [Phase 19]: Replaced getattr indirection with direct call for critical monitoring APIs
 
 ### Pending Todos
 
@@ -59,6 +61,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T20:24:10.402Z
-Stopped at: Completed 19-01-PLAN.md
+Last session: 2026-03-22T20:24:40.233Z
+Stopped at: Completed 19-02-PLAN.md
 Resume file: None

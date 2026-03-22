@@ -55,7 +55,7 @@ Full details: `.planning/milestones/v3.0-ROADMAP.md`
 
 **Milestone Goal:** Fix critical architectural defects discovered in comprehensive audit -- concurrency bugs that risk money loss, async correctness issues that cause silent degradation, error handling gaps that mask failures, and dependency layer violations that hinder maintainability.
 
-- [ ] **Phase 19: Concurrency Safety and Integration Fixes** - Fix money-losing race conditions, lock misuse, session leaks, and v3.0 integration gaps
+- [x] **Phase 19: Concurrency Safety and Integration Fixes** - Fix money-losing race conditions, lock misuse, session leaks, and v3.0 integration gaps (completed 2026-03-22)
 - [ ] **Phase 20: Async Correctness and Resource Management** - Fix blocking calls in async paths, coroutine discard bugs, and resource lifecycle gaps
 - [ ] **Phase 21: Error Handling Hardening** - Fix NaN propagation, exception suppression, silent degradation, and API security gap
 - [ ] **Phase 22: Dependency Layer Cleanup** - Extract orchestrators from core/, assign module layers, remove dead infrastructure
@@ -76,7 +76,7 @@ Full details: `.planning/milestones/v3.0-ROADMAP.md`
 **Plans**: 2 plans
 Plans:
 - [x] 19-01-PLAN.md -- Fix TinkoffBroker lock types, event loop TOCTOU, and macro_cache session leak
-- [ ] 19-02-PLAN.md -- Atomic stop-loss, /gonogo import verification, feed timestamp wiring
+- [x] 19-02-PLAN.md -- Atomic stop-loss, /gonogo import verification, feed timestamp wiring
 
 ### Phase 20: Async Correctness and Resource Management
 **Goal**: All async code paths are non-blocking and all external resources (gRPC channels, HTTP clients) have explicit lifecycle management
@@ -129,7 +129,7 @@ Note: Phase 21 depends on Phase 19 (not 20), so 20 and 21 could run in parallel 
 | 1-7 | v1.0 | 22/22 | Complete | 2026-03-19 |
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
-| 19. Concurrency Safety | v4.0 | 1/2 | In Progress|  |
+| 19. Concurrency Safety | v4.0 | 2/2 | Complete   | 2026-03-22 |
 | 20. Async and Resources | v4.0 | 0/TBD | Not started | - |
 | 21. Error Handling | v4.0 | 0/TBD | Not started | - |
 | 22. Layer Cleanup | v4.0 | 0/TBD | Not started | - |

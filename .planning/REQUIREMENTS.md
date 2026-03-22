@@ -9,7 +9,7 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 
 ### Concurrency Safety
 
-- [ ] **CONC-01**: Stop-loss check-and-sell is atomic under a single lock — no double-sell possible for the same symbol
+- [x] **CONC-01**: Stop-loss check-and-sell is atomic under a single lock — no double-sell possible for the same symbol
 - [x] **CONC-02**: TinkoffBroker uses asyncio.Lock (not threading.Lock) for async code paths, eliminating latent deadlock
 - [x] **CONC-03**: TinkoffBroker event loop creation is thread-safe — no TOCTOU race on _loop initialization
 - [x] **CONC-04**: macro_cache session is properly scoped with async-with and rollback on error — no connection pool leak
@@ -53,8 +53,8 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 
 ### Integration Bug Fixes
 
-- [ ] **INT-01**: Telegram /gonogo import fixed (OPS-04 gap from v3.0)
-- [ ] **INT-02**: HealthMonitor.update_feed_timestamp() wired into TradingLoop (OPS-02 gap from v3.0)
+- [x] **INT-01**: Telegram /gonogo import fixed (OPS-04 gap from v3.0)
+- [x] **INT-02**: HealthMonitor.update_feed_timestamp() wired into TradingLoop (OPS-02 gap from v3.0)
 
 ## Future Requirements
 
@@ -82,7 +82,7 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONC-01 | Phase 19 | Pending |
+| CONC-01 | Phase 19 | Complete |
 | CONC-02 | Phase 19 | Complete |
 | CONC-03 | Phase 19 | Complete |
 | CONC-04 | Phase 19 | Complete |
@@ -105,8 +105,8 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 | RES-01 | Phase 20 | Pending |
 | RES-02 | Phase 20 | Pending |
 | RES-03 | Phase 20 | Pending |
-| INT-01 | Phase 19 | Pending |
-| INT-02 | Phase 19 | Pending |
+| INT-01 | Phase 19 | Complete |
+| INT-02 | Phase 19 | Complete |
 
 **Coverage:**
 - v4.0 requirements: 25 total
