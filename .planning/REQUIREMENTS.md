@@ -42,8 +42,8 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 
 ### Dead Code Cleanup
 
-- [ ] **DEAD-01**: Event bus streams (STREAM_MARKET_DATA, STREAM_SIGNALS, STREAM_EXECUTION) removed or wired to actual consumers
-- [ ] **DEAD-02**: Stub API endpoints (/signals, /trades, /news, /ml/status etc.) either implemented or removed with clear 501 Not Implemented response
+- [x] **DEAD-01**: Event bus streams (STREAM_MARKET_DATA, STREAM_SIGNALS, STREAM_EXECUTION) removed or wired to actual consumers
+- [x] **DEAD-02**: Stub API endpoints (/signals, /trades, /news, /ml/status etc.) either implemented or removed with clear 501 Not Implemented response
 
 ### Resource Management
 
@@ -100,8 +100,8 @@ Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
 | LAYER-03 | Phase 22 | Pending |
 | LAYER-04 | Phase 22 | Pending |
 | API-01 | Phase 21 | Complete |
-| DEAD-01 | Phase 22 | Pending |
-| DEAD-02 | Phase 22 | Pending |
+| DEAD-01 | Phase 22 | Complete |
+| DEAD-02 | Phase 22 | Complete |
 | RES-01 | Phase 20 | Complete |
 | RES-02 | Phase 20 | Complete |
 | RES-03 | Phase 20 | Complete |

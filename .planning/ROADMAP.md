@@ -127,7 +127,7 @@ Plans:
 Plans:
 - [ ] 22-01-PLAN.md -- Move orchestration files (trading_loop, bond_cycle) and notification files (alerts, telegram_bot) to correct layers
 - [ ] 22-02-PLAN.md -- Inject MetricsCollector via constructor, document layer assignments for backtest/ and monitoring/
-- [ ] 22-03-PLAN.md -- Remove dead event bus streams, convert stub API endpoints to 501
+- [x] 22-03-PLAN.md -- Remove dead event bus streams, convert stub API endpoints to 501
 
 ## Progress
 
@@ -143,4 +143,4 @@ Note: Phase 21 depends on Phase 19 (not 20), so 20 and 21 could run in parallel 
 | 19. Concurrency Safety | v4.0 | 2/2 | Complete    | 2026-03-22 |
 | 20. Async and Resources | v4.0 | 3/3 | Complete    | 2026-03-22 |
 | 21. Error Handling | v4.0 | 2/2 | Complete    | 2026-03-22 |
-| 22. Layer Cleanup | v4.0 | 0/3 | Not started | - |
+| 22. Layer Cleanup | v4.0 | 1/3 | In Progress|  |
