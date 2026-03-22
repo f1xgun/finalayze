@@ -19,11 +19,25 @@ import math
 import warnings
 
 import numpy as np
+import structlog
 from arch import arch_model
+
+_log = structlog.get_logger()
 
 _MIN_RETURNS = 30
 _MIN_RETURNS_REALIZED = 2
 _ANNUALIZATION_FACTOR = 252
+
+
+def _rolling_vol_fallback(returns: list[float]) -> float:
+    """Compute annualized rolling volatility as std(returns) * sqrt(252).
+
+    Returns NaN if fewer than _MIN_RETURNS_REALIZED data points.
+    """
+    if len(returns) < _MIN_RETURNS_REALIZED:
+        return float("nan")
+    arr = np.array(returns, dtype=np.float64)
+    return float(np.std(arr)) * math.sqrt(_ANNUALIZATION_FACTOR)
 
 
 class GJRGarchForecaster:
@@ -53,11 +67,17 @@ class GJRGarchForecaster:
             horizon: Forecast horizon in periods (default 1).
 
         Returns:
-            Annualized volatility forecast (float). Returns NaN if the fit fails
-            or if there are fewer than 30 returns.
+            Annualized volatility forecast (float). Returns rolling vol fallback
+            when model fails or data is insufficient (but >= 2 points).
+            Returns NaN only when fewer than 2 returns.
         """
         if len(returns) < _MIN_RETURNS:
-            return float("nan")
+            _log.warning(
+                "garch_insufficient_data",
+                n_returns=len(returns),
+                fallback="rolling_vol",
+            )
+            return _rolling_vol_fallback(returns)
 
         try:
             data = np.array(returns, dtype=np.float64) * 100  # arch expects pct scale
@@ -81,19 +101,22 @@ class GJRGarchForecaster:
             variance_pct2 = float(forecasts.variance.iloc[-1, horizon - 1])  # type: ignore[arg-type]
 
             if not math.isfinite(variance_pct2) or variance_pct2 <= 0:
-                return float("nan")
+                _log.warning("garch_invalid_variance", fallback="rolling_vol")
+                return _rolling_vol_fallback(returns)
 
             # Convert from pct scale back to decimal, then annualize
             daily_vol = math.sqrt(variance_pct2) / 100.0
             annualized_vol = daily_vol * math.sqrt(_ANNUALIZATION_FACTOR)
 
             if not math.isfinite(annualized_vol) or annualized_vol <= 0:
-                return float("nan")
+                _log.warning("garch_invalid_annualized_vol", fallback="rolling_vol")
+                return _rolling_vol_fallback(returns)
 
             return annualized_vol
 
         except Exception:
-            return float("nan")
+            _log.warning("garch_fit_failed", fallback="rolling_vol", exc_info=True)
+            return _rolling_vol_fallback(returns)
 
     def fit_forecast_safe(
         self,
@@ -141,7 +164,7 @@ def forecast_garch_vol(returns: list[float], horizon: int = 1) -> float:
         horizon: Forecast horizon in periods (default 1).
 
     Returns:
-        Annualized volatility forecast (float). Returns NaN on failure.
+        Annualized volatility forecast (float). Returns rolling vol fallback on failure.
     """
     forecaster = GJRGarchForecaster(p=1, o=1, q=1)
-    return forecaster.fit_forecast(returns, horizon=horizon)
+    return forecaster.fit_forecast_safe(returns, horizon=horizon)

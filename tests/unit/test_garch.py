@@ -8,9 +8,14 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from finalayze.risk.garch import GJRGarchForecaster, forecast_garch_vol
+from finalayze.risk.garch import (
+    GJRGarchForecaster,
+    _rolling_vol_fallback,
+    forecast_garch_vol,
+)
 
 _RNG_SEED = 42
+_ANNUALIZATION_FACTOR = 252
 
 
 class TestGJRGarchForecaster:
@@ -27,14 +32,15 @@ class TestGJRGarchForecaster:
         assert math.isfinite(vol), "Forecast must be finite"
         assert vol > 0, "Annualized vol forecast must be positive"
 
-    def test_forecast_insufficient_data(self) -> None:
-        """Returns NaN when fewer than 30 data points are provided."""
+    def test_forecast_insufficient_data_but_enough_for_fallback(self) -> None:
+        """Returns rolling vol fallback when fewer than 30 but >= 2 data points."""
         short_returns = [0.01] * 20
 
         forecaster = GJRGarchForecaster()
         vol = forecaster.fit_forecast(short_returns)
 
-        assert math.isnan(vol), "Should return NaN for insufficient data"
+        # With the NaN fallback fix, 20 returns (>= 2) should get rolling vol
+        assert math.isfinite(vol), "Should return rolling vol fallback, not NaN"
 
     def test_forecast_safe_with_fallback(self) -> None:
         """fit_forecast_safe returns fallback vol when GARCH fit fails."""
@@ -103,6 +109,74 @@ class TestGJRGarchForecaster:
 
         assert math.isfinite(vol)
         assert vol > 0
+
+    def test_fit_forecast_insufficient_data_returns_fallback(self) -> None:
+        """When returns >= 2 but < 30, fit_forecast returns rolling vol fallback (not NaN)."""
+        returns = [0.01, -0.005, 0.003, 0.007, -0.002] * 4  # 20 returns
+        forecaster = GJRGarchForecaster()
+        vol = forecaster.fit_forecast(returns)
+        assert math.isfinite(vol), "Should return rolling vol fallback, not NaN"
+        assert vol > 0, "Fallback vol must be positive"
+
+    def test_fit_forecast_very_short_returns_nan(self) -> None:
+        """When returns < 2, fit_forecast returns NaN (not enough for any estimate)."""
+        forecaster = GJRGarchForecaster()
+        vol = forecaster.fit_forecast([0.01])
+        assert math.isnan(vol), "Should return NaN for < 2 returns"
+
+        vol_empty = forecaster.fit_forecast([])
+        assert math.isnan(vol_empty), "Should return NaN for empty returns"
+
+    def test_fit_forecast_model_failure_returns_fallback(self) -> None:
+        """When arch_model raises, fit_forecast returns rolling vol fallback."""
+        returns = [0.01, -0.005, 0.003] * 20  # 60 returns
+        forecaster = GJRGarchForecaster()
+
+        with patch("finalayze.risk.garch.arch_model", side_effect=RuntimeError("fit failed")):
+            vol = forecaster.fit_forecast(returns)
+
+        assert math.isfinite(vol), "Should return fallback on model failure"
+        assert vol > 0
+
+    def test_fit_forecast_invalid_variance_returns_fallback(self) -> None:
+        """When GARCH produces non-finite variance, returns rolling vol fallback."""
+        returns = [0.01, -0.005, 0.003] * 20
+        forecaster = GJRGarchForecaster()
+
+        # Mock the model to return -1.0 variance
+        with patch("finalayze.risk.garch.arch_model") as mock_am:
+            mock_result = mock_am.return_value.fit.return_value
+            mock_forecast = mock_result.forecast.return_value
+            # Create a mock DataFrame-like with iloc
+            variance_mock = type("V", (), {"iloc": {-1: {0: float("inf")}}})()
+            # Use property-like access
+            mock_forecast.variance = type("DF", (), {
+                "iloc": type("Iloc", (), {"__getitem__": lambda s, k: type("Row", (), {"__getitem__": lambda s2, k2: float("inf")})()})()
+            })()
+            vol = forecaster.fit_forecast(returns)
+
+        assert math.isfinite(vol), "Should return fallback on invalid variance"
+        assert vol > 0
+
+    def test_forecast_garch_vol_returns_fallback_on_failure(self) -> None:
+        """Convenience function returns fallback (not NaN) when model fails."""
+        returns = [0.01, -0.005, 0.003] * 20
+        with patch("finalayze.risk.garch.arch_model", side_effect=RuntimeError("fit failed")):
+            vol = forecast_garch_vol(returns)
+        assert math.isfinite(vol), "forecast_garch_vol should return fallback, not NaN"
+        assert vol > 0
+
+    def test_rolling_vol_fallback_helper(self) -> None:
+        """_rolling_vol_fallback computes std * sqrt(252)."""
+        returns = [0.01, -0.005, 0.003, 0.007, -0.002]
+        expected = float(np.std(returns)) * math.sqrt(_ANNUALIZATION_FACTOR)
+        result = _rolling_vol_fallback(returns)
+        assert result == pytest.approx(expected, rel=1e-6)
+
+    def test_rolling_vol_fallback_too_short(self) -> None:
+        """_rolling_vol_fallback returns NaN for < 2 returns."""
+        assert math.isnan(_rolling_vol_fallback([0.01]))
+        assert math.isnan(_rolling_vol_fallback([]))
 
     def test_horizon_scaling(self) -> None:
         """Multi-step horizon should produce a different (typically higher) forecast."""

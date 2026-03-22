@@ -5,10 +5,11 @@ See docs/architecture/DATA_FLOW.md for event flow details.
 
 from __future__ import annotations
 
-import contextlib
-
 import redis.asyncio
+import structlog
 from pydantic import BaseModel
+
+_log = structlog.get_logger()
 
 
 class MarketDataEvent(BaseModel):
@@ -108,9 +109,13 @@ class EventBus:
                       Use ``"0"`` to replay all existing messages, or ``"$"``
                       to consume only new messages written after group creation.
         """
-        # ResponseError is raised when the group already exists; suppress it.
-        with contextlib.suppress(Exception):
+        try:
             await self._redis.xgroup_create(stream, group, id=start_id, mkstream=True)
+        except redis.ResponseError:
+            pass  # Group already exists -- expected
+        except Exception:
+            _log.error("eventbus_create_group_failed", stream=stream, group=group, exc_info=True)
+            raise
 
     async def read_group(
         self,

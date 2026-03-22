@@ -208,3 +208,34 @@ class TestEventBus:
             bus = EventBus()
         mock_from_url.assert_called_once_with(REDIS_URL, decode_responses=True)
         assert bus is not None
+
+    @pytest.mark.asyncio
+    async def test_create_group_suppresses_response_error(
+        self, event_bus: EventBus, mock_redis: AsyncMock
+    ) -> None:
+        """create_group silently ignores redis.ResponseError (group already exists)."""
+        import redis as redis_lib
+
+        mock_redis.xgroup_create = AsyncMock(
+            side_effect=redis_lib.ResponseError("BUSYGROUP Consumer Group already exists")
+        )
+        # Should not raise
+        await event_bus.create_group(TEST_STREAM, "test_group")
+
+    @pytest.mark.asyncio
+    async def test_create_group_reraises_non_response_error(
+        self, event_bus: EventBus, mock_redis: AsyncMock
+    ) -> None:
+        """create_group re-raises non-ResponseError exceptions (e.g., ConnectionError)."""
+        mock_redis.xgroup_create = AsyncMock(side_effect=ConnectionError("connection lost"))
+        with pytest.raises(ConnectionError, match="connection lost"):
+            await event_bus.create_group(TEST_STREAM, "test_group")
+
+    @pytest.mark.asyncio
+    async def test_create_group_reraises_runtime_error(
+        self, event_bus: EventBus, mock_redis: AsyncMock
+    ) -> None:
+        """create_group re-raises RuntimeError (not a ResponseError)."""
+        mock_redis.xgroup_create = AsyncMock(side_effect=RuntimeError("unexpected"))
+        with pytest.raises(RuntimeError, match="unexpected"):
+            await event_bus.create_group(TEST_STREAM, "test_group")
