@@ -813,3 +813,103 @@ class TestOFZRotation:
         result = apply_ofz_rotation(configs, as_of=date(2025, 10, 30))
         rotated_sum = sum(c.capital_pct for c in result.values())
         assert rotated_sum == original_sum
+
+
+class TestBondCycleConsecutiveErrors:
+    """ERR-05: BondCycleProcessor tracks per-layer consecutive gRPC error counts."""
+
+    LAYER_ERROR_THRESHOLD = 3
+
+    def _make_failing_processor(self) -> BondCycleProcessor:
+        """Create a processor where _process_layer always raises for specific layers."""
+        snapshot = MacroSnapshot(
+            key_rate=Decimal("16.00"),
+            ruonia_7d_avg=Decimal("15.50"),
+            cpi_yoy=Decimal("9.0"),
+            last_cbr_decision="hold",
+        )
+        return _make_processor(macro_snapshot=snapshot)
+
+    def test_consecutive_layer_errors_dict_exists(self) -> None:
+        """BondCycleProcessor must have _consecutive_layer_errors dict."""
+        proc = self._make_failing_processor()
+        assert hasattr(proc, "_consecutive_layer_errors")
+        assert isinstance(proc._consecutive_layer_errors, dict)
+
+    def test_layer_error_counter_increments(self) -> None:
+        """After a layer failure, its counter increments."""
+        proc = self._make_failing_processor()
+
+        # Make _process_layer raise for all layers
+        with patch.object(proc, "_process_layer", side_effect=RuntimeError("gRPC fail")):
+            proc.run_cycle()
+
+        # All 4 layers should have count=1
+        assert len(proc._consecutive_layer_errors) > 0
+        for count in proc._consecutive_layer_errors.values():
+            assert count == 1
+
+    def test_layer_error_counter_resets_on_success(self) -> None:
+        """After a successful layer processing, its counter resets to 0."""
+        proc = self._make_failing_processor()
+
+        # Pre-set error count for a layer
+        proc._consecutive_layer_errors["core"] = 2
+
+        # Run a successful cycle (no _process_layer failure)
+        proc.run_cycle()
+
+        # The counter for "core" should be reset to 0
+        assert proc._consecutive_layer_errors.get("core", 0) == 0
+
+    def test_escalated_log_after_threshold_failures(self) -> None:
+        """After 3 consecutive failures for a layer, log level escalates to error."""
+        proc = self._make_failing_processor()
+
+        with (
+            patch.object(proc, "_process_layer", side_effect=RuntimeError("gRPC fail")),
+            patch("finalayze.core.bond_cycle._log") as mock_log,
+        ):
+            for _ in range(self.LAYER_ERROR_THRESHOLD):
+                proc.run_cycle()
+
+        # After 3 cycles, each layer should have triggered the escalated log
+        error_calls = mock_log.error.call_args_list
+        escalated = [c for c in error_calls if c[0][0] == "bond_layer_consecutive_failures"]
+        assert len(escalated) > 0
+        # Check that consecutive_count and threshold are in the log kwargs
+        first_call = escalated[0]
+        assert first_call[1]["consecutive_count"] >= self.LAYER_ERROR_THRESHOLD
+        assert "threshold" in first_call[1]
+
+    def test_reset_prevents_escalation(self) -> None:
+        """Fail twice, succeed, fail once = counter at 1, not 3."""
+        proc = self._make_failing_processor()
+
+        # Fail twice
+        with patch.object(proc, "_process_layer", side_effect=RuntimeError("gRPC fail")):
+            proc.run_cycle()
+            proc.run_cycle()
+
+        # All layers at count 2
+        for count in proc._consecutive_layer_errors.values():
+            assert count == 2
+
+        # Succeed once -- resets counters
+        proc.run_cycle()
+        for count in proc._consecutive_layer_errors.values():
+            assert count == 0
+
+        # Fail once more
+        with (
+            patch.object(proc, "_process_layer", side_effect=RuntimeError("gRPC fail")),
+            patch("finalayze.core.bond_cycle._log") as mock_log,
+        ):
+            proc.run_cycle()
+
+        # Counter at 1, no escalated log
+        for count in proc._consecutive_layer_errors.values():
+            assert count == 1
+        error_calls = mock_log.error.call_args_list
+        escalated = [c for c in error_calls if c[0][0] == "bond_layer_consecutive_failures"]
+        assert len(escalated) == 0
