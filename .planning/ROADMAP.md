@@ -109,7 +109,7 @@ Plans:
   6. POST /kill endpoint requires X-API-Key header matching a configured secret -- unauthenticated requests receive 401
 **Plans**: 2 plans
 Plans:
-- [ ] 21-01-PLAN.md -- GARCH NaN fallback, EventBus exception narrowing, /kill auth
+- [x] 21-01-PLAN.md -- GARCH NaN fallback, EventBus exception narrowing, /kill auth
 - [ ] 21-02-PLAN.md -- TinkoffFetcher structured logging, TradingLoop and BondCycle consecutive error counters
 
 ### Phase 22: Dependency Layer Cleanup
@@ -138,5 +138,5 @@ Note: Phase 21 depends on Phase 19 (not 20), so 20 and 21 could run in parallel 
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
 | 19. Concurrency Safety | v4.0 | 2/2 | Complete    | 2026-03-22 |
 | 20. Async and Resources | v4.0 | 3/3 | Complete    | 2026-03-22 |
-| 21. Error Handling | v4.0 | 0/2 | Not started | - |
+| 21. Error Handling | v4.0 | 1/2 | In Progress|  |
 | 22. Layer Cleanup | v4.0 | 0/TBD | Not started | - |

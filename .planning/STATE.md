@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: Architecture Hardening
-status: unknown
-stopped_at: Completed 20-01-PLAN.md
-last_updated: "2026-03-22T20:50:47.054Z"
+status: Ready to execute
+stopped_at: Completed 21-01-PLAN.md
+last_updated: "2026-03-22T21:01:10.091Z"
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 7
+  completed_plans: 6
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 20 — async-correctness-and-resource-management
+**Current focus:** Phase 21 — error-handling-hardening
 
 ## Current Position
 
-Phase: 21
-Plan: Not started
+Phase: 21 (error-handling-hardening) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -55,6 +55,9 @@ Key carry-forward decisions for v4.0:
 - [Phase 20]: Used _stop_event.wait(timeout=) for gRPC reconnect delay instead of time.sleep
 - [Phase 20]: Used asyncio.iscoroutine() in aexecute for dual sync/async callable support
 - [Phase 20]: Lazy background event loop thread for SandboxMonitor persistence replacing asyncio.run()
+- [Phase 21]: GARCH returns NaN only for < 2 data points; all other failures use rolling vol fallback
+- [Phase 21]: EventBus uses try/except redis.ResponseError instead of contextlib.suppress(Exception)
+- [Phase 21]: POST /kill endpoint now requires X-API-Key authentication
 
 ### Pending Todos
 
@@ -68,6 +71,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T20:47:44.570Z
-Stopped at: Completed 20-01-PLAN.md
+Last session: 2026-03-22T21:01:10.088Z
+Stopped at: Completed 21-01-PLAN.md
 Resume file: None
