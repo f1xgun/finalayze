@@ -107,7 +107,10 @@ Plans:
   4. TradingLoop increments a consecutive error counter per cycle type; after N consecutive failures (configurable, default 3), a Telegram warning alert is sent
   5. BondCycleProcessor logs escalated error after threshold consecutive gRPC failures per cycle -- systematic broker issues are visible in logs
   6. POST /kill endpoint requires X-API-Key header matching a configured secret -- unauthenticated requests receive 401
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 21-01-PLAN.md -- GARCH NaN fallback, EventBus exception narrowing, /kill auth
+- [ ] 21-02-PLAN.md -- TinkoffFetcher structured logging, TradingLoop and BondCycle consecutive error counters
 
 ### Phase 22: Dependency Layer Cleanup
 **Goal**: core/ contains only Layer 0 types and schemas; orchestration logic lives in a dedicated module; dead infrastructure is removed
@@ -135,5 +138,5 @@ Note: Phase 21 depends on Phase 19 (not 20), so 20 and 21 could run in parallel 
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
 | 19. Concurrency Safety | v4.0 | 2/2 | Complete    | 2026-03-22 |
 | 20. Async and Resources | v4.0 | 3/3 | Complete    | 2026-03-22 |
-| 21. Error Handling | v4.0 | 0/TBD | Not started | - |
+| 21. Error Handling | v4.0 | 0/2 | Not started | - |
 | 22. Layer Cleanup | v4.0 | 0/TBD | Not started | - |
