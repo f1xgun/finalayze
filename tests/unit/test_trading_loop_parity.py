@@ -1,6 +1,8 @@
 """Tests for live-backtest parity: trailing stop state machine and re-entry guard.
 
+PARITY-01: Live sizing uses PositionSizingPipeline (matching backtest engine).
 PARITY-02: Live trailing stop ratchets upward after activation threshold.
+PARITY-03: All 14 pre-trade check parameters passed in live path.
 PARITY-04: Stop-loss exit prevents same-cycle re-entry.
 """
 
@@ -8,16 +10,26 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from config.settings import Settings
 
 from finalayze.core.alerts import TelegramAlerter
 from finalayze.core.modes import WorkMode
+from finalayze.core.schemas import SignalDirection
 from finalayze.core.trading_loop import TradingLoop
 from finalayze.execution.simulated_broker import StopLossState
 from finalayze.markets.instruments import InstrumentRegistry
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
+from finalayze.risk.position_sizing_pipeline import (
+    HardCapsStep,
+    KellyStep,
+    MetaLabelStep,
+    PositionSizingPipeline,
+    RegimeStep,
+    SizingContext,
+    VolTargetStep,
+)
 
 # ── Constants ──────────────────────────────────────────────────────────
 MARKET_US = "us"
@@ -248,3 +260,131 @@ class TestCycleExitedCleared:
 
         loop._reset_cycle_counters()
         assert len(loop._cycle_exited_symbols) == 0
+
+
+# ── PARITY-01: Pipeline sizing tests ─────────────────────────────────
+
+
+def _make_candle(close: float = 150.0) -> MagicMock:
+    """Create a mock candle with the given close price."""
+    c = MagicMock()
+    c.close = Decimal(str(close))
+    return c
+
+
+def _make_signal(direction: SignalDirection = SignalDirection.BUY) -> MagicMock:
+    """Create a mock Signal with sane defaults."""
+    sig = MagicMock()
+    sig.direction = direction
+    sig.strategy_name = "dual_momentum"
+    sig.confidence = 0.7
+    sig.features = {"ml_confidence": 0.65}
+    sig.reasoning = "test signal"
+    return sig
+
+
+def _make_portfolio(
+    equity: Decimal = BASELINE_EQUITY,
+    cash: Decimal = BASELINE_CASH,
+) -> MagicMock:
+    """Create a mock PortfolioState."""
+    p = MagicMock()
+    p.equity = equity
+    p.cash = cash
+    p.positions = {}
+    return p
+
+
+class TestPipelineSizing:
+    """_build_order() for BUY signals uses PositionSizingPipeline."""
+
+    def test_build_order_calls_pipeline_compute(self) -> None:
+        """_build_order() constructs SizingContext and calls pipeline.compute()."""
+        loop = _make_loop()
+        signal = _make_signal()
+        candles = [_make_candle(150.0) for _ in range(NUM_CANDLES)]
+        portfolio = _make_portfolio()
+
+        # The method should now have _build_sizing_pipeline
+        assert hasattr(loop, "_build_sizing_pipeline"), (
+            "TradingLoop must have _build_sizing_pipeline method"
+        )
+
+        # Patch _build_sizing_pipeline to capture the call
+        mock_pipeline = MagicMock(spec=PositionSizingPipeline)
+        mock_pipeline.compute.return_value = Decimal("10000")
+
+        with patch.object(loop, "_build_sizing_pipeline", return_value=mock_pipeline):
+            order = loop._build_order(
+                signal, CircuitLevel.NORMAL, BASELINE_EQUITY, BASELINE_CASH,
+                candles, SYMBOL_AAPL, Decimal("0.5"),
+                portfolio=portfolio, seg_id="us_tech",
+            )
+
+        mock_pipeline.compute.assert_called_once()
+        ctx = mock_pipeline.compute.call_args[0][0]
+        assert isinstance(ctx, SizingContext)
+        assert ctx.equity == BASELINE_EQUITY
+        assert order is not None
+
+    def test_pipeline_includes_core_steps(self) -> None:
+        """Pipeline includes KellyStep, VolTargetStep, RegimeStep, MetaLabelStep, HardCapsStep."""
+        loop = _make_loop()
+        pipeline = loop._build_sizing_pipeline("us_tech")
+        step_types = [type(s) for s in pipeline._steps]
+        assert KellyStep in step_types
+        assert VolTargetStep in step_types
+        assert RegimeStep in step_types
+        assert MetaLabelStep in step_types
+        assert HardCapsStep in step_types
+
+    def test_pipeline_zero_returns_none(self) -> None:
+        """When pipeline.compute() returns 0, _build_order() returns None."""
+        loop = _make_loop()
+        signal = _make_signal()
+        candles = [_make_candle(150.0) for _ in range(NUM_CANDLES)]
+        portfolio = _make_portfolio()
+
+        mock_pipeline = MagicMock(spec=PositionSizingPipeline)
+        mock_pipeline.compute.return_value = Decimal("0")
+
+        with patch.object(loop, "_build_sizing_pipeline", return_value=mock_pipeline):
+            order = loop._build_order(
+                signal, CircuitLevel.NORMAL, BASELINE_EQUITY, BASELINE_CASH,
+                candles, SYMBOL_AAPL, Decimal("0.5"),
+                portfolio=portfolio, seg_id="us_tech",
+            )
+
+        assert order is None
+
+    def test_caution_reduces_pipeline_output(self) -> None:
+        """CAUTION level applies _CAUTION_SIZE_FACTOR on top of pipeline output."""
+        loop = _make_loop()
+        signal = _make_signal()
+        signal.confidence = 0.9  # high enough to pass CAUTION gate
+        candles = [_make_candle(100.0) for _ in range(NUM_CANDLES)]
+        portfolio = _make_portfolio()
+
+        mock_pipeline = MagicMock(spec=PositionSizingPipeline)
+        mock_pipeline.compute.return_value = Decimal("10000")
+
+        # Patch _get_segment_min_confidence to return low threshold
+        with (
+            patch.object(loop, "_build_sizing_pipeline", return_value=mock_pipeline),
+            patch.object(loop, "_get_segment_min_confidence", return_value=0.3),
+        ):
+            order_normal = loop._build_order(
+                signal, CircuitLevel.NORMAL, BASELINE_EQUITY, BASELINE_CASH,
+                candles, SYMBOL_AAPL, Decimal("0.5"),
+                portfolio=portfolio, seg_id="us_tech",
+            )
+            order_caution = loop._build_order(
+                signal, CircuitLevel.CAUTION, BASELINE_EQUITY, BASELINE_CASH,
+                candles, SYMBOL_AAPL, Decimal("0.5"),
+                portfolio=portfolio, seg_id="us_tech",
+            )
+
+        # CAUTION should produce smaller or equal quantity
+        assert order_normal is not None
+        assert order_caution is not None
+        assert order_caution.quantity <= order_normal.quantity
