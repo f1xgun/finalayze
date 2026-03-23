@@ -1,68 +1,47 @@
 ---
 gsd_state_version: 1.0
-milestone: v4.0
-milestone_name: Architecture Hardening
-status: unknown
-stopped_at: Completed 22-02-PLAN.md
-last_updated: "2026-03-22T21:49:22.168Z"
+milestone: v5.0
+milestone_name: Data Flow Correctness & Live-Backtest Parity
+status: defining_requirements
+stopped_at: null
+last_updated: "2026-03-23T10:00:00.000Z"
+last_activity: 2026-03-23 -- Milestone v5.0 started
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 10
-  completed_plans: 10
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-22)
+See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 22 — dependency-layer-cleanup
+**Current focus:** v5.0 Data Flow Correctness — defining requirements
 
 ## Current Position
 
-Phase: 22
-Plan: Not started
-
-## Performance Metrics
-
-**Velocity:**
-
-- Total plans completed: 0 (v4.0) / 48 (all milestones)
-- Average duration: --
-- Total execution time: --
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-23 — Milestone v5.0 started
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions from v1.0-v3.0 are archived in milestones/.
-Key carry-forward decisions for v4.0:
+Decisions from v1.0-v4.0 are archived in milestones/.
+Key carry-forward decisions for v5.0:
 
-- Monitoring services standalone (not embedded in TradingLoop)
-- KillSwitch uses deferred imports for CircuitLevel/AlertPriority to maintain layer boundaries
-- File-based kill flag works even when DB is down
-- Fire-and-forget DB persistence for metrics -- never crash the trading loop
-- [Phase 19]: Keep _client_lock as threading.Lock for sync _get_client (APScheduler compat); separate _loop_init_lock for event loop init guard
-- [Phase 19]: Stop-loss check-and-sell made atomic under single lock hold to prevent double-sell TOCTOU race
-- [Phase 19]: Replaced getattr indirection with direct call for critical monitoring APIs
-- [Phase 20]: Idempotent TelegramAlerter.close() via _closed flag; both instances closed in lifespan shutdown
-- [Phase 20]: Used default ThreadPoolExecutor for run_in_executor in portfolio API -- appropriate for I/O-bound broker calls
-- [Phase 20]: Split close() cleanup into separate try/except blocks for __aexit__ and loop.stop -- independent failure handling
-- [Phase 20]: Default gRPC timeout 60s for TinkoffFetcher -- balances MOEX latency with hang prevention
-- [Phase 20]: Used _stop_event.wait(timeout=) for gRPC reconnect delay instead of time.sleep
-- [Phase 20]: Used asyncio.iscoroutine() in aexecute for dual sync/async callable support
-- [Phase 20]: Lazy background event loop thread for SandboxMonitor persistence replacing asyncio.run()
-- [Phase 21]: GARCH returns NaN only for < 2 data points; all other failures use rolling vol fallback
-- [Phase 21]: EventBus uses try/except redis.ResponseError instead of contextlib.suppress(Exception)
-- [Phase 21]: POST /kill endpoint now requires X-API-Key authentication
-- [Phase 21]: Used AlertPriority.CRITICAL for consecutive failure alerts; per-layer error tracking in BondCycleProcessor; threshold of 3 consecutive failures
-- [Phase 22]: Removed MarketDataEvent and SignalEvent classes -- unused in src/, tests updated to use local _TestEvent
-- [Phase 22]: Kept Pydantic response models on 501 endpoints for OpenAPI documentation
-- [Phase 22]: Used sys.modules aliasing for backward-compat module shims -- transparent to unittest.mock.patch
-- [Phase 22]: MetricsCollector injected as type (class ref) not instance -- all methods are static; guarded with if self._metrics
+- sys.modules shims for backward-compat module moves (v4.0)
+- MetricsCollector via constructor DI (v4.0)
+- asyncio.Lock for async, threading.Lock for sync paths (v4.0)
+- GARCH rolling vol fallback over NaN (v4.0)
+- Fire-and-forget DB persistence — never crash the trading loop
 
 ### Pending Todos
 
@@ -70,12 +49,13 @@ None yet.
 
 ### Blockers/Concerns
 
-- trading_loop.py is ~1800 lines god-object -- extract carefully to avoid breaking APScheduler wiring
-- 140+ except Exception clauses -- tightening too aggressively may crash the trading loop
-- Event bus removal must not break bond_discovery.py coupon publishing
+- PositionSizingPipeline wiring in live requires careful integration — pipeline was designed for backtest engine
+- Trailing stop in live needs state management across APScheduler cycles (not single-pass like backtest)
+- News pipeline disable must preserve the option to re-enable event_driven later
+- SELL sizing fix must handle partial positions and lot rounding for MOEX
 
 ## Session Continuity
 
-Last session: 2026-03-22T21:39:28.673Z
-Stopped at: Completed 22-02-PLAN.md
+Last session: 2026-03-23
+Stopped at: Defining requirements
 Resume file: None

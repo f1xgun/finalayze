@@ -12,6 +12,16 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
+## Current Milestone: v5.0 Data Flow Correctness & Live-Backtest Parity
+
+**Goal:** Fix critical data flow bugs found in audit — SELL order sizing, sector exposure calculation, live/backtest risk pipeline divergence, data validation gaps, and news pipeline no-op waste.
+
+**Target areas:**
+- P0: SELL sized by Kelly not position, sector exposure uses wrong price, CAUTION threshold hardcoded
+- Live-backtest parity: wire PositionSizingPipeline in live, trailing stops, missing pre-trade checks
+- Data quality: DataNormalizer wiring, candle staleness detection, IMOEX volume fix
+- News pipeline: disable no-op cycle or wire event_driven, add sentiment time-decay, fix ticker mismatch
+
 ## Current State: v4.0 shipped
 
 v4.0 Architecture Hardening shipped 2026-03-22. 4 phases, 10 plans.
@@ -104,11 +114,23 @@ v3.0 integration gaps closed (Telegram /gonogo import, HealthMonitor feed freshn
 
 ### Active
 
-<!-- Next milestone scope — TBD -->
+<!-- v5.0 Data Flow Correctness & Live-Backtest Parity -->
 
+- [ ] SELL orders sized by actual position, not Kelly fraction
+- [ ] Sector exposure calculated with each position's own price
+- [ ] CAUTION confidence threshold uses segment's min_combined_confidence
+- [ ] Live trading loop uses PositionSizingPipeline (matching backtest)
+- [ ] Live trailing stops (matching backtest SimulatedBroker)
+- [ ] All 14 pre-trade checks wired in live path
+- [ ] Stop-loss exit prevents same-cycle re-entry
+- [ ] DataNormalizer validates candles before strategy processing
+- [ ] Candle staleness detection active with configurable threshold
+- [ ] IMOEX volume stores share count, not turnover
+- [ ] News pipeline disabled when event_driven is off (save LLM tokens)
+- [ ] Sentiment time-based decay in _sentiment_cache
+- [ ] Entity extractor ticker "T" → "TCSG" mismatch fixed
+- [ ] Telegram message deduplication
 - [ ] Capital scaling from minimal to target after validation period
-- [ ] Migrate 99 test files from core.trading_loop shim to canonical orchestration.trading_loop imports
-- [ ] Inject _alerter_ref via TradingLoop constructor (currently attribute mutation)
 
 ### Out of Scope
 
@@ -193,4 +215,4 @@ All concurrency bugs fixed. All async paths non-blocking. Error handling hardene
 | 501 Not Implemented for stub endpoints | Empty 200 responses mislead API consumers | ✓ Good — clear signal that feature is pending |
 
 ---
-*Last updated: 2026-03-22 after v4.0 milestone shipped*
+*Last updated: 2026-03-23 after v5.0 milestone started*
