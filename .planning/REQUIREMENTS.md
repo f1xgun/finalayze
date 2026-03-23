@@ -9,9 +9,9 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 
 ### Order Sizing Bugs
 
-- [ ] **SIZE-01**: SELL orders use actual held position quantity, not Kelly-computed amount — no over/under-sell
-- [ ] **SIZE-02**: Sector exposure calculation uses each position's own last price, not current instrument's price
-- [ ] **SIZE-03**: CAUTION confidence threshold computed as `segment.min_combined_confidence * 1.2`, not hardcoded 0.6
+- [x] **SIZE-01**: SELL orders use actual held position quantity, not Kelly-computed amount — no over/under-sell
+- [x] **SIZE-02**: Sector exposure calculation uses each position's own last price, not current instrument's price
+- [x] **SIZE-03**: CAUTION confidence threshold computed as `segment.min_combined_confidence * 1.2`, not hardcoded 0.6
 
 ### Live-Backtest Parity
 
@@ -65,9 +65,9 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SIZE-01 | Phase 23 | Pending |
-| SIZE-02 | Phase 23 | Pending |
-| SIZE-03 | Phase 23 | Pending |
+| SIZE-01 | Phase 23 | Complete |
+| SIZE-02 | Phase 23 | Complete |
+| SIZE-03 | Phase 23 | Complete |
 | PARITY-01 | Phase 24 | Pending |
 | PARITY-02 | Phase 24 | Pending |
 | PARITY-03 | Phase 24 | Pending |

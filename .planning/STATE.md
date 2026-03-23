@@ -2,16 +2,14 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Data Flow Correctness & Live-Backtest Parity
-status: ready_to_plan
-stopped_at: null
-last_updated: "2026-03-23T12:00:00.000Z"
-last_activity: 2026-03-23 -- Roadmap created with 4 phases (23-26), 16 requirements mapped
+status: Phase complete — ready for verification
+stopped_at: Completed 23-01-PLAN.md
+last_updated: "2026-03-23T19:24:37.217Z"
 progress:
   total_phases: 4
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
 ---
 
 # Project State
@@ -21,20 +19,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** v5.0 Phase 23 -- Order Sizing Bug Fixes
+**Current focus:** Phase 23 — order-sizing-bug-fixes
 
 ## Current Position
 
-Phase: 23 of 26 (Order Sizing Bug Fixes)
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-03-23 -- Roadmap created
-
-Progress: [░░░░░░░░░░] 0%
+Phase: 23 (order-sizing-bug-fixes) — EXECUTING
+Plan: 1 of 1
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 0
 - Average duration: --
 - Total execution time: 0 hours
@@ -47,6 +42,8 @@ Progress: [░░░░░░░░░░] 0%
 
 ## Accumulated Context
 
+| Phase 23 P01 | 5min | 2 tasks | 2 files |
+
 ### Decisions
 
 Decisions from v1.0-v4.0 are archived in milestones/.
@@ -57,6 +54,8 @@ Key carry-forward decisions for v5.0:
 - asyncio.Lock for async, threading.Lock for sync paths (v4.0)
 - GARCH rolling vol fallback over NaN (v4.0)
 - Fire-and-forget DB persistence -- never crash the trading loop
+- [Phase 23]: SELL orders skip Kelly sizing and CAUTION reduction, sell entire held position
+- [Phase 23]: Segment min_confidence loaded from same YAML presets as StrategyCombiner, cached per segment
 
 ### Pending Todos
 
@@ -71,6 +70,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-23
-Stopped at: Roadmap created, ready to plan Phase 23
+Last session: 2026-03-23T19:24:37.213Z
+Stopped at: Completed 23-01-PLAN.md
 Resume file: None
