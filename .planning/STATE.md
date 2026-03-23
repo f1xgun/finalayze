@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Data Flow Correctness & Live-Backtest Parity
-status: unknown
-stopped_at: Completed 23-01-PLAN.md
-last_updated: "2026-03-23T19:30:10.806Z"
+status: Ready to execute
+stopped_at: Completed 24-01-PLAN.md
+last_updated: "2026-03-23T19:48:16.284Z"
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
+  total_plans: 7
+  completed_plans: 2
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 23 — order-sizing-bug-fixes
+**Current focus:** Phase 24 — live-backtest-parity
 
 ## Current Position
 
-Phase: 24
-Plan: Not started
+Phase: 24 (live-backtest-parity) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -43,6 +43,7 @@ Plan: Not started
 ## Accumulated Context
 
 | Phase 23 P01 | 5min | 2 tasks | 2 files |
+| Phase 24 P01 | 8min | 1 tasks | 8 files |
 
 ### Decisions
 
@@ -56,6 +57,8 @@ Key carry-forward decisions for v5.0:
 - Fire-and-forget DB persistence -- never crash the trading loop
 - [Phase 23]: SELL orders skip Kelly sizing and CAUTION reduction, sell entire held position
 - [Phase 23]: Segment min_confidence loaded from same YAML presets as StrategyCombiner, cached per segment
+- [Phase 24]: StopLossState reused from simulated_broker.py as canonical trailing stop state for both backtest and live
+- [Phase 24]: ATR value derived algebraically from stop formula instead of adding compute_atr_value function
 
 ### Pending Todos
 
@@ -70,6 +73,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-23T19:24:37.213Z
-Stopped at: Completed 23-01-PLAN.md
+Last session: 2026-03-23T19:48:16.281Z
+Stopped at: Completed 24-01-PLAN.md
 Resume file: None
