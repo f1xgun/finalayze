@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from finalayze.api.alerts import TelegramAlerter
     from finalayze.api.metrics import MetricsCollector
     from finalayze.core.events import EventBus
-    from finalayze.core.schemas import Candle, PortfolioState, SentimentResult, Signal  # noqa: F401
+    from finalayze.core.schemas import Candle, PortfolioState, SentimentResult, Signal
     from finalayze.data.cache import RedisCache
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
     from finalayze.data.fetchers.rss_fetcher import RssNewsFetcher
@@ -216,6 +216,12 @@ class TradingLoop:
 
         # Structured cycle validation logger
         self._validation_logger = ValidationLogger()
+
+        # Per-instrument last price cache: symbol -> Decimal (built during strategy cycle)
+        self._last_prices: dict[str, Decimal] = {}
+
+        # Segment min_combined_confidence cache: seg_id -> float
+        self._segment_min_confidence: dict[str, float] = {}
 
         # Per-cycle counters for CycleLogEntry (reset at each equity cycle start)
         self._reset_cycle_counters()
@@ -1320,6 +1326,10 @@ class TradingLoop:
         if candles and self._health_monitor is not None:
             self._health_monitor.update_feed_timestamp(now)
 
+        # Cache last price for per-position sector exposure calculation (SIZE-02)
+        if candles:
+            self._last_prices[instrument.symbol] = Decimal(str(candles[-1].close))
+
         # #157/#182: Check stop-losses against latest candle price
         if candles:
             current_price = candles[-1].close
@@ -1384,6 +1394,8 @@ class TradingLoop:
             candles,
             instrument.symbol,
             kelly_fraction,
+            portfolio=portfolio,
+            seg_id=seg_id,
         )
         if order is None:
             _log.info(
@@ -1427,12 +1439,13 @@ class TradingLoop:
         # 6A.7: Detect day trades for PDT compliance
         is_day_trade = self._is_day_trade(order.symbol, order.side, market_id)
 
-        # 6A.2: Compute sector exposure for concentration check
+        # 6A.2: Compute sector exposure for concentration check (SIZE-02 fix)
         sector_exposure = _ZERO
-        for qty in portfolio.positions.values():
+        for pos_symbol, qty in portfolio.positions.items():
             if qty > _ZERO:
-                # Use last candle price as proxy for all positions in segment
-                sector_exposure += qty * (candles[-1].close if candles else _ZERO)
+                # Use each position's own last known price, not current instrument's candle
+                pos_price = self._get_last_price(pos_symbol)
+                sector_exposure += qty * pos_price
         # Only pass if we have segment context
         seg_exposure: Decimal | None = sector_exposure if seg_id else None
 
@@ -1492,10 +1505,32 @@ class TradingLoop:
         candles: list[Candle],
         symbol: str,
         kelly_fraction: Decimal,
+        *,
+        portfolio: PortfolioState | None = None,
+        seg_id: str = "us_tech",
     ) -> OrderRequest | None:
-        """Build an order from signal, using Kelly sizing and respecting CAUTION reduction."""
+        """Build an order from signal, using Kelly sizing and respecting CAUTION reduction.
+
+        SIZE-01: SELL orders use actual held position quantity.
+        SIZE-03: CAUTION threshold uses segment preset min_combined_confidence * 1.2.
+        """
+        side: Literal["BUY", "SELL"] = (
+            "BUY" if signal.direction == SignalDirection.BUY else "SELL"
+        )
+
+        # SIZE-01: SELL orders use actual held quantity, skip Kelly sizing
+        if signal.direction == SignalDirection.SELL:
+            held = (
+                portfolio.positions.get(symbol, _ZERO) if portfolio is not None else _ZERO
+            )
+            if held <= _ZERO:
+                return None
+            return self._OrderRequest(symbol=symbol, side=side, quantity=held)
+
+        # SIZE-03: CAUTION threshold from segment preset (not hardcoded 0.5)
         if level == self._CircuitLevel.CAUTION:
-            min_conf = 0.5 * _MIN_CONFIDENCE_BOOST
+            preset_conf = self._get_segment_min_confidence(seg_id)
+            min_conf = preset_conf * _MIN_CONFIDENCE_BOOST
             if signal.confidence < min_conf:
                 return None
 
@@ -1510,8 +1545,39 @@ class TradingLoop:
         if qty <= _ZERO:
             return None
 
-        side: Literal["BUY", "SELL"] = "BUY" if signal.direction == SignalDirection.BUY else "SELL"
         return self._OrderRequest(symbol=symbol, side=side, quantity=qty)
+
+    def _get_last_price(self, symbol: str) -> Decimal:
+        """Return cached last price for a symbol, or _ZERO if unknown (SIZE-02)."""
+        return self._last_prices.get(symbol, _ZERO)
+
+    def _get_segment_min_confidence(self, seg_id: str) -> float:
+        """Load min_combined_confidence from segment preset YAML (SIZE-03).
+
+        Caches result to avoid re-reading YAML on every call.
+        Falls back to 0.5 if preset not found.
+        """
+        if seg_id in self._segment_min_confidence:
+            return self._segment_min_confidence[seg_id]
+
+        import yaml  # noqa: PLC0415
+
+        presets_dir = Path(__file__).parent.parent / "strategies" / "presets"
+        path = presets_dir / f"{seg_id}.yaml"
+        default_conf = 0.5
+        try:
+            with path.open() as f:
+                config = yaml.safe_load(f)
+            if isinstance(config, dict):
+                result = float(config.get("min_combined_confidence", default_conf))
+            else:
+                result = default_conf
+        except (FileNotFoundError, OSError):
+            _log.warning("segment_preset_not_found", seg_id=seg_id, path=str(path))
+            result = default_conf
+
+        self._segment_min_confidence[seg_id] = result
+        return result
 
     def _submit_order(
         self,

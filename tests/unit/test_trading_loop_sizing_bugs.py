@@ -28,8 +28,8 @@ SYMBOL_GOOGL = "GOOGL"
 CANDLE_CLOSE_AAPL = Decimal("150.00")
 CANDLE_CLOSE_MSFT = Decimal("200.00")
 CANDLE_CLOSE_GOOGL = Decimal("100.00")
-BASELINE_EQUITY = Decimal("100000")
-BASELINE_CASH = Decimal("50000")
+BASELINE_EQUITY = Decimal(100000)
+BASELINE_CASH = Decimal(50000)
 NUM_CANDLES = 60
 _ZERO = Decimal(0)
 
@@ -131,7 +131,7 @@ class TestSellOrderUsesHeldQuantity:
         loop = _make_loop()
         candles = _make_candles()
 
-        held_qty = Decimal("50")
+        held_qty = Decimal(50)
         portfolio = PortfolioState(
             cash=BASELINE_CASH,
             positions={SYMBOL_AAPL: held_qty},
@@ -233,7 +233,7 @@ class TestSectorExposurePerPositionPrice:
         # Portfolio has AAPL and MSFT positions
         portfolio = PortfolioState(
             cash=BASELINE_CASH,
-            positions={SYMBOL_AAPL: Decimal("10"), SYMBOL_MSFT: Decimal("20")},
+            positions={SYMBOL_AAPL: Decimal(10), SYMBOL_MSFT: Decimal(20)},
             equity=BASELINE_EQUITY,
             timestamp=datetime.now(tz=UTC),
         )
@@ -258,8 +258,8 @@ class TestSectorExposurePerPositionPrice:
                 pos_price = loop._last_prices.get(sym, _ZERO)
                 sector_exposure += qty * pos_price
 
-        expected_exposure = Decimal("10") * CANDLE_CLOSE_AAPL + Decimal("20") * CANDLE_CLOSE_MSFT
-        assert expected_exposure == Decimal("5500")
+        expected_exposure = Decimal(10) * CANDLE_CLOSE_AAPL + Decimal(20) * CANDLE_CLOSE_MSFT
+        assert expected_exposure == Decimal(5500)
 
         # Now test the BUGGY code path -- current _process_instrument uses candles[-1].close
         buggy_exposure = _ZERO
@@ -268,7 +268,7 @@ class TestSectorExposurePerPositionPrice:
                 buggy_exposure += qty * candles_googl[-1].close
 
         # Buggy: 10*100 + 20*100 = 3000
-        assert buggy_exposure == Decimal("3000"), "Sanity check: buggy calc uses wrong price"
+        assert buggy_exposure == Decimal(3000), "Sanity check: buggy calc uses wrong price"
 
         # The actual test: verify the code path in _process_instrument
         # We test this indirectly via pre_trade_checker.check call by inspecting
