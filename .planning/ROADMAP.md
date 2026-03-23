@@ -119,7 +119,10 @@ Plans:
   2. Cached sentiment scores decay exponentially with a configurable half-life (default 4 hours) -- a sentiment score cached 8 hours ago has decayed to 25% of its original value
   3. Entity extractor _VALID_TICKERS map contains "TCSG" (the MOEX ticker) and does not contain bare "T" -- news mentioning T-Bank resolves to TCSG
   4. Telegram reader tracks processed message URLs and skips duplicates within a configurable time window -- the same Telegram post is not sent to the LLM twice
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 26-01-PLAN.md -- News cycle skip guard and sentiment time-decay
+- [ ] 26-02-PLAN.md -- Fix TCSG ticker and Telegram message deduplication
 
 ## Progress
 
@@ -136,4 +139,4 @@ Note: Phases 25 and 26 have no dependency on 23/24 and could run in parallel aft
 | 23. Order Sizing Bug Fixes | v5.0 | 1/1 | Complete    | 2026-03-23 |
 | 24. Live-Backtest Parity | v5.0 | 0/TBD | Not started | - |
 | 25. Data Validation and Infrastructure | v5.0 | 0/TBD | Not started | - |
-| 26. News Pipeline Fixes | v5.0 | 0/TBD | Not started | - |
+| 26. News Pipeline Fixes | v5.0 | 0/2 | Not started | - |
