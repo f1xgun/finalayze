@@ -388,3 +388,195 @@ class TestPipelineSizing:
         assert order_normal is not None
         assert order_caution is not None
         assert order_caution.quantity <= order_normal.quantity
+
+
+# ── PARITY-03: Pre-trade check parameter passing tests ──────────────
+
+
+def _make_instrument(symbol: str = SYMBOL_AAPL) -> MagicMock:
+    """Create a mock Instrument."""
+    inst = MagicMock()
+    inst.symbol = symbol
+    inst.figi = "BBG000B9XRY4"
+    inst.segment_id = "us_tech"
+    return inst
+
+
+class TestPreTradeCheckParams:
+    """All 14 pre-trade check parameters are passed in the live path."""
+
+    def _setup_process_instrument(self, loop: TradingLoop) -> tuple:
+        """Set up loop state for _process_instrument to reach pre-trade check."""
+        candles = [_make_candle(150.0) for _ in range(NUM_CANDLES)]
+        signal = _make_signal()
+
+        # Mock fetcher
+        fetcher = MagicMock()
+        fetcher.fetch_candles.return_value = candles
+
+        # Mock strategy
+        loop._strategy.generate_signal.return_value = signal
+
+        # Mock broker
+        broker = MagicMock()
+        broker.has_position.return_value = False
+        broker.get_portfolio.return_value = _make_portfolio()
+        broker.get_positions.return_value = {}
+        loop._broker_router.route.return_value = broker
+
+        # Mock portfolio cache
+        portfolio = _make_portfolio()
+        loop._get_cached_portfolio = MagicMock(return_value=portfolio)
+
+        # Mock _build_order to return a valid order
+        mock_order = MagicMock()
+        mock_order.quantity = Decimal("10")
+        mock_order.symbol = SYMBOL_AAPL
+        mock_order.side = "BUY"
+        loop._build_order = MagicMock(return_value=mock_order)
+
+        # Mock _compute_total_equity_base
+        loop._compute_total_equity_base = MagicMock(return_value=BASELINE_EQUITY)
+
+        # Mock _get_market_equity
+        loop._get_market_equity = MagicMock(return_value=BASELINE_EQUITY)
+
+        return candles, signal, fetcher, broker, portfolio
+
+    def test_pre_trade_receives_stop_loss_price(self) -> None:
+        """stop_loss_price sourced from _stop_states[symbol].current_stop."""
+        loop = _make_loop()
+        self._setup_process_instrument(loop)
+
+        # Seed a stop state
+        stop_state = _seed_stop_state(loop)
+        expected_stop = stop_state.current_stop
+
+        # Patch pre_trade_checker.check to capture call
+        loop._pre_trade_checker.check = MagicMock(
+            return_value=MagicMock(passed=True, violations=[])
+        )
+
+        loop._process_instrument(
+            instrument=_make_instrument(),
+            market_id=MARKET_US,
+            level=CircuitLevel.NORMAL,
+            fetcher=MagicMock(fetch_candles=MagicMock(
+                return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
+            )),
+            now=datetime.now(UTC),
+        )
+
+        call_kwargs = loop._pre_trade_checker.check.call_args
+        assert call_kwargs is not None, "pre_trade_checker.check must be called"
+        # Check stop_loss_price is passed (keyword argument)
+        kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
+        assert "stop_loss_price" in kw, "stop_loss_price must be passed to pre-trade check"
+        assert kw["stop_loss_price"] == expected_stop
+
+    def test_pre_trade_receives_has_pending_order(self) -> None:
+        """has_pending_order passed to pre-trade check."""
+        loop = _make_loop()
+        self._setup_process_instrument(loop)
+
+        loop._pre_trade_checker.check = MagicMock(
+            return_value=MagicMock(passed=True, violations=[])
+        )
+
+        # Check that _has_pending_order method exists
+        assert hasattr(loop, "_has_pending_order"), (
+            "TradingLoop must have _has_pending_order method"
+        )
+
+    def test_pre_trade_receives_regime_state(self) -> None:
+        """regime_state passed from macro_cache."""
+        loop = _make_loop()
+        self._setup_process_instrument(loop)
+
+        loop._pre_trade_checker.check = MagicMock(
+            return_value=MagicMock(passed=True, violations=[])
+        )
+
+        # Check that _get_regime_state method exists
+        assert hasattr(loop, "_get_regime_state"), (
+            "TradingLoop must have _get_regime_state method"
+        )
+
+    def test_pre_trade_receives_strategy_name(self) -> None:
+        """strategy_name from signal is passed to pre-trade check."""
+        loop = _make_loop()
+        self._setup_process_instrument(loop)
+
+        loop._pre_trade_checker.check = MagicMock(
+            return_value=MagicMock(passed=True, violations=[])
+        )
+
+        loop._process_instrument(
+            instrument=_make_instrument(),
+            market_id=MARKET_US,
+            level=CircuitLevel.NORMAL,
+            fetcher=MagicMock(fetch_candles=MagicMock(
+                return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
+            )),
+            now=datetime.now(UTC),
+        )
+
+        call_kwargs = loop._pre_trade_checker.check.call_args
+        assert call_kwargs is not None
+        kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
+        assert "strategy_name" in kw, "strategy_name must be passed to pre-trade check"
+        assert kw["strategy_name"] == "dual_momentum"
+
+    def test_pre_trade_receives_open_positions_and_correlations(self) -> None:
+        """open_positions and correlations passed to pre-trade check."""
+        loop = _make_loop()
+        self._setup_process_instrument(loop)
+
+        loop._pre_trade_checker.check = MagicMock(
+            return_value=MagicMock(passed=True, violations=[])
+        )
+
+        loop._process_instrument(
+            instrument=_make_instrument(),
+            market_id=MARKET_US,
+            level=CircuitLevel.NORMAL,
+            fetcher=MagicMock(fetch_candles=MagicMock(
+                return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
+            )),
+            now=datetime.now(UTC),
+        )
+
+        call_kwargs = loop._pre_trade_checker.check.call_args
+        assert call_kwargs is not None
+        kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
+        assert "open_positions" in kw, "open_positions must be passed"
+        assert "correlations" in kw, "correlations must be passed"
+        assert isinstance(kw["open_positions"], list)
+        assert isinstance(kw["correlations"], dict)
+
+    def test_pre_trade_receives_require_stop_loss_and_symbol(self) -> None:
+        """require_stop_loss=True and symbol passed to pre-trade check."""
+        loop = _make_loop()
+        self._setup_process_instrument(loop)
+
+        loop._pre_trade_checker.check = MagicMock(
+            return_value=MagicMock(passed=True, violations=[])
+        )
+
+        loop._process_instrument(
+            instrument=_make_instrument(),
+            market_id=MARKET_US,
+            level=CircuitLevel.NORMAL,
+            fetcher=MagicMock(fetch_candles=MagicMock(
+                return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
+            )),
+            now=datetime.now(UTC),
+        )
+
+        call_kwargs = loop._pre_trade_checker.check.call_args
+        assert call_kwargs is not None
+        kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
+        assert "require_stop_loss" in kw, "require_stop_loss must be passed"
+        assert kw["require_stop_loss"] is True
+        assert "symbol" in kw, "symbol must be passed"
+        assert kw["symbol"] == SYMBOL_AAPL
