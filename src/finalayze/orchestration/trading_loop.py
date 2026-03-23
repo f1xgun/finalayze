@@ -1456,6 +1456,25 @@ class TradingLoop:
         # Only pass if we have segment context
         seg_exposure: Decimal | None = sector_exposure if seg_id else None
 
+        # PARITY-03: Gather all pre-trade check parameters
+        # Check 9: stop_loss_price from trailing stop state (Plan 01)
+        with self._stop_loss_lock:
+            _stop_st = self._stop_states.get(instrument.symbol)
+            stop_loss_price = _stop_st.current_stop if _stop_st is not None else None  # type: ignore[union-attr]
+
+        # Check 10: has_pending_order via broker
+        has_pending = self._has_pending_order(instrument.symbol, market_id)
+
+        # Check 12: regime_state from macro cache
+        regime_state = self._get_regime_state()
+
+        # Check 13: strategy_name from the signal
+        strategy_name = signal.strategy_name
+
+        # Check 14: open positions and correlations
+        open_positions = [s for s, q in portfolio.positions.items() if q > _ZERO]
+        correlations = self._get_correlations(open_positions)
+
         pre_result = self._pre_trade_checker.check(
             order_value=order_value,
             portfolio_equity=portfolio.equity,
@@ -1466,11 +1485,19 @@ class TradingLoop:
             circuit_breaker_level=self._circuit_breakers[market_id].level
             if market_id in self._circuit_breakers
             else None,
+            stop_loss_price=stop_loss_price,
+            require_stop_loss=True,
+            has_pending_order=has_pending,
+            symbol=instrument.symbol,
             cross_market_exposure_pct=cross_exposure,
             max_cross_market_exposure_pct=max_exposure,
             is_day_trade=is_day_trade,
             sector_exposure_value=seg_exposure,
             sector_id=seg_id,
+            regime_state=regime_state,
+            strategy_name=strategy_name,
+            open_positions=open_positions,
+            correlations=correlations,
         )
 
         if not pre_result.passed:
@@ -1570,6 +1597,35 @@ class TradingLoop:
             if regime is not None:
                 return Decimal(str(regime))
         return Decimal("1.0")
+
+    def _has_pending_order(self, symbol: str, market_id: str) -> bool:
+        """Check if broker has a pending (unfilled) order for symbol."""
+        try:
+            broker = self._broker_router.route(market_id)
+            if hasattr(broker, "get_pending_orders"):
+                pending = broker.get_pending_orders()
+                return any(o.symbol == symbol for o in pending)
+        except Exception:
+            _log.debug("pending_order_check_failed", symbol=symbol)
+        return False
+
+    def _get_regime_state(self) -> object | None:
+        """Get current regime state from macro cache."""
+        if self._macro_cache is not None:
+            return getattr(self._macro_cache, "regime_state", None)
+        return None
+
+    def _get_correlations(
+        self,
+        open_positions: list[str],  # noqa: ARG002
+    ) -> dict[tuple[str, str], float]:
+        """Compute pairwise correlations for open positions.
+
+        For live trading, correlation computation requires historical returns
+        which we don't track yet. Return empty dict for now (check 14 passes through).
+        TODO: Wire returns history for live correlation computation in future phase.
+        """
+        return {}
 
     def _build_order(
         self,
