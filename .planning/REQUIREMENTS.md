@@ -1,118 +1,92 @@
 # Requirements: Finalayze
 
-**Defined:** 2026-03-22
+**Defined:** 2026-03-23
 **Core Value:** Autonomous profitable MOEX trading with acceptable risk limits
 
-## v4.0 Requirements
+## v5.0 Requirements
 
-Requirements for Architecture Hardening milestone. Each maps to roadmap phases.
+Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 
-### Concurrency Safety
+### Order Sizing Bugs
 
-- [x] **CONC-01**: Stop-loss check-and-sell is atomic under a single lock — no double-sell possible for the same symbol
-- [x] **CONC-02**: TinkoffBroker uses asyncio.Lock (not threading.Lock) for async code paths, eliminating latent deadlock
-- [x] **CONC-03**: TinkoffBroker event loop creation is thread-safe — no TOCTOU race on _loop initialization
-- [x] **CONC-04**: macro_cache session is properly scoped with async-with and rollback on error — no connection pool leak
+- [ ] **SIZE-01**: SELL orders use actual held position quantity, not Kelly-computed amount — no over/under-sell
+- [ ] **SIZE-02**: Sector exposure calculation uses each position's own last price, not current instrument's price
+- [ ] **SIZE-03**: CAUTION confidence threshold computed as `segment.min_combined_confidence * 1.2`, not hardcoded 0.6
 
-### Async Correctness
+### Live-Backtest Parity
 
-- [x] **ASYNC-01**: gRPC reconnect uses non-blocking sleep (asyncio.sleep or dedicated thread) — APScheduler thread pool not starved
-- [x] **ASYNC-02**: RetryPolicy.aexecute() properly awaits coroutine functions — no silent coroutine discard
-- [x] **ASYNC-03**: Portfolio API endpoint runs broker calls via run_in_executor — FastAPI event loop not blocked
-- [x] **ASYNC-04**: sandbox_monitor uses async-safe persistence — no asyncio.run() blocking APScheduler threads
+- [ ] **PARITY-01**: Live trading loop uses PositionSizingPipeline with all steps (VolTarget, Regime, MetaLabel, Copula, EVT, HardCaps) — matching backtest engine
+- [ ] **PARITY-02**: Live trailing stops ratchet upward after activation threshold, matching SimulatedBroker trailing stop behavior
+- [ ] **PARITY-03**: All 14 pre-trade checks receive required parameters in live path — stop_loss_price, has_pending_order, regime_state, strategy_name, correlations are passed
+- [ ] **PARITY-04**: Stop-loss exit in a cycle prevents same-cycle re-entry for the same symbol
 
-### Error Handling
+### Data Validation
 
-- [x] **ERR-01**: GARCH failure returns historical volatility fallback (not NaN) and logs warning — NaN never propagates to sizing pipeline
-- [x] **ERR-02**: EventBus.create_group suppresses only redis.ResponseError — Redis connectivity failures are logged and raised
-- [x] **ERR-03**: Tinkoff data fetcher failures are logged with structured context (ticker, timeframe, error type)
-- [x] **ERR-04**: trading_loop consecutive error counter triggers Telegram alert after N failures — silent degradation detected
-- [x] **ERR-05**: bond_cycle per-cycle error counter escalates to error log after threshold — systematic gRPC failures visible
+- [ ] **DATA-01**: DataNormalizer.validate() runs on fetched candles before strategy processing — rejects negative prices, low > high, zero volume
+- [ ] **DATA-02**: Candle staleness detection active — configurable threshold (default: 2x timeframe interval), warning logged and instrument skipped when stale
+- [ ] **DATA-03**: IMOEX index candles use share volume (row[5]), not turnover value (row[4])
 
-### Dependency Layers
+### News Pipeline
 
-- [x] **LAYER-01**: trading_loop.py and bond_cycle.py moved from core/ to dedicated orchestration module — core/ contains only L0 types
-- [x] **LAYER-02**: telegram_bot.py and alerts.py moved from core/ to appropriate layer (L6 API/Dashboard)
-- [x] **LAYER-03**: MetricsCollector injected into trading loop via constructor — no direct import from L6
-- [x] **LAYER-04**: backtest/ and monitoring/ have documented layer assignments
+- [ ] **NEWS-01**: News cycle skipped entirely when no segment has event_driven enabled — no LLM calls wasted
+- [ ] **NEWS-02**: Sentiment cache has time-based exponential decay (configurable half-life, default 4 hours) — stale sentiment decays to zero
+- [ ] **NEWS-03**: Entity extractor _VALID_TICKERS contains "TCSG" (not "T") matching the extraction prompt
+- [ ] **NEWS-04**: Telegram reader deduplicates messages by message link URL — no repeated processing within time window
 
-### API Security
+### Data Infrastructure
 
-- [x] **API-01**: POST /kill endpoint requires X-API-Key authentication — no unauthenticated emergency shutdown
-
-### Dead Code Cleanup
-
-- [x] **DEAD-01**: Event bus streams (STREAM_MARKET_DATA, STREAM_SIGNALS, STREAM_EXECUTION) removed or wired to actual consumers
-- [x] **DEAD-02**: Stub API endpoints (/signals, /trades, /news, /ml/status etc.) either implemented or removed with clear 501 Not Implemented response
-
-### Resource Management
-
-- [x] **RES-01**: TinkoffBroker.close() logs cleanup failures instead of suppressing all exceptions
-- [x] **RES-02**: TinkoffFetcher gRPC calls have configurable timeout (default 60s) — no indefinite hang
-- [x] **RES-03**: httpx clients in alerts.py and fetchers are explicitly closed on shutdown
-
-### Integration Bug Fixes
-
-- [x] **INT-01**: Telegram /gonogo import fixed (OPS-04 gap from v3.0)
-- [x] **INT-02**: HealthMonitor.update_feed_timestamp() wired into TradingLoop (OPS-02 gap from v3.0)
+- [ ] **INFRA-01**: TinkoffFetcher reuses a persistent gRPC channel across calls (like TinkoffBroker pattern) — no per-call channel churn
+- [ ] **INFRA-02**: Brent crude candles cached via _cached_fetch() in MarketDataLoader — not re-downloaded on every backtest
 
 ## Future Requirements
 
-### Performance Optimization
+### News Pipeline Enhancement
 
-- **PERF-01**: APScheduler thread pool sized dynamically based on active cycles
-- **PERF-02**: Connection pool metrics exposed via Prometheus
+- **NEWS-F01**: Article persistence to database with queryable API endpoint
+- **NEWS-F02**: Prompt injection sanitization for LLM inputs
+- **NEWS-F03**: RSS article scope inference via LLM (not hardcoded "russia")
 
 ### Code Quality
 
-- **QUAL-01**: Reduce except-Exception count from 140+ to <50 with targeted exception types
-- **QUAL-02**: Add missing type annotations to core/trading_loop.py
+- **QUAL-01**: Migrate 99 test files from core.trading_loop shim to canonical imports
+- **QUAL-02**: Inject _alerter_ref via TradingLoop constructor parameter
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Full trading_loop.py rewrite | Too risky mid-production; incremental extraction only |
-| Event-driven architecture migration | Would require rewriting all data flow; current direct-call pattern works |
-| Multi-process architecture | Single-process with APScheduler sufficient for current scale |
-| New features or strategies | This milestone is purely hardening, no functional changes |
-| US market fixes | MOEX-only focus continues |
+| Full news pipeline rewrite | Only fix bugs and disable no-op; v6.0 can redesign |
+| Event-driven strategy enablement | Requires live news feed validation first |
+| Multi-source data fusion | Current single-source per data type is sufficient |
+| Real-time WebSocket data feeds | Current polling interval (60 min) matches strategy timeframe |
+| bond_cycle time.sleep fix | Covered by v4.0 pattern; bond fill timeout is short (2 min) |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONC-01 | Phase 19 | Complete |
-| CONC-02 | Phase 19 | Complete |
-| CONC-03 | Phase 19 | Complete |
-| CONC-04 | Phase 19 | Complete |
-| ASYNC-01 | Phase 20 | Complete |
-| ASYNC-02 | Phase 20 | Complete |
-| ASYNC-03 | Phase 20 | Complete |
-| ASYNC-04 | Phase 20 | Complete |
-| ERR-01 | Phase 21 | Complete |
-| ERR-02 | Phase 21 | Complete |
-| ERR-03 | Phase 21 | Complete |
-| ERR-04 | Phase 21 | Complete |
-| ERR-05 | Phase 21 | Complete |
-| LAYER-01 | Phase 22 | Complete |
-| LAYER-02 | Phase 22 | Complete |
-| LAYER-03 | Phase 22 | Complete |
-| LAYER-04 | Phase 22 | Complete |
-| API-01 | Phase 21 | Complete |
-| DEAD-01 | Phase 22 | Complete |
-| DEAD-02 | Phase 22 | Complete |
-| RES-01 | Phase 20 | Complete |
-| RES-02 | Phase 20 | Complete |
-| RES-03 | Phase 20 | Complete |
-| INT-01 | Phase 19 | Complete |
-| INT-02 | Phase 19 | Complete |
+| SIZE-01 | Phase 23 | Pending |
+| SIZE-02 | Phase 23 | Pending |
+| SIZE-03 | Phase 23 | Pending |
+| PARITY-01 | Phase 24 | Pending |
+| PARITY-02 | Phase 24 | Pending |
+| PARITY-03 | Phase 24 | Pending |
+| PARITY-04 | Phase 24 | Pending |
+| DATA-01 | Phase 25 | Pending |
+| DATA-02 | Phase 25 | Pending |
+| DATA-03 | Phase 25 | Pending |
+| NEWS-01 | Phase 26 | Pending |
+| NEWS-02 | Phase 26 | Pending |
+| NEWS-03 | Phase 26 | Pending |
+| NEWS-04 | Phase 26 | Pending |
+| INFRA-01 | Phase 25 | Pending |
+| INFRA-02 | Phase 25 | Pending |
 
 **Coverage:**
-- v4.0 requirements: 25 total
-- Mapped to phases: 25
+- v5.0 requirements: 16 total
+- Mapped to phases: 16
 - Unmapped: 0 ✓
 
 ---
-*Requirements defined: 2026-03-22*
-*Last updated: 2026-03-22 after initial definition*
+*Requirements defined: 2026-03-23*
+*Last updated: 2026-03-23 after initial definition*
