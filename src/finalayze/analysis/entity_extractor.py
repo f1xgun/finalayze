@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,10 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
+# Circuit breaker: stop calling LLM after N consecutive failures
+_CIRCUIT_BREAKER_THRESHOLD = 5
+_CIRCUIT_BREAKER_RESET_SECONDS = 300  # 5 min cooldown before retrying
+
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 # Known MOEX tickers from all ru_* segments
@@ -27,7 +32,7 @@ _VALID_TICKERS: frozenset[str] = frozenset(
         "SBER",
         "GAZP",
         "LKOH",
-        "YNDX",
+        "YDEX",
         "ROSN",
         "GMKN",
         "MGNT",
@@ -70,6 +75,8 @@ class EntityExtractor:
     def __init__(self, llm_client: LLMClient) -> None:
         self._llm = llm_client
         self._system_prompt = self._load_prompt()
+        self._consecutive_failures: int = 0
+        self._circuit_open_until: float = 0.0  # monotonic timestamp
 
     async def extract(self, article: NewsArticle) -> list[str]:
         """Extract MOEX ticker symbols mentioned in the article.
@@ -81,14 +88,40 @@ class EntityExtractor:
             List of valid MOEX ticker symbols found in the article.
             Empty list if no companies identified or on parse errors.
         """
+        # Circuit breaker: skip LLM calls when circuit is open
+        if self._consecutive_failures >= _CIRCUIT_BREAKER_THRESHOLD:
+            now = time.monotonic()
+            if now < self._circuit_open_until:
+                return []
+            # Half-open: allow one retry attempt
+            log.info("entity_extraction_circuit_half_open")
+
         user_prompt = f"Title: {article.title}\n\nContent: {article.content}"
 
         try:
             raw = await self._llm.complete(user_prompt, self._system_prompt)
         except Exception:
-            log.warning("entity_extraction_llm_failed", article_url=article.url)
+            self._consecutive_failures += 1
+            if self._consecutive_failures == _CIRCUIT_BREAKER_THRESHOLD:
+                self._circuit_open_until = time.monotonic() + _CIRCUIT_BREAKER_RESET_SECONDS
+                log.warning(
+                    "entity_extraction_circuit_opened",
+                    failures=self._consecutive_failures,
+                    cooldown_seconds=_CIRCUIT_BREAKER_RESET_SECONDS,
+                    exc_info=True,
+                )
+            else:
+                # Quiet: individual failures are expected during rate limiting
+                log.debug("entity_extraction_llm_failed", article_url=article.url)
             return []
 
+        # Success: reset circuit breaker
+        if self._consecutive_failures > 0:
+            log.info(
+                "entity_extraction_circuit_closed",
+                previous_failures=self._consecutive_failures,
+            )
+        self._consecutive_failures = 0
         return self._parse_response(raw)
 
     def _parse_response(self, raw: str) -> list[str]:

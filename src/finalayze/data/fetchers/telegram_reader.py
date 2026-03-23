@@ -6,6 +6,7 @@ No authentication required — uses plain HTTP GET + HTML parsing.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -18,6 +19,7 @@ from finalayze.core.schemas import NewsArticle
 logger = structlog.get_logger(__name__)
 
 _MAX_MESSAGES_PER_CHANNEL = 50
+_MAX_SEEN_SIZE = 5000
 _MIN_TEXT_LENGTH = 10
 _TITLE_MAX_LENGTH = 100
 _USER_AGENT = "Mozilla/5.0 (compatible; Finalayze/1.0)"
@@ -34,6 +36,7 @@ class TelegramChannelReader:
 
     def __init__(self, *, channels: list[str] | None = None) -> None:
         self._channels = channels or []
+        self._seen_urls: OrderedDict[str, None] = OrderedDict()
 
     @property
     def configured(self) -> bool:
@@ -157,6 +160,13 @@ class TelegramChannelReader:
             msg_url = f"https://t.me/{data_post}" if data_post else f"https://t.me/{channel_name}"
         else:
             msg_url = f"https://t.me/{channel_name}"
+
+        # URL-based deduplication -- skip messages already seen
+        if msg_url in self._seen_urls:
+            return None
+        self._seen_urls[msg_url] = None
+        if len(self._seen_urls) > _MAX_SEEN_SIZE:
+            self._seen_urls.popitem(last=False)
 
         return NewsArticle(
             id=uuid4(),
