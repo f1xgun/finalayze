@@ -166,7 +166,7 @@ def _make_trading_loop(
     broker_router.submit = MagicMock(return_value=fill_result)
     mock_broker = MagicMock()
     mock_broker.get_portfolio = MagicMock(
-        return_value=MagicMock(equity=BASELINE_EQUITY, cash=Decimal(50000))
+        return_value=MagicMock(equity=BASELINE_EQUITY, cash=Decimal(50000), positions={})
     )
     mock_broker.get_positions = MagicMock(return_value={})
     mock_broker.submit_order = MagicMock(return_value=fill_result)
