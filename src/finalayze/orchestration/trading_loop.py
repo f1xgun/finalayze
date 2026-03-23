@@ -1486,7 +1486,7 @@ class TradingLoop:
             if market_id in self._circuit_breakers
             else None,
             stop_loss_price=stop_loss_price,
-            require_stop_loss=True,
+            require_stop_loss=(instrument.symbol in self._stop_states),
             has_pending_order=has_pending,
             symbol=instrument.symbol,
             cross_market_exposure_pct=cross_exposure,

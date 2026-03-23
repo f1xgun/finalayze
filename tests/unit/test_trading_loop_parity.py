@@ -554,8 +554,8 @@ class TestPreTradeCheckParams:
         assert isinstance(kw["open_positions"], list)
         assert isinstance(kw["correlations"], dict)
 
-    def test_pre_trade_receives_require_stop_loss_and_symbol(self) -> None:
-        """require_stop_loss=True and symbol passed to pre-trade check."""
+    def test_pre_trade_receives_require_stop_loss_false_for_new_entry(self) -> None:
+        """require_stop_loss=False for new entries (no existing stop state)."""
         loop = _make_loop()
         self._setup_process_instrument(loop)
 
@@ -577,6 +577,38 @@ class TestPreTradeCheckParams:
         assert call_kwargs is not None
         kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
         assert "require_stop_loss" in kw, "require_stop_loss must be passed"
-        assert kw["require_stop_loss"] is True
+        assert kw["require_stop_loss"] is False, (
+            "New entries have no stop state yet; require_stop_loss must be False"
+        )
         assert "symbol" in kw, "symbol must be passed"
         assert kw["symbol"] == SYMBOL_AAPL
+
+    def test_pre_trade_receives_require_stop_loss_true_for_existing_position(self) -> None:
+        """require_stop_loss=True when symbol already has a stop state."""
+        loop = _make_loop()
+        self._setup_process_instrument(loop)
+
+        # Seed a stop state so the symbol has an existing position with stop
+        _seed_stop_state(loop)
+
+        loop._pre_trade_checker.check = MagicMock(
+            return_value=MagicMock(passed=True, violations=[])
+        )
+
+        loop._process_instrument(
+            instrument=_make_instrument(),
+            market_id=MARKET_US,
+            level=CircuitLevel.NORMAL,
+            fetcher=MagicMock(fetch_candles=MagicMock(
+                return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
+            )),
+            now=datetime.now(UTC),
+        )
+
+        call_kwargs = loop._pre_trade_checker.check.call_args
+        assert call_kwargs is not None
+        kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
+        assert "require_stop_loss" in kw, "require_stop_loss must be passed"
+        assert kw["require_stop_loss"] is True, (
+            "Existing positions must require stop loss in pre-trade check"
+        )
