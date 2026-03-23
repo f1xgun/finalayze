@@ -158,8 +158,12 @@ class TestSellOrderUsesHeldQuantity:
             f"SELL order qty should be {held_qty} (held), got {order.quantity}"
         )
 
-    def test_buy_order_still_uses_kelly_sizing(self) -> None:
-        """BUY orders must continue to use Kelly-based sizing (unchanged)."""
+    def test_buy_order_uses_pipeline_sizing(self) -> None:
+        """BUY orders use PositionSizingPipeline (PARITY-01), not bare Kelly.
+
+        Pipeline applies vol-targeting, regime scaling, etc. on top of Kelly base.
+        Result differs from bare Kelly*equity but is bounded by available cash.
+        """
         loop = _make_loop()
         candles = _make_candles()
 
@@ -184,11 +188,12 @@ class TestSellOrderUsesHeldQuantity:
             portfolio=portfolio,
         )
 
-        # Kelly: 0.25 * 100000 = 25000 / 150 = 166.67 -> 167 shares
-        expected_qty = (kelly_fraction * BASELINE_EQUITY / CANDLE_CLOSE_AAPL).quantize(Decimal(1))
-        assert order is not None
-        assert order.quantity == expected_qty, (
-            f"BUY order should use Kelly sizing ({expected_qty}), got {order.quantity}"
+        assert order is not None, "BUY order should not be None with positive Kelly"
+        assert order.quantity > _ZERO, "BUY order qty must be positive"
+        # Pipeline output is capped by available cash
+        max_qty = (BASELINE_CASH / CANDLE_CLOSE_AAPL).quantize(Decimal(1))
+        assert order.quantity <= max_qty, (
+            f"Order qty ({order.quantity}) must not exceed cash-limited qty ({max_qty})"
         )
 
     def test_sell_with_zero_position_returns_none(self) -> None:

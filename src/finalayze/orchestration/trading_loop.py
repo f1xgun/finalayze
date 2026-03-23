@@ -1503,6 +1503,74 @@ class TradingLoop:
         if is_day_trade:
             self._pdt_tracker.record_day_trade(now.date())
 
+    def _build_sizing_pipeline(self, segment_id: str) -> object:
+        """Build position sizing pipeline matching backtest engine step order.
+
+        Pipeline order: Kelly -> VolTarget -> Regime -> [RubOilRegime] -> [BrentGate]
+            -> [CBRRegime] -> [SectorAllocation] -> [Copula] -> [EVT] -> MetaLabel -> HardCaps
+        """
+        from finalayze.risk.position_sizing_pipeline import (  # noqa: PLC0415
+            BrentGateStep,
+            CBRRegimeStep,
+            CopulaStep,
+            EVTStep,
+            HardCapsStep,
+            KellyStep,
+            MetaLabelStep,
+            PositionSizingPipeline,
+            RegimeStep,
+            RubOilRegimeStep,
+            SectorAllocationStep,
+            VolTargetStep,
+        )
+
+        steps: list[object] = [KellyStep(), VolTargetStep(), RegimeStep()]
+
+        # Add MOEX-specific steps when macro_cache provides data
+        if self._macro_cache is not None and segment_id.startswith("ru_"):
+            rub_oil_signal = getattr(self._macro_cache, "rub_oil_regime_signal", None)
+            if rub_oil_signal is not None:
+                steps.append(RubOilRegimeStep(rub_oil_signal, segment_id))
+            brent_rub = getattr(self._macro_cache, "brent_rub_price", 0.0)
+            if brent_rub > 0:
+                steps.append(BrentGateStep(brent_rub, segment_id))
+            yield_slope = getattr(self._macro_cache, "yield_slope_bps", 0.0)
+            steps.append(CBRRegimeStep(yield_slope, segment_id))
+            cbr_dir = getattr(self._macro_cache, "cbr_direction", "")
+            if cbr_dir:
+                steps.append(SectorAllocationStep(brent_rub, cbr_dir, segment_id))
+
+        steps.append(CopulaStep())
+        steps.append(EVTStep())
+        steps.append(MetaLabelStep())
+        steps.append(HardCapsStep())
+        return PositionSizingPipeline(steps=steps)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _compute_asset_vol(candles: list[Candle]) -> Decimal:
+        """Compute annualized volatility from candle close prices."""
+        if len(candles) < 2:  # noqa: PLR2004
+            return Decimal("0.20")  # fallback
+        import math  # noqa: PLC0415
+
+        closes = [float(c.close) for c in candles]
+        log_rets = [
+            math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes)) if closes[i - 1] > 0
+        ]
+        if not log_rets:
+            return Decimal("0.20")
+        var = sum(r**2 for r in log_rets) / len(log_rets)
+        annual_vol = math.sqrt(var * 252)
+        return Decimal(str(round(annual_vol, 4)))
+
+    def _get_regime_scale(self) -> Decimal:
+        """Get current regime scale factor. 1.0 = risk-on, lower = risk-off."""
+        if self._macro_cache is not None:
+            regime = getattr(self._macro_cache, "regime_scale", None)
+            if regime is not None:
+                return Decimal(str(regime))
+        return Decimal("1.0")
+
     def _build_order(
         self,
         signal: Signal,
@@ -1516,14 +1584,17 @@ class TradingLoop:
         portfolio: PortfolioState | None = None,
         seg_id: str = "us_tech",
     ) -> OrderRequest | None:
-        """Build an order from signal, using Kelly sizing and respecting CAUTION reduction.
+        """Build an order from signal, using PositionSizingPipeline for BUY orders.
 
+        PARITY-01: BUY orders go through the same multi-step sizing pipeline as backtest.
         SIZE-01: SELL orders use actual held position quantity.
         SIZE-03: CAUTION threshold uses segment preset min_combined_confidence * 1.2.
         """
+        from finalayze.risk.position_sizing_pipeline import SizingContext  # noqa: PLC0415
+
         side: Literal["BUY", "SELL"] = "BUY" if signal.direction == SignalDirection.BUY else "SELL"
 
-        # SIZE-01: SELL orders use actual held quantity, skip Kelly sizing
+        # SIZE-01: SELL orders use actual held quantity, skip pipeline sizing
         if signal.direction == SignalDirection.SELL:
             held = portfolio.positions.get(symbol, _ZERO) if portfolio is not None else _ZERO
             if held <= _ZERO:
@@ -1537,9 +1608,36 @@ class TradingLoop:
             if signal.confidence < min_conf:
                 return None
 
-        # 6A.11: Kelly sizes against portfolio equity, capped by available cash
-        order_value = kelly_fraction * portfolio_equity
+        # PARITY-01: Build sizing pipeline and context (matching backtest engine)
+        pipeline = self._build_sizing_pipeline(seg_id)
+        asset_vol = self._compute_asset_vol(candles)
+        regime_scale = self._get_regime_scale()
+        ml_confidence = signal.features.get("ml_confidence") if signal.features else None
+
+        _limits = self._settings.effective_risk_limits()
+        min_pos = max(portfolio_equity * Decimal("0.005"), Decimal(500))
+
+        context = SizingContext(
+            equity=portfolio_equity,
+            base_position=kelly_fraction * portfolio_equity,
+            max_position_pct=Decimal(str(_limits.max_position_pct)),
+            min_position_size=min_pos,
+            asset_vol=asset_vol,
+            target_vol=Decimal(str(getattr(self._settings, "target_vol", 0.15))),
+            regime_scale=regime_scale,
+            correlation_scale=Decimal("1.0"),
+            returns_history=(),
+            ml_confidence=ml_confidence,
+        )
+
+        order_value = pipeline.compute(context)  # type: ignore[union-attr]
+        if order_value <= _ZERO:
+            return None
+
+        # Cap by available cash
         order_value = min(order_value, available_cash)
+
+        # CAUTION reduction (on top of pipeline)
         if level == self._CircuitLevel.CAUTION:
             order_value = order_value * _CAUTION_SIZE_FACTOR
 
