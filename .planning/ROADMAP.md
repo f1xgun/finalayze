@@ -5,7 +5,8 @@
 - ✅ **v1.0 MOEX MVP** -- Phases 1-7 (shipped 2026-03-19)
 - ✅ **v2.0 MOEX Profitability** -- Phases 8-14 (shipped 2026-03-21)
 - ✅ **v3.0 Production Readiness** -- Phases 15-18 (shipped 2026-03-22)
-- 🚧 **v4.0 Architecture Hardening** -- Phases 19-22 (in progress)
+- ✅ **v4.0 Architecture Hardening** -- Phases 19-22 (shipped 2026-03-22)
+- 🚧 **v5.0 Data Flow Correctness & Live-Backtest Parity** -- Phases 23-26 (in progress)
 
 ## Phases
 
@@ -51,96 +52,86 @@ Full details: `.planning/milestones/v3.0-ROADMAP.md`
 
 </details>
 
-### v4.0 Architecture Hardening (In Progress)
+<details>
+<summary>✅ v4.0 Architecture Hardening (Phases 19-22) -- SHIPPED 2026-03-22</summary>
 
-**Milestone Goal:** Fix critical architectural defects discovered in comprehensive audit -- concurrency bugs that risk money loss, async correctness issues that cause silent degradation, error handling gaps that mask failures, and dependency layer violations that hinder maintainability.
+- [x] Phase 19: Concurrency Safety and Integration Fixes (2/2 plans) -- completed 2026-03-22
+- [x] Phase 20: Async Correctness and Resource Management (3/3 plans) -- completed 2026-03-22
+- [x] Phase 21: Error Handling Hardening (2/2 plans) -- completed 2026-03-22
+- [x] Phase 22: Dependency Layer Cleanup (3/3 plans) -- completed 2026-03-22
 
-- [x] **Phase 19: Concurrency Safety and Integration Fixes** - Fix money-losing race conditions, lock misuse, session leaks, and v3.0 integration gaps (completed 2026-03-22)
-- [x] **Phase 20: Async Correctness and Resource Management** - Fix blocking calls in async paths, coroutine discard bugs, and resource lifecycle gaps (completed 2026-03-22)
-- [x] **Phase 21: Error Handling Hardening** - Fix NaN propagation, exception suppression, silent degradation, and API security gap (completed 2026-03-22)
-- [x] **Phase 22: Dependency Layer Cleanup** - Extract orchestrators from core/, assign module layers, remove dead infrastructure (completed 2026-03-22)
+Full details: `.planning/milestones/v4.0-ROADMAP.md`
+
+</details>
+
+### v5.0 Data Flow Correctness & Live-Backtest Parity (In Progress)
+
+**Milestone Goal:** Fix critical data flow bugs -- SELL order sizing, sector exposure calculation, live/backtest risk pipeline divergence, data validation gaps, and news pipeline no-op waste.
+
+- [ ] **Phase 23: Order Sizing Bug Fixes** - Fix money-losing SELL sizing, sector exposure, and CAUTION threshold bugs
+- [ ] **Phase 24: Live-Backtest Parity** - Wire PositionSizingPipeline, trailing stops, pre-trade checks, and re-entry guard in live path
+- [ ] **Phase 25: Data Validation and Infrastructure** - Wire DataNormalizer, candle staleness, IMOEX volume fix, gRPC channel reuse, Brent caching
+- [ ] **Phase 26: News Pipeline Fixes** - Disable no-op news cycle, add sentiment decay, fix ticker mismatch, deduplicate Telegram messages
 
 ## Phase Details
 
-### Phase 19: Concurrency Safety and Integration Fixes
-**Goal**: Trading system has no race conditions that can cause double-sells, deadlocks, or connection pool exhaustion -- and v3.0 integration gaps are closed
-**Depends on**: Phase 18 (v3.0 complete)
-**Requirements**: CONC-01, CONC-02, CONC-03, CONC-04, INT-01, INT-02
+### Phase 23: Order Sizing Bug Fixes
+**Goal**: SELL orders, sector exposure, and CAUTION thresholds produce correct values -- no over-sells, no cross-contaminated prices, no hardcoded thresholds
+**Depends on**: Nothing (first v5.0 phase)
+**Requirements**: SIZE-01, SIZE-02, SIZE-03
 **Success Criteria** (what must be TRUE):
-  1. Stop-loss sell for a symbol acquires an async lock before checking position and releasing after order submission -- concurrent signals for the same symbol are serialized, eliminating double-sell
-  2. TinkoffBroker uses asyncio.Lock for all async code paths -- threading.Lock is not used anywhere in async broker methods
-  3. TinkoffBroker event loop initialization uses a thread-safe pattern (e.g., asyncio.get_running_loop or lazy init with threading.Lock guard) -- no TOCTOU race on _loop attribute
-  4. macro_cache database session uses async-with context manager and issues rollback on exception -- connection pool leak under error conditions is eliminated
-  5. Telegram /gonogo command imports and runs successfully (OPS-04 integration fix verified by test)
-  6. HealthMonitor.update_feed_timestamp() is called by TradingLoop after each data fetch cycle -- feed freshness monitoring is operational
-**Plans**: 2 plans
-Plans:
-- [x] 19-01-PLAN.md -- Fix TinkoffBroker lock types, event loop TOCTOU, and macro_cache session leak
-- [x] 19-02-PLAN.md -- Atomic stop-loss, /gonogo import verification, feed timestamp wiring
+  1. When the system generates a SELL order, the quantity equals the actual held position for that symbol -- Kelly sizing is not applied to exits
+  2. Sector exposure pre-trade check computes each position's notional value using that position's own last traded price -- not the price of the instrument currently being evaluated
+  3. CAUTION confidence threshold is computed as `segment.min_combined_confidence * 1.2` and changes when segment config changes -- no literal 0.6 in the code path
+**Plans**: TBD
 
-### Phase 20: Async Correctness and Resource Management
-**Goal**: All async code paths are non-blocking and all external resources (gRPC channels, HTTP clients) have explicit lifecycle management
-**Depends on**: Phase 19
-**Requirements**: ASYNC-01, ASYNC-02, ASYNC-03, ASYNC-04, RES-01, RES-02, RES-03
+### Phase 24: Live-Backtest Parity
+**Goal**: Live trading loop risk pipeline matches the backtest engine -- same sizing steps, same trailing stop behavior, same pre-trade checks, same re-entry guard
+**Depends on**: Phase 23
+**Requirements**: PARITY-01, PARITY-02, PARITY-03, PARITY-04
 **Success Criteria** (what must be TRUE):
-  1. gRPC reconnect uses asyncio.sleep or a background task instead of time.sleep(300) -- APScheduler thread pool is never starved by a 5-minute blocking sleep
-  2. RetryPolicy.aexecute() checks if fn() returns a coroutine and awaits it -- coroutine objects are never silently discarded
-  3. Portfolio API endpoint wraps synchronous broker calls with run_in_executor -- FastAPI event loop latency is not blocked by broker I/O
-  4. SandboxMonitorService persistence does not call asyncio.run() from within APScheduler threads -- no nested event loop errors
-  5. TinkoffBroker.close() logs cleanup exceptions with structured context (resource name, error type) instead of bare except: pass
-  6. TinkoffFetcher gRPC calls have a configurable timeout parameter (default 60s) -- no indefinite hang on unresponsive gRPC server
-  7. httpx clients in alerts.py and fetcher modules are explicitly closed during application shutdown
-**Plans**: 3 plans
-Plans:
-- [x] 20-01-PLAN.md -- Fix gRPC reconnect blocking sleep, RetryPolicy coroutine discard, sandbox monitor asyncio.run
-- [x] 20-02-PLAN.md -- Portfolio run_in_executor, TinkoffBroker.close() logging, TinkoffFetcher gRPC timeout
-- [x] 20-03-PLAN.md -- Wire TelegramAlerter httpx client shutdown into application lifespan
+  1. Live trading loop instantiates PositionSizingPipeline with all steps (VolTarget, Regime, MetaLabel, Copula, EVT, HardCaps) and calls it for every BUY signal -- the same pipeline that backtest engine uses
+  2. Live trailing stops ratchet the stop price upward after an activation threshold is reached, and never ratchet downward -- matching SimulatedBroker trailing stop state machine
+  3. All 14 pre-trade checks in live path receive their required parameters (stop_loss_price, has_pending_order, regime_state, strategy_name, correlations) -- no check is skipped due to missing input
+  4. When a symbol is stopped out in a given equity cycle, the same cycle does not re-enter that symbol -- a per-cycle exclusion set prevents immediate re-buy after stop-loss
+**Plans**: TBD
 
-### Phase 21: Error Handling Hardening
-**Goal**: Failures in GARCH, EventBus, data fetchers, and trading loops are visible through logs and alerts -- no silent degradation or NaN propagation
-**Depends on**: Phase 19
-**Requirements**: ERR-01, ERR-02, ERR-03, ERR-04, ERR-05, API-01
+### Phase 25: Data Validation and Infrastructure
+**Goal**: Market data is validated before strategy consumption, stale data is detected and skipped, and data fetching is efficient with no redundant connections or downloads
+**Depends on**: Nothing (data layer is independent of sizing/parity fixes)
+**Requirements**: DATA-01, DATA-02, DATA-03, INFRA-01, INFRA-02
 **Success Criteria** (what must be TRUE):
-  1. When GARCH model fitting fails or produces NaN, the volatility module returns historical rolling volatility as fallback and logs a warning -- NaN never reaches the position sizing pipeline
-  2. EventBus.create_group catches only redis.ResponseError (not bare Exception) -- unexpected Redis errors are logged and re-raised
-  3. TinkoffFetcher logs failures with structured fields: ticker, timeframe, error_type, and request_id -- operators can filter and diagnose data issues
-  4. TradingLoop increments a consecutive error counter per cycle type; after N consecutive failures (configurable, default 3), a Telegram warning alert is sent
-  5. BondCycleProcessor logs escalated error after threshold consecutive gRPC failures per cycle -- systematic broker issues are visible in logs
-  6. POST /kill endpoint requires X-API-Key header matching a configured secret -- unauthenticated requests receive 401
-**Plans**: 2 plans
-Plans:
-- [x] 21-01-PLAN.md -- GARCH NaN fallback, EventBus exception narrowing, /kill auth
-- [x] 21-02-PLAN.md -- TinkoffFetcher structured logging, TradingLoop and BondCycle consecutive error counters
+  1. DataNormalizer.validate() runs on every batch of fetched candles before they reach strategy processing -- candles with negative prices, low > high, or zero volume are rejected with a warning log
+  2. When candle data for an instrument is older than 2x the expected timeframe interval (configurable), a warning is logged and the instrument is skipped for that cycle -- no trading on stale data
+  3. IMOEX index candles store share volume (column index 5) not turnover value (column index 4) -- volume-based indicators on IMOEX produce correct readings
+  4. TinkoffFetcher maintains a persistent gRPC channel that is reused across calls within the same session -- connection setup overhead is eliminated for consecutive data requests
+  5. Brent crude candles are cached via _cached_fetch() in MarketDataLoader -- repeated backtest runs do not re-download Brent data from yfinance
+**Plans**: TBD
 
-### Phase 22: Dependency Layer Cleanup
-**Goal**: core/ contains only Layer 0 types and schemas; orchestration logic lives in a dedicated module; dead infrastructure is removed
-**Depends on**: Phase 20, Phase 21
-**Requirements**: LAYER-01, LAYER-02, LAYER-03, LAYER-04, DEAD-01, DEAD-02
+### Phase 26: News Pipeline Fixes
+**Goal**: News pipeline does not waste LLM tokens when unused, sentiment ages out properly, ticker extraction is correct, and Telegram messages are not processed twice
+**Depends on**: Nothing (news pipeline is independent of other v5.0 work)
+**Requirements**: NEWS-01, NEWS-02, NEWS-03, NEWS-04
 **Success Criteria** (what must be TRUE):
-  1. trading_loop.py and bond_cycle.py are importable from a new orchestration/ module (not core/) -- core/ has no files that import from Layer 3+ modules
-  2. telegram_bot.py and alerts.py reside under an appropriate Layer 6 module -- core/ does not contain API/dashboard layer code
-  3. MetricsCollector is injected into TradingLoop via constructor parameter -- TradingLoop has no direct import of monitoring/ or api/ modules
-  4. backtest/ and monitoring/ modules have layer assignments documented in their respective CLAUDE.md files and confirmed by import analysis
-  5. Event bus stream constants (STREAM_MARKET_DATA, STREAM_SIGNALS, STREAM_EXECUTION) are either wired to actual consumers or removed -- no dead pub/sub infrastructure
-  6. Stub API endpoints (/signals, /trades, /news, /ml/status) either serve real data or return 501 Not Implemented with a clear message
-**Plans**: 3 plans
-Plans:
-- [x] 22-01-PLAN.md -- Move orchestration files (trading_loop, bond_cycle) and notification files (alerts, telegram_bot) to correct layers
-- [x] 22-02-PLAN.md -- Inject MetricsCollector via constructor, document layer assignments for backtest/ and monitoring/
-- [x] 22-03-PLAN.md -- Remove dead event bus streams, convert stub API endpoints to 501
+  1. When no segment in the active configuration has event_driven strategy enabled, the news cycle is skipped entirely -- zero LLM API calls are made
+  2. Cached sentiment scores decay exponentially with a configurable half-life (default 4 hours) -- a sentiment score cached 8 hours ago has decayed to 25% of its original value
+  3. Entity extractor _VALID_TICKERS map contains "TCSG" (the MOEX ticker) and does not contain bare "T" -- news mentioning T-Bank resolves to TCSG
+  4. Telegram reader tracks processed message URLs and skips duplicates within a configurable time window -- the same Telegram post is not sent to the LLM twice
+**Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 19 -> 20 -> 21 -> 22
-Note: Phase 21 depends on Phase 19 (not 20), so 20 and 21 could run in parallel if needed.
+Phases execute in numeric order: 23 -> 24 -> 25 -> 26
+Note: Phases 25 and 26 have no dependency on 23/24 and could run in parallel after Phase 23 completes.
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
 | 1-7 | v1.0 | 22/22 | Complete | 2026-03-19 |
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
-| 19. Concurrency Safety | v4.0 | 2/2 | Complete    | 2026-03-22 |
-| 20. Async and Resources | v4.0 | 3/3 | Complete    | 2026-03-22 |
-| 21. Error Handling | v4.0 | 2/2 | Complete    | 2026-03-22 |
-| 22. Layer Cleanup | v4.0 | 3/3 | Complete    | 2026-03-22 |
+| 19-22 | v4.0 | 10/10 | Complete | 2026-03-22 |
+| 23. Order Sizing Bug Fixes | v5.0 | 0/TBD | Not started | - |
+| 24. Live-Backtest Parity | v5.0 | 0/TBD | Not started | - |
+| 25. Data Validation and Infrastructure | v5.0 | 0/TBD | Not started | - |
+| 26. News Pipeline Fixes | v5.0 | 0/TBD | Not started | - |
