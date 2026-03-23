@@ -122,6 +122,7 @@ class TradingLoop:
         metrics_collector: type[MetricsCollector] | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
+        from finalayze.execution.simulated_broker import StopLossState  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
         from finalayze.risk.kelly import RollingKelly  # noqa: PLC0415
         from finalayze.risk.loss_limits import LossLimitTracker  # noqa: PLC0415
@@ -130,6 +131,7 @@ class TradingLoop:
         # Store class references for runtime use without module-level imports
         self._OrderRequest = OrderRequest
         self._CircuitLevel = CircuitLevel
+        self._StopLossState = StopLossState
 
         self._settings = settings
         self._fetchers = fetchers
@@ -165,9 +167,12 @@ class TradingLoop:
         # Daily baseline equities: market_id -> equity at start of trading day
         self._baseline_equities: dict[str, Decimal] = {}
 
-        # Stop-loss tracking: symbol -> stop_loss_price (thread-safe via lock)
-        self._stop_loss_prices: dict[str, Decimal] = {}
+        # Stop-loss tracking: symbol -> StopLossState (trailing, thread-safe via lock)
+        self._stop_states: dict[str, object] = {}  # StopLossState instances
         self._stop_loss_lock = threading.Lock()
+
+        # Per-cycle re-entry guard: symbols stopped out this cycle skip signal gen
+        self._cycle_exited_symbols: set[str] = set()
 
         # Risk management components
         # 6A.7: Wire PDTTracker into PreTradeChecker
@@ -241,6 +246,7 @@ class TradingLoop:
         self._cycle_orders_submitted: int = 0
         self._cycle_orders_filled: int = 0
         self._cycle_errors_caught: int = 0
+        self._cycle_exited_symbols: set[str] = set()
 
     # ── Candle staleness ──────────────────────────────────────────────────
 
@@ -1114,9 +1120,7 @@ class TradingLoop:
                         uptime_cycles=self._sandbox_monitor.cycle_count + 1,
                         signals_generated=self._cycle_signals_generated,
                         errors_caught=self._cycle_errors_caught,
-                        max_slippage_bps=max(
-                            self._sandbox_monitor.slippage_buffer, default=0.0
-                        ),
+                        max_slippage_bps=max(self._sandbox_monitor.slippage_buffer, default=0.0),
                         avg_slippage_bps=(
                             sum(self._sandbox_monitor.slippage_buffer)
                             / max(len(self._sandbox_monitor.slippage_buffer), 1)
@@ -1212,9 +1216,7 @@ class TradingLoop:
         if equity is not None and self._metrics:
             self._metrics.set_portfolio_equity(market_id, float(equity))
             cb_level_numeric = {"normal": 0, "caution": 1, "halted": 2, "liquidate": 3}
-            self._metrics.set_circuit_breaker_level(
-                market_id, cb_level_numeric.get(level.value, 0)
-            )
+            self._metrics.set_circuit_breaker_level(market_id, cb_level_numeric.get(level.value, 0))
 
     def _get_cached_portfolio(self, market_id: str) -> Any | None:
         """Return cached portfolio for this cycle, fetching once per market."""
@@ -1334,6 +1336,11 @@ class TradingLoop:
         if candles:
             current_price = candles[-1].close
             self._check_stop_losses(market_id, instrument.symbol, current_price)
+
+        # PARITY-04: Skip signal generation for symbols stopped out this cycle
+        if instrument.symbol in self._cycle_exited_symbols:
+            _log.debug("skip_reentry_guard", symbol=instrument.symbol)
+            return
 
         sentiment_score = self._get_sentiment(seg_id)
 
@@ -1514,15 +1521,11 @@ class TradingLoop:
         SIZE-01: SELL orders use actual held position quantity.
         SIZE-03: CAUTION threshold uses segment preset min_combined_confidence * 1.2.
         """
-        side: Literal["BUY", "SELL"] = (
-            "BUY" if signal.direction == SignalDirection.BUY else "SELL"
-        )
+        side: Literal["BUY", "SELL"] = "BUY" if signal.direction == SignalDirection.BUY else "SELL"
 
         # SIZE-01: SELL orders use actual held quantity, skip Kelly sizing
         if signal.direction == SignalDirection.SELL:
-            held = (
-                portfolio.positions.get(symbol, _ZERO) if portfolio is not None else _ZERO
-            )
+            held = portfolio.positions.get(symbol, _ZERO) if portfolio is not None else _ZERO
             if held <= _ZERO:
                 return None
             return self._OrderRequest(symbol=symbol, side=side, quantity=held)
@@ -1632,15 +1635,26 @@ class TradingLoop:
                     stop = compute_atr_stop_loss(
                         result.fill_price, candles, atr_multiplier=multiplier
                     )
-                    if stop is not None:
+                    if stop is not None and multiplier > _ZERO:
+                        # Derive ATR: stop = entry - mult * atr => atr = (entry - stop) / mult
+                        atr_val = (result.fill_price - stop) / multiplier
                         with self._stop_loss_lock:
-                            self._stop_loss_prices[order.symbol] = stop
+                            self._stop_states[order.symbol] = self._StopLossState(
+                                initial_stop=stop,
+                                current_stop=stop,
+                                highest_price=result.fill_price,
+                                trail_activated=False,
+                                activation_atr=Decimal("1.0"),
+                                trail_atr=Decimal("1.5"),
+                                entry_price=result.fill_price,
+                                atr_value=atr_val,
+                            )
                 # Update Kelly on SELL fill + clear stop-loss
                 elif order.side == "SELL":
                     if result.fill_price is not None:
                         self._update_kelly(order.symbol, result.fill_price)
                     with self._stop_loss_lock:
-                        self._stop_loss_prices.pop(order.symbol, None)
+                        self._stop_states.pop(order.symbol, None)
             else:
                 _log.warning(
                     "order_rejected",
@@ -1664,25 +1678,48 @@ class TradingLoop:
         symbol: str,
         current_price: Decimal,
     ) -> None:
-        """Check if current price has breached the stop-loss for a symbol.
+        """Check trailing stop-loss state and trigger SELL if breached.
 
-        If price <= stop_loss_price, submit a SELL market order immediately.
+        Implements the same 5-step trailing logic as SimulatedBroker:
+        1. Update high-water mark
+        2. Check activation threshold
+        3. Ratchet trail stop upward (never down)
+        4. Check trigger condition
+        5. Submit SELL and record in _cycle_exited_symbols (PARITY-04)
+
         The entire check-sell-remove is atomic under _stop_loss_lock to prevent
         double-sell from concurrent threads (CONC-01).
         """
         with self._stop_loss_lock:
-            stop_price = self._stop_loss_prices.get(symbol)
-            if stop_price is None:
+            state = self._stop_states.get(symbol)
+            if state is None:
                 return
 
-            if current_price > stop_price:
+            # Step 1: Update high-water mark
+            state.highest_price = max(state.highest_price, current_price)
+
+            # Step 2: Check activation
+            if not state.trail_activated:
+                activation_threshold = state.entry_price + state.activation_atr * state.atr_value
+                if state.highest_price >= activation_threshold:
+                    state.trail_activated = True
+
+            # Step 3: Ratchet trail stop (only moves up)
+            if state.trail_activated:
+                trail_stop = state.highest_price - state.trail_atr * state.atr_value
+                state.current_stop = max(state.current_stop, trail_stop)
+
+            # Step 4: Trigger check
+            if current_price > state.current_stop:
                 return
 
+            # Step 5: Stop triggered
             _log.warning(
-                "_check_stop_losses: stop triggered for %s @ %s (stop=%s)",
-                symbol,
-                current_price,
-                stop_price,
+                "stop_triggered",
+                symbol=symbol,
+                price=float(current_price),
+                stop=float(state.current_stop),
+                trailing=state.trail_activated,
             )
             broker = self._broker_router.route(market_id)
             positions = broker.get_positions()
@@ -1692,14 +1729,13 @@ class TradingLoop:
                 try:
                     broker.submit_order(order)
                 except Exception:
-                    _log.exception(
-                        "_check_stop_losses: failed to submit stop-loss for %s", symbol
-                    )
-                    return  # Don't clear stop price -- retry next cycle
+                    _log.exception("_check_stop_losses: failed to submit stop-loss for %s", symbol)
+                    return  # Don't clear stop state -- retry next cycle
                 # Update Kelly with stop-loss exit
                 self._update_kelly(symbol, current_price)
-            # Clear stop-loss after successful trigger (or zero position)
-            self._stop_loss_prices.pop(symbol, None)
+            # Clear stop state after successful trigger (or zero position)
+            del self._stop_states[symbol]
+            self._cycle_exited_symbols.add(symbol)  # PARITY-04
 
     def _update_kelly(self, symbol: str, fill_price: Decimal) -> None:
         """Compute P&L from entry price and feed a TradeRecord to RollingKelly."""

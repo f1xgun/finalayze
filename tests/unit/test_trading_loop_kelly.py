@@ -133,8 +133,19 @@ class TestTradingLoopKellyUpdate:
         loop = _make_loop()
 
         # Setup: position and entry price exist
+        from finalayze.execution.simulated_broker import StopLossState
+
         loop._entry_prices[SYMBOL] = FILL_PRICE_ENTRY
-        loop._stop_loss_prices[SYMBOL] = Decimal("140.00")
+        loop._stop_states[SYMBOL] = StopLossState(
+            initial_stop=Decimal("140.00"),
+            current_stop=Decimal("140.00"),
+            highest_price=FILL_PRICE_ENTRY,
+            trail_activated=False,
+            activation_atr=Decimal("1.0"),
+            trail_atr=Decimal("1.5"),
+            entry_price=FILL_PRICE_ENTRY,
+            atr_value=Decimal("5.0"),
+        )
 
         broker = MagicMock()
         broker.get_positions.return_value = {SYMBOL: Decimal(10)}

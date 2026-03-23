@@ -101,9 +101,9 @@ class TestStopLossStateStorage:
 
     def test_buy_fill_stores_stop_loss_state(self) -> None:
         loop = _make_loop()
-        # Verify the loop has _stop_states dict (not _stop_loss_prices)
+        # Verify the loop has _stop_states dict (StopLossState-based trailing stops)
         assert hasattr(loop, "_stop_states"), (
-            "TradingLoop must have _stop_states dict (StopLossState), not _stop_loss_prices"
+            "TradingLoop must have _stop_states dict with StopLossState instances"
         )
         assert isinstance(loop._stop_states, dict)
 
@@ -130,7 +130,7 @@ class TestTrailingStopRatchet:
 
         # Mock broker so stop doesn't try to trade
         loop._broker_router.route.return_value.get_positions.return_value = {
-            SYMBOL_AAPL: Decimal("10"),
+            SYMBOL_AAPL: Decimal(10),
         }
 
         loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, higher_price)
@@ -184,7 +184,7 @@ class TestStopTriggerSell:
         _seed_stop_state(loop)
 
         mock_broker = MagicMock()
-        mock_broker.get_positions.return_value = {SYMBOL_AAPL: Decimal("10")}
+        mock_broker.get_positions.return_value = {SYMBOL_AAPL: Decimal(10)}
         loop._broker_router.route.return_value = mock_broker
 
         # Price drops to 139 (below initial stop of 140)
@@ -194,7 +194,7 @@ class TestStopTriggerSell:
         mock_broker.submit_order.assert_called_once()
         sell_order = mock_broker.submit_order.call_args[0][0]
         assert sell_order.side == "SELL"
-        assert sell_order.quantity == Decimal("10")
+        assert sell_order.quantity == Decimal(10)
 
         # Symbol should be in _cycle_exited_symbols
         assert SYMBOL_AAPL in loop._cycle_exited_symbols
@@ -218,13 +218,14 @@ class TestReentryGuard:
         instrument.figi = "BBG000B9XRY4"
         instrument.segment_id = "us_tech"
 
-        # Mock fetcher so candles would succeed if called
+        # Mock fetcher to return empty candles (symbol was exited, stop check runs first)
         fetcher = MagicMock()
+        fetcher.fetch_candles.return_value = []
 
         loop._process_instrument(
             instrument=instrument,
             market_id=MARKET_US,
-            level=CircuitLevel.GREEN,
+            level=CircuitLevel.NORMAL,
             fetcher=fetcher,
             now=datetime.now(UTC),
         )

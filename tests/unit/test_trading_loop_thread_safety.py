@@ -46,7 +46,7 @@ def _make_trading_loop(**overrides: object) -> object:
 
 
 class TestStopLossLock:
-    """6D.2: Verify _stop_loss_lock protects _stop_loss_prices."""
+    """6D.2: Verify _stop_loss_lock protects _stop_states."""
 
     def test_stop_loss_lock_exists(self) -> None:
         loop = _make_trading_loop()
@@ -62,7 +62,7 @@ class TestStopLossLock:
             try:
                 for i in range(100):
                     with loop._stop_loss_lock:
-                        loop._stop_loss_prices[f"SYM_{start}_{i}"] = Decimal(str(i))
+                        loop._stop_states[f"SYM_{start}_{i}"] = Decimal(str(i))
             except Exception as exc:
                 errors.append(exc)
 
@@ -74,7 +74,7 @@ class TestStopLossLock:
         t2.join()
         assert errors == []
         # Both threads wrote 100 entries each
-        assert len(loop._stop_loss_prices) == 200
+        assert len(loop._stop_states) == 200
 
 
 class TestSentimentLockScope:

@@ -14,8 +14,25 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from finalayze.execution.simulated_broker import StopLossState
 
-_ZERO = Decimal("0")
+_ZERO = Decimal(0)
+
+
+def _make_stop_state(stop_price: Decimal, entry_price: Decimal | None = None) -> StopLossState:
+    """Create a StopLossState with given stop price for backward-compat tests."""
+    ep = entry_price or stop_price + Decimal(10)
+    atr = (ep - stop_price) / Decimal("2.0")
+    return StopLossState(
+        initial_stop=stop_price,
+        current_stop=stop_price,
+        highest_price=ep,
+        trail_activated=False,
+        activation_atr=Decimal("1.0"),
+        trail_atr=Decimal("1.5"),
+        entry_price=ep,
+        atr_value=atr,
+    )
 
 
 def _make_trading_loop(
@@ -45,7 +62,7 @@ def _make_trading_loop(
     if broker_positions is not None:
         mock_broker.get_positions.return_value = broker_positions
     else:
-        mock_broker.get_positions.return_value = {"AAPL": Decimal("100")}
+        mock_broker.get_positions.return_value = {"AAPL": Decimal(100)}
 
     if submit_side_effect is not None:
         mock_broker.submit_order.side_effect = submit_side_effect
@@ -82,8 +99,8 @@ class TestStopLossAtomicity:
         """
         loop, mock_broker = _make_trading_loop()
 
-        # Set a stop-loss price
-        loop._stop_loss_prices["AAPL"] = Decimal("140.00")
+        # Set a stop-loss state
+        loop._stop_states["AAPL"] = _make_stop_state(Decimal("140.00"), Decimal("150.00"))
         # Set an entry price for Kelly update
         loop._entry_prices["AAPL"] = Decimal("150.00")
 
@@ -113,8 +130,8 @@ class TestStopLossAtomicity:
         # Order should have been submitted
         assert mock_broker.submit_order.call_count == 1
 
-        # Stop price should be cleared
-        assert "AAPL" not in loop._stop_loss_prices
+        # Stop state should be cleared
+        assert "AAPL" not in loop._stop_states
 
     def test_concurrent_threads_only_one_sell(self) -> None:
         """If two concurrent threads trigger stop for same symbol, only one submits a sell.
@@ -124,7 +141,7 @@ class TestStopLossAtomicity:
         """
         loop, mock_broker = _make_trading_loop()
 
-        loop._stop_loss_prices["AAPL"] = Decimal("140.00")
+        loop._stop_states["AAPL"] = _make_stop_state(Decimal("140.00"), Decimal("150.00"))
         loop._entry_prices["AAPL"] = Decimal("150.00")
 
         barrier = threading.Barrier(2, timeout=5)
@@ -154,8 +171,8 @@ class TestStopLossAtomicity:
             f"(double-sell bug)"
         )
 
-        # Stop price should be cleared
-        assert "AAPL" not in loop._stop_loss_prices
+        # Stop state should be cleared
+        assert "AAPL" not in loop._stop_states
 
     def test_stop_price_preserved_on_submit_failure(self) -> None:
         """If submit_order raises, stop price is NOT cleared (retry next cycle)."""
@@ -163,7 +180,7 @@ class TestStopLossAtomicity:
             submit_side_effect=RuntimeError("broker down"),
         )
 
-        loop._stop_loss_prices["AAPL"] = Decimal("140.00")
+        loop._stop_states["AAPL"] = _make_stop_state(Decimal("140.00"), Decimal("150.00"))
         loop._entry_prices["AAPL"] = Decimal("150.00")
 
         # Should not raise -- exception is caught internally
@@ -172,20 +189,20 @@ class TestStopLossAtomicity:
         # submit_order was called (and raised)
         assert mock_broker.submit_order.call_count == 1
 
-        # Stop price should still be set (preserved for retry)
-        assert "AAPL" in loop._stop_loss_prices
-        assert loop._stop_loss_prices["AAPL"] == Decimal("140.00")
+        # Stop state should still be set (preserved for retry)
+        assert "AAPL" in loop._stop_states
+        assert loop._stop_states["AAPL"].current_stop == Decimal("140.00")
 
     def test_no_sell_when_price_above_stop(self) -> None:
         """No order submitted when current price is above stop price."""
         loop, mock_broker = _make_trading_loop()
-        loop._stop_loss_prices["AAPL"] = Decimal("140.00")
+        loop._stop_states["AAPL"] = _make_stop_state(Decimal("140.00"))
 
         loop._check_stop_losses("us", "AAPL", Decimal("145.00"))
 
         mock_broker.submit_order.assert_not_called()
-        # Stop price should still be set
-        assert "AAPL" in loop._stop_loss_prices
+        # Stop state should still be set
+        assert "AAPL" in loop._stop_states
 
     def test_no_sell_when_no_stop_price(self) -> None:
         """No order submitted when symbol has no stop price set."""

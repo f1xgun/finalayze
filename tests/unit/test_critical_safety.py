@@ -585,17 +585,27 @@ class TestStopLossMonitoring:
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
-        # Loop must track open positions and their stop-loss prices
-        assert hasattr(loop, "_stop_loss_prices")
+        # Loop must track open positions and their stop-loss states
+        assert hasattr(loop, "_stop_states")
 
     def test_check_stop_losses_submits_sell_when_price_at_stop(self) -> None:
         from finalayze.core.trading_loop import TradingLoop
+        from finalayze.execution.simulated_broker import StopLossState
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
 
         # Set up a position with stop loss at 160.00, current price 150.00 (below stop)
-        loop._stop_loss_prices[SYMBOL_AAPL] = Decimal("160.00")  # type: ignore[attr-defined]
+        loop._stop_states[SYMBOL_AAPL] = StopLossState(  # type: ignore[attr-defined]
+            initial_stop=Decimal("160.00"),
+            current_stop=Decimal("160.00"),
+            highest_price=Decimal("170.00"),
+            trail_activated=False,
+            activation_atr=Decimal("1.0"),
+            trail_atr=Decimal("1.5"),
+            entry_price=Decimal("170.00"),
+            atr_value=Decimal("5.0"),
+        )
 
         # Mock broker to return a position for AAPL
         broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
@@ -611,12 +621,22 @@ class TestStopLossMonitoring:
 
     def test_check_stop_losses_does_not_sell_above_stop(self) -> None:
         from finalayze.core.trading_loop import TradingLoop
+        from finalayze.execution.simulated_broker import StopLossState
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
 
         # Stop at 140.00, current price 150.00 (above stop -> hold)
-        loop._stop_loss_prices[SYMBOL_AAPL] = Decimal("140.00")  # type: ignore[attr-defined]
+        loop._stop_states[SYMBOL_AAPL] = StopLossState(  # type: ignore[attr-defined]
+            initial_stop=Decimal("140.00"),
+            current_stop=Decimal("140.00"),
+            highest_price=Decimal("150.00"),
+            trail_activated=False,
+            activation_atr=Decimal("1.0"),
+            trail_atr=Decimal("1.5"),
+            entry_price=Decimal("150.00"),
+            atr_value=Decimal("5.0"),
+        )
         current_price = Decimal("150.00")
         loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, current_price)  # type: ignore[attr-defined]
 
