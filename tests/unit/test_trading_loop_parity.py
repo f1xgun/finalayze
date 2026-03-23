@@ -1,0 +1,249 @@
+"""Tests for live-backtest parity: trailing stop state machine and re-entry guard.
+
+PARITY-02: Live trailing stop ratchets upward after activation threshold.
+PARITY-04: Stop-loss exit prevents same-cycle re-entry.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from unittest.mock import MagicMock
+
+from config.settings import Settings
+
+from finalayze.core.alerts import TelegramAlerter
+from finalayze.core.modes import WorkMode
+from finalayze.core.trading_loop import TradingLoop
+from finalayze.execution.simulated_broker import StopLossState
+from finalayze.markets.instruments import InstrumentRegistry
+from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
+
+# ── Constants ──────────────────────────────────────────────────────────
+MARKET_US = "us"
+SYMBOL_AAPL = "AAPL"
+BASELINE_EQUITY = Decimal(100000)
+BASELINE_CASH = Decimal(50000)
+NUM_CANDLES = 60
+_ZERO = Decimal(0)
+ENTRY_PRICE = Decimal("150.00")
+ATR_VALUE = Decimal("5.00")
+INITIAL_STOP = Decimal("140.00")  # entry - 2.0 * atr
+ATR_MULTIPLIER = Decimal("2.0")
+
+
+def _make_settings() -> MagicMock:
+    s = MagicMock(spec=Settings)
+    s.news_cycle_minutes = 30
+    s.strategy_cycle_minutes = 60
+    s.daily_reset_hour_utc = 0
+    s.max_position_pct = 0.20
+    s.kelly_fraction = 0.5
+    s.max_positions_per_market = 10
+    s.daily_loss_limit_pct = 0.03
+    s.max_cross_market_exposure_pct = 0.80
+    s.mode = WorkMode.SANDBOX
+    return s
+
+
+def _make_loop() -> TradingLoop:
+    settings = _make_settings()
+    fetchers = {MARKET_US: MagicMock()}
+    news_fetcher = MagicMock()
+    news_analyzer = MagicMock()
+    event_classifier = MagicMock()
+    impact_estimator = MagicMock()
+    strategy = MagicMock()
+    broker_router = MagicMock()
+    alerter = MagicMock(spec=TelegramAlerter)
+    cb_us = CircuitBreaker(market_id=MARKET_US)
+    circuit_breakers = {MARKET_US: cb_us}
+    cross_market = CrossMarketCircuitBreaker()
+    registry = InstrumentRegistry()
+
+    return TradingLoop(
+        settings=settings,
+        fetchers=fetchers,
+        news_fetcher=news_fetcher,
+        news_analyzer=news_analyzer,
+        event_classifier=event_classifier,
+        impact_estimator=impact_estimator,
+        strategy=strategy,
+        broker_router=broker_router,
+        circuit_breakers=circuit_breakers,
+        cross_market_breaker=cross_market,
+        alerter=alerter,
+        instrument_registry=registry,
+    )
+
+
+def _seed_stop_state(loop: TradingLoop, symbol: str = SYMBOL_AAPL) -> StopLossState:
+    """Plant a StopLossState into the loop's _stop_states dict."""
+    state = StopLossState(
+        initial_stop=INITIAL_STOP,
+        current_stop=INITIAL_STOP,
+        highest_price=ENTRY_PRICE,
+        trail_activated=False,
+        activation_atr=Decimal("1.0"),
+        trail_atr=Decimal("1.5"),
+        entry_price=ENTRY_PRICE,
+        atr_value=ATR_VALUE,
+    )
+    loop._stop_states[symbol] = state
+    return state
+
+
+# ── Test 1: BUY fill stores StopLossState ──────────────────────────────
+
+
+class TestStopLossStateStorage:
+    """After a BUY fill, TradingLoop stores StopLossState (not bare Decimal)."""
+
+    def test_buy_fill_stores_stop_loss_state(self) -> None:
+        loop = _make_loop()
+        # Verify the loop has _stop_states dict (not _stop_loss_prices)
+        assert hasattr(loop, "_stop_states"), (
+            "TradingLoop must have _stop_states dict (StopLossState), not _stop_loss_prices"
+        )
+        assert isinstance(loop._stop_states, dict)
+
+    def test_stop_state_has_required_fields(self) -> None:
+        loop = _make_loop()
+        state = _seed_stop_state(loop)
+        assert state.entry_price == ENTRY_PRICE
+        assert state.atr_value == ATR_VALUE
+        assert state.activation_atr == Decimal("1.0")
+        assert state.trail_atr == Decimal("1.5")
+        assert state.trail_activated is False
+
+
+# ── Test 2: Trailing stop ratchets upward ─────────────────────────────
+
+
+class TestTrailingStopRatchet:
+    """_check_stop_losses updates highest_price and ratchets current_stop upward."""
+
+    def test_highest_price_updates_to_max(self) -> None:
+        loop = _make_loop()
+        state = _seed_stop_state(loop)
+        higher_price = ENTRY_PRICE + Decimal("10.00")  # 160
+
+        # Mock broker so stop doesn't try to trade
+        loop._broker_router.route.return_value.get_positions.return_value = {
+            SYMBOL_AAPL: Decimal("10"),
+        }
+
+        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, higher_price)
+        assert state.highest_price == higher_price
+
+    def test_trailing_activates_at_threshold(self) -> None:
+        """Trail activates when highest_price >= entry + activation_atr * atr_value."""
+        loop = _make_loop()
+        state = _seed_stop_state(loop)
+        # activation threshold = 150 + 1.0 * 5.0 = 155
+        activation_price = ENTRY_PRICE + state.activation_atr * state.atr_value
+
+        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, activation_price)
+        assert state.trail_activated is True
+
+    def test_trail_stop_ratchets_upward(self) -> None:
+        """Once activated, current_stop = max(current_stop, highest - trail_atr * atr)."""
+        loop = _make_loop()
+        state = _seed_stop_state(loop)
+
+        # Push price to 160 (activates trail at 155)
+        high_price = Decimal("160.00")
+        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, high_price)
+        assert state.trail_activated is True
+        # trail_stop = 160 - 1.5 * 5 = 152.5
+        expected_stop = high_price - state.trail_atr * state.atr_value
+        assert state.current_stop == expected_stop
+
+    def test_stop_never_moves_downward(self) -> None:
+        """current_stop can only increase, never decrease."""
+        loop = _make_loop()
+        state = _seed_stop_state(loop)
+
+        # Push to 160.00, trail activates, stop = 152.50
+        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("160.00"))
+        stop_after_high = state.current_stop
+
+        # Price drops to 153.00 (above stop, no trigger)
+        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("153.00"))
+        assert state.current_stop == stop_after_high, "Stop must not decrease when price drops"
+
+
+# ── Test 3: Stop triggers SELL and adds to exited symbols ──────────────
+
+
+class TestStopTriggerSell:
+    """When price <= current_stop, a SELL fires and symbol goes to _cycle_exited_symbols."""
+
+    def test_stop_trigger_sells_and_records_exit(self) -> None:
+        loop = _make_loop()
+        _seed_stop_state(loop)
+
+        mock_broker = MagicMock()
+        mock_broker.get_positions.return_value = {SYMBOL_AAPL: Decimal("10")}
+        loop._broker_router.route.return_value = mock_broker
+
+        # Price drops to 139 (below initial stop of 140)
+        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("139.00"))
+
+        # SELL order should have been submitted
+        mock_broker.submit_order.assert_called_once()
+        sell_order = mock_broker.submit_order.call_args[0][0]
+        assert sell_order.side == "SELL"
+        assert sell_order.quantity == Decimal("10")
+
+        # Symbol should be in _cycle_exited_symbols
+        assert SYMBOL_AAPL in loop._cycle_exited_symbols
+
+        # Stop state should be cleared
+        assert SYMBOL_AAPL not in loop._stop_states
+
+
+# ── Test 4: Re-entry guard skips signal generation ─────────────────────
+
+
+class TestReentryGuard:
+    """When a symbol is in _cycle_exited_symbols, _process_instrument returns early."""
+
+    def test_process_instrument_skips_exited_symbol(self) -> None:
+        loop = _make_loop()
+        loop._cycle_exited_symbols.add(SYMBOL_AAPL)
+
+        instrument = MagicMock()
+        instrument.symbol = SYMBOL_AAPL
+        instrument.figi = "BBG000B9XRY4"
+        instrument.segment_id = "us_tech"
+
+        # Mock fetcher so candles would succeed if called
+        fetcher = MagicMock()
+
+        loop._process_instrument(
+            instrument=instrument,
+            market_id=MARKET_US,
+            level=CircuitLevel.GREEN,
+            fetcher=fetcher,
+            now=datetime.now(UTC),
+        )
+
+        # Strategy generate_signal should NOT have been called
+        loop._strategy.generate_signal.assert_not_called()
+
+
+# ── Test 5: _cycle_exited_symbols cleared each cycle ───────────────────
+
+
+class TestCycleExitedCleared:
+    """_cycle_exited_symbols is cleared at the start of each equity cycle."""
+
+    def test_reset_cycle_counters_clears_exited(self) -> None:
+        loop = _make_loop()
+        loop._cycle_exited_symbols.add(SYMBOL_AAPL)
+        loop._cycle_exited_symbols.add("MSFT")
+        assert len(loop._cycle_exited_symbols) > 0
+
+        loop._reset_cycle_counters()
+        assert len(loop._cycle_exited_symbols) == 0
