@@ -143,6 +143,6 @@ Note: Phases 25 and 26 have no dependency on 23/24 and could run in parallel aft
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
 | 19-22 | v4.0 | 10/10 | Complete | 2026-03-22 |
 | 23. Order Sizing Bug Fixes | v5.0 | 1/1 | Complete    | 2026-03-23 |
-| 24. Live-Backtest Parity | v5.0 | 2/2 | Complete   | 2026-03-23 |
+| 24. Live-Backtest Parity | v5.0 | 2/2 | Complete    | 2026-03-23 |
 | 25. Data Validation and Infrastructure | v5.0 | 0/2 | Not started | - |
 | 26. News Pipeline Fixes | v5.0 | 0/2 | Not started | - |
