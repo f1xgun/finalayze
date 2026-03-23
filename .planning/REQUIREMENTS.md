@@ -15,9 +15,9 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 
 ### Live-Backtest Parity
 
-- [ ] **PARITY-01**: Live trading loop uses PositionSizingPipeline with all steps (VolTarget, Regime, MetaLabel, Copula, EVT, HardCaps) — matching backtest engine
+- [x] **PARITY-01**: Live trading loop uses PositionSizingPipeline with all steps (VolTarget, Regime, MetaLabel, Copula, EVT, HardCaps) — matching backtest engine
 - [x] **PARITY-02**: Live trailing stops ratchet upward after activation threshold, matching SimulatedBroker trailing stop behavior
-- [ ] **PARITY-03**: All 14 pre-trade checks receive required parameters in live path — stop_loss_price, has_pending_order, regime_state, strategy_name, correlations are passed
+- [x] **PARITY-03**: All 14 pre-trade checks receive required parameters in live path — stop_loss_price, has_pending_order, regime_state, strategy_name, correlations are passed
 - [x] **PARITY-04**: Stop-loss exit in a cycle prevents same-cycle re-entry for the same symbol
 
 ### Data Validation
@@ -68,9 +68,9 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 | SIZE-01 | Phase 23 | Complete |
 | SIZE-02 | Phase 23 | Complete |
 | SIZE-03 | Phase 23 | Complete |
-| PARITY-01 | Phase 24 | Pending |
+| PARITY-01 | Phase 24 | Complete |
 | PARITY-02 | Phase 24 | Complete |
-| PARITY-03 | Phase 24 | Pending |
+| PARITY-03 | Phase 24 | Complete |
 | PARITY-04 | Phase 24 | Complete |
 | DATA-01 | Phase 25 | Pending |
 | DATA-02 | Phase 25 | Pending |

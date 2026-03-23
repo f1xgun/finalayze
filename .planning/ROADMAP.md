@@ -69,7 +69,7 @@ Full details: `.planning/milestones/v4.0-ROADMAP.md`
 **Milestone Goal:** Fix critical data flow bugs -- SELL order sizing, sector exposure calculation, live/backtest risk pipeline divergence, data validation gaps, and news pipeline no-op waste.
 
 - [x] **Phase 23: Order Sizing Bug Fixes** - Fix money-losing SELL sizing, sector exposure, and CAUTION threshold bugs (completed 2026-03-23)
-- [ ] **Phase 24: Live-Backtest Parity** - Wire PositionSizingPipeline, trailing stops, pre-trade checks, and re-entry guard in live path
+- [x] **Phase 24: Live-Backtest Parity** - Wire PositionSizingPipeline, trailing stops, pre-trade checks, and re-entry guard in live path (completed 2026-03-23)
 - [ ] **Phase 25: Data Validation and Infrastructure** - Wire DataNormalizer, candle staleness, IMOEX volume fix, gRPC channel reuse, Brent caching
 - [ ] **Phase 26: News Pipeline Fixes** - Disable no-op news cycle, add sentiment decay, fix ticker mismatch, deduplicate Telegram messages
 
@@ -96,10 +96,10 @@ Plans:
   2. Live trailing stops ratchet the stop price upward after an activation threshold is reached, and never ratchet downward -- matching SimulatedBroker trailing stop state machine
   3. All 14 pre-trade checks in live path receive their required parameters (stop_loss_price, has_pending_order, regime_state, strategy_name, correlations) -- no check is skipped due to missing input
   4. When a symbol is stopped out in a given equity cycle, the same cycle does not re-enter that symbol -- a per-cycle exclusion set prevents immediate re-buy after stop-loss
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 24-01-PLAN.md -- Wire trailing stop state machine and per-cycle re-entry guard
-- [ ] 24-02-PLAN.md -- Wire PositionSizingPipeline and complete pre-trade check parameters
+- [x] 24-02-PLAN.md -- Wire PositionSizingPipeline and complete pre-trade check parameters
 
 ### Phase 25: Data Validation and Infrastructure
 **Goal**: Market data is validated before strategy consumption, stale data is detected and skipped, and data fetching is efficient with no redundant connections or downloads
@@ -143,6 +143,6 @@ Note: Phases 25 and 26 have no dependency on 23/24 and could run in parallel aft
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
 | 19-22 | v4.0 | 10/10 | Complete | 2026-03-22 |
 | 23. Order Sizing Bug Fixes | v5.0 | 1/1 | Complete    | 2026-03-23 |
-| 24. Live-Backtest Parity | v5.0 | 1/2 | In Progress|  |
+| 24. Live-Backtest Parity | v5.0 | 2/2 | Complete   | 2026-03-23 |
 | 25. Data Validation and Infrastructure | v5.0 | 0/2 | Not started | - |
 | 26. News Pipeline Fixes | v5.0 | 0/2 | Not started | - |
