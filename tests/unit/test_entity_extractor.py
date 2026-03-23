@@ -12,6 +12,7 @@ import pytest
 from finalayze.analysis.entity_extractor import (
     _CIRCUIT_BREAKER_RESET_SECONDS,
     _CIRCUIT_BREAKER_THRESHOLD,
+    _VALID_TICKERS,
     EntityExtractor,
 )
 from finalayze.core.schemas import NewsArticle
@@ -116,6 +117,41 @@ class TestEntityExtraction:
         result = await extractor.extract(article)
 
         assert result == ["GAZP"]
+
+
+class TestValidTickers:
+    """NEWS-03: TCSG ticker must be in _VALID_TICKERS, bare T must not."""
+
+    def test_tcsg_in_valid_tickers(self) -> None:
+        assert "TCSG" in _VALID_TICKERS
+
+    def test_bare_t_not_in_valid_tickers(self) -> None:
+        assert "T" not in _VALID_TICKERS
+
+    @pytest.mark.asyncio
+    async def test_extract_keeps_tcsg(
+        self, mock_llm: AsyncMock, extractor: EntityExtractor
+    ) -> None:
+        """EntityExtractor.extract() keeps TCSG in output when LLM returns it."""
+        mock_llm.complete.return_value = json.dumps(
+            {"tickers": ["TCSG", "SBER"], "scope": "company"}
+        )
+        article = _make_article(title="Т-Банк повысил дивиденды")
+        result = await extractor.extract(article)
+        assert "TCSG" in result
+
+    @pytest.mark.asyncio
+    async def test_extract_filters_out_bare_t(
+        self, mock_llm: AsyncMock, extractor: EntityExtractor
+    ) -> None:
+        """EntityExtractor.extract() filters out bare T (not in valid set)."""
+        mock_llm.complete.return_value = json.dumps(
+            {"tickers": ["T", "SBER"], "scope": "company"}
+        )
+        article = _make_article(title="Some news about T")
+        result = await extractor.extract(article)
+        assert "T" not in result
+        assert result == ["SBER"]
 
 
 class TestEntityExtractionCircuitBreaker:

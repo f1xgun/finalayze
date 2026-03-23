@@ -11,7 +11,10 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from finalayze.data.fetchers.telegram_reader import TelegramChannelReader
+from finalayze.data.fetchers.telegram_reader import (
+    _MAX_SEEN_SIZE,
+    TelegramChannelReader,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -257,3 +260,83 @@ class TestTelegramChannelReaderConfigured:
 
         assert len(articles) == 1
         assert articles[0].source == "telegram:@override"
+
+
+# ---------------------------------------------------------------------------
+# Tests -- message deduplication (NEWS-04)
+# ---------------------------------------------------------------------------
+
+
+class TestTelegramChannelReaderDedup:
+    """URL-based message deduplication prevents duplicate LLM processing."""
+
+    @pytest.mark.asyncio
+    async def test_dedup_skips_same_url_on_second_fetch(self) -> None:
+        """Same message URL returned on first fetch, skipped on second."""
+        html = _make_html([
+            {"text": "Breaking news about Sberbank today", "id": 100, "channel": "fin_news"},
+        ])
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=_mock_response(html))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "finalayze.data.fetchers.telegram_reader.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            reader = TelegramChannelReader(channels=["@fin_news"])
+
+            first = await reader.fetch_recent_messages()
+            assert len(first) == 1
+
+            second = await reader.fetch_recent_messages()
+            assert len(second) == 0
+
+    @pytest.mark.asyncio
+    async def test_dedup_different_urls_returned_normally(self) -> None:
+        """Messages with different URLs are both returned."""
+        html = _make_html([
+            {"text": "First message about markets today", "id": 100, "channel": "fin_news"},
+            {"text": "Second different message about bonds", "id": 101, "channel": "fin_news"},
+        ])
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=_mock_response(html))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "finalayze.data.fetchers.telegram_reader.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            reader = TelegramChannelReader(channels=["@fin_news"])
+            articles = await reader.fetch_recent_messages()
+
+        assert len(articles) == 2
+
+    @pytest.mark.asyncio
+    async def test_dedup_evicts_oldest_beyond_max_size(self) -> None:
+        """Seen URL set does not grow beyond _MAX_SEEN_SIZE; oldest evicted."""
+        reader = TelegramChannelReader(channels=["@test"])
+
+        # Manually populate _seen_urls to capacity
+        for i in range(_MAX_SEEN_SIZE):
+            reader._seen_urls[f"https://t.me/test/{i}"] = None
+
+        assert len(reader._seen_urls) == _MAX_SEEN_SIZE
+
+        # The very first URL should still be in the set
+        assert "https://t.me/test/0" in reader._seen_urls
+
+        # Add one more -- should evict the oldest (index 0)
+        reader._seen_urls[f"https://t.me/test/{_MAX_SEEN_SIZE}"] = None
+        if len(reader._seen_urls) > _MAX_SEEN_SIZE:
+            reader._seen_urls.popitem(last=False)
+
+        assert len(reader._seen_urls) == _MAX_SEEN_SIZE
+        assert "https://t.me/test/0" not in reader._seen_urls
+        assert f"https://t.me/test/{_MAX_SEEN_SIZE}" in reader._seen_urls
+
+    def test_max_seen_size_constant(self) -> None:
+        """_MAX_SEEN_SIZE is 5000."""
+        assert _MAX_SEEN_SIZE == 5000
