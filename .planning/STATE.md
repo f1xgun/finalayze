@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Data Flow Correctness & Live-Backtest Parity
-status: Phase complete — ready for verification
+status: unknown
 stopped_at: Completed 23-01-PLAN.md
-last_updated: "2026-03-23T19:24:37.217Z"
+last_updated: "2026-03-23T19:30:10.806Z"
 progress:
   total_phases: 4
   completed_phases: 1
@@ -23,8 +23,8 @@ See: .planning/PROJECT.md (updated 2026-03-23)
 
 ## Current Position
 
-Phase: 23 (order-sizing-bug-fixes) — EXECUTING
-Plan: 1 of 1
+Phase: 24
+Plan: Not started
 
 ## Performance Metrics
 
