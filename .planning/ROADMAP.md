@@ -83,7 +83,9 @@ Full details: `.planning/milestones/v4.0-ROADMAP.md`
   1. When the system generates a SELL order, the quantity equals the actual held position for that symbol -- Kelly sizing is not applied to exits
   2. Sector exposure pre-trade check computes each position's notional value using that position's own last traded price -- not the price of the instrument currently being evaluated
   3. CAUTION confidence threshold is computed as `segment.min_combined_confidence * 1.2` and changes when segment config changes -- no literal 0.6 in the code path
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 23-01-PLAN.md -- Fix SELL sizing, sector exposure prices, and CAUTION threshold bugs
 
 ### Phase 24: Live-Backtest Parity
 **Goal**: Live trading loop risk pipeline matches the backtest engine -- same sizing steps, same trailing stop behavior, same pre-trade checks, same re-entry guard
@@ -131,7 +133,7 @@ Note: Phases 25 and 26 have no dependency on 23/24 and could run in parallel aft
 | 8-14 | v2.0 | 16/16 | Complete | 2026-03-21 |
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
 | 19-22 | v4.0 | 10/10 | Complete | 2026-03-22 |
-| 23. Order Sizing Bug Fixes | v5.0 | 0/TBD | Not started | - |
+| 23. Order Sizing Bug Fixes | v5.0 | 0/1 | Not started | - |
 | 24. Live-Backtest Parity | v5.0 | 0/TBD | Not started | - |
 | 25. Data Validation and Infrastructure | v5.0 | 0/TBD | Not started | - |
 | 26. News Pipeline Fixes | v5.0 | 0/TBD | Not started | - |
