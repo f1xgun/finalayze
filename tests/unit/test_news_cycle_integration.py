@@ -1,11 +1,12 @@
-"""Integration tests for TradingLoop._news_cycle with RSS + Telegram + EntityExtractor.
+"""Integration tests for TradingLoop._news_cycle with NewsImpactAnalyzer pipeline.
 
 Validates that the news cycle fetches from multiple sources with independent
-error handling and runs entity extraction before sentiment processing.
+error handling and runs NewsImpactAnalyzer for per-ticker sentiment.
 """
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,6 +14,8 @@ from uuid import uuid4
 
 import pytest
 
+from finalayze.analysis.event_classifier import EventType
+from finalayze.analysis.news_impact_analyzer import NewsImpactResult, SectorImpactDetail
 from finalayze.core.schemas import NewsArticle
 
 
@@ -29,11 +32,30 @@ def _make_article(title: str = "Test", source: str = "rss") -> NewsArticle:
     )
 
 
+def _make_impact_result(
+    *,
+    sentiment: float = 0.6,
+    confidence: float = 0.8,
+    sectors: list[SectorImpactDetail] | None = None,
+    direct_tickers: list[str] | None = None,
+) -> NewsImpactResult:
+    """Build a NewsImpactResult for testing."""
+    return NewsImpactResult(
+        event_type=EventType.CBR_RATE,
+        sentiment=sentiment,
+        confidence=confidence,
+        reasoning="test reasoning",
+        affected_sectors=sectors or [],
+        direct_tickers=direct_tickers or [],
+    )
+
+
 def _make_loop(
     *,
     rss_fetcher: object | None = None,
     telegram_reader: object | None = None,
-    entity_extractor: object | None = None,
+    news_impact_analyzer: object | None = None,
+    sector_ticker_mapper: object | None = None,
     news_fetcher: object | None = None,
     settings: object | None = None,
 ) -> object:
@@ -70,7 +92,8 @@ def _make_loop(
         instrument_registry=MagicMock(),
         rss_fetcher=rss_fetcher,
         telegram_reader=telegram_reader,
-        entity_extractor=entity_extractor,
+        news_impact_analyzer=news_impact_analyzer,
+        sector_ticker_mapper=sector_ticker_mapper,
     )
     # Pre-set event_driven guard so news cycle tests proceed without reading YAMLs
     loop._event_driven_active = True  # type: ignore[attr-defined]
@@ -86,14 +109,17 @@ class TestNewsCycleRss:
         articles = [_make_article("RSS Article 1"), _make_article("RSS Article 2")]
         rss.fetch_news.return_value = articles
 
-        loop = _make_loop(rss_fetcher=rss)
-        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        analyzer = MagicMock()
+        analyzer.analyze = AsyncMock(return_value=_make_impact_result())
+
+        loop = _make_loop(rss_fetcher=rss, news_impact_analyzer=analyzer)
+        loop._analyze_impact_batch = AsyncMock(return_value=(2, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         rss.fetch_news.assert_called_once()
-        loop._process_articles_batch.assert_called_once()  # type: ignore[attr-defined]
-        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
         assert len(processed) == 2
 
     def test_rss_failure_does_not_block_telegram(self) -> None:
@@ -105,14 +131,21 @@ class TestNewsCycleRss:
         tg_articles = [_make_article("TG Article", source="telegram:@chan")]
         tg.fetch_recent_messages = AsyncMock(return_value=tg_articles)
 
-        loop = _make_loop(rss_fetcher=rss, telegram_reader=tg)
-        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        analyzer = MagicMock()
+        analyzer.analyze = AsyncMock(return_value=_make_impact_result())
+
+        loop = _make_loop(
+            rss_fetcher=rss,
+            telegram_reader=tg,
+            news_impact_analyzer=analyzer,
+        )
+        loop._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         # Telegram articles should still be processed
-        loop._process_articles_batch.assert_called_once()  # type: ignore[attr-defined]
-        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
         assert len(processed) == 1
 
 
@@ -125,13 +158,16 @@ class TestNewsCycleTelegram:
         tg_articles = [_make_article("TG News", source="telegram:@rbc")]
         tg.fetch_recent_messages = AsyncMock(return_value=tg_articles)
 
-        loop = _make_loop(telegram_reader=tg)
-        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        analyzer = MagicMock()
+        analyzer.analyze = AsyncMock(return_value=_make_impact_result())
+
+        loop = _make_loop(telegram_reader=tg, news_impact_analyzer=analyzer)
+        loop._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
-        loop._process_articles_batch.assert_called_once()  # type: ignore[attr-defined]
-        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
         assert len(processed) == 1
 
     def test_telegram_failure_does_not_block_rss(self) -> None:
@@ -143,38 +179,243 @@ class TestNewsCycleTelegram:
         tg = MagicMock()
         tg.fetch_recent_messages = AsyncMock(side_effect=RuntimeError("TG down"))
 
-        loop = _make_loop(rss_fetcher=rss, telegram_reader=tg)
-        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        analyzer = MagicMock()
+        analyzer.analyze = AsyncMock(return_value=_make_impact_result())
+
+        loop = _make_loop(
+            rss_fetcher=rss,
+            telegram_reader=tg,
+            news_impact_analyzer=analyzer,
+        )
+        loop._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         # RSS articles should still be processed
-        loop._process_articles_batch.assert_called_once()  # type: ignore[attr-defined]
-        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
         assert len(processed) == 1
 
 
-class TestEntityExtraction:
-    """Test entity extraction integration in _news_cycle."""
+class TestNewsImpactPipeline:
+    """Test NewsImpactAnalyzer integration replacing EntityExtractor + CombinedAnalyzer."""
 
-    def test_entity_extraction_populates_symbols(self) -> None:
-        """Entity extraction runs on each article and populates symbols."""
+    def test_news_cycle_calls_impact_analyzer_not_entity_extractor(self) -> None:
+        """_news_cycle calls NewsImpactAnalyzer.analyze(), not EntityExtractor."""
         rss = MagicMock()
-        article = _make_article("Sberbank grows")
-        rss.fetch_news.return_value = [article]
+        rss.fetch_news.return_value = [_make_article("CBR raised rates")]
 
-        extractor = MagicMock()
-        extractor.extract = AsyncMock(return_value=["SBER"])
+        analyzer = MagicMock()
+        analyzer.analyze = AsyncMock(return_value=_make_impact_result())
 
-        loop = _make_loop(rss_fetcher=rss, entity_extractor=extractor)
-        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        loop = _make_loop(rss_fetcher=rss, news_impact_analyzer=analyzer)
+        loop._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
-        extractor.extract.assert_called_once()
-        # The processed articles should have symbols populated
-        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
-        assert processed[0].symbols == ["SBER"]
+        # Should call _analyze_impact_batch, not _process_articles_batch
+        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        assert not hasattr(loop, "_entity_extractor")
+        assert not hasattr(loop, "_combined_analyzer")
+
+    def test_per_ticker_sentiment_from_sector_impact(self) -> None:
+        """Article with affected_sectors=['banking'] populates per-ticker cache
+        for SBER, VTBR, TCSG (NEWS-08)."""
+        from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
+
+        mapper = SectorTickerMapper()
+        result = _make_impact_result(
+            sentiment=0.6,
+            confidence=0.8,
+            sectors=[
+                SectorImpactDetail(
+                    sector="banking",
+                    direction=1,
+                    magnitude=0.7,
+                    reasoning="CBR rate cut positive for banks",
+                ),
+            ],
+        )
+
+        loop = _make_loop(
+            news_impact_analyzer=MagicMock(),
+            sector_ticker_mapper=mapper,
+        )
+
+        # Set up fetchers and registry so _collect_active_segments / _get_segment_tickers work
+        mock_instruments = []
+        for ticker in ["SBER", "VTBR", "TCSG", "LKOH"]:
+            instr = MagicMock()
+            instr.symbol = ticker
+            instr.segment_id = "ru_blue_chips"
+            mock_instruments.append(instr)
+        loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
+        loop._registry.list_by_market.return_value = mock_instruments  # type: ignore[attr-defined]
+
+        loop._apply_impact_result(result)  # type: ignore[attr-defined]
+
+        # Check per-ticker cache entries
+        cache = loop._sentiment_cache  # type: ignore[attr-defined]
+        assert ("ru_blue_chips", "SBER") in cache
+        assert ("ru_blue_chips", "VTBR") in cache
+        assert ("ru_blue_chips", "TCSG") in cache
+        # LKOH is not in banking sector, should NOT have entry
+        assert ("ru_blue_chips", "LKOH") not in cache
+
+    def test_direct_ticker_sentiment(self) -> None:
+        """Article with direct_tickers=['SBER'] gets per-ticker entry."""
+        from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
+
+        mapper = SectorTickerMapper()
+        result = _make_impact_result(
+            sentiment=0.5,
+            confidence=0.9,
+            direct_tickers=["SBER"],
+        )
+
+        loop = _make_loop(
+            news_impact_analyzer=MagicMock(),
+            sector_ticker_mapper=mapper,
+        )
+
+        mock_instruments = []
+        for ticker in ["SBER", "VTBR"]:
+            instr = MagicMock()
+            instr.symbol = ticker
+            instr.segment_id = "ru_blue_chips"
+            mock_instruments.append(instr)
+        loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
+        loop._registry.list_by_market.return_value = mock_instruments  # type: ignore[attr-defined]
+
+        loop._apply_impact_result(result)  # type: ignore[attr-defined]
+
+        cache = loop._sentiment_cache  # type: ignore[attr-defined]
+        assert ("ru_blue_chips", "SBER") in cache
+        # VTBR was not mentioned, should NOT have entry
+        assert ("ru_blue_chips", "VTBR") not in cache
+
+    def test_sentiment_formula_sector(self) -> None:
+        """Sentiment score = sector.magnitude * sector.direction * article.sentiment."""
+        from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
+
+        mapper = SectorTickerMapper()
+        result = _make_impact_result(
+            sentiment=-0.5,
+            confidence=0.8,
+            sectors=[
+                SectorImpactDetail(
+                    sector="banking",
+                    direction=-1,
+                    magnitude=0.6,
+                    reasoning="negative for banks",
+                ),
+            ],
+        )
+
+        loop = _make_loop(
+            news_impact_analyzer=MagicMock(),
+            sector_ticker_mapper=mapper,
+        )
+
+        instr = MagicMock()
+        instr.symbol = "SBER"
+        instr.segment_id = "ru_blue_chips"
+        loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
+        loop._registry.list_by_market.return_value = [instr]  # type: ignore[attr-defined]
+
+        loop._apply_impact_result(result)  # type: ignore[attr-defined]
+
+        cache = loop._sentiment_cache  # type: ignore[attr-defined]
+        score, _ts = cache[("ru_blue_chips", "SBER")]
+        # formula: magnitude * direction * sentiment = 0.6 * -1 * -0.5 = 0.3
+        # EMA: 0.0 * 0.7 + 0.3 * 0.3 = 0.09
+        expected = 0.0 * 0.7 + (0.6 * (-1) * (-0.5)) * 0.3
+        assert abs(score - expected) < 1e-9
+
+
+class TestPerTickerSentimentRead:
+    """Test _read_decayed_sentiment and _get_sentiment with per-ticker keying."""
+
+    def test_read_decayed_sentiment_per_ticker(self) -> None:
+        """_read_decayed_sentiment(seg_id, ticker) returns per-ticker score."""
+        loop = _make_loop()
+        now = time.monotonic()
+
+        with loop._sentiment_lock:  # type: ignore[attr-defined]
+            loop._sentiment_cache[("ru_blue_chips", "SBER")] = (0.8, now)  # type: ignore[attr-defined]
+
+        result = loop._read_decayed_sentiment("ru_blue_chips", "SBER")  # type: ignore[attr-defined]
+        assert abs(result - 0.8) < 0.01
+
+    def test_read_decayed_sentiment_fallback_to_segment_average(self) -> None:
+        """_read_decayed_sentiment(seg_id, 'UNKNOWN') falls back to segment average."""
+        loop = _make_loop()
+        now = time.monotonic()
+
+        with loop._sentiment_lock:  # type: ignore[attr-defined]
+            loop._sentiment_cache[("ru_blue_chips", "SBER")] = (0.6, now)  # type: ignore[attr-defined]
+            loop._sentiment_cache[("ru_blue_chips", "VTBR")] = (0.4, now)  # type: ignore[attr-defined]
+
+        result = loop._read_decayed_sentiment(  # type: ignore[attr-defined]
+            "ru_blue_chips", "UNKNOWN_TICKER"
+        )
+        # Should be average of 0.6 and 0.4 = 0.5
+        assert abs(result - 0.5) < 0.01
+
+    def test_read_decayed_sentiment_default_when_no_entries(self) -> None:
+        """_read_decayed_sentiment returns default when no entries for segment."""
+        loop = _make_loop()
+        result = loop._read_decayed_sentiment("nonexistent", "SBER")  # type: ignore[attr-defined]
+        assert result == 0.0
+
+    def test_get_sentiment_passes_ticker(self) -> None:
+        """_get_sentiment(seg_id, ticker) passes ticker to _read_decayed_sentiment."""
+        loop = _make_loop()
+        loop._cache = None  # type: ignore[attr-defined]
+        now = time.monotonic()
+
+        with loop._sentiment_lock:  # type: ignore[attr-defined]
+            loop._sentiment_cache[("ru_blue_chips", "SBER")] = (0.8, now)  # type: ignore[attr-defined]
+
+        result = loop._get_sentiment("ru_blue_chips", "SBER")  # type: ignore[attr-defined]
+        assert abs(result - 0.8) < 0.01
+
+    def test_sector_only_article_produces_nonzero_sentiment(self) -> None:
+        """Sector-only articles (no direct_tickers) produce non-zero sentiment
+        for mapped tickers (NEWS-08)."""
+        from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
+
+        mapper = SectorTickerMapper()
+        result = _make_impact_result(
+            sentiment=0.7,
+            confidence=0.9,
+            sectors=[
+                SectorImpactDetail(
+                    sector="banking",
+                    direction=1,
+                    magnitude=0.8,
+                    reasoning="positive for banks",
+                ),
+            ],
+            direct_tickers=[],  # No direct tickers!
+        )
+
+        loop = _make_loop(
+            news_impact_analyzer=MagicMock(),
+            sector_ticker_mapper=mapper,
+        )
+
+        instr = MagicMock()
+        instr.symbol = "SBER"
+        instr.segment_id = "ru_blue_chips"
+        loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
+        loop._registry.list_by_market.return_value = [instr]  # type: ignore[attr-defined]
+
+        loop._apply_impact_result(result)  # type: ignore[attr-defined]
+
+        cache = loop._sentiment_cache  # type: ignore[attr-defined]
+        score, _ts = cache[("ru_blue_chips", "SBER")]
+        assert score != 0.0, "Sector-only article must produce non-zero sentiment"
 
 
 class TestNewsCycleInterval:
@@ -228,12 +469,15 @@ class TestLegacyFallback:
         legacy_articles = [_make_article("Legacy news")]
         legacy.fetch_news.return_value = legacy_articles
 
-        loop = _make_loop(news_fetcher=legacy)
-        loop._process_articles_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        analyzer = MagicMock()
+        analyzer.analyze = AsyncMock(return_value=_make_impact_result())
+
+        loop = _make_loop(news_fetcher=legacy, news_impact_analyzer=analyzer)
+        loop._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         legacy.fetch_news.assert_called_once()
-        loop._process_articles_batch.assert_called_once()  # type: ignore[attr-defined]
-        processed = loop._process_articles_batch.call_args[0][0]  # type: ignore[attr-defined]
+        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
         assert len(processed) == 1
