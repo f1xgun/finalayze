@@ -70,16 +70,20 @@ Key carry-forward decisions for v5.0:
 - [Phase 25]: Bond async methods use _get_services_async for persistent gRPC channel
 - [Phase 25]: Brent cache uses Candle model class with BZ_F cache_id
 
+### Roadmap Evolution
+
+- Phase 27 added: Intelligent News Impact Analysis — sector-aware LLM pipeline replacing naive ticker extraction
+
 ### Pending Todos
 
 None yet.
 
 ### Blockers/Concerns
 
-- PositionSizingPipeline wiring in live requires careful integration -- pipeline was designed for backtest engine
-- Trailing stop in live needs state management across APScheduler cycles (not single-pass like backtest)
-- News pipeline disable must preserve the option to re-enable event_driven later
-- SELL sizing fix must handle partial positions and lot rounding for MOEX
+- NewsImpactAnalyzer prompt must handle Russian + English articles with sector vocabulary
+- SectorTickerMapper must stay in sync with InstrumentRegistry — stale mapping = missed tickers
+- Per-ticker sentiment cache changes _sentiment_cache structure — event_driven strategy must adapt
+- LLM response quality for sector impact prediction needs validation against real news corpus
 
 ## Session Continuity
 

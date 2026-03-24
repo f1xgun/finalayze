@@ -72,6 +72,7 @@ Full details: `.planning/milestones/v4.0-ROADMAP.md`
 - [x] **Phase 24: Live-Backtest Parity** - Wire PositionSizingPipeline, trailing stops, pre-trade checks, and re-entry guard in live path (completed 2026-03-23)
 - [x] **Phase 25: Data Validation and Infrastructure** - Wire DataNormalizer, candle staleness, IMOEX volume fix, gRPC channel reuse, Brent caching (completed 2026-03-24)
 - [x] **Phase 26: News Pipeline Fixes** - Disable no-op news cycle, add sentiment decay, fix ticker mismatch, deduplicate Telegram messages (completed 2026-03-24)
+- [ ] **Phase 27: Intelligent News Impact Analysis** - Replace naive ticker extraction with sector-aware LLM analysis; single-call NewsImpactAnalyzer + SectorTickerMapper
 
 ## Phase Details
 
@@ -146,3 +147,15 @@ Note: Phases 25 and 26 have no dependency on 23/24 and could run in parallel aft
 | 24. Live-Backtest Parity | v5.0 | 2/2 | Complete    | 2026-03-23 |
 | 25. Data Validation and Infrastructure | v5.0 | 2/2 | Complete    | 2026-03-24 |
 | 26. News Pipeline Fixes | v5.0 | 2/2 | Complete    | 2026-03-24 |
+
+### Phase 27: Intelligent News Impact Analysis
+**Goal**: News pipeline understands context and predicts which MOEX sectors and tickers are affected by each article — replacing naive ticker-in-text extraction with sector-aware LLM analysis
+**Depends on**: Phase 26
+**Requirements**: NEWS-05, NEWS-06, NEWS-07, NEWS-08, NEWS-09
+**Success Criteria** (what must be TRUE):
+  1. NewsImpactAnalyzer produces event_type, sentiment, confidence, and affected_sectors (with direction, magnitude, reasoning) in a single LLM call per article — no separate EntityExtractor or CombinedAnalyzer calls
+  2. SectorTickerMapper maps LLM-returned sector names to concrete MOEX tickers via a static registry — no LLM needed for sector→ticker resolution
+  3. Per-ticker sentiment is computed as sector.magnitude × sector.direction × article.sentiment and stored in _sentiment_cache keyed by (segment_id, ticker) — not just by segment_id
+  4. Articles that don't mention any company by name but affect sectors (e.g., "ЦБ повысил ставку") still produce non-zero sentiment for affected tickers via sector mapping
+  5. Total LLM calls per article reduced from 2 (EntityExtractor + CombinedAnalyzer) to 1 (NewsImpactAnalyzer only)
+**Plans**: TBD

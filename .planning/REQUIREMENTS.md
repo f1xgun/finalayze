@@ -38,13 +38,20 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 - [x] **INFRA-01**: TinkoffFetcher reuses a persistent gRPC channel across calls (like TinkoffBroker pattern) — no per-call channel churn
 - [x] **INFRA-02**: Brent crude candles cached via _cached_fetch() in MarketDataLoader — not re-downloaded on every backtest
 
+### Intelligent News Impact
+
+- [ ] **NEWS-05**: NewsImpactAnalyzer replaces EntityExtractor + CombinedAnalyzer — single LLM call returns event_type, sentiment, confidence, affected_sectors (with direction/magnitude/reasoning), and optional direct_tickers
+- [ ] **NEWS-06**: SectorTickerMapper maps sector names (oil_gas, banking, metals, etc.) to MOEX tickers via static registry — no LLM for ticker resolution
+- [ ] **NEWS-07**: Per-ticker sentiment stored in _sentiment_cache as (segment_id, ticker) key — not just segment-level flat score
+- [ ] **NEWS-08**: Articles without explicit company mentions produce non-zero sentiment for affected tickers via sector mapping (e.g., "ЦБ повысил ставку" → banking tickers get negative sentiment)
+- [ ] **NEWS-09**: LLM calls per article reduced from 2 to 1 — NewsImpactAnalyzer prompt combines sentiment analysis, event classification, and sector impact prediction
+
 ## Future Requirements
 
 ### News Pipeline Enhancement
 
 - **NEWS-F01**: Article persistence to database with queryable API endpoint
 - **NEWS-F02**: Prompt injection sanitization for LLM inputs
-- **NEWS-F03**: RSS article scope inference via LLM (not hardcoded "russia")
 
 ### Code Quality
 
@@ -81,10 +88,15 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 | NEWS-04 | Phase 26 | Pending |
 | INFRA-01 | Phase 25 | Complete |
 | INFRA-02 | Phase 25 | Complete |
+| NEWS-05 | Phase 27 | Pending |
+| NEWS-06 | Phase 27 | Pending |
+| NEWS-07 | Phase 27 | Pending |
+| NEWS-08 | Phase 27 | Pending |
+| NEWS-09 | Phase 27 | Pending |
 
 **Coverage:**
-- v5.0 requirements: 16 total
-- Mapped to phases: 16
+- v5.0 requirements: 21 total
+- Mapped to phases: 21
 - Unmapped: 0 ✓
 
 ---
