@@ -232,6 +232,83 @@ class TestRunIterationIntegration:
         loader = MarketDataLoader()
         loader.close()  # no-op, must not raise
 
+class TestBrentCaching:
+    """Tests for Brent crude caching via _cached_fetch."""
+
+    def test_brent_uses_cached_fetch(self) -> None:
+        """_load_moex() must call _cached_fetch for Brent data, not _safe_fetch."""
+        import inspect
+        import re
+
+        source = inspect.getsource(MarketDataLoader._load_moex)
+        # Find the Brent fetch call -- it should use _cached_fetch, not _safe_fetch.
+        # The call spans multiple lines, so join and search.
+        collapsed = re.sub(r"\s+", " ", source)
+        assert re.search(r"_cached_fetch\(.*yfinance\.brent", collapsed), (
+            "_load_moex must use _cached_fetch for Brent data"
+        )
+        assert not re.search(r"_safe_fetch\(.*yfinance\.brent", collapsed), (
+            "Brent must not use _safe_fetch"
+        )
+
+    def test_second_call_uses_cache(self, tmp_path: Path) -> None:
+        """Second call to _load_moex() with same date range must not call yfinance for Brent."""
+        moex_candles = MagicMock()
+        moex_candles.fetch_candles.return_value = [_make_candle("IMOEX")]
+
+        moex_raw = MagicMock()
+        moex_raw.fetch_market_turnover.return_value = [
+            TurnoverRecord(
+                timestamp=datetime(2024, 1, 15, 0, 0, tzinfo=UTC),
+                volume_rub=Decimal("1.5e12"),
+            )
+        ]
+
+        cbr = MagicMock()
+        cbr.fetch_fx_rates.return_value = [
+            FXRate(
+                timestamp=datetime(2024, 1, 15, 0, 0, tzinfo=UTC),
+                pair="USDRUB",
+                rate=Decimal("89.50"),
+            )
+        ]
+        cbr.fetch_key_rate.return_value = [
+            KeyRateRecord(
+                timestamp=datetime(2024, 1, 1, 0, 0, tzinfo=UTC),
+                rate=Decimal("0.16"),
+            )
+        ]
+
+        brent_candle = _make_candle("BZ=F")
+        yf = MagicMock()
+        yf.fetch_candles.return_value = [brent_candle]
+
+        brent_cache = GenericFileCache(tmp_path / "brent")
+
+        loader = MarketDataLoader(
+            moex_iss_candles=moex_candles,
+            moex_iss_raw=moex_raw,
+            cbr=cbr,
+            yfinance_fetcher=yf,
+            brent_cache=brent_cache,
+        )
+
+        seg = SimpleNamespace(market="moex")
+        # First call -- fetches from yfinance
+        ctx1 = loader.load(seg, date(2024, 1, 1), date(2024, 2, 1))
+        assert ctx1.moex_data is not None
+        assert ctx1.moex_data.commodity_candles is not None
+        first_call_count = yf.fetch_candles.call_count
+
+        # Second call -- should use cache, not call yfinance again for Brent
+        ctx2 = loader.load(seg, date(2024, 1, 1), date(2024, 2, 1))
+        assert ctx2.moex_data is not None
+        assert ctx2.moex_data.commodity_candles is not None
+        # yfinance should NOT have been called again for Brent
+        assert yf.fetch_candles.call_count == first_call_count
+
+
+class TestRunIterationIntegrationExtra:
     def test_us_segment_benchmark_only_no_vix(self) -> None:
         """US load with VIX fetch failure still returns benchmark_candles."""
         yf = MagicMock()
