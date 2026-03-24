@@ -71,7 +71,7 @@ Full details: `.planning/milestones/v4.0-ROADMAP.md`
 - [x] **Phase 23: Order Sizing Bug Fixes** - Fix money-losing SELL sizing, sector exposure, and CAUTION threshold bugs (completed 2026-03-23)
 - [x] **Phase 24: Live-Backtest Parity** - Wire PositionSizingPipeline, trailing stops, pre-trade checks, and re-entry guard in live path (completed 2026-03-23)
 - [ ] **Phase 25: Data Validation and Infrastructure** - Wire DataNormalizer, candle staleness, IMOEX volume fix, gRPC channel reuse, Brent caching
-- [ ] **Phase 26: News Pipeline Fixes** - Disable no-op news cycle, add sentiment decay, fix ticker mismatch, deduplicate Telegram messages
+- [x] **Phase 26: News Pipeline Fixes** - Disable no-op news cycle, add sentiment decay, fix ticker mismatch, deduplicate Telegram messages (completed 2026-03-24)
 
 ## Phase Details
 
@@ -111,9 +111,9 @@ Plans:
   3. IMOEX index candles store share volume (column index 5) not turnover value (column index 4) -- volume-based indicators on IMOEX produce correct readings
   4. TinkoffFetcher maintains a persistent gRPC channel that is reused across calls within the same session -- connection setup overhead is eliminated for consecutive data requests
   5. Brent crude candles are cached via _cached_fetch() in MarketDataLoader -- repeated backtest runs do not re-download Brent data from yfinance
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 25-01-PLAN.md -- Fix IMOEX volume column, wire DataNormalizer validation, activate staleness check
+- [x] 25-01-PLAN.md -- Fix IMOEX volume column, wire DataNormalizer validation, activate staleness check
 - [ ] 25-02-PLAN.md -- Persistent gRPC channel for TinkoffFetcher, Brent crude caching
 
 ### Phase 26: News Pipeline Fixes
@@ -125,10 +125,10 @@ Plans:
   2. Cached sentiment scores decay exponentially with a configurable half-life (default 4 hours) -- a sentiment score cached 8 hours ago has decayed to 25% of its original value
   3. Entity extractor _VALID_TICKERS map contains "TCSG" (the MOEX ticker) and does not contain bare "T" -- news mentioning T-Bank resolves to TCSG
   4. Telegram reader tracks processed message URLs and skips duplicates within a configurable time window -- the same Telegram post is not sent to the LLM twice
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
-- [ ] 26-01-PLAN.md -- News cycle skip guard and sentiment time-decay
-- [ ] 26-02-PLAN.md -- Fix TCSG ticker and Telegram message deduplication
+- [x] 26-01-PLAN.md -- News cycle skip guard and sentiment time-decay
+- [x] 26-02-PLAN.md -- Fix TCSG ticker and Telegram message deduplication
 
 ## Progress
 
@@ -144,5 +144,5 @@ Note: Phases 25 and 26 have no dependency on 23/24 and could run in parallel aft
 | 19-22 | v4.0 | 10/10 | Complete | 2026-03-22 |
 | 23. Order Sizing Bug Fixes | v5.0 | 1/1 | Complete    | 2026-03-23 |
 | 24. Live-Backtest Parity | v5.0 | 2/2 | Complete    | 2026-03-23 |
-| 25. Data Validation and Infrastructure | v5.0 | 0/2 | Not started | - |
-| 26. News Pipeline Fixes | v5.0 | 0/2 | Not started | - |
+| 25. Data Validation and Infrastructure | v5.0 | 1/2 | In Progress|  |
+| 26. News Pipeline Fixes | v5.0 | 2/2 | Complete   | 2026-03-24 |

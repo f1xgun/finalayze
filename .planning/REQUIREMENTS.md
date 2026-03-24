@@ -22,14 +22,14 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 
 ### Data Validation
 
-- [ ] **DATA-01**: DataNormalizer.validate() runs on fetched candles before strategy processing — rejects negative prices, low > high, zero volume
-- [ ] **DATA-02**: Candle staleness detection active — configurable threshold (default: 2x timeframe interval), warning logged and instrument skipped when stale
-- [ ] **DATA-03**: IMOEX index candles use share volume (row[5]), not turnover value (row[4])
+- [x] **DATA-01**: DataNormalizer.validate() runs on fetched candles before strategy processing — rejects negative prices, low > high, zero volume
+- [x] **DATA-02**: Candle staleness detection active — configurable threshold (default: 2x timeframe interval), warning logged and instrument skipped when stale
+- [x] **DATA-03**: IMOEX index candles use share volume (row[5]), not turnover value (row[4])
 
 ### News Pipeline
 
-- [ ] **NEWS-01**: News cycle skipped entirely when no segment has event_driven enabled — no LLM calls wasted
-- [ ] **NEWS-02**: Sentiment cache has time-based exponential decay (configurable half-life, default 4 hours) — stale sentiment decays to zero
+- [x] **NEWS-01**: News cycle skipped entirely when no segment has event_driven enabled — no LLM calls wasted
+- [x] **NEWS-02**: Sentiment cache has time-based exponential decay (configurable half-life, default 4 hours) — stale sentiment decays to zero
 - [ ] **NEWS-03**: Entity extractor _VALID_TICKERS contains "TCSG" (not "T") matching the extraction prompt
 - [ ] **NEWS-04**: Telegram reader deduplicates messages by message link URL — no repeated processing within time window
 
@@ -72,11 +72,11 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 | PARITY-02 | Phase 24 | Complete |
 | PARITY-03 | Phase 24 | Complete |
 | PARITY-04 | Phase 24 | Complete |
-| DATA-01 | Phase 25 | Pending |
-| DATA-02 | Phase 25 | Pending |
-| DATA-03 | Phase 25 | Pending |
-| NEWS-01 | Phase 26 | Pending |
-| NEWS-02 | Phase 26 | Pending |
+| DATA-01 | Phase 25 | Complete |
+| DATA-02 | Phase 25 | Complete |
+| DATA-03 | Phase 25 | Complete |
+| NEWS-01 | Phase 26 | Complete |
+| NEWS-02 | Phase 26 | Complete |
 | NEWS-03 | Phase 26 | Pending |
 | NEWS-04 | Phase 26 | Pending |
 | INFRA-01 | Phase 25 | Pending |

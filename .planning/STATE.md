@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Data Flow Correctness & Live-Backtest Parity
-status: unknown
-stopped_at: Completed 24-02-PLAN.md
-last_updated: "2026-03-23T20:04:38.161Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 25-01-PLAN.md
+last_updated: "2026-03-24T07:32:48.270Z"
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 3
+  completed_plans: 6
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 24 — live-backtest-parity
+**Current focus:** Phase 25 — data-validation-and-infrastructure
 
 ## Current Position
 
-Phase: 25
-Plan: Not started
+Phase: 25 (data-validation-and-infrastructure) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -45,6 +45,8 @@ Plan: Not started
 | Phase 23 P01 | 5min | 2 tasks | 2 files |
 | Phase 24 P01 | 8min | 1 tasks | 8 files |
 | Phase 24 P02 | 5min | 2 tasks | 3 files |
+| Phase 26 P01 | 5min | 1 tasks | 3 files |
+| Phase 25 P01 | 5min | 1 tasks | 3 files |
 
 ### Decisions
 
@@ -62,6 +64,8 @@ Key carry-forward decisions for v5.0:
 - [Phase 24]: ATR value derived algebraically from stop formula instead of adding compute_atr_value function
 - [Phase 24]: Correlations return empty dict for graceful degradation in live pre-trade check 14
 - [Phase 24]: Pipeline includes Copula+EVT steps matching backtest even with empty returns_history
+- [Phase 26]: Sentiment decay uses time.monotonic() with 4h half-life, cached once per process
+- [Phase 25]: 48h staleness threshold (2x daily timeframe) as module-level constant
 
 ### Pending Todos
 
@@ -76,6 +80,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-23T19:56:06.224Z
-Stopped at: Completed 24-02-PLAN.md
+Last session: 2026-03-24T07:32:48.267Z
+Stopped at: Completed 25-01-PLAN.md
 Resume file: None
