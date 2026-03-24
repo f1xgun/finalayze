@@ -1,8 +1,9 @@
-"""Tests for 6D.1: Persistent Tinkoff async client with connection reuse."""
+"""Tests for persistent gRPC channel in TinkoffFetcher and TinkoffBroker."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import threading
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
 from finalayze.execution.tinkoff_broker import TinkoffBroker
@@ -18,6 +19,9 @@ def _make_registry() -> MagicMock:
     instr.symbol = "SBER"
     registry.get.return_value = instr
     return registry
+
+
+# ── TinkoffBroker tests (unchanged reference) ────────────────────────────────
 
 
 class TestTinkoffBrokerPersistentClient:
@@ -52,6 +56,92 @@ class TestTinkoffBrokerPersistentClient:
             assert broker._client is None
 
 
+# ── TinkoffFetcher persistent channel tests ───────────────────────────────────
+
+
+class TestTinkoffFetcherPersistentChannel:
+    """Verify TinkoffFetcher reuses a persistent background event loop."""
+
+    def test_run_async_creates_loop_once(self) -> None:
+        """_run_async should create a background event loop that persists across calls."""
+        fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
+
+        async def _dummy() -> str:
+            return "ok"
+
+        result1 = fetcher._run_async(_dummy())
+        loop_after_first = fetcher._loop
+
+        result2 = fetcher._run_async(_dummy())
+        loop_after_second = fetcher._loop
+
+        assert result1 == "ok"
+        assert result2 == "ok"
+        assert loop_after_first is loop_after_second
+        assert loop_after_first is not None
+        assert isinstance(fetcher._loop_thread, threading.Thread)
+
+        fetcher.close()
+
+    def test_close_stops_loop_and_clears_state(self) -> None:
+        """close() should stop the background event loop and nil out state."""
+        fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
+
+        async def _dummy() -> str:
+            return "ok"
+
+        fetcher._run_async(_dummy())
+        assert fetcher._loop is not None
+
+        fetcher.close()
+
+        assert fetcher._loop is None
+        assert fetcher._loop_thread is None
+        assert fetcher._client is None
+        assert fetcher._services is None
+
+    def test_recovery_after_close(self) -> None:
+        """After close(), a new _run_async call creates a fresh event loop."""
+        fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
+
+        async def _dummy() -> str:
+            return "ok"
+
+        fetcher._run_async(_dummy())
+        old_loop = fetcher._loop
+        fetcher.close()
+
+        result = fetcher._run_async(_dummy())
+        assert result == "ok"
+        assert fetcher._loop is not old_loop
+        assert fetcher._loop is not None
+
+        fetcher.close()
+
+    def test_make_client_called_once_for_multiple_fetches(self) -> None:
+        """_make_client should be called only once when _get_services_async caches services."""
+        fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
+
+        mock_services = MagicMock()
+        mock_response = MagicMock()
+        mock_response.candles = []
+        mock_services.market_data.get_candles = AsyncMock(return_value=mock_response)
+
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_services)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(fetcher, "_make_client", return_value=mock_client) as mock_make:
+            # First call -- creates client
+            fetcher._run_async(fetcher._get_services_async())
+            # Second call -- reuses cached services
+            fetcher._run_async(fetcher._get_services_async())
+
+            mock_make.assert_called_once()
+
+        fetcher.close()
+
+
 class TestTinkoffFetcherClientCreation:
     """Verify TinkoffFetcher _make_client creates correct client types."""
 
@@ -74,10 +164,10 @@ class TestTinkoffFetcherClientCreation:
 
             assert mock_cls.call_count == 2  # noqa: PLR2004
 
-    def test_close_is_noop(self) -> None:
-        """close() is a no-op for TinkoffFetcher (fresh client per call)."""
+    def test_close_tears_down_state(self) -> None:
+        """close() should clean up persistent state."""
         fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
-        fetcher.close()  # should not raise
+        fetcher.close()  # should not raise even with no active loop
 
     def test_live_mode_uses_async_client(self) -> None:
         """sandbox=False should use AsyncClient with production target."""
@@ -88,3 +178,59 @@ class TestTinkoffFetcherClientCreation:
 
             client = fetcher._make_client()
             assert client is mock_client
+
+
+class TestTinkoffFetcherBondMethodsPersistent:
+    """Verify bond methods use the persistent channel, not asyncio.run()."""
+
+    def test_fetch_bond_candles_uses_run_async(self) -> None:
+        """fetch_bond_candles should use _run_async, not asyncio.run."""
+        import inspect
+
+        source = inspect.getsource(TinkoffFetcher.fetch_bond_candles)
+        assert "self._run_async" in source, "fetch_bond_candles must use _run_async"
+        assert "asyncio.run(" not in source, "fetch_bond_candles must not use asyncio.run"
+
+    def test_fetch_bond_info_uses_run_async(self) -> None:
+        """fetch_bond_info should use _run_async, not asyncio.run."""
+        import inspect
+
+        source = inspect.getsource(TinkoffFetcher.fetch_bond_info)
+        assert "self._run_async" in source, "fetch_bond_info must use _run_async"
+        assert "asyncio.run(" not in source, "fetch_bond_info must not use asyncio.run"
+
+    def test_fetch_bond_coupons_uses_run_async(self) -> None:
+        """fetch_bond_coupons should use _run_async, not asyncio.run."""
+        import inspect
+
+        source = inspect.getsource(TinkoffFetcher.fetch_bond_coupons)
+        assert "self._run_async" in source, "fetch_bond_coupons must use _run_async"
+        assert "asyncio.run(" not in source, "fetch_bond_coupons must not use asyncio.run"
+
+    def test_fetch_accrued_interest_uses_run_async(self) -> None:
+        """fetch_accrued_interest should use _run_async, not asyncio.run."""
+        import inspect
+
+        source = inspect.getsource(TinkoffFetcher.fetch_accrued_interest)
+        assert "self._run_async" in source, "fetch_accrued_interest must use _run_async"
+        assert "asyncio.run(" not in source, "fetch_accrued_interest must not use asyncio.run"
+
+    def test_bond_async_methods_use_get_services(self) -> None:
+        """Bond async methods should use _get_services_async, not _make_client."""
+        import inspect
+
+        for method_name in [
+            "_fetch_bond_candles_async",
+            "_fetch_bond_info_async",
+            "_fetch_bond_coupons_async",
+            "_fetch_accrued_interest_async",
+            "_fetch_amortization_async",
+        ]:
+            method = getattr(TinkoffFetcher, method_name)
+            source = inspect.getsource(method)
+            assert "_get_services_async" in source, (
+                f"{method_name} must use _get_services_async"
+            )
+            assert "self._make_client()" not in source, (
+                f"{method_name} must not create its own client"
+            )
