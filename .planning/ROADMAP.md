@@ -72,7 +72,7 @@ Full details: `.planning/milestones/v4.0-ROADMAP.md`
 - [x] **Phase 24: Live-Backtest Parity** - Wire PositionSizingPipeline, trailing stops, pre-trade checks, and re-entry guard in live path (completed 2026-03-23)
 - [x] **Phase 25: Data Validation and Infrastructure** - Wire DataNormalizer, candle staleness, IMOEX volume fix, gRPC channel reuse, Brent caching (completed 2026-03-24)
 - [x] **Phase 26: News Pipeline Fixes** - Disable no-op news cycle, add sentiment decay, fix ticker mismatch, deduplicate Telegram messages (completed 2026-03-24)
-- [ ] **Phase 27: Intelligent News Impact Analysis** - Replace naive ticker extraction with sector-aware LLM analysis; single-call NewsImpactAnalyzer + SectorTickerMapper
+- [x] **Phase 27: Intelligent News Impact Analysis** - Replace naive ticker extraction with sector-aware LLM analysis; single-call NewsImpactAnalyzer + SectorTickerMapper (completed 2026-03-24)
 
 ## Phase Details
 
@@ -147,7 +147,7 @@ Note: Phases 25 and 26 have no dependency on 23/24 and could run in parallel aft
 | 24. Live-Backtest Parity | v5.0 | 2/2 | Complete    | 2026-03-23 |
 | 25. Data Validation and Infrastructure | v5.0 | 2/2 | Complete    | 2026-03-24 |
 | 26. News Pipeline Fixes | v5.0 | 2/2 | Complete    | 2026-03-24 |
-| 27. Intelligent News Impact Analysis | v5.0 | 1/2 | In Progress|  |
+| 27. Intelligent News Impact Analysis | v5.0 | 2/2 | Complete   | 2026-03-24 |
 
 ### Phase 27: Intelligent News Impact Analysis
 **Goal**: News pipeline understands context and predicts which MOEX sectors and tickers are affected by each article — replacing naive ticker-in-text extraction with sector-aware LLM analysis
@@ -159,7 +159,7 @@ Note: Phases 25 and 26 have no dependency on 23/24 and could run in parallel aft
   3. Per-ticker sentiment is computed as sector.magnitude × sector.direction × article.sentiment and stored in _sentiment_cache keyed by (segment_id, ticker) — not just by segment_id
   4. Articles that don't mention any company by name but affect sectors (e.g., "ЦБ повысил ставку") still produce non-zero sentiment for affected tickers via sector mapping
   5. Total LLM calls per article reduced from 2 (EntityExtractor + CombinedAnalyzer) to 1 (NewsImpactAnalyzer only)
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 27-01-PLAN.md -- Create NewsImpactAnalyzer + SectorTickerMapper with prompts and tests
-- [ ] 27-02-PLAN.md -- Wire into TradingLoop with per-ticker sentiment cache
+- [x] 27-02-PLAN.md -- Wire into TradingLoop with per-ticker sentiment cache

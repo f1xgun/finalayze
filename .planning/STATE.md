@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Data Flow Correctness & Live-Backtest Parity
-status: Ready to execute
-stopped_at: Completed 27-01-PLAN.md
-last_updated: "2026-03-24T08:59:58.772Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 27-02-PLAN.md
+last_updated: "2026-03-24T09:16:29.054Z"
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
@@ -49,6 +49,7 @@ Plan: 2 of 2
 | Phase 25 P01 | 5min | 1 tasks | 3 files |
 | Phase 25 P02 | 8min | 2 tasks | 5 files |
 | Phase 27 P01 | 3min | 1 tasks | 6 files |
+| Phase 27 P02 | 13min | 1 tasks | 5 files |
 
 ### Decisions
 
@@ -71,6 +72,7 @@ Key carry-forward decisions for v5.0:
 - [Phase 25]: Bond async methods use _get_services_async for persistent gRPC channel
 - [Phase 25]: Brent cache uses Candle model class with BZ_F cache_id
 - [Phase 27]: Reuse _VALID_TICKERS from entity_extractor and _PROMPT_TO_EVENT_TYPE from event_classifier rather than duplicating
+- [Phase 27]: Per-ticker sentiment cache with (segment_id, ticker) tuple keys replacing flat segment_id strings
 
 ### Roadmap Evolution
 
@@ -89,6 +91,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T08:59:58.768Z
-Stopped at: Completed 27-01-PLAN.md
+Last session: 2026-03-24T09:16:29.051Z
+Stopped at: Completed 27-02-PLAN.md
 Resume file: None

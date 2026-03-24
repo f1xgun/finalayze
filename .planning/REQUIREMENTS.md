@@ -42,8 +42,8 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 
 - [x] **NEWS-05**: NewsImpactAnalyzer replaces EntityExtractor + CombinedAnalyzer — single LLM call returns event_type, sentiment, confidence, affected_sectors (with direction/magnitude/reasoning), and optional direct_tickers
 - [x] **NEWS-06**: SectorTickerMapper maps sector names (oil_gas, banking, metals, etc.) to MOEX tickers via static registry — no LLM for ticker resolution
-- [ ] **NEWS-07**: Per-ticker sentiment stored in _sentiment_cache as (segment_id, ticker) key — not just segment-level flat score
-- [ ] **NEWS-08**: Articles without explicit company mentions produce non-zero sentiment for affected tickers via sector mapping (e.g., "ЦБ повысил ставку" → banking tickers get negative sentiment)
+- [x] **NEWS-07**: Per-ticker sentiment stored in _sentiment_cache as (segment_id, ticker) key — not just segment-level flat score
+- [x] **NEWS-08**: Articles without explicit company mentions produce non-zero sentiment for affected tickers via sector mapping (e.g., "ЦБ повысил ставку" → banking tickers get negative sentiment)
 - [x] **NEWS-09**: LLM calls per article reduced from 2 to 1 — NewsImpactAnalyzer prompt combines sentiment analysis, event classification, and sector impact prediction
 
 ## Future Requirements
@@ -90,8 +90,8 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 | INFRA-02 | Phase 25 | Complete |
 | NEWS-05 | Phase 27 | Complete |
 | NEWS-06 | Phase 27 | Complete |
-| NEWS-07 | Phase 27 | Pending |
-| NEWS-08 | Phase 27 | Pending |
+| NEWS-07 | Phase 27 | Complete |
+| NEWS-08 | Phase 27 | Complete |
 | NEWS-09 | Phase 27 | Complete |
 
 **Coverage:**
