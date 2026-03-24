@@ -35,8 +35,8 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 
 ### Data Infrastructure
 
-- [ ] **INFRA-01**: TinkoffFetcher reuses a persistent gRPC channel across calls (like TinkoffBroker pattern) — no per-call channel churn
-- [ ] **INFRA-02**: Brent crude candles cached via _cached_fetch() in MarketDataLoader — not re-downloaded on every backtest
+- [x] **INFRA-01**: TinkoffFetcher reuses a persistent gRPC channel across calls (like TinkoffBroker pattern) — no per-call channel churn
+- [x] **INFRA-02**: Brent crude candles cached via _cached_fetch() in MarketDataLoader — not re-downloaded on every backtest
 
 ## Future Requirements
 
@@ -79,8 +79,8 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 | NEWS-02 | Phase 26 | Complete |
 | NEWS-03 | Phase 26 | Pending |
 | NEWS-04 | Phase 26 | Pending |
-| INFRA-01 | Phase 25 | Pending |
-| INFRA-02 | Phase 25 | Pending |
+| INFRA-01 | Phase 25 | Complete |
+| INFRA-02 | Phase 25 | Complete |
 
 **Coverage:**
 - v5.0 requirements: 16 total

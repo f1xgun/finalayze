@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Data Flow Correctness & Live-Backtest Parity
 status: Phase complete — ready for verification
-stopped_at: Completed 25-01-PLAN.md
-last_updated: "2026-03-24T07:32:48.270Z"
+stopped_at: Completed 25-02-PLAN.md
+last_updated: "2026-03-24T07:38:47.009Z"
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Project State
@@ -47,6 +47,7 @@ Plan: 2 of 2
 | Phase 24 P02 | 5min | 2 tasks | 3 files |
 | Phase 26 P01 | 5min | 1 tasks | 3 files |
 | Phase 25 P01 | 5min | 1 tasks | 3 files |
+| Phase 25 P02 | 8min | 2 tasks | 5 files |
 
 ### Decisions
 
@@ -66,6 +67,8 @@ Key carry-forward decisions for v5.0:
 - [Phase 24]: Pipeline includes Copula+EVT steps matching backtest even with empty returns_history
 - [Phase 26]: Sentiment decay uses time.monotonic() with 4h half-life, cached once per process
 - [Phase 25]: 48h staleness threshold (2x daily timeframe) as module-level constant
+- [Phase 25]: Bond async methods use _get_services_async for persistent gRPC channel
+- [Phase 25]: Brent cache uses Candle model class with BZ_F cache_id
 
 ### Pending Todos
 
@@ -80,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T07:32:48.267Z
-Stopped at: Completed 25-01-PLAN.md
+Last session: 2026-03-24T07:38:47.006Z
+Stopped at: Completed 25-02-PLAN.md
 Resume file: None
