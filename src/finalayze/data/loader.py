@@ -12,6 +12,7 @@ import structlog
 
 from finalayze.core.exceptions import DataFetchError
 from finalayze.core.schemas import (
+    Candle,
     FXRate,
     KeyRateRecord,
     MarketContext,
@@ -50,6 +51,7 @@ class MarketDataLoader:
         yfinance_fetcher: BaseFetcher | None = None,
         turnover_cache: GenericFileCache | None = None,
         cbr_cache: GenericFileCache | None = None,
+        brent_cache: GenericFileCache | None = None,
     ) -> None:
         self._moex_candles = moex_iss_candles  # CachingFetcher(MoexISSFetcher)
         self._moex_raw = moex_iss_raw  # Raw MoexISSFetcher for turnover
@@ -57,6 +59,7 @@ class MarketDataLoader:
         self._yf = yfinance_fetcher
         self._turnover_cache = turnover_cache
         self._cbr_cache = cbr_cache
+        self._brent_cache = brent_cache
         self.fetch_failures: list[str] = []
 
     def close(self) -> None:
@@ -110,9 +113,15 @@ class MarketDataLoader:
             end,
             fn=lambda: self._cbr_key_rate_fetch(start, end),
         )
-        brent = self._safe_fetch(
+        brent = self._cached_fetch(
             "yfinance.brent",
-            lambda: self._yf_fetch("BZ=F", start, end),
+            self._brent_cache,
+            Candle,
+            "yfinance",
+            "BZ_F",
+            start,
+            end,
+            fn=lambda: self._yf_fetch("BZ=F", start, end),
         )
         turnover = self._cached_fetch(
             "moex_iss.turnover",

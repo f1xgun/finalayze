@@ -238,17 +238,22 @@ class TestBrentCaching:
     def test_brent_uses_cached_fetch(self) -> None:
         """_load_moex() must call _cached_fetch for Brent data, not _safe_fetch."""
         import inspect
-        import re
 
         source = inspect.getsource(MarketDataLoader._load_moex)
-        # Find the Brent fetch call -- it should use _cached_fetch, not _safe_fetch.
-        # The call spans multiple lines, so join and search.
-        collapsed = re.sub(r"\s+", " ", source)
-        assert re.search(r"_cached_fetch\(.*yfinance\.brent", collapsed), (
-            "_load_moex must use _cached_fetch for Brent data"
+        # Find the brent assignment -- it should use _cached_fetch
+        lines = source.split("\n")
+        brent_idx = None
+        for i, line in enumerate(lines):
+            if line.strip().startswith("brent = self."):
+                brent_idx = i
+                break
+        assert brent_idx is not None, "Could not find brent assignment in _load_moex"
+        brent_line = lines[brent_idx].strip()
+        assert "_cached_fetch" in brent_line, (
+            f"Brent must use _cached_fetch, got: {brent_line}"
         )
-        assert not re.search(r"_safe_fetch\(.*yfinance\.brent", collapsed), (
-            "Brent must not use _safe_fetch"
+        assert "_safe_fetch" not in brent_line, (
+            f"Brent must not use _safe_fetch, got: {brent_line}"
         )
 
     def test_second_call_uses_cache(self, tmp_path: Path) -> None:
