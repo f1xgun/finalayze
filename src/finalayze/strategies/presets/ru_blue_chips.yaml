@@ -36,7 +36,7 @@ strategies:
       vol_target_enabled: true
       vol_target: 0.40
   event_driven:
-    enabled: false
+    enabled: true
     weight: 0.15
     params:
       min_sentiment: 0.6

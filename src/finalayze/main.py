@@ -138,6 +138,7 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                         broker_router=broker_router,
                         trading_loop=_trading_loop_instance,  # type: ignore[arg-type]
                         alerter=alerter_ref,
+                        strategy_cycle_minutes=_settings.strategy_cycle_minutes,
                     )
                     set_health_monitor(health_monitor)
                     # Wire health monitor into trading loop for feed timestamp updates

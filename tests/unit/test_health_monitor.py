@@ -98,19 +98,28 @@ class TestHealthMonitor:
         assert result.feed_fresh is False
 
     def test_check_now_detects_dead_loop(self):
-        """Test 4: check_now() detects dead loop (cycle count unchanged between checks)."""
+        """Test 4: check_now() detects dead loop (cycle count unchanged past 2x strategy interval)."""
+        # Use short strategy_cycle_minutes to make test fast
         monitor, _broker_router, trading_loop, _alerter = _make_monitor()
+        monitor._strategy_cycle_minutes = 1  # 1-min cycle → 2-min stale threshold
 
         # First check -- loop alive (cycle count > 0 and different from last)
         trading_loop.total_cycles = 5
         result = monitor.check_now()
         assert result.loop_alive is True
 
-        # Second check -- same cycle count = dead
+        # Second check -- same cycle count within grace period = still alive (waiting)
+        result = monitor.check_now()
+        assert result.loop_alive is True
+        assert "waiting" in result.details["loop"]
+
+        # Simulate time beyond 2x strategy interval
+        monitor._last_cycle_change_time -= timedelta(minutes=3)
         result = monitor.check_now()
         assert result.loop_alive is False
+        assert "stalled" in result.details["loop"]
 
-        # Third check -- cycle count changed = alive again
+        # Cycle count changed = alive again
         trading_loop.total_cycles = 6
         result = monitor.check_now()
         assert result.loop_alive is True

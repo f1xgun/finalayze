@@ -50,15 +50,18 @@ class HealthMonitor:
         alerter: TelegramAlerter,
         check_interval_seconds: int = 300,
         feed_freshness_minutes: int = 30,
+        strategy_cycle_minutes: int = 60,
     ) -> None:
         self._broker_router = broker_router
         self._trading_loop = trading_loop
         self._alerter = alerter
         self._check_interval_seconds = check_interval_seconds
         self._feed_freshness_minutes = feed_freshness_minutes
+        self._strategy_cycle_minutes = strategy_cycle_minutes
 
         self._consecutive_failures: int = 0
         self._last_cycle_count: int = 0
+        self._last_cycle_change_time: datetime = datetime.now(tz=UTC)
         self._last_result: HealthCheckResult | None = None
         self._last_feed_timestamp: datetime | None = None
         self._scheduler: BackgroundScheduler | None = None
@@ -101,17 +104,34 @@ class HealthMonitor:
             details["feed"] = "no feed timestamp set"
 
         # Check 3: Loop liveness
+        # Compare cycle count change against strategy cycle interval, not health
+        # check interval.  Strategy cycles run every strategy_cycle_minutes (e.g.
+        # 60 min) while health checks run every 5 min.  Only flag as stalled when
+        # no new cycle has completed for 2x the strategy interval.
         current_cycles = self._trading_loop.total_cycles
+        now = datetime.now(tz=UTC)
         loop_alive = False
         if current_cycles != self._last_cycle_count:
             loop_alive = True
+            self._last_cycle_change_time = now
             details["loop"] = f"alive (cycles: {current_cycles})"
         elif self._last_cycle_count == 0 and current_cycles == 0:
             # First check, no cycles yet -- treat as alive (not started yet)
             loop_alive = True
             details["loop"] = "not started yet"
         else:
-            details["loop"] = f"stalled at {current_cycles} cycles"
+            # Cycle count unchanged -- stalled only if too long since last change
+            stale_threshold = timedelta(minutes=self._strategy_cycle_minutes * 2)
+            elapsed = now - self._last_cycle_change_time
+            if elapsed <= stale_threshold:
+                loop_alive = True
+                remaining = stale_threshold - elapsed
+                details["loop"] = (
+                    f"waiting (cycles: {current_cycles}, "
+                    f"next expected in {remaining.total_seconds():.0f}s)"
+                )
+            else:
+                details["loop"] = f"stalled at {current_cycles} cycles"
         self._last_cycle_count = current_cycles
 
         result = HealthCheckResult(
