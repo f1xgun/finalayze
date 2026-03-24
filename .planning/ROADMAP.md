@@ -147,7 +147,7 @@ Note: Phases 25 and 26 have no dependency on 23/24 and could run in parallel aft
 | 24. Live-Backtest Parity | v5.0 | 2/2 | Complete    | 2026-03-23 |
 | 25. Data Validation and Infrastructure | v5.0 | 2/2 | Complete    | 2026-03-24 |
 | 26. News Pipeline Fixes | v5.0 | 2/2 | Complete    | 2026-03-24 |
-| 27. Intelligent News Impact Analysis | v5.0 | 2/2 | Complete   | 2026-03-24 |
+| 27. Intelligent News Impact Analysis | v5.0 | 2/2 | Complete    | 2026-03-24 |
 
 ### Phase 27: Intelligent News Impact Analysis
 **Goal**: News pipeline understands context and predicts which MOEX sectors and tickers are affected by each article — replacing naive ticker-in-text extraction with sector-aware LLM analysis
