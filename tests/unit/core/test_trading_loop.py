@@ -20,7 +20,8 @@ def _make_loop(
     *,
     rss_fetcher: object | None = None,
     telegram_reader: object | None = None,
-    entity_extractor: object | None = None,
+    news_impact_analyzer: object | None = None,
+    sector_ticker_mapper: object | None = None,
     news_fetcher: object | None = None,
     settings: object | None = None,
 ) -> object:
@@ -57,7 +58,8 @@ def _make_loop(
         instrument_registry=MagicMock(),
         rss_fetcher=rss_fetcher,
         telegram_reader=telegram_reader,
-        entity_extractor=entity_extractor,
+        news_impact_analyzer=news_impact_analyzer,
+        sector_ticker_mapper=sector_ticker_mapper,
     )
     return loop
 
@@ -183,9 +185,9 @@ class TestSentimentTimeDecay:
         now = time.monotonic()
 
         with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache["test_seg"] = (0.8, now)  # type: ignore[attr-defined]
+            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, now)  # type: ignore[attr-defined]
 
-        result = loop._read_decayed_sentiment("test_seg")  # type: ignore[attr-defined]
+        result = loop._read_decayed_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
         assert abs(result - 0.8) < 0.01
 
     def test_sentiment_decay_at_four_hours(self) -> None:
@@ -194,9 +196,9 @@ class TestSentimentTimeDecay:
         four_hours_ago = time.monotonic() - 4 * 3600
 
         with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache["test_seg"] = (0.8, four_hours_ago)  # type: ignore[attr-defined]
+            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, four_hours_ago)  # type: ignore[attr-defined]
 
-        result = loop._read_decayed_sentiment("test_seg")  # type: ignore[attr-defined]
+        result = loop._read_decayed_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
         # half-life = 4h -> at 4h, should be ~50% = 0.4
         assert abs(result - 0.4) < 0.05
 
@@ -206,9 +208,9 @@ class TestSentimentTimeDecay:
         eight_hours_ago = time.monotonic() - 8 * 3600
 
         with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache["test_seg"] = (0.8, eight_hours_ago)  # type: ignore[attr-defined]
+            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, eight_hours_ago)  # type: ignore[attr-defined]
 
-        result = loop._read_decayed_sentiment("test_seg")  # type: ignore[attr-defined]
+        result = loop._read_decayed_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
         # 2 half-lives -> ~25% = 0.2
         assert abs(result - 0.2) < 0.05
 
@@ -221,14 +223,14 @@ class TestSentimentTimeDecay:
         loop._cache = None  # type: ignore[attr-defined]
 
         with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache["test_seg"] = (0.8, four_hours_ago)  # type: ignore[attr-defined]
+            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, four_hours_ago)  # type: ignore[attr-defined]
 
-        result = loop._get_sentiment("test_seg")  # type: ignore[attr-defined]
+        result = loop._get_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
         # Should return decayed value (~0.4), not raw 0.8
         assert abs(result - 0.4) < 0.05
 
     def test_sentiment_default_for_missing_segment(self) -> None:
         """_read_decayed_sentiment returns default for missing segment."""
         loop = _make_loop()
-        result = loop._read_decayed_sentiment("nonexistent")  # type: ignore[attr-defined]
+        result = loop._read_decayed_sentiment("nonexistent", "SBER")  # type: ignore[attr-defined]
         assert result == 0.0

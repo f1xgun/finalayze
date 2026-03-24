@@ -39,15 +39,15 @@ from finalayze.markets.currency import CurrencyConverter
 if TYPE_CHECKING:
     from config.settings import Settings
 
-    from finalayze.analysis.combined_analyzer import CombinedNewsAnalyzer
-    from finalayze.analysis.entity_extractor import EntityExtractor
-    from finalayze.analysis.event_classifier import EventClassifier, EventType
+    from finalayze.analysis.event_classifier import EventClassifier
     from finalayze.analysis.impact_estimator import ImpactEstimator
     from finalayze.analysis.news_analyzer import NewsAnalyzer
+    from finalayze.analysis.news_impact_analyzer import NewsImpactAnalyzer, NewsImpactResult
+    from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
     from finalayze.api.alerts import TelegramAlerter
     from finalayze.api.metrics import MetricsCollector
     from finalayze.core.events import EventBus
-    from finalayze.core.schemas import Candle, PortfolioState, SentimentResult, Signal
+    from finalayze.core.schemas import Candle, PortfolioState, Signal
     from finalayze.data.cache import RedisCache
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
     from finalayze.data.fetchers.rss_fetcher import RssNewsFetcher
@@ -121,8 +121,8 @@ class TradingLoop:
         macro_cache: MacroCacheService | None = None,
         rss_fetcher: RssNewsFetcher | None = None,
         telegram_reader: TelegramChannelReader | None = None,
-        entity_extractor: EntityExtractor | None = None,
-        combined_analyzer: CombinedNewsAnalyzer | None = None,
+        news_impact_analyzer: NewsImpactAnalyzer | None = None,
+        sector_ticker_mapper: SectorTickerMapper | None = None,
         sandbox_monitor: SandboxMonitorService | None = None,
         health_monitor: object | None = None,
         metrics_collector: type[MetricsCollector] | None = None,
@@ -158,16 +158,16 @@ class TradingLoop:
         self._macro_cache = macro_cache
         self._rss_fetcher = rss_fetcher
         self._telegram_reader = telegram_reader
-        self._entity_extractor = entity_extractor
-        self._combined_analyzer = combined_analyzer
+        self._news_impact_analyzer = news_impact_analyzer
+        self._sector_ticker_mapper = sector_ticker_mapper
         self._sandbox_monitor = sandbox_monitor
         self._health_monitor = health_monitor
         self._metrics = metrics_collector
 
         self._fx = CurrencyConverter(base_currency="USD")
 
-        # Thread-safe sentiment cache: segment_id -> (score, monotonic_timestamp)
-        self._sentiment_cache: dict[str, tuple[float, float]] = {}
+        # Per-ticker sentiment: (segment_id, ticker) -> (score, monotonic_timestamp)
+        self._sentiment_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._sentiment_lock = threading.Lock()
 
         # Cached check: any segment has event_driven strategy enabled?
@@ -830,22 +830,14 @@ class TradingLoop:
                 _log.warning("news_legacy_fetch_failed", exc_info=True)
                 return
 
-        # Entity extraction: enrich articles with MOEX tickers (parallel)
+        # Analyze articles via NewsImpactAnalyzer (single LLM call per article)
         # Large timeout: with rate-limited LLM, batches may take minutes.
         _batch_timeout = 1800
-        enriched_count = 0
-        if self._entity_extractor is not None and articles:
-            articles = self._run_async(
-                self._extract_entities_batch(articles), timeout=_batch_timeout
-            )
-            enriched_count = sum(1 for a in articles if a.symbols)
-
-        # Process through existing pipeline (parallel)
         processed_ok = 0
         processed_fail = 0
-        if articles:
+        if self._news_impact_analyzer is not None and articles:
             processed_ok, processed_fail, _ = self._run_async(
-                self._process_articles_batch(articles), timeout=_batch_timeout
+                self._analyze_impact_batch(articles), timeout=_batch_timeout
             )
 
         # Single summary line for the entire news cycle
@@ -853,52 +845,14 @@ class TradingLoop:
         log_fn(
             "news_cycle_complete",
             articles=len(articles),
-            enriched=enriched_count,
             processed_ok=processed_ok,
             processed_fail=processed_fail,
         )
 
-    async def _analyze_article(self, article: NewsArticle) -> tuple[SentimentResult, EventType]:
-        """Analyze article for sentiment and event type.
-
-        Uses CombinedNewsAnalyzer (1 LLM call) if available, otherwise
-        falls back to separate NewsAnalyzer + EventClassifier (2 calls).
-        """
-        if self._combined_analyzer is not None:
-            return await self._combined_analyzer.analyze(article)
-        sentiment, event = await asyncio.gather(
-            self._news_analyzer.analyze(article),
-            self._event_classifier.classify(article),
-        )
-        return sentiment, event
-
-    async def _extract_entities_batch(self, articles: list[NewsArticle]) -> list[NewsArticle]:
-        """Extract entities from all articles concurrently with bounded concurrency."""
-        sem = asyncio.Semaphore(5)  # max 5 concurrent LLM calls
-        entity_extractor = self._entity_extractor
-        assert entity_extractor is not None, (
-            "ExtractEntitiesBatch called when entity_extractor is None"
-        )
-
-        async def _extract_one(idx: int, article: NewsArticle) -> tuple[int, NewsArticle]:
-            async with sem:
-                try:
-                    tickers = await entity_extractor.extract(article)
-                    if tickers:
-                        return idx, article.model_copy(update={"symbols": tickers})
-                except Exception:
-                    _log.debug("entity_extraction_failed", article_id=str(article.id))
-                return idx, article
-
-        results = await asyncio.gather(*[_extract_one(i, a) for i, a in enumerate(articles)])
-        # Preserve order
-        updated = list(articles)
-        for idx, art in results:
-            updated[idx] = art
-        return updated
-
-    async def _process_articles_batch(self, articles: list[NewsArticle]) -> tuple[int, int, str]:
-        """Process all articles concurrently with bounded concurrency.
+    async def _analyze_impact_batch(
+        self, articles: list[NewsArticle]
+    ) -> tuple[int, int, str]:
+        """Analyze all articles via NewsImpactAnalyzer with bounded concurrency.
 
         Uses an inline circuit breaker: after 5 consecutive LLM failures,
         remaining articles are skipped to avoid wasting minutes on retries.
@@ -912,35 +866,17 @@ class TradingLoop:
         last_error = ""
         consecutive_failures = 0
         _fail_threshold = 5
+        analyzer = self._news_impact_analyzer
+        assert analyzer is not None
 
         async def _process_one(article: NewsArticle) -> bool:
             nonlocal consecutive_failures, last_error
-            # Circuit breaker: skip remaining articles after N consecutive failures
             if consecutive_failures >= _fail_threshold:
                 return False
             async with sem:
                 try:
-                    sentiment, event = await self._analyze_article(article)
-                    active_segments = self._collect_active_segments()
-                    impacts = self._impact_estimator.estimate(
-                        article, event, sentiment, active_segments
-                    )
-                    redis_updates: list[tuple[str, float]] = []
-                    with self._sentiment_lock:
-                        for impact in impacts:
-                            existing = self._read_decayed_sentiment(impact.segment_id)
-                            new_score = existing * 0.7 + impact.sentiment * 0.3
-                            self._sentiment_cache[impact.segment_id] = (
-                                new_score,
-                                time.monotonic(),
-                            )
-                            redis_updates.append((impact.segment_id, new_score))
-                    if self._cache is not None:
-                        for segment_id, score in redis_updates:
-                            try:
-                                await self._cache.set_sentiment(segment_id, score)
-                            except Exception:
-                                _log.debug("Failed to write sentiment to Redis cache")
+                    result = await analyzer.analyze(article)
+                    self._apply_impact_result(result)
                     consecutive_failures = 0
                     return True
                 except Exception as exc:
@@ -962,32 +898,60 @@ class TradingLoop:
                 fail_count += 1
         return ok_count, fail_count, last_error
 
-    def _process_news_article(self, article: NewsArticle) -> None:
-        """Analyze a single article and update sentiment cache."""
-        sentiment, event = self._run_async(self._analyze_article(article))
+    def _apply_impact_result(self, result: NewsImpactResult) -> None:
+        """Apply NewsImpactResult to per-ticker sentiment cache."""
         active_segments = self._collect_active_segments()
-        impacts = self._impact_estimator.estimate(
-            article,
-            event,
-            sentiment,
-            active_segments,
-        )
-        # Collect updates under lock
-        redis_updates: list[tuple[str, float]] = []
-        with self._sentiment_lock:
-            for impact in impacts:
-                existing = self._read_decayed_sentiment(impact.segment_id)
-                new_score = existing * 0.7 + impact.sentiment * 0.3
-                self._sentiment_cache[impact.segment_id] = (new_score, time.monotonic())
-                redis_updates.append((impact.segment_id, new_score))
+        mapper = self._sector_ticker_mapper
+        if mapper is None:
+            return
 
-        # Write to Redis outside the lock
+        # Build ticker -> score mapping from sectors
+        ticker_scores: dict[str, float] = {}
+        for sector_impact in result.affected_sectors:
+            tickers = mapper.map_sectors([sector_impact.sector])
+            score = sector_impact.magnitude * sector_impact.direction * result.sentiment
+            for ticker in tickers:
+                # Take the strongest impact if ticker appears in multiple sectors
+                if ticker not in ticker_scores or abs(score) > abs(ticker_scores[ticker]):
+                    ticker_scores[ticker] = score
+
+        # Direct tickers get the raw sentiment * confidence
+        for ticker in result.direct_tickers:
+            direct_score = result.sentiment * result.confidence
+            if ticker not in ticker_scores or abs(direct_score) > abs(ticker_scores[ticker]):
+                ticker_scores[ticker] = direct_score
+
+        # Update cache for all active segments containing these tickers
+        redis_updates: list[tuple[str, str, float]] = []
+        with self._sentiment_lock:
+            for seg_id in active_segments:
+                seg_tickers = self._get_segment_tickers(seg_id)
+                for ticker in seg_tickers:
+                    if ticker in ticker_scores:
+                        cache_key = (seg_id, ticker)
+                        existing = self._read_decayed_sentiment(seg_id, ticker)
+                        new_score = existing * 0.7 + ticker_scores[ticker] * 0.3
+                        self._sentiment_cache[cache_key] = (new_score, time.monotonic())
+                        redis_updates.append((seg_id, ticker, new_score))
+
+        # Redis write outside lock
         if self._cache is not None:
-            for segment_id, score in redis_updates:
+            for seg_id, ticker, score in redis_updates:
                 try:
-                    self._run_async(self._cache.set_sentiment(segment_id, score))
+                    self._run_async(
+                        self._cache.set_sentiment(f"{seg_id}:{ticker}", score)
+                    )
                 except Exception:
                     _log.debug("Failed to write sentiment to Redis cache")
+
+    def _get_segment_tickers(self, seg_id: str) -> list[str]:
+        """Get ticker symbols for instruments in this segment."""
+        return [
+            instr.symbol
+            for market_id in self._fetchers
+            for instr in self._registry.list_by_market(market_id)
+            if hasattr(instr, "segment_id") and instr.segment_id == seg_id
+        ]
 
     def _collect_active_segments(self) -> list[str]:
         """Collect distinct segment IDs across all markets."""
@@ -1001,30 +965,54 @@ class TradingLoop:
             }
         )
 
-    def _read_decayed_sentiment(self, seg_id: str) -> float:
+    def _read_decayed_sentiment(
+        self, seg_id: str, ticker: str | None = None
+    ) -> float:
         """Read sentiment with exponential time-decay applied.
 
+        If ticker is provided, reads per-ticker score.
+        Falls back to segment average if no per-ticker entry.
         Must be called while holding _sentiment_lock.
-        Returns _DEFAULT_SENTIMENT if segment has no cached score.
         """
-        entry = self._sentiment_cache.get(seg_id)
-        if entry is None:
+        if ticker is not None:
+            entry = self._sentiment_cache.get((seg_id, ticker))
+            if entry is not None:
+                score, ts = entry
+                hours_elapsed = (time.monotonic() - ts) / 3600.0
+                return score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed)
+            # Fallback: average of all per-ticker scores for this segment
+            seg_scores = []
+            for (s, _t), (score, ts) in self._sentiment_cache.items():
+                if s == seg_id:
+                    hours_elapsed = (time.monotonic() - ts) / 3600.0
+                    seg_scores.append(score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed))
+            if seg_scores:
+                return sum(seg_scores) / len(seg_scores)
             return _DEFAULT_SENTIMENT
-        score, ts = entry
-        hours_elapsed = (time.monotonic() - ts) / 3600.0
-        return score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed)
+        # Legacy: no ticker -- average all scores for segment
+        seg_scores = []
+        for (s, _t), (score, ts) in self._sentiment_cache.items():
+            if s == seg_id:
+                hours_elapsed = (time.monotonic() - ts) / 3600.0
+                seg_scores.append(score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed))
+        if seg_scores:
+            return sum(seg_scores) / len(seg_scores)
+        return _DEFAULT_SENTIMENT
 
-    def _get_sentiment(self, seg_id: str) -> float:
+    def _get_sentiment(self, seg_id: str, ticker: str | None = None) -> float:
         """Read sentiment from Redis cache (if available) or in-memory fallback."""
         if self._cache is not None:
+            cache_key = f"{seg_id}:{ticker}" if ticker else seg_id
             try:
-                cached: float | None = self._run_async(self._cache.get_sentiment(seg_id))
+                cached: float | None = self._run_async(
+                    self._cache.get_sentiment(cache_key)
+                )
                 if cached is not None:
                     return cached
             except Exception:
                 _log.debug("Failed to read sentiment from Redis cache")
         with self._sentiment_lock:
-            return self._read_decayed_sentiment(seg_id)
+            return self._read_decayed_sentiment(seg_id, ticker)
 
     def _any_event_driven_enabled(self) -> bool:
         """Check if any segment preset has event_driven strategy enabled.
@@ -1420,7 +1408,7 @@ class TradingLoop:
             _log.debug("skip_reentry_guard", symbol=instrument.symbol)
             return
 
-        sentiment_score = self._get_sentiment(seg_id)
+        sentiment_score = self._get_sentiment(seg_id, instrument.symbol)
 
         broker = self._broker_router.route(market_id)
         has_open_position = broker.has_position(instrument.symbol)

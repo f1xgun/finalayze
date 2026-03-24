@@ -82,33 +82,43 @@ class TestSentimentLockScope:
 
     def test_redis_write_outside_lock(self) -> None:
         """The _sentiment_lock should not be held during Redis cache writes."""
+        from finalayze.analysis.event_classifier import EventType
+        from finalayze.analysis.news_impact_analyzer import NewsImpactResult, SectorImpactDetail
+        from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
+
         mock_cache = MagicMock()
         lock_held_during_redis_write: list[bool] = []
 
-        loop = _make_trading_loop(cache=mock_cache)
+        mapper = SectorTickerMapper()
+        loop = _make_trading_loop(cache=mock_cache, sector_ticker_mapper=mapper)
 
-        call_count = 0
+        # Set up instruments for segment
+        instr = MagicMock()
+        instr.symbol = "SBER"
+        instr.segment_id = "ru_blue_chips"
+        loop._fetchers = {"moex": MagicMock()}
+        loop._registry.list_by_market.return_value = [instr]
 
-        def tracking_run_async(coro: object) -> object:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                # First call is _analyze_article -- return mock sentiment/event
-                return (MagicMock(score=0.5), MagicMock())
-            # Subsequent calls are Redis cache writes
+        def tracking_run_async(coro: object, **kwargs: object) -> object:
             locked = loop._sentiment_lock.locked()
             lock_held_during_redis_write.append(locked)
             return None
 
         loop._run_async = tracking_run_async  # type: ignore[assignment]
 
-        # Simulate an impact
-        impact = MagicMock()
-        impact.segment_id = "us_tech"
-        impact.sentiment = 0.8
-
-        loop._impact_estimator.estimate.return_value = [impact]
-        loop._process_news_article(MagicMock())
+        result = NewsImpactResult(
+            event_type=EventType.CBR_RATE,
+            sentiment=0.8,
+            confidence=0.9,
+            reasoning="test",
+            affected_sectors=[
+                SectorImpactDetail(
+                    sector="banking", direction=1, magnitude=0.7, reasoning="test"
+                ),
+            ],
+            direct_tickers=[],
+        )
+        loop._apply_impact_result(result)
 
         # The Redis write should have happened with lock NOT held
         assert any(not held for held in lock_held_during_redis_write)

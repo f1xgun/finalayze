@@ -399,9 +399,6 @@ def _build_trading_loop(settings: object) -> object | None:
 
         news_analyzer = NewsAnalyzer(llm_client=llm_client)
         event_classifier = EventClassifier(llm_client=llm_client)
-        from finalayze.analysis.combined_analyzer import CombinedNewsAnalyzer  # noqa: PLC0415
-
-        combined_analyzer = CombinedNewsAnalyzer(llm_client=llm_client)
         impact_estimator = ImpactEstimator()
         _has_news = bool(getattr(settings, "newsapi_api_key", ""))
         news_fetcher = (
@@ -410,12 +407,14 @@ def _build_trading_loop(settings: object) -> object | None:
             else NewsApiFetcher(api_key="")
         )
 
-        # ── Entity Extractor (LLM-based MOEX ticker extraction) ──────────
-        from finalayze.analysis.entity_extractor import EntityExtractor  # noqa: PLC0415
+        # ── News Impact Analyzer (single-call LLM pipeline) ──────────
+        from finalayze.analysis.news_impact_analyzer import NewsImpactAnalyzer  # noqa: PLC0415
+        from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper  # noqa: PLC0415
 
-        entity_extractor = (
-            EntityExtractor(llm_client) if not isinstance(llm_client, _StubLLMClient) else None
+        news_impact_analyzer = (
+            NewsImpactAnalyzer(llm_client) if not isinstance(llm_client, _StubLLMClient) else None
         )
+        sector_ticker_mapper = SectorTickerMapper()
 
         # ── RSS + Telegram Fetchers ──────────────────────────────────────
         from finalayze.data.fetchers.rss_fetcher import RssNewsFetcher  # noqa: PLC0415
@@ -458,8 +457,8 @@ def _build_trading_loop(settings: object) -> object | None:
             instrument_registry=registry,
             rss_fetcher=rss_fetcher,
             telegram_reader=telegram_reader,
-            entity_extractor=entity_extractor,
-            combined_analyzer=combined_analyzer,
+            news_impact_analyzer=news_impact_analyzer,
+            sector_ticker_mapper=sector_ticker_mapper,
             sandbox_monitor=sandbox_monitor,
             metrics_collector=MetricsCollector,
         )
