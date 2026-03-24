@@ -1,5 +1,21 @@
 # Milestones
 
+## v5.0 Data Flow Correctness (Shipped: 2026-03-24)
+
+**Phases completed:** 4 phases, 7 plans, 10 tasks
+
+**Key accomplishments:**
+
+- Fixed SELL qty (held position), sector exposure (per-position prices), and CAUTION threshold (segment preset) in TradingLoop
+- Trailing stop state machine with 5-step ratcheting logic and per-cycle re-entry guard wired into TradingLoop, matching SimulatedBroker behavior
+- PositionSizingPipeline wired in live _build_order with all 14 pre-trade check parameters passed
+- DataNormalizer candle validation, 48h staleness detection, and IMOEX volume column fix wired into live trading loop
+- Persistent gRPC channel for all TinkoffFetcher bond methods and Brent crude caching via GenericFileCache
+- News cycle skip guard when event_driven is disabled plus 4-hour half-life exponential sentiment decay
+- Fixed T-Bank ticker mismatch (T -> TCSG) in entity extractor and added URL-based message deduplication to Telegram reader with 5000-entry LRU eviction
+
+---
+
 ## v4.0 Architecture Hardening (Shipped: 2026-03-22)
 
 **Phases completed:** 4 phases, 10 plans, 21 tasks

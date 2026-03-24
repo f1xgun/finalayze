@@ -12,17 +12,13 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
-## Current Milestone: v5.0 Data Flow Correctness & Live-Backtest Parity
+## Current State: v5.0 shipped
 
-**Goal:** Fix critical data flow bugs found in audit — SELL order sizing, sector exposure calculation, live/backtest risk pipeline divergence, data validation gaps, and news pipeline no-op waste.
-
-**Target areas:**
-- P0: SELL sized by Kelly not position, sector exposure uses wrong price, CAUTION threshold hardcoded
-- Live-backtest parity: wire PositionSizingPipeline in live, trailing stops, missing pre-trade checks
-- Data quality: DataNormalizer wiring, candle staleness detection, IMOEX volume fix
-- News pipeline: disable no-op cycle or wire event_driven, add sentiment time-decay, fix ticker mismatch
-
-## Current State: v4.0 shipped
+v5.0 Data Flow Correctness shipped 2026-03-24. 4 phases, 7 plans.
+Fixed SELL order sizing, sector exposure prices, CAUTION threshold.
+Live trading now uses full PositionSizingPipeline matching backtest, trailing stops, all 14 pre-trade checks.
+DataNormalizer validates candles, staleness detection active, IMOEX volume fixed.
+News pipeline skips when event_driven disabled, sentiment has time-decay, TCSG ticker fixed.
 
 v4.0 Architecture Hardening shipped 2026-03-22. 4 phases, 10 plans.
 Fixed concurrency bugs (stop-loss TOCTOU, async lock, session leak), async correctness
@@ -215,4 +211,4 @@ All concurrency bugs fixed. All async paths non-blocking. Error handling hardene
 | 501 Not Implemented for stub endpoints | Empty 200 responses mislead API consumers | ✓ Good — clear signal that feature is pending |
 
 ---
-*Last updated: 2026-03-23 after v5.0 milestone started*
+*Last updated: 2026-03-24 after v5.0 milestone shipped*
