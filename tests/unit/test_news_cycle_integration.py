@@ -72,6 +72,8 @@ def _make_loop(
         telegram_reader=telegram_reader,
         entity_extractor=entity_extractor,
     )
+    # Pre-set event_driven guard so news cycle tests proceed without reading YAMLs
+    loop._event_driven_active = True  # type: ignore[attr-defined]
     return loop
 
 

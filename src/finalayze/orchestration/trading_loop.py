@@ -15,7 +15,9 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
+import math
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -31,6 +33,7 @@ try:
     from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 except ImportError:  # pragma: no cover
     SQLAlchemyJobStore = None  # type: ignore[assignment,misc]
+from finalayze.data.normalizer import DataNormalizer
 from finalayze.markets.currency import CurrencyConverter
 
 if TYPE_CHECKING:
@@ -71,8 +74,11 @@ _CANDLE_LOOKBACK = 60  # number of bars to fetch per symbol
 _CAUTION_SIZE_FACTOR = Decimal("0.5")  # halve position size at CAUTION
 _MIN_CONFIDENCE_BOOST = 1.2  # raise required confidence 20% at CAUTION
 _DEFAULT_SENTIMENT = 0.0
+_SENTIMENT_HALF_LIFE_HOURS = 4.0
+_SENTIMENT_DECAY_LAMBDA = math.log(2) / _SENTIMENT_HALF_LIFE_HOURS  # ~0.1733
 _ZERO = Decimal(0)
 _WEEKEND_WEEKDAY = 5  # Saturday=5, Sunday=6
+_STALENESS_THRESHOLD_HOURS: float = 48.0  # 2x daily timeframe; skip if latest candle older
 _ATR_MULTIPLIER_US = Decimal("2.0")
 _ATR_MULTIPLIER_MOEX = Decimal("2.5")
 _MARKET_CURRENCY: dict[str, str] = {"us": "USD", "moex": "RUB"}
@@ -160,9 +166,12 @@ class TradingLoop:
 
         self._fx = CurrencyConverter(base_currency="USD")
 
-        # Thread-safe sentiment cache: segment_id -> weighted sentiment score
-        self._sentiment_cache: dict[str, float] = {}
+        # Thread-safe sentiment cache: segment_id -> (score, monotonic_timestamp)
+        self._sentiment_cache: dict[str, tuple[float, float]] = {}
         self._sentiment_lock = threading.Lock()
+
+        # Cached check: any segment has event_driven strategy enabled?
+        self._event_driven_active: bool | None = None
 
         # Daily baseline equities: market_id -> equity at start of trading day
         self._baseline_equities: dict[str, Decimal] = {}
@@ -776,6 +785,10 @@ class TradingLoop:
 
     def _news_cycle(self) -> None:
         """Fetch news from RSS, Telegram, and legacy NewsAPI; analyze and update sentiment."""
+        if not self._any_event_driven_enabled():
+            _log.debug("news_cycle_skipped_no_event_driven")
+            return
+
         articles: list[NewsArticle] = []
 
         # RSS feeds (sync -- runs in APScheduler thread)
@@ -915,11 +928,12 @@ class TradingLoop:
                     redis_updates: list[tuple[str, float]] = []
                     with self._sentiment_lock:
                         for impact in impacts:
-                            existing = self._sentiment_cache.get(
-                                impact.segment_id, _DEFAULT_SENTIMENT
-                            )
+                            existing = self._read_decayed_sentiment(impact.segment_id)
                             new_score = existing * 0.7 + impact.sentiment * 0.3
-                            self._sentiment_cache[impact.segment_id] = new_score
+                            self._sentiment_cache[impact.segment_id] = (
+                                new_score,
+                                time.monotonic(),
+                            )
                             redis_updates.append((impact.segment_id, new_score))
                     if self._cache is not None:
                         for segment_id, score in redis_updates:
@@ -962,9 +976,9 @@ class TradingLoop:
         redis_updates: list[tuple[str, float]] = []
         with self._sentiment_lock:
             for impact in impacts:
-                existing = self._sentiment_cache.get(impact.segment_id, _DEFAULT_SENTIMENT)
+                existing = self._read_decayed_sentiment(impact.segment_id)
                 new_score = existing * 0.7 + impact.sentiment * 0.3
-                self._sentiment_cache[impact.segment_id] = new_score
+                self._sentiment_cache[impact.segment_id] = (new_score, time.monotonic())
                 redis_updates.append((impact.segment_id, new_score))
 
         # Write to Redis outside the lock
@@ -987,6 +1001,19 @@ class TradingLoop:
             }
         )
 
+    def _read_decayed_sentiment(self, seg_id: str) -> float:
+        """Read sentiment with exponential time-decay applied.
+
+        Must be called while holding _sentiment_lock.
+        Returns _DEFAULT_SENTIMENT if segment has no cached score.
+        """
+        entry = self._sentiment_cache.get(seg_id)
+        if entry is None:
+            return _DEFAULT_SENTIMENT
+        score, ts = entry
+        hours_elapsed = (time.monotonic() - ts) / 3600.0
+        return score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed)
+
     def _get_sentiment(self, seg_id: str) -> float:
         """Read sentiment from Redis cache (if available) or in-memory fallback."""
         if self._cache is not None:
@@ -997,7 +1024,41 @@ class TradingLoop:
             except Exception:
                 _log.debug("Failed to read sentiment from Redis cache")
         with self._sentiment_lock:
-            return self._sentiment_cache.get(seg_id, _DEFAULT_SENTIMENT)
+            return self._read_decayed_sentiment(seg_id)
+
+    def _any_event_driven_enabled(self) -> bool:
+        """Check if any segment preset has event_driven strategy enabled.
+
+        Caches result in self._event_driven_active to avoid re-reading
+        YAML files on every news cycle.
+        """
+        if self._event_driven_active is not None:
+            return self._event_driven_active
+
+        import yaml  # noqa: PLC0415
+
+        presets_dir = Path(__file__).parent.parent / "strategies" / "presets"
+        result = False
+        try:
+            for path in presets_dir.glob("*.yaml"):
+                try:
+                    with path.open() as f:
+                        config = yaml.safe_load(f)
+                    if (
+                        isinstance(config, dict)
+                        and config.get("strategies", {})
+                        .get("event_driven", {})
+                        .get("enabled", False)
+                    ):
+                        result = True
+                        break
+                except (OSError, yaml.YAMLError):
+                    _log.warning("preset_read_failed", path=str(path))
+        except OSError:
+            _log.warning("presets_dir_not_found", path=str(presets_dir))
+
+        self._event_driven_active = result
+        return result
 
     def _now(self) -> datetime:
         """Return current UTC datetime. Extracted for testability."""
@@ -1322,6 +1383,23 @@ class TradingLoop:
         except Exception:
             _log.exception("_strategy_cycle: failed to fetch candles for %s", instrument.symbol)
             self._cycle_errors_caught += 1
+            return
+
+        # DATA-01: Validate candles through DataNormalizer before any processing
+        normalizer = DataNormalizer(market_id=market_id, source="live")
+        candles = normalizer.normalize_batch(candles)
+        if not candles:
+            _log.warning("all_candles_invalid", symbol=instrument.symbol, market=market_id)
+            return
+
+        # DATA-02: Skip instrument if latest candle is stale
+        if self._is_candle_stale(candles[-1].timestamp, _STALENESS_THRESHOLD_HOURS):
+            _log.warning(
+                "candle_data_stale",
+                symbol=instrument.symbol,
+                latest_ts=candles[-1].timestamp.isoformat(),
+                threshold_hours=_STALENESS_THRESHOLD_HOURS,
+            )
             return
 
         # Update health monitor feed timestamp on successful fetch
