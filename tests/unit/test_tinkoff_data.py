@@ -120,11 +120,8 @@ class TestTinkoffFetchCandles:
             time_seconds=FAKE_TIMESTAMP,
         )
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=[fake_candle],
-        ):
-            fetcher = _make_fetcher()
+        fetcher = _make_fetcher()
+        with patch.object(fetcher, "_run_async", return_value=[fake_candle]):
             start = datetime(2024, 1, 1, tzinfo=UTC)
             end = datetime(2024, 2, 1, tzinfo=UTC)
             candles = fetcher.fetch_candles(SBER_SYMBOL, start, end, timeframe="1d")
@@ -146,11 +143,8 @@ class TestTinkoffFetchCandles:
             fetcher.fetch_candles(UNKNOWN_SYMBOL, start, end)
 
     def test_fetch_propagates_sdk_error(self) -> None:
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            side_effect=RuntimeError("gRPC error"),
-        ):
-            fetcher = _make_fetcher()
+        fetcher = _make_fetcher()
+        with patch.object(fetcher, "_run_async", side_effect=RuntimeError("gRPC error")):
             start = datetime(2024, 1, 1, tzinfo=UTC)
             end = datetime(2024, 2, 1, tzinfo=UTC)
             with pytest.raises(DataFetchError, match="gRPC error"):
@@ -192,11 +186,8 @@ class TestTinkoffFetcherGrpcTimeout:
         """asyncio.TimeoutError from wait_for must be converted to DataFetchError."""
         import asyncio as _asyncio
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            side_effect=_asyncio.TimeoutError(),
-        ):
-            fetcher = _make_fetcher()
+        fetcher = _make_fetcher()
+        with patch.object(fetcher, "_run_async", side_effect=_asyncio.TimeoutError()):
             start = datetime(2024, 1, 1, tzinfo=UTC)
             end = datetime(2024, 2, 1, tzinfo=UTC)
             with pytest.raises(DataFetchError, match="timeout"):
@@ -206,75 +197,27 @@ class TestTinkoffFetcherGrpcTimeout:
 class TestTinkoffFetcherSandboxClientSelection:
     """Verify that sandbox flag controls which AsyncClient class is used."""
 
-    def _make_client_mock(self, fake_candle: MagicMock) -> MagicMock:
-        """Build a mock client that returns candles directly (persistent client pattern)."""
-        mock_response = MagicMock()
-        mock_response.candles = [fake_candle]
-        mock_client = MagicMock()
-        mock_client.market_data.get_candles = AsyncMock(return_value=mock_response)
-        return mock_client
-
     def test_sandbox_true_uses_sandbox_target(self) -> None:
-        """When sandbox=True, AsyncClient must be called with sandbox target."""
-        fake_candle = _make_fake_candle(
-            open_u=OPEN_PRICE,
-            open_n=0,
-            close_u=CLOSE_PRICE,
-            close_n=0,
-            high_u=HIGH_PRICE,
-            high_n=0,
-            low_u=LOW_PRICE,
-            low_n=0,
-            volume=FAKE_VOLUME,
-            time_seconds=FAKE_TIMESTAMP,
-        )
-
-        mock_client = self._make_client_mock(fake_candle)
-        mock_cls = MagicMock(return_value=mock_client)
-
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.AsyncClient",
-            mock_cls,
-        ):
+        """When sandbox=True, _make_client must pass sandbox target to AsyncClient."""
+        with patch("finalayze.data.fetchers.tinkoff_data.AsyncClient") as mock_cls:
+            mock_cls.return_value = MagicMock()
             fetcher = _make_fetcher(sandbox=True)
-            start = datetime(2024, 1, 1, tzinfo=UTC)
-            end = datetime(2024, 2, 1, tzinfo=UTC)
-            fetcher.fetch_candles(SBER_SYMBOL, start, end, timeframe="1d")
+            fetcher._make_client()
 
-        mock_cls.assert_called_once()
-        call_kwargs = mock_cls.call_args
-        assert "sandbox" in str(call_kwargs)  # target contains "sandbox"
+            mock_cls.assert_called_once()
+            call_kwargs = mock_cls.call_args
+            assert "sandbox" in str(call_kwargs)  # target contains "sandbox"
 
     def test_sandbox_false_uses_production_client(self) -> None:
-        """When sandbox=False, _get_client must use AsyncClient (production)."""
-        fake_candle = _make_fake_candle(
-            open_u=OPEN_PRICE,
-            open_n=0,
-            close_u=CLOSE_PRICE,
-            close_n=0,
-            high_u=HIGH_PRICE,
-            high_n=0,
-            low_u=LOW_PRICE,
-            low_n=0,
-            volume=FAKE_VOLUME,
-            time_seconds=FAKE_TIMESTAMP,
-        )
-
-        mock_client = self._make_client_mock(fake_candle)
-        mock_cls = MagicMock(return_value=mock_client)
-
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.AsyncClient",
-            mock_cls,
-        ):
+        """When sandbox=False, _make_client must pass production target to AsyncClient."""
+        with patch("finalayze.data.fetchers.tinkoff_data.AsyncClient") as mock_cls:
+            mock_cls.return_value = MagicMock()
             fetcher = _make_fetcher(sandbox=False)
-            start = datetime(2024, 1, 1, tzinfo=UTC)
-            end = datetime(2024, 2, 1, tzinfo=UTC)
-            fetcher.fetch_candles(SBER_SYMBOL, start, end, timeframe="1d")
+            fetcher._make_client()
 
-        mock_cls.assert_called_once()
-        call_kwargs = mock_cls.call_args
-        assert "sandbox" not in str(call_kwargs)  # production target
+            mock_cls.assert_called_once()
+            call_kwargs = mock_cls.call_args
+            assert "sandbox" not in str(call_kwargs)  # production target
 
 
 class TestTinkoffFetcherErrorTypeLogging:
@@ -282,11 +225,10 @@ class TestTinkoffFetcherErrorTypeLogging:
 
     def test_fetch_candles_logs_error_type(self) -> None:
         """fetch_candles exception log must include error_type field."""
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            side_effect=RuntimeError("gRPC error"),
+        fetcher = _make_fetcher()
+        with patch.object(
+            fetcher, "_run_async", side_effect=RuntimeError("gRPC error")
         ), patch("finalayze.data.fetchers.tinkoff_data._log") as mock_log:
-            fetcher = _make_fetcher()
             start = datetime(2024, 1, 1, tzinfo=UTC)
             end = datetime(2024, 2, 1, tzinfo=UTC)
             with pytest.raises(DataFetchError):
@@ -298,11 +240,10 @@ class TestTinkoffFetcherErrorTypeLogging:
 
     def test_fetch_all_bonds_logs_error_type(self) -> None:
         """fetch_all_bonds exception log must include error_type field."""
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            side_effect=ConnectionError("connection lost"),
+        fetcher = _make_fetcher()
+        with patch.object(
+            fetcher, "_run_async", side_effect=ConnectionError("connection lost")
         ), patch("finalayze.data.fetchers.tinkoff_data._log") as mock_log:
-            fetcher = _make_fetcher()
             result = fetcher.fetch_all_bonds()
             assert result == []
             mock_log.exception.assert_called_once()
@@ -311,11 +252,10 @@ class TestTinkoffFetcherErrorTypeLogging:
 
     def test_fetch_amortization_logs_error_type(self) -> None:
         """fetch_amortization_schedule exception log must include error_type and instrument_id."""
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            side_effect=ValueError("bad data"),
+        fetcher = _make_fetcher()
+        with patch.object(
+            fetcher, "_run_async", side_effect=ValueError("bad data")
         ), patch("finalayze.data.fetchers.tinkoff_data._log") as mock_log:
-            fetcher = _make_fetcher()
             result = fetcher.fetch_amortization_schedule("test-instrument-id")
             assert result == []
             mock_log.exception.assert_called_once()
@@ -327,11 +267,10 @@ class TestTinkoffFetcherErrorTypeLogging:
         """fetch_bond_candles exception log must include error_type and figi."""
         from datetime import date as date_type
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            side_effect=TimeoutError("timed out"),
+        fetcher = _make_fetcher()
+        with patch.object(
+            fetcher, "_run_async", side_effect=TimeoutError("timed out")
         ), patch("finalayze.data.fetchers.tinkoff_data._log") as mock_log:
-            fetcher = _make_fetcher()
             result = fetcher.fetch_bond_candles(
                 "BBG00FAKE123", date_type(2024, 1, 1), date_type(2024, 2, 1)
             )

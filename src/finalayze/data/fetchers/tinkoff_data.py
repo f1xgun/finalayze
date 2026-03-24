@@ -1,8 +1,8 @@
 """Tinkoff Invest MOEX data fetcher (Layer 2).
 
 Fetches OHLCV candles from MOEX via the t-tech-investments gRPC SDK.
-Wraps async SDK calls in asyncio.run() to provide a sync interface
-consistent with BaseFetcher.
+Uses a persistent background event loop with run_coroutine_threadsafe()
+to reuse a single gRPC channel across all fetch calls.
 
 See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 """
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from pathlib import Path
 
 # gRPC env vars MUST be set before importing grpc (via t_tech.invest).
@@ -77,6 +78,13 @@ class TinkoffFetcher(BaseFetcher):
         self._sandbox = sandbox
         self._rate_limiter = rate_limiter
         self._grpc_timeout = grpc_timeout
+        # Persistent gRPC channel state (mirrors TinkoffBroker pattern)
+        self._client: AsyncClient | None = None
+        self._services: object | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_thread: threading.Thread | None = None
+        self._loop_init_lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
 
     def _make_client(self) -> AsyncClient:
         """Create a new async client instance.
@@ -87,8 +95,71 @@ class TinkoffFetcher(BaseFetcher):
         target = _TBANK_GRPC_SANDBOX_TARGET if self._sandbox else _TBANK_GRPC_TARGET
         return AsyncClient(self._token, target=target)
 
+    def _run_async(self, coro: object) -> object:
+        """Run an async coroutine on a persistent background event loop.
+
+        Uses run_coroutine_threadsafe() so gRPC channels survive across
+        multiple fetch calls. Mirrors TinkoffBroker._run_async pattern.
+        """
+        if self._loop is None or self._loop.is_closed():
+            with self._loop_init_lock:
+                if self._loop is None or self._loop.is_closed():
+                    loop = asyncio.new_event_loop()
+                    self._loop = loop
+                    thread = threading.Thread(target=loop.run_forever, daemon=True)
+                    thread.start()
+                    self._loop_thread = thread
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)  # type: ignore[arg-type]
+        return future.result(timeout=self._grpc_timeout)
+
+    async def _get_services_async(self) -> object:
+        """Return persistent AsyncServices, creating client lazily.
+
+        Double-checked locking ensures a single gRPC channel is reused
+        across all fetch_candles / fetch_dividends / etc. calls.
+        """
+        if self._services is None:
+            async with self._async_lock:
+                if self._services is None:
+                    self._client = self._make_client()
+                    self._services = await self._client.__aenter__()
+        return self._services
+
     def close(self) -> None:
-        """No-op — each fetch creates and closes its own channel."""
+        """Close the persistent gRPC channel and stop the background event loop."""
+        if self._client is not None:
+            if self._loop and not self._loop.is_closed():
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._client.__aexit__(None, None, None),  # type: ignore[no-untyped-call]
+                        self._loop,
+                    )
+                    future.result(timeout=5)
+                except Exception as exc:
+                    _log.warning(
+                        "grpc_channel_close_failed",
+                        resource="grpc_client",
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
+                try:
+                    self._loop.call_soon_threadsafe(self._loop.stop)
+                except Exception as exc:
+                    _log.warning(
+                        "event_loop_stop_failed",
+                        resource="event_loop",
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
+        elif self._loop and not self._loop.is_closed():
+            try:
+                self._loop.call_soon_threadsafe(self._loop.stop)
+            except Exception:
+                pass
+        self._client = None
+        self._services = None
+        self._loop = None
+        self._loop_thread = None
 
     def fetch_candles(
         self,
@@ -110,7 +181,7 @@ class TinkoffFetcher(BaseFetcher):
             self._rate_limiter.acquire()
 
         try:
-            raw_candles = asyncio.run(self._fetch_async(figi, start, end, interval))
+            raw_candles = self._run_async(self._fetch_async(figi, start, end, interval))
         except InstrumentNotFoundError:
             raise
         except asyncio.TimeoutError as exc:
@@ -143,21 +214,19 @@ class TinkoffFetcher(BaseFetcher):
     ) -> list[Any]:
         """Async call to Tinkoff SDK get_candles.
 
-        Creates a fresh client per call — the SDK closes the gRPC channel
-        on context exit, so we cannot reuse across ``asyncio.run()`` calls.
+        Uses persistent gRPC channel via _get_services_async.
         """
-        client = self._make_client()
-        async with client as services:
-            response = await asyncio.wait_for(
-                services.market_data.get_candles(
-                    figi=figi,
-                    from_=start,
-                    to=end,
-                    interval=interval,
-                ),
-                timeout=self._grpc_timeout,
-            )
-            return list(response.candles)
+        services = await self._get_services_async()
+        response = await asyncio.wait_for(
+            services.market_data.get_candles(  # type: ignore[attr-defined]
+                figi=figi,
+                from_=start,
+                to=end,
+                interval=interval,
+            ),
+            timeout=self._grpc_timeout,
+        )
+        return list(response.candles)
 
     def _symbol_to_figi(self, symbol: str) -> str:
         """Look up FIGI for a MOEX symbol via the instrument registry."""
@@ -209,7 +278,7 @@ class TinkoffFetcher(BaseFetcher):
             self._rate_limiter.acquire()
 
         try:
-            raw_dividends = asyncio.run(self._fetch_dividends_async(figi, start, end))
+            raw_dividends = self._run_async(self._fetch_dividends_async(figi, start, end))
         except InstrumentNotFoundError:
             raise
         except Exception as exc:
@@ -225,14 +294,13 @@ class TinkoffFetcher(BaseFetcher):
         end: datetime,
     ) -> list[Any]:
         """Async call to Tinkoff SDK get_dividends."""
-        client = self._make_client()
-        async with client as services:
-            response = await services.instruments.get_dividends(
-                figi=figi,
-                from_=start,
-                to=end,
-            )
-            return list(response.dividends)
+        services = await self._get_services_async()
+        response = await services.instruments.get_dividends(  # type: ignore[attr-defined]
+            figi=figi,
+            from_=start,
+            to=end,
+        )
+        return list(response.dividends)
 
     # ── Bond discovery methods ─────────────────────────────────────────────
 
@@ -251,7 +319,7 @@ class TinkoffFetcher(BaseFetcher):
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
         try:
-            return asyncio.run(self._fetch_all_bonds_async())
+            return self._run_async(self._fetch_all_bonds_async())
         except Exception as exc:
             _log.exception("fetch_all_bonds_failed", error_type=type(exc).__name__)
             return []
@@ -260,62 +328,61 @@ class TinkoffFetcher(BaseFetcher):
         """Async call to T-Bank SDK bonds()."""
         from t_tech.invest.schemas import InstrumentStatus  # noqa: PLC0415
 
-        client = self._make_client()
-        async with client as services:
-            resp = await services.instruments.bonds(
-                instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
-            )
-            result: list[dict[str, Any]] = []
-            for bond in resp.instruments:
-                nominal = self._money_to_decimal(bond.nominal)
-                initial_nom = self._money_to_decimal(bond.initial_nominal)
-                aci = self._money_to_decimal(bond.aci_value)
+        services = await self._get_services_async()
+        resp = await services.instruments.bonds(  # type: ignore[attr-defined]
+            instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
+        )
+        result: list[dict[str, Any]] = []
+        for bond in resp.instruments:
+            nominal = self._money_to_decimal(bond.nominal)
+            initial_nom = self._money_to_decimal(bond.initial_nominal)
+            aci = self._money_to_decimal(bond.aci_value)
 
-                maturity = None
-                if hasattr(bond, "maturity_date") and bond.maturity_date:
-                    maturity = (
-                        bond.maturity_date.date()
-                        if hasattr(bond.maturity_date, "date")
-                        else bond.maturity_date
-                    )
-
-                call_d = None
-                if hasattr(bond, "call_date") and bond.call_date:
-                    call_d = (
-                        bond.call_date.date()
-                        if hasattr(bond.call_date, "date")
-                        else bond.call_date
-                    )
-
-                result.append(
-                    {
-                        "figi": bond.figi,
-                        "ticker": bond.ticker,
-                        "isin": bond.isin,
-                        "name": bond.name,
-                        "lot": bond.lot,
-                        "currency": bond.currency,
-                        "nominal": nominal,
-                        "initial_nominal": initial_nom,
-                        "coupon_quantity_per_year": bond.coupon_quantity_per_year,
-                        "maturity_date": maturity,
-                        "floating_coupon_flag": bond.floating_coupon_flag,
-                        "amortization_flag": bond.amortization_flag,
-                        "risk_level": getattr(bond, "risk_level", 0),
-                        "aci_value": aci,
-                        "class_code": bond.class_code,
-                        "subordinated_flag": getattr(bond, "subordinated_flag", False),
-                        "liquidity_flag": getattr(bond, "liquidity_flag", False),
-                        "sector": getattr(bond, "sector", ""),
-                        "bond_type": getattr(bond, "bond_type", ""),
-                        "call_date": call_d,
-                        "perpetual_flag": getattr(bond, "perpetual_flag", False),
-                        "api_trade_available_flag": getattr(
-                            bond, "api_trade_available_flag", False
-                        ),
-                    }
+            maturity = None
+            if hasattr(bond, "maturity_date") and bond.maturity_date:
+                maturity = (
+                    bond.maturity_date.date()
+                    if hasattr(bond.maturity_date, "date")
+                    else bond.maturity_date
                 )
-            return result
+
+            call_d = None
+            if hasattr(bond, "call_date") and bond.call_date:
+                call_d = (
+                    bond.call_date.date()
+                    if hasattr(bond.call_date, "date")
+                    else bond.call_date
+                )
+
+            result.append(
+                {
+                    "figi": bond.figi,
+                    "ticker": bond.ticker,
+                    "isin": bond.isin,
+                    "name": bond.name,
+                    "lot": bond.lot,
+                    "currency": bond.currency,
+                    "nominal": nominal,
+                    "initial_nominal": initial_nom,
+                    "coupon_quantity_per_year": bond.coupon_quantity_per_year,
+                    "maturity_date": maturity,
+                    "floating_coupon_flag": bond.floating_coupon_flag,
+                    "amortization_flag": bond.amortization_flag,
+                    "risk_level": getattr(bond, "risk_level", 0),
+                    "aci_value": aci,
+                    "class_code": bond.class_code,
+                    "subordinated_flag": getattr(bond, "subordinated_flag", False),
+                    "liquidity_flag": getattr(bond, "liquidity_flag", False),
+                    "sector": getattr(bond, "sector", ""),
+                    "bond_type": getattr(bond, "bond_type", ""),
+                    "call_date": call_d,
+                    "perpetual_flag": getattr(bond, "perpetual_flag", False),
+                    "api_trade_available_flag": getattr(
+                        bond, "api_trade_available_flag", False
+                    ),
+                }
+            )
+        return result
 
     def fetch_amortization_schedule(self, instrument_id: str) -> list[dict[str, Any]]:
         """Fetch amortization schedule for a bond.
@@ -329,7 +396,7 @@ class TinkoffFetcher(BaseFetcher):
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
         try:
-            return asyncio.run(self._fetch_amortization_async(instrument_id))
+            return self._run_async(self._fetch_amortization_async(instrument_id))
         except Exception as exc:
             _log.exception(
                 "fetch_amortization_failed",
@@ -342,28 +409,27 @@ class TinkoffFetcher(BaseFetcher):
         """Async call to T-Bank SDK get_bond_events for amortization."""
         from t_tech.invest.schemas import EventType, GetBondEventsRequest  # noqa: PLC0415
 
-        client = self._make_client()
-        async with client as services:
-            resp = await services.instruments.get_bond_events(
-                request=GetBondEventsRequest(
-                    instrument_id=instrument_id,
-                    type=EventType.EVENT_TYPE_MTY,
-                ),
+        services = await self._get_services_async()
+        resp = await services.instruments.get_bond_events(  # type: ignore[attr-defined]
+            request=GetBondEventsRequest(
+                instrument_id=instrument_id,
+                type=EventType.EVENT_TYPE_MTY,
+            ),
+        )
+        events: list[dict[str, Any]] = []
+        for ev in resp.events:
+            ev_date = (
+                ev.event_date.date() if hasattr(ev.event_date, "date") else ev.event_date
             )
-            events: list[dict[str, Any]] = []
-            for ev in resp.events:
-                ev_date = (
-                    ev.event_date.date() if hasattr(ev.event_date, "date") else ev.event_date
-                )
-                pay = self._money_to_decimal(ev.pay_one_bond)
-                events.append(
-                    {
-                        "event_date": ev_date,
-                        "pay_one_bond": pay,
-                        "event_number": ev.event_number,
-                    }
-                )
-            return events
+            pay = self._money_to_decimal(ev.pay_one_bond)
+            events.append(
+                {
+                    "event_date": ev_date,
+                    "pay_one_bond": pay,
+                    "event_number": ev.event_number,
+                }
+            )
+        return events
 
     def fetch_bond_candles(
         self,
@@ -394,7 +460,8 @@ class TinkoffFetcher(BaseFetcher):
             self._rate_limiter.acquire()
 
         try:
-            return asyncio.run(self._fetch_bond_candles_async(figi, from_date, to_date, interval))
+            coro = self._fetch_bond_candles_async(figi, from_date, to_date, interval)
+            return self._run_async(coro)
         except Exception as exc:
             _log.exception(
                 "bond_candle_fetch_failed", figi=figi, error_type=type(exc).__name__
@@ -412,29 +479,28 @@ class TinkoffFetcher(BaseFetcher):
         start_dt = datetime.combine(from_date, datetime.min.time(), tzinfo=UTC)
         end_dt = datetime.combine(to_date, datetime.max.time(), tzinfo=UTC)
 
-        client = self._make_client()
-        async with client as services:
-            response = await services.market_data.get_candles(
-                figi=figi,
-                from_=start_dt,
-                to=end_dt,
-                interval=interval,
+        services = await self._get_services_async()
+        response = await services.market_data.get_candles(  # type: ignore[attr-defined]
+            figi=figi,
+            from_=start_dt,
+            to=end_dt,
+            interval=interval,
+        )
+        result: list[dict[str, Any]] = []
+        for c in response.candles:
+            ts = c.time
+            candle_date = ts.date() if hasattr(ts, "date") else ts
+            result.append(
+                {
+                    "date": candle_date,
+                    "open": self._quotation_to_decimal(c.open),
+                    "high": self._quotation_to_decimal(c.high),
+                    "low": self._quotation_to_decimal(c.low),
+                    "close": self._quotation_to_decimal(c.close),
+                    "volume": int(c.volume),
+                }
             )
-            result: list[dict[str, Any]] = []
-            for c in response.candles:
-                ts = c.time
-                candle_date = ts.date() if hasattr(ts, "date") else ts
-                result.append(
-                    {
-                        "date": candle_date,
-                        "open": self._quotation_to_decimal(c.open),
-                        "high": self._quotation_to_decimal(c.high),
-                        "low": self._quotation_to_decimal(c.low),
-                        "close": self._quotation_to_decimal(c.close),
-                        "volume": int(c.volume),
-                    }
-                )
-            return result
+        return result
 
     # ── Bond data methods ──────────────────────────────────────────────────
 
@@ -451,7 +517,7 @@ class TinkoffFetcher(BaseFetcher):
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
         try:
-            result = asyncio.run(self._fetch_bond_info_async(figi))
+            result = self._run_async(self._fetch_bond_info_async(figi))
         except Exception as exc:
             msg = f"Tinkoff gRPC error fetching bond info for {symbol} (FIGI={figi}): {exc}"
             raise DataFetchError(msg) from exc
@@ -461,38 +527,37 @@ class TinkoffFetcher(BaseFetcher):
         """Async call to T-Bank SDK bond_by."""
         from t_tech.invest.schemas import InstrumentIdType  # noqa: PLC0415
 
-        client = self._make_client()
-        async with client as services:
-            resp = await services.instruments.bond_by(
-                id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_FIGI,
-                id=figi,
-            )
-            bond = resp.instrument
-            nominal = self._money_to_decimal(bond.nominal)
+        services = await self._get_services_async()
+        resp = await services.instruments.bond_by(  # type: ignore[attr-defined]
+            id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_FIGI,
+            id=figi,
+        )
+        bond = resp.instrument
+        nominal = self._money_to_decimal(bond.nominal)
 
-            # For floating-coupon bonds, coupon_rate stores the spread over RUONIA.
-            # Will be populated from coupon data when available.
-            coupon_rate_val = Decimal(0)
+        # For floating-coupon bonds, coupon_rate stores the spread over RUONIA.
+        # Will be populated from coupon data when available.
+        coupon_rate_val = Decimal(0)
 
-            maturity = (
-                bond.maturity_date.date()
-                if hasattr(bond.maturity_date, "date")
-                else bond.maturity_date
-            )
+        maturity = (
+            bond.maturity_date.date()
+            if hasattr(bond.maturity_date, "date")
+            else bond.maturity_date
+        )
 
-            return BondInfo(
-                figi=bond.figi,
-                ticker=bond.ticker,
-                isin=bond.isin,
-                name=bond.name,
-                face_value=nominal,
-                coupon_rate=coupon_rate_val,
-                coupon_frequency=bond.coupon_quantity_per_year,
-                maturity_date=maturity,
-                floating_coupon=bond.floating_coupon_flag,
-                class_code=bond.class_code,
-                currency=bond.currency,
-            )
+        return BondInfo(
+            figi=bond.figi,
+            ticker=bond.ticker,
+            isin=bond.isin,
+            name=bond.name,
+            face_value=nominal,
+            coupon_rate=coupon_rate_val,
+            coupon_frequency=bond.coupon_quantity_per_year,
+            maturity_date=maturity,
+            floating_coupon=bond.floating_coupon_flag,
+            class_code=bond.class_code,
+            currency=bond.currency,
+        )
 
     def fetch_bond_coupons(
         self,
@@ -514,7 +579,7 @@ class TinkoffFetcher(BaseFetcher):
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
         try:
-            result = asyncio.run(self._fetch_bond_coupons_async(figi, start, end))
+            result = self._run_async(self._fetch_bond_coupons_async(figi, start, end))
         except Exception as exc:
             msg = f"Tinkoff gRPC error fetching coupons for {symbol} (FIGI={figi}): {exc}"
             raise DataFetchError(msg) from exc
@@ -524,32 +589,31 @@ class TinkoffFetcher(BaseFetcher):
         self, figi: str, start: datetime, end: datetime
     ) -> list[CouponPayment]:
         """Async call to T-Bank SDK get_bond_coupons."""
-        client = self._make_client()
-        async with client as services:
-            resp = await services.instruments.get_bond_coupons(
-                figi=figi,
-                from_=start,
-                to=end,
+        services = await self._get_services_async()
+        resp = await services.instruments.get_bond_coupons(  # type: ignore[attr-defined]
+            figi=figi,
+            from_=start,
+            to=end,
+        )
+        coupons: list[CouponPayment] = []
+        for c in resp.events:
+            amount = self._money_to_decimal(c.pay_one_bond)
+            coupon_date = (
+                c.coupon_date.date() if hasattr(c.coupon_date, "date") else c.coupon_date
             )
-            coupons: list[CouponPayment] = []
-            for c in resp.events:
-                amount = self._money_to_decimal(c.pay_one_bond)
-                coupon_date = (
-                    c.coupon_date.date() if hasattr(c.coupon_date, "date") else c.coupon_date
+            # Record date is typically T-2 business days before payment.
+            # T-Bank doesn't provide it directly; estimate from coupon_date.
+            record_date = self._business_days_before(coupon_date, 2)
+            coupons.append(
+                CouponPayment(
+                    bond_figi=figi,
+                    coupon_date=coupon_date,
+                    record_date=record_date,
+                    amount_per_bond=amount,
+                    coupon_number=c.coupon_number,
                 )
-                # Record date is typically T-2 business days before payment.
-                # T-Bank doesn't provide it directly; estimate from coupon_date.
-                record_date = self._business_days_before(coupon_date, 2)
-                coupons.append(
-                    CouponPayment(
-                        bond_figi=figi,
-                        coupon_date=coupon_date,
-                        record_date=record_date,
-                        amount_per_bond=amount,
-                        coupon_number=c.coupon_number,
-                    )
-                )
-            return coupons
+            )
+        return coupons
 
     def fetch_accrued_interest(
         self,
@@ -571,7 +635,7 @@ class TinkoffFetcher(BaseFetcher):
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
         try:
-            result = asyncio.run(self._fetch_accrued_interest_async(figi, start, end))
+            result = self._run_async(self._fetch_accrued_interest_async(figi, start, end))
         except Exception as exc:
             msg = f"Tinkoff gRPC error fetching NKD for {symbol} (FIGI={figi}): {exc}"
             raise DataFetchError(msg) from exc
@@ -581,27 +645,26 @@ class TinkoffFetcher(BaseFetcher):
         self, figi: str, start: datetime, end: datetime
     ) -> list[AccruedInterest]:
         """Async call to T-Bank SDK get_accrued_interests."""
-        client = self._make_client()
-        async with client as services:
-            resp = await services.instruments.get_accrued_interests(
-                figi=figi,
-                from_=start,
-                to=end,
-            )
-            results: list[AccruedInterest] = []
-            for ai in resp.accrued_interests:
-                value = self._money_to_decimal(ai.value)
-                value_pct = self._quotation_to_decimal(ai.value_percent)
-                ai_date: date = ai.date.date() if hasattr(ai.date, "date") else ai.date
-                results.append(
-                    AccruedInterest(
-                        bond_figi=figi,
-                        date=ai_date,
-                        value=value,
-                        value_percent=value_pct,
-                    )
+        services = await self._get_services_async()
+        resp = await services.instruments.get_accrued_interests(  # type: ignore[attr-defined]
+            figi=figi,
+            from_=start,
+            to=end,
+        )
+        results: list[AccruedInterest] = []
+        for ai in resp.accrued_interests:
+            value = self._money_to_decimal(ai.value)
+            value_pct = self._quotation_to_decimal(ai.value_percent)
+            ai_date: date = ai.date.date() if hasattr(ai.date, "date") else ai.date
+            results.append(
+                AccruedInterest(
+                    bond_figi=figi,
+                    date=ai_date,
+                    value=value,
+                    value_percent=value_pct,
                 )
-            return results
+            )
+        return results
 
     @staticmethod
     def _next_business_day(dt: datetime) -> datetime:
