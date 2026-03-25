@@ -1161,7 +1161,7 @@ class TradingLoop:
                 # Update feed timestamp at cycle level (not just per-instrument)
                 # so health monitor sees the cycle ran even when 0 instruments processed
                 if self._health_monitor is not None:
-                    self._health_monitor.update_feed_timestamp(now)
+                    self._health_monitor.update_feed_timestamp(self._now())
 
                 # Sandbox monitoring: persist cycle metrics
                 if self._sandbox_monitor is not None:
