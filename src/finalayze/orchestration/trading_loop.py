@@ -1158,6 +1158,11 @@ class TradingLoop:
                     drawdown_pct=round(drawdown_pct, 4),
                 )
 
+                # Update feed timestamp at cycle level (not just per-instrument)
+                # so health monitor sees the cycle ran even when 0 instruments processed
+                if self._health_monitor is not None:
+                    self._health_monitor.update_feed_timestamp(now)
+
                 # Sandbox monitoring: persist cycle metrics
                 if self._sandbox_monitor is not None:
                     from finalayze.monitoring.sandbox_monitor import CycleMetrics  # noqa: PLC0415
