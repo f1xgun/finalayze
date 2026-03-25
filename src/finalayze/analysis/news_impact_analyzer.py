@@ -207,9 +207,9 @@ class NewsImpactAnalyzer:
         confidence = _clamp(float(data.get("confidence", 0.0)), 0.0, 1.0)
         reasoning = str(data.get("reasoning", ""))
 
-        # Affected sectors
+        # Affected sectors (guard against null from LLM)
         affected_sectors: list[SectorImpactDetail] = []
-        for entry in data.get("affected_sectors", []):
+        for entry in data.get("affected_sectors") or []:
             if not isinstance(entry, dict):
                 continue
             try:
@@ -227,8 +227,8 @@ class NewsImpactAnalyzer:
             except (ValueError, TypeError):
                 continue
 
-        # Direct tickers filtered against valid set
-        raw_tickers = data.get("direct_tickers", [])
+        # Direct tickers filtered against valid set (guard against null from LLM)
+        raw_tickers = data.get("direct_tickers") or []
         direct_tickers = [t for t in raw_tickers if isinstance(t, str) and t in _VALID_TICKERS]
 
         return NewsImpactResult(
