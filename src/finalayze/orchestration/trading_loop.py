@@ -882,6 +882,12 @@ class TradingLoop:
                 except Exception as exc:
                     consecutive_failures += 1
                     last_error = type(exc).__name__
+                    _log.debug(
+                        "news_article_analysis_failed",
+                        article_title=article.title[:80],
+                        error_type=last_error,
+                        error=str(exc)[:200],
+                    )
                     if consecutive_failures == _fail_threshold:
                         _log.warning(
                             "news_processing_circuit_opened",
