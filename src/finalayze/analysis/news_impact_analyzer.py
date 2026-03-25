@@ -138,12 +138,53 @@ class NewsImpactAnalyzer:
         return self._prompts[lang]
 
     def _parse_response(self, raw: str) -> NewsImpactResult:
-        """Parse LLM JSON response into NewsImpactResult."""
-        # Strip code fences
+        """Parse LLM JSON response into NewsImpactResult.
+
+        Handles common LLM output issues:
+        - Markdown code fences around JSON
+        - JavaScript-style comments (// ...) inside JSON
+        - Extra text after the JSON object (e.g., "Примечание: ...")
+        - Double-escaped JSON strings ("{\"key\": ...}")
+        - Truncated JSON (attempts to close braces)
+        """
         stripped = raw.strip()
+
+        # Strip code fences
         match = _CODE_FENCE_RE.match(stripped)
         if match:
-            stripped = match.group(1)
+            stripped = match.group(1).strip()
+
+        # Unescape double-escaped JSON: "{\"key\": ...}" → {"key": ...}
+        if stripped.startswith('"') and "\\\"" in stripped:
+            try:
+                stripped = json.loads(stripped)  # parse the outer string
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Remove JavaScript-style single-line comments (// ...)
+        stripped = re.sub(r'//[^\n]*', '', stripped)
+
+        # Extract first JSON object — ignore trailing text after closing brace
+        brace_start = stripped.find("{")
+        if brace_start >= 0:
+            depth, i = 0, brace_start
+            in_string = False
+            for i, ch in enumerate(stripped[brace_start:], start=brace_start):
+                if ch == '"' and (i == 0 or stripped[i - 1] != "\\"):
+                    in_string = not in_string
+                elif not in_string:
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            stripped = stripped[brace_start : i + 1]
+                            break
+            else:
+                # Truncated JSON — try to close open braces/brackets
+                stripped = stripped[brace_start:]
+                stripped += "]" * stripped.count("[") - stripped.count("]")
+                stripped += "}" * (stripped.count("{") - stripped.count("}"))
 
         try:
             data = json.loads(stripped)

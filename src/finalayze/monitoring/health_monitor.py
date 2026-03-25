@@ -92,16 +92,28 @@ class HealthMonitor:
             details["broker"] = f"error: {exc}"
 
         # Check 2: Feed freshness
+        # During market closed hours (MOEX: 18:50-06:50 UTC, weekends) feed is
+        # not updated because no strategy cycles run.  Treat feed as fresh
+        # during off-hours to avoid false stale alerts overnight.
         feed_fresh = False
+        now = datetime.now(tz=UTC)
+        market_open = self._is_market_hours(now)
         if self._last_feed_timestamp is not None:
-            age = datetime.now(tz=UTC) - self._last_feed_timestamp
+            age = now - self._last_feed_timestamp
             if age <= timedelta(minutes=self._feed_freshness_minutes):
                 feed_fresh = True
                 details["feed"] = f"fresh (age: {age.total_seconds():.0f}s)"
+            elif not market_open:
+                feed_fresh = True
+                details["feed"] = f"off-hours (age: {age.total_seconds():.0f}s, market closed)"
             else:
                 details["feed"] = f"stale (age: {age.total_seconds():.0f}s)"
         else:
-            details["feed"] = "no feed timestamp set"
+            if not market_open:
+                feed_fresh = True
+                details["feed"] = "off-hours (no feed yet, market closed)"
+            else:
+                details["feed"] = "no feed timestamp set"
 
         # Check 3: Loop liveness
         # Compare cycle count change against strategy cycle interval, not health
@@ -204,3 +216,15 @@ class HealthMonitor:
     def update_feed_timestamp(self, ts: datetime) -> None:
         """Update the last known feed data timestamp."""
         self._last_feed_timestamp = ts
+
+    @staticmethod
+    def _is_market_hours(now: datetime) -> bool:
+        """Check if MOEX is likely open (Mon-Fri, 07:00-18:50 UTC).
+
+        Approximate — does not account for MOEX holidays or transferred
+        weekends, but prevents false stale alerts overnight and on weekends.
+        """
+        if now.weekday() >= 5:  # Saturday=5, Sunday=6  # noqa: PLR2004
+            return False
+        hour = now.hour
+        return 7 <= hour < 19  # noqa: PLR2004
