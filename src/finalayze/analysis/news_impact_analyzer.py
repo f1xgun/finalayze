@@ -105,7 +105,9 @@ class NewsImpactAnalyzer:
         user_prompt = f"Title: {article.title}\n\nContent: {article.content}"
 
         try:
-            raw = await self._llm.complete(user_prompt, system_prompt)
+            raw = await self._llm.complete(
+                user_prompt, system_prompt, json_mode=True, max_tokens=2048
+            )
         except Exception:
             self._consecutive_failures += 1
             if self._consecutive_failures == _CIRCUIT_BREAKER_THRESHOLD:
