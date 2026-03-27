@@ -1435,6 +1435,15 @@ class TradingLoop:
             _log.debug("signal_hold", symbol=instrument.symbol, segment=seg_id)
             return
 
+        # Skip BUY when position already open — prevent infinite accumulation
+        if has_open_position and signal.direction == SignalDirection.BUY:
+            _log.debug(
+                "signal_skip_already_positioned",
+                symbol=instrument.symbol,
+                direction="BUY",
+            )
+            return
+
         self._cycle_signals_generated += 1
 
         if self._metrics:
