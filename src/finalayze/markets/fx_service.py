@@ -7,6 +7,7 @@ or falls back to a configurable static rate.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -28,20 +29,43 @@ class FXRateService:
     def __init__(self, converter: CurrencyConverter) -> None:
         self._converter = converter
         self._client = httpx.AsyncClient(timeout=_HTTP_TIMEOUT)
+        self._last_rate: Decimal | None = None
+        self._last_rate_at: datetime | None = None
 
     async def update_usdrub(self) -> Decimal | None:
-        """Fetch USD/RUB from CBR and update the converter. Returns the rate."""
+        """Fetch USD/RUB from CBR and update the converter. Returns the rate.
+
+        On failure, returns the last successfully fetched rate (if any).
+        """
         try:
             response = await self._client.get(_CBR_DAILY_URL)
             response.raise_for_status()
             rate = self._parse_cbr_xml(response.text)
             if rate is not None:
                 self._converter.set_rate("USDRUB", rate)
+                self._last_rate = rate
+                self._last_rate_at = datetime.now(tz=UTC)
                 _log.info("fx_rate_updated", pair="USDRUB", rate=float(rate))
-            return rate
+                return rate
         except Exception:
-            _log.exception("fx_rate_update_failed")
-            return None
+            _log.warning("fx_rate_cbr_daily_failed", exc_info=True)
+
+        # Fallback: return last known rate
+        if self._last_rate is not None:
+            age_s = (
+                (datetime.now(tz=UTC) - self._last_rate_at).total_seconds()
+                if self._last_rate_at
+                else 0
+            )
+            _log.warning(
+                "fx_rate_using_cached",
+                rate=float(self._last_rate),
+                cache_age_seconds=round(age_s),
+            )
+            return self._last_rate
+
+        _log.error("fx_rate_no_fallback_available")
+        return None
 
     @staticmethod
     def _parse_cbr_xml(xml_text: str) -> Decimal | None:

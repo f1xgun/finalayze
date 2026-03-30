@@ -837,9 +837,13 @@ class TradingLoop:
     # ── Cycles ───────────────────────────────────────────────────────────────
 
     def _fx_update_cycle(self) -> None:
-        """Fetch latest FX rates from CBR."""
+        """Fetch latest FX rates from CBR and update Prometheus metric."""
         if self._fx_service is not None:
-            self._run_async(self._fx_service.update_usdrub())
+            rate = self._run_async(self._fx_service.update_usdrub())
+            if rate is not None:
+                from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
+                MetricsCollector.set_usd_rub_rate(float(rate))
 
     def _news_cycle(self) -> None:
         """Fetch news from RSS, Telegram, and legacy NewsAPI; analyze and update sentiment."""

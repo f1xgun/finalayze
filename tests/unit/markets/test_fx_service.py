@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -29,6 +30,34 @@ _SAMPLE_CBR_XML = """\
         <VCurs>100,1234</VCurs>
     </Valute>
 </ValCurs>"""
+
+
+class TestCurrencyConverterStaleness:
+    """Test rate staleness tracking in CurrencyConverter."""
+
+    def test_set_rate_updates_rate_updated_at(self) -> None:
+        """set_rate should record timestamp of update."""
+        converter = CurrencyConverter(base_currency="USD")
+        before = datetime.now(tz=UTC)
+        converter.set_rate("USDRUB", Decimal("90.0"))
+        after = datetime.now(tz=UTC)
+
+        assert "USDRUB" in converter._rate_updated_at
+        assert before <= converter._rate_updated_at["USDRUB"] <= after
+
+    def test_rate_age_returns_timedelta(self) -> None:
+        """rate_age should return timedelta since last set_rate call."""
+        converter = CurrencyConverter(base_currency="USD")
+        converter.set_rate("USDRUB", Decimal("90.0"))
+        age = converter.rate_age("USDRUB")
+        assert age is not None
+        assert isinstance(age, timedelta)
+        assert age.total_seconds() < 1.0  # Should be near-instant
+
+    def test_rate_age_returns_none_for_unknown_pair(self) -> None:
+        """rate_age should return None for a pair that was never set."""
+        converter = CurrencyConverter(base_currency="USD")
+        assert converter.rate_age("UNKNOWN") is None
 
 
 class TestParseCbrXml:
@@ -99,5 +128,93 @@ class TestUpdateUsdrub:
         assert rate is None
         # Converter should retain old rate
         assert converter._rates["USDRUB"] == original_rate
+
+        await service.close()
+
+
+class TestFXRateFallback:
+    """Test FX rate fallback with cached rate."""
+
+    @pytest.mark.asyncio
+    async def test_success_caches_last_rate(self) -> None:
+        """Successful fetch should cache rate in _last_rate."""
+        converter = CurrencyConverter(base_currency="USD")
+        service = FXRateService(converter)
+
+        mock_response = AsyncMock()
+        mock_response.text = _SAMPLE_CBR_XML
+        mock_response.raise_for_status = lambda: None
+
+        with patch.object(service._client, "get", return_value=mock_response):
+            rate = await service.update_usdrub()
+
+        assert rate == Decimal("92.5410")
+        assert service._last_rate == Decimal("92.5410")
+        assert service._last_rate_at is not None
+
+        await service.close()
+
+    @pytest.mark.asyncio
+    async def test_failure_returns_cached_rate(self) -> None:
+        """CBR failure should return _last_rate if available."""
+        converter = CurrencyConverter(base_currency="USD")
+        service = FXRateService(converter)
+
+        # First: successful fetch to populate cache
+        mock_response = AsyncMock()
+        mock_response.text = _SAMPLE_CBR_XML
+        mock_response.raise_for_status = lambda: None
+
+        with patch.object(service._client, "get", return_value=mock_response):
+            await service.update_usdrub()
+
+        # Second: failure should return cached rate
+        with patch.object(service._client, "get", side_effect=httpx.ConnectError("timeout")):
+            rate = await service.update_usdrub()
+
+        assert rate == Decimal("92.5410")
+
+        await service.close()
+
+    @pytest.mark.asyncio
+    async def test_failure_no_cache_returns_none(self) -> None:
+        """CBR failure with no cached rate should return None."""
+        converter = CurrencyConverter(base_currency="USD")
+        service = FXRateService(converter)
+
+        with patch.object(service._client, "get", side_effect=httpx.ConnectError("timeout")):
+            rate = await service.update_usdrub()
+
+        assert rate is None
+        assert service._last_rate is None
+
+        await service.close()
+
+    @pytest.mark.asyncio
+    async def test_cached_rate_logs_warning(self) -> None:
+        """Using cached rate should log fx_rate_using_cached."""
+        converter = CurrencyConverter(base_currency="USD")
+        service = FXRateService(converter)
+
+        # Populate cache
+        mock_response = AsyncMock()
+        mock_response.text = _SAMPLE_CBR_XML
+        mock_response.raise_for_status = lambda: None
+
+        with patch.object(service._client, "get", return_value=mock_response):
+            await service.update_usdrub()
+
+        # Fail and check log
+        with (
+            patch.object(service._client, "get", side_effect=httpx.ConnectError("timeout")),
+            patch("finalayze.markets.fx_service._log") as mock_log,
+        ):
+            await service.update_usdrub()
+
+        mock_log.warning.assert_any_call(
+            "fx_rate_using_cached",
+            rate=float(Decimal("92.5410")),
+            cache_age_seconds=pytest.approx(0, abs=5),
+        )
 
         await service.close()
