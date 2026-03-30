@@ -1,291 +1,171 @@
 # Project Research Summary
 
-**Project:** Finalayze MOEX MVP — v3.0 Production Readiness
-**Domain:** Sandbox monitoring, go/no-go gate automation, gradual rollout, production health operations
-**Researched:** 2026-03-21
+**Project:** Finalayze v6.0 — Sandbox Stability & Observability
+**Domain:** Production MOEX autonomous trading system hardening
+**Researched:** 2026-03-30
 **Confidence:** HIGH
 
 ## Executive Summary
 
-Finalayze v3.0 is a production readiness milestone for an existing autonomous MOEX trading system. The system already has a rich v2.0 foundation — Prometheus metrics, structured logging, CircuitBreaker, PreTradeChecker, TelegramAlerter, APScheduler cycles, and a Streamlit dashboard — so the work is not building an observability stack from scratch. It is building the decision layer on top of that stack: formalized go/no-go gate logic, slippage capture to feed that gate, gradual rollout configuration, and emergency kill switch capability. The recommended approach is to add a new `monitoring/` module at Layer 6 (same plane as `api/`), implement the gate as a pure function for testability, configure rollout phases as frozen dataclasses at Layer 1, and make minimal additive modifications to existing components. At most 2-3 new pip packages are required (Jinja2, WeasyPrint for PDF reports; aiogram for Telegram bot commands) — zero if PDF archiving is deferred.
+This milestone is not greenfield feature work — it is hardening an existing, functional trading system that showed 10 concrete failure modes during a week-long sandbox run (March 20-30, 2026). The system already trades, has strategies, ML models, a broker integration, and a monitoring stack. What it lacks is the operational reliability required for production. Key failures observed: 127 missed scheduler jobs due to gRPC event loop contention, 62 portfolio fetch failures from T-Bank error 70001, zero DB rows written across 5 days, zero log entries reaching Loki, and FX rates stuck at 0.0. These are not design flaws — they are integration gaps and configuration omissions. Every fix has a specific, measured failure behind it.
 
-The critical risk for v3.0 is false confidence from sandbox metrics. Tinkoff's sandbox fills orders at the last price with 100% synthetic fill rate, so sandbox P&L will appear 0.3-1.5% better than live execution on illiquid MOEX instruments. The go/no-go gate must focus on what sandbox CAN validate reliably — uptime, signal-direction correctness, absence of critical errors — and thresholds must be derived from walk-forward backtest distribution percentiles, not round numbers. The go-live decision is always a human decision: the system generates a structured report with PROCEED/DEFER/ABORT recommendation; the operator reviews it and initiates the mode transition with an existing confirmation token.
+The recommended approach is a four-phase fix plan ordered strictly by severity and dependency. gRPC event loop isolation is the top blocker: the PollerCompletionQueue from grpcio >= 1.75 saturates asyncio's self-pipe when gRPC channels share an event loop with non-gRPC work, causing strategy cycles to drift from 5 minutes to 60+ minutes. Until this is fixed, the scheduler cannot fire reliably and nothing else matters. After gRPC stability is restored, DB persistence and log observability unlock the ability to diagnose all remaining issues. Finally, lower-priority fixes (FX fallback, market-hours gate, article dedup, stale tickers) complete the hardening. Zero new external dependencies are needed: every fix uses existing stdlib or already-installed libraries.
 
-Research also surfaced a parallel v2.0 MOEX strategy improvement workstream with data-integrity prerequisites that must be resolved before any new strategy backtesting is valid. The current codebase has three confirmed problems invalidating all MOEX backtest results: vol_target 0.19 is US-calibrated (MOEX needs 0.35-0.40); the dividend calendar has only 43 events and excludes cancelled dividends, introducing look-ahead bias; and Feb-Mar 2022 MOEX closure contaminates walk-forward training with artificially distorted volatility. These are quick fixes with high impact and must come before strategy work. The highest architectural risk in the v2.0 stream is sector rotation — it must be implemented as a SectorAllocationStep in the PositionSizingPipeline, not as a combiner strategy; implementing it in the wrong layer carries a HIGH recovery cost.
+The critical risk across all fixes is incorrect event loop architecture. The system currently has three independent asyncio event loops (TradingLoop, TinkoffBroker, TinkoffFetcher), which is architecturally wrong and the root cause of the PollerCompletionQueue problem. The consolidation to a two-loop design (dedicated gRPC loop + general async loop) must be done atomically for all three components in the same phase. The `asyncio.Lock` used for gRPC serialization must live on the same loop as the gRPC calls it protects — if this invariant is violated during the refactor, race conditions can produce duplicate orders during concurrent equity and bond cycle execution.
 
 ## Key Findings
 
 ### Recommended Stack
 
-v3.0 requires minimal new dependencies. The entire monitoring and health-pulse infrastructure already exists. See `.planning/research/STACK.md` for the full audit of existing capabilities.
+No new libraries are required for any of the six core fixes. The system's existing stack (grpcio 1.78.1, SQLAlchemy 2.0.46, asyncpg, httpx, structlog, APScheduler, Promtail 3.4.2, Loki 3.4.2) is correct and sufficient. Explicitly avoid adding uvloop (worsens PollerCompletionQueue contention), grpclib (incompatible with t-tech-investments SDK), celery, tenacity, or custom log shipping. The only new code uses stdlib: `asyncio`, `threading`, `hashlib`, `collections.OrderedDict`.
 
-**Core technologies (new additions only):**
-- `Jinja2 >= 3.1.4`: HTML template rendering for gate reports — already a transitive dependency via FastAPI/Starlette; just make it explicit in pyproject.toml
-- `weasyprint >= 68.1`: HTML-to-PDF conversion for archiving go/no-go reports — best Python option in 2025, no Chromium, CSS3 support; can be omitted entirely if PDF archiving is not required
-- `aiogram >= 3.17.0`: Async-native Telegram bot command handling for /kill, /rollout, /gonogo — optional; raw httpx POST is sufficient if interactive conversation FSM is not needed
-- `types-Jinja2 >= 3.1.0`: mypy stubs for Jinja2 (dev dependency only)
+**Core technologies (existing, no changes needed):**
+- `grpcio` 1.78.1 + `t-tech-investments` 0.3.3: T-Bank gRPC transport — must be isolated to a dedicated event loop to eliminate PollerCompletionQueue contention
+- `SQLAlchemy` 2.0.46 async + `asyncpg`: DB persistence — `async_sessionmaker` pattern is correct and thread-safe; just not wired into trading loop call sites
+- `APScheduler` BackgroundScheduler: job scheduling — already works; recovers to 5-min cycle interval once gRPC isolation removes the 60-min drift
+- `Promtail` 3.4.2 + `Loki` 3.4.2: log pipeline — correct stack; single missing volume mount (`/var/lib/docker/containers`) is the only fix needed
+- `httpx` + `xml.etree` + `FXRateService`: CBR XML FX fallback — fully implemented in `markets/fx_service.py`; only wiring into `TradingLoop._fx_update_cycle()` is missing
 
-**Stack decision rule:** If PDF report archiving is not required, v3.0 adds zero new pip packages. All monitoring primitives (metrics, alerting, scheduling, health checks, kill switch) are already installed.
-
-**What NOT to add:** OpenTelemetry (overkill for a single-process system), Celery (mismatches APScheduler single-process model), external feature flag services (rollout is capital/risk limit progression, not code path toggling), Datadog/NewRelic/Sentry APMs (external SaaS with sensitive trading data egress), ADTK/darts for anomaly detection (unmaintained or too heavy; rolling z-score with numpy is sufficient).
+**What NOT to add:**
+- `uvloop`: worsens the PollerCompletionQueue EAGAIN issue; standard asyncio is safer
+- `grpclib`: t-tech-investments SDK requires grpcio; cannot swap
+- `redis` for article dedup: overkill; in-memory OrderedDict with TTL is sufficient for single-process
+- `tenacity`: `RetryPolicy` already exists in `execution/retry.py`
 
 ### Expected Features
 
-See `.planning/research/FEATURES.md` for the full feature table with prioritization matrix and dependency graph.
+All 9 features are small enough to ship in one milestone. Nothing should be deferred.
 
-**Must have (table stakes — blocks go-live without these):**
-- Formalized go/no-go gate with configurable thresholds — current gate has 4 hardcoded criteria; need 8 configurable criteria including uptime %, fill rate, mean slippage, and signal frequency
-- Slippage capture in sandbox — expected_price at signal generation time vs. actual fill price; required to populate slippage gate criterion
-- Gradual rollout tightened risk limits config — `RolloutPhase` profiles (minimal_50k: 3% max position, 1% daily loss, 2% DD auto-stop) consumed by PreTradeChecker and CircuitBreaker
-- Production health heartbeat alert — silent TradingLoop crash undetected for hours without this; timer check + Telegram CRITICAL alert
-- REST API kill switch POST /system/stop — Telegram /stop exists but CI and scripts need a programmatic equivalent
+**Must have (table stakes — system is broken without these):**
+- TS-1: gRPC event loop isolation — 127 missed scheduler jobs/week, 60-min cycle drift; no trading system tolerates this
+- TS-2: T-Bank API error 70001 resilience — multi-hour portfolio blind windows, no position sizing, no risk checks
+- TS-3: DB persistence for orders/signals/news/sentiment — 0 rows after 5 days, complete data loss, no audit trail
+- TS-4: Loki log pipeline operational — 0 log entries, Grafana log dashboards useless, cannot search for failures
+- TS-5: FX rate fallback via CBR XML — FX = 0.0 on gRPC failure, all MOEX position sizing is wrong
+- TS-6: Market-hours gate at cycle level — strategy cycles fire 24/7, MOEX open 07:00-15:45 UTC only
 
-**Should have (P2 — add during or after sandbox validation period):**
-- Sandbox dashboard validation progress page — Streamlit page showing per-criterion progress bars and per-day equity chart; manual JSONL report is acceptable for MVP
-- Automated gate evaluation on daily schedule — APScheduler job at 19:00 MSK; manual run is acceptable for MVP
-- Strategy signal-frequency anomaly alert — detects silent strategy failure via Prometheus strategy_signal_count counters
-- Post-live slippage report vs. backtest comparison — weekly Telegram message; needs 5-10 real trades before first run
+**Should have (operational quality — significant reduction in burden):**
+- D-1: LLM article deduplication — 35 Groq fallback activations/day, wastes LLM quota, slower analysis
+- D-2: Stale ticker cleanup — HHRU->HH rename missing in `config/segments.py`; causes failed instrument lookups
+- D-3: Telegram alerter startup resilience — startup crash if Telegram token invalid; alerter should be best-effort
 
-**Defer to v3.1+:**
-- Signal divergence tracker (shadow backtest engine per cycle) — too compute-intensive for the trading loop hot path; needs separate architectural design
-- Capital scaling confirmation flow — manual confirmation token is acceptable for the first 30 days live; automate after stable live data
+**Defer:** Nothing. All 9 items fit in a single milestone (estimated 2-4 days, 4 phases).
 
-**Anti-features (specifically avoid):**
-- Fully automated sandbox-to-live promotion — any system that promotes itself to real money without a human checkpoint is a liability
-- Automated position liquidation on gate FAIL — adds state management complexity with no benefit in sandbox; high-risk in live (slippage, incomplete fills)
-- Per-cycle shadow backtest for signal divergence — adds 30-60 seconds compute per cycle, starves the main trading loop
-- Multi-account capital splitting — Tinkoff Invest does not support multi-account management via one API token
-
-**Go/no-go gate expansion (current hardcoded vs. v3.0 configurable target):**
-
-| Criterion | Current (hardcoded) | v3.0 Target (configurable) |
-|-----------|---------------------|----------------------------|
-| Minimum trading days | >= 5 | >= 10 (two full MOEX weeks) |
-| Max drawdown | < 5.0% | < 5.0% configurable; tighten to 3% for phase 1 live |
-| Round-trip fills | >= 10 | >= 20 (statistical minimum) |
-| Critical errors | == 0 | == 0 (keep) |
-| Uptime % | Not measured | >= 99% (actual cycles / expected cycles) |
-| Fill rate | Not measured | >= 95% (orders_filled / orders_submitted) |
-| Mean slippage | Not measured | < 30 bps |
-| Signal frequency | Not measured | >= 1 signal per enabled strategy per 5 days |
+**All features are fully independent** — no blocking dependency chains between them. Can be parallelized freely within phases.
 
 ### Architecture Approach
 
-The architecture adds a new `monitoring/` top-level module at Layer 6 and makes minimal additive modifications to existing components. See `.planning/research/ARCHITECTURE.md` for full data-flow diagrams, component specifications, and anti-pattern analysis.
+The post-fix architecture introduces a strict two-loop separation within TradingLoop: a dedicated gRPC event loop thread (`_grpc_loop`) for all TinkoffBroker and TinkoffFetcher calls, and the existing general async loop (`_async_loop`) for HTTP, DB, and Telegram work. TinkoffBroker and TinkoffFetcher no longer manage their own event loops — they accept the shared gRPC loop via constructor injection from TradingLoop. All gRPC serialization (`asyncio.Lock`) moves to live on the gRPC loop.
 
-**New module structure:**
-```
-src/finalayze/monitoring/   # NEW — Layer 6, same plane as api/
-    sandbox_monitor.py      # SandboxMonitorService: collect metrics, persist to TimescaleDB
-    gonogo.py               # GoNoGoReporter: pure evaluation function, no side effects
-    anomaly.py              # AnomalyDetector: z-score alerting on equity/slippage/signals
-    health_monitor.py       # ProductionHealthMonitor: 5-minute health pulse
-    kill_switch.py          # KillSwitch: halt-all with order cancellation sequence
+DB persistence is extracted to a new `orchestration/persistence.py` module (fire-and-forget helpers: `persist_signal()`, `persist_order()`, `persist_news_article()`, `persist_sentiment()`) to avoid further bloating `trading_loop.py` (already 2400+ lines). Article deduplication gets its own `analysis/dedup.py` module with title-hash + TTL eviction logic. Infrastructure changes are limited to two YAML lines in docker-compose and Promtail config.
 
-config/rollout.py           # NEW — Layer 1: RolloutPhase frozen dataclasses, env var resolver
-api/v1/sandbox.py           # NEW: GET /sandbox/metrics, GET /sandbox/gonogo
-alembic/versions/XXX.py     # NEW migration: sandbox_metrics TimescaleDB hypertable
-```
+**Major components and their changes:**
+1. `TradingLoop` (`orchestration/trading_loop.py`) — gains `_grpc_loop` + `_run_grpc()` dispatcher; adds persist call sites at signal/order/news points; adds market-hours early exit; ~200 new lines
+2. `TinkoffBroker` (`execution/tinkoff_broker.py`) — removes self-managed `_loop`/`_loop_thread`; gains last-known-portfolio cache; channel reset on 70001/INTERNAL; ~80 new lines
+3. `TinkoffFetcher` (`data/fetchers/tinkoff_data.py`) — removes self-managed loop; accepts external gRPC loop via constructor; ~30 changed lines
+4. `persistence.py` (NEW `orchestration/`) — fire-and-forget DB write helpers; ~120 lines
+5. `dedup.py` (NEW `analysis/`) — `deduplicate_articles()` with SHA256 URL hash + 24h TTL; ~40 lines
+6. `docker/docker-compose.sandbox.yml` + `monitoring/promtail/promtail-config.yml` — 1-2 line additions for Docker log volume mount and `__path__` relabeling
 
-**Major components and their responsibilities:**
-1. `SandboxMonitorService` — reads ValidationLogger JSONL (fast append-only write path), aggregates daily metric snapshots, persists SandboxMetricSnapshot to TimescaleDB (queryable read path)
-2. `GoNoGoReporter` — pure function: takes list of SandboxMetricSnapshot and configurable thresholds, applies 8 gate rules, returns frozen GoNoGoReport with PROCEED/DEFER/ABORT recommendation; no side effects, trivially testable
-3. `RolloutPhase` in `config/rollout.py` — frozen dataclasses with named profiles (minimal_50k, scale_200k, target_500k) and per-phase risk parameter overrides; active phase resolved from FINALAYZE_ROLLOUT_PHASE env var at startup; validated by Pydantic
-4. `ProductionHealthMonitor` — 5-minute APScheduler job: broker ping, ValidationLogger feed freshness, Redis ping, circuit breaker level; sends Telegram IMPORTANT alert on degradation
-5. `KillSwitch.activate(reason)` — strict sequence: (1) set _stop_event to halt scheduler, (2) escalate all CircuitBreakers to LIQUIDATE, (3) cancel pending orders via BrokerRouter, (4) send CRITICAL Telegram alert, (5) set kill_switch_active Prometheus gauge
-
-**Existing components modified (all additive, None-default to preserve existing behavior):**
-- `CycleLogEntry` — 3 optional None-default fields: fill_rate_pct, avg_slippage_bps, signal_divergence_pct
-- `PreTradeChecker` — accept optional `rollout_phase: RolloutPhase | None = None` for position limit overrides
-- `CircuitBreaker` — accept optional `rollout_phase: RolloutPhase | None = None` for threshold overrides
-- `TradingLoop` — add `_health_pulse_cycle()` APScheduler job; add `activate_kill_switch()` method
-- `TelegramBotHandler` — add /gonogo, /health, /killswitch to existing command dispatch table
-- `MetricsCollector` — add ~5 new Prometheus gauges (fill_rate, kill_switch_active, rollout_phase, health_pulse_status, signal_divergence)
-
-**Suggested build order (dictated by dependency chain):**
-1. Schema and config foundation (GoNoGoReport, SandboxMetricSnapshot, HealthCheckResult schemas; RolloutPhase dataclasses; DB migration — zero behavior change)
-2. Risk layer rollout wiring (CircuitBreaker and PreTradeChecker accept optional rollout_phase)
-3. Monitoring services (SandboxMonitorService, GoNoGoReporter, AnomalyDetector, ProductionHealthMonitor)
-4. API endpoints (GET /sandbox/metrics, GET /sandbox/gonogo; thin wrappers over Phase 3 services)
-5. TradingLoop and Telegram extensions (health pulse job, kill switch, new bot commands — highest regression risk, done last)
-6. Streamlit dashboard pages (optional — Telegram commands provide equivalent operational visibility)
+**Total scope:** 9 modified files, 2 new files, ~540 new/changed lines.
 
 ### Critical Pitfalls
 
-PITFALLS.md covers two research domains. See `.planning/research/PITFALLS.md` for full analysis including detection signals, recovery costs, and phase-specific warnings.
+1. **gRPC asyncio.Lock mismatch during event loop consolidation** — The existing `_grpc_lock` (`asyncio.Lock`) is bound to `TradingLoop._async_loop`. If gRPC calls move to `_grpc_loop` but the lock stays on `_async_loop`, it stops serializing concurrent equity and bond cycle broker calls. Race condition produces duplicate orders. Fix: re-create `_grpc_lock` on the gRPC loop; or use a `threading.Lock` for cross-thread serialization. This is the highest-risk element of the entire milestone.
 
-**Top pitfalls — v3.0 production readiness:**
+2. **Channel reconnection orphans in-flight orders** — During the reconnect window, a `post_order` call may time out client-side while the gRPC server already executed it. On the next cycle, the system generates the same BUY signal and submits a duplicate (doubling the position). Fix: call `_reconcile_inflight_orders()` after every reconnect; add a "reconnecting" guard flag that blocks order submission during the window; use T-Bank's `order_id` idempotency key.
 
-1. **Sandbox gives false confidence because Tinkoff fills are synthetic** — Sandbox always fills at last price with 100% fill rate. Live MOEX execution on illiquid instruments will be 0.3-1.5% worse. Sandbox P&L must NOT be the primary gate criterion. Track "simulated slippage" (sandbox fill price vs. MOEX ISS mid-price at signal time) to measure the gap explicitly. Zero fill rejections over 30 sandbox days is a warning sign, not a positive indicator.
+3. **DB errors crash the trading loop** — If `_consecutive_equity_errors` counts DB write failures the same as trading failures, a 3-cycle DB outage triggers a CRITICAL alert and halts trading even though the trading logic is fine. DB persistence is non-critical path. Fix: fire-and-forget with a separate `db_write_failures` Prometheus counter; never propagate DB exceptions to the cycle; never place DB writes between order submission and position tracking update.
 
-2. **Go/no-go thresholds invented, not calibrated against backtest distributions** — A 5% DD gate will permanently block go-live if the system naturally produces 6% drawdown during sideways MOEX markets. Derive each threshold from walk-forward percentiles from existing PortfolioBacktestOrchestrator results. Separate "blocking" gates (uptime, signal direction) from "advisory" gates (slippage, fill rate).
+4. **Ticker rename orphans stop-loss state** — Runtime state (`_stop_states`, `_entry_prices`) is keyed by ticker symbol. After renaming HHRU->HH, any open position under the old key loses its trailing stop. Fix: add `_TICKER_RENAMES` migration mapping applied at startup; keep old tickers as inactive in registry with same FIGI during transition.
 
-3. **Kill switch that only stops the scheduler leaves pending broker orders live** — Pending MOEX limit orders remain valid until market close. Strict sequence required: stop accepting cycles, escalate CircuitBreakers to LIQUIDATE, cancel all pending orders via BrokerRouter, then shut down scheduler. If order cancellation fails, log and continue — the LIQUIDATE circuit state prevents new orders.
-
-4. **Monitoring logic embedded in TradingLoop** — TradingLoop is already 500+ lines with 20+ injected dependencies. Adding monitoring creates scheduler contention (a slow health check delays trade execution) and untestable circular coupling. Monitoring services must be standalone with separate APScheduler jobs.
-
-5. **Automated go/no-go block at real mode startup** — Creates a chicken-and-egg problem and hides root cause of failures. The existing `real_confirmed` environment variable guard is the correct automated safety. Go/no-go is an on-demand report that the operator reviews before initiating mode transition.
-
-**Top pitfalls — v2.0 MOEX strategy improvements:**
-
-1. **Look-ahead bias in dividend gap backtests** — The dividend YAML has only paid dividends; cancelled events (GAZP 2022: 52.53 RUB recommended, rejected by shareholders) are missing. Backtest win rate appears >85% when the real rate including cancellations is ~65-75%. Fix: expand from 43 to 150+ events with a `status: paid|cancelled|reduced` field; include ALL board recommendations, not just successful payments.
-
-2. **Survivorship bias from 2022 MOEX sanctions structural break** — Feb-Mar 2022 included a 25-day trading halt, artificial circuit breakers, and government-supported price floors. Any strategy calibrated on this data learns false patterns. Fix: add `exclude_periods: [("2022-02-24", "2022-04-01")]` to BacktestConfig; remove toxic symbols (GAZP, VTBR, SNGS) from active universe; never train walk-forward across the structural break.
-
-3. **Vol target 0.19 systematically undersizes all MOEX positions** — US-calibrated target vs. MOEX's 0.35-0.60 annualized volatility causes VolTargetStep to hit the 0.25x floor on 60-70% of MOEX trades. Positions are too small to overcome transaction costs. Fix: set MOEX vol_target to 0.35-0.40 for ru_blue_chips in preset YAMLs. Quick config change, high impact.
-
-4. **CBR rate regime timing error** — The market prices CBR decisions 1-3 weeks before announcement via the OFZ yield curve. Buying on the announcement buys AFTER the rally, then holds through mean-reversion. Fix: use OFZ yield curve slope (2Y-10Y spread) and RUONIA-OIS spread as leading indicators; only trade the surprise component (actual minus market-implied rate) on announcement day.
-
-5. **Sector rotation forced into per-symbol combiner** — Sector rotation operates at portfolio level; the combiner operates per-symbol per-bar. Forcing it in creates contradictory signals, monthly whipsaw at rebalance, and backtest overfitting to macro events. Fix: implement as SectorAllocationStep in PositionSizingPipeline. Recovery cost if built in the wrong layer: HIGH — requires architectural refactor.
+5. **CBR XML sync call blocks strategy cycle** — `CBRFetcher` uses sync `httpx.Client` (30s timeout, 3 retries = worst-case 97s). Calling it inline as an FX fallback during `_strategy_cycle` blocks the APScheduler thread for 97s with no stop-loss checks running. Fix: pre-fetch CBR rate in a background APScheduler job every 30 minutes into `_fx_cache`; strategy cycle reads from cache only, never makes a live CBR HTTP call.
 
 ## Implications for Roadmap
 
-Research across both streams points to a sequential structure within each stream and a clear dependency ordering between them. The v3.0 production readiness path has a well-specified 5-6 phase build order driven by dependency chains. The v2.0 MOEX strategy path has a 4-phase structure where data integrity must precede all strategy work.
+Based on the combined dependency graph from ARCHITECTURE.md and risk ordering from PITFALLS.md, the recommended phase structure is four phases:
 
-### Phase 1: Schema, Config Foundation, and Data Integrity
+### Phase 1: Quick Wins — Config & Guard Fixes
+**Rationale:** Zero-risk changes (config-only, try/except wrappers). Ship same day to reduce noise before tackling the architectural changes in Phase 2. Resolves the ticker-rename pitfall before it can interact with Phase 3 (DB persistence keys orders by symbol — must be correct before any orders are persisted).
+**Delivers:** Correct MOEX ticker universe (HHRU->HH), no startup crash from invalid Telegram token, off-hours cycles skipped at cycle entry
+**Addresses:** D-2 (stale tickers), D-3 (alerter resilience), TS-6 (market-hours gate)
+**Avoids:** Pitfall 4 (ticker rename orphaning stop-loss state), Pitfall 7 (gate timing — gate at cycle entry AND at order submission for defense-in-depth)
+**Research flag:** None — standard config patterns, no research needed
 
-**Rationale:** Schema definitions at Layer 0/1 must exist before any service can produce or consume them (zero behavior change, all existing tests pass). MOEX data integrity problems invalidate all backtest results regardless of strategy quality — they must be resolved before any strategy work produces reliable signal.
+### Phase 2: gRPC Isolation & Log Visibility
+**Rationale:** gRPC event loop isolation (TS-1) is the root cause of 127 missed scheduler jobs. Nothing else can be properly debugged until cycles are stable. Loki pipeline fix (TS-4) enables log-based debugging for all subsequent phases. These two can be worked in parallel (infrastructure track: Loki config; code track: gRPC consolidation) but must both land before Phase 3.
+**Delivers:** Stable 5-minute strategy cycles, Grafana/Loki logs visible, gRPC calls isolated from HTTP/DB event loop
+**Addresses:** TS-1 (gRPC isolation), TS-4 (Loki pipeline)
+**Avoids:** Pitfall 1 (asyncio.Lock mismatch — MUST be solved in this phase, tested with concurrent equity+bond cycles), Pitfall 5 (Loki high-cardinality `event` label — remove from Promtail labels, parse at query time), Pitfall 12 (JSON drop stage regex mismatch — fix for structlog JSON format)
+**Research flag:** The three-way refactoring (TradingLoop + TinkoffBroker + TinkoffFetcher) must be designed and implemented atomically. Consider `/gsd:research-phase` if the asyncio.Lock migration approach is not fully clear before implementation starts.
 
-**Delivers (v3.0):** `GoNoGoReport`, `GoNoGoGateResult`, `SandboxMetricSnapshot`, `HealthCheckResult` frozen Pydantic schemas; `CycleLogEntry` extended with 3 optional None-default fields; `RolloutPhase` dataclasses with named profiles; `sandbox_metrics` TimescaleDB hypertable migration
+### Phase 3: Resilience — Portfolio Cache, FX Fallback & Bond Broker
+**Rationale:** Builds on the broker refactoring from Phase 2. T-Bank 70001 resilience (TS-2) requires the broker event loop to already be sorted out, then adds the last-known-portfolio cache layer. FX fallback (TS-5) is independent but low-priority relative to gRPC stability. Bond broker reconnect coordination (Pitfall 10) must be addressed in the same phase as channel reconnection logic.
+**Delivers:** Multi-hour portfolio blind windows eliminated, FX rate always available via CBR fallback, bond broker stays in sync after equity broker reconnect
+**Addresses:** TS-2 (70001 resilience), TS-5 (FX rate fallback + staleness tracking)
+**Avoids:** Pitfall 2 (duplicate orders during reconnect — post-reconnect reconciliation + idempotency keys), Pitfall 6 (CBR sync call blocking cycle — background fetch job, not inline call), Pitfall 10 (bond broker stale client reference after reconnect)
+**Research flag:** None — last-known-good cache and channel reset are textbook patterns. ARCHITECTURE.md provides code sketches for all three.
 
-**Delivers (v2.0):** Toxic symbols removed from MOEX segments (GAZP, VTBR, SNGS, IRAO, ALRS); dividend calendar expanded from 43 to 150+ events with `status` field and cancelled events; `exclude_periods` in BacktestConfig for Feb-Mar 2022; `vol_target` recalibrated to 0.35-0.40 in ru_*.yaml presets; `event_driven` disabled in backtest configs; `DEFAULT_STRATEGY_HOLD_BARS["dividend_gap"]` aligned to 60
-
-**Avoids:** Look-ahead bias (Pitfall 1 v2.0), survivorship bias (Pitfall 2 v2.0), vol undersizing (Pitfall 3 v2.0), phantom event_driven signals in backtest (Pitfall 9 v2.0)
-
-**Research flag:** Standard patterns — Pydantic models, Alembic migration, YAML config updates, T-Invest API calls against documented endpoints. No research phase needed.
-
-### Phase 2: Risk Layer Wiring and Core Monitoring Services
-
-**Rationale:** Risk layer rollout wiring (Phase 2 in ARCHITECTURE.md build order) must be validated in isolation before TradingLoop integration. Monitoring services depend on Phase 1 schemas and can be built and tested as standalone units before touching the live trading path. DividendGapStrategy wiring belongs here because it has data dependencies from Phase 1 and is the highest-confidence MOEX alpha source.
-
-**Delivers (v3.0):** CircuitBreaker and PreTradeChecker accept optional rollout_phase param (None preserves existing behavior); SandboxMonitorService with TimescaleDB persistence and JSONL read logic; GoNoGoReporter pure function with configurable threshold evaluation; AnomalyDetector z-score alerting on equity moves and fill rate drops
-
-**Delivers (v2.0):** DividendGapStrategy with corrected T+1 settlement date handling (last_buy_date vs. ex-date renamed and logic fixed); combiner `_EVENT_STRATEGIES` frozenset bypass so dividend signals are not diluted by ADX routing; rub_oil_regime.py wired into PositionSizingPipeline as a regime scale step
-
-**Addresses:** Formalized go/no-go gate (table stakes), gradual rollout tightened risk limits (table stakes), dividend gap correctness
-
-**Avoids:** Combiner diluting dividend signals (Pitfall 5 v2.0), T+1 settlement timing confusion (Pitfall 13 v2.0), monitoring logic in TradingLoop (anti-pattern from ARCHITECTURE.md)
-
-**Research flag:** Standard patterns — sizing pipeline step extension, combiner frozenset addition, pure service with existing JSONL and TimescaleDB infrastructure. No research phase needed.
-
-### Phase 3: API Endpoints, Kill Switch, and Health Monitoring
-
-**Rationale:** API endpoints are thin wrappers over Phase 2 services — lowest-risk API change, follows established sub-router pattern. Kill switch and health pulse extend TradingLoop (the highest-regression-risk change) and are done after all dependencies are tested. CBR regime wiring belongs here because it requires a new OFZ data source and is a Phase 3 deliverable per PITFALLS.md.
-
-**Delivers (v3.0):** GET /sandbox/metrics and GET /sandbox/gonogo REST endpoints; ProductionHealthMonitor 5-minute APScheduler job with broker ping and feed freshness checks; KillSwitch with strict order-cancellation sequence; TradingLoop extended with `_health_pulse_cycle()` and `activate_kill_switch()`; TelegramBotHandler extended with /gonogo, /health, /killswitch commands; MetricsCollector extended with ~5 new Prometheus gauges; REST API kill switch POST /api/v1/system/killswitch
-
-**Delivers (v2.0):** CBR regime integration using OFZ yield curve slope as leading indicator (not CBR announcement date); MacroSnapshot extended with brent_close and usdrub_daily_change fields; BacktestEngine passes MacroSnapshot through `_process_bar()` to strategy kwargs
-
-**Addresses:** REST API kill switch (table stakes), production health heartbeat (table stakes), CBR regime timing error (Pitfall 4 v2.0)
-
-**Avoids:** Kill switch that only stops the scheduler (v3.0 Pitfall P3), CBR timing error (v2.0 Pitfall 4)
-
-**Research flag:** CBR leading indicator design needs `/gsd:research-phase`. OFZ yield curve slope data source (MOEX ISS endpoint availability), RUONIA-OIS spread availability, and integration approach are open questions before implementation.
-
-### Phase 4: Sector Rotation, Sizing Pipeline, and Preferred Share Arbitrage
-
-**Rationale:** Sector rotation requires an explicit architectural decision (sizing step, not combiner strategy) and depends on clean universe (Phase 1) and calibrated vol target (Phase 1). Must be designed carefully — building it in the wrong layer has HIGH recovery cost. SectorAllocationStep must be analyzed alongside existing multiplicative sizing reduction to avoid MOEX positions clustering at the pipeline floor.
-
-**Delivers (v2.0):** SectorAllocationStep in PositionSizingPipeline (NOT in StrategyCombiner) with 20-day linear weight transition; SectorClassifier at Layer 2 with static YAML symbol-to-sector mapping; Brent-in-RUB gate (BZ=F * USDRUB, 1-day lag) for energy sector; PreferredShareArbStrategy (long-only spread convergence on SBER/SBERP, TATN/TATNP; entry threshold z > 2.0; window excludes 2022 crisis period); multiplicative sizing reduction cap at pipeline level
-
-**Addresses:** Sector rotation alpha on MOEX blue chips
-
-**Avoids:** Sector rotation in wrong layer (Pitfall 6 v2.0 — HIGH recovery cost), Brent gate wrong currency/lag (Pitfall 11 v2.0), multiplicative sizing floor (Pitfall 14 v2.0), preferred share constant spread assumption (Pitfall 10 v2.0)
-
-**Research flag:** Quantitative research needed on MOEX sector momentum validity and whether 3 years of post-2022 data is sufficient to avoid Pitfall 7 (overfitting to crisis). Preferred share cointegration test on post-2022 data must be run before implementing PreferredShareArbStrategy — if cointegration fails, skip the strategy.
-
-### Phase 5: Dashboard, Automated Gate, and MOEX ML
-
-**Rationale:** Dashboard pages and automated gate scheduling are read-only consumers of Phase 2-3 services and can be built any time after Phase 3 without affecting trading functionality. MOEX ML enablement depends on clean data (Phase 1), regime infrastructure (Phase 3), and a demonstrated positive equity baseline to validate against.
-
-**Delivers (v3.0):** Streamlit sandbox validation progress page with per-criterion progress bars and per-day equity chart; automated daily gate evaluation via APScheduler job at 19:00 MSK; strategy signal-frequency anomaly alert via Prometheus counters; post-live slippage vs. backtest comparison weekly Telegram report
-
-**Delivers (v2.0):** 10 new MOEX macro ML features (cbr_key_rate_level, cbr_rate_delta_3m, cbr_rate_direction, usdrub_return_20d, usdrub_zscore_60d, usdrub_vol_20d, brent_return_20d, brent_rub_spread, imoex_relative_21d, moex_turnover_zscore) gated by quality gates; ML walk-forward training excluding Feb-Mar 2022 with validation on 2024-2025 calm data
-
-**Addresses:** Automated gate evaluation (P2 feature), signal anomaly detection (P2 feature), MOEX ML alpha
-
-**Avoids:** Overfitting to 2022 crisis regime in ML (Pitfall 7 v2.0), MOEX ML on insufficient training samples
-
-**Research flag:** MOEX ML with < 3 years of clean post-2022 data has insufficient sample volume. Research on transfer learning from US model and pooled-sector feature approaches is needed before implementation. Portfolio orchestrator design (for OFZ/equity combined backtest) also needs research on monthly rebalancing mechanics.
+### Phase 4: Data Capture & Noise Reduction
+**Rationale:** DB persistence (TS-3) requires stable cycles from Phase 2 to produce meaningful data (60-min drift would generate misleading timestamps). Article deduplication (D-1) is independent but lower urgency than core stability. These are the highest-LOC changes but lowest operational risk — all writes are additive and fire-and-forget.
+**Delivers:** Full audit trail for orders, signals, news, and sentiment; ~50% reduction in LLM API calls from deduplication
+**Addresses:** TS-3 (DB persistence for all four tables), D-1 (article deduplication across RSS and Telegram sources)
+**Avoids:** Pitfall 3 (DB errors crash trading loop — strict fire-and-forget, separate error counter, never in critical path between order submission and position tracking), Pitfall 8 (dedup hash collisions — SHA256 URL hash, not Python built-in hash; 24h TTL eviction), Pitfall 11 (asyncpg session leak — `async with` + try/finally + pool_timeout=5)
+**Research flag:** None — SQLAlchemy `async_sessionmaker` fire-and-forget pattern and SHA256 dedup with TTL are fully documented in STACK.md and ARCHITECTURE.md.
 
 ### Phase Ordering Rationale
 
-- Schema and config must precede all service code — Layer 0/1 before Layer 4/6 (fundamental dependency direction)
-- Data integrity prerequisites (Phase 1 v2.0) are not optional — backtesting with dirty data invalidates all iteration results and makes them incomparable to v2.0 baselines; 104 rejected iterations partially traced to these problems
-- Risk layer wiring in isolation (Phase 2) before TradingLoop integration (Phase 3) limits regression surface to the most critical path changes
-- Sector rotation (Phase 4) is deferred because its architectural decision must not be made under time pressure and has the highest recovery cost if built incorrectly — the codebase must have a confirmed positive MOEX equity baseline before adding this complexity
-- Dashboard and automation (Phase 5) are genuinely optional for go-live — Telegram commands provide equivalent operational visibility for a single-operator system
+- Phase 1 before Phase 2: config fixes take minutes and eliminate confounding factors for the architectural changes; ticker rename must be correct before DB persistence keys orders by symbol
+- Phase 2 before Phase 3: broker event loop refactoring must be complete before adding cache/fallback logic on top of the refactored broker
+- Phase 2 before Phase 4: DB persistence needs stable 5-min cycles to produce useful data; 127 missed-job events being persisted would create misleading audit data
+- Phases 3 and 4 are independent of each other — can be parallelized if two implementation tracks are available
+- gRPC isolation, reconnect, and bond broker (Pitfalls 1, 2, 10) must all be addressed in Phases 2-3 — they interact tightly and partial fixes create dangerous race conditions with duplicate orders
 
 ### Research Flags
 
-Phases needing `/gsd:research-phase` during planning:
+Phases needing deeper research during planning:
+- **Phase 2 (gRPC loop consolidation):** The three-way refactoring touches three files simultaneously with asyncio.Lock semantics that must be preserved. If the exact implementation approach for gRPC loop sharing and lock migration is not clear before coding starts, run `/gsd:research-phase` scoped to the asyncio.Lock + gRPC shared loop pattern.
 
-- **Phase 3 (CBR leading indicator):** OFZ yield curve slope data source (MOEX ISS vs. separate endpoint), RUONIA-OIS spread availability, and pre-meeting consensus rate input mechanism are all open questions before CBR regime implementation
-- **Phase 3 (Kill switch order cancellation):** BrokerRouter.cancel_all_pending() interface needs verification; BrokerBase may need extension; needs targeted API research before implementation
-- **Phase 4 (Sector rotation alpha validation):** Whether MOEX sector momentum is statistically significant on 3 years of post-2022 data is unvalidated; academic threshold sources needed to avoid overfitting to 2022 crisis
-- **Phase 5 (MOEX ML sample size):** Transfer learning from US model to MOEX to address the 3-year vs. 10-year training data gap; pooled-sector feature approach; validation methodology on limited clean data
-
-Phases with standard patterns (skip research-phase):
-
-- **Phase 1:** Pydantic schema additions, Alembic migration, YAML config updates, T-Invest API calls — all patterns established in codebase
-- **Phase 2:** Sizing pipeline step addition, combiner frozenset extension, pure service with JSONL and TimescaleDB — all precedented in codebase
-- **Phase 4 (preferred share arb):** Extends existing PairsStrategy pattern with MOEX-specific config — standard if cointegration test passes
+Phases with standard patterns (skip additional research):
+- **Phase 1:** Config-only changes. No research needed.
+- **Phase 3:** Last-known-good cache pattern. Code sketches already in ARCHITECTURE.md. No research needed.
+- **Phase 4:** SQLAlchemy async fire-and-forget and SHA256 dedup with TTL are fully specified in STACK.md and ARCHITECTURE.md. No research needed.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack (v3.0) | HIGH | Direct codebase audit. Every existing capability verified against source. New package versions confirmed on PyPI. Zero ambiguity on what exists vs. what is new. |
-| Features (v3.0) | HIGH | Based on direct codebase audit of existing validation scripts + industry sources on trading system go-live requirements. Anti-features clearly identified with explicit rationale. |
-| Architecture (v3.0) | HIGH | Layer-by-layer analysis of all 6 layers. Component boundaries verified against existing interfaces (TradingLoop, CircuitBreaker, PreTradeChecker, TelegramBotHandler). Dependency chain confirmed. |
-| Pitfalls (v3.0) | HIGH (confirmed) / MEDIUM (severity quantification) | Pitfalls confirmed against codebase. Severity of sandbox false confidence on live MOEX execution quality (0.3-1.5% worse fills) is estimated from market microstructure knowledge, not measured. |
-| Stack (v2.0) | HIGH | Zero new packages required; all building blocks confirmed in codebase against pyproject.toml. |
-| Features (v2.0) | MEDIUM | Dividend closure statistics from financial media; CBR sector impact magnitudes from Forbes.ru/RBC; these require live empirical validation. |
-| Architecture (v2.0) | HIGH | Derived from direct inspection of combiner.py, position_sizing_pipeline.py, engine.py, dividend_gap.py, cbr_calendar.py, rub_oil_regime.py; all layer boundaries confirmed. |
-| Pitfalls (v2.0) | HIGH (structural) / MEDIUM (MOEX domain) | Structural pitfalls (vol target, T+1 settlement, combiner routing, sector rotation layer) verified in code. MOEX domain pitfalls (CBR pricing timing, Brent correlation lag) are research-informed estimates. |
+| Stack | HIGH | No new dependencies. All fixes verified against existing installed library docs. The gRPC PollerCompletionQueue EAGAIN behavior confirmed by official gRPC docs + LangGraph community reports. |
+| Features | HIGH | Based on direct sandbox observation with specific measured metrics (127 missed jobs, 62 portfolio failures, 0 DB rows, 0 Loki entries, FX=0.0). No speculation — each feature addresses a measured failure. |
+| Architecture | HIGH | Based on direct codebase inspection of all 11 files to be modified, with line numbers. Code sketches for all fixes are in ARCHITECTURE.md and validated against existing patterns in the codebase. |
+| Pitfalls | HIGH | Based on codebase analysis + production sandbox validation logs. All pitfalls are grounded in specific code constructs (e.g., `asyncio.Lock` on wrong loop, `_client` shared reference in bond broker). Prevention strategies are concrete and testable. |
 
-**Overall confidence:** HIGH for v3.0 execution plan. MEDIUM-HIGH for v2.0 MOEX strategy alpha projections.
+**Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **Slippage budget quantification:** The 0.3-1.5% live slippage estimate for MOEX mid-caps needs validation against actual MOEX ISS order book data before finalizing go/no-go slippage threshold. This is a Phase 2 task, not a planning blocker.
-- **Go/no-go threshold calibration:** The specific thresholds (uptime >= 99%, fill rate >= 95%, DD < 5%) need validation against walk-forward backtest distribution percentiles from existing PortfolioBacktestOrchestrator results. This is a Phase 2 deliverable.
-- **OFZ yield curve data source:** CBR regime overlay (Phase 3 v2.0) requires OFZ 2Y-10Y yield data. MOEX ISS provides OFZ yield data but integration is unverified. This is the key open question for Phase 3 planning.
-- **Preferred share spread stationarity post-2022:** SBER/SBERP spread was non-stationary in 2022 (preferred briefly exceeded common). Cointegration test on post-2022 data must be run before Phase 4 preferred arb implementation — if cointegration fails, skip the strategy entirely.
-- **MOEX sector index ticker availability via ISS:** MOEX ISS confirmed for IMOEX; specific sector tickers (MOEXOG, MOEXFN, MOEXMM) need live API validation before Phase 4 sector rotation implementation.
+- **Bond broker reconnect coordination (Pitfall 10):** `make_bond_broker()` in `tinkoff_broker.py` (line 529) shares the equity broker's `_client` reference. After equity reconnect, bond broker gets a stale client. The exact fix (shared client holder vs. coordinated reconnect) depends on the event loop consolidation design chosen in Phase 2 — resolve during Phase 2 planning before implementation.
+- **Promtail drop stage regex (Pitfall 12):** The current drop regex (`^INFO:.*"GET /metrics.*`) does not match structlog JSON output. The exact structlog JSON key structure and Promtail `json` pipeline stage config need to be verified against a live log sample during Phase 2. Low risk to delay to Phase 2 implementation rather than planning.
+- **Market-hours gate placement (Pitfall 7):** PITFALLS.md recommends gating at order submission rather than cycle start to avoid missing the last 45 minutes of the session. FEATURES.md (TS-6) recommends gating at cycle entry for simplicity. Resolve during Phase 1: implement both (cycle-entry gate as early exit + submission-time gate as defense-in-depth). This is not a research question — it is an implementation decision.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-
-- Codebase direct inspection: `src/finalayze/` all 6 layers — `api/metrics.py`, `core/validation_logger.py`, `core/trading_loop.py`, `core/telegram_bot.py`, `risk/circuit_breaker.py`, `risk/pre_trade_check.py`, `risk/position_sizing_pipeline.py`, `execution/sandbox_tracker.py`, `strategies/combiner.py`, `strategies/dividend_gap.py`, `strategies/presets/ru_blue_chips.yaml`, `risk/rub_oil_regime.py`, `backtest/config.py`, `config/segments.py`, `pyproject.toml`
-- WeasyPrint v68.1: https://pypi.org/project/weasyprint/ (released 2025-01-30)
-- Jinja2 v3.1.6: https://pypi.org/project/Jinja2/
-- APScheduler 4.x pre-release status: https://github.com/agronholm/apscheduler/issues/465
-- aiogram v3: https://docs.aiogram.dev/en/latest/
-- CBR key rate history: https://cbr.ru/eng/hd_base/KeyRate/
-- MOEX ISS API: https://iss.moex.com/iss/reference/
-- T-Invest API: t-tech-investments gRPC SDK proto definitions
+- Direct codebase inspection: `src/finalayze/orchestration/trading_loop.py` (2400+ lines, all cycle methods), `src/finalayze/execution/tinkoff_broker.py` (519 lines), `src/finalayze/data/fetchers/tinkoff_data.py`, `src/finalayze/core/models.py`, `src/finalayze/markets/fx_service.py`, `src/finalayze/data/fetchers/cbr.py`, `config/segments.py`, `monitoring/promtail/promtail-config.yml`, `monitoring/loki/loki-config.yml`, `docker/docker-compose.sandbox.yml`
+- Sandbox validation logs (March 20-30, 2026): 127 missed scheduler jobs, 62 portfolio fetch failures, 0 DB rows, 0 Loki log entries, FX=0.0
+- [gRPC Python AsyncIO API docs](https://grpc.github.io/grpc/python/grpc_asyncio.html) — PollerCompletionQueue behavior, channel lifecycle
+- [grpc/grpc#25364](https://github.com/grpc/grpc/issues/25364) — multi-thread async client thread safety discussion
+- [SQLAlchemy 2.0 AsyncIO docs](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html) — `async_sessionmaker` thread safety, `expire_on_commit=False` requirement
 
 ### Secondary (MEDIUM confidence)
+- [LangGraph PollerCompletionQueue thread](https://forum.langchain.com/t/pollercompletionqueue-handle-events-blockingioerror-spam-in-langgraph-cloud-logs/3232) — EAGAIN suppression pattern validated by community at grpcio >= 1.75
+- [Promtail Docker SD troubleshooting](https://community.grafana.com/t/promtail-does-not-collect-logs-from-other-containers/87000) — `/var/lib/docker/containers` volume mount requirement confirmed by multiple independent reports
+- [Grafana Loki issue #5955](https://github.com/grafana/loki/issues/5955) — "Unable to find any logs to tail" resolution
+- [gRPC environment variables reference](https://grpc.github.io/grpc/core/md_doc_environment_variables.html) — GRPC_POLL_STRATEGY analysis
 
-- FIA Best Practices for Automated Trading Risk Controls: https://www.fia.org/fia/articles/fia-releases-best-practices-automated-trading-risk-controls-and-system-safeguards
-- NYIF: Trading System Kill Switch: https://www.nyif.com/articles/trading-system-kill-switch-panacea-or-pandoras-box
-- Eventus: Algo Monitoring Real-Time Oversight: https://www.eventus.com/algo-monitoring-real-time-oversight-for-automated-ever-evolving-markets/
-- MOEX dividend calendar: https://www.moex.com/ru/listing/dividend-yield.aspx
-- Smart-Lab dividend calendar: https://smart-lab.ru/dividends/
-- Dividend gap closure statistics (2024-2025): https://www.finam.ru/publications/item/istoricheski-lukoyl-i-tatneft-obladayut-potentsialom-bystrogo-vosstanovleniya-posle-dividendnogo-gepa-20250604-0900/
-- CBR rate cut sector impact: https://www.forbes.ru/investicii/543288-raduznye-nadezdy-kakie-akcii-vyrastut-iz-za-snizenia-stavki-cb
-- Common pitfalls of sector rotation: https://www.gwcindia.in/gigapro/blog/common-pitfalls-of-sector-rotation-and-how-to-avoid-them/
-- Sector Rotation Myth (Molchanov 2024): https://onlinelibrary.wiley.com/doi/10.1002/ijfe.2882
-- MOEX 2022 crisis structural break: Bloomberg (Russian Stocks Slump Most on Record, 2022-02-24)
-
-### Tertiary (LOW confidence)
-
-- Live MOEX slippage estimates (0.3-1.5% for illiquid instruments) — estimated from market microstructure knowledge; needs empirical validation during sandbox period
-- Brent-MOEX energy correlation magnitude (0.6-0.8) and 1-3 day lag — general market knowledge; needs empirical validation against training data
-- Preferred share spread ranges (SBER/SBERP: 5-15%) — historical patterns; current levels require live cointegration check on post-2022 data
+### Tertiary (LOW confidence — validate during implementation)
+- CBR XML_daily.asp API stability claim ("unchanged for 10+ years") — credible based on API age and widespread use, but not independently benchmarked; will be confirmed empirically when FX fallback is wired in Phase 3
 
 ---
-*Research completed: 2026-03-21*
+*Research completed: 2026-03-30*
 *Ready for roadmap: yes*
