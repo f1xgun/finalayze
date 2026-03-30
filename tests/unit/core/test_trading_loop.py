@@ -234,3 +234,61 @@ class TestSentimentTimeDecay:
         loop = _make_loop()
         result = loop._read_decayed_sentiment("nonexistent", "SBER")  # type: ignore[attr-defined]
         assert result == 0.0
+
+
+class TestMarketHoursGate:
+    """OPS-01: _strategy_cycle skips when all registered markets are closed."""
+
+    def test_strategy_cycle_skips_when_markets_closed(self) -> None:
+        """_strategy_cycle returns early when all registered markets are closed."""
+        loop = _make_loop()
+
+        # Mode allows orders
+        loop._settings.mode.can_submit_orders.return_value = True  # type: ignore[attr-defined]
+
+        # Register two markets, both closed
+        loop._broker_router.registered_markets = ["us", "moex"]  # type: ignore[attr-defined]
+
+        mock_schedule_us = MagicMock()
+        mock_schedule_us.is_market_open.return_value = False
+        mock_schedule_moex = MagicMock()
+        mock_schedule_moex.is_market_open.return_value = False
+
+        # Mock _strategy_cycle_impl to track if it gets called
+        loop._strategy_cycle_impl = MagicMock()  # type: ignore[attr-defined]
+
+        with patch(
+            "finalayze.orchestration.trading_loop.SCHEDULES",
+            {"us": mock_schedule_us, "moex": mock_schedule_moex},
+        ):
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+
+        # _strategy_cycle_impl should NOT have been called (early return)
+        loop._strategy_cycle_impl.assert_not_called()  # type: ignore[attr-defined]
+
+    def test_strategy_cycle_runs_when_market_open(self) -> None:
+        """_strategy_cycle proceeds when at least one market is open."""
+        loop = _make_loop()
+
+        # Mode allows orders
+        loop._settings.mode.can_submit_orders.return_value = True  # type: ignore[attr-defined]
+
+        # Register two markets, one open
+        loop._broker_router.registered_markets = ["us", "moex"]  # type: ignore[attr-defined]
+
+        mock_schedule_us = MagicMock()
+        mock_schedule_us.is_market_open.return_value = True
+        mock_schedule_moex = MagicMock()
+        mock_schedule_moex.is_market_open.return_value = False
+
+        # Mock _strategy_cycle_impl to prevent actual execution
+        loop._strategy_cycle_impl = MagicMock()  # type: ignore[attr-defined]
+
+        with patch(
+            "finalayze.orchestration.trading_loop.SCHEDULES",
+            {"us": mock_schedule_us, "moex": mock_schedule_moex},
+        ):
+            loop._strategy_cycle()  # type: ignore[attr-defined]
+
+        # _strategy_cycle_impl SHOULD have been called
+        loop._strategy_cycle_impl.assert_called_once()  # type: ignore[attr-defined]

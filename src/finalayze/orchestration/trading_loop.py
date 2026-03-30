@@ -15,9 +15,11 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import math
 import threading
 import time
+from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -35,6 +37,7 @@ except ImportError:  # pragma: no cover
     SQLAlchemyJobStore = None  # type: ignore[assignment,misc]
 from finalayze.data.normalizer import DataNormalizer
 from finalayze.markets.currency import CurrencyConverter
+from finalayze.markets.schedule import SCHEDULES
 
 if TYPE_CHECKING:
     from config.settings import Settings
@@ -82,6 +85,8 @@ _STALENESS_THRESHOLD_HOURS: float = 48.0  # 2x daily timeframe; skip if latest c
 _ATR_MULTIPLIER_US = Decimal("2.0")
 _ATR_MULTIPLIER_MOEX = Decimal("2.5")
 _MARKET_CURRENCY: dict[str, str] = {"us": "USD", "moex": "RUB"}
+_ARTICLE_DEDUP_MAX_SIZE = 5000  # max hashes to track
+_ARTICLE_DEDUP_TTL_HOURS = 24  # skip articles seen within this window
 
 # US market hours in UTC: 9:30-16:00 ET = 14:30-21:00 UTC
 _US_OPEN_UTC = (14, 30)
@@ -172,6 +177,9 @@ class TradingLoop:
 
         # Cached check: any segment has event_driven strategy enabled?
         self._event_driven_active: bool | None = None
+
+        # Article dedup: SHA-256(url|title) -> monotonic timestamp (OPS-03)
+        self._seen_article_hashes: OrderedDict[str, float] = OrderedDict()
 
         # Daily baseline equities: market_id -> equity at start of trading day
         self._baseline_equities: dict[str, Decimal] = {}
@@ -849,6 +857,34 @@ class TradingLoop:
             processed_fail=processed_fail,
         )
 
+    def _is_article_duplicate(self, article: NewsArticle) -> bool:
+        """Check if article was already processed within the TTL window.
+
+        Uses SHA-256 of (url + title) as the dedup key. Evicts entries
+        older than _ARTICLE_DEDUP_TTL_HOURS and caps at _ARTICLE_DEDUP_MAX_SIZE.
+        """
+        key = hashlib.sha256(f"{article.url}|{article.title}".encode()).hexdigest()
+        now = time.monotonic()
+
+        # Evict expired entries (oldest first, since OrderedDict preserves insertion order)
+        cutoff = now - _ARTICLE_DEDUP_TTL_HOURS * 3600
+        while self._seen_article_hashes:
+            oldest_key, oldest_ts = next(iter(self._seen_article_hashes.items()))
+            if oldest_ts < cutoff:
+                del self._seen_article_hashes[oldest_key]
+            else:
+                break
+
+        if key in self._seen_article_hashes:
+            return True
+
+        self._seen_article_hashes[key] = now
+        # Cap size
+        while len(self._seen_article_hashes) > _ARTICLE_DEDUP_MAX_SIZE:
+            self._seen_article_hashes.popitem(last=False)
+
+        return False
+
     async def _analyze_impact_batch(
         self, articles: list[NewsArticle]
     ) -> tuple[int, int, str]:
@@ -860,6 +896,19 @@ class TradingLoop:
         Returns:
             (ok_count, fail_count, last_error_type) for summary logging.
         """
+        # Deduplicate articles already seen within TTL window (OPS-03)
+        unique_articles = [a for a in articles if not self._is_article_duplicate(a)]
+        skipped_count = len(articles) - len(unique_articles)
+        if skipped_count > 0:
+            _log.info(
+                "news_articles_deduplicated",
+                skipped=skipped_count,
+                remaining=len(unique_articles),
+            )
+        articles = unique_articles
+        if not articles:
+            return 0, 0, ""
+
         sem = asyncio.Semaphore(5)
         ok_count = 0
         fail_count = 0
@@ -1078,7 +1127,7 @@ class TradingLoop:
             return 0.0
         return (self._peak_equity_rub - equity_rub) / self._peak_equity_rub
 
-    def _strategy_cycle(self) -> None:
+    def _strategy_cycle(self) -> None:  # noqa: PLR0915
         """For each market and instrument, generate a signal and submit orders."""
         import time as _time  # noqa: PLC0415
 
@@ -1089,6 +1138,20 @@ class TradingLoop:
             _log.info(
                 "_strategy_cycle: mode=%s does not allow orders -- skipping",
                 self._settings.mode,
+            )
+            return
+
+        # 6A.2: Market-hours gate -- skip cycle when all markets are closed
+        any_market_open = False
+        for market_id in self._broker_router.registered_markets:
+            schedule = SCHEDULES.get(market_id)
+            if schedule is None or schedule.is_market_open():
+                any_market_open = True
+                break
+        if not any_market_open:
+            _log.info(
+                "strategy_cycle_skipped_markets_closed",
+                markets=list(self._broker_router.registered_markets),
             )
             return
 
