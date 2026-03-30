@@ -111,7 +111,10 @@ Plans:
   1. gRPC calls (TinkoffBroker, TinkoffFetcher) run on a dedicated event loop thread isolated from the main asyncio loop -- no BlockingIOError from PollerCompletionQueue, strategy cycles complete within 5 minutes of their scheduled time
   2. Promtail ships Docker container logs from all 7 containers to Loki -- `/var/lib/docker/containers` is mounted and JSON log format is correctly parsed
   3. Grafana log dashboard queries return results for all containers with at least 30 days of retention -- logs from any container are searchable within seconds of being emitted
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 29-01-PLAN.md -- gRPC event loop isolation (GRPC-01)
+- [ ] 29-02-PLAN.md -- Loki log pipeline fix (OBS-01, OBS-02)
 
 ### Phase 30: Broker Resilience
 **Goal**: Trading continues through T-Bank API failures and FX rate is always available for position sizing
@@ -149,6 +152,6 @@ Note: Phases 30 and 31 both depend on Phase 29 but are independent of each other
 | 19-22 | v4.0 | 10/10 | Complete | 2026-03-22 |
 | 23-27 | v5.0 | 9/9 | Complete | 2026-03-24 |
 | 28. Operational Hygiene | v6.0 | 2/2 | Complete    | 2026-03-30 |
-| 29. Core Stability | v6.0 | 0/TBD | Not started | - |
+| 29. Core Stability | v6.0 | 0/2 | Not started | - |
 | 30. Broker Resilience | v6.0 | 0/TBD | Not started | - |
 | 31. Data Capture | v6.0 | 0/TBD | Not started | - |
