@@ -1563,6 +1563,12 @@ class TradingLoop:
 
         self._cycle_signals_generated += 1
 
+        # Fire-and-forget signal persistence (PERSIST-02)
+        self._persist_to_db(
+            self._persist_signal_async(signal),
+            table="signals",
+        )
+
         if self._metrics:
             self._metrics.record_signal(
                 market=market_id,
@@ -1962,6 +1968,12 @@ class TradingLoop:
                 )
                 self._alerter.on_trade_filled(result, market_id, broker=market_id)
 
+                # Fire-and-forget order persistence (PERSIST-01)
+                self._persist_to_db(
+                    self._persist_order_async(order, result, market_id),
+                    table="orders",
+                )
+
                 # Compute slippage in bps
                 expected_price = candles[-1].close if candles else None
                 if (
@@ -2357,6 +2369,59 @@ class TradingLoop:
 
             db_write_failures.labels(table=table).inc()
             _log.warning("db_persist_failed", table=table, exc_info=True)
+
+    async def _persist_order_async(
+        self,
+        order: OrderRequest,
+        result: Any,
+        market_id: str,
+    ) -> None:
+        """Persist a filled/rejected order to the orders table."""
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+        from finalayze.core.models import OrderModel  # noqa: PLC0415
+
+        factory = get_async_session_factory()
+        async with factory() as session:
+            row = OrderModel(
+                broker=market_id,
+                broker_order_id=result.order_id or None,
+                symbol=order.symbol,
+                market_id=market_id,
+                side=order.side,
+                order_type="market",
+                quantity=order.quantity,
+                currency="RUB" if market_id.startswith(("moex", "ru_")) else "USD",
+                status="filled" if result.filled else "rejected",
+                filled_quantity=result.quantity if result.filled else Decimal(0),
+                filled_avg_price=result.fill_price,
+                filled_at=self._now() if result.filled else None,
+                submitted_at=self._now(),
+                mode=self._settings.mode.value,
+            )
+            session.add(row)
+            await session.commit()
+
+    async def _persist_signal_async(self, signal: Any) -> None:
+        """Persist a generated signal to the signals table."""
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+        from finalayze.core.models import SignalModel  # noqa: PLC0415
+
+        factory = get_async_session_factory()
+        async with factory() as session:
+            row = SignalModel(
+                strategy_name=signal.strategy_name,
+                symbol=signal.symbol,
+                market_id=signal.market_id,
+                segment_id=signal.segment_id,
+                direction=signal.direction.value,
+                confidence=Decimal(str(round(signal.confidence, 4))),
+                features=signal.features or None,
+                reasoning=signal.reasoning,
+                created_at=self._now(),
+                mode=self._settings.mode.value,
+            )
+            session.add(row)
+            await session.commit()
 
     def _persist_equity_snapshots(
         self,
