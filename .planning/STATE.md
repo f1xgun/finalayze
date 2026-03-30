@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Sandbox Stability & Observability
-status: roadmap_complete
-stopped_at: null
-last_updated: "2026-03-30"
+status: Ready to execute
+stopped_at: Completed 28-01-PLAN.md
+last_updated: "2026-03-30T08:26:57.120Z"
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # Project State
@@ -19,16 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 28 -- Operational Hygiene
+**Current focus:** Phase 28 — operational-hygiene
 
 ## Current Position
 
-Phase: 28 of 31 (Operational Hygiene)
-Plan: -- (not yet planned)
-Status: Ready to plan
-Last activity: 2026-03-30 -- Roadmap created for v6.0
-
-Progress: [░░░░░░░░░░] 0%
+Phase: 28 (operational-hygiene) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -50,6 +46,7 @@ Carried from v5.0:
 ### Sandbox Analysis Findings (2026-03-30)
 
 Key issues from week-long sandbox run (March 20-30):
+
 - gRPC BlockingIOError floods asyncio loop -- 127 missed scheduler jobs, cycle drift up to 60 min
 - T-Bank API error 70001 -- 62 portfolio fetch failures, multi-hour outage windows
 - DB persistence broken -- 0 rows across all 4 tables after 5 days
@@ -71,6 +68,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-30
-Stopped at: Roadmap created, ready to plan Phase 28
+Last session: 2026-03-30T08:26:57.116Z
+Stopped at: Completed 28-01-PLAN.md
 Resume file: None
