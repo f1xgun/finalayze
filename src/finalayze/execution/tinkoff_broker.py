@@ -91,6 +91,11 @@ class TinkoffBroker(BrokerBase):
         self._services: object | None = None  # AsyncServices from __aenter__
         self._client_lock = threading.Lock()  # for sync _get_client only
         self._async_lock = asyncio.Lock()  # for async _get_services_async
+        # Portfolio cache for 70001 fallback
+        self._last_known_portfolio: PortfolioState | None = None
+        self._last_portfolio_at: datetime | None = None
+        self._consecutive_70001_errors: int = 0
+        self._MAX_70001_BEFORE_RECONNECT: int = 5
         # Externally injected gRPC event loop (from TradingLoop / run_sandbox.py).
         # When set, _run_async uses this loop instead of creating a self-managed one.
         self._grpc_loop = grpc_loop
@@ -396,11 +401,20 @@ class TinkoffBroker(BrokerBase):
         )
 
     def get_portfolio(self) -> PortfolioState:
-        """Return current MOEX portfolio state from Tinkoff."""
+        """Return current MOEX portfolio state from Tinkoff.
+
+        On success, caches the result for fallback. On T-Bank error 70001,
+        returns the cached portfolio if available (stale-but-usable).
+        After ``_MAX_70001_BEFORE_RECONNECT`` consecutive 70001 errors,
+        auto-triggers ``reconnect_client()`` to reset the gRPC channel.
+        """
         try:
             self._ensure_account_id()
             portfolio = self._call(lambda: self._run_async(self._get_portfolio_async()))
         except Exception as exc:
+            exc_str = str(exc)
+            if "70001" in exc_str:
+                return self._handle_70001_fallback(exc)
             _log.exception("portfolio_fetch_failed")
             msg = f"Tinkoff portfolio fetch failed: {exc}"
             raise BrokerError(msg) from exc
@@ -415,18 +429,63 @@ class TinkoffBroker(BrokerBase):
             else:
                 pos_map[pos.figi] = qty  # Tinkoff positions are FIGI-keyed
 
+        result = PortfolioState(
+            cash=cash_sum,
+            positions=pos_map,
+            equity=total,
+            timestamp=datetime.now(tz=UTC),
+        )
+
+        # Cache on success and reset error counter
+        self._last_known_portfolio = result
+        self._last_portfolio_at = datetime.now(tz=UTC)
+        self._consecutive_70001_errors = 0
+
         _log.debug(
             "portfolio_fetched",
             equity=float(total),
             cash=float(cash_sum),
             positions=len(pos_map),
         )
-        return PortfolioState(
-            cash=cash_sum,
-            positions=pos_map,
-            equity=total,
-            timestamp=datetime.now(tz=UTC),
+        return result
+
+    def _handle_70001_fallback(self, exc: Exception) -> PortfolioState:
+        """Handle T-Bank error 70001 with portfolio cache fallback.
+
+        Returns cached portfolio if available, otherwise re-raises.
+        Triggers auto-reconnect after threshold consecutive errors.
+        """
+        if self._last_known_portfolio is None:
+            _log.exception("portfolio_fetch_failed_no_cache")
+            msg = f"Tinkoff portfolio fetch failed: {exc}"
+            raise BrokerError(msg) from exc
+
+        self._consecutive_70001_errors += 1
+        cache_age_seconds = (
+            (datetime.now(tz=UTC) - self._last_portfolio_at).total_seconds()
+            if self._last_portfolio_at is not None
+            else -1.0
         )
+        _log.warning(
+            "portfolio_using_cached",
+            cache_age_seconds=round(cache_age_seconds, 1),
+            consecutive_70001_errors=self._consecutive_70001_errors,
+        )
+
+        if self._consecutive_70001_errors >= self._MAX_70001_BEFORE_RECONNECT:
+            _log.warning(
+                "grpc_channel_reconnecting_70001",
+                consecutive_errors=self._consecutive_70001_errors,
+            )
+            success = self.reconnect_client()
+            if success:
+                _log.info(
+                    "grpc_channel_reconnected_70001",
+                    attempt_count=self._consecutive_70001_errors,
+                )
+            self._consecutive_70001_errors = 0
+
+        return self._last_known_portfolio
 
     async def _get_portfolio_async(self) -> object:
         """Async call to Tinkoff SDK get_portfolio."""
