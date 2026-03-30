@@ -549,18 +549,27 @@ _log.info(
     news_cycle_min=settings.news_cycle_minutes,
 )
 
-alerter.send_alert(
-    f"Sandbox started: mode={settings.mode.value}, "
-    f"markets={broker_router.registered_markets}, "
-    f"instruments={len(registry.list_by_market('moex'))}"
-)
+try:
+    alerter.send_alert(
+        f"Sandbox started: mode={settings.mode.value}, "
+        f"markets={broker_router.registered_markets}, "
+        f"instruments={len(registry.list_by_market('moex'))}"
+    )
+except Exception:
+    _log.warning(
+        "alerter_startup_failed",
+        reason="Telegram alert failed at startup -- trading loop will continue",
+    )
 
 try:
     loop.start()  # blocks until stop() is called
 except KeyboardInterrupt:
     _log.info("keyboard_interrupt")
 finally:
-    alerter.send_alert("Sandbox shutdown")
+    try:
+        alerter.send_alert("Sandbox shutdown")
+    except Exception:
+        _log.warning("alerter_shutdown_failed")
     loop.stop()
     tinkoff_broker.close()
     tinkoff_broker_bonds.close()
