@@ -236,6 +236,62 @@ class TestSentimentTimeDecay:
         assert result == 0.0
 
 
+def _make_article(*, url: str = "https://example.com/1", title: str = "Test Article") -> NewsArticle:
+    """Create a minimal NewsArticle for dedup tests."""
+    from uuid import uuid4
+
+    return NewsArticle(
+        id=uuid4(),
+        source="test",
+        title=title,
+        content="body",
+        url=url,
+        language="en",
+        published_at=datetime.now(UTC),
+    )
+
+
+class TestArticleDedup:
+    """OPS-03: Duplicate articles are filtered by SHA-256(url|title) before LLM processing."""
+
+    def test_article_dedup_skips_duplicate(self) -> None:
+        """Same article (url+title) is flagged as duplicate on second call."""
+        loop = _make_loop()
+        article = _make_article()
+
+        first = loop._is_article_duplicate(article)  # type: ignore[attr-defined]
+        second = loop._is_article_duplicate(article)  # type: ignore[attr-defined]
+
+        assert first is False
+        assert second is True
+
+    def test_article_dedup_ttl_expires(self) -> None:
+        """Article is no longer considered duplicate after TTL expires."""
+        loop = _make_loop()
+        article = _make_article()
+
+        # First call: mark as seen
+        assert loop._is_article_duplicate(article) is False  # type: ignore[attr-defined]
+
+        # Manually backdate the stored timestamp beyond TTL (24h)
+        key = list(loop._seen_article_hashes.keys())[0]  # type: ignore[attr-defined]
+        loop._seen_article_hashes[key] = time.monotonic() - 25 * 3600  # type: ignore[attr-defined]
+        # Move to front so eviction can find it
+        loop._seen_article_hashes.move_to_end(key, last=False)  # type: ignore[attr-defined]
+
+        # Should NOT be duplicate anymore (TTL expired, entry evicted)
+        assert loop._is_article_duplicate(article) is False  # type: ignore[attr-defined]
+
+    def test_article_dedup_different_articles_pass(self) -> None:
+        """Two articles with different URLs are both not duplicates."""
+        loop = _make_loop()
+        a1 = _make_article(url="https://example.com/1")
+        a2 = _make_article(url="https://example.com/2")
+
+        assert loop._is_article_duplicate(a1) is False  # type: ignore[attr-defined]
+        assert loop._is_article_duplicate(a2) is False  # type: ignore[attr-defined]
+
+
 class TestMarketHoursGate:
     """OPS-01: _strategy_cycle skips when all registered markets are closed."""
 
