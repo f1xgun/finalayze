@@ -979,6 +979,20 @@ class TradingLoop:
             async with sem:
                 try:
                     result = await analyzer.analyze(article)
+                    # Fire-and-forget news article persistence (PERSIST-03)
+                    try:
+                        await self._persist_news_article_async(article, result)
+                    except Exception:
+                        from finalayze.api.metrics import (  # noqa: PLC0415
+                            db_write_failures,
+                        )
+
+                        db_write_failures.labels(table="news_articles").inc()
+                        _log.warning(
+                            "db_persist_failed",
+                            table="news_articles",
+                            exc_info=True,
+                        )
                     self._apply_impact_result(result)
                     consecutive_failures = 0
                     return True
@@ -1043,6 +1057,9 @@ class TradingLoop:
                         self._sentiment_cache[cache_key] = (new_score, time.monotonic())
                         redis_updates.append((seg_id, ticker, new_score))
 
+        # Fire-and-forget sentiment persistence (PERSIST-04)
+        self._persist_sentiment_scores(ticker_scores, active_segments, result.confidence)
+
         # Redis write outside lock
         if self._cache is not None:
             for seg_id, ticker, score in redis_updates:
@@ -1052,6 +1069,22 @@ class TradingLoop:
                     )
                 except Exception:
                     _log.debug("Failed to write sentiment to Redis cache")
+
+    def _persist_sentiment_scores(
+        self,
+        ticker_scores: dict[str, float],
+        active_segments: list[str],
+        confidence: float,
+    ) -> None:
+        """Fire-and-forget sentiment persistence to DB (PERSIST-04)."""
+        if not ticker_scores:
+            return
+        has_non_ru = any(not s.startswith("ru_") for s in active_segments)
+        market_id = "us" if has_non_ru else "moex"
+        self._persist_to_db(
+            self._persist_sentiment_batch_async(ticker_scores, market_id, confidence),
+            table="sentiment_scores",
+        )
 
     def _get_segment_tickers(self, seg_id: str) -> list[str]:
         """Get ticker symbols for instruments in this segment."""
@@ -2369,6 +2402,72 @@ class TradingLoop:
 
             db_write_failures.labels(table=table).inc()
             _log.warning("db_persist_failed", table=table, exc_info=True)
+
+    async def _persist_news_article_async(
+        self,
+        article: NewsArticle,
+        impact_result: NewsImpactResult | None,
+    ) -> None:
+        """Persist a news article to the news_articles table (PERSIST-03)."""
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+        from finalayze.core.models import NewsArticleModel  # noqa: PLC0415
+
+        content_hash = hashlib.sha256(article.content.encode()).hexdigest()[:32]
+        factory = get_async_session_factory()
+        async with factory() as session:
+            row = NewsArticleModel(
+                source=article.source[:50],
+                title=article.title,
+                summary=article.content[:500] if article.content else None,
+                content=content_hash,
+                url=article.url or None,
+                language=getattr(article, "language", "en"),
+                published_at=article.published_at,
+                symbols=list(impact_result.direct_tickers) if impact_result else [],
+                affected_segments=(
+                    [s.sector for s in impact_result.affected_sectors]
+                    if impact_result
+                    else []
+                ),
+                raw_sentiment=(
+                    Decimal(str(round(impact_result.sentiment, 4)))
+                    if impact_result
+                    else None
+                ),
+                credibility_score=(
+                    Decimal(str(round(impact_result.confidence, 4)))
+                    if impact_result
+                    else None
+                ),
+                is_processed=impact_result is not None,
+            )
+            session.add(row)
+            await session.commit()
+
+    async def _persist_sentiment_batch_async(
+        self,
+        ticker_scores: dict[str, float],
+        market_id: str,
+        confidence: float,
+    ) -> None:
+        """Persist sentiment scores for a batch of tickers (PERSIST-04)."""
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+        from finalayze.core.models import SentimentScoreModel  # noqa: PLC0415
+
+        now = self._now()
+        factory = get_async_session_factory()
+        async with factory() as session:
+            for ticker, score in ticker_scores.items():
+                row = SentimentScoreModel(
+                    symbol=ticker,
+                    market_id=market_id,
+                    timestamp=now,
+                    news_sentiment=Decimal(str(round(score, 4))),
+                    composite_sentiment=Decimal(str(round(score, 4))),
+                    confidence=Decimal(str(round(confidence, 4))),
+                )
+                session.add(row)
+            await session.commit()
 
     async def _persist_order_async(
         self,
