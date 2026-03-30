@@ -61,27 +61,27 @@ Requirements for Sandbox Stability & Observability milestone.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GRPC-01 | — | Pending |
-| GRPC-02 | — | Pending |
-| GRPC-03 | — | Pending |
-| PERSIST-01 | — | Pending |
-| PERSIST-02 | — | Pending |
-| PERSIST-03 | — | Pending |
-| PERSIST-04 | — | Pending |
-| PERSIST-05 | — | Pending |
-| OBS-01 | — | Pending |
-| OBS-02 | — | Pending |
-| OBS-03 | — | Pending |
-| OPS-01 | — | Pending |
-| OPS-02 | — | Pending |
-| OPS-03 | — | Pending |
-| OPS-04 | — | Pending |
+| GRPC-01 | Phase 29 | Pending |
+| GRPC-02 | Phase 30 | Pending |
+| GRPC-03 | Phase 30 | Pending |
+| PERSIST-01 | Phase 31 | Pending |
+| PERSIST-02 | Phase 31 | Pending |
+| PERSIST-03 | Phase 31 | Pending |
+| PERSIST-04 | Phase 31 | Pending |
+| PERSIST-05 | Phase 31 | Pending |
+| OBS-01 | Phase 29 | Pending |
+| OBS-02 | Phase 29 | Pending |
+| OBS-03 | Phase 30 | Pending |
+| OPS-01 | Phase 28 | Pending |
+| OPS-02 | Phase 28 | Pending |
+| OPS-03 | Phase 28 | Pending |
+| OPS-04 | Phase 28 | Pending |
 
 **Coverage:**
 - v6.0 requirements: 15 total
-- Mapped to phases: 0
-- Unmapped: 15 ⚠️
+- Mapped to phases: 15
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-03-30 after initial definition*
+*Last updated: 2026-03-30 after roadmap creation*
