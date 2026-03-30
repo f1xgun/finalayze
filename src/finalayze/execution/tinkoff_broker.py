@@ -156,7 +156,7 @@ class TinkoffBroker(BrokerBase):
             try:
                 self._loop.call_soon_threadsafe(self._loop.stop)
             except Exception:
-                pass
+                _log.debug("event_loop_stop_failed_on_close")
             self._loop = None
             self._loop_thread = None
 

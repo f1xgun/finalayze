@@ -131,6 +131,7 @@ class TradingLoop:
         sandbox_monitor: SandboxMonitorService | None = None,
         health_monitor: object | None = None,
         metrics_collector: type[MetricsCollector] | None = None,
+        grpc_loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.execution.simulated_broker import StopLossState  # noqa: PLC0415
@@ -223,9 +224,14 @@ class TradingLoop:
         # Populated at the start of each strategy cycle, cleared at the end.
         self._cycle_portfolio_cache: dict[str, Any] = {}
 
-        # Persistent background event loop for async calls (5.4)
+        # Persistent background event loop for non-gRPC async calls (HTTP, DB, Telegram)
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._async_thread: threading.Thread | None = None
+
+        # Dedicated gRPC event loop -- isolates PollerCompletionQueue from general
+        # async work. Prevents BlockingIOError contention causing 60-min cycle drift.
+        self._grpc_loop: asyncio.AbstractEventLoop | None = grpc_loop
+        self._grpc_thread: threading.Thread | None = None
 
         # asyncio.Lock for gRPC client serialization (equity + bond don't overlap)
         self._grpc_lock = asyncio.Lock()
@@ -406,6 +412,43 @@ class TradingLoop:
             thread.start()
             self._async_thread = thread
         future = asyncio.run_coroutine_threadsafe(coro, self._async_loop)
+        return future.result(timeout=timeout)
+
+    # ── gRPC loop helpers ─────────────────────────────────────────────────────
+
+    def _init_grpc_loop(self) -> asyncio.AbstractEventLoop:
+        """Create a dedicated background event loop for all gRPC operations.
+
+        Isolated from _async_loop to prevent PollerCompletionQueue BlockingIOError
+        from starving HTTP/DB/Telegram coroutines and causing strategy cycle drift.
+        """
+        loop = asyncio.new_event_loop()
+
+        # Suppress benign BlockingIOError from gRPC PollerCompletionQueue
+        def _grpc_exception_handler(
+            loop: asyncio.AbstractEventLoop, context: dict[str, Any]
+        ) -> None:
+            exc = context.get("exception")
+            if isinstance(exc, BlockingIOError):
+                return  # benign EAGAIN from PollerCompletionQueue
+            loop.default_exception_handler(context)
+
+        loop.set_exception_handler(_grpc_exception_handler)
+        thread = threading.Thread(target=loop.run_forever, daemon=True, name="grpc-loop")
+        thread.start()
+        self._grpc_loop = loop
+        self._grpc_thread = thread
+        return loop
+
+    def _run_grpc(self, coro: Any, *, timeout: int = 30) -> Any:
+        """Run a gRPC coroutine on the dedicated gRPC event loop.
+
+        Use this for all TinkoffBroker and TinkoffFetcher calls.
+        Non-gRPC async work (HTTP, DB, Telegram) should use _run_async().
+        """
+        if self._grpc_loop is None or self._grpc_loop.is_closed():
+            self._init_grpc_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, self._grpc_loop)  # type: ignore[arg-type]
         return future.result(timeout=timeout)
 
     @property
@@ -592,7 +635,7 @@ class TradingLoop:
         _log.info("metrics_initialized", markets=list(self._fetchers.keys()))
 
     def stop(self) -> None:
-        """Gracefully shut down scheduler, async loop, and connections."""
+        """Gracefully shut down scheduler, async/gRPC loops, and connections."""
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=True)
         if self._async_loop is not None and not self._async_loop.is_closed():
@@ -621,6 +664,13 @@ class TradingLoop:
             self._async_loop.call_soon_threadsafe(self._async_loop.stop)
             if self._async_thread is not None:
                 self._async_thread.join(timeout=5)
+        # Stop dedicated gRPC event loop
+        if self._grpc_loop is not None and not self._grpc_loop.is_closed():
+            self._grpc_loop.call_soon_threadsafe(self._grpc_loop.stop)
+            if self._grpc_thread is not None:
+                self._grpc_thread.join(timeout=5)
+            self._grpc_loop = None
+            self._grpc_thread = None
         self._stop_event.set()
 
     # ── Bond cycle methods ───────────────────────────────────────────────

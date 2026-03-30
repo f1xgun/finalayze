@@ -348,3 +348,88 @@ class TestMarketHoursGate:
 
         # _strategy_cycle_impl SHOULD have been called
         loop._strategy_cycle_impl.assert_called_once()  # type: ignore[attr-defined]
+
+
+class TestGrpcLoopIsolation:
+    """Verify _run_grpc routes to dedicated gRPC event loop, not _async_loop."""
+
+    def test_run_grpc_uses_dedicated_loop(self) -> None:
+        """_run_grpc dispatches coroutines to _grpc_loop, not _async_loop."""
+        import asyncio
+        import threading
+
+        loop_obj = _make_loop()
+
+        grpc_loop = asyncio.new_event_loop()
+        thread = threading.Thread(target=grpc_loop.run_forever, daemon=True)
+        thread.start()
+        try:
+            loop_obj._grpc_loop = grpc_loop  # type: ignore[attr-defined]
+
+            async def check_loop() -> asyncio.AbstractEventLoop:
+                return asyncio.get_running_loop()
+
+            result = loop_obj._run_grpc(check_loop())  # type: ignore[attr-defined]
+            assert result is grpc_loop
+        finally:
+            grpc_loop.call_soon_threadsafe(grpc_loop.stop)
+            thread.join(timeout=2)
+
+    def test_run_grpc_creates_loop_lazily(self) -> None:
+        """_run_grpc creates _grpc_loop if not set."""
+        loop_obj = _make_loop()
+        assert loop_obj._grpc_loop is None  # type: ignore[attr-defined]
+
+        async def noop() -> str:
+            return "ok"
+
+        result = loop_obj._run_grpc(noop())  # type: ignore[attr-defined]
+        assert result == "ok"
+        assert loop_obj._grpc_loop is not None  # type: ignore[attr-defined]
+
+        # Clean up
+        grpc_loop = loop_obj._grpc_loop  # type: ignore[attr-defined]
+        grpc_loop.call_soon_threadsafe(grpc_loop.stop)
+
+    def test_grpc_loop_injected_via_constructor(self) -> None:
+        """grpc_loop parameter in constructor sets _grpc_loop."""
+        import asyncio
+        import threading
+
+        from finalayze.core.trading_loop import TradingLoop
+
+        grpc_loop = asyncio.new_event_loop()
+        thread = threading.Thread(target=grpc_loop.run_forever, daemon=True)
+        thread.start()
+        try:
+            mock_settings = MagicMock()
+            mock_settings.news_cycle_minutes = 15
+            mock_settings.news_poll_interval_minutes = 5
+            mock_settings.strategy_cycle_minutes = 30
+            mock_settings.daily_reset_hour_utc = 0
+            mock_settings.max_position_pct = 0.1
+            mock_settings.max_positions_per_market = 10
+            mock_settings.daily_loss_limit_pct = 0.05
+            mock_settings.kelly_fraction = 0.5
+            mock_settings.ml_enabled = False
+            mock_settings.telegram_channels = []
+
+            loop_obj = TradingLoop(
+                settings=mock_settings,
+                fetchers={},
+                news_fetcher=MagicMock(),
+                news_analyzer=MagicMock(),
+                event_classifier=MagicMock(),
+                impact_estimator=MagicMock(),
+                strategy=MagicMock(),
+                broker_router=MagicMock(),
+                circuit_breakers={},
+                cross_market_breaker=MagicMock(),
+                alerter=MagicMock(),
+                instrument_registry=MagicMock(),
+                grpc_loop=grpc_loop,
+            )
+            assert loop_obj._grpc_loop is grpc_loop
+        finally:
+            grpc_loop.call_soon_threadsafe(grpc_loop.stop)
+            thread.join(timeout=2)

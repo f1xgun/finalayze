@@ -233,6 +233,34 @@ _log.info(
     total=len(registry.list_by_market("moex")),
 )
 
+# ── Shared gRPC Event Loop ───────────────────────────────────────────────
+# Create a dedicated background event loop for ALL gRPC operations (broker +
+# fetcher). Isolates PollerCompletionQueue from HTTP/DB/Telegram async work,
+# preventing BlockingIOError contention that causes 60-min strategy cycle drift.
+
+import threading as _threading
+
+
+def _make_grpc_loop() -> asyncio.AbstractEventLoop:
+    loop = asyncio.new_event_loop()
+
+    def _grpc_exception_handler(
+        loop: asyncio.AbstractEventLoop, context: dict[str, object]
+    ) -> None:
+        exc = context.get("exception")
+        if isinstance(exc, BlockingIOError):
+            return  # benign EAGAIN from PollerCompletionQueue
+        loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_grpc_exception_handler)
+    thread = _threading.Thread(target=loop.run_forever, daemon=True, name="grpc-loop")
+    thread.start()
+    return loop
+
+
+_grpc_loop = _make_grpc_loop()
+_log.info("grpc_loop_created", thread_name="grpc-loop")
+
 # ── Data Fetcher ─────────────────────────────────────────────────────────
 
 from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
@@ -241,6 +269,7 @@ tinkoff_fetcher = TinkoffFetcher(
     token=settings.tinkoff_token,
     registry=registry,
     sandbox=True,
+    grpc_loop=_grpc_loop,
 )
 
 fetchers: dict[str, object] = {"moex": tinkoff_fetcher}
@@ -257,6 +286,7 @@ tinkoff_broker = TinkoffBroker(
     registry=registry,
     sandbox=True,
     retry_policy=retry_policy,
+    grpc_loop=_grpc_loop,
 )
 # ── Bond Broker (separate instance for thread safety) ─────────────────
 tinkoff_broker_bonds = TinkoffBroker(
@@ -264,6 +294,7 @@ tinkoff_broker_bonds = TinkoffBroker(
     registry=registry,
     sandbox=True,
     retry_policy=retry_policy,
+    grpc_loop=_grpc_loop,
 )
 broker_router = BrokerRouter(
     {
@@ -525,6 +556,7 @@ loop = TradingLoop(
     fx_service=fx_service,
     bond_cycle_processor=bond_processor,
     macro_cache=macro_cache,
+    grpc_loop=_grpc_loop,
 )
 
 # ── Signal Handlers ──────────────────────────────────────────────────────
