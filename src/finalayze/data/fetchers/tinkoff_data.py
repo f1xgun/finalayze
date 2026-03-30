@@ -72,15 +72,20 @@ class TinkoffFetcher(BaseFetcher):
         sandbox: bool = True,
         rate_limiter: RateLimiter | None = None,
         grpc_timeout: float = 60.0,
+        grpc_loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         self._token = token
         self._registry = registry
         self._sandbox = sandbox
         self._rate_limiter = rate_limiter
         self._grpc_timeout = grpc_timeout
+        # Externally injected gRPC event loop (from TradingLoop / run_sandbox.py).
+        # When set, _run_async uses this loop instead of creating a self-managed one.
+        self._grpc_loop = grpc_loop
         # Persistent gRPC channel state (mirrors TinkoffBroker pattern)
         self._client: AsyncClient | None = None
         self._services: object | None = None
+        # Self-managed loop fallback (tests, standalone scripts)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_thread: threading.Thread | None = None
         self._loop_init_lock = threading.Lock()
@@ -100,16 +105,24 @@ class TinkoffFetcher(BaseFetcher):
 
         Uses run_coroutine_threadsafe() so gRPC channels survive across
         multiple fetch calls. Mirrors TinkoffBroker._run_async pattern.
+
+        When an external grpc_loop is injected, uses that directly (no
+        self-managed loop). Falls back to creating a self-managed loop for
+        backward compatibility (tests, standalone scripts).
         """
-        if self._loop is None or self._loop.is_closed():
-            with self._loop_init_lock:
-                if self._loop is None or self._loop.is_closed():
-                    loop = asyncio.new_event_loop()
-                    self._loop = loop
-                    thread = threading.Thread(target=loop.run_forever, daemon=True)
-                    thread.start()
-                    self._loop_thread = thread
-        future = asyncio.run_coroutine_threadsafe(coro, self._loop)  # type: ignore[arg-type]
+        loop = self._grpc_loop
+        if loop is None:
+            # Fallback: self-managed loop for backward compat (tests, standalone use)
+            if self._loop is None or self._loop.is_closed():
+                with self._loop_init_lock:
+                    if self._loop is None or self._loop.is_closed():
+                        new_loop = asyncio.new_event_loop()
+                        self._loop = new_loop
+                        thread = threading.Thread(target=new_loop.run_forever, daemon=True)
+                        thread.start()
+                        self._loop_thread = thread
+            loop = self._loop
+        future = asyncio.run_coroutine_threadsafe(coro, loop)  # type: ignore[arg-type]
         return future.result(timeout=self._grpc_timeout)
 
     async def _get_services_async(self) -> object:
@@ -126,13 +139,18 @@ class TinkoffFetcher(BaseFetcher):
         return self._services
 
     def close(self) -> None:
-        """Close the persistent gRPC channel and stop the background event loop."""
+        """Close the persistent gRPC channel and stop the background event loop.
+
+        When grpc_loop is externally injected, only closes the gRPC client/services.
+        The loop owner (TradingLoop / run_sandbox.py) manages the loop lifecycle.
+        """
         if self._client is not None:
-            if self._loop and not self._loop.is_closed():
+            loop = self._grpc_loop or self._loop
+            if loop and not loop.is_closed():
                 try:
                     future = asyncio.run_coroutine_threadsafe(
                         self._client.__aexit__(None, None, None),  # type: ignore[no-untyped-call]
-                        self._loop,
+                        loop,
                     )
                     future.result(timeout=5)
                 except Exception as exc:
@@ -142,24 +160,16 @@ class TinkoffFetcher(BaseFetcher):
                         error_type=type(exc).__name__,
                         error=str(exc),
                     )
-                try:
-                    self._loop.call_soon_threadsafe(self._loop.stop)
-                except Exception as exc:
-                    _log.warning(
-                        "event_loop_stop_failed",
-                        resource="event_loop",
-                        error_type=type(exc).__name__,
-                        error=str(exc),
-                    )
-        elif self._loop and not self._loop.is_closed():
+        self._client = None
+        self._services = None
+        # Only stop self-managed loop (not injected grpc_loop)
+        if self._grpc_loop is None and self._loop and not self._loop.is_closed():
             try:
                 self._loop.call_soon_threadsafe(self._loop.stop)
             except Exception:
                 pass
-        self._client = None
-        self._services = None
-        self._loop = None
-        self._loop_thread = None
+            self._loop = None
+            self._loop_thread = None
 
     def fetch_candles(
         self,
