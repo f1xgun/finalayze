@@ -1,50 +1,38 @@
 # Requirements: Finalayze
 
-**Defined:** 2026-03-23
+**Defined:** 2026-03-30
 **Core Value:** Autonomous profitable MOEX trading with acceptable risk limits
 
-## v5.0 Requirements
+## v6.0 Requirements
 
-Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
+Requirements for Sandbox Stability & Observability milestone.
 
-### Order Sizing Bugs
+### gRPC Stability
 
-- [x] **SIZE-01**: SELL orders use actual held position quantity, not Kelly-computed amount — no over/under-sell
-- [x] **SIZE-02**: Sector exposure calculation uses each position's own last price, not current instrument's price
-- [x] **SIZE-03**: CAUTION confidence threshold computed as `segment.min_combined_confidence * 1.2`, not hardcoded 0.6
+- [ ] **GRPC-01**: gRPC PollerCompletionQueue runs on a dedicated event loop isolated from APScheduler — no BlockingIOError flooding the main asyncio loop, strategy cycles fire within 5 min of scheduled time
+- [ ] **GRPC-02**: TinkoffBroker reconnects gRPC channel on StatusCode.INTERNAL (error 70001) — automatic recovery within 1 retry cycle, no multi-hour outage windows
+- [ ] **GRPC-03**: Portfolio fetch failure falls back to last-known portfolio state — strategy cycle continues with cached positions instead of skipping entirely
 
-### Live-Backtest Parity
+### Data Persistence
 
-- [x] **PARITY-01**: Live trading loop uses PositionSizingPipeline with all steps (VolTarget, Regime, MetaLabel, Copula, EVT, HardCaps) — matching backtest engine
-- [x] **PARITY-02**: Live trailing stops ratchet upward after activation threshold, matching SimulatedBroker trailing stop behavior
-- [x] **PARITY-03**: All 14 pre-trade checks receive required parameters in live path — stop_loss_price, has_pending_order, regime_state, strategy_name, correlations are passed
-- [x] **PARITY-04**: Stop-loss exit in a cycle prevents same-cycle re-entry for the same symbol
+- [ ] **PERSIST-01**: Executed orders persisted to `orders` table after fill — symbol, side, quantity, fill_price, order_id, timestamp stored
+- [ ] **PERSIST-02**: Generated signals persisted to `signals` table — strategy, symbol, direction, confidence, reasoning stored
+- [ ] **PERSIST-03**: Processed news articles persisted to `news_articles` table — title, source, published_at, content hash stored
+- [ ] **PERSIST-04**: Sentiment scores persisted to `sentiment_scores` table — ticker, score, source, timestamp stored
+- [ ] **PERSIST-05**: DB write failures are fire-and-forget with structured logging — never crash the trading loop or increment consecutive error counter
 
-### Data Validation
+### Observability
 
-- [x] **DATA-01**: DataNormalizer.validate() runs on fetched candles before strategy processing — rejects negative prices, low > high, zero volume
-- [x] **DATA-02**: Candle staleness detection active — configurable threshold (default: 2x timeframe interval), warning logged and instrument skipped when stale
-- [x] **DATA-03**: IMOEX index candles use share volume (row[5]), not turnover value (row[4])
+- [ ] **OBS-01**: Promtail ships Docker container logs to Loki — `/var/lib/docker/containers` mounted, JSON log format parsed correctly
+- [ ] **OBS-02**: Loki retains queryable logs for 30 days — dashboard queries return results for all 7 containers
+- [ ] **OBS-03**: FX rate (USD/RUB) fetched from CBR XML API as fallback when gRPC FX fetch fails — `finalayze_usd_rub_rate` metric is non-zero
 
-### News Pipeline
+### Operational Hygiene
 
-- [x] **NEWS-01**: News cycle skipped entirely when no segment has event_driven enabled — no LLM calls wasted
-- [x] **NEWS-02**: Sentiment cache has time-based exponential decay (configurable half-life, default 4 hours) — stale sentiment decays to zero
-- [ ] **NEWS-03**: Entity extractor _VALID_TICKERS contains "TCSG" (not "T") matching the extraction prompt
-- [ ] **NEWS-04**: Telegram reader deduplicates messages by message link URL — no repeated processing within time window
-
-### Data Infrastructure
-
-- [x] **INFRA-01**: TinkoffFetcher reuses a persistent gRPC channel across calls (like TinkoffBroker pattern) — no per-call channel churn
-- [x] **INFRA-02**: Brent crude candles cached via _cached_fetch() in MarketDataLoader — not re-downloaded on every backtest
-
-### Intelligent News Impact
-
-- [x] **NEWS-05**: NewsImpactAnalyzer replaces EntityExtractor + CombinedAnalyzer — single LLM call returns event_type, sentiment, confidence, affected_sectors (with direction/magnitude/reasoning), and optional direct_tickers
-- [x] **NEWS-06**: SectorTickerMapper maps sector names (oil_gas, banking, metals, etc.) to MOEX tickers via static registry — no LLM for ticker resolution
-- [x] **NEWS-07**: Per-ticker sentiment stored in _sentiment_cache as (segment_id, ticker) key — not just segment-level flat score
-- [x] **NEWS-08**: Articles without explicit company mentions produce non-zero sentiment for affected tickers via sector mapping (e.g., "ЦБ повысил ставку" → banking tickers get negative sentiment)
-- [x] **NEWS-09**: LLM calls per article reduced from 2 to 1 — NewsImpactAnalyzer prompt combines sentiment analysis, event classification, and sector impact prediction
+- [ ] **OPS-01**: Strategy cycle skips execution when MOEX market is closed — no wasted cycles with 0 instruments processed
+- [ ] **OPS-02**: Stale tickers removed/updated in config/segments.py — FIVE, FIXP, POLY removed; YNDX→YDEX; HHRU→HH (if valid)
+- [ ] **OPS-03**: LLM article deduplication via content hash — seen articles skipped within 24h TTL window, reducing rate-limit fallbacks
+- [ ] **OPS-04**: Telegram alerter startup failure does not block trading loop launch — alert sent on next successful cycle instead
 
 ## Future Requirements
 
@@ -62,43 +50,38 @@ Requirements for Data Flow Correctness & Live-Backtest Parity milestone.
 
 | Feature | Reason |
 |---------|--------|
-| Full news pipeline rewrite | Only fix bugs and disable no-op; v6.0 can redesign |
-| Event-driven strategy enablement | Requires live news feed validation first |
-| Multi-source data fusion | Current single-source per data type is sufficient |
-| Real-time WebSocket data feeds | Current polling interval (60 min) matches strategy timeframe |
-| bond_cycle time.sleep fix | Covered by v4.0 pattern; bond fill timeout is short (2 min) |
+| Full gRPC SDK replacement | t-tech-investments SDK works, only isolation needed |
+| Real-time WebSocket data feeds | Current polling interval matches strategy timeframe |
+| Multi-provider LLM orchestration | Single primary + fallback is sufficient |
+| Automated go/no-go from DB metrics | Advisory report pattern proven in v3.0 |
+| Log-based alerting (Loki alerts) | Prometheus alerts already cover critical paths |
+| DB-level trade analytics/reporting | Out of scope — persist first, analyze later |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SIZE-01 | Phase 23 | Complete |
-| SIZE-02 | Phase 23 | Complete |
-| SIZE-03 | Phase 23 | Complete |
-| PARITY-01 | Phase 24 | Complete |
-| PARITY-02 | Phase 24 | Complete |
-| PARITY-03 | Phase 24 | Complete |
-| PARITY-04 | Phase 24 | Complete |
-| DATA-01 | Phase 25 | Complete |
-| DATA-02 | Phase 25 | Complete |
-| DATA-03 | Phase 25 | Complete |
-| NEWS-01 | Phase 26 | Complete |
-| NEWS-02 | Phase 26 | Complete |
-| NEWS-03 | Phase 26 | Pending |
-| NEWS-04 | Phase 26 | Pending |
-| INFRA-01 | Phase 25 | Complete |
-| INFRA-02 | Phase 25 | Complete |
-| NEWS-05 | Phase 27 | Complete |
-| NEWS-06 | Phase 27 | Complete |
-| NEWS-07 | Phase 27 | Complete |
-| NEWS-08 | Phase 27 | Complete |
-| NEWS-09 | Phase 27 | Complete |
+| GRPC-01 | — | Pending |
+| GRPC-02 | — | Pending |
+| GRPC-03 | — | Pending |
+| PERSIST-01 | — | Pending |
+| PERSIST-02 | — | Pending |
+| PERSIST-03 | — | Pending |
+| PERSIST-04 | — | Pending |
+| PERSIST-05 | — | Pending |
+| OBS-01 | — | Pending |
+| OBS-02 | — | Pending |
+| OBS-03 | — | Pending |
+| OPS-01 | — | Pending |
+| OPS-02 | — | Pending |
+| OPS-03 | — | Pending |
+| OPS-04 | — | Pending |
 
 **Coverage:**
-- v5.0 requirements: 21 total
-- Mapped to phases: 21
-- Unmapped: 0 ✓
+- v6.0 requirements: 15 total
+- Mapped to phases: 0
+- Unmapped: 15 ⚠️
 
 ---
-*Requirements defined: 2026-03-23*
-*Last updated: 2026-03-23 after initial definition*
+*Requirements defined: 2026-03-30*
+*Last updated: 2026-03-30 after initial definition*
