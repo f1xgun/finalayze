@@ -160,4 +160,4 @@ Note: Phases 30 and 31 both depend on Phase 29 but are independent of each other
 | 28. Operational Hygiene | v6.0 | 2/2 | Complete    | 2026-03-30 |
 | 29. Core Stability | v6.0 | 2/2 | Complete    | 2026-03-30 |
 | 30. Broker Resilience | v6.0 | 2/2 | Complete    | 2026-03-30 |
-| 31. Data Capture | v6.0 | 2/2 | Complete   | 2026-03-30 |
+| 31. Data Capture | v6.0 | 2/2 | Complete    | 2026-03-30 |
