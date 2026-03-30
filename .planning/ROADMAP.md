@@ -85,7 +85,7 @@ Full details: `.planning/milestones/v5.0-ROADMAP.md`
 - [x] **Phase 28: Operational Hygiene** - Fix stale tickers, add market-hours gate, LLM dedup, alerter resilience (completed 2026-03-30)
 - [x] **Phase 29: Core Stability** - gRPC event loop isolation and Loki log pipeline fix (completed 2026-03-30)
 - [x] **Phase 30: Broker Resilience** - gRPC 70001 reconnect, portfolio cache fallback, FX rate fallback (completed 2026-03-30)
-- [ ] **Phase 31: Data Capture** - DB persistence for orders, signals, news articles, sentiment scores
+- [x] **Phase 31: Data Capture** - DB persistence for orders, signals, news articles, sentiment scores (completed 2026-03-30)
 
 ## Phase Details
 
@@ -142,7 +142,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 31-01-PLAN.md -- Fire-and-forget helper, order and signal persistence (PERSIST-01, PERSIST-02, PERSIST-05)
-- [ ] 31-02-PLAN.md -- News article and sentiment score persistence (PERSIST-03, PERSIST-04)
+- [x] 31-02-PLAN.md -- News article and sentiment score persistence (PERSIST-03, PERSIST-04)
 
 ## Progress
 
@@ -160,4 +160,4 @@ Note: Phases 30 and 31 both depend on Phase 29 but are independent of each other
 | 28. Operational Hygiene | v6.0 | 2/2 | Complete    | 2026-03-30 |
 | 29. Core Stability | v6.0 | 2/2 | Complete    | 2026-03-30 |
 | 30. Broker Resilience | v6.0 | 2/2 | Complete    | 2026-03-30 |
-| 31. Data Capture | v6.0 | 1/2 | In Progress|  |
+| 31. Data Capture | v6.0 | 2/2 | Complete   | 2026-03-30 |
