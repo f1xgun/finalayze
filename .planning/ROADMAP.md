@@ -98,7 +98,10 @@ Full details: `.planning/milestones/v5.0-ROADMAP.md`
   2. config/segments.py contains only valid MOEX tickers -- FIVE, FIXP, POLY are removed; YNDX is replaced with YDEX; HHRU is replaced with HH (if valid on MOEX)
   3. News articles already seen within the last 24 hours are skipped before being sent to the LLM -- duplicate content does not consume LLM API quota
   4. If Telegram alerter fails to connect at startup, the trading loop launches normally and queues alerts for the next successful connection -- no startup crash from invalid or missing Telegram token
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 28-01-PLAN.md -- Market-hours gate and stale ticker fixes (OPS-01, OPS-02)
+- [ ] 28-02-PLAN.md -- LLM article dedup and alerter resilience (OPS-03, OPS-04)
 
 ### Phase 29: Core Stability
 **Goal**: Strategy cycles fire reliably within 5 minutes of scheduled time and all container logs are queryable in Grafana/Loki
@@ -145,7 +148,7 @@ Note: Phases 30 and 31 both depend on Phase 29 but are independent of each other
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
 | 19-22 | v4.0 | 10/10 | Complete | 2026-03-22 |
 | 23-27 | v5.0 | 9/9 | Complete | 2026-03-24 |
-| 28. Operational Hygiene | v6.0 | 0/TBD | Not started | - |
+| 28. Operational Hygiene | v6.0 | 0/2 | Not started | - |
 | 29. Core Stability | v6.0 | 0/TBD | Not started | - |
 | 30. Broker Resilience | v6.0 | 0/TBD | Not started | - |
 | 31. Data Capture | v6.0 | 0/TBD | Not started | - |
