@@ -10,8 +10,8 @@ Requirements for Sandbox Stability & Observability milestone.
 ### gRPC Stability
 
 - [x] **GRPC-01**: gRPC PollerCompletionQueue runs on a dedicated event loop isolated from APScheduler — no BlockingIOError flooding the main asyncio loop, strategy cycles fire within 5 min of scheduled time
-- [ ] **GRPC-02**: TinkoffBroker reconnects gRPC channel on StatusCode.INTERNAL (error 70001) — automatic recovery within 1 retry cycle, no multi-hour outage windows
-- [ ] **GRPC-03**: Portfolio fetch failure falls back to last-known portfolio state — strategy cycle continues with cached positions instead of skipping entirely
+- [x] **GRPC-02**: TinkoffBroker reconnects gRPC channel on StatusCode.INTERNAL (error 70001) — automatic recovery within 1 retry cycle, no multi-hour outage windows
+- [x] **GRPC-03**: Portfolio fetch failure falls back to last-known portfolio state — strategy cycle continues with cached positions instead of skipping entirely
 
 ### Data Persistence
 
@@ -62,8 +62,8 @@ Requirements for Sandbox Stability & Observability milestone.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | GRPC-01 | Phase 29 | Complete |
-| GRPC-02 | Phase 30 | Pending |
-| GRPC-03 | Phase 30 | Pending |
+| GRPC-02 | Phase 30 | Complete |
+| GRPC-03 | Phase 30 | Complete |
 | PERSIST-01 | Phase 31 | Pending |
 | PERSIST-02 | Phase 31 | Pending |
 | PERSIST-03 | Phase 31 | Pending |
