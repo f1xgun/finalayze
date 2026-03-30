@@ -83,7 +83,7 @@ Full details: `.planning/milestones/v5.0-ROADMAP.md`
 **Milestone Goal:** Fix all critical issues discovered during week-long sandbox validation run (March 20-30) to make the system production-ready. Stable 5-min strategy cycles, complete audit trail, operational log pipeline, and resilient broker connectivity.
 
 - [x] **Phase 28: Operational Hygiene** - Fix stale tickers, add market-hours gate, LLM dedup, alerter resilience (completed 2026-03-30)
-- [ ] **Phase 29: Core Stability** - gRPC event loop isolation and Loki log pipeline fix
+- [x] **Phase 29: Core Stability** - gRPC event loop isolation and Loki log pipeline fix (completed 2026-03-30)
 - [ ] **Phase 30: Broker Resilience** - gRPC 70001 reconnect, portfolio cache fallback, FX rate fallback
 - [ ] **Phase 31: Data Capture** - DB persistence for orders, signals, news articles, sentiment scores
 
@@ -111,9 +111,9 @@ Plans:
   1. gRPC calls (TinkoffBroker, TinkoffFetcher) run on a dedicated event loop thread isolated from the main asyncio loop -- no BlockingIOError from PollerCompletionQueue, strategy cycles complete within 5 minutes of their scheduled time
   2. Promtail ships Docker container logs from all 7 containers to Loki -- `/var/lib/docker/containers` is mounted and JSON log format is correctly parsed
   3. Grafana log dashboard queries return results for all containers with at least 30 days of retention -- logs from any container are searchable within seconds of being emitted
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
-- [ ] 29-01-PLAN.md -- gRPC event loop isolation (GRPC-01)
+- [x] 29-01-PLAN.md -- gRPC event loop isolation (GRPC-01)
 - [x] 29-02-PLAN.md -- Loki log pipeline fix (OBS-01, OBS-02)
 
 ### Phase 30: Broker Resilience
@@ -152,6 +152,6 @@ Note: Phases 30 and 31 both depend on Phase 29 but are independent of each other
 | 19-22 | v4.0 | 10/10 | Complete | 2026-03-22 |
 | 23-27 | v5.0 | 9/9 | Complete | 2026-03-24 |
 | 28. Operational Hygiene | v6.0 | 2/2 | Complete    | 2026-03-30 |
-| 29. Core Stability | v6.0 | 1/2 | In Progress|  |
+| 29. Core Stability | v6.0 | 2/2 | Complete   | 2026-03-30 |
 | 30. Broker Resilience | v6.0 | 0/TBD | Not started | - |
 | 31. Data Capture | v6.0 | 0/TBD | Not started | - |
