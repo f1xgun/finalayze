@@ -155,8 +155,13 @@ class TinkoffBroker(BrokerBase):
         if self._grpc_loop is None and self._loop and not self._loop.is_closed():
             try:
                 self._loop.call_soon_threadsafe(self._loop.stop)
-            except Exception:
-                _log.debug("event_loop_stop_failed_on_close")
+            except Exception as exc:
+                _log.warning(
+                    "event_loop_stop_failed",
+                    resource="event_loop",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
             self._loop = None
             self._loop_thread = None
 

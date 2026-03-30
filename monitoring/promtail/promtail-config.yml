@@ -17,6 +17,12 @@ scrape_configs:
           - name: name
             values:
               - finalayze-sandbox-app
+              - finalayze-sandbox-db
+              - finalayze-sandbox-redis
+              - finalayze-sandbox-prometheus
+              - finalayze-sandbox-loki
+              - finalayze-sandbox-promtail
+              - finalayze-sandbox-grafana
     relabel_configs:
       - source_labels: ['__meta_docker_container_name']
         regex: '/(.*)'
