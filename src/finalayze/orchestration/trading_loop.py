@@ -2348,6 +2348,16 @@ class TradingLoop:
         movers.sort(key=lambda x: abs(x[1]), reverse=True)
         return movers[:3]
 
+    def _persist_to_db(self, coro: Any, *, table: str) -> None:
+        """Fire-and-forget DB write. Never crashes the trading loop (PERSIST-05)."""
+        try:
+            self._run_async(coro)
+        except Exception:
+            from finalayze.api.metrics import db_write_failures  # noqa: PLC0415
+
+            db_write_failures.labels(table=table).inc()
+            _log.warning("db_persist_failed", table=table, exc_info=True)
+
     def _persist_equity_snapshots(
         self,
         baselines: dict[str, Decimal],

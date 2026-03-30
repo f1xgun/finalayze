@@ -127,6 +127,14 @@ portfolio_equity_rub = Gauge(
 )
 
 
+# ── DB persistence ───────────────────────────────────────────────────────────
+db_write_failures = Counter(
+    "finalayze_db_write_failures_total",
+    "Count of fire-and-forget DB persistence failures",
+    ["table"],
+)
+
+
 class MetricsCollector:
     """Facade for updating all Prometheus business metrics.
 
