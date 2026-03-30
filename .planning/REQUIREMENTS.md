@@ -31,8 +31,8 @@ Requirements for Sandbox Stability & Observability milestone.
 
 - [x] **OPS-01**: Strategy cycle skips execution when MOEX market is closed — no wasted cycles with 0 instruments processed
 - [x] **OPS-02**: Stale tickers removed/updated in config/segments.py — FIVE, FIXP, POLY removed; YNDX→YDEX; HHRU→HH (if valid)
-- [ ] **OPS-03**: LLM article deduplication via content hash — seen articles skipped within 24h TTL window, reducing rate-limit fallbacks
-- [ ] **OPS-04**: Telegram alerter startup failure does not block trading loop launch — alert sent on next successful cycle instead
+- [x] **OPS-03**: LLM article deduplication via content hash — seen articles skipped within 24h TTL window, reducing rate-limit fallbacks
+- [x] **OPS-04**: Telegram alerter startup failure does not block trading loop launch — alert sent on next successful cycle instead
 
 ## Future Requirements
 
@@ -74,8 +74,8 @@ Requirements for Sandbox Stability & Observability milestone.
 | OBS-03 | Phase 30 | Pending |
 | OPS-01 | Phase 28 | Complete |
 | OPS-02 | Phase 28 | Complete |
-| OPS-03 | Phase 28 | Pending |
-| OPS-04 | Phase 28 | Pending |
+| OPS-03 | Phase 28 | Complete |
+| OPS-04 | Phase 28 | Complete |
 
 **Coverage:**
 - v6.0 requirements: 15 total
