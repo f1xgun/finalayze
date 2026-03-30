@@ -25,7 +25,7 @@ Requirements for Sandbox Stability & Observability milestone.
 
 - [x] **OBS-01**: Promtail ships Docker container logs to Loki — `/var/lib/docker/containers` mounted, JSON log format parsed correctly
 - [x] **OBS-02**: Loki retains queryable logs for 30 days — dashboard queries return results for all 7 containers
-- [ ] **OBS-03**: FX rate (USD/RUB) fetched from CBR XML API as fallback when gRPC FX fetch fails — `finalayze_usd_rub_rate` metric is non-zero
+- [x] **OBS-03**: FX rate (USD/RUB) fetched from CBR XML API as fallback when gRPC FX fetch fails — `finalayze_usd_rub_rate` metric is non-zero
 
 ### Operational Hygiene
 
@@ -71,7 +71,7 @@ Requirements for Sandbox Stability & Observability milestone.
 | PERSIST-05 | Phase 31 | Pending |
 | OBS-01 | Phase 29 | Complete |
 | OBS-02 | Phase 29 | Complete |
-| OBS-03 | Phase 30 | Pending |
+| OBS-03 | Phase 30 | Complete |
 | OPS-01 | Phase 28 | Complete |
 | OPS-02 | Phase 28 | Complete |
 | OPS-03 | Phase 28 | Complete |
