@@ -12,7 +12,19 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
-## Current State: v5.0 shipped
+## Current Milestone: v6.0 Sandbox Stability & Observability
+
+**Goal:** Fix all critical issues discovered during week-long sandbox validation run (March 20-30, 2026) to make the system production-ready.
+
+**Target features:**
+- Fix gRPC BlockingIOError that starves asyncio event loop (strategy cycles drift up to 60 min)
+- Fix T-Bank Sandbox API error 70001 handling (portfolio fetch fails for hours)
+- Wire DB persistence for orders, signals, news articles, sentiment scores
+- Fix Loki log pipeline (Promtail not shipping logs — 0 entries ever stored)
+- Add FX rate fallback (CBR XML API), market-hours gate, stale ticker cleanup
+- Fix LLM rate limiting with article deduplication
+
+## Previous State: v5.0 shipped
 
 v5.0 Data Flow Correctness shipped 2026-03-24. 4 phases, 7 plans.
 Fixed SELL order sizing, sector exposure prices, CAUTION threshold.
@@ -110,23 +122,17 @@ v3.0 integration gaps closed (Telegram /gonogo import, HealthMonitor feed freshn
 
 ### Active
 
-<!-- v5.0 Data Flow Correctness & Live-Backtest Parity -->
+<!-- v6.0 Sandbox Stability & Observability -->
 
-- [ ] SELL orders sized by actual position, not Kelly fraction
-- [ ] Sector exposure calculated with each position's own price
-- [ ] CAUTION confidence threshold uses segment's min_combined_confidence
-- [ ] Live trading loop uses PositionSizingPipeline (matching backtest)
-- [ ] Live trailing stops (matching backtest SimulatedBroker)
-- [ ] All 14 pre-trade checks wired in live path
-- [ ] Stop-loss exit prevents same-cycle re-entry
-- [ ] DataNormalizer validates candles before strategy processing
-- [ ] Candle staleness detection active with configurable threshold
-- [ ] IMOEX volume stores share count, not turnover
-- [ ] News pipeline disabled when event_driven is off (save LLM tokens)
-- [ ] Sentiment time-based decay in _sentiment_cache
-- [ ] Entity extractor ticker "T" → "TCSG" mismatch fixed
-- [ ] Telegram message deduplication
-- [ ] Capital scaling from minimal to target after validation period
+- [ ] gRPC event loop isolation — no BlockingIOError flooding asyncio
+- [ ] T-Bank API error 70001 resilience — channel reconnect + last-known-portfolio fallback
+- [ ] DB persistence for orders, signals, news articles, sentiment scores
+- [ ] Loki log pipeline operational — Promtail ships logs to Loki
+- [ ] FX rate fallback via CBR XML API when gRPC fails
+- [ ] Market-hours gate in strategy cycle — skip off-hours runs
+- [ ] Stale tickers updated (FIVE→X5, FIXP/POLY removed, YNDX→YDEX, HHRU→HH)
+- [ ] LLM article deduplication to reduce rate limit fallbacks
+- [ ] Telegram alerter startup resilience
 
 ### Out of Scope
 
@@ -210,5 +216,22 @@ All concurrency bugs fixed. All async paths non-blocking. Error handling hardene
 | GARCH rolling vol fallback over NaN | NaN propagation through sizing pipeline is dangerous | ✓ Good — safe fallback with warning logged |
 | 501 Not Implemented for stub endpoints | Empty 200 responses mislead API consumers | ✓ Good — clear signal that feature is pending |
 
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd:transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd:complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
 ---
-*Last updated: 2026-03-24 after v5.0 milestone shipped*
+*Last updated: 2026-03-30 after v6.0 milestone started*
