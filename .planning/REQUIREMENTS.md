@@ -15,11 +15,11 @@ Requirements for Sandbox Stability & Observability milestone.
 
 ### Data Persistence
 
-- [ ] **PERSIST-01**: Executed orders persisted to `orders` table after fill — symbol, side, quantity, fill_price, order_id, timestamp stored
-- [ ] **PERSIST-02**: Generated signals persisted to `signals` table — strategy, symbol, direction, confidence, reasoning stored
+- [x] **PERSIST-01**: Executed orders persisted to `orders` table after fill — symbol, side, quantity, fill_price, order_id, timestamp stored
+- [x] **PERSIST-02**: Generated signals persisted to `signals` table — strategy, symbol, direction, confidence, reasoning stored
 - [ ] **PERSIST-03**: Processed news articles persisted to `news_articles` table — title, source, published_at, content hash stored
 - [ ] **PERSIST-04**: Sentiment scores persisted to `sentiment_scores` table — ticker, score, source, timestamp stored
-- [ ] **PERSIST-05**: DB write failures are fire-and-forget with structured logging — never crash the trading loop or increment consecutive error counter
+- [x] **PERSIST-05**: DB write failures are fire-and-forget with structured logging — never crash the trading loop or increment consecutive error counter
 
 ### Observability
 
@@ -64,11 +64,11 @@ Requirements for Sandbox Stability & Observability milestone.
 | GRPC-01 | Phase 29 | Complete |
 | GRPC-02 | Phase 30 | Complete |
 | GRPC-03 | Phase 30 | Complete |
-| PERSIST-01 | Phase 31 | Pending |
-| PERSIST-02 | Phase 31 | Pending |
+| PERSIST-01 | Phase 31 | Complete |
+| PERSIST-02 | Phase 31 | Complete |
 | PERSIST-03 | Phase 31 | Pending |
 | PERSIST-04 | Phase 31 | Pending |
-| PERSIST-05 | Phase 31 | Pending |
+| PERSIST-05 | Phase 31 | Complete |
 | OBS-01 | Phase 29 | Complete |
 | OBS-02 | Phase 29 | Complete |
 | OBS-03 | Phase 30 | Complete |

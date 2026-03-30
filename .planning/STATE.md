@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Sandbox Stability & Observability
-status: unknown
-stopped_at: Completed 30-01-PLAN.md
-last_updated: "2026-03-30T21:11:00.041Z"
+status: Ready to execute
+stopped_at: Completed 31-01-PLAN.md
+last_updated: "2026-03-30T21:25:08.241Z"
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 8
+  completed_plans: 7
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 30 — broker-resilience
+**Current focus:** Phase 31 — data-capture
 
 ## Current Position
 
-Phase: 31
-Plan: Not started
+Phase: 31 (data-capture) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -68,6 +68,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-30T21:07:21.018Z
-Stopped at: Completed 30-01-PLAN.md
+Last session: 2026-03-30T21:25:08.238Z
+Stopped at: Completed 31-01-PLAN.md
 Resume file: None

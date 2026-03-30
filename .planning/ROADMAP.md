@@ -141,7 +141,7 @@ Plans:
   5. If any DB write fails, the failure is logged with structlog and a `db_write_failures` Prometheus counter is incremented -- the trading loop and consecutive error counter are never affected by DB issues
 **Plans**: 2 plans
 Plans:
-- [ ] 31-01-PLAN.md -- Fire-and-forget helper, order and signal persistence (PERSIST-01, PERSIST-02, PERSIST-05)
+- [x] 31-01-PLAN.md -- Fire-and-forget helper, order and signal persistence (PERSIST-01, PERSIST-02, PERSIST-05)
 - [ ] 31-02-PLAN.md -- News article and sentiment score persistence (PERSIST-03, PERSIST-04)
 
 ## Progress
@@ -160,4 +160,4 @@ Note: Phases 30 and 31 both depend on Phase 29 but are independent of each other
 | 28. Operational Hygiene | v6.0 | 2/2 | Complete    | 2026-03-30 |
 | 29. Core Stability | v6.0 | 2/2 | Complete    | 2026-03-30 |
 | 30. Broker Resilience | v6.0 | 2/2 | Complete    | 2026-03-30 |
-| 31. Data Capture | v6.0 | 0/2 | Not started | - |
+| 31. Data Capture | v6.0 | 1/2 | In Progress|  |
