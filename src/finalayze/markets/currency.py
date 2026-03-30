@@ -6,6 +6,7 @@ Phase 2: Replace with real-time rates from Tinkoff/CBR API.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 # Supported currency pairs
@@ -27,6 +28,7 @@ class CurrencyConverter:
 
     def __init__(self, base_currency: str = "USD") -> None:
         self._base = base_currency
+        self._rate_updated_at: dict[str, datetime] = {}
         self._rates: dict[str, Decimal] = {
             "USDRUB": _FALLBACK_USDRUB,
             "RUBUSD": Decimal(1) / _FALLBACK_USDRUB,
@@ -69,6 +71,7 @@ class CurrencyConverter:
             msg = f"Rate must be positive, got {rate}"
             raise ValueError(msg)
         self._rates[pair] = rate
+        self._rate_updated_at[pair] = datetime.now(tz=UTC)
         # Also update the inverse so both directions stay consistent.
         # Only set the inverse here; never call set_rate for both directions
         # independently (see docstring).
@@ -78,3 +81,10 @@ class CurrencyConverter:
     def to_base(self, amount: Decimal, from_currency: str) -> Decimal:
         """Convert amount to the base currency."""
         return self.convert(amount, from_currency, self._base)
+
+    def rate_age(self, pair: str) -> timedelta | None:
+        """Return age of the rate for the given pair, or None if never set."""
+        updated = self._rate_updated_at.get(pair)
+        if updated is None:
+            return None
+        return datetime.now(tz=UTC) - updated
