@@ -4,7 +4,7 @@ milestone: v6.0
 milestone_name: Sandbox Stability & Observability
 status: unknown
 stopped_at: Completed 31-02-PLAN.md
-last_updated: "2026-03-30T21:33:23.081Z"
+last_updated: "2026-03-30T21:35:09.365Z"
 progress:
   total_phases: 4
   completed_phases: 4

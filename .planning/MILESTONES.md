@@ -1,5 +1,22 @@
 # Milestones
 
+## v6.0 Sandbox Stability & Observability (Shipped: 2026-03-30)
+
+**Phases completed:** 4 phases, 8 plans, 15 tasks
+
+**Key accomplishments:**
+
+- Market-hours gate in strategy cycle to skip off-hours computation, and HHRU->HEAD ticker fix in ru_tech segment
+- SHA-256 article deduplication before LLM calls (24h TTL, 5000-entry cap) and try/except-wrapped Telegram alerter at sandbox startup/shutdown
+- Dedicated gRPC event loop isolating PollerCompletionQueue from HTTP/DB/Telegram work to eliminate 60-min strategy cycle drift
+- Fixed Promtail->Loki log pipeline with container log volume mounts, __path__ relabeling, low-cardinality labels, and 30-day retention via compactor
+- Portfolio cache fallback on T-Bank 70001 errors with auto-reconnect after 5 consecutive failures
+- CBR XML FX rate fallback with in-memory cache and Prometheus metric wiring to prevent zero USD/RUB rate during gRPC outages
+- Fire-and-forget DB persistence for orders and signals via _persist_to_db helper with Prometheus failure counter
+- Fire-and-forget DB persistence for news articles (with SHA-256 content hash) and batch sentiment scores after LLM analysis
+
+---
+
 ## v5.0 Data Flow Correctness (Shipped: 2026-03-24)
 
 **Phases completed:** 4 phases, 7 plans, 10 tasks

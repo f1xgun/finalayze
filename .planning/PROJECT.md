@@ -12,25 +12,14 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
-## Current Milestone: v6.0 Sandbox Stability & Observability
+## Current State: v6.0 shipped
 
-**Goal:** Fix all critical issues discovered during week-long sandbox validation run (March 20-30, 2026) to make the system production-ready.
-
-**Target features:**
-- Fix gRPC BlockingIOError that starves asyncio event loop (strategy cycles drift up to 60 min)
-- Fix T-Bank Sandbox API error 70001 handling (portfolio fetch fails for hours)
-- Wire DB persistence for orders, signals, news articles, sentiment scores
-- Fix Loki log pipeline (Promtail not shipping logs — 0 entries ever stored)
-- Add FX rate fallback (CBR XML API), market-hours gate, stale ticker cleanup
-- Fix LLM rate limiting with article deduplication
-
-## Previous State: v5.0 shipped
-
-v5.0 Data Flow Correctness shipped 2026-03-24. 4 phases, 7 plans.
-Fixed SELL order sizing, sector exposure prices, CAUTION threshold.
-Live trading now uses full PositionSizingPipeline matching backtest, trailing stops, all 14 pre-trade checks.
-DataNormalizer validates candles, staleness detection active, IMOEX volume fixed.
-News pipeline skips when event_driven disabled, sentiment has time-decay, TCSG ticker fixed.
+v6.0 Sandbox Stability & Observability shipped 2026-03-31. 4 phases, 8 plans.
+Fixed gRPC event loop isolation (dedicated loop eliminates 60-min cycle drift).
+T-Bank 70001 errors handled with portfolio cache fallback + auto-reconnect.
+DB persistence wired for orders, signals, news articles, sentiment scores (fire-and-forget).
+Loki log pipeline fixed (Promtail volume mount + JSON parsing + 30-day retention).
+FX rate CBR XML fallback, market-hours gate, stale tickers cleaned, LLM article dedup added.
 
 v4.0 Architecture Hardening shipped 2026-03-22. 4 phases, 10 plans.
 Fixed concurrency bugs (stop-loss TOCTOU, async lock, session leak), async correctness
@@ -120,19 +109,21 @@ v3.0 integration gaps closed (Telegram /gonogo import, HealthMonitor feed freshn
 - ✓ Telegram /gonogo import fixed — v4.0
 - ✓ HealthMonitor feed freshness wired — v4.0
 
+- ✓ gRPC event loop isolation — dedicated loop eliminates BlockingIOError — v6.0
+- ✓ T-Bank 70001 resilience — portfolio cache fallback + auto-reconnect — v6.0
+- ✓ DB persistence for orders, signals, news articles, sentiment scores (fire-and-forget) — v6.0
+- ✓ Loki log pipeline operational — Promtail ships all 7 container logs — v6.0
+- ✓ FX rate CBR XML API fallback — v6.0
+- ✓ Market-hours gate in strategy cycle — v6.0
+- ✓ Stale tickers cleaned (HHRU→HEAD, FIVE/FIXP/POLY removed, YNDX→YDEX) — v6.0
+- ✓ LLM article deduplication (SHA-256, 24h TTL) — v6.0
+- ✓ Telegram alerter startup resilience — v6.0
+
 ### Active
 
-<!-- v6.0 Sandbox Stability & Observability -->
+<!-- Next milestone scope — to be defined -->
 
-- [ ] gRPC event loop isolation — no BlockingIOError flooding asyncio
-- [ ] T-Bank API error 70001 resilience — channel reconnect + last-known-portfolio fallback
-- [ ] DB persistence for orders, signals, news articles, sentiment scores
-- [ ] Loki log pipeline operational — Promtail ships logs to Loki
-- [ ] FX rate fallback via CBR XML API when gRPC fails
-- [ ] Market-hours gate in strategy cycle — skip off-hours runs
-- [ ] Stale tickers updated (FIVE→X5, FIXP/POLY removed, YNDX→YDEX, HHRU→HH)
-- [ ] LLM article deduplication to reduce rate limit fallbacks
-- [ ] Telegram alerter startup resilience
+(None yet — define with `/gsd:new-milestone`)
 
 ### Out of Scope
 
@@ -147,17 +138,18 @@ v3.0 integration gaps closed (Telegram /gonogo import, HealthMonitor feed freshn
 
 ## Context
 
-### Current State (v4.0 shipped)
+### Current State (v6.0 shipped)
 
-Codebase: ~470 Python files, ~39,000 LOC (reduced by dead code removal).
+Codebase: ~480 Python files, ~40,000 LOC.
 Tech stack: Python 3.12, FastAPI, SQLAlchemy 2.0 async, PostgreSQL+TimescaleDB, Redis,
 XGBoost, LightGBM, CatBoost, PyTorch, pandas-ta, QuantLib, feedparser, Telethon.
 
-v4.0 shipped: Architecture hardening complete. 4 phases (19-22), 10 plans, ~70 new tests.
-Orchestration module extracted from core/ (trading_loop.py, bond_cycle.py → orchestration/).
-Notifications moved to API layer (alerts.py, telegram_bot.py → api/).
-MetricsCollector injected via constructor. Dead event bus streams removed.
-All concurrency bugs fixed. All async paths non-blocking. Error handling hardened.
+v6.0 shipped: Sandbox stability complete. 4 phases (28-31), 8 plans, ~52 new tests.
+gRPC isolated on dedicated event loop — strategy cycles no longer drift 60 min.
+T-Bank 70001 errors handled with portfolio cache + auto-reconnect.
+All 4 DB tables wired (orders, signals, news_articles, sentiment_scores) with fire-and-forget.
+Loki pipeline fixed — all 7 containers ship logs with 30-day retention.
+FX rate fallback via CBR XML, market-hours gate, LLM article dedup, alerter resilience.
 
 ### Known Issues
 - ML quality gates fail for small MOEX datasets (accuracy cap at 0.55 for n_eff<20)
@@ -234,4 +226,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-30 after v6.0 milestone started*
+*Last updated: 2026-03-31 after v6.0 milestone shipped*
