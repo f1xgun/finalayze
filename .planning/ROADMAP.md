@@ -124,7 +124,10 @@ Plans:
   1. When TinkoffBroker receives StatusCode.INTERNAL (error 70001), it automatically resets the gRPC channel and retries -- recovery happens within one retry cycle without multi-hour outage windows
   2. When portfolio fetch fails, the strategy cycle continues using the last successfully fetched portfolio state -- positions, balances, and risk checks use cached data instead of skipping the entire cycle
   3. When gRPC FX rate fetch fails, USD/RUB rate is fetched from CBR XML API as a background job -- the `finalayze_usd_rub_rate` Prometheus metric is never zero during market hours
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 30-01-PLAN.md -- Portfolio cache fallback and 70001 auto-reconnect (GRPC-02, GRPC-03)
+- [ ] 30-02-PLAN.md -- FX rate CBR fallback and Prometheus metric (OBS-03)
 
 ### Phase 31: Data Capture
 **Goal**: Every trade, signal, news article, and sentiment score is persisted to the database for audit trail and future analysis
@@ -153,5 +156,5 @@ Note: Phases 30 and 31 both depend on Phase 29 but are independent of each other
 | 23-27 | v5.0 | 9/9 | Complete | 2026-03-24 |
 | 28. Operational Hygiene | v6.0 | 2/2 | Complete    | 2026-03-30 |
 | 29. Core Stability | v6.0 | 2/2 | Complete    | 2026-03-30 |
-| 30. Broker Resilience | v6.0 | 0/TBD | Not started | - |
+| 30. Broker Resilience | v6.0 | 0/2 | Not started | - |
 | 31. Data Capture | v6.0 | 0/TBD | Not started | - |
