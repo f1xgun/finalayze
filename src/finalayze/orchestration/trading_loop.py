@@ -77,7 +77,7 @@ if TYPE_CHECKING:
 # ── Constants ──────────────────────────────────────────────────────────────
 _NEWS_QUERY = "stock market finance"
 _NEWS_LOOKBACK_HOURS = 2
-_CANDLE_LOOKBACK = 60  # number of bars to fetch per symbol
+_CANDLE_LOOKBACK = 210  # SMA-200 needs 200 bars + buffer; dual_momentum needs 126
 _CAUTION_SIZE_FACTOR = Decimal("0.5")  # halve position size at CAUTION
 _MIN_CONFIDENCE_BOOST = 1.2  # raise required confidence 20% at CAUTION
 _DEFAULT_SENTIMENT = 0.0
@@ -136,6 +136,7 @@ class TradingLoop:
         health_monitor: HealthMonitor | None = None,
         metrics_collector: type[MetricsCollector] | None = None,
         grpc_loop: asyncio.AbstractEventLoop | None = None,
+        kill_switch: object | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.execution.simulated_broker import StopLossState  # noqa: PLC0415
@@ -173,6 +174,7 @@ class TradingLoop:
         self._sandbox_monitor = sandbox_monitor
         self._health_monitor = health_monitor
         self._metrics = metrics_collector
+        self._kill_switch = kill_switch
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -469,6 +471,9 @@ class TradingLoop:
 
     def start(self) -> None:
         """Start the APScheduler and block until stop() is called."""
+        if self._kill_switch is not None and self._kill_switch.is_killed:
+            raise RuntimeError("Kill switch active -- clear flag before restarting")
+
         from apscheduler.executors.pool import (  # noqa: PLC0415
             ThreadPoolExecutor as APSThreadPoolExecutor,
         )

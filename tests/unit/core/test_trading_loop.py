@@ -369,6 +369,58 @@ class TestMarketHoursGate:
         loop._strategy_cycle_impl.assert_called_once()  # type: ignore[attr-defined]
 
 
+class TestCandleLookback:
+    """SANDBOX-FIX-01: _CANDLE_LOOKBACK must be 210 for SMA-200 and 126-bar lookback."""
+
+    def test_candle_lookback_is_210(self) -> None:
+        """_CANDLE_LOOKBACK constant must be 210 to satisfy SMA-200 and dual_momentum."""
+        from finalayze.orchestration.trading_loop import _CANDLE_LOOKBACK
+
+        assert _CANDLE_LOOKBACK == 210
+
+
+class TestKillSwitchStartupGuard:
+    """SANDBOX-FIX-02: start() must check kill switch before scheduling."""
+
+    def test_start_raises_when_kill_switch_active(self) -> None:
+        """start() raises RuntimeError when kill switch is_killed returns True."""
+        loop = _make_loop()
+        mock_ks = MagicMock()
+        mock_ks.is_killed = True
+        loop._kill_switch = mock_ks  # type: ignore[attr-defined]
+
+        with pytest.raises(RuntimeError, match="Kill switch active"):
+            loop.start()  # type: ignore[attr-defined]
+
+    def test_start_proceeds_when_kill_switch_none(self) -> None:
+        """start() proceeds normally when _kill_switch is None (no RuntimeError)."""
+        loop = _make_loop()
+        loop._kill_switch = None  # type: ignore[attr-defined]
+
+        # Patch BackgroundScheduler so start() does not actually run the scheduler.
+        # After the kill switch check, start() creates a BackgroundScheduler;
+        # we just verify the kill switch check passes (no RuntimeError).
+        mock_sched = MagicMock()
+        with patch("finalayze.orchestration.trading_loop.BackgroundScheduler", return_value=mock_sched):
+            # start() blocks on _stop_event.wait(); simulate immediate stop
+            loop._stop_event.set()  # type: ignore[attr-defined]
+            loop.start()  # type: ignore[attr-defined]
+        # If we got here, no RuntimeError was raised -- test passes
+
+    def test_start_proceeds_when_kill_switch_not_killed(self) -> None:
+        """start() proceeds normally when kill switch is_killed returns False."""
+        loop = _make_loop()
+        mock_ks = MagicMock()
+        mock_ks.is_killed = False
+        loop._kill_switch = mock_ks  # type: ignore[attr-defined]
+
+        mock_sched = MagicMock()
+        with patch("finalayze.orchestration.trading_loop.BackgroundScheduler", return_value=mock_sched):
+            loop._stop_event.set()  # type: ignore[attr-defined]
+            loop.start()  # type: ignore[attr-defined]
+        # If we got here, no RuntimeError was raised -- test passes
+
+
 class TestGrpcLoopIsolation:
     """Verify _run_grpc routes to dedicated gRPC event loop, not _async_loop."""
 
