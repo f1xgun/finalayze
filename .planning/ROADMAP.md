@@ -149,7 +149,7 @@ Plans:
 
 **Milestone Goal:** Build a scientific decision-making system: structured debate protocol for agent recommendations, experiment registry with pre-defined success criteria, backtest-based A/B testing with interaction effects, and Streamlit Experiment Lab UI for full lifecycle visibility.
 
-- [ ] **Phase 32: Critical Sandbox Fixes** - Fix _CANDLE_LOOKBACK=210, kill switch startup check, rollout default for sandbox mode (prerequisite for meaningful experiments)
+- [x] **Phase 32: Critical Sandbox Fixes** - Fix _CANDLE_LOOKBACK=210, kill switch startup check, rollout default for sandbox mode (prerequisite for meaningful experiments) (completed 2026-04-07)
 - [ ] **Phase 33: Structured Debate Protocol** - Evidence-based agent output format (claim + source + prediction + risk), arbiter agent for fact-checking, debate state tracking
 - [ ] **Phase 34: Experiment Registry & Runner** - Hypothesis lifecycle (define → criteria → run → compare → verdict), parameterized backtest runner with hypothesis_id, interaction testing (A, B, A+B), integration with history.jsonl
 - [ ] **Phase 35: Experiment Lab UI** - Streamlit app for experiment lifecycle: hypothesis context, pre-defined success criteria, execution status, results vs expectations, decision history
@@ -168,11 +168,11 @@ Plans:
   7. ValidationLogger tracks per-gate signal drops (no_bars, below_threshold, pre_trade_rejected) -- signal loss is diagnosable
   8. ML profit_factor gate computes actual PF from fold predictions -- gate no longer always fails
   9. ML Brier gate uses calibrated probabilities -- calibrator applied during walk-forward evaluation
-**Plans:** 3 plans
+**Plans:** 3/3 plans complete
 Plans:
-- [ ] 32-01-PLAN.md -- Data pipeline and safety defaults (SANDBOX-FIX-01, SANDBOX-FIX-02, SANDBOX-FIX-03, SANDBOX-FIX-04)
-- [ ] 32-02-PLAN.md -- Sandbox data wiring, news pipeline, signal diagnostics (SANDBOX-FIX-05, SANDBOX-FIX-06, SANDBOX-FIX-07, SANDBOX-FIX-08)
-- [ ] 32-03-PLAN.md -- ML quality gate fixes (SANDBOX-FIX-09, SANDBOX-FIX-10)
+- [x] 32-01-PLAN.md -- Data pipeline and safety defaults (SANDBOX-FIX-01, SANDBOX-FIX-02, SANDBOX-FIX-03, SANDBOX-FIX-04)
+- [x] 32-02-PLAN.md -- Sandbox data wiring, news pipeline, signal diagnostics (SANDBOX-FIX-05, SANDBOX-FIX-06, SANDBOX-FIX-07, SANDBOX-FIX-08)
+- [x] 32-03-PLAN.md -- ML quality gate fixes (SANDBOX-FIX-09, SANDBOX-FIX-10)
 
 ### Phase 33: Structured Debate Protocol
 **Goal**: Agent recommendations include verifiable evidence, conflicts are detected automatically, and unresolved conflicts escalate to experiments
@@ -223,7 +223,7 @@ v7.0: 32 -> 33 -> 34 -> 35
 | 29. Core Stability | v6.0 | 2/2 | Complete | 2026-03-30 |
 | 30. Broker Resilience | v6.0 | 2/2 | Complete | 2026-03-30 |
 | 31. Data Capture | v6.0 | 2/2 | Complete | 2026-03-30 |
-| 32. Critical Sandbox Fixes | v7.0 | 0/3 | Planned | -- |
+| 32. Critical Sandbox Fixes | v7.0 | 3/3 | Complete   | 2026-04-07 |
 | 33. Structured Debate Protocol | v7.0 | TBD | Pending | -- |
 | 34. Experiment Registry & Runner | v7.0 | TBD | Pending | -- |
 | 35. Experiment Lab UI | v7.0 | TBD | Pending | -- |

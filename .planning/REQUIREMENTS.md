@@ -44,10 +44,10 @@ Requirements for Agent Intelligence & Experiment Framework milestone.
 - [ ] **SANDBOX-FIX-02**: `TradingLoop.start()` checks `KillSwitch.is_killed` before starting scheduler — killed system does not resume on Docker restart
 - [ ] **SANDBOX-FIX-03**: When `FINALAYZE_MODE=sandbox` and `rollout_phase` not explicitly set, effective rollout is MINIMAL — sandbox starts with conservative risk limits
 - [ ] **SANDBOX-FIX-04**: Staleness threshold handles weekends and MOEX holidays — Monday morning and post-holiday cycles not blocked by 48h threshold
-- [ ] **SANDBOX-FIX-05**: TinkoffFetcher wrapped in CachingFetcher in sandbox mode — repeated API calls for same data eliminated
-- [ ] **SANDBOX-FIX-06**: RateLimiter passed to TinkoffFetcher in sandbox — API throttling prevented for large instrument universes
-- [ ] **SANDBOX-FIX-07**: `FINALAYZE_LLM_API_KEY` documented and event_driven enabled for ru_blue_chips, ru_energy, ru_finance — news pipeline activated for MOEX
-- [ ] **SANDBOX-FIX-08**: Per-gate signal drop counters in ValidationLogger — instruments_no_bars, signals_below_threshold, signals_pre_trade_rejected tracked separately
+- [x] **SANDBOX-FIX-05**: TinkoffFetcher wrapped in CachingFetcher in sandbox mode — repeated API calls for same data eliminated
+- [x] **SANDBOX-FIX-06**: RateLimiter passed to TinkoffFetcher in sandbox — API throttling prevented for large instrument universes
+- [x] **SANDBOX-FIX-07**: `FINALAYZE_LLM_API_KEY` documented and event_driven enabled for ru_blue_chips, ru_energy, ru_finance — news pipeline activated for MOEX
+- [x] **SANDBOX-FIX-08**: Per-gate signal drop counters in ValidationLogger — instruments_no_bars, signals_below_threshold, signals_pre_trade_rejected tracked separately
 - [ ] **SANDBOX-FIX-09**: ML quality gate bug: profit_factor gate populated with actual PF from fold predictions — gate no longer always fails with default 1.0
 - [ ] **SANDBOX-FIX-10**: ML quality gate: Brier score evaluated on calibrated probabilities — calibrator applied during walk-forward evaluation
 

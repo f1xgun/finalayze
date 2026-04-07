@@ -1,15 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v6.0
-milestone_name: Sandbox Stability & Observability
-status: unknown
-stopped_at: Completed 31-02-PLAN.md
-last_updated: "2026-03-30T21:35:09.365Z"
+milestone: v7.0
+milestone_name: Agent Intelligence & Experiment Framework
+status: Ready to execute
+stopped_at: Completed 32-02-PLAN.md
+last_updated: "2026-04-07T18:03:21.191Z"
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 8
-  completed_plans: 8
+  total_phases: 8
+  completed_phases: 5
+  total_plans: 11
+  completed_plans: 11
+  percent: 100
 ---
 
 # Project State
@@ -19,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 31 — data-capture
+**Current focus:** Phase 32 — critical-sandbox-fixes
 
 ## Current Position
 
-Phase: 31
-Plan: Not started
+Phase: 32 (critical-sandbox-fixes) — EXECUTING
+Plan: 2 of 3
 
 ## Performance Metrics
 
@@ -68,6 +69,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-30T21:30:26.454Z
-Stopped at: Completed 31-02-PLAN.md
+Last session: 2026-04-07T18:03:21.188Z
+Stopped at: Completed 32-02-PLAN.md
 Resume file: None
