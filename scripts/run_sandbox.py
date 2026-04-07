@@ -263,16 +263,21 @@ _log.info("grpc_loop_created", thread_name="grpc-loop")
 
 # ── Data Fetcher ─────────────────────────────────────────────────────────
 
+from finalayze.data.fetchers.caching import CachingFetcher
 from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
+from finalayze.data.rate_limiter import RateLimiter
 
+_tbank_rate_limiter = RateLimiter(name="tbank", rate=4.0)
 tinkoff_fetcher = TinkoffFetcher(
     token=settings.tinkoff_token,
     registry=registry,
     sandbox=True,
+    rate_limiter=_tbank_rate_limiter,
     grpc_loop=_grpc_loop,
 )
+caching_fetcher = CachingFetcher(delegate=tinkoff_fetcher)
 
-fetchers: dict[str, object] = {"moex": tinkoff_fetcher}
+fetchers: dict[str, object] = {"moex": caching_fetcher}
 
 # ── Execution ────────────────────────────────────────────────────────────
 

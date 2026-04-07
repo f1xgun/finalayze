@@ -223,7 +223,9 @@ def _build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
         from finalayze.analysis.news_analyzer import NewsAnalyzer  # noqa: PLC0415
         from finalayze.api.alerts import TelegramAlerter  # noqa: PLC0415
         from finalayze.data.fetchers.newsapi import NewsApiFetcher  # noqa: PLC0415
+        from finalayze.data.fetchers.caching import CachingFetcher  # noqa: PLC0415
         from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
+        from finalayze.data.rate_limiter import RateLimiter  # noqa: PLC0415
         from finalayze.execution.broker_router import BrokerRouter  # noqa: PLC0415
         from finalayze.execution.retry import RetryPolicy  # noqa: PLC0415
         from finalayze.execution.tinkoff_broker import TinkoffBroker  # noqa: PLC0415
@@ -331,12 +333,15 @@ def _build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
         # ── Data Fetcher ─────────────────────────────────────────────────
         fetchers: dict[str, object] = {}
         if tinkoff_token:
+            _tbank_rate_limiter = RateLimiter(name="tbank", rate=4.0)
             tinkoff_fetcher = TinkoffFetcher(
                 token=tinkoff_token,
                 registry=registry,
                 sandbox=is_sandbox,
+                rate_limiter=_tbank_rate_limiter,
             )
-            fetchers["moex"] = tinkoff_fetcher
+            caching_fetcher = CachingFetcher(delegate=tinkoff_fetcher)
+            fetchers["moex"] = caching_fetcher
 
         # ── Broker ───────────────────────────────────────────────────────
         retry_policy = RetryPolicy(max_retries=3, base_delay=1.0)
