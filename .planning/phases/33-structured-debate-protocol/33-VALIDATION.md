@@ -38,15 +38,20 @@ created: 2026-04-07
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 33-01-01 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_claim_requires_source -x` | ❌ W0 | ⬜ pending |
-| 33-01-02 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_file_line_source_fields -x` | ❌ W0 | ⬜ pending |
-| 33-01-03 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_metric_source_fields -x` | ❌ W0 | ⬜ pending |
-| 33-01-04 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_agent_output_requires_claims -x` | ❌ W0 | ⬜ pending |
-| 33-01-05 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_claim_confidence_bounds -x` | ❌ W0 | ⬜ pending |
-| 33-02-01 | 02 | 1 | DEBATE-02 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_fact_check_report_has_contradictions -x` | ❌ W0 | ⬜ pending |
-| 33-02-02 | 02 | 1 | DEBATE-02 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_fact_check_report_markdown -x` | ❌ W0 | ⬜ pending |
-| 33-03-01 | 03 | 1 | DEBATE-03 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_debate_file_roundtrip -x` | ❌ W0 | ⬜ pending |
-| 33-03-02 | 03 | 1 | DEBATE-03 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_debate_escalation -x` | ❌ W0 | ⬜ pending |
+| 33-01-01 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_file_line_source_valid -x` | ❌ W0 | ⬜ pending |
+| 33-01-02 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_metric_source_valid -x` | ❌ W0 | ⬜ pending |
+| 33-01-03 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_claim_with_file_source -x` | ❌ W0 | ⬜ pending |
+| 33-01-04 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_agent_output_empty_claims -x` | ❌ W0 | ⬜ pending |
+| 33-01-05 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_claim_confidence_below_zero -x` | ❌ W0 | ⬜ pending |
+| 33-01-06 | 01 | 1 | DEBATE-01 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_claim_confidence_above_one -x` | ❌ W0 | ⬜ pending |
+| 33-01-07 | 01 | 1 | DEBATE-02 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_fact_check_report_has_contradictions_true -x` | ❌ W0 | ⬜ pending |
+| 33-01-08 | 01 | 1 | DEBATE-02 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_fact_check_report_to_markdown -x` | ❌ W0 | ⬜ pending |
+| 33-01-09 | 01 | 1 | DEBATE-03 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_debate_state_escalation -x` | ❌ W0 | ⬜ pending |
+| 33-01-10 | 01 | 1 | DEBATE-03 | unit | `uv run pytest tests/unit/core/test_debate_schemas.py::test_debate_state_status_enum -x` | ❌ W0 | ⬜ pending |
+| 33-02-01 | 02 | 2 | DEBATE-03 | unit | `uv run pytest tests/unit/core/test_debate_manager.py::test_create_debate -x` | ❌ W0 | ⬜ pending |
+| 33-02-02 | 02 | 2 | DEBATE-03 | unit | `uv run pytest tests/unit/core/test_debate_manager.py::test_read_debate -x` | ❌ W0 | ⬜ pending |
+| 33-02-03 | 02 | 2 | DEBATE-03 | unit | `uv run pytest tests/unit/core/test_debate_manager.py::test_roundtrip -x` | ❌ W0 | ⬜ pending |
+| 33-02-04 | 02 | 2 | DEBATE-03 | unit | `uv run pytest tests/unit/core/test_debate_manager.py::test_escalate_debate -x` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -54,7 +59,8 @@ created: 2026-04-07
 
 ## Wave 0 Requirements
 
-- [ ] `tests/unit/core/test_debate_schemas.py` — stubs for DEBATE-01, DEBATE-02, DEBATE-03
+- [ ] `tests/unit/core/test_debate_schemas.py` — stubs for DEBATE-01, DEBATE-02, DEBATE-03 schema tests
+- [ ] `tests/unit/core/test_debate_manager.py` — stubs for DEBATE-03 debate file CRUD tests
 
 *Existing pytest infrastructure covers framework needs.*
 

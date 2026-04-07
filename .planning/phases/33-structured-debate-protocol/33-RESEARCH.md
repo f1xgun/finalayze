@@ -426,22 +426,22 @@ def lookup_metric(iteration_name: str, metric_name: str) -> float | None:
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **What triggers the arbiter agent?**
    - What we know: The arbiter is a Claude Code sub-agent invoked manually or by another agent.
    - What's unclear: Is the trigger a human running `/gsd:arbiter <debate-file>`, or does the planner include an explicit "run arbiter" task in each plan that produces a debate?
-   - Recommendation: Include an explicit "arbiter task" in each plan that creates a debate file. Avoids orphaned debates with `status: open`.
+   - RESOLVED: Include an explicit "arbiter task" in each plan that creates a debate file. Avoids orphaned debates with `status: open`.
 
 2. **How are existing agents updated to emit `AgentOutput`?**
    - What we know: 21 existing agents produce freeform markdown. Retrofitting all of them is large scope.
    - What's unclear: Does Phase 33 require all agents to adopt the schema, or just the agents that participate in debates?
-   - Recommendation: Phase 33 scope should be the schema + arbiter + debate persistence infrastructure. Agent adoption is per-debate-scenario, not a bulk migration. Planner should reflect this.
+   - RESOLVED: Phase 33 scope should be the schema + arbiter + debate persistence infrastructure. Agent adoption is per-debate-scenario, not a bulk migration. Planner should reflect this.
 
 3. **What is "both agents maintain their position" for auto-escalation?**
    - What we know: CONTEXT.md says escalation happens when arbiter marks ≥1 claim as "contradicted" AND both agents maintain position.
    - What's unclear: There is no automated mechanism for agents to respond to the arbiter report. Who determines "maintained position"?
-   - Recommendation: In Phase 33, implement the schema and arbiter. Escalation rule becomes: if `arbiter_report.has_contradictions` is True at debate close time, set `status: escalated` and assign `experiment_id`. The "both agents maintain position" check is deferred to a human or Phase 34 orchestration.
+   - RESOLVED: In Phase 33, implement the schema and arbiter. Escalation rule becomes: if `arbiter_report.has_contradictions` is True at debate close time, set `status: escalated` and assign `experiment_id`. The "both agents maintain position" check is deferred to a human or Phase 34 orchestration.
 
 ---
 
