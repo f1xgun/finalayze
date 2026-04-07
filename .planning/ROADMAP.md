@@ -7,7 +7,8 @@
 - ✅ **v3.0 Production Readiness** -- Phases 15-18 (shipped 2026-03-22)
 - ✅ **v4.0 Architecture Hardening** -- Phases 19-22 (shipped 2026-03-22)
 - ✅ **v5.0 Data Flow Correctness** -- Phases 23-27 (shipped 2026-03-24)
-- 🚧 **v6.0 Sandbox Stability & Observability** -- Phases 28-31 (in progress)
+- ✅ **v6.0 Sandbox Stability & Observability** -- Phases 28-31 (shipped 2026-03-30)
+- 🚧 **v7.0 Agent Intelligence & Experiment Framework** -- Phases 32-35
 
 ## Phases
 
@@ -144,11 +145,62 @@ Plans:
 - [x] 31-01-PLAN.md -- Fire-and-forget helper, order and signal persistence (PERSIST-01, PERSIST-02, PERSIST-05)
 - [x] 31-02-PLAN.md -- News article and sentiment score persistence (PERSIST-03, PERSIST-04)
 
+### v7.0 Agent Intelligence & Experiment Framework
+
+**Milestone Goal:** Build a scientific decision-making system: structured debate protocol for agent recommendations, experiment registry with pre-defined success criteria, backtest-based A/B testing with interaction effects, and Streamlit Experiment Lab UI for full lifecycle visibility.
+
+- [ ] **Phase 32: Critical Sandbox Fixes** - Fix _CANDLE_LOOKBACK=210, kill switch startup check, rollout default for sandbox mode (prerequisite for meaningful experiments)
+- [ ] **Phase 33: Structured Debate Protocol** - Evidence-based agent output format (claim + source + prediction + risk), arbiter agent for fact-checking, debate state tracking
+- [ ] **Phase 34: Experiment Registry & Runner** - Hypothesis lifecycle (define → criteria → run → compare → verdict), parameterized backtest runner with hypothesis_id, interaction testing (A, B, A+B), integration with history.jsonl
+- [ ] **Phase 35: Experiment Lab UI** - Streamlit app for experiment lifecycle: hypothesis context, pre-defined success criteria, execution status, results vs expectations, decision history
+
+### Phase 32: Critical Sandbox Fixes
+**Goal**: All strategies function correctly in live/sandbox mode and safety defaults prevent accidental production-level risk
+**Depends on**: Nothing (zero-risk fixes)
+**Requirements**: SANDBOX-FIX-01, SANDBOX-FIX-02, SANDBOX-FIX-03
+**Success Criteria** (what must be TRUE):
+  1. `_CANDLE_LOOKBACK >= 210` in trading loop -- RSI2 Connors (needs SMA(200)), dual_momentum (needs 126 bars), and OU mean reversion (needs 126 bars) all receive sufficient data in live mode
+  2. `TradingLoop.start()` checks `KillSwitch.is_killed` before starting scheduler -- a killed system does not resume trading on Docker restart
+  3. When `FINALAYZE_MODE=sandbox` and `rollout_phase` is not explicitly set, the effective rollout phase is MINIMAL (not FULL) -- sandbox always starts with conservative risk limits
+Plans: TBD
+
+### Phase 33: Structured Debate Protocol
+**Goal**: Agent recommendations include verifiable evidence, conflicts are detected automatically, and unresolved conflicts escalate to experiments
+**Depends on**: Phase 32 (need working sandbox to validate experiment results)
+**Requirements**: DEBATE-01, DEBATE-02, DEBATE-03
+**Success Criteria** (what must be TRUE):
+  1. Agent output schema enforces structured claims with source references (file:line or metric value) -- no unsourced assertions in agent recommendations
+  2. An arbiter agent can take two conflicting agent outputs and produce a fact-check report showing which claims are verified, which are contradicted, and which are untestable
+  3. Debate state (claims, conflicts, resolutions) is persisted in `.planning/debates/` for audit trail -- every multi-agent decision has a traceable history
+Plans: TBD
+
+### Phase 34: Experiment Registry & Runner
+**Goal**: Hypotheses are defined with success criteria before execution, backtest experiments test proposals in isolation and combination, and results are structured for comparison
+**Depends on**: Phase 33 (debate protocol identifies which conflicts need experiments)
+**Requirements**: EXP-01, EXP-02, EXP-03, EXP-04
+**Success Criteria** (what must be TRUE):
+  1. Experiment registry stores hypothesis, success criteria (metric + threshold), status, and linked backtest results -- every experiment has a pre-registered definition
+  2. `run_iteration.py --hypothesis <id>` runs a parameterized backtest and links results to the hypothesis -- experiment results are automatically associated with their hypothesis
+  3. Interaction testing: given hypotheses A and B, the runner executes A-only, B-only, and A+B runs and compares all three -- combination effects are measured, not assumed
+  4. Experiment verdicts (ACCEPT/REJECT/INCONCLUSIVE) are recorded with reasoning and linked to the debate that triggered them
+Plans: TBD
+
+### Phase 35: Experiment Lab UI
+**Goal**: Full experiment lifecycle is visible in a Streamlit web app -- from debate context through execution to final decision
+**Depends on**: Phase 34 (needs experiment registry and results to display)
+**Requirements**: UI-EXP-01, UI-EXP-02, UI-EXP-03
+**Success Criteria** (what must be TRUE):
+  1. Experiment list page shows all experiments with status (PENDING/RUNNING/COMPLETED), hypothesis summary, and key metrics -- at a glance, what experiments exist and their state
+  2. Experiment detail page shows: debate context (why), success criteria (what we expect), backtest results with charts (what happened), and A vs B vs A+B comparison table -- complete decision context on one screen
+  3. Decision history page shows accepted/rejected experiments with reasoning -- the team can review past decisions and understand why the system is configured the way it is
+Plans: TBD
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 28 -> 29 -> 30 -> 31
-Note: Phases 30 and 31 both depend on Phase 29 but are independent of each other -- they can run in parallel.
+
+v6.0: 28 -> 29 -> 30 -> 31 (all complete)
+v7.0: 32 -> 33 -> 34 -> 35
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
@@ -157,7 +209,11 @@ Note: Phases 30 and 31 both depend on Phase 29 but are independent of each other
 | 15-18 | v3.0 | 10/10 | Complete | 2026-03-22 |
 | 19-22 | v4.0 | 10/10 | Complete | 2026-03-22 |
 | 23-27 | v5.0 | 9/9 | Complete | 2026-03-24 |
-| 28. Operational Hygiene | v6.0 | 2/2 | Complete    | 2026-03-30 |
-| 29. Core Stability | v6.0 | 2/2 | Complete    | 2026-03-30 |
-| 30. Broker Resilience | v6.0 | 2/2 | Complete    | 2026-03-30 |
-| 31. Data Capture | v6.0 | 2/2 | Complete    | 2026-03-30 |
+| 28. Operational Hygiene | v6.0 | 2/2 | Complete | 2026-03-30 |
+| 29. Core Stability | v6.0 | 2/2 | Complete | 2026-03-30 |
+| 30. Broker Resilience | v6.0 | 2/2 | Complete | 2026-03-30 |
+| 31. Data Capture | v6.0 | 2/2 | Complete | 2026-03-30 |
+| 32. Critical Sandbox Fixes | v7.0 | TBD | Pending | -- |
+| 33. Structured Debate Protocol | v7.0 | TBD | Pending | -- |
+| 34. Experiment Registry & Runner | v7.0 | TBD | Pending | -- |
+| 35. Experiment Lab UI | v7.0 | TBD | Pending | -- |
