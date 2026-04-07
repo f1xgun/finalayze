@@ -524,7 +524,6 @@ def _fetch_candles(
     return candles
 
 
-
 def _get_triple_barrier_params(segment_id: str) -> dict[str, float | int | bool]:
     """Return triple barrier parameters for a segment.
 
@@ -1235,16 +1234,15 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         print(f"[{segment_id}] No folds produced results.")
         return None
 
-    min_ratio = (
-        _MOEX_MIN_PASSING_FOLDS_RATIO if _is_moex_segment(segment_id) else 0.60
-    )
+    min_ratio = _MOEX_MIN_PASSING_FOLDS_RATIO if _is_moex_segment(segment_id) else 0.60
     overall_passed, gate_pass_rates = evaluate_walk_forward(
         all_fold_results, min_passing_folds_ratio=min_ratio
     )
 
     status_str = "PASS" if overall_passed else "FAIL"
-    print(f"\n[{segment_id}] Walk-forward results (overall: {status_str}, "
-          f"min_ratio={min_ratio:.0%}):")
+    print(
+        f"\n[{segment_id}] Walk-forward results (overall: {status_str}, min_ratio={min_ratio:.0%}):"
+    )
     for gate_name, rate in sorted(gate_pass_rates.items()):
         status = "PASS" if rate >= min_ratio else "FAIL"
         print(f"  {gate_name:>20s}: {rate:.1%} [{status}]")
@@ -1495,7 +1493,7 @@ def _evaluate_model(
     return f"acc={acc:.3f} brier={brier:.3f} logloss={ll:.3f}"
 
 
-def _train_and_evaluate_models(  # noqa: PLR0912
+def _train_and_evaluate_models(  # noqa: PLR0912, PLR0915
     segment_id: str,
     segment_dir: Path,
     train_features: list[dict[str, float]],

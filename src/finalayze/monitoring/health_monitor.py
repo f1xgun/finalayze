@@ -19,8 +19,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 if TYPE_CHECKING:
     from finalayze.api.alerts import TelegramAlerter
-    from finalayze.orchestration.trading_loop import TradingLoop
     from finalayze.execution.broker_router import BrokerRouter
+    from finalayze.orchestration.trading_loop import TradingLoop
 
 _log = structlog.get_logger()
 
@@ -66,7 +66,7 @@ class HealthMonitor:
         self._last_feed_timestamp: datetime | None = None
         self._scheduler: BackgroundScheduler | None = None
 
-    def check_now(self) -> HealthCheckResult:
+    def check_now(self) -> HealthCheckResult:  # noqa: PLR0912, PLR0915
         """Run all health checks and return a structured result.
 
         Checks:
@@ -82,7 +82,7 @@ class HealthMonitor:
             markets = self._broker_router.registered_markets
             if markets:
                 broker = self._broker_router.route(markets[0])
-                broker.get_open_orders()
+                broker.get_open_orders()  # type: ignore[attr-defined]
                 broker_ok = True
                 details["broker"] = "ok"
             else:
@@ -108,12 +108,11 @@ class HealthMonitor:
                 details["feed"] = f"off-hours (age: {age.total_seconds():.0f}s, market closed)"
             else:
                 details["feed"] = f"stale (age: {age.total_seconds():.0f}s)"
+        elif not market_open:
+            feed_fresh = True
+            details["feed"] = "off-hours (no feed yet, market closed)"
         else:
-            if not market_open:
-                feed_fresh = True
-                details["feed"] = "off-hours (no feed yet, market closed)"
-            else:
-                details["feed"] = "no feed timestamp set"
+            details["feed"] = "no feed timestamp set"
 
         # Check 3: Loop liveness
         # Compare cycle count change against strategy cycle interval, not health

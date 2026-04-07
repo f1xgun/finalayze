@@ -12,6 +12,8 @@ See docs/plans/2026-03-02-enhanced-improvement-plan.md, task B.7.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import structlog
@@ -23,7 +25,7 @@ logger = structlog.get_logger(__name__)
 
 def _deduplicate_correlated(
     feature_names: list[str],
-    corr_matrix: np.ndarray,
+    corr_matrix: np.ndarray[Any, Any],
     importance_map: dict[str, float],
     threshold: float,
 ) -> set[str]:
@@ -311,7 +313,7 @@ def _build_importance_map(model: xgb.XGBClassifier, feature_names: list[str]) ->
     importance_map: dict[str, float] = {}
     for i, name in enumerate(feature_names):
         xgb_name = f"f{i}"
-        importance_map[name] = raw_importances.get(xgb_name, 0.0)
+        importance_map[name] = float(raw_importances.get(xgb_name, 0.0))  # type: ignore[arg-type]
 
     total_importance = sum(importance_map.values())
     if total_importance > 0:

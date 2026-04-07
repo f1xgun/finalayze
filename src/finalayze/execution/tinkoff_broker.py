@@ -12,6 +12,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures  # noqa: TC003 - used at runtime for Future type
 import math
 import os
 import threading
@@ -194,7 +195,10 @@ class TinkoffBroker(BrokerBase):
                         thread.start()
                         self._loop_thread = thread
             loop = self._loop
-        future = asyncio.run_coroutine_threadsafe(coro, loop)  # type: ignore[arg-type]
+        future: concurrent.futures.Future[object] = asyncio.run_coroutine_threadsafe(
+            coro,  # type: ignore[arg-type]
+            loop,
+        )
         return future.result(timeout=_timeout)
 
     def _call(self, fn: object) -> object:
@@ -351,10 +355,10 @@ class TinkoffBroker(BrokerBase):
         result: dict[str, Decimal] = {}
         for item in response.last_prices:  # type: ignore[attr-defined]
             figi = item.figi
-            sym = figi_to_symbol.get(figi)
-            if sym is not None:
+            resolved_sym = figi_to_symbol.get(figi)
+            if resolved_sym is not None:
                 price = self._quotation_to_decimal(item.price)
-                result[sym] = price
+                result[resolved_sym] = price
 
         return result
 

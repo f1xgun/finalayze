@@ -124,9 +124,7 @@ class SmokeTestRunner:
     async def _test_connectivity(self, services: object) -> None:
         """Test 1: Verify sandbox connectivity and balance."""
         try:
-            portfolio = await services.operations.get_portfolio(
-                account_id=self._account_id
-            )
+            portfolio = await services.operations.get_portfolio(account_id=self._account_id)
             total = portfolio.total_amount_portfolio
             balance = Decimal(total.units) + Decimal(total.nano) / Decimal(1_000_000_000)
             min_balance = 100_000
@@ -186,13 +184,9 @@ class SmokeTestRunner:
     async def _test_portfolio_after_bonds(self, services: object) -> None:
         """Test 4: Verify portfolio has bond positions."""
         try:
-            portfolio = await services.operations.get_portfolio(
-                account_id=self._account_id
-            )
+            portfolio = await services.operations.get_portfolio(account_id=self._account_id)
             bond_positions = [
-                p
-                for p in portfolio.positions
-                if getattr(p, "instrument_type", "") == "bond"
+                p for p in portfolio.positions if getattr(p, "instrument_type", "") == "bond"
             ]
             passed = len(bond_positions) >= 2  # noqa: PLR2004
             figis = [p.figi for p in bond_positions]
@@ -219,13 +213,9 @@ class SmokeTestRunner:
             ledger = ShadowLedger()
 
             # Get current sandbox positions to check bond holdings
-            portfolio = await services.operations.get_portfolio(
-                account_id=self._account_id
-            )
+            portfolio = await services.operations.get_portfolio(account_id=self._account_id)
             bond_positions = [
-                p
-                for p in portfolio.positions
-                if getattr(p, "instrument_type", "") == "bond"
+                p for p in portfolio.positions if getattr(p, "instrument_type", "") == "bond"
             ]
 
             # Simulate coupon payment for OFZ 26244
@@ -261,9 +251,7 @@ class SmokeTestRunner:
             )
             self._record("ShadowLedger coupon processing", True, detail)
         except Exception as exc:
-            self._record(
-                "ShadowLedger coupon processing", False, str(exc)[:200]
-            )
+            self._record("ShadowLedger coupon processing", False, str(exc)[:200])
 
     async def _test_buy_equity(self, services: object) -> None:
         """Test 6: Buy SBER (10 lots = 100 shares)."""
@@ -290,15 +278,11 @@ class SmokeTestRunner:
     async def _test_full_portfolio(self, services: object) -> None:
         """Test 7: Verify portfolio has bonds + equity."""
         try:
-            portfolio = await services.operations.get_portfolio(
-                account_id=self._account_id
-            )
+            portfolio = await services.operations.get_portfolio(account_id=self._account_id)
             positions = portfolio.positions
             types = {getattr(p, "instrument_type", "unknown") for p in positions}
             total = portfolio.total_amount_portfolio
-            equity = Decimal(total.units) + Decimal(total.nano) / Decimal(
-                1_000_000_000
-            )
+            equity = Decimal(total.units) + Decimal(total.nano) / Decimal(1_000_000_000)
 
             has_bonds = "bond" in types
             has_shares = "share" in types
@@ -314,9 +298,7 @@ class SmokeTestRunner:
     async def _test_sell_all(self, services: object) -> None:
         """Test 8: Sell all positions to clean up."""
         try:
-            portfolio = await services.operations.get_portfolio(
-                account_id=self._account_id
-            )
+            portfolio = await services.operations.get_portfolio(account_id=self._account_id)
             sold_count = 0
             for pos in portfolio.positions:
                 qty_units = pos.quantity.units
@@ -402,8 +384,7 @@ class SmokeTestRunner:
             signal_window = 3 <= days_left <= 5 if days_left is not None else False  # noqa: PLR2004
 
             detail = (
-                f"next_meeting={next_meeting}, days={days_left}, "
-                f"in_signal_window={signal_window}"
+                f"next_meeting={next_meeting}, days={days_left}, in_signal_window={signal_window}"
             )
             # This test passes regardless — it's informational
             self._record("CBR event strategy check", True, detail)

@@ -13,6 +13,10 @@ from __future__ import annotations
 from decimal import Decimal
 from enum import StrEnum
 
+import structlog
+
+_log = structlog.get_logger()
+
 # ── Threshold defaults ──────────────────────────────────────────────────────
 _DEFAULT_L1 = 0.05
 _DEFAULT_L2 = 0.10
@@ -116,6 +120,15 @@ class CircuitBreaker:
 
         # 6A.6: Sticky -- only escalate, never de-escalate within a day
         if _LEVEL_ORDER[new_level] > _LEVEL_ORDER[self._level]:
+            _log.warning(
+                "circuit_breaker_escalated",
+                market=self._market_id,
+                from_level=self._level.value,
+                to_level=new_level.value,
+                drawdown_pct=float(drawdown * 100),
+                baseline=float(baseline_equity),
+                current=float(current_equity),
+            )
             self._level = new_level
 
         # Track baseline for profitable-day comparison in reset_daily
@@ -142,13 +155,26 @@ class CircuitBreaker:
         self._baseline = new_baseline
 
         if self._level == CircuitLevel.CAUTION:
+            _log.info("circuit_breaker_reset", market=self._market_id, from_level="caution")
             self._level = CircuitLevel.NORMAL
             self._consecutive_profitable_days = 0
         elif self._level == CircuitLevel.HALTED:
             if self._consecutive_profitable_days >= _L2_PROFITABLE_DAYS_REQUIRED:
+                _log.info(
+                    "circuit_breaker_reset",
+                    market=self._market_id,
+                    from_level="halted",
+                    profitable_days=self._consecutive_profitable_days,
+                )
                 self._level = CircuitLevel.NORMAL
                 self._consecutive_profitable_days = 0
-            # else: stay HALTED
+            else:
+                _log.info(
+                    "circuit_breaker_halted_persists",
+                    market=self._market_id,
+                    profitable_days=self._consecutive_profitable_days,
+                    required=_L2_PROFITABLE_DAYS_REQUIRED,
+                )
         # LIQUIDATE: never auto-cleared
 
     def reset_manual(self) -> None:

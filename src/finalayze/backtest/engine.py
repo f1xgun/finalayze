@@ -184,7 +184,7 @@ class BacktestEngine:
         steps: list[object] = [KellyStep(), VolTargetStep(), RegimeStep()]
         # MOEX regime steps (Phase 9: Strategy Wiring)
         if cfg.rub_oil_regime_signal is not None:
-            steps.append(RubOilRegimeStep(cfg.rub_oil_regime_signal, segment_id))
+            steps.append(RubOilRegimeStep(cfg.rub_oil_regime_signal, segment_id))  # type: ignore[arg-type]
         if cfg.brent_rub_price > 0:
             steps.append(BrentGateStep(cfg.brent_rub_price, segment_id))
         # Phase 10: Macro regime steps
@@ -552,7 +552,7 @@ class BacktestEngine:
                         entry_bars=entry_bars,
                         bar_index=i,
                         regime_position_scale=(
-                            regime_state.position_scale if regime_state is not None else None
+                            float(regime_state.position_scale) if regime_state is not None else None
                         ),
                         entry_strategies=entry_strategies,
                         chandelier_stops=chandelier_stops,
@@ -868,7 +868,9 @@ class BacktestEngine:
                             entry_bars=entry_bars,
                             bar_index=bar_counts.get(sym, 0),
                             regime_position_scale=(
-                                regime_state.position_scale if regime_state is not None else None
+                                float(regime_state.position_scale)
+                                if regime_state is not None
+                                else None
                             ),
                             entry_strategies=entry_strategies,
                             chandelier_stops=chandelier_stops,
@@ -1244,6 +1246,8 @@ class BacktestEngine:
             returns_history=tuple(self._portfolio_returns),
             ml_confidence=ml_confidence,
         )
+        if self._sizing_pipeline is None:
+            return
         position_value = self._sizing_pipeline.compute(context)
 
         # Apply confidence scaling from signal (post-pipeline multiplier)

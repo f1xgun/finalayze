@@ -7,6 +7,7 @@ Implements NEWS-05 (sector-aware impact) and NEWS-09 (single LLM call).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import time
@@ -97,6 +98,11 @@ class NewsImpactAnalyzer:
         if self._consecutive_failures >= _CIRCUIT_BREAKER_THRESHOLD:
             now = time.monotonic()
             if now < self._circuit_open_until:
+                log.debug(
+                    "news_impact_circuit_skipped",
+                    article_url=article.url,
+                    remaining_seconds=round(self._circuit_open_until - now, 1),
+                )
                 return _FALLBACK_RESULT
             # Half-open: allow one retry
             log.info("news_impact_circuit_half_open")
@@ -129,7 +135,21 @@ class NewsImpactAnalyzer:
                 previous_failures=self._consecutive_failures,
             )
         self._consecutive_failures = 0
-        return self._parse_response(raw)
+        result = self._parse_response(raw)
+        if result is _FALLBACK_RESULT:
+            log.warning(
+                "news_impact_llm_parse_fallback",
+                article_url=article.url,
+            )
+        else:
+            log.debug(
+                "news_impact_llm_success",
+                article_url=article.url,
+                event_type=result.event_type,
+                sentiment=round(result.sentiment, 3),
+                confidence=round(result.confidence, 3),
+            )
+        return result
 
     def _load_prompt(self, language: str) -> str:
         """Load and cache prompt for the given language."""
@@ -139,7 +159,7 @@ class NewsImpactAnalyzer:
             self._prompts[lang] = prompt_path.read_text(encoding="utf-8").strip()
         return self._prompts[lang]
 
-    def _parse_response(self, raw: str) -> NewsImpactResult:
+    def _parse_response(self, raw: str) -> NewsImpactResult:  # noqa: PLR0912
         """Parse LLM JSON response into NewsImpactResult.
 
         Handles common LLM output issues:
@@ -156,15 +176,13 @@ class NewsImpactAnalyzer:
         if match:
             stripped = match.group(1).strip()
 
-        # Unescape double-escaped JSON: "{\"key\": ...}" → {"key": ...}
-        if stripped.startswith('"') and "\\\"" in stripped:
-            try:
+        # Unescape double-escaped JSON: "{\"key\": ...}" -> {"key": ...}
+        if stripped.startswith('"') and '\\"' in stripped:
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
                 stripped = json.loads(stripped)  # parse the outer string
-            except (json.JSONDecodeError, TypeError):
-                pass
 
         # Remove JavaScript-style single-line comments (// ...)
-        stripped = re.sub(r'//[^\n]*', '', stripped)
+        stripped = re.sub(r"//[^\n]*", "", stripped)
 
         # Extract first JSON object — ignore trailing text after closing brace
         brace_start = stripped.find("{")
@@ -185,7 +203,7 @@ class NewsImpactAnalyzer:
             else:
                 # Truncated JSON — try to close open braces/brackets
                 stripped = stripped[brace_start:]
-                stripped += "]" * stripped.count("[") - stripped.count("]")
+                stripped += "]" * (stripped.count("[") - stripped.count("]"))
                 stripped += "}" * (stripped.count("{") - stripped.count("}"))
 
         try:

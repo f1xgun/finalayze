@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import threading
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from config.logging import setup_logging
@@ -27,15 +27,15 @@ setup_logging(_settings.mode)
 log = structlog.get_logger()
 
 # Module-level reference for graceful shutdown
-_trading_loop_instance: object | None = None
+_trading_loop_instance: Any | None = None
 _trading_loop_thread: threading.Thread | None = None
 
 # Module-level reference for Telegram bot handler (wired in lifespan)
-_bot_handler_instance: object | None = None
+_bot_handler_instance: Any | None = None
 
 
 @asynccontextmanager
-async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR0915
     """Start TradingLoop in background thread for sandbox/real modes, shut down on exit."""
     global _trading_loop_instance, _trading_loop_thread  # noqa: PLW0603
 
@@ -73,7 +73,7 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                 # Wire KillSwitch and GoNoGoReporter to Telegram bot handler
                 if _bot_handler_instance is not None:
                     if kill_switch is not None:
-                        _bot_handler_instance._kill_switch = kill_switch  # type: ignore[union-attr]
+                        _bot_handler_instance._kill_switch = kill_switch
                         log.info("kill_switch_wired_to_telegram_bot")
 
                     try:
@@ -88,7 +88,7 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                         if _gate_cfg.exists():
                             _thresholds = GateThresholds.from_yaml(_gate_cfg)
                             go_no_go_reporter = GoNoGoReporter(_thresholds, market_id="moex")
-                            _bot_handler_instance._go_no_go_reporter = go_no_go_reporter  # type: ignore[union-attr]
+                            _bot_handler_instance._go_no_go_reporter = go_no_go_reporter
                             log.info("go_no_go_reporter_wired_to_telegram_bot")
 
                             from finalayze.api.v1.sandbox import (  # noqa: PLC0415
@@ -101,12 +101,12 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                         log.debug("go_no_go_reporter_wire_failed", exc_info=True)
 
                     if broker_router is not None:
-                        _bot_handler_instance._broker_router = broker_router  # type: ignore[union-attr]
+                        _bot_handler_instance._broker_router = broker_router
                         circuit_breakers_ref = getattr(
                             _trading_loop_instance, "_circuit_breakers", {}
                         )
-                        _bot_handler_instance._circuit_breakers = circuit_breakers_ref  # type: ignore[union-attr]
-                        _bot_handler_instance._trading_loop = _trading_loop_instance  # type: ignore[union-attr]
+                        _bot_handler_instance._circuit_breakers = circuit_breakers_ref
+                        _bot_handler_instance._trading_loop = _trading_loop_instance
                         log.info("bot_handler_fully_wired")
 
                 # Wire GoNoGoReporter to sandbox endpoint even without Telegram bot
@@ -136,7 +136,7 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                 if broker_router is not None and alerter_ref is not None:
                     health_monitor = HealthMonitor(
                         broker_router=broker_router,
-                        trading_loop=_trading_loop_instance,  # type: ignore[arg-type]
+                        trading_loop=_trading_loop_instance,
                         alerter=alerter_ref,
                         strategy_cycle_minutes=_settings.strategy_cycle_minutes,
                         # Feed freshness must exceed strategy cycle interval + buffer
@@ -146,12 +146,12 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                     set_health_monitor(health_monitor)
                     # Wire health monitor into trading loop for feed timestamp updates
                     if _trading_loop_instance is not None:
-                        _trading_loop_instance._health_monitor = health_monitor  # type: ignore[union-attr]
+                        _trading_loop_instance._health_monitor = health_monitor
                     health_monitor.start()
                     log.info("health_monitor_started")
 
                 _trading_loop_thread = threading.Thread(
-                    target=_trading_loop_instance.start,  # type: ignore[union-attr]
+                    target=_trading_loop_instance.start,
                     daemon=True,
                     name="trading-loop",
                 )
@@ -178,7 +178,7 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                 log.debug("health_monitor_stop_failed", exc_info=True)
 
         try:
-            _trading_loop_instance.stop()  # type: ignore[union-attr]
+            _trading_loop_instance.stop()
             log.info("trading_loop_stopped")
         except Exception:
             log.debug("trading_loop_stop_failed", exc_info=True)
@@ -207,7 +207,7 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
                 log.debug("bot_handler_alerter_close_failed", exc_info=True)
 
 
-def _build_trading_loop(settings: object) -> object | None:
+def _build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
     """Build TradingLoop with all dependencies. Returns None on failure.
 
     Reuses the full wiring from scripts/run_sandbox.py via subprocess
@@ -222,7 +222,6 @@ def _build_trading_loop(settings: object) -> object | None:
         from finalayze.analysis.impact_estimator import ImpactEstimator  # noqa: PLC0415
         from finalayze.analysis.news_analyzer import NewsAnalyzer  # noqa: PLC0415
         from finalayze.api.alerts import TelegramAlerter  # noqa: PLC0415
-        from finalayze.orchestration.trading_loop import TradingLoop  # noqa: PLC0415
         from finalayze.data.fetchers.newsapi import NewsApiFetcher  # noqa: PLC0415
         from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
         from finalayze.execution.broker_router import BrokerRouter  # noqa: PLC0415
@@ -232,6 +231,7 @@ def _build_trading_loop(settings: object) -> object | None:
             Instrument,
             InstrumentRegistry,
         )
+        from finalayze.orchestration.trading_loop import TradingLoop  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import (  # noqa: PLC0415
             CircuitBreaker,
             CrossMarketCircuitBreaker,
@@ -260,7 +260,7 @@ def _build_trading_loop(settings: object) -> object | None:
                         symbol=sym,
                         market_id="moex",
                         name=sym,
-                        instrument_type=seg.instrument_type,
+                        instrument_type=seg.instrument_type,  # type: ignore[arg-type]
                         currency=seg.currency,
                         segment_id=seg.segment_id,
                     )
@@ -312,7 +312,7 @@ def _build_trading_loop(settings: object) -> object | None:
                     share = share_by_ticker[sym]
                     try:
                         existing = registry.get(sym, "moex")
-                    except Exception:
+                    except Exception:  # noqa: S112
                         continue
                     registry.register(
                         Instrument(
@@ -321,7 +321,7 @@ def _build_trading_loop(settings: object) -> object | None:
                             name=str(share["name"]),
                             instrument_type=existing.instrument_type,
                             figi=str(share["figi"]),
-                            lot_size=int(share["lot"]),
+                            lot_size=int(share["lot"]),  # type: ignore[call-overload]
                             currency=existing.currency,
                             segment_id=existing.segment_id,
                         )
@@ -354,7 +354,7 @@ def _build_trading_loop(settings: object) -> object | None:
                 sandbox=is_sandbox,
                 retry_policy=retry_policy,
             )
-        broker_router = BrokerRouter(brokers=brokers)
+        broker_router = BrokerRouter(brokers=brokers)  # type: ignore[arg-type]
 
         # ── Strategies ───────────────────────────────────────────────────
         strategies_list = [
@@ -387,7 +387,14 @@ def _build_trading_loop(settings: object) -> object | None:
         from finalayze.analysis.llm_client import LLMClient  # noqa: PLC0415
 
         class _StubLLMClient(LLMClient):
-            async def complete(self, prompt: str, system: str) -> str:  # noqa: ARG002
+            async def complete(
+                self,
+                prompt: str,  # noqa: ARG002
+                system: str,  # noqa: ARG002
+                *,
+                json_mode: bool = False,  # noqa: ARG002
+                max_tokens: int | None = None,  # noqa: ARG002
+            ) -> str:
                 return '{"sentiment": 0.0, "confidence": 0.0, "reasoning": "stub"}'
 
         _has_llm = bool(
@@ -405,7 +412,7 @@ def _build_trading_loop(settings: object) -> object | None:
         impact_estimator = ImpactEstimator()
         _has_news = bool(getattr(settings, "newsapi_api_key", ""))
         news_fetcher = (
-            NewsApiFetcher(api_key=settings.newsapi_api_key)  # type: ignore[union-attr]
+            NewsApiFetcher(api_key=settings.newsapi_api_key)
             if _has_news
             else NewsApiFetcher(api_key="")
         )
@@ -439,14 +446,13 @@ def _build_trading_loop(settings: object) -> object | None:
         # ── Kill Switch ───────────────────────────────────────────────
         from pathlib import Path  # noqa: PLC0415
 
-        from finalayze.core.kill_switch import KillSwitch  # noqa: PLC0415
-
         # Build TradingLoop first, then create KillSwitch that references it
         # ── Build TradingLoop ────────────────────────────────────────────
         from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+        from finalayze.core.kill_switch import KillSwitch  # noqa: PLC0415
 
         loop = TradingLoop(
-            settings=settings,  # type: ignore[arg-type]
+            settings=settings,
             fetchers=fetchers,
             news_fetcher=news_fetcher,
             news_analyzer=news_analyzer,
@@ -486,7 +492,7 @@ def _build_trading_loop(settings: object) -> object | None:
 
         # Store kill_switch on loop for access from lifespan
         loop._kill_switch = kill_switch  # type: ignore[attr-defined]
-        loop._circuit_breakers = circuit_breakers  # type: ignore[attr-defined]
+        loop._circuit_breakers = circuit_breakers
         loop._alerter_ref = alerter  # type: ignore[attr-defined]
 
         log.info(
@@ -516,17 +522,17 @@ def create_app() -> FastAPI:
 
     # Mount Telegram webhook router when bot token and webhook secret are configured
     if settings.telegram_bot_token and settings.telegram_webhook_secret:
-        from finalayze.api.v1.telegram import create_telegram_router  # noqa: PLC0415
         from finalayze.api.alerts import TelegramAlerter  # noqa: PLC0415
         from finalayze.api.telegram_bot import TelegramBotHandler  # noqa: PLC0415
+        from finalayze.api.v1.telegram import create_telegram_router  # noqa: PLC0415
 
         alerter = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
         global _bot_handler_instance  # noqa: PLW0603
         bot_handler = TelegramBotHandler(
             alerter=alerter,
-            broker_router=None,  # type: ignore[arg-type] -- wired in TradingLoop startup
+            broker_router=None,  # type: ignore[arg-type]  # wired in TradingLoop startup
             circuit_breakers={},
-            settings=settings,  # type: ignore[arg-type]
+            settings=settings,
         )
         _bot_handler_instance = bot_handler
         telegram_router = create_telegram_router(bot_handler, settings.telegram_webhook_secret)

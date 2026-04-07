@@ -61,7 +61,7 @@ class CatBoostModel(BaseMLModel):
                 )
                 raise InsufficientDataError(msg)
         features_arr = np.array([[features[k] for k in sorted(features)]], dtype=float)
-        proba = self._model.predict_proba(features_arr)  # type: ignore[union-attr]
+        proba = self._model.predict_proba(features_arr)  # type: ignore[attr-defined]
         return float(proba[0][1])
 
     def fit(

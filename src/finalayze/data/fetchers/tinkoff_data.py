@@ -10,6 +10,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures  # noqa: TC003 - used at runtime for Future type
 import os
 import threading
 from pathlib import Path
@@ -122,7 +123,10 @@ class TinkoffFetcher(BaseFetcher):
                         thread.start()
                         self._loop_thread = thread
             loop = self._loop
-        future = asyncio.run_coroutine_threadsafe(coro, loop)  # type: ignore[arg-type]
+        future: concurrent.futures.Future[object] = asyncio.run_coroutine_threadsafe(
+            coro,  # type: ignore[arg-type]
+            loop,
+        )
         return future.result(timeout=self._grpc_timeout)
 
     async def _get_services_async(self) -> object:
@@ -194,7 +198,7 @@ class TinkoffFetcher(BaseFetcher):
             raw_candles = self._run_async(self._fetch_async(figi, start, end, interval))
         except InstrumentNotFoundError:
             raise
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             _log.error(
                 "candle_fetch_timeout", symbol=symbol, figi=figi, timeout_s=self._grpc_timeout
             )
@@ -211,7 +215,7 @@ class TinkoffFetcher(BaseFetcher):
             msg = f"Tinkoff gRPC error fetching {symbol}: {exc}"
             raise DataFetchError(msg) from exc
 
-        candles = [self._map_candle(c, symbol, timeframe) for c in raw_candles]
+        candles = [self._map_candle(c, symbol, timeframe) for c in raw_candles]  # type: ignore[attr-defined]
         _log.debug("candles_fetched", symbol=symbol, count=len(candles), timeframe=timeframe)
         return candles
 
@@ -295,7 +299,7 @@ class TinkoffFetcher(BaseFetcher):
             msg = f"Tinkoff gRPC error fetching dividends for {symbol}: {exc}"
             raise DataFetchError(msg) from exc
 
-        return [self._map_dividend(d) for d in raw_dividends]
+        return [self._map_dividend(d) for d in raw_dividends]  # type: ignore[attr-defined]
 
     async def _fetch_dividends_async(
         self,
@@ -329,7 +333,7 @@ class TinkoffFetcher(BaseFetcher):
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
         try:
-            return self._run_async(self._fetch_all_bonds_async())
+            return self._run_async(self._fetch_all_bonds_async())  # type: ignore[return-value]
         except Exception as exc:
             _log.exception("fetch_all_bonds_failed", error_type=type(exc).__name__)
             return []
@@ -359,9 +363,7 @@ class TinkoffFetcher(BaseFetcher):
             call_d = None
             if hasattr(bond, "call_date") and bond.call_date:
                 call_d = (
-                    bond.call_date.date()
-                    if hasattr(bond.call_date, "date")
-                    else bond.call_date
+                    bond.call_date.date() if hasattr(bond.call_date, "date") else bond.call_date
                 )
 
             result.append(
@@ -387,9 +389,7 @@ class TinkoffFetcher(BaseFetcher):
                     "bond_type": getattr(bond, "bond_type", ""),
                     "call_date": call_d,
                     "perpetual_flag": getattr(bond, "perpetual_flag", False),
-                    "api_trade_available_flag": getattr(
-                        bond, "api_trade_available_flag", False
-                    ),
+                    "api_trade_available_flag": getattr(bond, "api_trade_available_flag", False),
                 }
             )
         return result
@@ -406,7 +406,7 @@ class TinkoffFetcher(BaseFetcher):
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
         try:
-            return self._run_async(self._fetch_amortization_async(instrument_id))
+            return self._run_async(self._fetch_amortization_async(instrument_id))  # type: ignore[return-value]
         except Exception as exc:
             _log.exception(
                 "fetch_amortization_failed",
@@ -428,9 +428,7 @@ class TinkoffFetcher(BaseFetcher):
         )
         events: list[dict[str, Any]] = []
         for ev in resp.events:
-            ev_date = (
-                ev.event_date.date() if hasattr(ev.event_date, "date") else ev.event_date
-            )
+            ev_date = ev.event_date.date() if hasattr(ev.event_date, "date") else ev.event_date
             pay = self._money_to_decimal(ev.pay_one_bond)
             events.append(
                 {
@@ -471,11 +469,9 @@ class TinkoffFetcher(BaseFetcher):
 
         try:
             coro = self._fetch_bond_candles_async(figi, from_date, to_date, interval)
-            return self._run_async(coro)
+            return self._run_async(coro)  # type: ignore[return-value]
         except Exception as exc:
-            _log.exception(
-                "bond_candle_fetch_failed", figi=figi, error_type=type(exc).__name__
-            )
+            _log.exception("bond_candle_fetch_failed", figi=figi, error_type=type(exc).__name__)
             return []
 
     async def _fetch_bond_candles_async(
@@ -531,7 +527,7 @@ class TinkoffFetcher(BaseFetcher):
         except Exception as exc:
             msg = f"Tinkoff gRPC error fetching bond info for {symbol} (FIGI={figi}): {exc}"
             raise DataFetchError(msg) from exc
-        return result
+        return result  # type: ignore[return-value]
 
     async def _fetch_bond_info_async(self, figi: str) -> BondInfo:
         """Async call to T-Bank SDK bond_by."""
@@ -550,9 +546,7 @@ class TinkoffFetcher(BaseFetcher):
         coupon_rate_val = Decimal(0)
 
         maturity = (
-            bond.maturity_date.date()
-            if hasattr(bond.maturity_date, "date")
-            else bond.maturity_date
+            bond.maturity_date.date() if hasattr(bond.maturity_date, "date") else bond.maturity_date
         )
 
         return BondInfo(
@@ -593,7 +587,7 @@ class TinkoffFetcher(BaseFetcher):
         except Exception as exc:
             msg = f"Tinkoff gRPC error fetching coupons for {symbol} (FIGI={figi}): {exc}"
             raise DataFetchError(msg) from exc
-        return result
+        return result  # type: ignore[return-value]
 
     async def _fetch_bond_coupons_async(
         self, figi: str, start: datetime, end: datetime
@@ -608,9 +602,7 @@ class TinkoffFetcher(BaseFetcher):
         coupons: list[CouponPayment] = []
         for c in resp.events:
             amount = self._money_to_decimal(c.pay_one_bond)
-            coupon_date = (
-                c.coupon_date.date() if hasattr(c.coupon_date, "date") else c.coupon_date
-            )
+            coupon_date = c.coupon_date.date() if hasattr(c.coupon_date, "date") else c.coupon_date
             # Record date is typically T-2 business days before payment.
             # T-Bank doesn't provide it directly; estimate from coupon_date.
             record_date = self._business_days_before(coupon_date, 2)
@@ -649,7 +641,7 @@ class TinkoffFetcher(BaseFetcher):
         except Exception as exc:
             msg = f"Tinkoff gRPC error fetching NKD for {symbol} (FIGI={figi}): {exc}"
             raise DataFetchError(msg) from exc
-        return result
+        return result  # type: ignore[return-value]
 
     async def _fetch_accrued_interest_async(
         self, figi: str, start: datetime, end: datetime

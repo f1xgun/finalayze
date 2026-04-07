@@ -60,9 +60,7 @@ class MacroCacheService:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    self._persist_task = loop.create_task(
-                        self._persist_snapshot(self._snapshot)
-                    )
+                    self._persist_task = loop.create_task(self._persist_snapshot(self._snapshot))
                 except RuntimeError:
                     # No running loop — create one for the write
                     asyncio.run(self._persist_snapshot(self._snapshot))
@@ -96,6 +94,7 @@ class MacroCacheService:
             usdrub=snapshot.usdrub,
             ofzin_indexation_coefficient=snapshot.ofzin_indexation_coefficient,
         )
+        assert self._db_session_factory is not None  # caller checks before invoking
         try:
             async with self._db_session_factory() as session:
                 session.add(model)

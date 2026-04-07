@@ -9,7 +9,7 @@ Each portfolio layer operates as a virtual sub-account with:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 

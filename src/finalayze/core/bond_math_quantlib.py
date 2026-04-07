@@ -22,7 +22,7 @@ import contextlib
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
-import QuantLib as ql  # type: ignore[import-untyped]  # noqa: N813
+import QuantLib as ql  # noqa: N813
 
 _QUANT_2DP = Decimal("0.01")
 _QUANT_4DP = Decimal("0.0001")
@@ -412,4 +412,4 @@ def effective_duration_rate_shock(
     if base_price == 0.0:
         return 0.0
 
-    return (price_dn - price_up) / (base_price * dy)
+    return float((price_dn - price_up) / (base_price * dy))

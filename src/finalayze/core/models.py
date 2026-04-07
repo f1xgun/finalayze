@@ -257,7 +257,7 @@ class MacroSnapshotModel(Base):
     cpi_yoy: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     last_cbr_decision: Mapped[str | None] = mapped_column(String(10))
     breakeven_inflation: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
-    yield_curve: Mapped[dict | None] = mapped_column(JSONB)
+    yield_curve: Mapped[dict[str, str] | None] = mapped_column(JSONB)
     usdrub: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
     ofzin_indexation_coefficient: Mapped[Decimal | None] = mapped_column(Numeric(8, 6))
 

@@ -7,6 +7,7 @@ Captures CycleMetrics after each TradingLoop cycle, persists to TimescaleDB
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures  # noqa: TC003 - used at runtime for Future type
 import threading
 from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003
@@ -131,7 +132,7 @@ class SandboxMonitorService:
                     )
                     t.start()
                     self.__class__._persist_loop = loop
-        return self.__class__._persist_loop  # type: ignore[return-value]
+        return self.__class__._persist_loop
 
     def _run_async_safe(self, coro: object) -> None:
         """Run a coroutine from sync context via background event loop.
@@ -141,7 +142,7 @@ class SandboxMonitorService:
         """
         try:
             loop = self._get_persist_loop()
-            future = asyncio.run_coroutine_threadsafe(
+            future: concurrent.futures.Future[None] = asyncio.run_coroutine_threadsafe(
                 coro,  # type: ignore[arg-type]
                 loop,
             )

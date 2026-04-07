@@ -11,6 +11,10 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+import structlog
+
+_log = structlog.get_logger()
+
 if TYPE_CHECKING:
     from finalayze.risk.circuit_breaker import CircuitLevel
     from finalayze.risk.regime import RegimeState
@@ -316,7 +320,16 @@ class PreTradeChecker:
                     f"(max {_MAX_CORRELATED_POSITIONS})"
                 )
 
-        return PreTradeResult(passed=len(violations) == 0, violations=violations)
+        result = PreTradeResult(passed=len(violations) == 0, violations=violations)
+        if not result.passed:
+            _log.warning(
+                "pre_trade_check_failed",
+                symbol=symbol,
+                market=market_id,
+                violations=result.violations,
+                order_value=float(order_value),
+            )
+        return result
 
     @staticmethod
     def _is_market_open(market_id: str, dt: datetime) -> bool:

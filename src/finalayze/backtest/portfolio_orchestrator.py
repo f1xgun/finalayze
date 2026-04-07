@@ -365,7 +365,7 @@ class PortfolioBacktestOrchestrator:
         if std <= 0:
             return 0.0
 
-        return mean_excess / std * math.sqrt(_TRADING_DAYS_PER_YEAR)
+        return float(mean_excess / std * math.sqrt(_TRADING_DAYS_PER_YEAR))
 
     @staticmethod
     def _compute_max_drawdown(curve: list[float]) -> float:

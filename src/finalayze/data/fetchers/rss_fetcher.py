@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-import feedparser
+import feedparser  # type: ignore[import-untyped]
 import structlog
 from dateutil.parser import parse as dateutil_parse
 

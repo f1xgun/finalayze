@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     llm_fallback_api_key: str = ""  # FINALAYZE_LLM_FALLBACK_API_KEY
 
     # Cycle intervals (restart required to apply changes)
-    news_cycle_minutes: int = 30  # FINALAYZE_NEWS_CYCLE_MINUTES
+    news_cycle_minutes: int = 2  # FINALAYZE_NEWS_CYCLE_MINUTES  # TODO: revert to 30
     strategy_cycle_minutes: int = 60  # FINALAYZE_STRATEGY_CYCLE_MINUTES
     daily_reset_hour_utc: int = 0  # FINALAYZE_DAILY_RESET_HOUR_UTC
 
@@ -108,16 +108,30 @@ class Settings(BaseSettings):
     weekly_digest_hour_utc: int = 16  # FINALAYZE_WEEKLY_DIGEST_HOUR_UTC (Sunday 19:00 MSK)
 
     # Kill switch
-    kill_switch_flag_path: str = "/tmp/finalayze_killed"  # FINALAYZE_KILL_SWITCH_FLAG_PATH
+    kill_switch_flag_path: str = "/tmp/finalayze_killed"  # noqa: S108  # FINALAYZE_KILL_SWITCH_FLAG_PATH
 
     # News pipeline (Phase 7)
     news_rss_urls: list[str] = [
+        # Official RU
         "https://rssexport.rbc.ru/rbcnews/news/30/full.rss",
         "https://www.interfax.ru/rss.asp",
         "https://tass.com/rss/v2.xml",
+        # Business / finance RU
+        "https://www.banki.ru/xml/news.rss",
+        "https://www.vedomosti.ru/rss/news",
+        "https://www.kommersant.ru/RSS/news.xml",
+        # Global / US markets
+        "https://feeds.bloomberg.com/markets/news.rss",
+        "https://www.investing.com/rss/news.rss",
     ]
     news_poll_interval_minutes: int = 5  # FINALAYZE_NEWS_POLL_INTERVAL_MINUTES
-    telegram_channels: list[str] = []  # FINALAYZE_TELEGRAM_CHANNELS
+    telegram_channels: list[str] = [  # FINALAYZE_TELEGRAM_CHANNELS
+        "@markettwits",
+        "@AK47pfl",
+        "@cbrstocks",
+        "@investorbiz",
+        "@raborynok",
+    ]
 
     # Rollout
     rollout_phase: RolloutPhase = RolloutPhase.FULL  # FINALAYZE_ROLLOUT_PHASE

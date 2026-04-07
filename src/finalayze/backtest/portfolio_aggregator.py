@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from datetime import date
@@ -38,7 +38,7 @@ class LayerResult:
     layer_id: str  # "core", "strategic", "tactical", "short"
     equity_curve: list[float]  # daily equity values
     dates: list[date]
-    trades: list  # TradeResult list  # type: ignore[type-arg]
+    trades: list[Any]  # TradeResult list
     total_return_pct: float
     max_drawdown_pct: float
     coupon_income_net: float = 0.0
@@ -265,7 +265,7 @@ class PortfolioAggregator:
         if std <= 0:
             return 0.0
 
-        return mean_excess / std * math.sqrt(self._tdays)
+        return float(mean_excess / std * math.sqrt(self._tdays))
 
     def _compute_absolute_sharpe(self, combined: list[float]) -> float:
         """Compute annualised absolute Sharpe (no risk-free subtraction)."""

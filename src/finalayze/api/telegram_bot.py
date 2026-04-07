@@ -50,7 +50,7 @@ class TelegramBotHandler:
         circuit_breakers: dict[str, CircuitBreaker],
         settings: Settings,
         bond_processor: object | None = None,
-        trading_loop: object | None = None,
+        trading_loop: Any | None = None,
         kill_switch: KillSwitch | None = None,
         go_no_go_reporter: GoNoGoReporter | None = None,
     ) -> None:
@@ -181,7 +181,7 @@ class TelegramBotHandler:
         _log.critical("telegram_stop_command", chat_id=chat_id)
         if self._trading_loop is not None:
             try:
-                self._trading_loop.stop()  # type: ignore[union-attr]
+                self._trading_loop.stop()
                 await self._alerter._send(
                     "<b>TRADING HALTED</b>\n\n"
                     "All cycles stopped. Manual restart required to resume."
@@ -192,9 +192,7 @@ class TelegramBotHandler:
                     "<b>STOP FAILED</b>\n\nCheck logs. Scheduler may still be running."
                 )
         else:
-            await self._alerter._send(
-                "<b>STOP: No trading loop</b>\n\nRunning in API-only mode."
-            )
+            await self._alerter._send("<b>STOP: No trading loop</b>\n\nRunning in API-only mode.")
 
     async def handle_breakers(self, chat_id: str) -> None:  # noqa: ARG002
         """Show circuit breaker states for all layers.
@@ -255,8 +253,7 @@ class TelegramBotHandler:
 
         self._pending_kill[chat_id] = time.monotonic()
         await self._alerter._send(
-            "<b>KILL SWITCH</b>\n\n"
-            "Type CONFIRM to kill all trading within 30s"
+            "<b>KILL SWITCH</b>\n\nType CONFIRM to kill all trading within 30s"
         )
 
     async def handle_gonogo(self, chat_id: str) -> None:  # noqa: ARG002
@@ -295,9 +292,7 @@ class TelegramBotHandler:
 
         for c in report.criteria:
             c_emoji = "\u2705" if c.passed else "\u274c"
-            lines.append(
-                f"{c_emoji} {c.name}: {c.actual:.1f} / {c.threshold:.1f} {c.unit}"
-            )
+            lines.append(f"{c_emoji} {c.name}: {c.actual:.1f} / {c.threshold:.1f} {c.unit}")
 
         lines.append(f"\n{report.reason}")
 
@@ -311,9 +306,7 @@ class TelegramBotHandler:
 
         elapsed = time.monotonic() - started_at
         if elapsed > self._KILL_CONFIRM_TIMEOUT_S:
-            await self._alerter._send(
-                "Confirmation expired. Send /kill again."
-            )
+            await self._alerter._send("Confirmation expired. Send /kill again.")
             return {"ok": "processed"}
 
         if self._kill_switch is None:
@@ -339,7 +332,8 @@ class TelegramBotHandler:
         """Remove pending kill confirmations older than 60s."""
         now = time.monotonic()
         expired = [
-            cid for cid, ts in self._pending_kill.items()
+            cid
+            for cid, ts in self._pending_kill.items()
             if now - ts > self._KILL_CLEANUP_THRESHOLD_S
         ]
         for cid in expired:

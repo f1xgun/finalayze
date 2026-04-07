@@ -25,8 +25,8 @@ import structlog
 
 if TYPE_CHECKING:
     from finalayze.api.alerts import TelegramAlerter
-    from finalayze.orchestration.trading_loop import TradingLoop
     from finalayze.execution.broker_router import BrokerRouter
+    from finalayze.orchestration.trading_loop import TradingLoop
     from finalayze.risk.circuit_breaker import CircuitBreaker
 
 _log = structlog.get_logger()
@@ -86,10 +86,10 @@ class KillSwitch:
         for market_id in self._broker_router.registered_markets:
             try:
                 broker = self._broker_router.route(market_id)
-                open_orders = broker.get_open_orders()
+                open_orders = broker.get_open_orders()  # type: ignore[attr-defined]
                 for order in open_orders:
                     try:
-                        broker.cancel_order_safe(order.order_id)
+                        broker.cancel_order_safe(order.order_id)  # type: ignore[attr-defined]
                         orders_cancelled += 1
                     except Exception:
                         _log.warning(

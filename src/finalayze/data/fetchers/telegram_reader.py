@@ -72,9 +72,7 @@ class TelegramChannelReader:
         ) as client:
             for channel in target_channels:
                 try:
-                    channel_articles = await self._fetch_channel(
-                        client, channel, cutoff
-                    )
+                    channel_articles = await self._fetch_channel(client, channel, cutoff)
                     articles.extend(channel_articles)
                 except Exception:
                     logger.warning(
@@ -114,7 +112,7 @@ class TelegramChannelReader:
         )
         return articles
 
-    def _parse_message(
+    def _parse_message(  # noqa: PLR0911, PLR0912
         self,
         widget: Tag,
         channel: str,
@@ -129,6 +127,8 @@ class TelegramChannelReader:
         dt_str = time_tag.get("datetime", "")
         if isinstance(dt_str, list):
             dt_str = dt_str[0] if dt_str else ""
+        if dt_str is None:
+            return None
         try:
             published = datetime.fromisoformat(dt_str.replace("+00:00", "+00:00"))
             if published.tzinfo is None:
@@ -150,9 +150,7 @@ class TelegramChannelReader:
 
         # Extract message link
         channel_name = channel.lstrip("@")
-        link_el = widget.select_one(
-            ".tgme_widget_message[data-post]"
-        )
+        link_el = widget.select_one(".tgme_widget_message[data-post]")
         if link_el is not None:
             data_post = link_el.get("data-post", "")
             if isinstance(data_post, list):

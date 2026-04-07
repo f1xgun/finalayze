@@ -115,19 +115,19 @@ class CBRFetcher:
         Returns None if no data rows found (weekends/holidays).
         """
         doc = lxml_html.fromstring(content)
-        tables = doc.xpath("//table[contains(@class, 'data')]")
+        tables: Any = doc.xpath("//table[contains(@class, 'data')]")
         if not tables:
             return None
 
-        table = tables[0]
-        rows = table.xpath(".//tr")
+        table: Any = tables[0]
+        rows: Any = table.xpath(".//tr")
         if len(rows) < 2:  # noqa: PLR2004 -- header + at least 1 data row
             return None
 
         # Header row: extract maturity labels
-        headers = [th.text_content().strip() for th in rows[0].xpath("th|td")]
+        headers: list[str] = [th.text_content().strip() for th in rows[0].xpath("th|td")]
         # Data row: first data row after header
-        data_cells = [td.text_content().strip() for td in rows[1].xpath("td")]
+        data_cells: list[str] = [td.text_content().strip() for td in rows[1].xpath("td")]
 
         if len(data_cells) < 2:  # noqa: PLR2004 -- date + at least 1 value
             return None
@@ -168,17 +168,17 @@ class CBRFetcher:
         Returns the indexation coefficient as Decimal, or None if no data.
         """
         doc = lxml_html.fromstring(content)
-        tables = doc.xpath("//table[contains(@class, 'data')]")
+        tables: Any = doc.xpath("//table[contains(@class, 'data')]")
         if not tables:
             return None
 
-        table = tables[0]
-        rows = table.xpath(".//tr")
+        table: Any = tables[0]
+        rows: Any = table.xpath(".//tr")
         if len(rows) < 2:  # noqa: PLR2004 -- header + at least 1 data row
             return None
 
         # Data row: second row (first is header)
-        data_cells = [td.text_content().strip() for td in rows[1].xpath("td")]
+        data_cells: list[str] = [td.text_content().strip() for td in rows[1].xpath("td")]
         if len(data_cells) < 2:  # noqa: PLR2004 -- date + coefficient
             return None
 
@@ -529,7 +529,7 @@ def get_recent_cbr_decisions(as_of: date, count: int = 3) -> list[str]:
     Meetings with ``decision is None`` are skipped.
     """
     past = [m for m in CBR_MEETINGS if m.date <= as_of and m.decision is not None]
-    return [m.decision for m in reversed(past[-count:])]
+    return [m.decision for m in reversed(past[-count:]) if m.decision is not None]
 
 
 def is_cutting_cycle(as_of: date) -> bool:

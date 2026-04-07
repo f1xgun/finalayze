@@ -104,7 +104,7 @@ class RetryPolicy:
                 result = fn()
                 if asyncio.iscoroutine(result):
                     result = await result
-                return result  # type: ignore[return-value]
+                return result
             except self._non_retryable:
                 raise
             except _RETRYABLE_EXCEPTIONS as exc:

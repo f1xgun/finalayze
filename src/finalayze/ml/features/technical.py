@@ -666,7 +666,7 @@ def _compute_fx_return_features(moex_data: MoexMarketData | None) -> dict[str, f
         # Use lagged series for vol computation
         lagged_rates = rates[:-lag] if lag > 0 else rates
         rate_values = pd.Series([float(r.rate) for r in lagged_rates], dtype=float)
-        log_returns = np.log(rate_values / rate_values.shift(1)).dropna()
+        log_returns = pd.Series(np.log(rate_values / rate_values.shift(1))).dropna()
         if len(log_returns) >= _vol_window:
             rolling_std = log_returns.rolling(_vol_window).std()
             last_std = float(rolling_std.iloc[-1])
@@ -1005,8 +1005,8 @@ def _compute_predictive_features(
 
     # Return distribution (Harvey & Siddique 2000)
     recent_returns = returns.iloc[-_RECENT_RETURN_WINDOW:].dropna()
-    skew_20d = float(recent_returns.skew()) if len(recent_returns) >= _MIN_SKEW_BARS else 0.0
-    kurt_20d = float(recent_returns.kurtosis()) if len(recent_returns) >= _MIN_SKEW_BARS else 0.0
+    skew_20d = float(recent_returns.skew()) if len(recent_returns) >= _MIN_SKEW_BARS else 0.0  # type: ignore[arg-type]
+    kurt_20d = float(recent_returns.kurtosis()) if len(recent_returns) >= _MIN_SKEW_BARS else 0.0  # type: ignore[arg-type]
     max_ret_20d = float(recent_returns.max()) if len(recent_returns) >= 1 else 0.0
     min_ret_20d = float(recent_returns.min()) if len(recent_returns) >= 1 else 0.0
     if not math.isfinite(skew_20d):

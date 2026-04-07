@@ -31,8 +31,10 @@ def _print_preflight() -> None:
 
     token = os.environ.get("FINALAYZE_TINKOFF_TOKEN", "")
     mode = os.environ.get("FINALAYZE_MODE", "")
-    print(f"  [{'x' if token else ' '}] FINALAYZE_TINKOFF_TOKEN is set"
-          f" {'(detected)' if token else '(NOT SET -- required!)'}")
+    print(
+        f"  [{'x' if token else ' '}] FINALAYZE_TINKOFF_TOKEN is set"
+        f" {'(detected)' if token else '(NOT SET -- required!)'}"
+    )
     mode_label = mode or "unset"
     mode_detail = "(detected)" if mode == "sandbox" else f"(current: {mode_label})"
     print(f"  [{'x' if mode == 'sandbox' else ' '}] FINALAYZE_MODE=sandbox {mode_detail}")
@@ -86,8 +88,10 @@ def _print_monitoring() -> None:
     print("    curl http://localhost:8000/health | python -m json.tool")
     print()
     print("  Cycle logs:")
-    print("    docker compose -f docker/docker-compose.sandbox.yml exec app "
-          "cat results/validation/cycles.jsonl | tail -5")
+    print(
+        "    docker compose -f docker/docker-compose.sandbox.yml exec app "
+        "cat results/validation/cycles.jsonl | tail -5"
+    )
     print()
 
 
@@ -113,8 +117,10 @@ def _print_completion() -> None:
     print("## COMPLETION (After 5 days)")
     print()
     print("  1. Save Docker logs:")
-    print("     docker compose -f docker/docker-compose.sandbox.yml logs app "
-          "> results/validation/docker_logs.txt")
+    print(
+        "     docker compose -f docker/docker-compose.sandbox.yml logs app "
+        "> results/validation/docker_logs.txt"
+    )
     print()
     print("  2. Generate validation report:")
     print("     python scripts/generate_validation_report.py")

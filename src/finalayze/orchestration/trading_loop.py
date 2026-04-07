@@ -34,13 +34,14 @@ from finalayze.core.validation_logger import CycleLogEntry, ValidationLogger
 try:
     from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 except ImportError:  # pragma: no cover
-    SQLAlchemyJobStore = None  # type: ignore[assignment,misc]
+    SQLAlchemyJobStore = None
 from finalayze.data.normalizer import DataNormalizer
 from finalayze.markets.currency import CurrencyConverter
 from finalayze.markets.schedule import SCHEDULES
 
 if TYPE_CHECKING:
     from config.settings import Settings
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from finalayze.analysis.event_classifier import EventClassifier
     from finalayze.analysis.impact_estimator import ImpactEstimator
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
     from finalayze.markets.fx_service import FXRateService
     from finalayze.markets.instruments import Instrument, InstrumentRegistry
     from finalayze.ml.registry import MLModelRegistry
+    from finalayze.monitoring.health_monitor import HealthMonitor
     from finalayze.monitoring.sandbox_monitor import SandboxMonitorService
     from finalayze.orchestration.bond_cycle import BondCycleProcessor
     from finalayze.risk.circuit_breaker import (
@@ -68,6 +70,8 @@ if TYPE_CHECKING:
         CircuitLevel,
         CrossMarketCircuitBreaker,
     )
+    from finalayze.risk.position_sizing_pipeline import PositionSizingPipeline
+    from finalayze.risk.regime import RegimeState
     from finalayze.strategies.combiner import StrategyCombiner
 
 # ── Constants ──────────────────────────────────────────────────────────────
@@ -129,7 +133,7 @@ class TradingLoop:
         news_impact_analyzer: NewsImpactAnalyzer | None = None,
         sector_ticker_mapper: SectorTickerMapper | None = None,
         sandbox_monitor: SandboxMonitorService | None = None,
-        health_monitor: object | None = None,
+        health_monitor: HealthMonitor | None = None,
         metrics_collector: type[MetricsCollector] | None = None,
         grpc_loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
@@ -186,7 +190,7 @@ class TradingLoop:
         self._baseline_equities: dict[str, Decimal] = {}
 
         # Stop-loss tracking: symbol -> StopLossState (trailing, thread-safe via lock)
-        self._stop_states: dict[str, object] = {}  # StopLossState instances
+        self._stop_states: dict[str, StopLossState] = {}
         self._stop_loss_lock = threading.Lock()
 
         # Per-cycle re-entry guard: symbols stopped out this cycle skip signal gen
@@ -228,6 +232,11 @@ class TradingLoop:
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._async_thread: threading.Thread | None = None
 
+        # Separate DB engine/session factory for background loop.
+        # asyncpg binds connections to the event loop where they were created,
+        # so we cannot share the FastAPI (uvicorn) engine with our bg loop.
+        self._bg_session_factory: async_sessionmaker[AsyncSession] | None = None
+
         # Dedicated gRPC event loop -- isolates PollerCompletionQueue from general
         # async work. Prevents BlockingIOError contention causing 60-min cycle drift.
         self._grpc_loop: asyncio.AbstractEventLoop | None = grpc_loop
@@ -264,12 +273,12 @@ class TradingLoop:
 
     def _reset_cycle_counters(self) -> None:
         """Reset per-cycle counters for CycleLogEntry tracking."""
-        self._cycle_instruments_processed: int = 0
-        self._cycle_signals_generated: int = 0
-        self._cycle_orders_submitted: int = 0
-        self._cycle_orders_filled: int = 0
-        self._cycle_errors_caught: int = 0
-        self._cycle_exited_symbols: set[str] = set()
+        self._cycle_instruments_processed = 0
+        self._cycle_signals_generated = 0
+        self._cycle_orders_submitted = 0
+        self._cycle_orders_filled = 0
+        self._cycle_errors_caught = 0
+        self._cycle_exited_symbols = set()
 
     # ── Candle staleness ──────────────────────────────────────────────────
 
@@ -792,7 +801,7 @@ class TradingLoop:
         # Check 3: LayerLedger reconciliation
         if checks_ok and self._bond_processor is not None:
             try:
-                self._bond_processor.reconcile_with_broker()
+                self._bond_processor.reconcile_with_broker()  # type: ignore[attr-defined]
             except Exception:
                 _log.exception("preflight_ledger_failed")
                 checks_ok = False
@@ -888,6 +897,7 @@ class TradingLoop:
                     from_date=from_date,
                     to_date=now,
                 )
+                _log.info("news_legacy_fetched", count=len(articles))
             except Exception:
                 _log.warning("news_legacy_fetch_failed", exc_info=True)
                 return
@@ -939,9 +949,7 @@ class TradingLoop:
 
         return False
 
-    async def _analyze_impact_batch(
-        self, articles: list[NewsArticle]
-    ) -> tuple[int, int, str]:
+    async def _analyze_impact_batch(self, articles: list[NewsArticle]) -> tuple[int, int, str]:
         """Analyze all articles via NewsImpactAnalyzer with bounded concurrency.
 
         Uses an inline circuit breaker: after 5 consecutive LLM failures,
@@ -979,21 +987,24 @@ class TradingLoop:
             async with sem:
                 try:
                     result = await analyzer.analyze(article)
+                    _log.info(
+                        "news_article_analyzed",
+                        article_title=article.title[:80],
+                        article_url=article.url,
+                        event_type=result.event_type,
+                        sentiment=round(result.sentiment, 3),
+                        confidence=round(result.confidence, 3),
+                        sectors=[s.sector for s in result.affected_sectors],
+                        direct_tickers=result.direct_tickers,
+                    )
                     # Fire-and-forget news article persistence (PERSIST-03)
-                    try:
-                        await self._persist_news_article_async(article, result)
-                    except Exception:
-                        from finalayze.api.metrics import (  # noqa: PLC0415
-                            db_write_failures,
-                        )
-
-                        db_write_failures.labels(table="news_articles").inc()
-                        _log.warning(
-                            "db_persist_failed",
-                            table="news_articles",
-                            exc_info=True,
-                        )
-                    self._apply_impact_result(result)
+                    await self._persist_to_db_async(
+                        self._persist_news_article_async(article, result),
+                        table="news_articles",
+                        article_url=article.url,
+                        article_title=article.title[:80],
+                    )
+                    await self._apply_impact_result(result)
                     consecutive_failures = 0
                     return True
                 except Exception as exc:
@@ -1021,8 +1032,13 @@ class TradingLoop:
                 fail_count += 1
         return ok_count, fail_count, last_error
 
-    def _apply_impact_result(self, result: NewsImpactResult) -> None:
-        """Apply NewsImpactResult to per-ticker sentiment cache."""
+    async def _apply_impact_result(self, result: NewsImpactResult) -> None:
+        """Apply NewsImpactResult to per-ticker sentiment cache.
+
+        Must be async because it is called from _process_one which runs on
+        _async_loop.  Using sync _run_async / _persist_to_db from within
+        _async_loop would deadlock (submit + block on the same loop).
+        """
         active_segments = self._collect_active_segments()
         mapper = self._sector_ticker_mapper
         if mapper is None:
@@ -1057,16 +1073,23 @@ class TradingLoop:
                         self._sentiment_cache[cache_key] = (new_score, time.monotonic())
                         redis_updates.append((seg_id, ticker, new_score))
 
-        # Fire-and-forget sentiment persistence (PERSIST-04)
-        self._persist_sentiment_scores(ticker_scores, active_segments, result.confidence)
+        # Fire-and-forget sentiment persistence (PERSIST-04) — async path
+        await self._persist_sentiment_scores_async(
+            ticker_scores, active_segments, result.confidence
+        )
 
-        # Redis write outside lock
+        _log.info(
+            "news_impact_applied",
+            tickers_updated=len(ticker_scores),
+            segments_affected=len(active_segments),
+            cache_entries_written=len(redis_updates),
+        )
+
+        # Redis write — already on _async_loop, just await directly
         if self._cache is not None:
             for seg_id, ticker, score in redis_updates:
                 try:
-                    self._run_async(
-                        self._cache.set_sentiment(f"{seg_id}:{ticker}", score)
-                    )
+                    await self._cache.set_sentiment(f"{seg_id}:{ticker}", score)
                 except Exception:
                     _log.debug("Failed to write sentiment to Redis cache")
 
@@ -1076,7 +1099,10 @@ class TradingLoop:
         active_segments: list[str],
         confidence: float,
     ) -> None:
-        """Fire-and-forget sentiment persistence to DB (PERSIST-04)."""
+        """Fire-and-forget sentiment persistence to DB (PERSIST-04).
+
+        Sync variant — safe to call from APScheduler threads (NOT from _async_loop).
+        """
         if not ticker_scores:
             return
         has_non_ru = any(not s.startswith("ru_") for s in active_segments)
@@ -1084,6 +1110,26 @@ class TradingLoop:
         self._persist_to_db(
             self._persist_sentiment_batch_async(ticker_scores, market_id, confidence),
             table="sentiment_scores",
+            market=market_id,
+            tickers=len(ticker_scores),
+        )
+
+    async def _persist_sentiment_scores_async(
+        self,
+        ticker_scores: dict[str, float],
+        active_segments: list[str],
+        confidence: float,
+    ) -> None:
+        """Async variant of _persist_sentiment_scores for use on _async_loop."""
+        if not ticker_scores:
+            return
+        has_non_ru = any(not s.startswith("ru_") for s in active_segments)
+        market_id = "us" if has_non_ru else "moex"
+        await self._persist_to_db_async(
+            self._persist_sentiment_batch_async(ticker_scores, market_id, confidence),
+            table="sentiment_scores",
+            market=market_id,
+            tickers=len(ticker_scores),
         )
 
     def _get_segment_tickers(self, seg_id: str) -> list[str]:
@@ -1107,9 +1153,7 @@ class TradingLoop:
             }
         )
 
-    def _read_decayed_sentiment(
-        self, seg_id: str, ticker: str | None = None
-    ) -> float:
+    def _read_decayed_sentiment(self, seg_id: str, ticker: str | None = None) -> float:
         """Read sentiment with exponential time-decay applied.
 
         If ticker is provided, reads per-ticker score.
@@ -1146,9 +1190,7 @@ class TradingLoop:
         if self._cache is not None:
             cache_key = f"{seg_id}:{ticker}" if ticker else seg_id
             try:
-                cached: float | None = self._run_async(
-                    self._cache.get_sentiment(cache_key)
-                )
+                cached: float | None = self._run_async(self._cache.get_sentiment(cache_key))
                 if cached is not None:
                     return cached
             except Exception:
@@ -1174,12 +1216,9 @@ class TradingLoop:
                 try:
                     with path.open() as f:
                         config = yaml.safe_load(f)
-                    if (
-                        isinstance(config, dict)
-                        and config.get("strategies", {})
-                        .get("event_driven", {})
-                        .get("enabled", False)
-                    ):
+                    if isinstance(config, dict) and config.get("strategies", {}).get(
+                        "event_driven", {}
+                    ).get("enabled", False):
                         result = True
                         break
                 except (OSError, yaml.YAMLError):
@@ -1320,9 +1359,8 @@ class TradingLoop:
                     cycle_metrics = CycleMetrics(
                         timestamp=self._now(),
                         trade_count=self._cycle_orders_filled,
-                        pnl_rub=Decimal(
-                            str(equity_rub - self._baseline_equities.get("moex", equity_rub))
-                        ),
+                        pnl_rub=Decimal(str(equity_rub))
+                        - self._baseline_equities.get("moex", Decimal(str(equity_rub))),
                         equity_rub=Decimal(str(equity_rub)),
                         fill_rate=(
                             self._cycle_orders_filled / max(self._cycle_orders_submitted, 1)
@@ -1600,6 +1638,9 @@ class TradingLoop:
         self._persist_to_db(
             self._persist_signal_async(signal),
             table="signals",
+            symbol=signal.symbol,
+            strategy=signal.strategy_name,
+            direction=signal.direction.value,
         )
 
         if self._metrics:
@@ -1702,7 +1743,7 @@ class TradingLoop:
         # Check 9: stop_loss_price from trailing stop state (Plan 01)
         with self._stop_loss_lock:
             _stop_st = self._stop_states.get(instrument.symbol)
-            stop_loss_price = _stop_st.current_stop if _stop_st is not None else None  # type: ignore[union-attr]
+            stop_loss_price = _stop_st.current_stop if _stop_st is not None else None
 
         # Check 10: has_pending_order via broker
         has_pending = self._has_pending_order(instrument.symbol, market_id)
@@ -1772,7 +1813,7 @@ class TradingLoop:
         if is_day_trade:
             self._pdt_tracker.record_day_trade(now.date())
 
-    def _build_sizing_pipeline(self, segment_id: str) -> object:
+    def _build_sizing_pipeline(self, segment_id: str) -> PositionSizingPipeline:
         """Build position sizing pipeline matching backtest engine step order.
 
         Pipeline order: Kelly -> VolTarget -> Regime -> [RubOilRegime] -> [BrentGate]
@@ -1851,7 +1892,7 @@ class TradingLoop:
             _log.debug("pending_order_check_failed", symbol=symbol)
         return False
 
-    def _get_regime_state(self) -> object | None:
+    def _get_regime_state(self) -> RegimeState | None:
         """Get current regime state from macro cache."""
         if self._macro_cache is not None:
             return getattr(self._macro_cache, "regime_state", None)
@@ -1928,7 +1969,7 @@ class TradingLoop:
             ml_confidence=ml_confidence,
         )
 
-        order_value = pipeline.compute(context)  # type: ignore[union-attr]
+        order_value = pipeline.compute(context)
         if order_value <= _ZERO:
             return None
 
@@ -2005,6 +2046,9 @@ class TradingLoop:
                 self._persist_to_db(
                     self._persist_order_async(order, result, market_id),
                     table="orders",
+                    symbol=order.symbol,
+                    side=order.side,
+                    market=market_id,
                 )
 
                 # Compute slippage in bps
@@ -2318,8 +2362,12 @@ class TradingLoop:
         # Bond P&L from LayerLedger (not broker portfolio)
         if self._bond_processor is not None:
             try:
-                bond_equity = sum(
-                    ledger.current_equity for ledger in self._bond_processor._layer_ledgers.values()
+                bond_equity: Decimal = sum(
+                    (
+                        ledger.current_equity
+                        for ledger in self._bond_processor._layer_ledgers.values()
+                    ),
+                    _ZERO,
                 )
                 bond_baseline = self._baseline_equities.get(
                     "moex_bonds",
@@ -2356,7 +2404,7 @@ class TradingLoop:
         total_equity_rub: Decimal | None = None
         if self._fx_service is not None:
             try:
-                usdrub = self._fx_service.get_usdrub()
+                usdrub = self._fx_service._last_rate
                 if usdrub and usdrub > _ZERO:
                     total_equity_rub = total_equity  # already mixed RUB+USD
             except Exception:
@@ -2393,15 +2441,60 @@ class TradingLoop:
         movers.sort(key=lambda x: abs(x[1]), reverse=True)
         return movers[:3]
 
-    def _persist_to_db(self, coro: Any, *, table: str) -> None:
+    _DB_PERSIST_TIMEOUT = 120  # seconds — generous for fire-and-forget writes
+
+    def _get_bg_session_factory(self) -> async_sessionmaker[AsyncSession]:
+        """Return a session factory bound to the background event loop.
+
+        asyncpg connections are pinned to the event loop where they were first
+        used.  The global ``get_async_session_factory()`` creates its engine on
+        the FastAPI (uvicorn) loop, so using it from the background loop that
+        ``_run_async`` manages causes ``RuntimeError: Future attached to a
+        different loop``.  This method lazily creates a *separate* engine for
+        the background loop, avoiding the cross-loop conflict.
+        """
+        if self._bg_session_factory is None:
+            from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession  # noqa: PLC0415, I001
+            from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker  # noqa: PLC0415
+            from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine  # noqa: PLC0415
+            from config.settings import get_settings  # noqa: PLC0415
+
+            settings = get_settings()
+            engine = _create_async_engine(
+                settings.database_url,
+                echo=False,
+                pool_pre_ping=True,
+                pool_size=5,
+                max_overflow=2,
+                pool_timeout=30,
+                pool_recycle=1800,
+            )
+            self._bg_session_factory = _async_sessionmaker(
+                engine, class_=_AsyncSession, expire_on_commit=False
+            )
+        return self._bg_session_factory
+
+    def _persist_to_db(self, coro: Any, *, table: str, **ctx: Any) -> None:
         """Fire-and-forget DB write. Never crashes the trading loop (PERSIST-05)."""
         try:
-            self._run_async(coro)
+            self._run_async(coro, timeout=self._DB_PERSIST_TIMEOUT)
+            _log.debug("db_persist_ok", table=table, **ctx)
         except Exception:
             from finalayze.api.metrics import db_write_failures  # noqa: PLC0415
 
             db_write_failures.labels(table=table).inc()
-            _log.warning("db_persist_failed", table=table, exc_info=True)
+            _log.warning("db_persist_failed", table=table, **ctx, exc_info=True)
+
+    async def _persist_to_db_async(self, coro: Any, *, table: str, **ctx: Any) -> None:
+        """Async variant of _persist_to_db for use in async contexts (PERSIST-05)."""
+        try:
+            await coro
+            _log.debug("db_persist_ok", table=table, **ctx)
+        except Exception:
+            from finalayze.api.metrics import db_write_failures  # noqa: PLC0415
+
+            db_write_failures.labels(table=table).inc()
+            _log.warning("db_persist_failed", table=table, **ctx, exc_info=True)
 
     async def _persist_news_article_async(
         self,
@@ -2409,11 +2502,10 @@ class TradingLoop:
         impact_result: NewsImpactResult | None,
     ) -> None:
         """Persist a news article to the news_articles table (PERSIST-03)."""
-        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import NewsArticleModel  # noqa: PLC0415
 
         content_hash = hashlib.sha256(article.content.encode()).hexdigest()[:32]
-        factory = get_async_session_factory()
+        factory = self._get_bg_session_factory()
         async with factory() as session:
             row = NewsArticleModel(
                 source=article.source[:50],
@@ -2425,19 +2517,13 @@ class TradingLoop:
                 published_at=article.published_at,
                 symbols=list(impact_result.direct_tickers) if impact_result else [],
                 affected_segments=(
-                    [s.sector for s in impact_result.affected_sectors]
-                    if impact_result
-                    else []
+                    [s.sector for s in impact_result.affected_sectors] if impact_result else []
                 ),
                 raw_sentiment=(
-                    Decimal(str(round(impact_result.sentiment, 4)))
-                    if impact_result
-                    else None
+                    Decimal(str(round(impact_result.sentiment, 4))) if impact_result else None
                 ),
                 credibility_score=(
-                    Decimal(str(round(impact_result.confidence, 4)))
-                    if impact_result
-                    else None
+                    Decimal(str(round(impact_result.confidence, 4))) if impact_result else None
                 ),
                 is_processed=impact_result is not None,
             )
@@ -2451,11 +2537,10 @@ class TradingLoop:
         confidence: float,
     ) -> None:
         """Persist sentiment scores for a batch of tickers (PERSIST-04)."""
-        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import SentimentScoreModel  # noqa: PLC0415
 
         now = self._now()
-        factory = get_async_session_factory()
+        factory = self._get_bg_session_factory()
         async with factory() as session:
             for ticker, score in ticker_scores.items():
                 row = SentimentScoreModel(
@@ -2476,10 +2561,9 @@ class TradingLoop:
         market_id: str,
     ) -> None:
         """Persist a filled/rejected order to the orders table."""
-        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import OrderModel  # noqa: PLC0415
 
-        factory = get_async_session_factory()
+        factory = self._get_bg_session_factory()
         async with factory() as session:
             row = OrderModel(
                 broker=market_id,
@@ -2502,10 +2586,9 @@ class TradingLoop:
 
     async def _persist_signal_async(self, signal: Any) -> None:
         """Persist a generated signal to the signals table."""
-        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import SignalModel  # noqa: PLC0415
 
-        factory = get_async_session_factory()
+        factory = self._get_bg_session_factory()
         async with factory() as session:
             row = SignalModel(
                 strategy_name=signal.strategy_name,
@@ -2545,10 +2628,9 @@ class TradingLoop:
         Creates one DailyEquitySnapshot row per market_id. Currency is
         determined from market_id prefix (moex/ru_ -> RUB, else USD).
         """
-        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import DailyEquitySnapshot  # noqa: PLC0415
 
-        factory = get_async_session_factory()
+        factory = self._get_bg_session_factory()
         async with factory() as session:
             for market_id, equity in baselines.items():
                 currency = (
@@ -2602,10 +2684,9 @@ class TradingLoop:
         """
         from sqlalchemy import func, select  # noqa: PLC0415
 
-        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import DailyEquitySnapshot  # noqa: PLC0415
 
-        factory = get_async_session_factory()
+        factory = self._get_bg_session_factory()
         async with factory() as session:
             today_start = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
             # Subquery: latest timestamp per market_id for today
@@ -2670,12 +2751,16 @@ class TradingLoop:
         # Bond layer P&L
         if self._bond_processor is not None:
             try:
-                bond_equity = sum(
-                    ledger.current_equity for ledger in self._bond_processor._layer_ledgers.values()
+                bond_equity_w: Decimal = sum(
+                    (
+                        ledger.current_equity
+                        for ledger in self._bond_processor._layer_ledgers.values()
+                    ),
+                    _ZERO,
                 )
-                bond_baseline = self._baseline_equities.get("moex_bonds", bond_equity)
-                week_pnl["moex_bonds"] = bond_equity - bond_baseline
-                total_equity += bond_equity
+                bond_baseline = self._baseline_equities.get("moex_bonds", bond_equity_w)
+                week_pnl["moex_bonds"] = bond_equity_w - bond_baseline
+                total_equity += bond_equity_w
             except Exception:
                 _log.debug("_weekly_digest: bond P&L failed")
 

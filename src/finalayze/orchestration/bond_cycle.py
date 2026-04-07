@@ -185,6 +185,29 @@ class BondCycleProcessor:
         self._consecutive_layer_errors: dict[str, int] = {}
         self._layer_error_threshold: int = 3
 
+    @staticmethod
+    def _validated_bond_fields(
+        bond_info: Any,
+    ) -> tuple[Decimal, Decimal, int, date]:
+        """Extract and validate required bond fields from Instrument.
+
+        Returns (coupon_rate, face_value, coupon_frequency, maturity_date).
+        Raises ValueError if any required bond field is None.
+        """
+        if (
+            bond_info.coupon_rate is None
+            or bond_info.face_value is None
+            or bond_info.coupon_frequency is None
+            or bond_info.maturity_date is None
+        ):
+            msg = f"Missing bond fields for {getattr(bond_info, 'symbol', '?')}"
+            raise ValueError(msg)
+        coupon_rate: Decimal = bond_info.coupon_rate
+        face_value: Decimal = bond_info.face_value
+        coupon_frequency: int = bond_info.coupon_frequency
+        maturity_date: date = bond_info.maturity_date
+        return coupon_rate, face_value, coupon_frequency, maturity_date
+
     def run_cycle(self) -> BondCycleResult:
         """Execute one bond trading cycle across all layers. SYNC."""
         macro = self._macro_cache.get()
@@ -228,9 +251,7 @@ class BondCycleProcessor:
                         threshold=self._layer_error_threshold,
                     )
                 else:
-                    _log.exception(
-                        "bond_layer_failed", layer=layer_key, consecutive_count=count
-                    )
+                    _log.exception("bond_layer_failed", layer=layer_key, consecutive_count=count)
                 results.append(LayerResult(layer=layer, error=True))
 
         return BondCycleResult(layer_results=results)
@@ -353,9 +374,18 @@ class BondCycleProcessor:
         symbols = list(ledger.bond_positions.keys())
 
         try:
-            prices = broker.get_last_prices(symbols)
+            prices = broker.get_last_prices(symbols)  # type: ignore[attr-defined]
         except Exception:
             _log.exception("yield_stop_price_fetch_failed", layer=layer.value)
+            return 0
+
+        if (
+            macro.key_rate is None
+            or macro.ruonia_7d_avg is None
+            or macro.cpi_yoy is None
+            or macro.last_cbr_decision is None
+        ):
+            _log.warning("yield_stop_missing_macro_fields", layer=layer.value)
             return 0
 
         regime = classify_regime(
@@ -375,13 +405,14 @@ class BondCycleProcessor:
             # Compute current YTM from current clean price
             try:
                 bond_info = self._registry.get(symbol, _MOEX_MARKET_ID)
+                cr, fv, cf, md = self._validated_bond_fields(bond_info)
                 current_ytm = bond_math.ytm(
                     clean_price_pct=current_price_pct,
-                    coupon_rate=bond_info.coupon_rate,
-                    face_value=bond_info.face_value,
-                    coupon_frequency=bond_info.coupon_frequency,
+                    coupon_rate=cr,
+                    face_value=fv,
+                    coupon_frequency=cf,
                     settlement_date=datetime.now(tz=UTC).date(),
-                    maturity_date=bond_info.maturity_date,
+                    maturity_date=md,
                 )
             except Exception:
                 _log.exception("yield_stop_ytm_calc_failed", symbol=symbol)
@@ -561,13 +592,12 @@ class BondCycleProcessor:
         """Compute pricing data for a BUY order. Returns None on failure."""
         try:
             bond_info = self._registry.get(symbol, _MOEX_MARKET_ID)
+            cr, fv, cf, md = self._validated_bond_fields(bond_info)
         except Exception:
             _log.exception("bond_buy_info_failed", symbol=symbol)
             return None
 
-        coupon_amount = (
-            bond_info.coupon_rate / Decimal(100) * bond_info.face_value / bond_info.coupon_frequency
-        )
+        coupon_amount = cr / Decimal(100) * fv / cf
         nkd_estimate = bond_math.nkd(coupon_amount, 91, 182)
 
         try:
@@ -580,18 +610,18 @@ class BondCycleProcessor:
             _log.exception("bond_buy_price_failed", symbol=symbol)
             return None
 
-        dirty = bond_math.dirty_price(clean_price_pct, nkd_estimate, bond_info.face_value)
-        tx_costs = _estimate_transaction_costs_per_unit(clean_price_pct, bond_info.face_value)
+        dirty = bond_math.dirty_price(clean_price_pct, nkd_estimate, fv)
+        tx_costs = _estimate_transaction_costs_per_unit(clean_price_pct, fv)
         today = datetime.now(tz=UTC).date()
 
         try:
             entry_ytm = bond_math.ytm(
                 clean_price_pct=clean_price_pct,
-                coupon_rate=bond_info.coupon_rate,
-                face_value=bond_info.face_value,
-                coupon_frequency=bond_info.coupon_frequency,
+                coupon_rate=cr,
+                face_value=fv,
+                coupon_frequency=cf,
                 settlement_date=today,
-                maturity_date=bond_info.maturity_date,
+                maturity_date=md,
             )
         except Exception:
             _log.exception("bond_buy_ytm_failed", symbol=symbol)
@@ -600,11 +630,11 @@ class BondCycleProcessor:
         try:
             mod_dur = bond_math.modified_duration(
                 entry_ytm,
-                bond_info.coupon_rate,
-                bond_info.face_value,
-                bond_info.coupon_frequency,
+                cr,
+                fv,
+                cf,
                 today,
-                bond_info.maturity_date,
+                md,
             )
             dv01_per_unit = bond_math.dv01(mod_dur, dirty)
         except Exception:
@@ -808,22 +838,18 @@ class BondCycleProcessor:
         for symbol, record in ledger.bond_positions.items():
             try:
                 bond_info = self._registry.get(symbol, _MOEX_MARKET_ID)
+                cr, fv, cf, md = self._validated_bond_fields(bond_info)
                 mod_dur = bond_math.modified_duration(
                     record.entry_ytm_pct,
-                    bond_info.coupon_rate,
-                    bond_info.face_value,
-                    bond_info.coupon_frequency,
+                    cr,
+                    fv,
+                    cf,
                     record.entry_date,
-                    bond_info.maturity_date,
+                    md,
                 )
-                coupon_amount = (
-                    bond_info.coupon_rate
-                    / Decimal(100)
-                    * bond_info.face_value
-                    / bond_info.coupon_frequency
-                )
+                coupon_amount = cr / Decimal(100) * fv / cf
                 nkd_est = bond_math.nkd(coupon_amount, 91, 182)
-                dirty = bond_math.dirty_price(record.entry_clean_pct, nkd_est, bond_info.face_value)
+                dirty = bond_math.dirty_price(record.entry_clean_pct, nkd_est, fv)
                 unit_dv01 = bond_math.dv01(mod_dur, dirty)
                 total_dv01 += unit_dv01 * record.quantity
             except Exception:

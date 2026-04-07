@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from datetime import datetime as _datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from finalayze.core.schemas import Candle
 from finalayze.data.fetchers.base import BaseFetcher
@@ -75,7 +75,7 @@ class CachingFetcher(BaseFetcher):
         symbol: str,
         start: datetime,
         end: datetime,
-    ) -> list[dict]:
+    ) -> list[dict[Any, Any]]:
         """Fetch dividends, delegating to the inner fetcher with file-based caching.
 
         If the inner fetcher does not support fetch_dividends, returns an empty list.
@@ -93,9 +93,9 @@ class CachingFetcher(BaseFetcher):
             for item in raw:
                 if isinstance(item.get("ex_date"), str):
                     item["ex_date"] = _datetime.fromisoformat(item["ex_date"])
-            return raw
+            return list(raw)
 
-        result = self._delegate.fetch_dividends(symbol, start, end)
+        result: list[dict[Any, Any]] = self._delegate.fetch_dividends(symbol, start, end)
 
         if result:
             path.write_text(json.dumps(result, default=str))

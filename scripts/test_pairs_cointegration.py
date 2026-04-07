@@ -16,7 +16,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 from dataclasses import dataclass
@@ -40,14 +39,14 @@ if _PROJECT_ROOT not in sys.path:
 # ---------------------------------------------------------------------------
 
 PAIRS: list[tuple[str, str]] = [
-    ("SBER", "VTBR"),   # Sberbank vs VTB Bank
-    ("GAZP", "LKOH"),   # Gazprom vs Lukoil
-    ("SBER", "GMKN"),   # Sberbank vs Norilsk Nickel
-    ("MGNT", "FIVE"),   # Magnit vs X5 Retail (retail)
-    ("NLMK", "CHMF"),   # NLMK vs Severstal (steel)
-    ("ALRS", "PLZL"),   # Alrosa vs Polyus (mining)
-    ("ROSN", "TATN"),   # Rosneft vs Tatneft (energy)
-    ("SBER", "TCSG"),   # Sberbank vs T-Bank (banks)
+    ("SBER", "VTBR"),  # Sberbank vs VTB Bank
+    ("GAZP", "LKOH"),  # Gazprom vs Lukoil
+    ("SBER", "GMKN"),  # Sberbank vs Norilsk Nickel
+    ("MGNT", "FIVE"),  # Magnit vs X5 Retail (retail)
+    ("NLMK", "CHMF"),  # NLMK vs Severstal (steel)
+    ("ALRS", "PLZL"),  # Alrosa vs Polyus (mining)
+    ("ROSN", "TATN"),  # Rosneft vs Tatneft (energy)
+    ("SBER", "TCSG"),  # Sberbank vs T-Bank (banks)
 ]
 
 START_DATE = "2022-01-01"
@@ -467,9 +466,7 @@ def _print_stability(all_results: list[PairResult]) -> None:
         for r in pair_results:
             marker = "pass" if r.verdict == "KEEP" else "FAIL"
             hl_str = f"{r.half_life:.1f}"
-            print(
-                f"    {r.period:8s}: {marker} (p={r.p_value:.4f}, HL={hl_str}d, H={r.hurst:.3f})"
-            )
+            print(f"    {r.period:8s}: {marker} (p={r.p_value:.4f}, HL={hl_str}d, H={r.hurst:.3f})")
 
         stability = passes / total if total > 0 else 0
         print(f"    Stability: {passes}/{total} sub-periods pass ({stability:.0%})")
@@ -524,7 +521,7 @@ def main() -> None:
 
     # Print reports
     _print_summary(full_results)
-    disable_pairs = _print_recommendations(full_results)
+    _print_recommendations(full_results)
     _print_stability(all_results)
 
     print()

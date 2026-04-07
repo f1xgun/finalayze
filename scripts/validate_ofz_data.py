@@ -30,12 +30,12 @@ if _GRPC_ROOTS.exists():
 
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from dotenv import load_dotenv  # noqa: E402
+from dotenv import load_dotenv
 
 load_dotenv(_PROJECT_ROOT / ".env")
 
-from t_tech.invest import AsyncClient, CandleInterval, InstrumentStatus  # noqa: E402
-from t_tech.invest.schemas import InstrumentIdType  # noqa: E402
+from t_tech.invest import AsyncClient, CandleInterval
+from t_tech.invest.schemas import InstrumentIdType
 
 _TBANK_GRPC_TARGET = "invest-public-api.tbank.ru:443"
 _NANO_DIVISOR = Decimal(1_000_000_000)
@@ -60,17 +60,17 @@ OFZ_PK_TICKERS = [
 ]
 
 
-def quotation_to_decimal(q) -> Decimal:  # noqa: ANN001
+def quotation_to_decimal(q) -> Decimal:
     """Convert Tinkoff Quotation(units, nano) to Decimal."""
     return Decimal(q.units) + Decimal(q.nano) / _NANO_DIVISOR
 
 
-def money_to_decimal(m) -> Decimal:  # noqa: ANN001
+def money_to_decimal(m) -> Decimal:
     """Convert Tinkoff MoneyValue to Decimal."""
     return Decimal(m.units) + Decimal(m.nano) / _NANO_DIVISOR
 
 
-async def validate_ofz_data() -> dict:
+async def validate_ofz_data() -> dict:  # noqa: PLR0912, PLR0915
     """Run all Phase 0 validation checks."""
     token = os.environ.get("FINALAYZE_TINKOFF_TOKEN", "")
     if not token:
@@ -192,17 +192,14 @@ async def validate_ofz_data() -> dict:
 
                     # Check for 2022 MOEX closure gap
                     dates = [c.time.date() for c in all_candles]
-                    gap_start = datetime(2022, 2, 24).date()
-                    gap_end = datetime(2022, 3, 28).date()
+                    gap_start = datetime(2022, 2, 24, tzinfo=UTC).date()
+                    gap_end = datetime(2022, 3, 28, tzinfo=UTC).date()
                     gap_bars = [d for d in dates if gap_start <= d <= gap_end]
                     if not gap_bars:
                         results["data_gaps"][ticker] = "No data Feb 24 - Mar 28, 2022"
-                        print(f"         GAP: No data during MOEX closure (Feb 24 - Mar 28, 2022)")
+                        print("         GAP: No data during MOEX closure (Feb 24 - Mar 28, 2022)")
                     else:
-                        print(
-                            f"         Note: {len(gap_bars)} bars during "
-                            f"Feb 24 - Mar 28 period"
-                        )
+                        print(f"         Note: {len(gap_bars)} bars during Feb 24 - Mar 28 period")
                 else:
                     results["candle_data"][ticker] = {"total_bars": 0}
                     results["errors"].append(f"No candles for {ticker}")
@@ -241,9 +238,7 @@ async def validate_ofz_data() -> dict:
 
                     # Sample coupon amounts
                     sample = coupons[:3]
-                    amounts = [
-                        float(money_to_decimal(c.pay_one_bond)) for c in sample
-                    ]
+                    amounts = [float(money_to_decimal(c.pay_one_bond)) for c in sample]
 
                     results["coupon_data"][ticker] = {
                         "total_coupons": len(coupons),
@@ -304,10 +299,7 @@ async def validate_ofz_data() -> dict:
                         "total_records": len(nkd_list),
                         "sample": nkd_values,
                     }
-                    print(
-                        f"  OK {ticker}: {len(nkd_list)} NKD records, "
-                        f"latest: {nkd_values[-1]}"
-                    )
+                    print(f"  OK {ticker}: {len(nkd_list)} NKD records, latest: {nkd_values[-1]}")
                 else:
                     print(f"  WARN {ticker}: No NKD data returned")
             except Exception as exc:
@@ -324,16 +316,8 @@ async def validate_ofz_data() -> dict:
     total_bonds = len(all_tickers)
     found = len(results["bonds_found"])
     not_found = len(results["bonds_not_found"])
-    with_candles = sum(
-        1
-        for v in results["candle_data"].values()
-        if v.get("total_bars", 0) > 0
-    )
-    with_coupons = sum(
-        1
-        for v in results["coupon_data"].values()
-        if v.get("total_coupons", 0) > 0
-    )
+    with_candles = sum(1 for v in results["candle_data"].values() if v.get("total_bars", 0) > 0)
+    with_coupons = sum(1 for v in results["coupon_data"].values() if v.get("total_coupons", 0) > 0)
     with_nkd = len(results["accrued_interest"])
 
     print(f"\n  Bonds found:       {found}/{total_bonds}")
@@ -353,7 +337,8 @@ async def validate_ofz_data() -> dict:
             # Parse "2031-05-14 00:00:00+00:00" style
             mat_date = datetime.fromisoformat(mat_str).date()
             years_to_mat = (mat_date - today).days / 365.25
-            flag = " *** EXCEEDS 5Y CAP" if years_to_mat > 5.0 else ""
+            max_maturity_years = 5.0
+            flag = " *** EXCEEDS 5Y CAP" if years_to_mat > max_maturity_years else ""
             print(f"    {ticker}: {years_to_mat:.1f}Y to maturity{flag}")
 
     if results["data_gaps"]:

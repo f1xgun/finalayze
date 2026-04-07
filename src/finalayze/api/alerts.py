@@ -169,9 +169,7 @@ class TelegramMessageQueue:
             await self._send_with_retry(msg.text, msg.parse_mode)
             self._sent_timestamps.append(time.monotonic())
 
-    async def _send_with_retry(
-        self, text: str, parse_mode: str = "HTML"
-    ) -> bool:
+    async def _send_with_retry(self, text: str, parse_mode: str = "HTML") -> bool:
         """Send via alerter._send, retry once on failure after 5s."""
         ok = await self._alerter._send(text, parse_mode=parse_mode)
         if not ok:
@@ -238,9 +236,7 @@ class TelegramAlerter:
 
         Example: ``AAPL BUY rejected: insufficient funds``
         """
-        text = (
-            f"\u26a0\ufe0f <b>{order.symbol}</b> {order.side} rejected: {reason}"
-        )
+        text = f"\u26a0\ufe0f <b>{order.symbol}</b> {order.side} rejected: {reason}"
         self.send_alert(text, priority=AlertPriority.IMPORTANT)
 
     def on_circuit_breaker_trip(
@@ -288,9 +284,7 @@ class TelegramAlerter:
         text = f"\U0001f4ca Daily: {summary}"
 
         if top_movers:
-            movers_str = ", ".join(
-                f"<b>{sym}</b> {pct:+.1f}%" for sym, pct in top_movers[:3]
-            )
+            movers_str = ", ".join(f"<b>{sym}</b> {pct:+.1f}%" for sym, pct in top_movers[:3])
             text += f"\nTop: {movers_str}"
 
         if total_equity_rub is not None:
@@ -313,10 +307,7 @@ class TelegramAlerter:
 
         Example: ``Coupon: SU26244RMFS2 +3,250.00 RUB``
         """
-        text = (
-            f"\U0001f4b0 Coupon: <b>{symbol}</b> "
-            f"+<code>{amount:,.2f}</code> {currency}"
-        )
+        text = f"\U0001f4b0 Coupon: <b>{symbol}</b> +<code>{amount:,.2f}</code> {currency}"
         self.send_alert(text, priority=AlertPriority.INFO)
 
     def on_cbr_meeting(
@@ -330,8 +321,7 @@ class TelegramAlerter:
         Example: ``CBR meeting 2026-03-20: HOLD, key rate 21.00%``
         """
         text = (
-            f"\U0001f3e6 CBR meeting {meeting_date}: "
-            f"{decision}, key rate <code>{key_rate}</code>"
+            f"\U0001f3e6 CBR meeting {meeting_date}: {decision}, key rate <code>{key_rate}</code>"
         )
         self.send_alert(text, priority=AlertPriority.INFO)
 
@@ -372,10 +362,7 @@ class TelegramAlerter:
 
         Example: ``Finalayze started: sandbox, markets=[moex], 23 instruments``
         """
-        text = (
-            f"\U0001f680 Finalayze started: {mode}, "
-            f"markets={markets}, {instruments} instruments"
-        )
+        text = f"\U0001f680 Finalayze started: {mode}, markets={markets}, {instruments} instruments"
         self.send_alert(text, priority=AlertPriority.INFO)
 
     def on_shutdown(self) -> None:
@@ -483,7 +470,7 @@ class TelegramAlerter:
                         self._queue.enqueue(message, priority),
                     )
                 else:
-                    _task = loop.create_task(self._send(message))
+                    _task = loop.create_task(self._send(message))  # type: ignore[arg-type]
             else:
                 # Sync context (APScheduler thread) — use sync httpx
                 self._send_sync(message)

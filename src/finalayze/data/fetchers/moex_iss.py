@@ -247,8 +247,8 @@ class MoexISSFetcher(BaseFetcher):
             return None
 
         open_price, close_price, high_price, low_price = row[0], row[1], row[2], row[3]
-        volume_val = row[4]  # value (turnover in RUB), not share volume
-        _volume = row[5]  # share volume (often 0 for indices)
+        row[4]  # value (turnover in RUB) -- not used for Candle.volume
+        share_volume = row[5]  # share volume (correct for volume-based indicators)
         begin_str: str = row[6]
 
         # Parse begin timestamp as MSK-naive, then convert to UTC
@@ -264,7 +264,7 @@ class MoexISSFetcher(BaseFetcher):
             high=Decimal(str(high_price)),
             low=Decimal(str(low_price)),
             close=Decimal(str(close_price)),
-            volume=int(volume_val) if volume_val else 0,
+            volume=int(share_volume) if share_volume else 0,
             source=_ISS_SOURCE,
         )
 

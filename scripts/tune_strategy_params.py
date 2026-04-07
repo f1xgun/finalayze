@@ -232,7 +232,7 @@ def _apply_params_to_config(config: dict[str, Any], params: dict[str, Any]) -> d
     return config
 
 
-def run_backtest_for_trial(
+def run_backtest_for_trial(  # noqa: PLR0915
     segment_id: str,
     params: dict[str, Any],
     *,
@@ -308,9 +308,7 @@ def run_backtest_for_trial(
             if not token:
                 return {"wf_sharpe": -1.0, "trades": 0, "max_dd": 1.0}
             registry = build_default_registry()
-            fetcher = CachingFetcher(
-                TinkoffFetcher(token=token, registry=registry, sandbox=False)
-            )
+            fetcher = CachingFetcher(TinkoffFetcher(token=token, registry=registry, sandbox=False))
             cash = Decimal(1_000_000)
         else:
             fetcher = CachingFetcher(YFinanceFetcher(market_id=market_id))

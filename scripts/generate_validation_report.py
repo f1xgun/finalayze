@@ -107,8 +107,7 @@ def _build_report_sections(m: _Metrics) -> tuple[list[str], bool]:
         f" | {'PASS' if dd_pass else 'FAIL'} |",
         f"| Round-Trip Trades | >= {MIN_ROUND_TRIP_TRADES} | {m.total_fills}"
         f" | {'PASS' if trades_pass else 'FAIL'} |",
-        f"| Critical Errors | 0 | {m.total_errors}"
-        f" | {'PASS' if errors_pass else 'FAIL'} |",
+        f"| Critical Errors | 0 | {m.total_errors} | {'PASS' if errors_pass else 'FAIL'} |",
         "",
     ]
 

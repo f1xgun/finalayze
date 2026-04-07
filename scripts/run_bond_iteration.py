@@ -305,9 +305,11 @@ def walk_forward_bond_backtest(
     total_coupon_net = 0.0
 
     for fold_idx, (train_start, train_end, test_start, test_end) in enumerate(folds):
-        print(f"\n  Fold {fold_idx + 1}/{len(folds)}: "
-              f"train {train_start} to {train_end}, "
-              f"test {test_start} to {test_end}")
+        print(
+            f"\n  Fold {fold_idx + 1}/{len(folds)}: "
+            f"train {train_start} to {train_end}, "
+            f"test {test_start} to {test_end}"
+        )
 
         # Slice data to test period
         test_candles = _slice_candles_by_date(candles_by_symbol, test_start, test_end)
@@ -315,15 +317,17 @@ def walk_forward_bond_backtest(
 
         if not test_candles:
             print("    No candle data in test period, skipping fold")
-            per_fold.append({
-                "fold": fold_idx + 1,
-                "train_start": str(train_start),
-                "train_end": str(train_end),
-                "test_start": str(test_start),
-                "test_end": str(test_end),
-                "metrics": None,
-                "skipped": True,
-            })
+            per_fold.append(
+                {
+                    "fold": fold_idx + 1,
+                    "train_start": str(train_start),
+                    "train_end": str(train_end),
+                    "test_start": str(test_start),
+                    "test_end": str(test_end),
+                    "metrics": None,
+                    "skipped": True,
+                }
+            )
             continue
 
         # Run engine on test period
@@ -337,17 +341,18 @@ def walk_forward_bond_backtest(
                 macro_provider=macro_provider,
             )
         except Exception:
-            print(f"    ERROR in fold {fold_idx + 1}: "
-                  f"{traceback.format_exc().splitlines()[-1]}")
-            per_fold.append({
-                "fold": fold_idx + 1,
-                "train_start": str(train_start),
-                "train_end": str(train_end),
-                "test_start": str(test_start),
-                "test_end": str(test_end),
-                "metrics": None,
-                "error": True,
-            })
+            print(f"    ERROR in fold {fold_idx + 1}: {traceback.format_exc().splitlines()[-1]}")
+            per_fold.append(
+                {
+                    "fold": fold_idx + 1,
+                    "train_start": str(train_start),
+                    "train_end": str(train_end),
+                    "test_start": str(test_start),
+                    "test_end": str(test_end),
+                    "metrics": None,
+                    "error": True,
+                }
+            )
             continue
 
         # Compute fold metrics
@@ -379,11 +384,13 @@ def walk_forward_bond_backtest(
         }
         per_fold.append(fold_data)
 
-        print(f"    Return: {fold_metrics.total_return_pct:+.2f}% | "
-              f"Sharpe: {fold_metrics.excess_sharpe:+.4f} | "
-              f"PF: {fold_metrics.profit_factor:.2f} | "
-              f"DD: {fold_metrics.max_drawdown_pct:.2f}% | "
-              f"Trades: {fold_metrics.trade_count}")
+        print(
+            f"    Return: {fold_metrics.total_return_pct:+.2f}% | "
+            f"Sharpe: {fold_metrics.excess_sharpe:+.4f} | "
+            f"PF: {fold_metrics.profit_factor:.2f} | "
+            f"DD: {fold_metrics.max_drawdown_pct:.2f}% | "
+            f"Trades: {fold_metrics.trade_count}"
+        )
 
         # Accumulate out-of-sample data for aggregate metrics
         # Normalize equity curve to start at previous OOS endpoint (chain them)
@@ -749,6 +756,7 @@ def _evaluate_wf_verdict(agg: dict[str, Any]) -> dict[str, bool]:
 
 def _print_wf_verdict(agg: dict[str, Any], verdict: dict[str, bool]) -> None:
     """Print walk-forward acceptance verdict."""
+
     def _tag(key: str) -> str:
         return "PASS" if verdict.get(key) else "FAIL"
 

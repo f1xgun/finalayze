@@ -186,7 +186,7 @@ class OpenRouterClient(_CachingLLMClient):
                 ],
                 max_tokens=max_tokens or 1024,
                 **({"response_format": {"type": "json_object"}} if json_mode else {}),
-            )
+            )  # type: ignore[call-overload]
         except openai.RateLimitError as exc:
             msg = f"OpenRouter rate limit: {exc}"
             raise LLMRateLimitError(msg) from exc
@@ -194,7 +194,7 @@ class OpenRouterClient(_CachingLLMClient):
             msg = f"OpenRouter API error: {exc}"
             raise LLMError(msg) from exc
 
-        content = completion.choices[0].message.content
+        content: str | None = completion.choices[0].message.content
         if content is None:
             msg = "OpenRouter returned empty response"
             raise LLMError(msg)
@@ -228,7 +228,7 @@ class OpenAIClient(_CachingLLMClient):
                 ],
                 max_tokens=max_tokens or 1024,
                 **({"response_format": {"type": "json_object"}} if json_mode else {}),
-            )
+            )  # type: ignore[call-overload]
         except openai.RateLimitError as exc:
             msg = f"OpenAI rate limit: {exc}"
             raise LLMRateLimitError(msg) from exc
@@ -236,7 +236,7 @@ class OpenAIClient(_CachingLLMClient):
             msg = f"OpenAI API error: {exc}"
             raise LLMError(msg) from exc
 
-        content = completion.choices[0].message.content
+        content: str | None = completion.choices[0].message.content
         if content is None:
             msg = "OpenAI returned empty response"
             raise LLMError(msg)
@@ -263,7 +263,9 @@ class AnthropicClient(_CachingLLMClient):
     ) -> str:
         effective_system = system
         if json_mode:
-            effective_system = system + "\n\nIMPORTANT: Respond with valid JSON only. No comments, no extra text."
+            effective_system = (
+                system + "\n\nIMPORTANT: Respond with valid JSON only. No comments, no extra text."
+            )
         try:
             message = await self._client.messages.create(
                 model=self._model,
@@ -314,7 +316,7 @@ class GroqClient(_CachingLLMClient):
                 ],
                 max_tokens=max_tokens or 1024,
                 **({"response_format": {"type": "json_object"}} if json_mode else {}),
-            )
+            )  # type: ignore[call-overload]
         except openai.RateLimitError as exc:
             msg = f"Groq rate limit: {exc}"
             raise LLMRateLimitError(msg) from exc
@@ -322,7 +324,7 @@ class GroqClient(_CachingLLMClient):
             msg = f"Groq API error: {exc}"
             raise LLMError(msg) from exc
 
-        content = completion.choices[0].message.content
+        content: str | None = completion.choices[0].message.content
         if content is None:
             msg = "Groq returned empty response"
             raise LLMError(msg)
@@ -358,7 +360,7 @@ class DeepSeekClient(_CachingLLMClient):
                 ],
                 max_tokens=max_tokens or 1024,
                 **({"response_format": {"type": "json_object"}} if json_mode else {}),
-            )
+            )  # type: ignore[call-overload]
         except openai.RateLimitError as exc:
             msg = f"DeepSeek rate limit: {exc}"
             raise LLMRateLimitError(msg) from exc
@@ -366,7 +368,7 @@ class DeepSeekClient(_CachingLLMClient):
             msg = f"DeepSeek API error: {exc}"
             raise LLMError(msg) from exc
 
-        content = completion.choices[0].message.content
+        content: str | None = completion.choices[0].message.content
         if content is None:
             msg = "DeepSeek returned empty response"
             raise LLMError(msg)

@@ -100,6 +100,7 @@ t-tech-investments = { index = "tbank" }
 target-version = "py312"
 line-length = 100
 src = ["src"]
+extend-exclude = [".claude/worktrees"]
 
 [tool.ruff.lint]
 select = [
@@ -133,7 +134,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "T20", "ARG", "PLC0415", "N806", "TC001", "RUF100", "PT018", "S108", "F401", "SLF001", "PLR2004", "TC003"]
+"tests/**" = ["S101", "T20", "ARG", "PLC0415", "N806", "TC001", "RUF100", "PT018", "S108", "F401", "SLF001", "PLR2004", "TC003", "S105", "S106", "S107", "S311", "N813", "PT019"]
 "scripts/**" = ["T20", "E402", "S112", "TC001"]
 "src/finalayze/dashboard/**" = ["TC001", "PLR0912", "PLR0915"]
 
