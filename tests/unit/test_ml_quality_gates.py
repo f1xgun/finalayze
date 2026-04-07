@@ -110,10 +110,12 @@ class TestEvaluateFoldMetricsProfitFactor:
         test_labels = [1, 1, 0, 0]
 
         # Calibrator that maps probabilities closer to extremes (better calibration)
+        import numpy as np
+
         calibrator = MagicMock()
         calibrator.is_fitted = True
-        calibrator.calibrate = MagicMock(
-            side_effect=lambda p: 0.9 if p >= 0.5 else 0.1
+        calibrator.predict_proba = MagicMock(
+            return_value=np.array([0.9, 0.9, 0.1, 0.1])
         )
 
         result_with_cal = _evaluate_fold_metrics(

@@ -1009,6 +1009,7 @@ def _evaluate_fold_metrics(
     test_labels: list[int],
     mean_uniqueness: float = 1.0,
     avg_hold_bars: float = 1.0,
+    calibrator: object | None = None,
 ) -> FoldMetrics:
     """Evaluate models on a test fold and compute FoldMetrics for quality gates."""
     probas_all: list[float] = []
@@ -1030,7 +1031,20 @@ def _evaluate_fold_metrics(
     n_neg = n_test - n_pos
 
     acc = float(accuracy_score(test_labels, preds)) if n_test > 0 else 0.5
-    brier = float(brier_score_loss(test_labels, probas_all)) if n_test > 0 else 0.25
+
+    # Compute Brier score: use calibrated probabilities if calibrator available
+    if calibrator is not None and hasattr(calibrator, "predict_proba"):
+        try:
+            import numpy as np
+
+            calibrated_probas = calibrator.predict_proba(
+                np.array(probas_all, dtype=np.float64)
+            ).tolist()
+            brier = float(brier_score_loss(test_labels, calibrated_probas)) if n_test > 0 else 0.25
+        except Exception:
+            brier = float(brier_score_loss(test_labels, probas_all)) if n_test > 0 else 0.25
+    else:
+        brier = float(brier_score_loss(test_labels, probas_all)) if n_test > 0 else 0.25
 
     # Sensitivity / specificity
     tp = sum(1 for p, y in zip(preds, test_labels, strict=True) if p == 1 and y == 1)
@@ -1041,6 +1055,22 @@ def _evaluate_fold_metrics(
     buy_count = sum(preds)
     buy_ratio = buy_count / n_test if n_test > 0 else 0.5
 
+    # Compute profit factor from BUY predictions vs actual labels
+    _pf_threshold = 0.55
+    gross_profit = 0.0
+    gross_loss = 0.0
+    for prob, label in zip(probas_all, test_labels, strict=True):
+        if prob >= _pf_threshold:  # model predicts BUY
+            if label == 1:
+                gross_profit += 1.0
+            else:
+                gross_loss += 1.0
+    profit_factor = (
+        gross_profit / gross_loss
+        if gross_loss > 0
+        else (2.0 if gross_profit > 0 else 1.0)
+    )
+
     return FoldMetrics(
         accuracy=acc,
         brier_score=brier,
@@ -1050,6 +1080,7 @@ def _evaluate_fold_metrics(
         buy_ratio=buy_ratio,
         sensitivity=sensitivity,
         specificity=specificity,
+        profit_factor=profit_factor,
         signal_count=n_test,
         avg_hold_bars=avg_hold_bars,
     )
