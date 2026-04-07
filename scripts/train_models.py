@@ -1156,6 +1156,7 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         train_f = [features[i] for i in train_idx]
         train_l = [labels[i] for i in train_idx]
         cal_f = [features[i] for i in cal_idx]
+        cal_l = [labels[i] for i in cal_idx]
         test_f = [features[i] for i in test_idx]
         test_l = [labels[i] for i in test_idx]
 
@@ -1234,10 +1235,34 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         else:
             fold_avg_hold = 1.0
 
+        # Fit per-fold calibrator on calibration split for Brier evaluation
+        fold_calibrator = None
+        if cal_f:
+            from finalayze.ml.calibration import EnsembleCalibrator as _EnsCalib  # noqa: PLC0415
+
+            cal_raw_probas = []
+            for feat in cal_f:
+                cprobs = []
+                for m in models:
+                    trained = getattr(m, "_trained", None) or getattr(m, "_model", None)
+                    if trained is None:
+                        continue
+                    try:
+                        cprobs.append(m.predict_proba(feat))
+                    except Exception:
+                        continue
+                cal_raw_probas.append(sum(cprobs) / len(cprobs) if cprobs else 0.5)
+
+            _fc = _EnsCalib()
+            _fc.fit(_np.array(cal_raw_probas), _np.array(cal_l))
+            if _fc.is_fitted:
+                fold_calibrator = _fc
+
         # Evaluate on test fold
         if test_f:
             fold_metrics = _evaluate_fold_metrics(
-                models, test_f, test_l, mean_uniq, avg_hold_bars=fold_avg_hold
+                models, test_f, test_l, mean_uniq, avg_hold_bars=fold_avg_hold,
+                calibrator=fold_calibrator,
             )
             gate_results = evaluate_fold(fold_metrics)
             all_fold_results.append(gate_results)

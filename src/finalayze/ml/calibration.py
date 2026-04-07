@@ -225,6 +225,30 @@ class EnsembleCalibrator:
         calibrated = float(self._calibrator.predict_proba(np.array([[raw_proba]]))[0, 1])
         return max(0.0, min(1.0, calibrated))
 
+    def predict_proba(self, raw_probas: np.ndarray) -> np.ndarray:  # type: ignore[type-arg]
+        """Calibrate an array of raw probabilities.
+
+        Vectorized version of calibrate() for batch evaluation.
+
+        Args:
+            raw_probas: 1-D array of raw ensemble probability outputs.
+
+        Returns:
+            1-D array of calibrated probabilities. If not fitted, returns input unchanged.
+        """
+        if not self._fitted:
+            return raw_probas.copy()
+
+        if self._use_isotonic and self._isotonic is not None:
+            calibrated = self._isotonic.predict(raw_probas)
+            return np.clip(calibrated, 0.0, 1.0)
+
+        if self._calibrator is None:
+            return raw_probas.copy()
+
+        calibrated = self._calibrator.predict_proba(raw_probas.reshape(-1, 1))[:, 1]
+        return np.clip(calibrated, 0.0, 1.0)
+
     def get_prediction_set(self, raw_prob: float) -> set[int]:
         """Get conformal prediction set for a raw probability.
 
