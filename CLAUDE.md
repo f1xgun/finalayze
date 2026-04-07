@@ -56,6 +56,9 @@ before completing the phase or quick task. Use other trading skills as needed
 | `data-quality-check` | Validate market data integrity before backtests |
 | `ml-experiment` | Train ML models, evaluate impact, gate enablement |
 | `preset-tuner` | Structured parameter tuning with sensitivity checks |
+| `daily-review` | Post-market daily analysis pipeline (collect, analyze, route) |
+| `weekly-deep-dive` | Multi-agent weekly strategy review with deliberation rounds |
+| `go-live-scorecard` | Automated production readiness assessment and trend tracking |
 
 External: `quantitative-research` (quant methodology), `risk-metrics-calculation` (risk math).
 See [WORKFLOW.md §9](WORKFLOW.md) for full dispatch rules.

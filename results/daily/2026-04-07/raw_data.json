@@ -1,0 +1,17 @@
+{
+  "report_date": "2026-04-07",
+  "generated_at": "2026-04-07T07:13:28.732414+00:00",
+  "snapshot": null,
+  "rolling_7d": {
+    "days_with_data": 0,
+    "message": "No data in 7-day window"
+  },
+  "recent_iterations": [],
+  "anomalies": [
+    "NO_DATA: No trading cycles recorded today"
+  ],
+  "data_quality": {
+    "status": "NO_DATA",
+    "details": "No cycle entries for this date"
+  }
+}

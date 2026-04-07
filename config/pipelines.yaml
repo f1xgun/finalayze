@@ -1,0 +1,67 @@
+# Autonomous Analysis Pipelines Configuration
+# Used by daily-review, weekly-deep-dive, and go-live-scorecard skills.
+
+pipelines:
+  daily_review:
+    enabled: true
+    schedule: "3 23 * * 1-5"  # Weekdays 23:03 MSK (after MOEX close)
+    output_dir: results/daily/
+    cycle_log_path: results/validation/cycles.jsonl
+    iteration_history: results/iterations/history.jsonl
+    anomaly_thresholds:
+      max_drawdown_warn_pct: 2.0     # flag if daily DD exceeds
+      min_fill_rate_pct: 80.0         # flag if fill rate below
+      signal_drop_pct: 70.0           # flag if signals drop 70%+ vs 7d avg
+      max_errors_per_day: 5           # flag if errors exceed
+      min_cycles_per_day: 2           # flag if fewer cycles than expected
+    notification:
+      telegram: true                   # send digest to Telegram
+      priority: normal                 # normal | high (for P0 items)
+
+  weekly_deep_dive:
+    enabled: true
+    schedule: "7 10 * * 6"   # Saturday 10:07 local time
+    output_dir: results/weekly/
+    use_agent_teams: true     # use Agent Teams for peer-to-peer discussion
+    fallback_sequential: true # fall back to sequential if teams unavailable
+    teammates:
+      - role: quant-analyst
+        focus: signal quality, strategy attribution, parameter sensitivity
+      - role: risk-officer
+        focus: drawdown trends, position sizing, correlation risk, go-live readiness
+      - role: ml-engineer
+        focus: model drift, prediction accuracy, feature importance, retraining decision
+    backtest_segments:
+      - us_tech
+      - us_broad
+
+  go_live_scorecard:
+    enabled: true
+    schedule: "17 11 * * 0"  # Sunday 11:17 local time
+    output_dir: results/readiness/
+    checklist_path: docs/operations/GO_LIVE_CHECKLIST.md
+    thresholds_path: config/gate_thresholds.yaml
+    criteria_weights:
+      tests_green: 15
+      lint_clean: 5
+      mypy_clean: 5
+      wf_sharpe_positive: 15
+      sandbox_5d: 15
+      max_dd_gate: 10
+      fill_rate_gate: 5
+      circuit_breakers_configured: 5
+      tinkoff_token_set: 5
+      telegram_configured: 5
+      emergency_procedures_tested: 5   # manual check
+      starting_capital_verified: 10    # manual check
+    verdict_thresholds:
+      ready: 85       # score >= 85 AND all critical pass
+      almost: 70      # score >= 70
+      # below 70 = NOT READY
+
+# Global settings
+global:
+  timezone: Europe/Moscow
+  notification_channel: telegram  # telegram | slack | none
+  retain_daily_reports_days: 90
+  retain_weekly_reports_weeks: 52

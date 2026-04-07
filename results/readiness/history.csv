@@ -1,0 +1,2 @@
+date,score,verdict,tests_pass,lint_pass,mypy_pass,wf_sharpe_pass,sandbox_days,max_dd_pass,blockers
+2026-04-07,40,NOT_READY,false,false,false,false,10,true,"test_fail;lint_3498;mypy_193;no_ru_backtest"
