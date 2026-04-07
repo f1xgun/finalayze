@@ -10,10 +10,10 @@ from dataclasses import field as dc_field
 from datetime import date, datetime  # noqa: TC003
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID  # noqa: TC003
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 type InstrumentType = Literal["stock", "etf", "bond"]
 
@@ -524,3 +524,155 @@ DEFAULT_LAYER_CONFIGS: dict[PortfolioLayer, LayerConfig] = {
         yield_stop_bps=0,
     ),
 }
+
+
+# ── Debate Protocol Schemas ─────────────────────────────────────────────────
+
+
+class DebateStatus(StrEnum):
+    """Status of a structured debate."""
+
+    OPEN = "open"
+    RESOLVED = "resolved"
+    ESCALATED = "escalated"
+
+
+class FileLineSource(BaseModel):
+    """Source reference pointing to a specific file and line."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["file"] = "file"
+    path: str
+    line: int
+    excerpt: str
+
+
+class MetricSource(BaseModel):
+    """Source reference citing a metric value from iteration history."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["metric"] = "metric"
+    metric_name: str
+    value: float
+    iteration: str
+
+
+ClaimSource = Annotated[
+    FileLineSource | MetricSource,
+    Field(discriminator="kind"),
+]
+
+
+class Claim(BaseModel):
+    """A verifiable assertion made by an agent."""
+
+    model_config = ConfigDict(frozen=True)
+
+    statement: str
+    source: ClaimSource
+    confidence: float
+
+    @field_validator("confidence")
+    @classmethod
+    def confidence_must_be_probability(cls, v: float) -> float:
+        """Validate that confidence is a probability in [0.0, 1.0]."""
+        if not (0.0 <= v <= 1.0):
+            msg = f"confidence must be in [0.0, 1.0], got {v}"
+            raise ValueError(msg)
+        return v
+
+
+class AgentOutput(BaseModel):
+    """Structured agent recommendation with verifiable evidence."""
+
+    model_config = ConfigDict(frozen=True)
+
+    agent_name: str
+    recommendation: str
+    claims: list[Claim] = Field(min_length=1)
+    timestamp: datetime
+
+
+class ClaimVerdict(StrEnum):
+    """Verdict from arbiter fact-checking a claim."""
+
+    VERIFIED = "verified"
+    CONTRADICTED = "contradicted"
+    UNTESTABLE = "untestable"
+
+
+class ClaimCheckResult(BaseModel):
+    """Result of fact-checking a single claim."""
+
+    model_config = ConfigDict(frozen=True)
+
+    claim: Claim
+    verdict: ClaimVerdict
+    evidence: str
+
+
+class FactCheckReport(BaseModel):
+    """Arbiter's structured fact-check report on a set of claims."""
+
+    model_config = ConfigDict(frozen=True)
+
+    debate_id: str
+    arbiter_timestamp: datetime
+    results: list[ClaimCheckResult]
+
+    @property
+    def has_contradictions(self) -> bool:
+        """Return True if any claim was CONTRADICTED."""
+        return any(r.verdict == ClaimVerdict.CONTRADICTED for r in self.results)
+
+    def to_markdown(self) -> str:
+        """Render the fact-check report as structured Markdown."""
+        sections: dict[str, list[ClaimCheckResult]] = {
+            "Verified": [],
+            "Contradicted": [],
+            "Untestable": [],
+        }
+        for r in self.results:
+            if r.verdict == ClaimVerdict.VERIFIED:
+                sections["Verified"].append(r)
+            elif r.verdict == ClaimVerdict.CONTRADICTED:
+                sections["Contradicted"].append(r)
+            else:
+                sections["Untestable"].append(r)
+
+        lines: list[str] = [f"# Fact-Check Report: {self.debate_id}", ""]
+        for heading, items in sections.items():
+            lines.append(f"## {heading}")
+            lines.append("")
+            if not items:
+                lines.append("_None_")
+            for item in items:
+                lines.append(f"- **{item.claim.statement}**")
+                lines.append(f"  Evidence: {item.evidence}")
+            lines.append("")
+        return "\n".join(lines)
+
+
+class DebateState(BaseModel):
+    """Persistent state of a structured debate between agents."""
+
+    model_config = ConfigDict(frozen=True)
+
+    debate_id: str
+    topic: str
+    status: DebateStatus
+    created: str  # ISO date string "YYYY-MM-DD"
+    agents: list[str]
+    arbiter_report: FactCheckReport | None = None
+    resolution: str | None = None
+    experiment_id: str | None = None
+
+    @model_validator(mode="after")
+    def escalated_requires_experiment_id(self) -> DebateState:
+        """Validate that escalated debates have an experiment_id."""
+        if self.status == DebateStatus.ESCALATED and self.experiment_id is None:
+            msg = "experiment_id is required when status is 'escalated'"
+            raise ValueError(msg)
+        return self
