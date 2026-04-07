@@ -155,13 +155,19 @@ Plans:
 - [ ] **Phase 35: Experiment Lab UI** - Streamlit app for experiment lifecycle: hypothesis context, pre-defined success criteria, execution status, results vs expectations, decision history
 
 ### Phase 32: Critical Sandbox Fixes
-**Goal**: All strategies function correctly in live/sandbox mode and safety defaults prevent accidental production-level risk
+**Goal**: All strategies function correctly in MOEX sandbox mode, safety defaults prevent accidental production-level risk, news pipeline activated, and signal diagnostics available
 **Depends on**: Nothing (zero-risk fixes)
-**Requirements**: SANDBOX-FIX-01, SANDBOX-FIX-02, SANDBOX-FIX-03
+**Requirements**: SANDBOX-FIX-01, SANDBOX-FIX-02, SANDBOX-FIX-03, SANDBOX-FIX-04, SANDBOX-FIX-05, SANDBOX-FIX-06, SANDBOX-FIX-07, SANDBOX-FIX-08, SANDBOX-FIX-09, SANDBOX-FIX-10
 **Success Criteria** (what must be TRUE):
   1. `_CANDLE_LOOKBACK >= 210` in trading loop -- RSI2 Connors (needs SMA(200)), dual_momentum (needs 126 bars), and OU mean reversion (needs 126 bars) all receive sufficient data in live mode
   2. `TradingLoop.start()` checks `KillSwitch.is_killed` before starting scheduler -- a killed system does not resume trading on Docker restart
   3. When `FINALAYZE_MODE=sandbox` and `rollout_phase` is not explicitly set, the effective rollout phase is MINIMAL (not FULL) -- sandbox always starts with conservative risk limits
+  4. Staleness threshold handles weekends (72h) and MOEX holidays -- Monday morning and post-New-Year cycles not blocked
+  5. TinkoffFetcher wrapped in CachingFetcher and RateLimiter in sandbox mode -- no repeated API calls, no throttling
+  6. event_driven enabled for ru_blue_chips, ru_energy, ru_finance with LLM setup documented -- news pipeline produces sentiment scores
+  7. ValidationLogger tracks per-gate signal drops (no_bars, below_threshold, pre_trade_rejected) -- signal loss is diagnosable
+  8. ML profit_factor gate computes actual PF from fold predictions -- gate no longer always fails
+  9. ML Brier gate uses calibrated probabilities -- calibrator applied during walk-forward evaluation
 Plans: TBD
 
 ### Phase 33: Structured Debate Protocol

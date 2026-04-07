@@ -34,6 +34,23 @@ Requirements for Sandbox Stability & Observability milestone.
 - [x] **OPS-03**: LLM article deduplication via content hash — seen articles skipped within 24h TTL window, reducing rate-limit fallbacks
 - [x] **OPS-04**: Telegram alerter startup failure does not block trading loop launch — alert sent on next successful cycle instead
 
+## v7.0 Requirements
+
+Requirements for Agent Intelligence & Experiment Framework milestone.
+
+### Sandbox Signal Fixes
+
+- [ ] **SANDBOX-FIX-01**: `_CANDLE_LOOKBACK >= 210` in trading loop — RSI2 Connors (SMA-200), dual_momentum (126 bars), OU mean reversion (126 bars) all receive sufficient data in live mode
+- [ ] **SANDBOX-FIX-02**: `TradingLoop.start()` checks `KillSwitch.is_killed` before starting scheduler — killed system does not resume on Docker restart
+- [ ] **SANDBOX-FIX-03**: When `FINALAYZE_MODE=sandbox` and `rollout_phase` not explicitly set, effective rollout is MINIMAL — sandbox starts with conservative risk limits
+- [ ] **SANDBOX-FIX-04**: Staleness threshold handles weekends and MOEX holidays — Monday morning and post-holiday cycles not blocked by 48h threshold
+- [ ] **SANDBOX-FIX-05**: TinkoffFetcher wrapped in CachingFetcher in sandbox mode — repeated API calls for same data eliminated
+- [ ] **SANDBOX-FIX-06**: RateLimiter passed to TinkoffFetcher in sandbox — API throttling prevented for large instrument universes
+- [ ] **SANDBOX-FIX-07**: `FINALAYZE_LLM_API_KEY` documented and event_driven enabled for ru_blue_chips, ru_energy, ru_finance — news pipeline activated for MOEX
+- [ ] **SANDBOX-FIX-08**: Per-gate signal drop counters in ValidationLogger — instruments_no_bars, signals_below_threshold, signals_pre_trade_rejected tracked separately
+- [ ] **SANDBOX-FIX-09**: ML quality gate bug: profit_factor gate populated with actual PF from fold predictions — gate no longer always fails with default 1.0
+- [ ] **SANDBOX-FIX-10**: ML quality gate: Brier score evaluated on calibrated probabilities — calibrator applied during walk-forward evaluation
+
 ## Future Requirements
 
 ### News Pipeline Enhancement
