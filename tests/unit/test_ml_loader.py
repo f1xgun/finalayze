@@ -484,7 +484,7 @@ class TestSegmentMetaRoundTrip:
         assert loaded["base_rate"] == pytest.approx(0.5312)
 
     def test_save_ensemble_always_writes_meta(self, tmp_path: Path) -> None:
-        """save_ensemble always writes segment_meta.json (even when base_rate is None) for feature_schema_version."""
+        """save_ensemble always writes segment_meta.json (even when base_rate is None)."""
         xgb = XGBoostModel(segment_id="us_tech")
         xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
         ensemble = EnsembleModel(models=[xgb], lstm_model=None)
@@ -542,7 +542,7 @@ class TestFeatureSchemaVersion:
         assert ensemble is not None
 
     def test_no_segment_meta_loads_without_version_check(self, tmp_path: Path) -> None:
-        """Legacy models with no segment_meta.json at all still load (no version field to mismatch)."""
+        """Legacy models with no segment_meta.json still load."""
         segment_dir = tmp_path / "us_tech"
         segment_dir.mkdir(parents=True)
 
@@ -574,7 +574,7 @@ class TestFeatureSchemaVersion:
         assert meta["feature_schema_version"] == FEATURE_SCHEMA_VERSION
 
     def test_save_ensemble_writes_version_even_without_base_rate(self, tmp_path: Path) -> None:
-        """save_ensemble always writes segment_meta.json with version, even when base_rate is None."""
+        """save_ensemble writes segment_meta.json with version even without base_rate."""
         from finalayze.ml.loader import FEATURE_SCHEMA_VERSION
 
         xgb = XGBoostModel(segment_id="us_tech")

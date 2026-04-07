@@ -6,7 +6,7 @@ and produces a markdown report with pass/fail assessment.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -26,7 +26,7 @@ def _make_entries(
 ) -> list[CycleLogEntry]:
     """Build sample CycleLogEntry list spanning ``days`` trading days."""
     entries: list[CycleLogEntry] = []
-    base = datetime(2026, 3, 10, 10, 0, 0)
+    base = datetime(2026, 3, 10, 10, 0, 0, tzinfo=UTC)
     equity = equity_start
     for d in range(days):
         day_ts = base + timedelta(days=d)

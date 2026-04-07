@@ -10,7 +10,7 @@ import pytest
 from finalayze.core.trading_loop import TradingLoop
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_loop() -> MagicMock:
     """Create a MagicMock that can call _is_market_open as unbound."""
     return MagicMock(spec=[])
@@ -78,9 +78,7 @@ class TestBondCycleHolidayGating:
         loop._bond_enabled = True
         loop._now.return_value = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
 
-        with patch(
-            "finalayze.data.moex_calendar.is_moex_trading_day", return_value=False
-        ):
+        with patch("finalayze.data.moex_calendar.is_moex_trading_day", return_value=False):
             TradingLoop._bond_cycle(loop)
 
         loop._bond_processor.run_cycle.assert_not_called()
@@ -95,9 +93,7 @@ class TestBondCycleHolidayGating:
         loop._now.return_value = datetime(2024, 3, 11, 5, 0, tzinfo=UTC)
         loop._is_market_open.return_value = False  # outside hours
 
-        with patch(
-            "finalayze.data.moex_calendar.is_moex_trading_day", return_value=True
-        ):
+        with patch("finalayze.data.moex_calendar.is_moex_trading_day", return_value=True):
             TradingLoop._bond_cycle(loop)
 
         loop._bond_processor.run_cycle.assert_not_called()
@@ -111,9 +107,7 @@ class TestBondCycleHolidayGating:
         loop._now.return_value = datetime(2024, 3, 11, 10, 0, tzinfo=UTC)
         loop._is_market_open.return_value = True
 
-        with patch(
-            "finalayze.data.moex_calendar.is_moex_trading_day", return_value=True
-        ):
+        with patch("finalayze.data.moex_calendar.is_moex_trading_day", return_value=True):
             TradingLoop._bond_cycle(loop)
 
         loop._bond_processor.run_cycle.assert_called_once()

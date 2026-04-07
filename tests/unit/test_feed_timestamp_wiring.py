@@ -25,7 +25,7 @@ def _make_trading_loop_with_health_monitor(
     mock_settings.work_mode = "sandbox"
     mock_settings.kelly_fraction = 0.5
 
-    loop = TradingLoop(
+    return TradingLoop(
         settings=mock_settings,
         fetchers={"us": MagicMock()},
         news_fetcher=MagicMock(),
@@ -40,7 +40,6 @@ def _make_trading_loop_with_health_monitor(
         instrument_registry=MagicMock(),
         health_monitor=health_monitor,
     )
-    return loop
 
 
 class TestGoNoGoImport:
@@ -65,7 +64,7 @@ class TestFeedTimestampWiring:
     def test_update_feed_timestamp_called_with_candles(self) -> None:
         """When candles are fetched, update_feed_timestamp is called with datetime."""
         mock_health = MagicMock()
-        loop = _make_trading_loop_with_health_monitor(health_monitor=mock_health)
+        _make_trading_loop_with_health_monitor(health_monitor=mock_health)
 
         # Simulate the feed timestamp update logic from _process_instrument
         # We test the actual code path by checking the source doesn't use getattr
@@ -76,11 +75,10 @@ class TestFeedTimestampWiring:
         source = inspect.getsource(TradingLoop._process_instrument)
 
         # INT-02: Must call update_feed_timestamp directly (not via getattr)
-        assert "getattr" not in source or "update_feed_timestamp" not in source.split(
-            "getattr"
-        )[-1].split("\n")[0], (
-            "update_feed_timestamp should be called directly, not via getattr"
-        )
+        assert (
+            "getattr" not in source
+            or "update_feed_timestamp" not in source.split("getattr")[-1].split("\n")[0]
+        ), "update_feed_timestamp should be called directly, not via getattr"
 
     def test_no_getattr_for_update_feed_timestamp(self) -> None:
         """The code must NOT use getattr to call update_feed_timestamp."""
@@ -92,7 +90,7 @@ class TestFeedTimestampWiring:
         source = inspect.getsource(TradingLoop._process_instrument)
 
         # Check that getattr(..., "update_feed_timestamp", ...) pattern is absent
-        pattern = r'getattr\([^)]*update_feed_timestamp[^)]*\)'
+        pattern = r"getattr\([^)]*update_feed_timestamp[^)]*\)"
         assert not re.search(pattern, source), (
             "Found getattr(..., 'update_feed_timestamp', ...) in _process_instrument -- "
             "should call self._health_monitor.update_feed_timestamp(now) directly"

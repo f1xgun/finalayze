@@ -65,16 +65,16 @@ def test_get_single_position_returns_404() -> None:
 def _make_mock_portfolio() -> MagicMock:
     """Create a mock PortfolioState with equity and cash."""
     p = MagicMock()
-    p.equity = Decimal("100000")
-    p.cash = Decimal("50000")
+    p.equity = Decimal(100000)
+    p.cash = Decimal(50000)
     return p
 
 
 def test_get_portfolio_uses_run_in_executor() -> None:
     """Verify that broker.get_portfolio() is called via run_in_executor, not directly."""
-    from finalayze.api.v1.portfolio import get_portfolio as _endpoint  # noqa: F401
-
     import inspect
+
+    from finalayze.api.v1.portfolio import get_portfolio as _endpoint  # noqa: F401
 
     source = inspect.getsource(_endpoint)
     assert "run_in_executor" in source, (

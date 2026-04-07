@@ -159,8 +159,8 @@ class TestTinkoffFetcherClientCreation:
         """Each _make_client call should create a new instance (no caching)."""
         fetcher = TinkoffFetcher(token=_TEST_TOKEN, registry=_make_registry(), sandbox=True)
         with patch("finalayze.data.fetchers.tinkoff_data.AsyncClient") as mock_cls:
-            client1 = fetcher._make_client()
-            client2 = fetcher._make_client()
+            fetcher._make_client()
+            fetcher._make_client()
 
             assert mock_cls.call_count == 2  # noqa: PLR2004
 
@@ -228,9 +228,7 @@ class TestTinkoffFetcherBondMethodsPersistent:
         ]:
             method = getattr(TinkoffFetcher, method_name)
             source = inspect.getsource(method)
-            assert "_get_services_async" in source, (
-                f"{method_name} must use _get_services_async"
-            )
+            assert "_get_services_async" in source, f"{method_name} must use _get_services_async"
             assert "self._make_client()" not in source, (
                 f"{method_name} must not create its own client"
             )

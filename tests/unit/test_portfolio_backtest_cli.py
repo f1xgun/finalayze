@@ -6,10 +6,11 @@ import sys
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
-import pytest
+if TYPE_CHECKING:
+    import pytest
 
 # Ensure scripts/ is importable
 _SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent.parent / "scripts")
@@ -41,7 +42,7 @@ def _make_bond_info(figi: str = "FIGI_TEST") -> Any:
     info = MagicMock()
     info.figi = figi
     info.coupon_period_days = 182
-    info.face_value = Decimal("1000")
+    info.face_value = Decimal(1000)
     info.maturity_date = date(2030, 1, 1)
     return info
 
@@ -70,9 +71,10 @@ class TestRunBondBacktest:
         mock_fetcher.fetch_bond_candles.return_value = []
         mock_fetcher.fetch_bond_coupons.return_value = []
 
-        with patch(
-            "run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher
-        ), patch("run_portfolio_backtest.build_default_registry"):
+        with (
+            patch("run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher),
+            patch("run_portfolio_backtest.build_default_registry"),
+        ):
             from run_portfolio_backtest import _run_bond_backtest
 
             result = _run_bond_backtest(
@@ -82,9 +84,7 @@ class TestRunBondBacktest:
             )
         assert result is None
 
-    def test_valid_candles_produces_result(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_valid_candles_produces_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With valid candle data, _run_bond_backtest produces BondBacktestResult."""
         monkeypatch.setenv("FINALAYZE_TINKOFF_TOKEN", "test-token")
 
@@ -92,24 +92,37 @@ class TestRunBondBacktest:
         mock_fetcher.fetch_bond_info.return_value = _make_bond_info()
         # Return raw candle dicts (as TinkoffFetcher.fetch_bond_candles does)
         mock_fetcher.fetch_bond_candles.return_value = [
-            {"date": date(2023, 1, 10), "open": Decimal("99"), "high": Decimal("100"),
-             "low": Decimal("98"), "close": Decimal("99.5"), "volume": 500},
-            {"date": date(2023, 1, 11), "open": Decimal("99.5"), "high": Decimal("100.5"),
-             "low": Decimal("99"), "close": Decimal("100"), "volume": 600},
+            {
+                "date": date(2023, 1, 10),
+                "open": Decimal(99),
+                "high": Decimal(100),
+                "low": Decimal(98),
+                "close": Decimal("99.5"),
+                "volume": 500,
+            },
+            {
+                "date": date(2023, 1, 11),
+                "open": Decimal("99.5"),
+                "high": Decimal("100.5"),
+                "low": Decimal(99),
+                "close": Decimal(100),
+                "volume": 600,
+            },
         ]
         mock_fetcher.fetch_bond_coupons.return_value = []
 
         mock_engine_result = MagicMock()
         mock_engine_result.trades = []
-        mock_engine_result.equity_curve = [Decimal("400000")]
+        mock_engine_result.equity_curve = [Decimal(400000)]
         mock_engine_class = MagicMock()
         mock_engine_class.return_value.run.return_value = mock_engine_result
 
-        with patch(
-            "run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher
-        ), patch("run_portfolio_backtest.build_default_registry"), patch(
-            "run_portfolio_backtest.BondBacktestEngine", mock_engine_class
-        ), patch("run_portfolio_backtest.BondDurationRotationStrategy"):
+        with (
+            patch("run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher),
+            patch("run_portfolio_backtest.build_default_registry"),
+            patch("run_portfolio_backtest.BondBacktestEngine", mock_engine_class),
+            patch("run_portfolio_backtest.BondDurationRotationStrategy"),
+        ):
             from run_portfolio_backtest import _run_bond_backtest
 
             result = _run_bond_backtest(
@@ -131,9 +144,10 @@ class TestRunBondBacktest:
         mock_fetcher.fetch_bond_candles.return_value = []
         mock_fetcher.fetch_bond_coupons.return_value = []
 
-        with patch(
-            "run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher
-        ), patch("run_portfolio_backtest.build_default_registry"):
+        with (
+            patch("run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher),
+            patch("run_portfolio_backtest.build_default_registry"),
+        ):
             from run_portfolio_backtest import _run_bond_backtest
 
             _run_bond_backtest(
@@ -178,9 +192,7 @@ class TestRunEquityBacktest:
         )
         assert result is None
 
-    def test_valid_candles_produces_tuple(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_valid_candles_produces_tuple(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With valid candle data, _run_equity_backtest returns (trades, snapshots)."""
         monkeypatch.setenv("FINALAYZE_TINKOFF_TOKEN", "test-token")
 
@@ -193,10 +205,10 @@ class TestRunEquityBacktest:
         mock_engine = MagicMock()
         mock_engine.run.return_value = (mock_trades, mock_snapshots)
 
-        with patch(
-            "run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher
-        ), patch("run_portfolio_backtest.build_default_registry"), patch(
-            "run_portfolio_backtest.BacktestEngine", return_value=mock_engine
+        with (
+            patch("run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher),
+            patch("run_portfolio_backtest.build_default_registry"),
+            patch("run_portfolio_backtest.BacktestEngine", return_value=mock_engine),
         ):
             from run_portfolio_backtest import _run_equity_backtest
 
@@ -225,9 +237,7 @@ class TestExtractUsdrub:
         )
         assert result == []
 
-    def test_valid_data_produces_series(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_valid_data_produces_series(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With valid candle data, returns list[tuple[date, float]]."""
         monkeypatch.setenv("FINALAYZE_TINKOFF_TOKEN", "test-token")
 
@@ -237,9 +247,10 @@ class TestExtractUsdrub:
             {"date": date(2023, 1, 11), "close": Decimal("74.00")},
         ]
 
-        with patch(
-            "run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher
-        ), patch("run_portfolio_backtest.build_default_registry"):
+        with (
+            patch("run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher),
+            patch("run_portfolio_backtest.build_default_registry"),
+        ):
             from run_portfolio_backtest import _extract_usdrub_series
 
             result = _extract_usdrub_series(
@@ -250,18 +261,17 @@ class TestExtractUsdrub:
         assert result[0] == (date(2023, 1, 10), 73.50)
         assert result[1] == (date(2023, 1, 11), 74.00)
 
-    def test_empty_candles_returns_empty(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_candles_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With empty candle response, returns []."""
         monkeypatch.setenv("FINALAYZE_TINKOFF_TOKEN", "test-token")
 
         mock_fetcher = MagicMock()
         mock_fetcher.fetch_bond_candles.return_value = []
 
-        with patch(
-            "run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher
-        ), patch("run_portfolio_backtest.build_default_registry"):
+        with (
+            patch("run_portfolio_backtest.TinkoffFetcher", return_value=mock_fetcher),
+            patch("run_portfolio_backtest.build_default_registry"),
+        ):
             from run_portfolio_backtest import _extract_usdrub_series
 
             result = _extract_usdrub_series(

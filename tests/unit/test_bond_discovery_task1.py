@@ -51,7 +51,7 @@ class TestCouponEventSchema:
             amount_per_bond=Decimal("35.50"),
             coupon_number=5,
         )
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(Exception):  # noqa: B017, PT011
             event.bond_figi = "BBG456"  # type: ignore[misc]
 
 
@@ -71,7 +71,7 @@ class TestBondCandleModel:
     def test_bond_candle_model_fields(self) -> None:
         from finalayze.core.models import BondCandleModel
 
-        model = BondCandleModel()
+        BondCandleModel()
         # Verify field names exist on the class
         assert hasattr(BondCandleModel, "bond_figi")
         assert hasattr(BondCandleModel, "date")

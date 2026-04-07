@@ -268,9 +268,7 @@ class TestSandboxMetricsEndpoint:
         key = _get_api_key()
 
         async with _make_client(app) as client:
-            response = await client.get(
-                METRICS_ENDPOINT, headers={"X-API-Key": key}
-            )
+            response = await client.get(METRICS_ENDPOINT, headers={"X-API-Key": key})
 
         assert response.status_code == HTTP_200
         body = response.json()
@@ -297,9 +295,7 @@ class TestSandboxMetricsEndpoint:
         key = _get_api_key()
 
         async with _make_client(app) as client:
-            response = await client.get(
-                METRICS_ENDPOINT, headers={"X-API-Key": key}
-            )
+            response = await client.get(METRICS_ENDPOINT, headers={"X-API-Key": key})
 
         assert response.status_code == HTTP_200
         assert response.json() == []

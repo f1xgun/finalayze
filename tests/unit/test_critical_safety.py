@@ -34,8 +34,25 @@ from finalayze.risk.pre_trade_check import PreTradeChecker
 # A Monday during US market hours (14:30 UTC = 10:30 ET)
 _MARKET_OPEN_DT = datetime(2026, 2, 23, 15, 0, tzinfo=UTC)  # Monday 15:00 UTC
 
-# ── Constants ──────────────────────────────────────────────────────────────
 MARKET_US = "us"
+
+
+def _market_open_ctx(loop: object) -> object:
+    """Return a combined context manager that patches SCHEDULES and _now for market-open."""
+    from contextlib import ExitStack
+
+    mock_schedule = MagicMock()
+    mock_schedule.is_market_open.return_value = True
+
+    stack = ExitStack()
+    stack.enter_context(
+        patch("finalayze.orchestration.trading_loop.SCHEDULES", {MARKET_US: mock_schedule})
+    )
+    stack.enter_context(patch.object(loop, "_now", return_value=_MARKET_OPEN_DT))
+    return stack
+
+
+# ── Constants ──────────────────────────────────────────────────────────────
 SEGMENT_US_TECH = "us_tech"
 SYMBOL_AAPL = "AAPL"
 BASELINE_EQUITY = Decimal(100_000)
@@ -49,7 +66,7 @@ ORDER_QTY = Decimal(10)
 
 
 def _make_candle(symbol: str = SYMBOL_AAPL, idx: int = 0) -> Candle:
-    base = datetime(2025, 1, 1, 14, 30, tzinfo=UTC)
+    base = datetime.now(UTC) - timedelta(days=NUM_CANDLES)
     return Candle(
         symbol=symbol,
         market_id=MARKET_US,
@@ -168,6 +185,7 @@ def _make_trading_loop(
         return_value=MagicMock(equity=BASELINE_EQUITY, cash=Decimal(50_000))
     )
     mock_broker.get_positions = MagicMock(return_value={})
+    mock_broker.has_position = MagicMock(return_value=False)
     mock_broker.submit_order = MagicMock(return_value=fill_result)
     broker_router.route = MagicMock(return_value=mock_broker)
     broker_router.registered_markets = [MARKET_US]
@@ -419,10 +437,9 @@ class TestStrategyCycleCallsPreTradeChecker:
         assert isinstance(loop, TradingLoop)
 
         with (
-            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            _market_open_ctx(loop),
             patch.object(loop, "_pre_trade_checker") as mock_checker,  # type: ignore[arg-type]
         ):
-            mock_dt.now.return_value = _MARKET_OPEN_DT
             mock_result = MagicMock()
             mock_result.passed = True
             mock_checker.check.return_value = mock_result
@@ -439,12 +456,11 @@ class TestStrategyCycleCallsPreTradeChecker:
         fail_result.violations = ["Insufficient cash"]
 
         with (
-            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            _market_open_ctx(loop),
             patch.object(  # type: ignore[attr-defined]
                 loop._pre_trade_checker, "check", return_value=fail_result
             ),
         ):
-            mock_dt.now.return_value = _MARKET_OPEN_DT
             loop._strategy_cycle()  # type: ignore[attr-defined]
         # Order must NOT be submitted if pre-trade check fails
         loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
@@ -468,12 +484,11 @@ class TestStrategyCycleUsesRollingKelly:
         assert hasattr(loop, "_kelly_sizer")
 
         with (
-            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            _market_open_ctx(loop),
             patch.object(  # type: ignore[attr-defined]
                 loop._kelly_sizer, "optimal_fraction", return_value=Decimal("0.01")
             ) as mock_kelly,
         ):
-            mock_dt.now.return_value = _MARKET_OPEN_DT
             loop._strategy_cycle()  # type: ignore[attr-defined]
             mock_kelly.assert_called()
 
@@ -499,8 +514,7 @@ class TestLossLimitTrackerWired:
         loop._loss_limit_tracker.is_halted = MagicMock(  # type: ignore[attr-defined]
             return_value=True
         )
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
 
@@ -511,8 +525,7 @@ class TestLossLimitTrackerWired:
         loop._loss_limit_tracker.is_halted = MagicMock(  # type: ignore[attr-defined]
             return_value=False
         )
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
 
@@ -789,12 +802,14 @@ class TestCrossMarketBreakerHaltsAll:
 
         # No fetcher.fetch_candles should be called (all markets halted)
         fetcher = loop._fetchers[MARKET_US]  # type: ignore[attr-defined]
-        loop._strategy_cycle()  # type: ignore[attr-defined]
+        with _market_open_ctx(loop):
+            loop._strategy_cycle()  # type: ignore[attr-defined]
         fetcher.fetch_candles.assert_not_called()
 
     def test_cross_market_trip_sends_alert(self) -> None:
         loop = _make_trading_loop(cross_trip=True)
-        loop._strategy_cycle()  # type: ignore[attr-defined]
+        with _market_open_ctx(loop):
+            loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._alerter.on_circuit_breaker_trip.assert_called()  # type: ignore[attr-defined]
 
 

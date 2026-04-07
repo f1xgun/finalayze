@@ -152,7 +152,7 @@ class TestWeeklyDigest:
     def test_weekly_digest_method_exists(self) -> None:
         """TradingLoop has a _weekly_digest method."""
         assert hasattr(TradingLoop, "_weekly_digest")
-        assert callable(getattr(TradingLoop, "_weekly_digest"))
+        assert callable(TradingLoop._weekly_digest)
 
     def test_weekly_digest_scheduled_via_cron(self) -> None:
         """Weekly digest is scheduled via CronTrigger on Sunday."""

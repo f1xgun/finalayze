@@ -41,8 +41,8 @@ def _lifespan_patches():
     )
 
 
-@pytest.fixture()
-def _patch_settings():
+@pytest.fixture
+def patch_settings():
     """Patch get_settings to return settings with telegram config."""
     mock_settings = MagicMock()
     mock_settings.mode.value = "sandbox"
@@ -59,12 +59,12 @@ def _patch_settings():
 class TestBotHandlerModuleLevel:
     """Test that _bot_handler_instance is stored at module level."""
 
-    def test_bot_handler_instance_exists_after_create_app(self, _patch_settings: MagicMock) -> None:
+    def test_bot_handler_instance_exists_after_create_app(self, patch_settings: MagicMock) -> None:
         """After create_app with telegram config, _bot_handler_instance should be set."""
         with (
-            patch("finalayze.main.get_settings", return_value=_patch_settings),
-            patch("finalayze.main._settings", _patch_settings),
-            patch("config.settings.get_settings", return_value=_patch_settings),
+            patch("finalayze.main.get_settings", return_value=patch_settings),
+            patch("finalayze.main._settings", patch_settings),
+            patch("config.settings.get_settings", return_value=patch_settings),
         ):
             from finalayze import main
 
@@ -82,7 +82,7 @@ class TestBotHandlerModuleLevel:
 class TestLifespanBotWiring:
     """Test that lifespan() wires dependencies into _bot_handler_instance."""
 
-    @pytest.mark.anyio()
+    @pytest.mark.anyio
     async def test_kill_switch_wired_to_bot_handler(self) -> None:
         """After lifespan runs, _bot_handler_instance._kill_switch is set."""
         from finalayze import main
@@ -114,7 +114,9 @@ class TestLifespanBotWiring:
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", fake_bot),
             patch.object(main, "_build_trading_loop", return_value=fake_loop),
-            p1, p2, p3,
+            p1,
+            p2,
+            p3,
         ):
             app = MagicMock()
             async with main.lifespan(app):
@@ -125,7 +127,7 @@ class TestLifespanBotWiring:
                 "_bot_handler_instance._kill_switch should be set to the loop's kill_switch"
             )
 
-    @pytest.mark.anyio()
+    @pytest.mark.anyio
     async def test_go_no_go_reporter_wired_to_bot_handler(self) -> None:
         """After lifespan runs, _bot_handler_instance._go_no_go_reporter is set."""
         from finalayze import main
@@ -151,7 +153,9 @@ class TestLifespanBotWiring:
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", fake_bot),
             patch.object(main, "_build_trading_loop", return_value=fake_loop),
-            p1, p2, p3,
+            p1,
+            p2,
+            p3,
         ):
             app = MagicMock()
             async with main.lifespan(app):
@@ -164,7 +168,7 @@ class TestLifespanBotWiring:
                 "_bot_handler_instance._go_no_go_reporter should be set"
             )
 
-    @pytest.mark.anyio()
+    @pytest.mark.anyio
     async def test_broker_router_and_breakers_wired(self) -> None:
         """After lifespan, _bot_handler_instance gets broker_router and circuit_breakers."""
         from finalayze import main
@@ -194,7 +198,9 @@ class TestLifespanBotWiring:
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", fake_bot),
             patch.object(main, "_build_trading_loop", return_value=fake_loop),
-            p1, p2, p3,
+            p1,
+            p2,
+            p3,
         ):
             app = MagicMock()
             async with main.lifespan(app):
@@ -203,7 +209,7 @@ class TestLifespanBotWiring:
             assert fake_bot._broker_router == fake_broker_router
             assert fake_bot._circuit_breakers == fake_circuit_breakers
 
-    @pytest.mark.anyio()
+    @pytest.mark.anyio
     async def test_no_crash_when_bot_handler_is_none(self) -> None:
         """When _bot_handler_instance is None (no telegram config), lifespan runs fine."""
         from finalayze import main
@@ -225,7 +231,9 @@ class TestLifespanBotWiring:
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", None),
             patch.object(main, "_build_trading_loop", return_value=fake_loop),
-            p1, p2, p3,
+            p1,
+            p2,
+            p3,
         ):
             app = MagicMock()
             # Should not raise

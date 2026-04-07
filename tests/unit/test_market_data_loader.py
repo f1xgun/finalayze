@@ -232,6 +232,7 @@ class TestRunIterationIntegration:
         loader = MarketDataLoader()
         loader.close()  # no-op, must not raise
 
+
 class TestBrentCaching:
     """Tests for Brent crude caching via _cached_fetch."""
 
@@ -249,12 +250,8 @@ class TestBrentCaching:
                 break
         assert brent_idx is not None, "Could not find brent assignment in _load_moex"
         brent_line = lines[brent_idx].strip()
-        assert "_cached_fetch" in brent_line, (
-            f"Brent must use _cached_fetch, got: {brent_line}"
-        )
-        assert "_safe_fetch" not in brent_line, (
-            f"Brent must not use _safe_fetch, got: {brent_line}"
-        )
+        assert "_cached_fetch" in brent_line, f"Brent must use _cached_fetch, got: {brent_line}"
+        assert "_safe_fetch" not in brent_line, f"Brent must not use _safe_fetch, got: {brent_line}"
 
     def test_second_call_uses_cache(self, tmp_path: Path) -> None:
         """Second call to _load_moex() with same date range must not call yfinance for Brent."""

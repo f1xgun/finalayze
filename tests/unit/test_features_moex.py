@@ -325,9 +325,7 @@ class TestCBRFeatures:
 
     def test_rate_level_returns_last_rate(self) -> None:
         """cbr_rate_level should be the forward-filled last key rate value."""
-        candle_ts = [
-            datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)
-        ]
+        candle_ts = [datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)]
         moex = MoexMarketData(key_rates=self._make_key_rates_varying())
         result = _compute_cbr_features(moex, candle_timestamps=candle_ts)
         # Last rate is 0.16
@@ -335,18 +333,14 @@ class TestCBRFeatures:
 
     def test_rate_delta_on_cut(self) -> None:
         """cbr_rate_delta should be negative when rate was cut (0.18 -> 0.16)."""
-        candle_ts = [
-            datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)
-        ]
+        candle_ts = [datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)]
         moex = MoexMarketData(key_rates=self._make_key_rates_varying())
         result = _compute_cbr_features(moex, candle_timestamps=candle_ts)
         assert result["cbr_rate_delta"] < 0.0
 
     def test_direction_cut_on_rate_cut(self) -> None:
         """When last rate change was negative (cut), cbr_direction_cut=1.0, hike=0.0."""
-        candle_ts = [
-            datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)
-        ]
+        candle_ts = [datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)]
         moex = MoexMarketData(key_rates=self._make_key_rates_varying())
         result = _compute_cbr_features(moex, candle_timestamps=candle_ts)
         assert result["cbr_direction_cut"] == 1.0
@@ -354,9 +348,7 @@ class TestCBRFeatures:
 
     def test_direction_hike_on_rate_hike(self) -> None:
         """When last rate change was positive (hike), cbr_direction_hike=1.0, cut=0.0."""
-        candle_ts = [
-            datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)
-        ]
+        candle_ts = [datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)]
         moex = MoexMarketData(key_rates=self._make_key_rates_hike())
         result = _compute_cbr_features(moex, candle_timestamps=candle_ts)
         assert result["cbr_direction_hike"] == 1.0
@@ -364,9 +356,7 @@ class TestCBRFeatures:
 
     def test_direction_hold_when_unchanged(self) -> None:
         """When rate unchanged, both cbr_direction_cut=0.0 and cbr_direction_hike=0.0."""
-        candle_ts = [
-            datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)
-        ]
+        candle_ts = [datetime(2024, 3, 1, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(10)]
         moex = MoexMarketData(key_rates=self._make_key_rates_hold())
         result = _compute_cbr_features(moex, candle_timestamps=candle_ts)
         assert result["cbr_direction_cut"] == 0.0
@@ -407,12 +397,8 @@ class TestFXReturnFeatures:
         """Extreme FX move should be clipped to [-0.15, 0.15]."""
         rates = list(_make_fx_rates(30))
         # Insert extreme rate at position that will be used (lagged)
-        rates[-3] = FXRate(
-            timestamp=rates[-3].timestamp, pair="USDRUB", rate=Decimal("200.00")
-        )
-        rates[-4] = FXRate(
-            timestamp=rates[-4].timestamp, pair="USDRUB", rate=Decimal("85.00")
-        )
+        rates[-3] = FXRate(timestamp=rates[-3].timestamp, pair="USDRUB", rate=Decimal("200.00"))
+        rates[-4] = FXRate(timestamp=rates[-4].timestamp, pair="USDRUB", rate=Decimal("85.00"))
         moex = MoexMarketData(fx_rates=tuple(rates))
         result = _compute_fx_return_features(moex)
         assert -0.15 <= result["usdrub_return"] <= 0.15
@@ -467,10 +453,10 @@ class TestBrentReturnFeatures:
             market_id="us",
             timeframe="1d",
             timestamp=candles[-3].timestamp,
-            open=Decimal("200"),
-            high=Decimal("210"),
-            low=Decimal("190"),
-            close=Decimal("200"),
+            open=Decimal(200),
+            high=Decimal(210),
+            low=Decimal(190),
+            close=Decimal(200),
             volume=1000,
         )
         candles[-4] = Candle(
@@ -478,10 +464,10 @@ class TestBrentReturnFeatures:
             market_id="us",
             timeframe="1d",
             timestamp=candles[-4].timestamp,
-            open=Decimal("80"),
-            high=Decimal("85"),
-            low=Decimal("75"),
-            close=Decimal("80"),
+            open=Decimal(80),
+            high=Decimal(85),
+            low=Decimal(75),
+            close=Decimal(80),
             volume=1000,
         )
         moex = MoexMarketData(commodity_candles={"BZ=F": tuple(candles)})
@@ -500,7 +486,7 @@ class TestNewMoexFeaturesInComputeFeatures:
             commodity_candles={"BZ=F": tuple(_make_candles(80, "BZ=F"))},
         )
         candles = _make_candles(100)
-        candle_ts = [c.timestamp for c in candles]
+        [c.timestamp for c in candles]
         ctx = MarketContext(moex_data=moex)
         features = compute_features(candles, market_context=ctx)
         new_keys = (

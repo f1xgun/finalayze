@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,7 +15,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 # Import UNIVERSE dict
-from scripts.run_iteration import UNIVERSE  # type: ignore[import-untyped]
+from scripts.run_iteration import UNIVERSE  # type: ignore[import-untyped]  # noqa: E402
 
 # Toxic symbols that must be excluded from all ru_* segments
 TOXIC_SYMBOLS = {"GAZP", "VTBR", "ALRS", "SNGS", "SNGSP", "IRAO"}
@@ -50,15 +50,15 @@ class TestUniverseRuFinance:
 
 # ------ DividendEntry.status wiring tests ------
 
-UTC = timezone.utc
-
 
 class TestDividendEntryStatusWiring:
     """All 3 data paths in _setup_dividend_gap_strategy must pass status= to DividendEntry."""
 
     def test_path1_tinkoff_api_passes_status(self) -> None:
         """Path 1: Tinkoff API should create DividendEntry with status='paid'."""
-        from scripts.run_iteration import _setup_dividend_gap_strategy  # type: ignore[import-untyped]
+        from scripts.run_iteration import (
+            _setup_dividend_gap_strategy,  # type: ignore[import-untyped]
+        )
 
         mock_fetcher = MagicMock()
         mock_fetcher.fetch_dividends.return_value = [
@@ -80,7 +80,9 @@ class TestDividendEntryStatusWiring:
 
     def test_path2_event_data_passes_status(self) -> None:
         """Path 2: event_data JSON should pass status from entry or default 'paid'."""
-        from scripts.run_iteration import _setup_dividend_gap_strategy  # type: ignore[import-untyped]
+        from scripts.run_iteration import (
+            _setup_dividend_gap_strategy,  # type: ignore[import-untyped]
+        )
 
         mock_fetcher = MagicMock(spec=[])  # no fetch_dividends attribute
 
@@ -110,7 +112,9 @@ class TestDividendEntryStatusWiring:
 
     def test_path3_static_yaml_passes_status(self) -> None:
         """Path 3: static YAML should pass status from entry or default 'paid'."""
-        from scripts.run_iteration import _setup_dividend_gap_strategy  # type: ignore[import-untyped]
+        from scripts.run_iteration import (
+            _setup_dividend_gap_strategy,  # type: ignore[import-untyped]
+        )
 
         mock_fetcher = MagicMock(spec=[])  # no fetch_dividends
 
@@ -121,9 +125,11 @@ class TestDividendEntryStatusWiring:
             ],
         }
 
-        with patch("scripts.run_iteration.yaml") as mock_yaml, \
-             patch.object(Path, "exists", return_value=True), \
-             patch.object(Path, "open", MagicMock()):
+        with (
+            patch("scripts.run_iteration.yaml") as mock_yaml,
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "open", MagicMock()),
+        ):
             mock_yaml.safe_load.return_value = yaml_content
 
             strategy = _setup_dividend_gap_strategy(

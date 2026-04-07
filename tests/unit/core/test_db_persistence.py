@@ -144,8 +144,7 @@ class TestOrderPersistence:
             loop._submit_order(order, "moex", candles=[])
             # Check _persist_to_db was called with table="orders"
             persist_calls = [
-                c for c in mock_persist.call_args_list
-                if c[1].get("table") == "orders"
+                c for c in mock_persist.call_args_list if c[1].get("table") == "orders"
             ]
             assert len(persist_calls) >= 1, "Expected _persist_to_db(table='orders')"
 

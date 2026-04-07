@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from finalayze.core.schemas import BondInfo
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -33,7 +32,7 @@ def _make_bond_info(figi: str = BOND_FIGI) -> BondInfo:
         ticker="SU26238RMFS4",
         isin="RU000A105YH5",
         name="OFZ 26238",
-        face_value=Decimal("1000"),
+        face_value=Decimal(1000),
         coupon_rate=Decimal("7.10"),
         coupon_frequency=2,
         maturity_date=date(2041, 5, 15),
@@ -52,7 +51,7 @@ def _make_fake_candle() -> MagicMock:
     candle.low.units = LOW_PRICE_UNITS
     candle.low.nano = LOW_PRICE_NANO
     candle.volume = FAKE_VOLUME
-    candle.time = datetime(2026, 3, 10, tzinfo=timezone.utc)
+    candle.time = datetime(2026, 3, 10, tzinfo=UTC)
     return candle
 
 
@@ -63,7 +62,7 @@ class TestFetchBondCandles:
         from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
         from finalayze.markets.instruments import InstrumentRegistry
 
-        fake_candle = _make_fake_candle()
+        _make_fake_candle()
         registry = InstrumentRegistry()
         fetcher = TinkoffFetcher(
             token="fake",  # noqa: S106
@@ -71,22 +70,18 @@ class TestFetchBondCandles:
             sandbox=True,
         )
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=[
-                {
-                    "date": date(2026, 3, 10),
-                    "open": Decimal("95.5"),
-                    "high": Decimal("97"),
-                    "low": Decimal("94.75"),
-                    "close": Decimal("96.25"),
-                    "volume": FAKE_VOLUME,
-                }
-            ],
-        ):
-            candles = fetcher.fetch_bond_candles(
-                BOND_FIGI, date(2026, 3, 1), date(2026, 3, 14)
-            )
+        candle_data = [
+            {
+                "date": date(2026, 3, 10),
+                "open": Decimal("95.5"),
+                "high": Decimal(97),
+                "low": Decimal("94.75"),
+                "close": Decimal("96.25"),
+                "volume": FAKE_VOLUME,
+            }
+        ]
+        with patch.object(fetcher, "_run_async", return_value=candle_data):
+            candles = fetcher.fetch_bond_candles(BOND_FIGI, date(2026, 3, 1), date(2026, 3, 14))
 
         assert len(candles) == EXPECTED_CANDLE_COUNT
         c = candles[0]
@@ -106,13 +101,8 @@ class TestFetchBondCandles:
             registry=registry,
         )
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=[],
-        ):
-            candles = fetcher.fetch_bond_candles(
-                BOND_FIGI, date(2026, 3, 1), date(2026, 3, 14)
-            )
+        with patch.object(fetcher, "_run_async", return_value=[]):
+            candles = fetcher.fetch_bond_candles(BOND_FIGI, date(2026, 3, 1), date(2026, 3, 14))
 
         assert candles == []
 
@@ -126,22 +116,18 @@ class TestFetchBondCandles:
             registry=registry,
         )
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=[
-                {
-                    "date": date(2026, 3, 10),
-                    "open": Decimal("95.5"),
-                    "high": Decimal("97"),
-                    "low": Decimal("94.75"),
-                    "close": Decimal("96.25"),
-                    "volume": FAKE_VOLUME,
-                }
-            ],
-        ):
-            candles = fetcher.fetch_bond_candles(
-                BOND_FIGI, date(2026, 3, 1), date(2026, 3, 14)
-            )
+        candle_data = [
+            {
+                "date": date(2026, 3, 10),
+                "open": Decimal("95.5"),
+                "high": Decimal(97),
+                "low": Decimal("94.75"),
+                "close": Decimal("96.25"),
+                "volume": FAKE_VOLUME,
+            }
+        ]
+        with patch.object(fetcher, "_run_async", return_value=candle_data):
+            candles = fetcher.fetch_bond_candles(BOND_FIGI, date(2026, 3, 1), date(2026, 3, 14))
 
         assert isinstance(candles[0]["open"], Decimal)
         assert isinstance(candles[0]["close"], Decimal)
@@ -156,13 +142,8 @@ class TestFetchBondCandles:
             registry=registry,
         )
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            side_effect=RuntimeError("gRPC error"),
-        ):
-            candles = fetcher.fetch_bond_candles(
-                BOND_FIGI, date(2026, 3, 1), date(2026, 3, 14)
-            )
+        with patch.object(fetcher, "_run_async", side_effect=RuntimeError("gRPC error")):
+            candles = fetcher.fetch_bond_candles(BOND_FIGI, date(2026, 3, 1), date(2026, 3, 14))
 
         assert candles == []
 
@@ -180,7 +161,7 @@ class TestPopulateCandleCache:
             {
                 "date": date(2026, 3, 10),
                 "open": Decimal("95.5"),
-                "high": Decimal("97"),
+                "high": Decimal(97),
                 "low": Decimal("94.75"),
                 "close": Decimal("96.25"),
                 "volume": FAKE_VOLUME,
@@ -190,7 +171,8 @@ class TestPopulateCandleCache:
         mock_session = MagicMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=None)
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar=MagicMock(return_value=None)))
+        _scalar_none = MagicMock(scalar=MagicMock(return_value=None))
+        mock_session.execute = AsyncMock(return_value=_scalar_none)
         mock_session.add_all = MagicMock()
         mock_session.commit = AsyncMock()
 
@@ -219,7 +201,7 @@ class TestPopulateCandleCache:
                 {
                     "date": date(2026, 3, 10),
                     "open": Decimal("95.5"),
-                    "high": Decimal("97"),
+                    "high": Decimal(97),
                     "low": Decimal("94.75"),
                     "close": Decimal("96.25"),
                     "volume": FAKE_VOLUME,
@@ -231,7 +213,8 @@ class TestPopulateCandleCache:
         mock_session = MagicMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=None)
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar=MagicMock(return_value=None)))
+        _scalar_none = MagicMock(scalar=MagicMock(return_value=None))
+        mock_session.execute = AsyncMock(return_value=_scalar_none)
         mock_session.add_all = MagicMock()
         mock_session.commit = AsyncMock()
 

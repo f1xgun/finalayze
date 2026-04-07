@@ -11,9 +11,7 @@ def test_no_stale_tickers_in_segments() -> None:
     """OPS-02: stale/delisted tickers must not appear in any segment."""
     for seg in DEFAULT_SEGMENTS:
         stale_found = set(seg.symbols) & _STALE_TICKERS
-        assert not stale_found, (
-            f"Segment {seg.segment_id} contains stale tickers: {stale_found}"
-        )
+        assert not stale_found, f"Segment {seg.segment_id} contains stale tickers: {stale_found}"
 
 
 def test_ru_tech_contains_head() -> None:

@@ -136,7 +136,9 @@ class TestValidTickers:
         mock_llm.complete.return_value = json.dumps(
             {"tickers": ["TCSG", "SBER"], "scope": "company"}
         )
-        article = _make_article(title="Т-Банк повысил дивиденды")
+        article = _make_article(
+            title="Т-Банк повысил дивиденды",  # noqa: RUF001
+        )
         result = await extractor.extract(article)
         assert "TCSG" in result
 
@@ -145,9 +147,7 @@ class TestValidTickers:
         self, mock_llm: AsyncMock, extractor: EntityExtractor
     ) -> None:
         """EntityExtractor.extract() filters out bare T (not in valid set)."""
-        mock_llm.complete.return_value = json.dumps(
-            {"tickers": ["T", "SBER"], "scope": "company"}
-        )
+        mock_llm.complete.return_value = json.dumps({"tickers": ["T", "SBER"], "scope": "company"})
         article = _make_article(title="Some news about T")
         result = await extractor.extract(article)
         assert "T" not in result

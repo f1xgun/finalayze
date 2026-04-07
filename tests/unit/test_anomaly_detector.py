@@ -154,9 +154,7 @@ class TestNoAlerter:
 
     def test_no_crash_without_alerter(self) -> None:
         detector = AnomalyDetector(alerter=None)
-        result = detector.check(
-            _make_metrics(fill_rate=0.80, max_slippage_bps=60.0)
-        )
+        result = detector.check(_make_metrics(fill_rate=0.80, max_slippage_bps=60.0))
         assert "fill_rate" in result
         assert "slippage" in result
 

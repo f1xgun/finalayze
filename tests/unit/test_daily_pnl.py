@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -13,9 +13,9 @@ from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel
 
 def _make_trading_loop_mock(
     *,
-    us_equity: Decimal = Decimal("50000"),
-    moex_equity: Decimal = Decimal("3000000"),
-    bond_ledger_equity: Decimal = Decimal("1000000"),
+    us_equity: Decimal = Decimal(50000),
+    moex_equity: Decimal = Decimal(3000000),
+    bond_ledger_equity: Decimal = Decimal(1000000),
     positions: dict[str, Decimal] | None = None,
     fx_rate: Decimal = Decimal("90.0"),
 ) -> MagicMock:
@@ -33,13 +33,13 @@ def _make_trading_loop_mock(
     us_broker = MagicMock()
     us_portfolio = MagicMock()
     us_portfolio.equity = us_equity
-    us_portfolio.positions = positions or {"AAPL": Decimal("10"), "MSFT": Decimal("5")}
+    us_portfolio.positions = positions or {"AAPL": Decimal(10), "MSFT": Decimal(5)}
     us_broker.get_portfolio.return_value = us_portfolio
 
     moex_broker = MagicMock()
     moex_portfolio = MagicMock()
     moex_portfolio.equity = moex_equity
-    moex_portfolio.positions = {"SBER": Decimal("100"), "GAZP": Decimal("50")}
+    moex_portfolio.positions = {"SBER": Decimal(100), "GAZP": Decimal(50)}
     moex_broker.get_portfolio.return_value = moex_portfolio
 
     def route(market_id: str) -> MagicMock:
@@ -58,9 +58,9 @@ def _make_trading_loop_mock(
 
     # Baseline equities (set from previous day)
     loop._baseline_equities = {
-        "us": us_equity - Decimal("500"),
-        "moex": moex_equity - Decimal("10000"),
-        "moex_bonds": bond_ledger_equity - Decimal("5000"),
+        "us": us_equity - Decimal(500),
+        "moex": moex_equity - Decimal(10000),
+        "moex_bonds": bond_ledger_equity - Decimal(5000),
     }
 
     # Cross-market breaker
@@ -84,6 +84,9 @@ def _make_trading_loop_mock(
 
     # _run_async - passthrough
     loop._run_async = lambda coro: None
+
+    # Metrics collector (needed by _daily_reset)
+    loop._metrics = MagicMock()
 
     return loop
 
@@ -110,14 +113,14 @@ class TestDailyPnLSeparation:
         """Bond P&L computed from LayerLedger equity (not broker portfolio)."""
         from finalayze.core.trading_loop import TradingLoop
 
-        loop = _make_trading_loop_mock(bond_ledger_equity=Decimal("1005000"))
-        loop._baseline_equities["moex_bonds"] = Decimal("1000000")
+        loop = _make_trading_loop_mock(bond_ledger_equity=Decimal(1005000))
+        loop._baseline_equities["moex_bonds"] = Decimal(1000000)
         TradingLoop._daily_reset(loop)
 
         call_args = loop._alerter.on_daily_summary.call_args
         market_pnl = call_args[0][0] if call_args[0] else call_args[1].get("market_pnl")
         bond_pnl = market_pnl["moex_bonds"]
-        assert bond_pnl == Decimal("5000")
+        assert bond_pnl == Decimal(5000)
 
 
 class TestEquitySnapshotPersistence:
@@ -149,9 +152,9 @@ class TestEquitySnapshotPersistence:
 
         loop = MagicMock(spec=TradingLoop)
         baselines = {
-            "us": Decimal("50000"),
-            "moex": Decimal("3000000"),
-            "moex_bonds": Decimal("1000000"),
+            "us": Decimal(50000),
+            "moex": Decimal(3000000),
+            "moex_bonds": Decimal(1000000),
         }
         now = datetime(2026, 3, 14, 0, 0, tzinfo=UTC)
 
@@ -162,11 +165,8 @@ class TestEquitySnapshotPersistence:
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "finalayze.core.db.get_async_session_factory",
-            return_value=mock_factory,
-        ):
-            await TradingLoop._persist_snapshots_async(loop, baselines, now)
+        loop._get_bg_session_factory = MagicMock(return_value=mock_factory)
+        await TradingLoop._persist_snapshots_async(loop, baselines, now)
 
         # Should have called session.add 3 times (one per market)
         assert mock_session.add.call_count == 3
@@ -188,8 +188,6 @@ class TestEquitySnapshotPersistence:
     @pytest.mark.asyncio
     async def test_load_baseline_async_populates_baselines(self) -> None:
         """_load_baseline_async queries DB and updates _baseline_equities."""
-        from unittest.mock import PropertyMock
-
         from finalayze.core.trading_loop import TradingLoop
 
         loop = MagicMock(spec=TradingLoop)
@@ -198,10 +196,10 @@ class TestEquitySnapshotPersistence:
         # Mock DB results
         row_us = MagicMock()
         row_us.market_id = "us"
-        row_us.equity = Decimal("50000")
+        row_us.equity = Decimal(50000)
         row_moex = MagicMock()
         row_moex.market_id = "moex"
-        row_moex.equity = Decimal("3000000")
+        row_moex.equity = Decimal(3000000)
 
         mock_result = MagicMock()
         mock_result.all.return_value = [row_us, row_moex]
@@ -212,14 +210,11 @@ class TestEquitySnapshotPersistence:
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "finalayze.core.db.get_async_session_factory",
-            return_value=mock_factory,
-        ):
-            await TradingLoop._load_baseline_async(loop)
+        loop._get_bg_session_factory = MagicMock(return_value=mock_factory)
+        await TradingLoop._load_baseline_async(loop)
 
-        assert loop._baseline_equities["us"] == Decimal("50000")
-        assert loop._baseline_equities["moex"] == Decimal("3000000")
+        assert loop._baseline_equities["us"] == Decimal(50000)
+        assert loop._baseline_equities["moex"] == Decimal(3000000)
 
     @pytest.mark.asyncio
     async def test_load_baseline_async_no_rows_raises_value_error(self) -> None:
@@ -227,7 +222,7 @@ class TestEquitySnapshotPersistence:
         from finalayze.core.trading_loop import TradingLoop
 
         loop = MagicMock(spec=TradingLoop)
-        original = {"us": Decimal("40000")}
+        original = {"us": Decimal(40000)}
         loop._baseline_equities = original.copy()
 
         mock_result = MagicMock()
@@ -239,10 +234,8 @@ class TestEquitySnapshotPersistence:
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "finalayze.core.db.get_async_session_factory",
-            return_value=mock_factory,
-        ), pytest.raises(ValueError, match="no snapshots for today"):
+        loop._get_bg_session_factory = MagicMock(return_value=mock_factory)
+        with pytest.raises(ValueError, match="no snapshots for today"):
             await TradingLoop._load_baseline_async(loop)
 
     def test_load_baseline_from_db_called_in_start(self) -> None:
@@ -273,7 +266,7 @@ class TestTopMovers:
         call_args = loop._alerter.on_daily_summary.call_args
         # Check that top_movers is passed (positional or keyword)
         assert call_args is not None
-        all_args = list(call_args[0]) + list(call_args[1].values())
+        list(call_args[0]) + list(call_args[1].values())
         # Should have more than 2 args (market_pnl, total_equity, and more)
         total_positional = len(call_args[0])
         total_keyword = len(call_args[1])

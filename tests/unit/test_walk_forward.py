@@ -268,9 +268,9 @@ class TestQualityGateEnforcement:
 
     def test_models_not_saved_when_gates_fail(self, tmp_path: Path) -> None:
         """When quality gates fail and force_save=False, model files must not exist."""
-        from finalayze.ml.training.quality_gates import FoldMetrics
-
         from scripts.train_models import train_walk_forward
+
+        from finalayze.ml.training.quality_gates import FoldMetrics
 
         features, labels, bw, hb, timestamps = self._make_fake_dataset()
         failing_folds = self._make_fake_fold_results(passed=False)
@@ -340,9 +340,9 @@ class TestQualityGateEnforcement:
 
     def test_models_saved_when_gates_fail_with_force_save(self, tmp_path: Path) -> None:
         """When quality gates fail but force_save=True, model files must be saved."""
-        from finalayze.ml.training.quality_gates import FoldMetrics
-
         from scripts.train_models import train_walk_forward
+
+        from finalayze.ml.training.quality_gates import FoldMetrics
 
         features, labels, bw, hb, timestamps = self._make_fake_dataset()
         failing_folds = self._make_fake_fold_results(passed=False)
@@ -408,9 +408,9 @@ class TestQualityGateEnforcement:
 
     def test_models_saved_when_gates_pass(self, tmp_path: Path) -> None:
         """When quality gates pass, model files must be saved (force_save irrelevant)."""
-        from finalayze.ml.training.quality_gates import FoldMetrics
-
         from scripts.train_models import train_walk_forward
+
+        from finalayze.ml.training.quality_gates import FoldMetrics
 
         features, labels, bw, hb, timestamps = self._make_fake_dataset()
         passing_folds = self._make_fake_fold_results(passed=True)

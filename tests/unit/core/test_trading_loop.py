@@ -43,7 +43,7 @@ def _make_loop(
 
     mock_news_fetcher = news_fetcher or MagicMock()
 
-    loop = TradingLoop(
+    return TradingLoop(
         settings=mock_settings,
         fetchers={},
         news_fetcher=mock_news_fetcher,
@@ -61,7 +61,6 @@ def _make_loop(
         news_impact_analyzer=news_impact_analyzer,
         sector_ticker_mapper=sector_ticker_mapper,
     )
-    return loop
 
 
 class TestNewsCycleSkipGuard:
@@ -104,12 +103,20 @@ class TestNewsCycleSkipGuard:
         presets_dir = tmp_path / "presets"
         presets_dir.mkdir()
 
-        (presets_dir / "seg_a.yaml").write_text(yaml.dump({
-            "strategies": {"event_driven": {"enabled": False}},
-        }))
-        (presets_dir / "seg_b.yaml").write_text(yaml.dump({
-            "strategies": {"event_driven": {"enabled": True}},
-        }))
+        (presets_dir / "seg_a.yaml").write_text(
+            yaml.dump(
+                {
+                    "strategies": {"event_driven": {"enabled": False}},
+                }
+            )
+        )
+        (presets_dir / "seg_b.yaml").write_text(
+            yaml.dump(
+                {
+                    "strategies": {"event_driven": {"enabled": True}},
+                }
+            )
+        )
 
         loop = _make_loop()
         # Patch the presets directory
@@ -135,7 +142,8 @@ class TestNewsCycleSkipGuard:
             "finalayze.orchestration.trading_loop.Path",
         ) as mock_path_cls:
             # Make Path(__file__).parent.parent / "strategies" / "presets" -> tmp_path/presets
-            mock_path_cls.return_value.parent.parent.__truediv__.return_value.__truediv__.return_value = presets_dir
+            mock_parent = mock_path_cls.return_value.parent.parent
+            mock_parent.__truediv__.return_value.__truediv__.return_value = presets_dir
             result = loop._any_event_driven_enabled()  # type: ignore[attr-defined]
 
         assert result is True
@@ -147,12 +155,20 @@ class TestNewsCycleSkipGuard:
         presets_dir = tmp_path / "presets"
         presets_dir.mkdir()
 
-        (presets_dir / "seg_a.yaml").write_text(yaml.dump({
-            "strategies": {"event_driven": {"enabled": False}},
-        }))
-        (presets_dir / "seg_b.yaml").write_text(yaml.dump({
-            "strategies": {"momentum": {"enabled": True}},
-        }))
+        (presets_dir / "seg_a.yaml").write_text(
+            yaml.dump(
+                {
+                    "strategies": {"event_driven": {"enabled": False}},
+                }
+            )
+        )
+        (presets_dir / "seg_b.yaml").write_text(
+            yaml.dump(
+                {
+                    "strategies": {"momentum": {"enabled": True}},
+                }
+            )
+        )
 
         loop = _make_loop()
         loop._event_driven_active = None  # type: ignore[attr-defined]
@@ -160,7 +176,8 @@ class TestNewsCycleSkipGuard:
         with patch(
             "finalayze.orchestration.trading_loop.Path",
         ) as mock_path_cls:
-            mock_path_cls.return_value.parent.parent.__truediv__.return_value.__truediv__.return_value = presets_dir
+            mock_parent = mock_path_cls.return_value.parent.parent
+            mock_parent.__truediv__.return_value.__truediv__.return_value = presets_dir
             result = loop._any_event_driven_enabled()  # type: ignore[attr-defined]
 
         assert result is False
@@ -236,7 +253,9 @@ class TestSentimentTimeDecay:
         assert result == 0.0
 
 
-def _make_article(*, url: str = "https://example.com/1", title: str = "Test Article") -> NewsArticle:
+def _make_article(
+    *, url: str = "https://example.com/1", title: str = "Test Article"
+) -> NewsArticle:
     """Create a minimal NewsArticle for dedup tests."""
     from uuid import uuid4
 
@@ -274,7 +293,7 @@ class TestArticleDedup:
         assert loop._is_article_duplicate(article) is False  # type: ignore[attr-defined]
 
         # Manually backdate the stored timestamp beyond TTL (24h)
-        key = list(loop._seen_article_hashes.keys())[0]  # type: ignore[attr-defined]
+        key = next(iter(loop._seen_article_hashes.keys()))  # type: ignore[attr-defined]
         loop._seen_article_hashes[key] = time.monotonic() - 25 * 3600  # type: ignore[attr-defined]
         # Move to front so eviction can find it
         loop._seen_article_hashes.move_to_end(key, last=False)  # type: ignore[attr-defined]

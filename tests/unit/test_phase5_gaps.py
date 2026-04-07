@@ -19,11 +19,15 @@ import time
 from collections import deque
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from finalayze.core.alerts import AlertPriority, TelegramAlerter, TelegramMessageQueue
+
+if TYPE_CHECKING:
+    from finalayze.core.telegram_bot import TelegramBotHandler
 
 # ── Constants (ruff PLR2004) ─────────────────────────────────────────────────
 VALID_TOKEN = "1234567890:AABBccDDeEFfGgHhIiJj"  # noqa: S105
@@ -313,6 +317,7 @@ class TestAttemptGrpcReconnect:
         loop._broker_router.route.return_value = mock_broker
         loop._reconnect_delays = [1]
         loop._alerter = MagicMock()
+        loop._stop_event = threading.Event()
 
         with patch("time.sleep"):
             result = TradingLoop._attempt_grpc_reconnect(loop, "moex")
@@ -365,8 +370,8 @@ class TestReconcileInflightOrders:
         order = MagicMock()
         order.order_id = "order-123"
         order.execution_status = "FILL"
-        order.filled_quantity = Decimal("0")
-        order.filled_price = Decimal("0")
+        order.filled_quantity = Decimal(0)
+        order.filled_price = Decimal(0)
 
         mock_broker = MagicMock(spec=TinkoffBroker)
         mock_broker.get_open_orders.return_value = [order]
@@ -388,7 +393,7 @@ class TestReconcileInflightOrders:
         order = MagicMock()
         order.order_id = "order-456"
         order.execution_status = "PARTIAL"
-        order.filled_quantity = Decimal("5")
+        order.filled_quantity = Decimal(5)
         order.filled_price = Decimal("280.50")
 
         mock_broker = MagicMock(spec=TinkoffBroker)
@@ -451,14 +456,14 @@ class TestComputeTopMovers:
 
         loop = MagicMock(spec=TradingLoop)
         loop._circuit_breakers = {"us": MagicMock()}
-        loop._baseline_equities = {"us": Decimal("50000")}
+        loop._baseline_equities = {"us": Decimal(50000)}
 
         portfolio = MagicMock()
         portfolio.positions = {
-            "AAPL": Decimal("10"),
-            "MSFT": Decimal("5"),
-            "GOOG": Decimal("8"),
-            "NVDA": Decimal("3"),
+            "AAPL": Decimal(10),
+            "MSFT": Decimal(5),
+            "GOOG": Decimal(8),
+            "NVDA": Decimal(3),
         }
         broker = MagicMock()
         broker.get_portfolio.return_value = portfolio
@@ -565,8 +570,8 @@ class TestWeeklyDigestExecution:
         from finalayze.core.trading_loop import TradingLoop
 
         portfolio = MagicMock()
-        portfolio.equity = Decimal("51000")
-        portfolio.positions = {"AAPL": Decimal("10")}
+        portfolio.equity = Decimal(51000)
+        portfolio.positions = {"AAPL": Decimal(10)}
 
         broker = MagicMock()
         broker.get_portfolio.return_value = portfolio
@@ -575,7 +580,7 @@ class TestWeeklyDigestExecution:
         loop._circuit_breakers = {"us": MagicMock()}
         loop._broker_router = MagicMock()
         loop._broker_router.route.return_value = broker
-        loop._baseline_equities = {"us": Decimal("50000")}
+        loop._baseline_equities = {"us": Decimal(50000)}
         loop._bond_processor = None
         loop._alerter = MagicMock()
         loop._now.return_value = datetime(2026, 3, 15, 16, 0, tzinfo=UTC)
@@ -592,20 +597,20 @@ class TestWeeklyDigestExecution:
         from finalayze.core.trading_loop import TradingLoop
 
         portfolio = MagicMock()
-        portfolio.equity = Decimal("51000")
+        portfolio.equity = Decimal(51000)
         portfolio.positions = {}
 
         broker = MagicMock()
         broker.get_portfolio.return_value = portfolio
 
         bond_ledger = MagicMock()
-        bond_ledger.current_equity = Decimal("1005000")
+        bond_ledger.current_equity = Decimal(1005000)
 
         loop = MagicMock(spec=TradingLoop)
         loop._circuit_breakers = {"us": MagicMock()}
         loop._broker_router = MagicMock()
         loop._broker_router.route.return_value = broker
-        loop._baseline_equities = {"us": Decimal("50000"), "moex_bonds": Decimal("1000000")}
+        loop._baseline_equities = {"us": Decimal(50000), "moex_bonds": Decimal(1000000)}
         loop._bond_processor = MagicMock()
         loop._bond_processor._layer_ledgers = {"core": bond_ledger}
         loop._alerter = MagicMock()
@@ -632,15 +637,16 @@ class TestDailyResetEdgeCases:
         loop = MagicMock(spec=TradingLoop)
         loop._circuit_breakers = {"us": MagicMock()}
         loop._bond_processor = None
+        loop._metrics = MagicMock()
 
         portfolio = MagicMock()
-        portfolio.equity = Decimal("50500")
+        portfolio.equity = Decimal(50500)
 
         broker = MagicMock()
         broker.get_portfolio.return_value = portfolio
         loop._broker_router = MagicMock()
         loop._broker_router.route.return_value = broker
-        loop._baseline_equities = {"us": Decimal("50000")}
+        loop._baseline_equities = {"us": Decimal(50000)}
         loop._cross_market_breaker = MagicMock()
         loop._alerter = MagicMock()
         loop._loss_limit_tracker = MagicMock()
@@ -660,6 +666,7 @@ class TestDailyResetEdgeCases:
         loop = MagicMock(spec=TradingLoop)
         loop._circuit_breakers = {}
         loop._bond_processor = None
+        loop._metrics = MagicMock()
 
         loop._cross_market_breaker = MagicMock()
         loop._alerter = MagicMock()
@@ -681,6 +688,7 @@ class TestDailyResetEdgeCases:
         loop = MagicMock(spec=TradingLoop)
         loop._circuit_breakers = {}
         loop._bond_processor = None
+        loop._metrics = MagicMock()
 
         loop._cross_market_breaker = MagicMock()
         loop._alerter = MagicMock()
@@ -702,6 +710,7 @@ class TestDailyResetEdgeCases:
         loop = MagicMock(spec=TradingLoop)
         loop._circuit_breakers = {}
         loop._bond_processor = None
+        loop._metrics = MagicMock()
         loop._cross_market_breaker = MagicMock()
         loop._alerter = MagicMock()
         loop._loss_limit_tracker = MagicMock()
@@ -711,13 +720,15 @@ class TestDailyResetEdgeCases:
         loop._now.return_value = datetime(2026, 3, 14, 0, 0, tzinfo=UTC)
 
         fx = MagicMock()
-        fx.get_usdrub.return_value = Decimal("0")
+        fx.get_usdrub.return_value = Decimal(0)
         loop._fx_service = fx
 
         TradingLoop._daily_reset(loop)
         call_args = loop._alerter.on_daily_summary.call_args
         # total_equity_rub should be None (FX rate is 0)
-        total_equity_rub = call_args[0][3] if len(call_args[0]) > 3 else call_args[1].get("total_equity_rub")
+        total_equity_rub = (
+            call_args[0][3] if len(call_args[0]) > 3 else call_args[1].get("total_equity_rub")
+        )
         assert total_equity_rub is None
 
 
@@ -760,9 +771,7 @@ class TestBotHandlerEdgeCases:
     async def test_empty_text_returns_no_command(self) -> None:
         """Message with empty text returns {"ok": "no_command"}."""
         handler = self._make_handler()
-        result = await handler.handle_update(
-            {"message": {"chat": {"id": 123456}, "text": ""}}
-        )
+        result = await handler.handle_update({"message": {"chat": {"id": 123456}, "text": ""}})
         assert result == {"ok": "no_command"}
 
     @pytest.mark.asyncio
@@ -809,7 +818,7 @@ class TestBotHandlerEdgeCases:
         # Setup circuit breakers
         for cb in handler._circuit_breakers.values():
             cb.level = "normal"
-            cb.baseline = Decimal("100000")
+            cb.baseline = Decimal(100000)
 
         result = await handler.handle_update(
             {"message": {"chat": {"id": 123456}, "text": "/breakers"}}

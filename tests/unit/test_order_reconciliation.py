@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from finalayze.execution.tinkoff_broker import (
+    _TERMINAL_STATUSES,
     OrderStateResult,
     TinkoffBroker,
-    _TERMINAL_STATUSES,
 )
 from finalayze.markets.instruments import DEFAULT_MOEX_INSTRUMENTS, InstrumentRegistry
 
@@ -108,7 +108,13 @@ class TestGetOpenOrders:
         broker = _make_broker()
         mock_response = MagicMock()
         mock_response.orders = [
-            _make_order_mock("ord-p", status=2, lots_executed=5, price_units=150, price_nano=500_000_000),
+            _make_order_mock(
+                "ord-p",
+                status=2,
+                lots_executed=5,
+                price_units=150,
+                price_nano=500_000_000,
+            ),
         ]
 
         with patch.object(broker, "_run_async", return_value=mock_response):

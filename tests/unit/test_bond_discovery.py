@@ -11,7 +11,6 @@ import pytest
 from finalayze.core.schemas import BondInfo
 from finalayze.markets.instruments import InstrumentRegistry
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -40,8 +39,8 @@ def _make_bond_dict(
     floating_coupon_flag: bool = False,
     amortization_flag: bool = False,
     coupon_quantity_per_year: int = 2,
-    nominal: Decimal = Decimal("1000"),
-    initial_nominal: Decimal = Decimal("1000"),
+    nominal: Decimal = Decimal(1000),
+    initial_nominal: Decimal = Decimal(1000),
     bond_type: str = "",
     subordinated_flag: bool = False,
     lot: int = 1,
@@ -332,7 +331,7 @@ class TestCouponEventEmission:
             ticker="SU26238RMFS4",
             isin="RU000A105YH5",
             name="OFZ 26238",
-            face_value=Decimal("1000"),
+            face_value=Decimal(1000),
             coupon_rate=Decimal("7.10"),
             coupon_frequency=2,
             maturity_date=FUTURE_MATURITY,
@@ -369,7 +368,7 @@ class TestCouponEventEmission:
             ticker="SU26238RMFS4",
             isin="RU000A105YH5",
             name="OFZ 26238",
-            face_value=Decimal("1000"),
+            face_value=Decimal(1000),
             coupon_rate=Decimal("7.10"),
             coupon_frequency=2,
             maturity_date=FUTURE_MATURITY,
@@ -406,7 +405,7 @@ class TestCouponEventEmission:
             ticker="SU26238RMFS4",
             isin="RU000A105YH5",
             name="OFZ 26238",
-            face_value=Decimal("1000"),
+            face_value=Decimal(1000),
             coupon_rate=Decimal("7.10"),
             coupon_frequency=2,
             maturity_date=FUTURE_MATURITY,

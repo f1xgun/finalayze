@@ -30,7 +30,7 @@ class TestTradingLoopJobStore:
         settings.bond_cycle_enabled = False
         settings.weekly_digest_hour_utc = 16
 
-        loop = TradingLoop(
+        return TradingLoop(
             settings=settings,
             fetchers={},
             news_fetcher=MagicMock(),
@@ -44,7 +44,6 @@ class TestTradingLoopJobStore:
             alerter=MagicMock(),
             instrument_registry=MagicMock(),
         )
-        return loop
 
     @patch("finalayze.core.trading_loop.BackgroundScheduler")
     def test_jobs_have_stable_ids(self, mock_scheduler_cls: MagicMock) -> None:
@@ -66,7 +65,7 @@ class TestTradingLoopJobStore:
 
         # Check all add_job calls have id and replace_existing
         for call in mock_scheduler.add_job.call_args_list:
-            kwargs = call.kwargs if call.kwargs else {}
+            kwargs = call.kwargs or {}
             # Some calls may use positional args for trigger type
             assert "id" in kwargs, f"Missing id in add_job call: {call}"
             assert kwargs.get("replace_existing") is True, (

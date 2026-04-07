@@ -136,8 +136,9 @@ class TestFetchBondInfo:
         """gRPC failure must be wrapped in DataFetchError."""
         fetcher = _make_fetcher()
         with (
-            patch(
-                "finalayze.data.fetchers.tinkoff_data.asyncio.run",
+            patch.object(
+                fetcher,
+                "_run_async",
                 side_effect=RuntimeError("gRPC connection refused"),
             ),
             pytest.raises(DataFetchError, match="gRPC error fetching bond info"),
@@ -162,10 +163,7 @@ class TestFetchBondInfo:
             currency="RUB",
         )
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=expected,
-        ):
+        with patch.object(fetcher, "_run_async", return_value=expected):
             result = fetcher.fetch_bond_info(FAKE_BOND_SYMBOL)
 
         assert isinstance(result, BondInfo)
@@ -199,10 +197,7 @@ class TestFetchBondInfo:
             currency="RUB",
         )
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=expected,
-        ):
+        with patch.object(fetcher, "_run_async", return_value=expected):
             fetcher.fetch_bond_info(FAKE_BOND_SYMBOL)
 
         mock_limiter.acquire.assert_called_once()
@@ -217,10 +212,7 @@ class TestFetchBondCoupons:
         start = datetime(2024, 1, 1, tzinfo=UTC)
         end = datetime(2024, 12, 31, tzinfo=UTC)
         with (
-            patch(
-                "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-                side_effect=RuntimeError("gRPC error"),
-            ),
+            patch.object(fetcher, "_run_async", side_effect=RuntimeError("gRPC error")),
             pytest.raises(DataFetchError, match="gRPC error fetching coupons"),
         ):
             fetcher.fetch_bond_coupons(FAKE_BOND_SYMBOL, start, end)
@@ -248,10 +240,7 @@ class TestFetchBondCoupons:
             ),
         ]
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=expected,
-        ):
+        with patch.object(fetcher, "_run_async", return_value=expected):
             result = fetcher.fetch_bond_coupons(FAKE_BOND_SYMBOL, start, end)
 
         assert len(result) == 2
@@ -271,10 +260,7 @@ class TestFetchAccruedInterest:
         start = datetime(2024, 1, 1, tzinfo=UTC)
         end = datetime(2024, 1, 5, tzinfo=UTC)
         with (
-            patch(
-                "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-                side_effect=RuntimeError("gRPC error"),
-            ),
+            patch.object(fetcher, "_run_async", side_effect=RuntimeError("gRPC error")),
             pytest.raises(DataFetchError, match="gRPC error fetching NKD"),
         ):
             fetcher.fetch_accrued_interest(FAKE_BOND_SYMBOL, start, end)
@@ -300,10 +286,7 @@ class TestFetchAccruedInterest:
             ),
         ]
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=expected,
-        ):
+        with patch.object(fetcher, "_run_async", return_value=expected):
             result = fetcher.fetch_accrued_interest(FAKE_BOND_SYMBOL, start, end)
 
         assert len(result) == 2

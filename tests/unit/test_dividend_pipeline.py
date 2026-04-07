@@ -87,11 +87,9 @@ class TestTinkoffFetchDividends:
         mock_response = MagicMock()
         mock_response.dividends = [div]
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=[div],
-        ):
-            fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        fetcher._run_async = MagicMock(return_value=[div])
+        with patch.object(fetcher, "_run_async", return_value=[div]):
             result = fetcher.fetch_dividends(
                 "SBER",
                 datetime(2024, 1, 1, tzinfo=UTC),
@@ -120,11 +118,9 @@ class TestTinkoffFetchDividends:
             dividend_net_nano=0,
         )
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=[div],
-        ):
-            fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        fetcher._run_async = MagicMock(return_value=[div])
+        with patch.object(fetcher, "_run_async", return_value=[div]):
             result = fetcher.fetch_dividends(
                 "SBER",
                 datetime(2023, 1, 1, tzinfo=UTC),
@@ -148,11 +144,9 @@ class TestTinkoffFetchDividends:
             dividend_net_nano=10_000_000,
         )
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=[div],
-        ):
-            fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        fetcher._run_async = MagicMock(return_value=[div])
+        with patch.object(fetcher, "_run_async", return_value=[div]):
             result = fetcher.fetch_dividends(
                 "SBER",
                 datetime(2022, 1, 1, tzinfo=UTC),
@@ -170,11 +164,8 @@ class TestTinkoffFetchDividends:
         instrument.figi = "BBG004730N88"
         registry.get.return_value = instrument
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=[],
-        ):
-            fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        with patch.object(fetcher, "_run_async", return_value=[]):
             result = fetcher.fetch_dividends(
                 "SBER",
                 datetime(2020, 1, 1, tzinfo=UTC),
@@ -199,11 +190,9 @@ class TestTinkoffFetchDividends:
             dividend_net_nano=0,
         )
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=[div],
-        ):
-            fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        fetcher._run_async = MagicMock(return_value=[div])
+        with patch.object(fetcher, "_run_async", return_value=[div]):
             result = fetcher.fetch_dividends(
                 "SBER",
                 datetime(2024, 1, 1, tzinfo=UTC),
@@ -223,17 +212,16 @@ class TestTinkoffFetchDividends:
         instrument.figi = "BBG004730N88"
         registry.get.return_value = instrument
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            side_effect=RuntimeError("gRPC unavailable"),
+        fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
+        with (
+            patch.object(fetcher, "_run_async", side_effect=RuntimeError("gRPC unavailable")),
+            pytest.raises(DataFetchError, match=r"dividend.*SBER"),
         ):
-            fetcher = TinkoffFetcher(token="fake", registry=registry)  # noqa: S106
-            with pytest.raises(DataFetchError, match=r"dividend.*SBER"):
-                fetcher.fetch_dividends(
-                    "SBER",
-                    datetime(2024, 1, 1, tzinfo=UTC),
-                    datetime(2025, 1, 1, tzinfo=UTC),
-                )
+            fetcher.fetch_dividends(
+                "SBER",
+                datetime(2024, 1, 1, tzinfo=UTC),
+                datetime(2025, 1, 1, tzinfo=UTC),
+            )
 
     def test_respects_rate_limiter(self) -> None:
         """Rate limiter should be acquired before the API call."""
@@ -246,15 +234,12 @@ class TestTinkoffFetchDividends:
 
         rate_limiter = MagicMock()
 
-        with patch(
-            "finalayze.data.fetchers.tinkoff_data.asyncio.run",
-            return_value=[],
-        ):
-            fetcher = TinkoffFetcher(
-                token="fake",  # noqa: S106
-                registry=registry,
-                rate_limiter=rate_limiter,
-            )
+        fetcher = TinkoffFetcher(
+            token="fake",  # noqa: S106
+            registry=registry,
+            rate_limiter=rate_limiter,
+        )
+        with patch.object(fetcher, "_run_async", return_value=[]):
             fetcher.fetch_dividends(
                 "SBER",
                 datetime(2024, 1, 1, tzinfo=UTC),

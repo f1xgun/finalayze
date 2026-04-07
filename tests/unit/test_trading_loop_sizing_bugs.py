@@ -281,9 +281,7 @@ class TestSectorExposurePerPositionPrice:
         # This test will PASS after the fix but we need to verify the fix is wired in
 
         # Direct test: verify _get_last_price helper exists and works
-        assert hasattr(loop, "_get_last_price"), (
-            "_get_last_price helper must exist after fix"
-        )
+        assert hasattr(loop, "_get_last_price"), "_get_last_price helper must exist after fix"
 
 
 class TestCautionThresholdFromPreset:

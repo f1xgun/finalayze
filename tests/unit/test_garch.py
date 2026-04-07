@@ -148,11 +148,27 @@ class TestGJRGarchForecaster:
             mock_result = mock_am.return_value.fit.return_value
             mock_forecast = mock_result.forecast.return_value
             # Create a mock DataFrame-like with iloc
-            variance_mock = type("V", (), {"iloc": {-1: {0: float("inf")}}})()
+            type("V", (), {"iloc": {-1: {0: float("inf")}}})()
             # Use property-like access
-            mock_forecast.variance = type("DF", (), {
-                "iloc": type("Iloc", (), {"__getitem__": lambda s, k: type("Row", (), {"__getitem__": lambda s2, k2: float("inf")})()})()
-            })()
+            mock_forecast.variance = type(
+                "DF",
+                (),
+                {
+                    "iloc": type(
+                        "Iloc",
+                        (),
+                        {
+                            "__getitem__": lambda s, k: type(
+                                "Row",
+                                (),
+                                {
+                                    "__getitem__": lambda s2, k2: float("inf"),
+                                },
+                            )(),
+                        },
+                    )(),
+                },
+            )()
             vol = forecaster.fit_forecast(returns)
 
         assert math.isfinite(vol), "Should return fallback on invalid variance"

@@ -48,9 +48,13 @@ class _FakeKillResult:
 
 
 def _make_app() -> FastAPI:
-    """Create a minimal FastAPI app with the system router."""
+    """Create a minimal FastAPI app with the system router (auth disabled for tests)."""
+    from finalayze.api.v1.auth import api_key_auth
+
     app = FastAPI()
     app.include_router(system.router, prefix="/api/v1")
+    # Override auth dependency so tests don't need an API key
+    app.dependency_overrides[api_key_auth] = lambda: None
     return app
 
 

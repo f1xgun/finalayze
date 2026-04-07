@@ -23,7 +23,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # system.py — set_tinkoff_broker, update_feed_timestamp, record_error
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -326,7 +325,7 @@ class TestQuotationToDecimal:
         from finalayze.execution.tinkoff_broker import TinkoffBroker
 
         q = MagicMock(units=100, nano=0)
-        assert TinkoffBroker._quotation_to_decimal(q) == Decimal("100")
+        assert TinkoffBroker._quotation_to_decimal(q) == Decimal(100)
 
     def test_units_and_nano(self) -> None:
         from finalayze.execution.tinkoff_broker import TinkoffBroker
@@ -340,7 +339,7 @@ class TestQuotationToDecimal:
 
         q = object()  # no units/nano attrs
         result = TinkoffBroker._quotation_to_decimal(q)
-        assert result == Decimal("0")
+        assert result == Decimal(0)
 
 
 class TestTinkoffClose:
@@ -355,17 +354,21 @@ class TestTinkoffClose:
         broker._loop.is_closed.return_value = False
         broker._loop.run_until_complete = MagicMock()
         broker._services = MagicMock()
+        broker._grpc_loop = None
+        broker._grpc_thread = None
 
         TinkoffBroker.close(broker)
         assert broker._client is None
         assert broker._services is None
-        assert broker._loop is None
 
     def test_close_noop_when_no_client(self) -> None:
         from finalayze.execution.tinkoff_broker import TinkoffBroker
 
         broker = MagicMock(spec=TinkoffBroker)
         broker._client = None
+        broker._grpc_loop = None
+        broker._grpc_thread = None
+        broker._loop = None
         # Should not raise
         TinkoffBroker.close(broker)
 
@@ -468,6 +471,8 @@ class TestTradingLoopStop:
         loop._cache = None
         loop._event_bus = None
         loop._fx_service = None
+        loop._grpc_loop = None
+        loop._grpc_thread = None
         loop._stop_event = threading.Event()
 
         TradingLoop.stop(loop)
@@ -484,6 +489,8 @@ class TestTradingLoopStop:
         loop._cache = None
         loop._event_bus = None
         loop._fx_service = None
+        loop._grpc_loop = None
+        loop._grpc_thread = None
         loop._stop_event = threading.Event()
 
         TradingLoop.stop(loop)
@@ -503,6 +510,8 @@ class TestTradingLoopStop:
         loop._cache = None
         loop._event_bus = None
         loop._fx_service = None
+        loop._grpc_loop = None
+        loop._grpc_thread = None
         loop._stop_event = threading.Event()
 
         TradingLoop.stop(loop)
@@ -604,7 +613,7 @@ class TestValidationReportEdgeCases:
         assert "2026-03-15" in content
 
     def test_collect_failures_all_fail(self) -> None:
-        from scripts.generate_validation_report import _Metrics, _collect_failures
+        from scripts.generate_validation_report import _collect_failures, _Metrics
 
         m = _Metrics(
             trading_days=2,
@@ -626,7 +635,7 @@ class TestValidationReportEdgeCases:
         assert any("Errors" in f for f in failures)
 
     def test_collect_failures_none_fail(self) -> None:
-        from scripts.generate_validation_report import _Metrics, _collect_failures
+        from scripts.generate_validation_report import _collect_failures, _Metrics
 
         m = _Metrics(
             trading_days=5,

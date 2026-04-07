@@ -24,6 +24,22 @@ from finalayze.risk.rollout import ROLLOUT_LIMITS, RolloutLimits
 # A Monday during US market hours (14:30 UTC = 10:30 ET)
 _MARKET_OPEN_DT = datetime(2026, 2, 23, 15, 0, tzinfo=UTC)
 
+
+def _market_open_ctx(loop: object) -> object:
+    """Return a combined context manager that patches SCHEDULES and _now for market-open."""
+    from contextlib import ExitStack
+
+    mock_schedule = MagicMock()
+    mock_schedule.is_market_open.return_value = True
+
+    stack = ExitStack()
+    stack.enter_context(
+        patch("finalayze.orchestration.trading_loop.SCHEDULES", {MARKET_US: mock_schedule})
+    )
+    stack.enter_context(patch.object(loop, "_now", return_value=_MARKET_OPEN_DT))
+    return stack
+
+
 # ── Constants ──────────────────────────────────────────────────────────────
 MARKET_US = "us"
 SEGMENT_US_TECH = "us_tech"
@@ -43,7 +59,9 @@ SENTIMENT_NEUTRAL = 0.0
 
 
 def _make_candle(symbol: str = SYMBOL_AAPL, idx: int = 0) -> Candle:
-    base = datetime(2025, 1, 1, 14, 30, tzinfo=UTC)
+    # Base the candles relative to real now() so the latest candle
+    # is within the 48-hour staleness threshold.
+    base = datetime.now(UTC) - timedelta(days=NUM_CANDLES)
     return Candle(
         symbol=symbol,
         market_id=MARKET_US,
@@ -169,6 +187,7 @@ def _make_trading_loop(
         return_value=MagicMock(equity=BASELINE_EQUITY, cash=Decimal(50000), positions={})
     )
     mock_broker.get_positions = MagicMock(return_value={})
+    mock_broker.has_position = MagicMock(return_value=False)
     mock_broker.submit_order = MagicMock(return_value=fill_result)
     broker_router.route = MagicMock(return_value=mock_broker)
     broker_router.registered_markets = [MARKET_US]
@@ -246,32 +265,28 @@ class TestTradingLoopStrategyCycle:
     def test_strategy_cycle_submits_order_on_buy_signal(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal)
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
 
     def test_strategy_cycle_alerts_on_fill(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, fill=True)
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._alerter.on_trade_filled.assert_called()  # type: ignore[attr-defined]
 
     def test_strategy_cycle_alerts_on_rejection(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, fill=False)
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._alerter.on_trade_rejected.assert_called()  # type: ignore[attr-defined]
 
     def test_strategy_cycle_skips_order_when_halted(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, circuit_level=CircuitLevel.HALTED)
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
 
@@ -279,17 +294,15 @@ class TestTradingLoopStrategyCycle:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, circuit_level=CircuitLevel.LIQUIDATE)
         with (
-            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            _market_open_ctx(loop),
             patch.object(loop, "_liquidate_market") as mock_liq,  # type: ignore[arg-type]
         ):
-            mock_dt.now.return_value = _MARKET_OPEN_DT
             loop._strategy_cycle()  # type: ignore[attr-defined]
             mock_liq.assert_called_with(MARKET_US)
 
     def test_strategy_cycle_no_signal_no_submit(self) -> None:
         loop = _make_trading_loop(signal=None)
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
 
@@ -297,8 +310,7 @@ class TestTradingLoopStrategyCycle:
         """CAUTION level should still allow orders (just with halved size)."""
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, circuit_level=CircuitLevel.CAUTION)
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
 
@@ -326,8 +338,7 @@ class TestHasOpenPositionPassthrough:
         mock_broker = loop._broker_router.route.return_value  # type: ignore[attr-defined]
         mock_broker.has_position.return_value = True
 
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
 
         # Verify generate_signal was called with has_open_position=True
@@ -341,8 +352,7 @@ class TestHasOpenPositionPassthrough:
         mock_broker = loop._broker_router.route.return_value  # type: ignore[attr-defined]
         mock_broker.has_position.return_value = False
 
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
 
         call_kwargs = loop._strategy.generate_signal.call_args  # type: ignore[attr-defined]
@@ -367,16 +377,14 @@ class TestModeGate:
     def test_debug_mode_skips_order_submission(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, mode=WorkMode.DEBUG)
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
 
     def test_sandbox_mode_allows_orders(self) -> None:
         signal = self._make_buy_signal()
         loop = _make_trading_loop(signal=signal, mode=WorkMode.SANDBOX)
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._broker_router.submit.assert_called()  # type: ignore[attr-defined]
 
@@ -465,8 +473,7 @@ class TestCrossMarketExposure:
         loop = _make_trading_loop(signal=signal)
         # Set max exposure very low so it triggers
         loop._settings.max_cross_market_exposure_pct = 0.01  # type: ignore[attr-defined]
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         # With very low max exposure, the order should be rejected
         loop._broker_router.submit.assert_not_called()  # type: ignore[attr-defined]
@@ -526,9 +533,10 @@ class TestDailyPnLComputation:
             equity=self.CURRENT_EQUITY, cash=Decimal(50000)
         )
 
-        with patch("finalayze.api.metrics.MetricsCollector") as mock_mc:
-            loop._daily_reset()  # type: ignore[attr-defined]
-            mock_mc.set_daily_pnl.assert_called_with(MARKET_US, float(self.EXPECTED_PNL))
+        mock_mc = MagicMock()
+        loop._metrics = mock_mc  # type: ignore[attr-defined]
+        loop._daily_reset()  # type: ignore[attr-defined]
+        mock_mc.set_daily_pnl.assert_called_with(MARKET_US, float(self.EXPECTED_PNL))
 
     def test_daily_reset_negative_pnl(self) -> None:
         """Negative P&L (loss) should be reported correctly."""
@@ -661,10 +669,15 @@ class TestPDTTrackerWiring:
         loop = _make_trading_loop(signal=signal)
         mock_broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
         mock_broker.has_position = MagicMock(return_value=True)
+        # Ensure portfolio reports a held position so _build_order builds a SELL order
+        mock_broker.get_portfolio.return_value = MagicMock(
+            equity=BASELINE_EQUITY,
+            cash=Decimal(50000),
+            positions={SYMBOL_AAPL: ORDER_QTY},
+        )
 
         initial_count = loop._pdt_tracker.recent_day_trades  # type: ignore[attr-defined]
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
 
         # After a fill of a day-trade sell, the tracker should record it
@@ -788,8 +801,7 @@ class TestSandboxMonitorIntegration:
         monitor.slippage_buffer = []
         loop._sandbox_monitor = monitor  # type: ignore[attr-defined]
 
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
 
         monitor.on_cycle_complete.assert_called_once()
@@ -821,9 +833,8 @@ class TestConsecutiveCycleErrors:
         assert loop._consecutive_equity_errors == 0  # type: ignore[attr-defined]
         with (
             patch.object(loop, "_strategy_cycle_impl", side_effect=RuntimeError("boom")),
-            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            _market_open_ctx(loop),
         ):
-            mock_dt.now.return_value = _MARKET_OPEN_DT
             loop._strategy_cycle()  # type: ignore[attr-defined]
         assert loop._consecutive_equity_errors == 1  # type: ignore[attr-defined]
 
@@ -831,8 +842,7 @@ class TestConsecutiveCycleErrors:
         """_consecutive_equity_errors resets to 0 on successful cycle."""
         loop = _make_trading_loop()
         loop._consecutive_equity_errors = 2  # type: ignore[attr-defined]
-        with patch("finalayze.core.trading_loop.datetime") as mock_dt:
-            mock_dt.now.return_value = _MARKET_OPEN_DT
+        with _market_open_ctx(loop):
             loop._strategy_cycle()  # type: ignore[attr-defined]
         assert loop._consecutive_equity_errors == 0  # type: ignore[attr-defined]
 
@@ -841,9 +851,8 @@ class TestConsecutiveCycleErrors:
         loop = _make_trading_loop()
         with (
             patch.object(loop, "_strategy_cycle_impl", side_effect=RuntimeError("boom")),
-            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            _market_open_ctx(loop),
         ):
-            mock_dt.now.return_value = _MARKET_OPEN_DT
             for _ in range(self.MAX_CONSECUTIVE):
                 loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._alerter.send_alert.assert_called()  # type: ignore[attr-defined]
@@ -856,9 +865,8 @@ class TestConsecutiveCycleErrors:
         loop = _make_trading_loop()
         with (
             patch.object(loop, "_strategy_cycle_impl", side_effect=RuntimeError("boom")),
-            patch("finalayze.core.trading_loop.datetime") as mock_dt,
+            _market_open_ctx(loop),
         ):
-            mock_dt.now.return_value = _MARKET_OPEN_DT
             for _ in range(self.MAX_CONSECUTIVE - 1):
                 loop._strategy_cycle()  # type: ignore[attr-defined]
         loop._alerter.send_alert.assert_not_called()  # type: ignore[attr-defined]

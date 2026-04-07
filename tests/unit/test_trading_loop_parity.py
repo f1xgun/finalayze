@@ -265,11 +265,21 @@ class TestCycleExitedCleared:
 # ── PARITY-01: Pipeline sizing tests ─────────────────────────────────
 
 
-def _make_candle(close: float = 150.0) -> MagicMock:
-    """Create a mock candle with the given close price."""
-    c = MagicMock()
-    c.close = Decimal(str(close))
-    return c
+def _make_candle(close: float = 150.0) -> object:
+    """Create a candle with the given close price."""
+    from finalayze.core.schemas import Candle
+
+    return Candle(
+        symbol=SYMBOL_AAPL,
+        market_id=MARKET_US,
+        timeframe="1d",
+        timestamp=datetime.now(UTC) - timedelta(hours=1),
+        open=Decimal(str(close)),
+        high=Decimal(str(close)),
+        low=Decimal(str(close)),
+        close=Decimal(str(close)),
+        volume=1_000_000,
+    )
 
 
 def _make_signal(direction: SignalDirection = SignalDirection.BUY) -> MagicMock:
@@ -312,13 +322,19 @@ class TestPipelineSizing:
 
         # Patch _build_sizing_pipeline to capture the call
         mock_pipeline = MagicMock(spec=PositionSizingPipeline)
-        mock_pipeline.compute.return_value = Decimal("10000")
+        mock_pipeline.compute.return_value = Decimal(10000)
 
         with patch.object(loop, "_build_sizing_pipeline", return_value=mock_pipeline):
             order = loop._build_order(
-                signal, CircuitLevel.NORMAL, BASELINE_EQUITY, BASELINE_CASH,
-                candles, SYMBOL_AAPL, Decimal("0.5"),
-                portfolio=portfolio, seg_id="us_tech",
+                signal,
+                CircuitLevel.NORMAL,
+                BASELINE_EQUITY,
+                BASELINE_CASH,
+                candles,
+                SYMBOL_AAPL,
+                Decimal("0.5"),
+                portfolio=portfolio,
+                seg_id="us_tech",
             )
 
         mock_pipeline.compute.assert_called_once()
@@ -346,13 +362,19 @@ class TestPipelineSizing:
         portfolio = _make_portfolio()
 
         mock_pipeline = MagicMock(spec=PositionSizingPipeline)
-        mock_pipeline.compute.return_value = Decimal("0")
+        mock_pipeline.compute.return_value = Decimal(0)
 
         with patch.object(loop, "_build_sizing_pipeline", return_value=mock_pipeline):
             order = loop._build_order(
-                signal, CircuitLevel.NORMAL, BASELINE_EQUITY, BASELINE_CASH,
-                candles, SYMBOL_AAPL, Decimal("0.5"),
-                portfolio=portfolio, seg_id="us_tech",
+                signal,
+                CircuitLevel.NORMAL,
+                BASELINE_EQUITY,
+                BASELINE_CASH,
+                candles,
+                SYMBOL_AAPL,
+                Decimal("0.5"),
+                portfolio=portfolio,
+                seg_id="us_tech",
             )
 
         assert order is None
@@ -366,7 +388,7 @@ class TestPipelineSizing:
         portfolio = _make_portfolio()
 
         mock_pipeline = MagicMock(spec=PositionSizingPipeline)
-        mock_pipeline.compute.return_value = Decimal("10000")
+        mock_pipeline.compute.return_value = Decimal(10000)
 
         # Patch _get_segment_min_confidence to return low threshold
         with (
@@ -374,14 +396,26 @@ class TestPipelineSizing:
             patch.object(loop, "_get_segment_min_confidence", return_value=0.3),
         ):
             order_normal = loop._build_order(
-                signal, CircuitLevel.NORMAL, BASELINE_EQUITY, BASELINE_CASH,
-                candles, SYMBOL_AAPL, Decimal("0.5"),
-                portfolio=portfolio, seg_id="us_tech",
+                signal,
+                CircuitLevel.NORMAL,
+                BASELINE_EQUITY,
+                BASELINE_CASH,
+                candles,
+                SYMBOL_AAPL,
+                Decimal("0.5"),
+                portfolio=portfolio,
+                seg_id="us_tech",
             )
             order_caution = loop._build_order(
-                signal, CircuitLevel.CAUTION, BASELINE_EQUITY, BASELINE_CASH,
-                candles, SYMBOL_AAPL, Decimal("0.5"),
-                portfolio=portfolio, seg_id="us_tech",
+                signal,
+                CircuitLevel.CAUTION,
+                BASELINE_EQUITY,
+                BASELINE_CASH,
+                candles,
+                SYMBOL_AAPL,
+                Decimal("0.5"),
+                portfolio=portfolio,
+                seg_id="us_tech",
             )
 
         # CAUTION should produce smaller or equal quantity
@@ -430,7 +464,7 @@ class TestPreTradeCheckParams:
 
         # Mock _build_order to return a valid order
         mock_order = MagicMock()
-        mock_order.quantity = Decimal("10")
+        mock_order.quantity = Decimal(10)
         mock_order.symbol = SYMBOL_AAPL
         mock_order.side = "BUY"
         loop._build_order = MagicMock(return_value=mock_order)
@@ -461,16 +495,18 @@ class TestPreTradeCheckParams:
             instrument=_make_instrument(),
             market_id=MARKET_US,
             level=CircuitLevel.NORMAL,
-            fetcher=MagicMock(fetch_candles=MagicMock(
-                return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
-            )),
+            fetcher=MagicMock(
+                fetch_candles=MagicMock(
+                    return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
+                )
+            ),
             now=datetime.now(UTC),
         )
 
         call_kwargs = loop._pre_trade_checker.check.call_args
         assert call_kwargs is not None, "pre_trade_checker.check must be called"
         # Check stop_loss_price is passed (keyword argument)
-        kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
+        kw = call_kwargs.kwargs or {}
         assert "stop_loss_price" in kw, "stop_loss_price must be passed to pre-trade check"
         assert kw["stop_loss_price"] == expected_stop
 
@@ -498,9 +534,7 @@ class TestPreTradeCheckParams:
         )
 
         # Check that _get_regime_state method exists
-        assert hasattr(loop, "_get_regime_state"), (
-            "TradingLoop must have _get_regime_state method"
-        )
+        assert hasattr(loop, "_get_regime_state"), "TradingLoop must have _get_regime_state method"
 
     def test_pre_trade_receives_strategy_name(self) -> None:
         """strategy_name from signal is passed to pre-trade check."""
@@ -515,15 +549,17 @@ class TestPreTradeCheckParams:
             instrument=_make_instrument(),
             market_id=MARKET_US,
             level=CircuitLevel.NORMAL,
-            fetcher=MagicMock(fetch_candles=MagicMock(
-                return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
-            )),
+            fetcher=MagicMock(
+                fetch_candles=MagicMock(
+                    return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
+                )
+            ),
             now=datetime.now(UTC),
         )
 
         call_kwargs = loop._pre_trade_checker.check.call_args
         assert call_kwargs is not None
-        kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
+        kw = call_kwargs.kwargs or {}
         assert "strategy_name" in kw, "strategy_name must be passed to pre-trade check"
         assert kw["strategy_name"] == "dual_momentum"
 
@@ -540,15 +576,17 @@ class TestPreTradeCheckParams:
             instrument=_make_instrument(),
             market_id=MARKET_US,
             level=CircuitLevel.NORMAL,
-            fetcher=MagicMock(fetch_candles=MagicMock(
-                return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
-            )),
+            fetcher=MagicMock(
+                fetch_candles=MagicMock(
+                    return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
+                )
+            ),
             now=datetime.now(UTC),
         )
 
         call_kwargs = loop._pre_trade_checker.check.call_args
         assert call_kwargs is not None
-        kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
+        kw = call_kwargs.kwargs or {}
         assert "open_positions" in kw, "open_positions must be passed"
         assert "correlations" in kw, "correlations must be passed"
         assert isinstance(kw["open_positions"], list)
@@ -567,15 +605,17 @@ class TestPreTradeCheckParams:
             instrument=_make_instrument(),
             market_id=MARKET_US,
             level=CircuitLevel.NORMAL,
-            fetcher=MagicMock(fetch_candles=MagicMock(
-                return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
-            )),
+            fetcher=MagicMock(
+                fetch_candles=MagicMock(
+                    return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
+                )
+            ),
             now=datetime.now(UTC),
         )
 
         call_kwargs = loop._pre_trade_checker.check.call_args
         assert call_kwargs is not None
-        kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
+        kw = call_kwargs.kwargs or {}
         assert "require_stop_loss" in kw, "require_stop_loss must be passed"
         assert kw["require_stop_loss"] is False, (
             "New entries have no stop state yet; require_stop_loss must be False"
@@ -599,15 +639,17 @@ class TestPreTradeCheckParams:
             instrument=_make_instrument(),
             market_id=MARKET_US,
             level=CircuitLevel.NORMAL,
-            fetcher=MagicMock(fetch_candles=MagicMock(
-                return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
-            )),
+            fetcher=MagicMock(
+                fetch_candles=MagicMock(
+                    return_value=[_make_candle(150.0) for _ in range(NUM_CANDLES)]
+                )
+            ),
             now=datetime.now(UTC),
         )
 
         call_kwargs = loop._pre_trade_checker.check.call_args
         assert call_kwargs is not None
-        kw = call_kwargs.kwargs if call_kwargs.kwargs else {}
+        kw = call_kwargs.kwargs or {}
         assert "require_stop_loss" in kw, "require_stop_loss must be passed"
         assert kw["require_stop_loss"] is True, (
             "Existing positions must require stop loss in pre-trade check"

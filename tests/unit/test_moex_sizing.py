@@ -121,7 +121,7 @@ def test_position_size_not_tiny_bug_value() -> None:
 # Test 4: CBRRegimeStep
 # ---------------------------------------------------------------------------
 
-from finalayze.risk.position_sizing_pipeline import (
+from finalayze.risk.position_sizing_pipeline import (  # noqa: E402
     CBRRegimeStep,
     SectorAllocationStep,
     SizingContext,
@@ -136,7 +136,7 @@ def _make_context() -> SizingContext:
         equity=Decimal(1_000_000),
         base_position=_TEST_SIZE,
         max_position_pct=Decimal("0.20"),
-        min_position_size=Decimal("500"),
+        min_position_size=Decimal(500),
         asset_vol=Decimal("0.30"),
         target_vol=Decimal("0.20"),
         regime_scale=Decimal("1.0"),

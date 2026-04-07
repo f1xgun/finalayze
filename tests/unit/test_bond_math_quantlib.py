@@ -174,9 +174,7 @@ class TestFloatingRateBond:
             coupon_frequency=SEMIANNUAL,
         )
         # cleanPrice() returns % of face directly
-        assert 80 < clean_price < 120, (
-            f"Floater price {clean_price:.1f}% outside 80-120% range"
-        )
+        assert 80 < clean_price < 120, f"Floater price {clean_price:.1f}% outside 80-120% range"
 
     def test_ytm_close_to_ruonia_plus_spread(self) -> None:
         """Floater YTM should be approximately RUONIA + spread."""
@@ -273,11 +271,14 @@ class TestEffectiveDuration:
         )
 
         schedule = ql.Schedule(
-            settlement, maturity,
+            settlement,
+            maturity,
             ql.Period(6, ql.Months),
             calendar,
-            ql.ModifiedFollowing, ql.ModifiedFollowing,
-            ql.DateGeneration.Backward, False,
+            ql.ModifiedFollowing,
+            ql.ModifiedFollowing,
+            ql.DateGeneration.Backward,
+            False,
         )
 
         bond = ql.FloatingRateBond(
@@ -310,11 +311,14 @@ class TestEffectiveDuration:
         curve_handle = ql.YieldTermStructureHandle(curve)
 
         schedule = ql.Schedule(
-            settlement, maturity,
+            settlement,
+            maturity,
             ql.Period(6, ql.Months),
             calendar,
-            ql.ModifiedFollowing, ql.ModifiedFollowing,
-            ql.DateGeneration.Backward, False,
+            ql.ModifiedFollowing,
+            ql.ModifiedFollowing,
+            ql.DateGeneration.Backward,
+            False,
         )
 
         bond = ql.FixedRateBond(
@@ -328,7 +332,11 @@ class TestEffectiveDuration:
 
         # Analytical modified duration from QuantLib
         analytical_dur = ql.BondFunctions.duration(
-            bond, ytm_rate, day_count, ql.Compounded, ql.Semiannual,
+            bond,
+            ytm_rate,
+            day_count,
+            ql.Compounded,
+            ql.Semiannual,
             ql.Duration.Modified,
         )
 

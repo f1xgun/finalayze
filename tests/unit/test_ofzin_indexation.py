@@ -70,9 +70,7 @@ def test_parse_indexation_response_empty_returns_none() -> None:
 
 def test_fetch_ofzin_indexation_coefficient_success() -> None:
     fetcher = CBRFetcher()
-    with patch.object(
-        fetcher, "_request", return_value=_SAMPLE_INDEXATION_HTML.encode("utf-8")
-    ):
+    with patch.object(fetcher, "_request", return_value=_SAMPLE_INDEXATION_HTML.encode("utf-8")):
         result = fetcher.fetch_ofzin_indexation_coefficient(date(2026, 3, 10))
     assert result is not None
     assert result == Decimal("1.052300")
@@ -82,9 +80,7 @@ def test_fetch_ofzin_indexation_coefficient_success() -> None:
 
 def test_fetch_ofzin_indexation_coefficient_missing_data() -> None:
     fetcher = CBRFetcher()
-    with patch.object(
-        fetcher, "_request", return_value=_EMPTY_INDEXATION_HTML.encode("utf-8")
-    ):
+    with patch.object(fetcher, "_request", return_value=_EMPTY_INDEXATION_HTML.encode("utf-8")):
         result = fetcher.fetch_ofzin_indexation_coefficient(date(2030, 1, 1))
     assert result is None
     fetcher.close()

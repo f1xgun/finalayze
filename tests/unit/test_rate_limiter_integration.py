@@ -112,13 +112,12 @@ class TestTinkoffRateLimiter:
         call_order: list[str] = []
         limiter.acquire.side_effect = lambda: call_order.append("acquire")
 
-        with patch("finalayze.data.fetchers.tinkoff_data.asyncio.run") as mock_run:
-            mock_run.side_effect = lambda coro: (
-                call_order.append("grpc"),
-                coro.close(),  # close the coroutine to avoid warnings
-                [],
-            )[2]
+        def mock_run_async(coro, **kwargs):  # noqa: ANN001, ANN003
+            call_order.append("grpc")
+            coro.close()  # close the coroutine to avoid warnings
+            return []
 
+        with patch.object(fetcher, "_run_async", side_effect=mock_run_async):
             fetcher.fetch_candles(
                 symbol="SBER",
                 start=datetime(2026, 1, 1, tzinfo=UTC),

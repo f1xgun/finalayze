@@ -448,14 +448,19 @@ class TestYieldHoldBars:
         # Trigger BUY on ex-div day
         candles_exdiv = candles[: _PRE_EXDIV_BARS + 1]
         buy_signal = strategy.generate_signal(
-            symbol=_SYMBOL, candles=candles_exdiv, segment_id=_SEGMENT_ID,
+            symbol=_SYMBOL,
+            candles=candles_exdiv,
+            segment_id=_SEGMENT_ID,
         )
         assert buy_signal is not None
         assert buy_signal.direction == SignalDirection.BUY
 
         # After 25 bars -> SELL (low yield tier reached)
         sell_signal = strategy.generate_signal(
-            symbol=_SYMBOL, candles=candles, segment_id=_SEGMENT_ID, has_open_position=True,
+            symbol=_SYMBOL,
+            candles=candles,
+            segment_id=_SEGMENT_ID,
+            has_open_position=True,
         )
         assert sell_signal is not None
         assert sell_signal.direction == SignalDirection.SELL
@@ -479,11 +484,16 @@ class TestYieldHoldBars:
         # Trigger BUY
         candles_exdiv = candles[: _PRE_EXDIV_BARS + 1]
         strategy.generate_signal(
-            symbol=_SYMBOL, candles=candles_exdiv, segment_id=_SEGMENT_ID,
+            symbol=_SYMBOL,
+            candles=candles_exdiv,
+            segment_id=_SEGMENT_ID,
         )
 
         # After 25 bars -> should still be holding (None), not SELL
         signal = strategy.generate_signal(
-            symbol=_SYMBOL, candles=candles, segment_id=_SEGMENT_ID, has_open_position=True,
+            symbol=_SYMBOL,
+            candles=candles,
+            segment_id=_SEGMENT_ID,
+            has_open_position=True,
         )
         assert signal is None

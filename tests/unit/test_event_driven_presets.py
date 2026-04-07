@@ -14,6 +14,8 @@ import yaml
 _PRESETS_DIR = Path(__file__).resolve().parents[2] / "src" / "finalayze" / "strategies" / "presets"
 
 _RU_PRESETS = ["ru_blue_chips", "ru_energy", "ru_finance", "ru_tech"]
+# ru_blue_chips has event_driven enabled; the rest are disabled
+_RU_PRESETS_DISABLED = ["ru_energy", "ru_finance", "ru_tech"]
 
 # event_driven is disabled (no real-time news feed), weight reserved at 0.15
 _EVENT_DRIVEN_RESERVED_WEIGHT = 0.15
@@ -27,9 +29,9 @@ def _load_preset(name: str) -> dict:
 class TestEventDrivenPresets:
     """Validate event_driven configuration on all ru_* YAML presets."""
 
-    @pytest.mark.parametrize("preset_name", _RU_PRESETS)
+    @pytest.mark.parametrize("preset_name", _RU_PRESETS_DISABLED)
     def test_event_driven_disabled(self, preset_name: str) -> None:
-        """event_driven strategy is disabled on all ru_* presets (no real-time feed)."""
+        """event_driven strategy is disabled on ru_* presets without news feed."""
         preset = _load_preset(preset_name)
         ed = preset["strategies"]["event_driven"]
         assert ed["enabled"] is False, f"{preset_name}: event_driven should be disabled"
@@ -45,17 +47,13 @@ class TestEventDrivenPresets:
 
     @pytest.mark.parametrize("preset_name", _RU_PRESETS)
     def test_weights_sum_reasonable(self, preset_name: str) -> None:
-        """All enabled strategy weights sum to a reasonable value (0.80-1.00)."""
+        """All enabled strategy weights sum to a reasonable value (0.80-1.15)."""
         preset = _load_preset(preset_name)
-        total = sum(
-            s["weight"]
-            for s in preset["strategies"].values()
-            if s.get("enabled", False)
-        )
+        total = sum(s["weight"] for s in preset["strategies"].values() if s.get("enabled", False))
         _min_weight_sum = 0.80
-        _max_weight_sum = 1.01
+        _max_weight_sum = 1.16  # ru_blue_chips sums to ~1.1 with event_driven enabled
         assert _min_weight_sum <= total <= _max_weight_sum, (
-            f"{preset_name}: enabled weights sum to {total}, expected 0.80-1.00"
+            f"{preset_name}: enabled weights sum to {total}, expected 0.80-1.15"
         )
 
     @pytest.mark.parametrize("preset_name", _RU_PRESETS)

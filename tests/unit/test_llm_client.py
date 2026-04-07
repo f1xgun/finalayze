@@ -92,9 +92,7 @@ class TestOpenRouterClient:
             mock_openai.chat.completions = MagicMock()
 
             rate_resp = MagicMock(status_code=429, headers={})
-            rate_err = openai.RateLimitError(
-                message="rate limited", response=rate_resp, body=None
-            )
+            rate_err = openai.RateLimitError(message="rate limited", response=rate_resp, body=None)
             mock_openai.chat.completions.create = AsyncMock(side_effect=rate_err)
             mock_cls.return_value = mock_openai
 
@@ -205,8 +203,11 @@ class TestCreateLLMClientFactory:
     def test_openrouter_provider_returns_openrouter_client(self) -> None:
         with patch("openai.AsyncOpenAI"):
             settings = Settings(
-                llm_provider="openrouter", llm_api_key="key", llm_model="model",
-                llm_fallback_provider="", llm_fallback_api_key="",
+                llm_provider="openrouter",
+                llm_api_key="key",
+                llm_model="model",
+                llm_fallback_provider="",
+                llm_fallback_api_key="",
             )
             client = create_llm_client(settings)
         assert isinstance(client, OpenRouterClient)
@@ -214,8 +215,11 @@ class TestCreateLLMClientFactory:
     def test_openai_provider_returns_openai_client(self) -> None:
         with patch("openai.AsyncOpenAI"):
             settings = Settings(
-                llm_provider="openai", llm_api_key="key", llm_model="gpt-4o",
-                llm_fallback_provider="", llm_fallback_api_key="",
+                llm_provider="openai",
+                llm_api_key="key",
+                llm_model="gpt-4o",
+                llm_fallback_provider="",
+                llm_fallback_api_key="",
             )
             client = create_llm_client(settings)
         assert isinstance(client, OpenAIClient)
@@ -223,8 +227,11 @@ class TestCreateLLMClientFactory:
     def test_anthropic_provider_returns_anthropic_client(self) -> None:
         with patch("anthropic.AsyncAnthropic"):
             settings = Settings(
-                llm_provider="anthropic", llm_api_key="key", llm_model="claude-3",
-                llm_fallback_provider="", llm_fallback_api_key="",
+                llm_provider="anthropic",
+                llm_api_key="key",
+                llm_model="claude-3",
+                llm_fallback_provider="",
+                llm_fallback_api_key="",
             )
             client = create_llm_client(settings)
         assert isinstance(client, AnthropicClient)

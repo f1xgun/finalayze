@@ -300,9 +300,7 @@ class TestTinkoffHealthProbe:
     async def test_health_degraded_when_tinkoff_down(self) -> None:
         """Overall /health status should be degraded when tinkoff probe fails."""
         app, _ = build_test_app()
-        degraded = ComponentStatus(
-            db="ok", redis="ok", alpaca="ok", tinkoff="error", llm="ok"
-        )
+        degraded = ComponentStatus(db="ok", redis="ok", alpaca="ok", tinkoff="error", llm="ok")
         with patch(
             "finalayze.api.v1.system._get_component_status",
             new_callable=AsyncMock,

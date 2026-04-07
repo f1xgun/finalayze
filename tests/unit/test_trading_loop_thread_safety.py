@@ -86,8 +86,16 @@ class TestSentimentLockScope:
         from finalayze.analysis.news_impact_analyzer import NewsImpactResult, SectorImpactDetail
         from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
 
-        mock_cache = MagicMock()
         lock_held_during_redis_write: list[bool] = []
+
+        # Create an async mock cache whose set_sentiment tracks lock state
+        mock_cache = AsyncMock()
+
+        async def tracking_set_sentiment(key: str, value: float) -> None:
+            locked = loop._sentiment_lock.locked()
+            lock_held_during_redis_write.append(locked)
+
+        mock_cache.set_sentiment = tracking_set_sentiment
 
         mapper = SectorTickerMapper()
         loop = _make_trading_loop(cache=mock_cache, sector_ticker_mapper=mapper)
@@ -99,28 +107,22 @@ class TestSentimentLockScope:
         loop._fetchers = {"moex": MagicMock()}
         loop._registry.list_by_market.return_value = [instr]
 
-        def tracking_run_async(coro: object, **kwargs: object) -> object:
-            locked = loop._sentiment_lock.locked()
-            lock_held_during_redis_write.append(locked)
-            return None
-
-        loop._run_async = tracking_run_async  # type: ignore[assignment]
-
         result = NewsImpactResult(
             event_type=EventType.CBR_RATE,
             sentiment=0.8,
             confidence=0.9,
             reasoning="test",
             affected_sectors=[
-                SectorImpactDetail(
-                    sector="banking", direction=1, magnitude=0.7, reasoning="test"
-                ),
+                SectorImpactDetail(sector="banking", direction=1, magnitude=0.7, reasoning="test"),
             ],
             direct_tickers=[],
         )
-        loop._apply_impact_result(result)
+        import asyncio as _aio
+
+        _aio.run(loop._apply_impact_result(result))
 
         # The Redis write should have happened with lock NOT held
+        assert len(lock_held_during_redis_write) > 0, "Redis set_sentiment must be called"
         assert any(not held for held in lock_held_during_redis_write)
 
 

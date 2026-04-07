@@ -252,7 +252,9 @@ class TestNewsImpactPipeline:
         loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
         loop._registry.list_by_market.return_value = mock_instruments  # type: ignore[attr-defined]
 
-        loop._apply_impact_result(result)  # type: ignore[attr-defined]
+        import asyncio as _aio
+
+        _aio.run(loop._apply_impact_result(result))  # type: ignore[attr-defined]
 
         # Check per-ticker cache entries
         cache = loop._sentiment_cache  # type: ignore[attr-defined]
@@ -287,7 +289,9 @@ class TestNewsImpactPipeline:
         loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
         loop._registry.list_by_market.return_value = mock_instruments  # type: ignore[attr-defined]
 
-        loop._apply_impact_result(result)  # type: ignore[attr-defined]
+        import asyncio as _aio
+
+        _aio.run(loop._apply_impact_result(result))  # type: ignore[attr-defined]
 
         cache = loop._sentiment_cache  # type: ignore[attr-defined]
         assert ("ru_blue_chips", "SBER") in cache
@@ -323,7 +327,9 @@ class TestNewsImpactPipeline:
         loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
         loop._registry.list_by_market.return_value = [instr]  # type: ignore[attr-defined]
 
-        loop._apply_impact_result(result)  # type: ignore[attr-defined]
+        import asyncio as _aio
+
+        _aio.run(loop._apply_impact_result(result))  # type: ignore[attr-defined]
 
         cache = loop._sentiment_cache  # type: ignore[attr-defined]
         score, _ts = cache[("ru_blue_chips", "SBER")]
@@ -411,7 +417,9 @@ class TestPerTickerSentimentRead:
         loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
         loop._registry.list_by_market.return_value = [instr]  # type: ignore[attr-defined]
 
-        loop._apply_impact_result(result)  # type: ignore[attr-defined]
+        import asyncio as _aio
+
+        _aio.run(loop._apply_impact_result(result))  # type: ignore[attr-defined]
 
         cache = loop._sentiment_cache  # type: ignore[attr-defined]
         score, _ts = cache[("ru_blue_chips", "SBER")]

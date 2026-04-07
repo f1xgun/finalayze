@@ -139,9 +139,9 @@ class TestCommandDispatch:
 
         # Setup portfolio response
         portfolio = MagicMock()
-        portfolio.equity = Decimal("50000")
-        portfolio.positions = {"AAPL": Decimal("10"), "MSFT": Decimal("5")}
-        portfolio.cash = Decimal("10000")
+        portfolio.equity = Decimal(50000)
+        portfolio.positions = {"AAPL": Decimal(10), "MSFT": Decimal(5)}
+        portfolio.cash = Decimal(10000)
 
         broker = MagicMock()
         broker.get_portfolio.return_value = portfolio
@@ -174,7 +174,7 @@ class TestCommandDispatch:
         for market_id, cb in mocks["circuit_breakers"].items():
             cb.level = CircuitLevel.NORMAL
             cb.market_id = market_id
-            cb.baseline = Decimal("100000")
+            cb.baseline = Decimal(100000)
 
         app = _make_app(handler)
         client = TestClient(app)
@@ -236,8 +236,9 @@ class TestWebhookMountedInCreateApp:
         mock_settings.mode = MagicMock()
         mock_settings.mode.value = "test"
 
-        with patch("finalayze.main.get_settings", return_value=mock_settings), patch(
-            "finalayze.main._settings", mock_settings
+        with (
+            patch("finalayze.main.get_settings", return_value=mock_settings),
+            patch("finalayze.main._settings", mock_settings),
         ):
             from finalayze.main import create_app
 
@@ -256,8 +257,9 @@ class TestWebhookMountedInCreateApp:
         mock_settings.mode = MagicMock()
         mock_settings.mode.value = "test"
 
-        with patch("finalayze.main.get_settings", return_value=mock_settings), patch(
-            "finalayze.main._settings", mock_settings
+        with (
+            patch("finalayze.main.get_settings", return_value=mock_settings),
+            patch("finalayze.main._settings", mock_settings),
         ):
             from finalayze.main import create_app
 

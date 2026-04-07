@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from pydantic import BaseModel
 
 from finalayze.core.events import EventBus
@@ -115,9 +114,7 @@ class TestEventBus:
     async def test_read_returns_messages_from_xread(
         self, event_bus: EventBus, mock_redis: AsyncMock
     ) -> None:
-        raw_messages = [
-            (TEST_STREAM, [(TEST_MSG_ID, {"type": "_TestEvent", "payload": "{}"})])
-        ]
+        raw_messages = [(TEST_STREAM, [(TEST_MSG_ID, {"type": "_TestEvent", "payload": "{}"})])]
         mock_redis.xread.return_value = raw_messages
         result = await event_bus.read(TEST_STREAM, count=READ_COUNT)
         assert len(result) == 1

@@ -60,9 +60,7 @@ class TestRateLimiting:
         queue = TelegramMessageQueue(alerter)
         now = time.monotonic()
         # Simulate 20 messages sent in the last 60s
-        queue._sent_timestamps = deque(
-            [now - i for i in range(RATE_LIMIT)], maxlen=RATE_LIMIT * 2
-        )
+        queue._sent_timestamps = deque([now - i for i in range(RATE_LIMIT)], maxlen=RATE_LIMIT * 2)
         # _is_rate_limited should return True
         assert queue._is_rate_limited() is True
 

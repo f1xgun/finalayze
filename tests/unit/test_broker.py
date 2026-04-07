@@ -322,17 +322,19 @@ class TestPortfolioFallbackCacheOnSuccess:
     def test_successful_fetch_caches_portfolio(self) -> None:
         """After a successful get_portfolio, _last_known_portfolio is set."""
         broker = _make_tinkoff_broker()
-        expected = _make_portfolio_state()
+        _make_portfolio_state()
 
         # Mock the async portfolio fetch to return a mock response
         mock_portfolio_response = MagicMock()
         mock_portfolio_response.total_amount_portfolio = MagicMock(units=100000, nano=0)
         mock_portfolio_response.positions = []
 
-        with patch.object(broker, "_call", return_value=mock_portfolio_response):
-            with patch.object(broker, "_run_async", return_value=mock_portfolio_response):
-                # We need to mock at a higher level -- mock get_portfolio to test caching
-                pass
+        with (
+            patch.object(broker, "_call", return_value=mock_portfolio_response),
+            patch.object(broker, "_run_async", return_value=mock_portfolio_response),
+        ):
+            # We need to mock at a higher level -- mock get_portfolio to test caching
+            pass
 
         # Instead, directly test the caching mechanism by calling get_portfolio
         # with a properly mocked internal chain
@@ -346,7 +348,7 @@ class TestPortfolioFallbackCacheOnSuccess:
         broker._call = fake_call  # type: ignore[assignment]
         broker._run_async = lambda coro: mock_response  # type: ignore[assignment]
 
-        result = broker.get_portfolio()
+        broker.get_portfolio()
 
         assert broker._last_known_portfolio is not None
         assert broker._last_known_portfolio.equity == Decimal(100000)

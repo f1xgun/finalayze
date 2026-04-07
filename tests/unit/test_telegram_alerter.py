@@ -180,9 +180,7 @@ class TestTelegramAlerterSendsMessages:
     def test_send_alert_running_loop_creates_task(self) -> None:
         """send_alert must create a task when an event loop is already running."""
         alerter = self._make_alerter()
-        with patch(
-            "finalayze.core.alerts.asyncio.get_running_loop"
-        ) as mock_get_loop:
+        with patch("finalayze.core.alerts.asyncio.get_running_loop") as mock_get_loop:
             mock_loop = MagicMock()
             mock_loop.is_running.return_value = True
             mock_get_loop.return_value = mock_loop

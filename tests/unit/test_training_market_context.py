@@ -16,7 +16,6 @@ import pytest
 
 from finalayze.core.schemas import Candle, FXRate, KeyRateRecord, MarketContext, MoexMarketData
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 _WINDOW_SIZE = 40  # small enough for fast tests
@@ -36,10 +35,10 @@ def _make_candles(
             market_id=market_id,
             timeframe="1d",
             timestamp=base + timedelta(days=i),
-            open=Decimal("100"),
-            high=Decimal("101"),
-            low=Decimal("99"),
-            close=Decimal("100"),
+            open=Decimal(100),
+            high=Decimal(101),
+            low=Decimal(99),
+            close=Decimal(100),
             volume=1_000_000,
         )
         for i in range(n)
@@ -52,7 +51,7 @@ def _make_fx_rates(n: int, start: datetime | None = None) -> tuple[FXRate, ...]:
         FXRate(
             timestamp=base + timedelta(days=i),
             pair="USDRUB",
-            rate=Decimal("90"),
+            rate=Decimal(90),
         )
         for i in range(n)
     )
@@ -92,12 +91,12 @@ class TestSliceMarketContext:
         from finalayze.ml.training import _slice_market_context  # noqa: PLC0415
 
         max_ts = datetime(2024, 6, 1, tzinfo=UTC)
-        # 12 monthly fx_rates: Jan–Dec 2024
+        # 12 monthly fx_rates: Jan-Dec 2024
         fx_rates = tuple(
             FXRate(
                 timestamp=datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=i * 30),
                 pair="USDRUB",
-                rate=Decimal("90"),
+                rate=Decimal(90),
             )
             for i in range(12)
         )
@@ -161,8 +160,14 @@ class TestSliceMarketContext:
 
         max_ts = datetime(2024, 6, 1, tzinfo=UTC)
         key_rates = (
-            KeyRateRecord(timestamp=datetime(2024, 1, 1, tzinfo=UTC), rate=Decimal("0.16")),
-            KeyRateRecord(timestamp=datetime(2024, 7, 1, tzinfo=UTC), rate=Decimal("0.18")),  # future
+            KeyRateRecord(
+                timestamp=datetime(2024, 1, 1, tzinfo=UTC),
+                rate=Decimal("0.16"),
+            ),
+            KeyRateRecord(
+                timestamp=datetime(2024, 7, 1, tzinfo=UTC),
+                rate=Decimal("0.18"),
+            ),  # future
         )
         moex = MoexMarketData(key_rates=key_rates)
         ctx = MarketContext(moex_data=moex)
@@ -185,10 +190,10 @@ class TestSliceMarketContext:
                 market_id="us",
                 timeframe="1d",
                 timestamp=datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=i * 10),
-                open=Decimal("80"),
-                high=Decimal("81"),
-                low=Decimal("79"),
-                close=Decimal("80"),
+                open=Decimal(80),
+                high=Decimal(81),
+                low=Decimal(79),
+                close=Decimal(80),
                 volume=1000,
             )
             for i in range(20)  # Jan to Jul 2024
@@ -213,7 +218,7 @@ class TestSliceMarketContext:
         turnover = tuple(
             TurnoverRecord(
                 timestamp=datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=i * 15),
-                volume_rub=Decimal("1000000"),
+                volume_rub=Decimal(1000000),
             )
             for i in range(15)
         )
@@ -283,9 +288,7 @@ class TestSliceMarketContext:
         from finalayze.ml.training import _slice_market_context  # noqa: PLC0415
 
         max_ts = datetime(2024, 6, 1, tzinfo=UTC)
-        fx_rates = (
-            FXRate(timestamp=max_ts, pair="USDRUB", rate=Decimal("90")),
-        )
+        fx_rates = (FXRate(timestamp=max_ts, pair="USDRUB", rate=Decimal(90)),)
         moex = MoexMarketData(fx_rates=fx_rates)
         ctx = MarketContext(moex_data=moex)
 
@@ -361,14 +364,18 @@ class TestBuildWindowsWithMarketContext:
 
         assert len(captured_contexts) > 0
         for i, captured_ctx in enumerate(captured_contexts):
-            # Window i covers candles[i:i+_WINDOW_SIZE]; max_ts is candles[i+_WINDOW_SIZE-1].timestamp
+            # Window i covers candles[i:i+_WINDOW_SIZE];
+            # max_ts is candles[i+_WINDOW_SIZE-1].timestamp
             window_max_ts = candles[i + _WINDOW_SIZE - 1].timestamp
-            if captured_ctx is not None and captured_ctx.moex_data is not None:
-                if captured_ctx.moex_data.fx_rates is not None:
-                    for rate in captured_ctx.moex_data.fx_rates:
-                        assert rate.timestamp <= window_max_ts, (
-                            f"Window {i}: fx_rate {rate.timestamp} > window max_ts {window_max_ts}"
-                        )
+            if (
+                captured_ctx is not None
+                and captured_ctx.moex_data is not None
+                and captured_ctx.moex_data.fx_rates is not None
+            ):
+                for rate in captured_ctx.moex_data.fx_rates:
+                    assert rate.timestamp <= window_max_ts, (
+                        f"Window {i}: fx_rate {rate.timestamp} > window max_ts {window_max_ts}"
+                    )
 
 
 # ── build_dataset with market_context tests ───────────────────────────────────
@@ -390,7 +397,7 @@ class TestBuildDatasetWithMarketContext:
         from finalayze.ml.training import build_dataset  # noqa: PLC0415
 
         candles = _make_candles(50)
-        features, labels, ts = build_dataset({"SBER": candles}, window_size=_WINDOW_SIZE)
+        features, _labels, _ts = build_dataset({"SBER": candles}, window_size=_WINDOW_SIZE)
         assert isinstance(features, list)
 
     def test_returns_nonempty_with_enough_candles(self) -> None:
@@ -480,9 +487,12 @@ class TestBuildTripleBarrierDatasetWithMarketContext:
 
         assert len(captured_contexts) > 0, "compute_features must have been called"
         for captured_ctx in captured_contexts:
-            if captured_ctx is not None and captured_ctx.moex_data is not None:
-                if captured_ctx.moex_data.fx_rates is not None:
-                    # All fx_rates in the context must be <= the last candle in the WINDOW,
-                    # not the full dataset. We cannot easily check per-window here, but
-                    # the key invariant is that they are not from the full unsliced context.
-                    assert len(captured_ctx.moex_data.fx_rates) <= len(fx_rates)
+            if (
+                captured_ctx is not None
+                and captured_ctx.moex_data is not None
+                and captured_ctx.moex_data.fx_rates is not None
+            ):
+                # All fx_rates in the context must be <= the last candle in the WINDOW,
+                # not the full dataset. We cannot easily check per-window here, but
+                # the key invariant is that they are not from the full unsliced context.
+                assert len(captured_ctx.moex_data.fx_rates) <= len(fx_rates)

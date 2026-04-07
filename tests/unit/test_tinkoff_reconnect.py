@@ -37,13 +37,13 @@ class TestReconnectClient:
         mock_accounts = MagicMock()
         mock_accounts.accounts = [MagicMock(id="new-account-456")]
 
-        with patch.object(broker, "_run_async", return_value=mock_accounts):
-            with patch(
-                "finalayze.execution.tinkoff_broker.AsyncClient"
-            ) as mock_client_cls:
-                mock_new_client = MagicMock()
-                mock_client_cls.return_value = mock_new_client
-                result = broker.reconnect_client()
+        with (
+            patch.object(broker, "_run_async", return_value=mock_accounts),
+            patch("finalayze.execution.tinkoff_broker.AsyncClient") as mock_client_cls,
+        ):
+            mock_new_client = MagicMock()
+            mock_client_cls.return_value = mock_new_client
+            result = broker.reconnect_client()
 
         assert result is True
         assert broker._client is mock_new_client
@@ -58,9 +58,11 @@ class TestReconnectClient:
         mock_accounts = MagicMock()
         mock_accounts.accounts = [MagicMock(id="acc-1")]
 
-        with patch.object(broker, "_run_async", return_value=mock_accounts):
-            with patch("finalayze.execution.tinkoff_broker.AsyncClient"):
-                broker.reconnect_client()
+        with (
+            patch.object(broker, "_run_async", return_value=mock_accounts),
+            patch("finalayze.execution.tinkoff_broker.AsyncClient"),
+        ):
+            broker.reconnect_client()
 
         # close() on the old client's __aexit__ should have been attempted
         # We just verify the client was replaced (close is called internally)
@@ -74,11 +76,11 @@ class TestReconnectClient:
         mock_accounts = MagicMock()
         mock_accounts.accounts = [MagicMock(id="acc-1")]
 
-        with patch.object(broker, "_run_async", return_value=mock_accounts):
-            with patch(
-                "finalayze.execution.tinkoff_broker.AsyncClient"
-            ) as mock_client_cls:
-                broker.reconnect_client()
+        with (
+            patch.object(broker, "_run_async", return_value=mock_accounts),
+            patch("finalayze.execution.tinkoff_broker.AsyncClient") as mock_client_cls,
+        ):
+            broker.reconnect_client()
 
         mock_client_cls.assert_called_once_with("fake_token", target=_TBANK_GRPC_SANDBOX_TARGET)  # noqa: S106
 
@@ -90,11 +92,11 @@ class TestReconnectClient:
         mock_accounts = MagicMock()
         mock_accounts.accounts = [MagicMock(id="acc-1")]
 
-        with patch.object(broker, "_run_async", return_value=mock_accounts):
-            with patch(
-                "finalayze.execution.tinkoff_broker.AsyncClient"
-            ) as mock_client_cls:
-                broker.reconnect_client()
+        with (
+            patch.object(broker, "_run_async", return_value=mock_accounts),
+            patch("finalayze.execution.tinkoff_broker.AsyncClient") as mock_client_cls,
+        ):
+            broker.reconnect_client()
 
         mock_client_cls.assert_called_once_with("fake_token", target=_TBANK_GRPC_TARGET)  # noqa: S106
 
@@ -121,9 +123,11 @@ class TestReconnectClient:
         mock_accounts = MagicMock()
         mock_accounts.accounts = [MagicMock(id="new-id")]
 
-        with patch.object(broker, "_run_async", return_value=mock_accounts):
-            with patch("finalayze.execution.tinkoff_broker.AsyncClient"):
-                broker.reconnect_client()
+        with (
+            patch.object(broker, "_run_async", return_value=mock_accounts),
+            patch("finalayze.execution.tinkoff_broker.AsyncClient"),
+        ):
+            broker.reconnect_client()
 
         assert broker._account_id == "new-id"
 
@@ -139,8 +143,9 @@ class TestReconnectClient:
         mock_accounts.accounts = [MagicMock(id="acc-safe")]
 
         # Patch at instance level before spawning threads
-        with patch.object(broker, "_run_async", return_value=mock_accounts), patch(
-            "finalayze.execution.tinkoff_broker.AsyncClient"
+        with (
+            patch.object(broker, "_run_async", return_value=mock_accounts),
+            patch("finalayze.execution.tinkoff_broker.AsyncClient"),
         ):
 
             def do_reconnect() -> None:

@@ -8,7 +8,6 @@ from decimal import Decimal
 from finalayze.core.schemas import BondPositionRecord
 from finalayze.risk.dv01_sizing import DV01BudgetStep, EqualWeightBondSizer
 
-
 # ── BondPositionRecord tests ─────────────────────────────────────────────
 
 ENTRY_YTM = Decimal("12.50")
@@ -56,9 +55,9 @@ class TestBondPositionRecord:
 
 # ── DV01 dirty-price + transaction costs tests ──────────────────────────
 
-DIRTY_PRICE = Decimal("1030")
-FACE_VALUE_STD = Decimal("1000")
-TRANSACTION_COST = Decimal("5")
+DIRTY_PRICE = Decimal(1030)
+FACE_VALUE_STD = Decimal(1000)
+TRANSACTION_COST = Decimal(5)
 
 
 class TestDV01UnitCostFix:

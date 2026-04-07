@@ -9,16 +9,16 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from finalayze.core.bond_cycle import (
+    _FILL_TIMEOUT_SECONDS,
+    _MAX_SIZING_ITERATIONS,
     BondCycleProcessor,
     BondCycleResult,
     LayerResult,
-    _FILL_TIMEOUT_SECONDS,
-    _MAX_SIZING_ITERATIONS,
 )
 from finalayze.core.layer_ledger import LayerLedger
 from finalayze.core.schemas import (
-    BondPositionRecord,
     DEFAULT_LAYER_CONFIGS,
+    BondPositionRecord,
     PortfolioLayer,
     Signal,
     SignalDirection,
@@ -761,7 +761,7 @@ class TestCouponAlertInBondCycle:
 # ── OFZ rotation tests ─────────────────────────────────────────────────────
 
 
-from finalayze.core.bond_cycle import apply_ofz_rotation
+from finalayze.core.bond_cycle import apply_ofz_rotation  # noqa: E402
 
 
 class TestOFZRotation:

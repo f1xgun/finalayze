@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from finalayze.execution.tinkoff_broker import TinkoffBroker
-
 
 # ---------- helpers ----------
 
@@ -19,8 +19,7 @@ FAKE_TOKEN = "fake_token"  # noqa: S105
 def _make_broker() -> TinkoffBroker:
     """Create a TinkoffBroker with mocked dependencies for close() testing."""
     registry = MagicMock()
-    broker = TinkoffBroker(token=FAKE_TOKEN, registry=registry, sandbox=True)
-    return broker
+    return TinkoffBroker(token=FAKE_TOKEN, registry=registry, sandbox=True)
 
 
 def _setup_broker_with_loop(broker: TinkoffBroker) -> asyncio.AbstractEventLoop:
@@ -87,10 +86,8 @@ class TestTinkoffBrokerClose:
                 error="loop already stopped",
             )
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 original_call_soon(loop.stop)
-            except Exception:
-                pass
 
     def test_close_cleans_up_references_even_after_errors(self) -> None:
         """_client, _services, _loop must be None even after errors."""
@@ -109,7 +106,7 @@ class TestTinkoffBrokerClose:
     def test_close_silent_when_no_errors(self) -> None:
         """close() must not log warnings when cleanup succeeds."""
         broker = _make_broker()
-        loop = _setup_broker_with_loop(broker)
+        _setup_broker_with_loop(broker)
 
         broker._client.__aexit__ = AsyncMock(return_value=None)
 

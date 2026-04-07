@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock
 
@@ -306,8 +306,8 @@ class TestLayerLedgerModel:
             entry_ytm_pct=Decimal("12.50"),
             entry_price=Decimal("1030.00"),
             entry_clean_pct=Decimal("98.50"),
-            entry_date=datetime(2026, 3, 14, tzinfo=timezone.utc),
-            updated_at=datetime(2026, 3, 14, tzinfo=timezone.utc),
+            entry_date=datetime(2026, 3, 14, tzinfo=UTC),
+            updated_at=datetime(2026, 3, 14, tzinfo=UTC),
         )
         assert model.layer_id == "core"
         assert model.symbol == "SU26244RMFS2"
@@ -338,8 +338,8 @@ class TestLayerLedgerOrmRoundTrip:
             entry_ytm_pct=Decimal("12.50"),
             entry_price=Decimal("1030.00"),
             entry_clean_pct=Decimal("98.50"),
-            entry_date=datetime(2026, 3, 14, tzinfo=timezone.utc),
-            updated_at=datetime(2026, 3, 14, tzinfo=timezone.utc),
+            entry_date=datetime(2026, 3, 14, tzinfo=UTC),
+            updated_at=datetime(2026, 3, 14, tzinfo=UTC),
         )
         ledger = LayerLedger.from_orm_rows("core", Decimal(500000), [row])
         assert "SU26244RMFS2" in ledger.bond_positions
@@ -389,7 +389,7 @@ class TestReconcileWithBroker:
             cash=Decimal(500000),
             positions={"BBG000FIGI01": RECON_BROKER_QTY},
             equity=Decimal(1000000),
-            timestamp=datetime(2026, 3, 14, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 3, 14, tzinfo=UTC),
         )
         ledgers = {
             "core": LayerLedger(layer_id="core", cash=Decimal(500000)),
@@ -407,7 +407,7 @@ class TestReconcileWithBroker:
             cash=Decimal(500000),
             positions={"BBG000FIGI01": RECON_BROKER_QTY},
             equity=Decimal(1000000),
-            timestamp=datetime(2026, 3, 14, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 3, 14, tzinfo=UTC),
         )
         ledger = LayerLedger(layer_id="core", cash=Decimal(500000))
         ledger.add_bond_position(_make_bond_record(quantity=RECON_LEDGER_QTY))
@@ -426,7 +426,7 @@ class TestReconcileWithBroker:
             cash=Decimal(500000),
             positions={"BBG000FIGI02": Decimal(5)},
             equity=Decimal(1000000),
-            timestamp=datetime(2026, 3, 14, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 3, 14, tzinfo=UTC),
         )
         ledgers = {"core": LayerLedger(layer_id="core", cash=Decimal(500000))}
         registry = _make_mock_registry()
@@ -440,7 +440,7 @@ class TestReconcileWithBroker:
             cash=Decimal(500000),
             positions={"BBG000FIGI03": Decimal(100)},
             equity=Decimal(1000000),
-            timestamp=datetime(2026, 3, 14, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 3, 14, tzinfo=UTC),
         )
         ledgers = {"core": LayerLedger(layer_id="core", cash=Decimal(500000))}
         registry = _make_mock_registry()
@@ -454,7 +454,7 @@ class TestReconcileWithBroker:
             cash=Decimal(500000),
             positions={"BBG000FIGI01": Decimal(5)},
             equity=Decimal(1000000),
-            timestamp=datetime(2026, 3, 14, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 3, 14, tzinfo=UTC),
         )
         ledgers = {"core": LayerLedger(layer_id="core", cash=Decimal(500000))}
         registry = _make_mock_registry()

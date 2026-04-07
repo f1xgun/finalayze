@@ -195,7 +195,7 @@ class TestWalkForwardUsesLastFold:
     """Verify that train_walk_forward always saves the last fold's models,
     not the fold with the highest accuracy (no cherry-picking / selection bias)."""
 
-    def test_last_fold_models_saved_not_best_accuracy(self, tmp_path: Path) -> None:
+    def test_last_fold_models_saved_not_best_accuracy(self, tmp_path: Path) -> None:  # noqa: PLR0915
         """Even when an earlier fold has higher accuracy, the last fold's models are saved."""
         mod = _load_script_module()
 

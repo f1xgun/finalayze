@@ -1153,11 +1153,13 @@ class TestEventStrategyBypass:
         ]
         combiner = StrategyCombiner(strategies)
         candles = _make_candles()
-        config = self._base_config({
-            "dividend_gap": {"enabled": True, "weight": _EVENT_WEIGHT},
-            "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
-            "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
-        })
+        config = self._base_config(
+            {
+                "dividend_gap": {"enabled": True, "weight": _EVENT_WEIGHT},
+                "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
+                "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
+            }
+        )
         with (
             patch.object(combiner, "_load_config", return_value=config),
             patch.object(combiner, "_compute_adx_regime", return_value=(40.0, "trend")),
@@ -1177,11 +1179,13 @@ class TestEventStrategyBypass:
         ]
         combiner = StrategyCombiner(strategies)
         candles = _make_candles()
-        config = self._base_config({
-            "cbr_calendar": {"enabled": True, "weight": _EVENT_WEIGHT},
-            "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
-            "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
-        })
+        config = self._base_config(
+            {
+                "cbr_calendar": {"enabled": True, "weight": _EVENT_WEIGHT},
+                "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
+                "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
+            }
+        )
         with (
             patch.object(combiner, "_load_config", return_value=config),
             patch.object(combiner, "_compute_adx_regime", return_value=(10.0, "mr")),
@@ -1201,11 +1205,13 @@ class TestEventStrategyBypass:
         ]
         combiner = StrategyCombiner(strategies)
         candles = _make_candles()
-        config = self._base_config({
-            "dividend_gap": {"enabled": True, "weight": _EVENT_WEIGHT},
-            "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
-            "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
-        })
+        config = self._base_config(
+            {
+                "dividend_gap": {"enabled": True, "weight": _EVENT_WEIGHT},
+                "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
+                "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
+            }
+        )
         with (
             patch.object(combiner, "_load_config", return_value=config),
             patch.object(combiner, "_compute_adx_regime", return_value=(40.0, "trend")),
@@ -1225,11 +1231,13 @@ class TestEventStrategyBypass:
         ]
         combiner = StrategyCombiner(strategies)
         candles = _make_candles()
-        config = self._base_config({
-            "cbr_calendar": {"enabled": True, "weight": _EVENT_WEIGHT},
-            "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
-            "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
-        })
+        config = self._base_config(
+            {
+                "cbr_calendar": {"enabled": True, "weight": _EVENT_WEIGHT},
+                "momentum": {"enabled": True, "weight": _MOMENTUM_WEIGHT},
+                "mean_reversion": {"enabled": True, "weight": _MR_WEIGHT},
+            }
+        )
         with (
             patch.object(combiner, "_load_config", return_value=config),
             patch.object(combiner, "_compute_adx_regime", return_value=(10.0, "mr")),

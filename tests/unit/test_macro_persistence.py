@@ -50,11 +50,14 @@ def test_persist_snapshot_creates_model() -> None:
     from finalayze.core.models import MacroSnapshotModel
 
     mock_session = AsyncMock()
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
+    # session.add is sync in SQLAlchemy -- use MagicMock
+    mock_session.add = MagicMock()
 
-    async def mock_factory():  # noqa: ANN202
-        return mock_session
+    # Factory must return an async context manager
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_factory = MagicMock(return_value=mock_ctx)
 
     provider = MacroContextProvider()
     cache = MacroCacheService(provider, db_session_factory=mock_factory)

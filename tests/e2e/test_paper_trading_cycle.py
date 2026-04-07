@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid as _uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from config.modes import WorkMode
@@ -191,10 +191,11 @@ def instrument_registry() -> InstrumentRegistry:
     from finalayze.markets.instruments import Instrument
 
     registry = build_default_registry()
-    # Patch US instruments with dummy FIGIs so _process_instrument doesn't skip them
-    for inst in list(registry._instruments.values()):
+    # Patch US instruments with dummy FIGIs so _process_instrument doesn't skip them.
+    # Key is (symbol, market_id) tuple, not just symbol.
+    for key, inst in list(registry._instruments.items()):
         if inst.market_id == "us" and not inst.figi:
-            registry._instruments[inst.symbol] = Instrument(
+            registry._instruments[key] = Instrument(
                 symbol=inst.symbol,
                 market_id=inst.market_id,
                 name=inst.name,
@@ -245,13 +246,13 @@ def trading_loop(
     """Build a TradingLoop with all external dependencies mocked."""
     # Mock fetchers: return BUY-signal candles for each symbol in their market
     us_fetcher = MagicMock()
-    us_fetcher.fetch_candles.side_effect = lambda symbol, **kwargs: (
-        _make_buy_signal_candles(symbol, "us")
+    us_fetcher.fetch_candles.side_effect = lambda symbol, **kwargs: _make_buy_signal_candles(
+        symbol, "us"
     )
 
     moex_fetcher = MagicMock()
-    moex_fetcher.fetch_candles.side_effect = lambda symbol, **kwargs: (
-        _make_buy_signal_candles(symbol, "moex")
+    moex_fetcher.fetch_candles.side_effect = lambda symbol, **kwargs: _make_buy_signal_candles(
+        symbol, "moex"
     )
 
     fetchers: dict[str, object] = {"us": us_fetcher, "moex": moex_fetcher}
@@ -307,6 +308,17 @@ def trading_loop(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _freeze_wall_clock():
+    """Freeze datetime.now() in trading_loop so synthetic candles aren't stale."""
+    with patch(
+        "finalayze.orchestration.trading_loop.datetime",
+        wraps=datetime,
+    ) as mock_dt:
+        mock_dt.now.return_value = MARKET_OPEN_DT
+        yield mock_dt
 
 
 @pytest.mark.e2e

@@ -33,11 +33,7 @@ def _make_html(messages: list[dict]) -> str:
         dt = msg.get("dt", _NOW - timedelta(minutes=2))
         dt_str = dt.isoformat()
 
-        text_div = (
-            f'<div class="tgme_widget_message_text">{text}</div>'
-            if text
-            else ""
-        )
+        text_div = f'<div class="tgme_widget_message_text">{text}</div>' if text else ""
         widgets.append(
             f'<div class="tgme_widget_message_wrap">'
             f'  <div class="tgme_widget_message" data-post="{channel}/{msg_id}">'
@@ -51,7 +47,9 @@ def _make_html(messages: list[dict]) -> str:
 
 
 def _mock_response(html: str, status: int = 200) -> httpx.Response:
-    return httpx.Response(status_code=status, text=html, request=httpx.Request("GET", "https://t.me/s/test"))
+    return httpx.Response(
+        status_code=status, text=html, request=httpx.Request("GET", "https://t.me/s/test")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +79,8 @@ class TestTelegramChannelReaderUnconfigured:
         assert reader.configured is True
 
 
+_ASYNC_CLIENT_PATH = "finalayze.data.fetchers.telegram_reader.httpx.AsyncClient"
+
 # ---------------------------------------------------------------------------
 # Tests — configured (mocked HTTP)
 # ---------------------------------------------------------------------------
@@ -89,15 +89,21 @@ class TestTelegramChannelReaderUnconfigured:
 class TestTelegramChannelReaderConfigured:
     @pytest.mark.asyncio
     async def test_fetch_returns_news_articles(self) -> None:
-        html = _make_html([
-            {"text": "Breaking: Sberbank reports record profits in Q4", "id": 100, "channel": "fin_news"},
-        ])
+        html = _make_html(
+            [
+                {
+                    "text": "Breaking: Sberbank reports record profits in Q4",
+                    "id": 100,
+                    "channel": "fin_news",
+                }
+            ]
+        )
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get = AsyncMock(return_value=_mock_response(html))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("finalayze.data.fetchers.telegram_reader.httpx.AsyncClient", return_value=mock_client):
+        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             reader = TelegramChannelReader(channels=["@fin_news"])
             articles = await reader.fetch_recent_messages()
 
@@ -108,13 +114,21 @@ class TestTelegramChannelReaderConfigured:
 
     @pytest.mark.asyncio
     async def test_source_format(self) -> None:
-        html = _make_html([{"text": "Test message with enough text", "id": 42, "channel": "fin_news"}])
+        html = _make_html(
+            [
+                {
+                    "text": "Test message with enough text",
+                    "id": 42,
+                    "channel": "fin_news",
+                }
+            ]
+        )
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get = AsyncMock(return_value=_mock_response(html))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("finalayze.data.fetchers.telegram_reader.httpx.AsyncClient", return_value=mock_client):
+        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             reader = TelegramChannelReader(channels=["@fin_news"])
             articles = await reader.fetch_recent_messages()
 
@@ -122,13 +136,21 @@ class TestTelegramChannelReaderConfigured:
 
     @pytest.mark.asyncio
     async def test_url_contains_data_post(self) -> None:
-        html = _make_html([{"text": "Another test message content", "id": 42, "channel": "fin_news"}])
+        html = _make_html(
+            [
+                {
+                    "text": "Another test message content",
+                    "id": 42,
+                    "channel": "fin_news",
+                }
+            ]
+        )
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get = AsyncMock(return_value=_mock_response(html))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("finalayze.data.fetchers.telegram_reader.httpx.AsyncClient", return_value=mock_client):
+        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             reader = TelegramChannelReader(channels=["@fin_news"])
             articles = await reader.fetch_recent_messages()
 
@@ -136,16 +158,18 @@ class TestTelegramChannelReaderConfigured:
 
     @pytest.mark.asyncio
     async def test_skips_messages_without_text(self) -> None:
-        html = _make_html([
-            {"text": "", "id": 1},
-            {"text": "Valid message with content", "id": 2},
-        ])
+        html = _make_html(
+            [
+                {"text": "", "id": 1},
+                {"text": "Valid message with content", "id": 2},
+            ]
+        )
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get = AsyncMock(return_value=_mock_response(html))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("finalayze.data.fetchers.telegram_reader.httpx.AsyncClient", return_value=mock_client):
+        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             reader = TelegramChannelReader(channels=["@test"])
             articles = await reader.fetch_recent_messages()
 
@@ -154,16 +178,18 @@ class TestTelegramChannelReaderConfigured:
 
     @pytest.mark.asyncio
     async def test_skips_short_messages(self) -> None:
-        html = _make_html([
-            {"text": "Short", "id": 1},
-            {"text": "This message is long enough to be accepted", "id": 2},
-        ])
+        html = _make_html(
+            [
+                {"text": "Short", "id": 1},
+                {"text": "This message is long enough to be accepted", "id": 2},
+            ]
+        )
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get = AsyncMock(return_value=_mock_response(html))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("finalayze.data.fetchers.telegram_reader.httpx.AsyncClient", return_value=mock_client):
+        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             reader = TelegramChannelReader(channels=["@test"])
             articles = await reader.fetch_recent_messages()
 
@@ -171,18 +197,36 @@ class TestTelegramChannelReaderConfigured:
 
     @pytest.mark.asyncio
     async def test_multiple_channels_combined(self) -> None:
-        html_ch1 = _make_html([{"text": "Message from channel one here", "id": 1, "channel": "ch1"}])
-        html_ch2 = _make_html([{"text": "Message from channel two here", "id": 2, "channel": "ch2"}])
+        html_ch1 = _make_html(
+            [
+                {
+                    "text": "Message from channel one here",
+                    "id": 1,
+                    "channel": "ch1",
+                }
+            ]
+        )
+        html_ch2 = _make_html(
+            [
+                {
+                    "text": "Message from channel two here",
+                    "id": 2,
+                    "channel": "ch2",
+                }
+            ]
+        )
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.get = AsyncMock(side_effect=[
-            _mock_response(html_ch1),
-            _mock_response(html_ch2),
-        ])
+        mock_client.get = AsyncMock(
+            side_effect=[
+                _mock_response(html_ch1),
+                _mock_response(html_ch2),
+            ]
+        )
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("finalayze.data.fetchers.telegram_reader.httpx.AsyncClient", return_value=mock_client):
+        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             reader = TelegramChannelReader(channels=["@ch1", "@ch2"])
             articles = await reader.fetch_recent_messages()
 
@@ -199,7 +243,7 @@ class TestTelegramChannelReaderConfigured:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("finalayze.data.fetchers.telegram_reader.httpx.AsyncClient", return_value=mock_client):
+        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             reader = TelegramChannelReader(channels=["@test"])
             articles = await reader.fetch_recent_messages()
 
@@ -208,17 +252,31 @@ class TestTelegramChannelReaderConfigured:
 
     @pytest.mark.asyncio
     async def test_channel_error_continues_others(self) -> None:
-        html_good = _make_html([{"text": "Good message from second channel", "id": 1, "channel": "good"}])
+        html_good = _make_html(
+            [
+                {
+                    "text": "Good message from second channel",
+                    "id": 1,
+                    "channel": "good",
+                }
+            ]
+        )
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.get = AsyncMock(side_effect=[
-            httpx.HTTPStatusError("Not Found", request=httpx.Request("GET", "https://t.me/s/bad"), response=_mock_response("", 404)),
-            _mock_response(html_good),
-        ])
+        mock_client.get = AsyncMock(
+            side_effect=[
+                httpx.HTTPStatusError(
+                    "Not Found",
+                    request=httpx.Request("GET", "https://t.me/s/bad"),
+                    response=_mock_response("", 404),
+                ),
+                _mock_response(html_good),
+            ]
+        )
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("finalayze.data.fetchers.telegram_reader.httpx.AsyncClient", return_value=mock_client):
+        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             reader = TelegramChannelReader(channels=["@bad_channel", "@good_channel"])
             articles = await reader.fetch_recent_messages()
 
@@ -229,16 +287,18 @@ class TestTelegramChannelReaderConfigured:
     async def test_filters_old_messages(self) -> None:
         old_dt = _NOW - timedelta(hours=2)
         recent_dt = _NOW - timedelta(minutes=5)
-        html = _make_html([
-            {"text": "Old message should be filtered out", "id": 1, "dt": old_dt},
-            {"text": "Recent message should be included", "id": 2, "dt": recent_dt},
-        ])
+        html = _make_html(
+            [
+                {"text": "Old message should be filtered out", "id": 1, "dt": old_dt},
+                {"text": "Recent message should be included", "id": 2, "dt": recent_dt},
+            ]
+        )
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get = AsyncMock(return_value=_mock_response(html))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("finalayze.data.fetchers.telegram_reader.httpx.AsyncClient", return_value=mock_client):
+        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             reader = TelegramChannelReader(channels=["@test"])
             articles = await reader.fetch_recent_messages(since_minutes=30)
 
@@ -248,13 +308,21 @@ class TestTelegramChannelReaderConfigured:
     @pytest.mark.asyncio
     async def test_channels_override(self) -> None:
         """Passing channels to fetch_recent_messages overrides constructor list."""
-        html = _make_html([{"text": "Override channel message here", "id": 1, "channel": "override"}])
+        html = _make_html(
+            [
+                {
+                    "text": "Override channel message here",
+                    "id": 1,
+                    "channel": "override",
+                }
+            ]
+        )
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get = AsyncMock(return_value=_mock_response(html))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("finalayze.data.fetchers.telegram_reader.httpx.AsyncClient", return_value=mock_client):
+        with patch(_ASYNC_CLIENT_PATH, return_value=mock_client):
             reader = TelegramChannelReader(channels=["@original"])
             articles = await reader.fetch_recent_messages(channels=["@override"])
 
@@ -273,9 +341,11 @@ class TestTelegramChannelReaderDedup:
     @pytest.mark.asyncio
     async def test_dedup_skips_same_url_on_second_fetch(self) -> None:
         """Same message URL returned on first fetch, skipped on second."""
-        html = _make_html([
-            {"text": "Breaking news about Sberbank today", "id": 100, "channel": "fin_news"},
-        ])
+        html = _make_html(
+            [
+                {"text": "Breaking news about Sberbank today", "id": 100, "channel": "fin_news"},
+            ]
+        )
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get = AsyncMock(return_value=_mock_response(html))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -296,10 +366,12 @@ class TestTelegramChannelReaderDedup:
     @pytest.mark.asyncio
     async def test_dedup_different_urls_returned_normally(self) -> None:
         """Messages with different URLs are both returned."""
-        html = _make_html([
-            {"text": "First message about markets today", "id": 100, "channel": "fin_news"},
-            {"text": "Second different message about bonds", "id": 101, "channel": "fin_news"},
-        ])
+        html = _make_html(
+            [
+                {"text": "First message about markets today", "id": 100, "channel": "fin_news"},
+                {"text": "Second different message about bonds", "id": 101, "channel": "fin_news"},
+            ]
+        )
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get = AsyncMock(return_value=_mock_response(html))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)

@@ -191,13 +191,13 @@ def _make_trading_loop(
     cross_breaker = CrossMarketCircuitBreaker()
 
     us_fetcher = MagicMock()
-    us_fetcher.fetch_candles.side_effect = lambda symbol, **kwargs: (
-        _make_buy_signal_candles(symbol, "us")
+    us_fetcher.fetch_candles.side_effect = lambda symbol, **kwargs: _make_buy_signal_candles(
+        symbol, "us"
     )
 
     moex_fetcher = MagicMock()
-    moex_fetcher.fetch_candles.side_effect = lambda symbol, **kwargs: (
-        _make_buy_signal_candles(symbol, "moex")
+    moex_fetcher.fetch_candles.side_effect = lambda symbol, **kwargs: _make_buy_signal_candles(
+        symbol, "moex"
     )
 
     news_fetcher = MagicMock()
@@ -248,9 +248,9 @@ def instrument_registry() -> InstrumentRegistry:
 
     registry = build_default_registry()
     # Patch US instruments with dummy FIGIs so _process_instrument doesn't skip them
-    for inst in list(registry._instruments.values()):
+    for key, inst in list(registry._instruments.items()):
         if inst.market_id == "us" and not inst.figi:
-            registry._instruments[inst.symbol] = Instrument(
+            registry._instruments[key] = Instrument(
                 symbol=inst.symbol,
                 market_id=inst.market_id,
                 name=inst.name,
@@ -487,13 +487,16 @@ class TestCircuitBreakerTripAndRecovery:
         circuit_breakers["us"].reset_manual()
         assert circuit_breakers["us"].level == CircuitLevel.NORMAL
 
-        # Now configure the broker to return BASELINE_EQUITY so no re-trip happens
+        # Now configure the broker to return BASELINE_EQUITY so no re-trip happens.
+        # Clear positions so BUY signals are not skipped as "already positioned".
         us_broker_liquidate.get_portfolio.return_value = PortfolioState(
             cash=INITIAL_CASH,
-            positions={"AAPL": POSITION_QTY_AAPL},
+            positions={},
             equity=BASELINE_EQUITY,
             timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
+        us_broker_liquidate.get_positions.return_value = {}
+        us_broker_liquidate.has_position.return_value = False
 
         trading_loop_for_trip._baseline_equities = {
             "us": BASELINE_EQUITY,
@@ -503,7 +506,16 @@ class TestCircuitBreakerTripAndRecovery:
         # Reset submit_order call count to isolate post-reset behaviour
         us_broker_liquidate.submit_order.reset_mock()
 
-        trading_loop_for_trip._strategy_cycle()
+        # Freeze wall-clock time so _is_candle_stale (which uses datetime.now)
+        # sees candle timestamps as fresh.  Candles span 2026-01-01..~2026-03-05;
+        # MARKET_OPEN_DT is 2026-02-23 — well within the 48-hour window of the
+        # last candle.
+        with patch(
+            "finalayze.orchestration.trading_loop.datetime",
+            wraps=datetime,
+        ) as mock_dt:
+            mock_dt.now.return_value = MARKET_OPEN_DT
+            trading_loop_for_trip._strategy_cycle()
 
         # Level must still be NORMAL (not re-tripped)
         assert circuit_breakers["us"].level == CircuitLevel.NORMAL

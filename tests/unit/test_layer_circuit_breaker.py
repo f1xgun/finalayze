@@ -63,7 +63,9 @@ class TestCircuitLevel:
         assert CircuitLevel.LIQUIDATE == 3
 
     def test_ordering(self) -> None:
-        assert CircuitLevel.NORMAL < CircuitLevel.CAUTION < CircuitLevel.HALT < CircuitLevel.LIQUIDATE
+        assert (
+            CircuitLevel.NORMAL < CircuitLevel.CAUTION < CircuitLevel.HALT < CircuitLevel.LIQUIDATE
+        )
 
 
 class TestLayerCircuitBreakerNormal:

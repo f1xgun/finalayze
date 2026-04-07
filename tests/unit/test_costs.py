@@ -87,9 +87,7 @@ class TestMoexBondCosts:
         price_rub = OFZ_CLEAN_PRICE_PCT / Decimal(100) * OFZ_FACE_VALUE
         cost = MOEX_BOND_COSTS.total_cost(price_rub, OFZ_QTY)
 
-        expected_commission = max(
-            Decimal("0.01"), price_rub * OFZ_QTY * Decimal("0.0005")
-        )
+        expected_commission = max(Decimal("0.01"), price_rub * OFZ_QTY * Decimal("0.0005"))
         spread = price_rub * Decimal(5) / _BPS_DIVISOR
         slippage = price_rub * Decimal(3) / _BPS_DIVISOR
         expected = expected_commission + (spread + slippage) * OFZ_QTY
@@ -195,9 +193,7 @@ class TestMoexBondCosts:
     def test_moex_costs_regression(self) -> None:
         """MOEX_COSTS still produces expected values after bond cost additions."""
         cost = MOEX_COSTS.total_cost(MOEX_PRICE, MOEX_QTY)
-        expected_commission = max(
-            Decimal("0.10"), MOEX_PRICE * MOEX_QTY * Decimal("0.0004")
-        )
+        expected_commission = max(Decimal("0.10"), MOEX_PRICE * MOEX_QTY * Decimal("0.0004"))
         spread = MOEX_PRICE * Decimal(10) / _BPS_DIVISOR
         slippage = MOEX_PRICE * Decimal(7) / _BPS_DIVISOR
         expected = expected_commission + (spread + slippage) * MOEX_QTY

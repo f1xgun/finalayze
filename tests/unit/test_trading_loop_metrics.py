@@ -96,6 +96,7 @@ class TestProcessInstrumentMetrics:
         loop._get_cached_portfolio = TradingLoop._get_cached_portfolio.__get__(loop)
 
         broker = MagicMock()
+        broker.has_position.return_value = False
         loop._broker_router.route.return_value = broker
 
         # Mock _compute_total_equity_base
@@ -138,20 +139,29 @@ class TestMarketCycleMetrics:
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _fake_candle() -> MagicMock:
-    c = MagicMock()
-    c.close = Decimal("150.00")
-    c.high = Decimal("155.00")
-    c.low = Decimal("145.00")
-    c.open = Decimal("148.00")
-    c.volume = 1000
-    return c
+def _fake_candle() -> object:
+    from datetime import UTC, datetime, timedelta
+
+    from finalayze.core.schemas import Candle
+
+    return Candle(
+        symbol="AAPL",
+        market_id="us",
+        timeframe="1d",
+        timestamp=datetime.now(UTC) - timedelta(hours=1),
+        open=Decimal("148.00"),
+        high=Decimal("155.00"),
+        low=Decimal("145.00"),
+        close=Decimal("150.00"),
+        volume=1000,
+    )
 
 
 def _make_loop_stub(*, metrics: MagicMock | None = None) -> MagicMock:
     """Create a MagicMock that acts as a TradingLoop instance with enough attributes."""
     import threading
 
+    from finalayze.core.trading_loop import TradingLoop
     from finalayze.execution.broker_base import OrderRequest
     from finalayze.risk.circuit_breaker import CircuitLevel
 
@@ -168,6 +178,7 @@ def _make_loop_stub(*, metrics: MagicMock | None = None) -> MagicMock:
     loop._metrics = metrics
     loop._alerter = MagicMock()
     loop._broker_router = MagicMock()
+    loop._broker_router.route.return_value.has_position.return_value = False
     loop._strategy = MagicMock()
     loop._registry = MagicMock()
     loop._settings = MagicMock()
@@ -178,4 +189,12 @@ def _make_loop_stub(*, metrics: MagicMock | None = None) -> MagicMock:
     loop._circuit_breakers = {}
     loop._fx = MagicMock()
     loop._cycle_portfolio_cache = {}
+    loop._is_candle_stale = TradingLoop._is_candle_stale
+    loop._health_monitor = None
+    loop._cycle_instruments_processed = 0
+    loop._cycle_signals_generated = 0
+    loop._cycle_orders_submitted = 0
+    loop._cycle_orders_filled = 0
+    loop._cycle_errors_caught = 0
+    loop._cycle_exited_symbols = set()
     return loop
