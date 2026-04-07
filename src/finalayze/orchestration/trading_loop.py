@@ -282,6 +282,9 @@ class TradingLoop:
         self._cycle_orders_filled = 0
         self._cycle_errors_caught = 0
         self._cycle_exited_symbols = set()
+        self._cycle_dropped_no_bars = 0
+        self._cycle_dropped_below_threshold = 0
+        self._cycle_dropped_pre_trade = 0
 
     # ── Candle staleness ──────────────────────────────────────────────────
 
@@ -1351,6 +1354,9 @@ class TradingLoop:
                     equity_rub=equity_rub,
                     drawdown_pct=drawdown_pct,
                     circuit_breaker_level=cb_level,
+                    signals_dropped_no_bars=self._cycle_dropped_no_bars,
+                    signals_dropped_below_threshold=self._cycle_dropped_below_threshold,
+                    signals_dropped_pre_trade=self._cycle_dropped_pre_trade,
                 )
                 self._validation_logger.log_cycle(entry)
                 holds = (
@@ -1601,6 +1607,7 @@ class TradingLoop:
         candles = normalizer.normalize_batch(candles)
         if not candles:
             _log.warning("all_candles_invalid", symbol=instrument.symbol, market=market_id)
+            self._cycle_dropped_no_bars += 1
             return
 
         # DATA-02: Skip instrument if latest candle is stale
@@ -1644,7 +1651,8 @@ class TradingLoop:
             has_open_position=has_open_position,
         )
         if signal is None:
-            _log.debug("signal_hold", symbol=instrument.symbol, segment=seg_id)
+            _log.info("signal_dropped_below_threshold", symbol=instrument.symbol, segment=seg_id)
+            self._cycle_dropped_below_threshold += 1
             return
 
         # Skip BUY when position already open — prevent infinite accumulation
@@ -1815,6 +1823,7 @@ class TradingLoop:
                 strategy=signal.strategy_name,
                 violations=pre_result.violations,
             )
+            self._cycle_dropped_pre_trade += 1
             return
 
         price = candles[-1].close if candles else _ZERO

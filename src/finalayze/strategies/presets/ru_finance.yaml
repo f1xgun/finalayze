@@ -22,7 +22,7 @@ strategies:
       rsi_oversold_mr: 25
       rsi_overbought_mr: 75
   event_driven:
-    enabled: false
+    enabled: true
     weight: 0.15
     params:
       min_sentiment: 0.6

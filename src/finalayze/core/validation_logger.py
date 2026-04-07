@@ -31,6 +31,9 @@ class CycleLogEntry:
     equity_rub: float
     drawdown_pct: float
     circuit_breaker_level: int
+    signals_dropped_no_bars: int = 0
+    signals_dropped_below_threshold: int = 0
+    signals_dropped_pre_trade: int = 0
 
 
 class ValidationLogger:
