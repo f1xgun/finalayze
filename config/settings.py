@@ -157,6 +157,12 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_mode_requirements(self) -> Settings:
         """Ensure required keys are set for non-DEBUG/TEST modes."""
+        import os  # noqa: PLC0415
+
+        # Sandbox safety: default to MINIMAL rollout unless explicitly overridden
+        if self.mode == WorkMode.SANDBOX and not os.environ.get("FINALAYZE_ROLLOUT_PHASE"):
+            self.rollout_phase = RolloutPhase.MINIMAL
+
         # DEBUG, TEST, and SANDBOX modes skip credential validation
         # (SANDBOX uses stubs for missing services)
         if self.mode in (WorkMode.DEBUG, WorkMode.TEST, WorkMode.SANDBOX):

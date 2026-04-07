@@ -35,6 +35,7 @@ try:
     from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 except ImportError:  # pragma: no cover
     SQLAlchemyJobStore = None
+from finalayze.data.moex_calendar import is_moex_holiday
 from finalayze.data.normalizer import DataNormalizer
 from finalayze.markets.currency import CurrencyConverter
 from finalayze.markets.schedule import SCHEDULES
@@ -85,7 +86,7 @@ _SENTIMENT_HALF_LIFE_HOURS = 4.0
 _SENTIMENT_DECAY_LAMBDA = math.log(2) / _SENTIMENT_HALF_LIFE_HOURS  # ~0.1733
 _ZERO = Decimal(0)
 _WEEKEND_WEEKDAY = 5  # Saturday=5, Sunday=6
-_STALENESS_THRESHOLD_HOURS: float = 48.0  # 2x daily timeframe; skip if latest candle older
+_STALENESS_THRESHOLD_HOURS: float = 72.0  # 3x daily; covers weekends + calendar-aware holidays
 _ATR_MULTIPLIER_US = Decimal("2.0")
 _ATR_MULTIPLIER_MOEX = Decimal("2.5")
 _MARKET_CURRENCY: dict[str, str] = {"us": "USD", "moex": "RUB"}
@@ -288,16 +289,34 @@ class TradingLoop:
     def _is_candle_stale(latest_ts: datetime, threshold_hours: float) -> bool:
         """Return True if the latest candle timestamp is older than threshold.
 
+        Calendar-aware: subtracts weekends and MOEX holidays from the age
+        so that Monday mornings and post-New-Year cycles are not falsely
+        flagged as stale.
+
         Args:
             latest_ts: Timestamp of the most recent candle (UTC).
             threshold_hours: Maximum acceptable age in hours.
 
         Returns:
-            True if candle data is stale and should be skipped.
+            True if candle data is genuinely stale after accounting for
+            non-trading days.
         """
         now = datetime.now(UTC)
         age = now - latest_ts
-        return age >= timedelta(hours=threshold_hours)
+        # Quick path: if within threshold even counting all hours, not stale
+        if age < timedelta(hours=threshold_hours):
+            return False
+        # Count non-trading days between latest_ts and now
+        non_trading_days = 0
+        check_date = latest_ts.date() + timedelta(days=1)
+        end_date = now.date()
+        while check_date <= end_date:
+            if check_date.weekday() >= 5 or is_moex_holiday(check_date):
+                non_trading_days += 1
+            check_date += timedelta(days=1)
+        # Subtract non-trading days from the age
+        adjusted_age = age - timedelta(days=non_trading_days)
+        return adjusted_age >= timedelta(hours=threshold_hours)
 
     # ── gRPC reconnection ────────────────────────────────────────────────
 
