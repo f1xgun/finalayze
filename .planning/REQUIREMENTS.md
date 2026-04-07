@@ -49,7 +49,7 @@ Requirements for Agent Intelligence & Experiment Framework milestone.
 - [x] **SANDBOX-FIX-07**: `FINALAYZE_LLM_API_KEY` documented and event_driven enabled for ru_blue_chips, ru_energy, ru_finance — news pipeline activated for MOEX
 - [x] **SANDBOX-FIX-08**: Per-gate signal drop counters in ValidationLogger — instruments_no_bars, signals_below_threshold, signals_pre_trade_rejected tracked separately
 - [ ] **SANDBOX-FIX-09**: ML quality gate bug: profit_factor gate populated with actual PF from fold predictions — gate no longer always fails with default 1.0
-- [ ] **SANDBOX-FIX-10**: ML quality gate: Brier score evaluated on calibrated probabilities — calibrator applied during walk-forward evaluation
+- [x] **SANDBOX-FIX-10**: ML quality gate: Brier score evaluated on calibrated probabilities — calibrator applied during walk-forward evaluation
 
 ## Future Requirements
 
