@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-04-07T17:50:01.642Z",
+  "phase": "32",
+  "phase_name": "Critical Sandbox Fixes",
+  "phase_dir": ".planning/phases/32-critical-sandbox-fixes",
+  "plan": 2,
+  "task": 1,
+  "total_tasks": 2,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": "32-01-T1", "name": "Fix _CANDLE_LOOKBACK + kill switch startup check", "status": "done", "commit": "2760f02"},
+    {"id": "32-01-T2", "name": "Sandbox rollout default MINIMAL + holiday-aware staleness", "status": "done", "commit": "ae22dfb"},
+    {"id": "32-03-T1", "name": "ML profit_factor gate + calibrated Brier parameter", "status": "done", "commit": "a8d861e"}
+  ],
+  "remaining_tasks": [
+    {"id": "32-02-T1", "name": "CachingFetcher + RateLimiter wiring in sandbox scripts", "status": "not_started"},
+    {"id": "32-02-T2", "name": "Enable event_driven for ru_* presets + per-gate signal diagnostics", "status": "not_started"}
+  ],
+  "blockers": [],
+  "human_actions_pending": [
+    {"action": "Set FINALAYZE_LLM_API_KEY in .env (OpenRouter free tier)", "context": "News pipeline is fully wired but needs an LLM key to analyze articles", "blocking": false}
+  ],
+  "decisions": [
+    {"decision": "MOEX-first focus — all fixes target ru_* segments, US deferred", "rationale": "User confirmed MOEX is the primary market for sandbox validation", "phase": "32"},
+    {"decision": "Staleness 72h + MOEX calendar awareness instead of simple 48h bump", "rationale": "MOEX has 10-day New Year holiday; simple threshold increase insufficient", "phase": "32"},
+    {"decision": "ML calibrator parameter added but not wired in walk-forward loop yet", "rationale": "Per-fold calibrator doesn't exist in current loop; parameter ready for future use", "phase": "32"},
+    {"decision": "v7.0 milestone: Agent Intelligence & Experiment Framework (Phases 32-35)", "rationale": "Board meeting identified agent consensus drift problem; scientific method for decisions", "phase": "32-35"}
+  ],
+  "uncommitted_files": [],
+  "next_action": "Execute Plan 32-02 (Wave 2): Wire CachingFetcher+RateLimiter in sandbox, enable event_driven for ru_blue_chips/ru_energy/ru_finance, add per-gate logging to ValidationLogger",
+  "context_notes": "Session started with 8-agent board of directors meeting (2 rounds). Round 1: Quant, Risk, Portfolio, Architect. Round 2: ML Engineer, Data Quality, News Pipeline, Live Monitor. Key finding: system produces ~1-3% of potential signals due to _CANDLE_LOOKBACK=60, dead ML, no news, cascading filters. Plans 32-01 and 32-03 completed in Wave 1. Plan 32-02 is Wave 2 (depends on 32-01 for trading_loop.py changes)."
+}
