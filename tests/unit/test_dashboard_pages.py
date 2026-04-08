@@ -37,3 +37,21 @@ def test_sandbox_render_importable() -> None:
     from finalayze.dashboard.pages import sandbox
 
     assert callable(sandbox.render)
+
+
+def test_experiments_list_render_importable() -> None:
+    from finalayze.dashboard.pages import experiments_list
+
+    assert callable(experiments_list.render)
+
+
+def test_experiment_detail_render_importable() -> None:
+    from finalayze.dashboard.pages import experiment_detail
+
+    assert callable(experiment_detail.render)
+
+
+def test_decision_history_render_importable() -> None:
+    from finalayze.dashboard.pages import decision_history
+
+    assert callable(decision_history.render)
