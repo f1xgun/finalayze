@@ -212,8 +212,8 @@ Plans:
   3. Decision history page shows accepted/rejected experiments with reasoning -- the team can review past decisions and understand why the system is configured the way it is
 **Plans:** 2 plans
 Plans:
-- [x] 34-01-PLAN.md — Experiment schemas (TDD) + ExperimentManager CRUD, verdict, debate linkage (EXP-01, EXP-04)
-- [ ] 34-02-PLAN.md — run_iteration.py --hypothesis extension + interaction test runner (EXP-02, EXP-03)
+- [ ] 35-01-PLAN.md — Smoke tests + Experiments List page (UI-EXP-01)
+- [ ] 35-02-PLAN.md — Experiment Detail page + Decision History page (UI-EXP-02, UI-EXP-03)
 
 ## Progress
 
@@ -236,4 +236,4 @@ v7.0: 32 -> 33 -> 34 -> 35
 | 32. Critical Sandbox Fixes | v7.0 | 4/4 | Complete    | 2026-04-07 |
 | 33. Structured Debate Protocol | v7.0 | 2/2 | Complete    | 2026-04-08 |
 | 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete    | 2026-04-08 |
-| 35. Experiment Lab UI | v7.0 | TBD | Pending | -- |
+| 35. Experiment Lab UI | v7.0 | 0/2 | In Progress | -- |
