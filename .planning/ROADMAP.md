@@ -210,9 +210,9 @@ Plans:
   1. Experiment list page shows all experiments with status (PENDING/RUNNING/COMPLETED), hypothesis summary, and key metrics -- at a glance, what experiments exist and their state
   2. Experiment detail page shows: debate context (why), success criteria (what we expect), backtest results with charts (what happened), and A vs B vs A+B comparison table -- complete decision context on one screen
   3. Decision history page shows accepted/rejected experiments with reasoning -- the team can review past decisions and understand why the system is configured the way it is
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 35-01-PLAN.md — Smoke tests + Experiments List page (UI-EXP-01)
+- [x] 35-01-PLAN.md — Smoke tests + Experiments List page (UI-EXP-01)
 - [ ] 35-02-PLAN.md — Experiment Detail page + Decision History page (UI-EXP-02, UI-EXP-03)
 
 ## Progress
@@ -236,4 +236,4 @@ v7.0: 32 -> 33 -> 34 -> 35
 | 32. Critical Sandbox Fixes | v7.0 | 4/4 | Complete    | 2026-04-07 |
 | 33. Structured Debate Protocol | v7.0 | 2/2 | Complete    | 2026-04-08 |
 | 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete    | 2026-04-08 |
-| 35. Experiment Lab UI | v7.0 | 0/2 | In Progress | -- |
+| 35. Experiment Lab UI | v7.0 | 1/2 | In Progress|  |
