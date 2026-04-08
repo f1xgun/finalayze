@@ -5,6 +5,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from datetime import date, datetime  # noqa: TC003
@@ -674,5 +675,93 @@ class DebateState(BaseModel):
         """Validate that escalated debates have an experiment_id."""
         if self.status == DebateStatus.ESCALATED and self.experiment_id is None:
             msg = "experiment_id is required when status is 'escalated'"
+            raise ValueError(msg)
+        return self
+
+
+# ── Experiment Registry Schemas ──────────────────────────────────────────────
+
+
+class ExperimentStatus(StrEnum):
+    """Lifecycle status of an experiment."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    INCONCLUSIVE = "inconclusive"
+
+
+_VALID_OPERATORS = frozenset({">=", "<=", ">", "<"})
+
+
+class SuccessCriteria(BaseModel):
+    """Defines a single metric threshold for experiment success/failure."""
+
+    model_config = ConfigDict(frozen=True)
+
+    metric: str
+    threshold: float
+    operator: str = ">="
+
+    @field_validator("operator")
+    @classmethod
+    def operator_must_be_valid(cls, v: str) -> str:
+        """Validate that operator is in the allowed whitelist."""
+        if v not in _VALID_OPERATORS:
+            msg = f"operator must be one of {sorted(_VALID_OPERATORS)}, got '{v}'"
+            raise ValueError(msg)
+        return v
+
+
+class ExperimentResult(BaseModel):
+    """Result of a single backtest run within an experiment."""
+
+    model_config = ConfigDict(frozen=True)
+
+    run_name: str
+    iteration_name: str
+    metrics: dict[str, Any]
+
+
+_EXPERIMENT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+class ExperimentState(BaseModel):
+    """Persistent state of an experiment in the registry."""
+
+    model_config = ConfigDict(frozen=True)
+
+    experiment_id: str
+    hypothesis: str
+    success_criteria: SuccessCriteria
+    status: ExperimentStatus
+    created: str  # ISO date "YYYY-MM-DD"
+    debate_id: str | None = None
+    results: list[ExperimentResult] = []
+    verdict: str | None = None
+    reasoning: str | None = None
+    preset_overrides: dict[str, Any] | None = None
+
+    @field_validator("experiment_id")
+    @classmethod
+    def experiment_id_safe(cls, v: str) -> str:
+        """Validate experiment_id is safe for use as a filename."""
+        if not _EXPERIMENT_ID_PATTERN.match(v):
+            msg = f"experiment_id must match [a-zA-Z0-9_-]+, got '{v}'"
+            raise ValueError(msg)
+        return v
+
+    @model_validator(mode="after")
+    def terminal_status_requires_verdict(self) -> ExperimentState:
+        """Validate that terminal statuses have a verdict set."""
+        terminal = {
+            ExperimentStatus.ACCEPTED,
+            ExperimentStatus.REJECTED,
+            ExperimentStatus.INCONCLUSIVE,
+        }
+        if self.status in terminal and self.verdict is None:
+            msg = "verdict is required when status is terminal (ACCEPTED/REJECTED/INCONCLUSIVE)"
             raise ValueError(msg)
         return self
