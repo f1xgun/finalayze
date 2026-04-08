@@ -228,6 +228,6 @@ v7.0: 32 -> 33 -> 34 -> 35
 | 30. Broker Resilience | v6.0 | 2/2 | Complete | 2026-03-30 |
 | 31. Data Capture | v6.0 | 2/2 | Complete | 2026-03-30 |
 | 32. Critical Sandbox Fixes | v7.0 | 4/4 | Complete    | 2026-04-07 |
-| 33. Structured Debate Protocol | v7.0 | 2/2 | Complete   | 2026-04-08 |
+| 33. Structured Debate Protocol | v7.0 | 2/2 | Complete    | 2026-04-08 |
 | 34. Experiment Registry & Runner | v7.0 | TBD | Pending | -- |
 | 35. Experiment Lab UI | v7.0 | TBD | Pending | -- |
