@@ -236,4 +236,4 @@ v7.0: 32 -> 33 -> 34 -> 35
 | 32. Critical Sandbox Fixes | v7.0 | 4/4 | Complete    | 2026-04-07 |
 | 33. Structured Debate Protocol | v7.0 | 2/2 | Complete    | 2026-04-08 |
 | 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete    | 2026-04-08 |
-| 35. Experiment Lab UI | v7.0 | 2/2 | Complete   | 2026-04-08 |
+| 35. Experiment Lab UI | v7.0 | 2/2 | Complete    | 2026-04-08 |
