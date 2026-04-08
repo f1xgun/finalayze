@@ -40,16 +40,35 @@ Requirements for Agent Intelligence & Experiment Framework milestone.
 
 ### Sandbox Signal Fixes
 
-- [ ] **SANDBOX-FIX-01**: `_CANDLE_LOOKBACK >= 210` in trading loop — RSI2 Connors (SMA-200), dual_momentum (126 bars), OU mean reversion (126 bars) all receive sufficient data in live mode
-- [ ] **SANDBOX-FIX-02**: `TradingLoop.start()` checks `KillSwitch.is_killed` before starting scheduler — killed system does not resume on Docker restart
-- [ ] **SANDBOX-FIX-03**: When `FINALAYZE_MODE=sandbox` and `rollout_phase` not explicitly set, effective rollout is MINIMAL — sandbox starts with conservative risk limits
-- [ ] **SANDBOX-FIX-04**: Staleness threshold handles weekends and MOEX holidays — Monday morning and post-holiday cycles not blocked by 48h threshold
+- [x] **SANDBOX-FIX-01**: `_CANDLE_LOOKBACK >= 210` in trading loop — RSI2 Connors (SMA-200), dual_momentum (126 bars), OU mean reversion (126 bars) all receive sufficient data in live mode
+- [x] **SANDBOX-FIX-02**: `TradingLoop.start()` checks `KillSwitch.is_killed` before starting scheduler — killed system does not resume on Docker restart
+- [x] **SANDBOX-FIX-03**: When `FINALAYZE_MODE=sandbox` and `rollout_phase` not explicitly set, effective rollout is MINIMAL — sandbox starts with conservative risk limits
+- [x] **SANDBOX-FIX-04**: Staleness threshold handles weekends and MOEX holidays — Monday morning and post-holiday cycles not blocked by 48h threshold
 - [x] **SANDBOX-FIX-05**: TinkoffFetcher wrapped in CachingFetcher in sandbox mode — repeated API calls for same data eliminated
 - [x] **SANDBOX-FIX-06**: RateLimiter passed to TinkoffFetcher in sandbox — API throttling prevented for large instrument universes
 - [x] **SANDBOX-FIX-07**: `FINALAYZE_LLM_API_KEY` documented and event_driven enabled for ru_blue_chips, ru_energy, ru_finance — news pipeline activated for MOEX
 - [x] **SANDBOX-FIX-08**: Per-gate signal drop counters in ValidationLogger — instruments_no_bars, signals_below_threshold, signals_pre_trade_rejected tracked separately
-- [ ] **SANDBOX-FIX-09**: ML quality gate bug: profit_factor gate populated with actual PF from fold predictions — gate no longer always fails with default 1.0
+- [x] **SANDBOX-FIX-09**: ML quality gate bug: profit_factor gate populated with actual PF from fold predictions — gate no longer always fails with default 1.0
 - [x] **SANDBOX-FIX-10**: ML quality gate: Brier score evaluated on calibrated probabilities — calibrator applied during walk-forward evaluation
+
+### Structured Debate Protocol
+
+- [x] **DEBATE-01**: Agent output schema enforces structured claims with source references (file:line or metric value) — no unsourced assertions in agent recommendations
+- [x] **DEBATE-02**: An arbiter agent can take two conflicting agent outputs and produce a fact-check report showing which claims are verified, which are contradicted, and which are untestable
+- [x] **DEBATE-03**: Debate state (claims, conflicts, resolutions) is persisted in `.planning/debates/` for audit trail — every multi-agent decision has a traceable history
+
+### Experiment Registry & Runner
+
+- [x] **EXP-01**: Experiment registry stores hypothesis, success criteria (metric + threshold), status, and linked backtest results — every experiment has a pre-registered definition
+- [x] **EXP-02**: `run_iteration.py --hypothesis <id>` runs a parameterized backtest and links results to the hypothesis — experiment results are automatically associated with their hypothesis
+- [x] **EXP-03**: Interaction testing: given hypotheses A and B, the runner executes A-only, B-only, and A+B runs and compares all three — combination effects are measured, not assumed
+- [x] **EXP-04**: Experiment verdicts (ACCEPT/REJECT/INCONCLUSIVE) are recorded with reasoning and linked to the debate that triggered them
+
+### Experiment Lab UI
+
+- [x] **UI-EXP-01**: Experiment list page shows all experiments with status (PENDING/RUNNING/COMPLETED), hypothesis summary, and key metrics — at a glance, what experiments exist and their state
+- [x] **UI-EXP-02**: Experiment detail page shows: debate context (why), success criteria (what we expect), backtest results with charts (what happened), and A vs B vs A+B comparison table — complete decision context on one screen
+- [x] **UI-EXP-03**: Decision history page shows accepted/rejected experiments with reasoning — the team can review past decisions and understand why the system is configured the way it is
 
 ## Future Requirements
 
@@ -94,11 +113,31 @@ Requirements for Agent Intelligence & Experiment Framework milestone.
 | OPS-03 | Phase 28 | Complete |
 | OPS-04 | Phase 28 | Complete |
 
+| SANDBOX-FIX-01 | Phase 32 | Complete |
+| SANDBOX-FIX-02 | Phase 32 | Complete |
+| SANDBOX-FIX-03 | Phase 32 | Complete |
+| SANDBOX-FIX-04 | Phase 32 | Complete |
+| SANDBOX-FIX-05 | Phase 32 | Complete |
+| SANDBOX-FIX-06 | Phase 32 | Complete |
+| SANDBOX-FIX-07 | Phase 32 | Complete |
+| SANDBOX-FIX-08 | Phase 32 | Complete |
+| SANDBOX-FIX-09 | Phase 32 | Complete |
+| SANDBOX-FIX-10 | Phase 32 | Complete |
+| DEBATE-01 | Phase 33 | Complete |
+| DEBATE-02 | Phase 33 | Complete |
+| DEBATE-03 | Phase 33 | Complete |
+| EXP-01 | Phase 34 | Complete |
+| EXP-02 | Phase 34 | Complete |
+| EXP-03 | Phase 34 | Complete |
+| EXP-04 | Phase 34 | Complete |
+| UI-EXP-01 | Phase 35 | Complete |
+| UI-EXP-02 | Phase 35 | Complete |
+| UI-EXP-03 | Phase 35 | Complete |
+
 **Coverage:**
-- v6.0 requirements: 15 total
-- Mapped to phases: 15
-- Unmapped: 0
+- v6.0 requirements: 15 total, 15 mapped, 0 unmapped
+- v7.0 requirements: 20 total, 20 mapped, 0 unmapped
 
 ---
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-03-30 after roadmap creation*
+*Last updated: 2026-04-08 after v7.0 milestone audit*
