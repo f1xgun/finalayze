@@ -429,22 +429,22 @@ if args.hypothesis:
 
 **Three assumptions, all low-to-medium risk.** All are Claude's discretion areas per CONTEXT.md.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **run_name for single-hypothesis runs**
    - What we know: `--run-name` is only meaningful for interaction tests (A-only/B-only/AB)
    - What's unclear: Should `--hypothesis` without `--run-name` use "main" or the iteration name?
-   - Recommendation: Default `run_name = "main"` when `--run-name` not specified.
+   - RESOLVED: Default `run_name = "main"` when `--run-name` not specified.
 
 2. **Which metric drives the verdict for interaction tests?**
    - What we know: Each experiment has one `success_criteria` metric. A+B run is the primary result.
    - What's unclear: Do we evaluate the criterion on A+B only, or on whichever run scores best?
-   - Recommendation: Evaluate on A+B run as primary, record A-only and B-only for comparison only.
+   - RESOLVED: Evaluate on A+B run as primary, record A-only and B-only for comparison only.
 
 3. **IterationTracker integration for experiment runs**
    - What we know: `run_iteration.py` appends to `results/iterations/history.jsonl` via `IterationTracker`.
    - What's unclear: Should experiment runs also appear in history.jsonl (for `backtest-iteration` skill) or be experiment-only?
-   - Recommendation: Yes — append to history.jsonl with a `tags: [experiment, {experiment_id}]` field so iteration history skill can filter.
+   - RESOLVED: Yes — append to history.jsonl with a `tags: [experiment, {experiment_id}]` field so iteration history skill can filter.
 
 ## Environment Availability
 
