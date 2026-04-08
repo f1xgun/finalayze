@@ -16,6 +16,10 @@ PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from scripts.run_interaction_test import (  # noqa: E402, I001
+    _format_comparison_table,
+    _parse_args as _parse_interaction_args,
+)
 from scripts.run_iteration import _deep_merge, _parse_args  # noqa: E402
 
 
@@ -75,3 +79,59 @@ class TestHypothesisArgs:
             args = _parse_args()
         assert args.hypothesis is None
         assert args.run_name == "main"
+
+
+class TestComparisonTable:
+    """Tests for interaction test comparison table formatting."""
+
+    def test_comparison_table_format(self) -> None:
+        a = {
+            "wf_sharpe": 0.1000, "profit_factor": 1.20,
+            "wf_max_drawdown": 0.0500, "trade_count": 100,
+        }
+        b = {
+            "wf_sharpe": 0.0800, "profit_factor": 1.10,
+            "wf_max_drawdown": 0.0600, "trade_count": 80,
+        }
+        ab = {
+            "wf_sharpe": 0.1500, "profit_factor": 1.30,
+            "wf_max_drawdown": 0.0400, "trade_count": 120,
+        }
+
+        table = _format_comparison_table(a, b, ab)
+        assert "| Metric |" in table
+        assert "WF Sharpe" in table
+        assert "Profit Factor" in table
+        assert "Max Drawdown" in table
+        assert "Trade Count" in table
+        # Verify delta columns exist
+        assert "Delta(A)" in table
+        assert "Delta(B)" in table
+        # Verify A+B values present
+        assert "0.1500" in table
+        assert "1.3000" in table
+        assert "120" in table
+
+    def test_comparison_table_with_zero_values(self) -> None:
+        a = {"wf_sharpe": 0.0, "profit_factor": 0.0, "wf_max_drawdown": 0.0, "trade_count": 0}
+        b = {"wf_sharpe": 0.0, "profit_factor": 0.0, "wf_max_drawdown": 0.0, "trade_count": 0}
+        ab = {"wf_sharpe": 0.0, "profit_factor": 0.0, "wf_max_drawdown": 0.0, "trade_count": 0}
+        table = _format_comparison_table(a, b, ab)
+        assert "WF Sharpe" in table
+
+
+class TestInteractionArgs:
+    """Tests for interaction test CLI arg parsing."""
+
+    def test_interaction_args_parsed(self) -> None:
+        test_argv = [
+            "run_interaction_test.py",
+            "--experiment-a", "exp-001",
+            "--experiment-b", "exp-002",
+            "--segments", "us_tech",
+        ]
+        with patch("sys.argv", test_argv):
+            args = _parse_interaction_args()
+        assert args.experiment_a == "exp-001"
+        assert args.experiment_b == "exp-002"
+        assert args.segments == "us_tech"
