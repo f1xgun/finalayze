@@ -372,17 +372,17 @@ def render(api: ApiClient) -> None:
 | A2 | `ExperimentResult.metrics` dict values may be stored as strings in YAML, matching the `summary.json` string-decimal format | Common Pitfalls (Pitfall 3) | If values are always floats, the cast is safe but unnecessary |
 | A3 | `DebateManager.read_debate(debate_id)` is the correct method name and signature | Code Examples | If the method is named differently, debate context loading section needs adjustment |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Debate body content**
    - What we know: `DebateManager._read_file()` returns `(frontmatter_dict, body_text)`. `DebateState` has `arbiter_report` and `resolution` fields.
    - What's unclear: Does the debate markdown body contain the full agent discussion text, or is that in `AgentOutput` objects stored elsewhere?
-   - Recommendation: For the detail page, display `DebateState.resolution` and `DebateState.arbiter_report.to_markdown()` if present. That's sufficient for "debate context."
+   - RESOLVED: For the detail page, display `DebateState.resolution` and `DebateState.arbiter_report.to_markdown()` if present. That's sufficient for "debate context."
 
 2. **results/experiments directory**
    - What we know: CONTEXT.md mentions reading from `results/experiments/{id}/` for result JSON files. `ExperimentResult.metrics` is a dict — the flat metrics dict is sufficient for bars/tables.
    - What's unclear: Whether Phase 34 writes equity curve timeseries data to `results/experiments/{id}/` or only the aggregate metrics dict into the YAML frontmatter.
-   - Recommendation: Implement the comparison chart from `ExperimentResult.metrics` dict (aggregate metrics only). If equity curve timeseries data doesn't exist in `results/experiments/`, skip the equity subplot and show "No timeseries data" — don't block the phase on this.
+   - RESOLVED: Implement the comparison chart from `ExperimentResult.metrics` dict (aggregate metrics only). If equity curve timeseries data doesn't exist in `results/experiments/`, skip the equity subplot and show "No timeseries data" — don't block the phase on this.
 
 ## Environment Availability
 
