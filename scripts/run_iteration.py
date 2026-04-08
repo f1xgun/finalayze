@@ -947,6 +947,17 @@ def _run_dry(
     print(_format_comparison_table(args.name, None, metrics, None, gate_results, verdict, git_info))
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge override into base, returning new dict."""
+    result = dict(base)
+    for key, val in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
+            result[key] = _deep_merge(result[key], val)
+        else:
+            result[key] = val
+    return result
+
+
 def _parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Run a new backtest iteration")
@@ -985,6 +996,12 @@ def _parse_args() -> argparse.Namespace:
         "--wf-test-months", type=int, default=6, help="Walk-forward test window in months"
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--hypothesis", default=None, help="Experiment ID to link backtest results"
+    )
+    parser.add_argument(
+        "--run-name", default="main", help="Label for interaction test run (A-only, B-only, AB)"
+    )
     return parser.parse_args()
 
 
@@ -1047,6 +1064,20 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     strategy_configs: dict[str, Any] = {}
     for seg in segments:
         strategy_configs[seg] = _load_preset(seg)
+
+    # Experiment integration: load hypothesis, merge preset overrides AFTER _load_preset()
+    experiment_mgr = None
+    if args.hypothesis:
+        from finalayze.core.experiment_manager import ExperimentManager  # noqa: PLC0415
+        from finalayze.core.schemas import ExperimentStatus  # noqa: PLC0415
+
+        experiment_mgr = ExperimentManager()
+        experiment = experiment_mgr.read_experiment(args.hypothesis)
+        experiment_mgr.update_status(args.hypothesis, ExperimentStatus.RUNNING.value)
+        if experiment.preset_overrides:
+            for seg, overrides in experiment.preset_overrides.items():
+                if seg in strategy_configs:
+                    strategy_configs[seg] = _deep_merge(strategy_configs[seg], overrides)
 
     config = BacktestConfig(initial_cash=cash)
     backtest_config_dict = {
@@ -1285,6 +1316,35 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     )
 
     result_path = tracker.save(metadata)
+
+    # Save experiment result and link to experiment registry
+    if experiment_mgr and args.hypothesis:
+        from finalayze.core.schemas import ExperimentResult  # noqa: PLC0415
+
+        exp_result_dir = Path("results/experiments") / args.hypothesis
+        exp_result_dir.mkdir(parents=True, exist_ok=True)
+        run_name = args.run_name
+        exp_result_path = exp_result_dir / f"{run_name}.json"
+        metrics_dict: dict[str, Any] = {
+            "experiment_id": args.hypothesis,
+            "run_name": run_name,
+            "iteration_name": args.name,
+            "wf_sharpe": float(metrics.wf_sharpe),
+            "profit_factor": float(metrics.profit_factor),
+            "wf_max_drawdown": float(metrics.wf_max_drawdown),
+            "trade_count": int(metrics.trade_count),
+        }
+        exp_result_path.write_text(json.dumps(metrics_dict, indent=2))
+        experiment_mgr.link_result(
+            args.hypothesis,
+            ExperimentResult(
+                run_name=run_name,
+                iteration_name=args.name,
+                metrics=metrics_dict,
+            ),
+        )
+        print(f"\n  Experiment result saved to: {exp_result_path}")
+
     print(f"\n  Saved to: {result_path}")
     print(
         _format_comparison_table(
