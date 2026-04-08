@@ -150,7 +150,7 @@ Plans:
 **Milestone Goal:** Build a scientific decision-making system: structured debate protocol for agent recommendations, experiment registry with pre-defined success criteria, backtest-based A/B testing with interaction effects, and Streamlit Experiment Lab UI for full lifecycle visibility.
 
 - [x] **Phase 32: Critical Sandbox Fixes** - Fix _CANDLE_LOOKBACK=210, kill switch startup check, rollout default for sandbox mode (prerequisite for meaningful experiments) (completed 2026-04-07)
-- [ ] **Phase 33: Structured Debate Protocol** - Evidence-based agent output format (claim + source + prediction + risk), arbiter agent for fact-checking, debate state tracking
+- [x] **Phase 33: Structured Debate Protocol** - Evidence-based agent output format (claim + source + prediction + risk), arbiter agent for fact-checking, debate state tracking (completed 2026-04-08)
 - [ ] **Phase 34: Experiment Registry & Runner** - Hypothesis lifecycle (define → criteria → run → compare → verdict), parameterized backtest runner with hypothesis_id, interaction testing (A, B, A+B), integration with history.jsonl
 - [ ] **Phase 35: Experiment Lab UI** - Streamlit app for experiment lifecycle: hypothesis context, pre-defined success criteria, execution status, results vs expectations, decision history
 
@@ -183,10 +183,10 @@ Plans:
   1. Agent output schema enforces structured claims with source references (file:line or metric value) -- no unsourced assertions in agent recommendations
   2. An arbiter agent can take two conflicting agent outputs and produce a fact-check report showing which claims are verified, which are contradicted, and which are untestable
   3. Debate state (claims, conflicts, resolutions) is persisted in `.planning/debates/` for audit trail -- every multi-agent decision has a traceable history
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 33-01-PLAN.md — Debate protocol schemas (TDD): Claim, AgentOutput, FactCheckReport, DebateState (DEBATE-01, DEBATE-02, DEBATE-03)
-- [ ] 33-02-PLAN.md — Arbiter agent, DebateManager CRUD, debates directory (DEBATE-02, DEBATE-03)
+- [x] 33-02-PLAN.md — Arbiter agent, DebateManager CRUD, debates directory (DEBATE-02, DEBATE-03)
 
 ### Phase 34: Experiment Registry & Runner
 **Goal**: Hypotheses are defined with success criteria before execution, backtest experiments test proposals in isolation and combination, and results are structured for comparison
@@ -228,6 +228,6 @@ v7.0: 32 -> 33 -> 34 -> 35
 | 30. Broker Resilience | v6.0 | 2/2 | Complete | 2026-03-30 |
 | 31. Data Capture | v6.0 | 2/2 | Complete | 2026-03-30 |
 | 32. Critical Sandbox Fixes | v7.0 | 4/4 | Complete    | 2026-04-07 |
-| 33. Structured Debate Protocol | v7.0 | 1/2 | In Progress|  |
+| 33. Structured Debate Protocol | v7.0 | 2/2 | Complete   | 2026-04-08 |
 | 34. Experiment Registry & Runner | v7.0 | TBD | Pending | -- |
 | 35. Experiment Lab UI | v7.0 | TBD | Pending | -- |
