@@ -197,9 +197,9 @@ Plans:
   2. `run_iteration.py --hypothesis <id>` runs a parameterized backtest and links results to the hypothesis -- experiment results are automatically associated with their hypothesis
   3. Interaction testing: given hypotheses A and B, the runner executes A-only, B-only, and A+B runs and compares all three -- combination effects are measured, not assumed
   4. Experiment verdicts (ACCEPT/REJECT/INCONCLUSIVE) are recorded with reasoning and linked to the debate that triggered them
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 34-01-PLAN.md — Experiment schemas (TDD) + ExperimentManager CRUD, verdict, debate linkage (EXP-01, EXP-04)
+- [x] 34-01-PLAN.md — Experiment schemas (TDD) + ExperimentManager CRUD, verdict, debate linkage (EXP-01, EXP-04)
 - [ ] 34-02-PLAN.md — run_iteration.py --hypothesis extension + interaction test runner (EXP-02, EXP-03)
 
 ### Phase 35: Experiment Lab UI
@@ -235,5 +235,5 @@ v7.0: 32 -> 33 -> 34 -> 35
 | 31. Data Capture | v6.0 | 2/2 | Complete | 2026-03-30 |
 | 32. Critical Sandbox Fixes | v7.0 | 4/4 | Complete    | 2026-04-07 |
 | 33. Structured Debate Protocol | v7.0 | 2/2 | Complete    | 2026-04-08 |
-| 34. Experiment Registry & Runner | v7.0 | 0/2 | In Progress | -- |
+| 34. Experiment Registry & Runner | v7.0 | 1/2 | In Progress|  |
 | 35. Experiment Lab UI | v7.0 | TBD | Pending | -- |
