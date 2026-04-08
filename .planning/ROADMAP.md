@@ -197,7 +197,10 @@ Plans:
   2. `run_iteration.py --hypothesis <id>` runs a parameterized backtest and links results to the hypothesis -- experiment results are automatically associated with their hypothesis
   3. Interaction testing: given hypotheses A and B, the runner executes A-only, B-only, and A+B runs and compares all three -- combination effects are measured, not assumed
   4. Experiment verdicts (ACCEPT/REJECT/INCONCLUSIVE) are recorded with reasoning and linked to the debate that triggered them
-Plans: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 34-01-PLAN.md — Experiment schemas (TDD) + ExperimentManager CRUD, verdict, debate linkage (EXP-01, EXP-04)
+- [ ] 34-02-PLAN.md — run_iteration.py --hypothesis extension + interaction test runner (EXP-02, EXP-03)
 
 ### Phase 35: Experiment Lab UI
 **Goal**: Full experiment lifecycle is visible in a Streamlit web app -- from debate context through execution to final decision
@@ -207,7 +210,10 @@ Plans: TBD
   1. Experiment list page shows all experiments with status (PENDING/RUNNING/COMPLETED), hypothesis summary, and key metrics -- at a glance, what experiments exist and their state
   2. Experiment detail page shows: debate context (why), success criteria (what we expect), backtest results with charts (what happened), and A vs B vs A+B comparison table -- complete decision context on one screen
   3. Decision history page shows accepted/rejected experiments with reasoning -- the team can review past decisions and understand why the system is configured the way it is
-Plans: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 34-01-PLAN.md — Experiment schemas (TDD) + ExperimentManager CRUD, verdict, debate linkage (EXP-01, EXP-04)
+- [ ] 34-02-PLAN.md — run_iteration.py --hypothesis extension + interaction test runner (EXP-02, EXP-03)
 
 ## Progress
 
@@ -229,5 +235,5 @@ v7.0: 32 -> 33 -> 34 -> 35
 | 31. Data Capture | v6.0 | 2/2 | Complete | 2026-03-30 |
 | 32. Critical Sandbox Fixes | v7.0 | 4/4 | Complete    | 2026-04-07 |
 | 33. Structured Debate Protocol | v7.0 | 2/2 | Complete    | 2026-04-08 |
-| 34. Experiment Registry & Runner | v7.0 | TBD | Pending | -- |
+| 34. Experiment Registry & Runner | v7.0 | 0/2 | In Progress | -- |
 | 35. Experiment Lab UI | v7.0 | TBD | Pending | -- |
