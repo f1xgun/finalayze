@@ -422,7 +422,7 @@ self._entry_strategy.pop(symbol, None)  # NEW: clear on close
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **preset_overrides key format**
    - What we know: `dict[str, Any]` with no schema constraint
