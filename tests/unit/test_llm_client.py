@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import anthropic
 import openai
 import pytest
 from config.settings import Settings
@@ -11,12 +13,15 @@ from pydantic import ValidationError
 
 from finalayze.analysis.llm_client import (
     AnthropicClient,
+    DeepSeekClient,
+    GroqClient,
     LLMClient,
     OpenAIClient,
     OpenRouterClient,
     create_llm_client,
 )
 from finalayze.core.exceptions import LLMError, LLMRateLimitError
+from finalayze.core.schemas import AgentOutput, Claim, FileLineSource
 
 _SYSTEM = "You are a financial analyst."
 _PROMPT = "Analyze this news: Fed raises rates."
@@ -240,3 +245,237 @@ class TestCreateLLMClientFactory:
         """Settings must reject invalid llm_provider values via Literal validation."""
         with pytest.raises(ValidationError):
             Settings(llm_provider="unknown", llm_api_key="key", llm_model="model")  # type: ignore[arg-type]
+
+
+# ── parse_structured() helpers ───────────────────────────────────────────────
+
+_DT = datetime(2026, 4, 12, tzinfo=timezone.utc)
+
+_AGENT_OUTPUT = AgentOutput(
+    agent_name="quant-analyst",
+    recommendation="Enable dual_momentum",
+    claims=[
+        Claim(
+            statement="PF is 1.29",
+            source=FileLineSource(
+                kind="file",
+                path="src/finalayze/strategies/combiner.py",
+                line=142,
+                excerpt="class StrategyCombiner",
+            ),
+            confidence=0.9,
+        )
+    ],
+    timestamp=_DT,
+)
+
+_AGENT_OUTPUT_JSON = _AGENT_OUTPUT.model_dump_json()
+
+
+def _make_anthropic_parse_response(parsed_obj: object) -> MagicMock:
+    """Build a mock response from anthropic messages.parse()."""
+    mock_message = MagicMock()
+    mock_message.parsed_output = parsed_obj
+    return mock_message
+
+
+def _make_openai_parse_response(parsed_obj: object) -> MagicMock:
+    """Build a mock response from openai beta.chat.completions.parse()."""
+    mock_choice = MagicMock()
+    mock_choice.message.parsed = parsed_obj
+    mock_completion = MagicMock()
+    mock_completion.choices = [mock_choice]
+    return mock_completion
+
+
+# ── AnthropicClient.parse_structured() ──────────────────────────────────────
+
+
+class TestAnthropicClientParseStructured:
+    @pytest.mark.asyncio
+    async def test_parse_structured_calls_messages_parse(self) -> None:
+        """AnthropicClient.parse_structured() calls self._client.messages.parse()."""
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_anthropic = MagicMock()
+            mock_anthropic.messages.parse = AsyncMock(
+                return_value=_make_anthropic_parse_response(_AGENT_OUTPUT)
+            )
+            mock_cls.return_value = mock_anthropic
+
+            client = AnthropicClient(api_key="test-key", model="claude-3")
+            result = await client.parse_structured(
+                prompt=_PROMPT,
+                system=_SYSTEM,
+                response_model=AgentOutput,
+            )
+
+        assert result == _AGENT_OUTPUT
+        mock_anthropic.messages.parse.assert_called_once()
+        call_kwargs = mock_anthropic.messages.parse.call_args.kwargs
+        assert call_kwargs["output_format"] is AgentOutput
+
+    @pytest.mark.asyncio
+    async def test_parse_structured_raises_rate_limit_error(self) -> None:
+        """AnthropicClient.parse_structured() raises LLMRateLimitError on RateLimitError."""
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_anthropic = MagicMock()
+            rate_resp = MagicMock(status_code=429, headers={})
+            mock_anthropic.messages.parse = AsyncMock(
+                side_effect=anthropic.RateLimitError(
+                    message="rate limited",
+                    response=rate_resp,
+                    body=None,
+                )
+            )
+            mock_cls.return_value = mock_anthropic
+
+            client = AnthropicClient(api_key="test-key", model="claude-3")
+            with pytest.raises(LLMRateLimitError):
+                await client.parse_structured(_PROMPT, _SYSTEM, AgentOutput)
+
+    @pytest.mark.asyncio
+    async def test_parse_structured_raises_llm_error_on_api_error(self) -> None:
+        """AnthropicClient.parse_structured() raises LLMError on APIError."""
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_anthropic = MagicMock()
+            mock_anthropic.messages.parse = AsyncMock(
+                side_effect=anthropic.APIStatusError(
+                    message="api error",
+                    response=MagicMock(status_code=500, headers={}),
+                    body=None,
+                )
+            )
+            mock_cls.return_value = mock_anthropic
+
+            client = AnthropicClient(api_key="test-key", model="claude-3")
+            with pytest.raises(LLMError):
+                await client.parse_structured(_PROMPT, _SYSTEM, AgentOutput)
+
+
+# ── OpenAIClient.parse_structured() ─────────────────────────────────────────
+
+
+class TestOpenAIClientParseStructured:
+    @pytest.mark.asyncio
+    async def test_parse_structured_calls_beta_parse(self) -> None:
+        """OpenAIClient.parse_structured() calls beta.chat.completions.parse()."""
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_openai = MagicMock()
+            mock_openai.beta = MagicMock()
+            mock_openai.beta.chat = MagicMock()
+            mock_openai.beta.chat.completions = MagicMock()
+            mock_openai.beta.chat.completions.parse = AsyncMock(
+                return_value=_make_openai_parse_response(_AGENT_OUTPUT)
+            )
+            mock_cls.return_value = mock_openai
+
+            client = OpenAIClient(api_key="test-key", model="gpt-4o")
+            result = await client.parse_structured(
+                prompt=_PROMPT,
+                system=_SYSTEM,
+                response_model=AgentOutput,
+            )
+
+        assert result == _AGENT_OUTPUT
+        mock_openai.beta.chat.completions.parse.assert_called_once()
+        call_kwargs = mock_openai.beta.chat.completions.parse.call_args.kwargs
+        assert call_kwargs["response_format"] is AgentOutput
+
+    @pytest.mark.asyncio
+    async def test_parse_structured_raises_llm_error_when_parsed_is_none(self) -> None:
+        """OpenAIClient.parse_structured() raises LLMError when parsed is None."""
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_openai = MagicMock()
+            mock_openai.beta = MagicMock()
+            mock_openai.beta.chat = MagicMock()
+            mock_openai.beta.chat.completions = MagicMock()
+            mock_openai.beta.chat.completions.parse = AsyncMock(
+                return_value=_make_openai_parse_response(None)
+            )
+            mock_cls.return_value = mock_openai
+
+            client = OpenAIClient(api_key="test-key", model="gpt-4o")
+            with pytest.raises(LLMError):
+                await client.parse_structured(_PROMPT, _SYSTEM, AgentOutput)
+
+
+# ── OpenRouterClient.parse_structured() ─────────────────────────────────────
+
+
+class TestOpenRouterClientParseStructured:
+    @pytest.mark.asyncio
+    async def test_parse_structured_falls_back_on_bad_request(self) -> None:
+        """OpenRouterClient falls back to complete(json_mode=True) on BadRequestError."""
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_openai = MagicMock()
+            mock_openai.beta = MagicMock()
+            mock_openai.beta.chat = MagicMock()
+            mock_openai.beta.chat.completions = MagicMock()
+            # Structured parse fails with BadRequestError
+            bad_req = openai.BadRequestError(
+                message="unsupported",
+                response=MagicMock(status_code=400, headers={}),
+                body=None,
+            )
+            mock_openai.beta.chat.completions.parse = AsyncMock(side_effect=bad_req)
+            # Fallback to regular chat completions returning JSON
+            mock_openai.chat = MagicMock()
+            mock_openai.chat.completions = MagicMock()
+            mock_choice = MagicMock()
+            mock_choice.message.content = _AGENT_OUTPUT_JSON
+            mock_completion = MagicMock()
+            mock_completion.choices = [mock_choice]
+            mock_openai.chat.completions.create = AsyncMock(return_value=mock_completion)
+            mock_cls.return_value = mock_openai
+
+            client = OpenRouterClient(api_key="test-key", model="llama-3")
+            result = await client.parse_structured(_PROMPT, _SYSTEM, AgentOutput)
+
+        assert result.agent_name == _AGENT_OUTPUT.agent_name
+        assert result.recommendation == _AGENT_OUTPUT.recommendation
+
+
+# ── GroqClient.parse_structured() ───────────────────────────────────────────
+
+
+class TestGroqClientParseStructured:
+    @pytest.mark.asyncio
+    async def test_parse_structured_uses_openai_compatible_path(self) -> None:
+        """GroqClient.parse_structured() uses beta.chat.completions.parse()."""
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_openai = MagicMock()
+            mock_openai.beta = MagicMock()
+            mock_openai.beta.chat = MagicMock()
+            mock_openai.beta.chat.completions = MagicMock()
+            mock_openai.beta.chat.completions.parse = AsyncMock(
+                return_value=_make_openai_parse_response(_AGENT_OUTPUT)
+            )
+            mock_cls.return_value = mock_openai
+
+            client = GroqClient(api_key="test-key", model="llama3-8b-8192")
+            result = await client.parse_structured(_PROMPT, _SYSTEM, AgentOutput)
+
+        assert result == _AGENT_OUTPUT
+
+
+# ── DeepSeekClient.parse_structured() ───────────────────────────────────────
+
+
+class TestDeepSeekClientParseStructured:
+    @pytest.mark.asyncio
+    async def test_parse_structured_uses_openai_compatible_path(self) -> None:
+        """DeepSeekClient.parse_structured() uses beta.chat.completions.parse()."""
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_openai = MagicMock()
+            mock_openai.beta = MagicMock()
+            mock_openai.beta.chat = MagicMock()
+            mock_openai.beta.chat.completions = MagicMock()
+            mock_openai.beta.chat.completions.parse = AsyncMock(
+                return_value=_make_openai_parse_response(_AGENT_OUTPUT)
+            )
+            mock_cls.return_value = mock_openai
+
+            client = DeepSeekClient(api_key="test-key", model="deepseek-chat")
+            result = await client.parse_structured(_PROMPT, _SYSTEM, AgentOutput)
+
+        assert result == _AGENT_OUTPUT

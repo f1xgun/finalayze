@@ -11,16 +11,19 @@ import hashlib
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict, deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 import anthropic
 import openai
 import structlog
+from pydantic import BaseModel
 
 from finalayze.core.exceptions import ConfigurationError, LLMError, LLMRateLimitError
 
 if TYPE_CHECKING:
     from config.settings import Settings
+
+T = TypeVar("T", bound=BaseModel)
 
 _log = structlog.get_logger(__name__)
 
@@ -58,6 +61,32 @@ class LLMClient(ABC):
         Raises:
             LLMRateLimitError: When provider rate limit is hit.
             LLMError: On any other LLM API failure.
+        """
+        ...
+
+    @abstractmethod
+    async def parse_structured(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,
+    ) -> T:
+        """Send a prompt and parse the response into a typed Pydantic model.
+
+        Args:
+            prompt: The user message / question.
+            system: The system instruction for the model.
+            response_model: Pydantic model class to parse the response into.
+            max_tokens: Override default max_tokens (1024) for this call.
+
+        Returns:
+            Parsed Pydantic model instance.
+
+        Raises:
+            LLMRateLimitError: When provider rate limit is hit.
+            LLMError: On any other LLM API failure or when parsing fails.
         """
         ...
 
@@ -156,6 +185,81 @@ class _CachingLLMClient(LLMClient, ABC):
         """Single attempt at completion — no retry logic here."""
         ...
 
+    async def parse_structured(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,
+    ) -> T:
+        """Parse structured output from LLM into a Pydantic model.
+
+        Unlike complete(), this does NOT use the LRU cache (structured output
+        is schema-dependent and caching would be error-prone).
+        """
+        if self._rate_limiter is not None:
+            await self._rate_limiter.acquire()
+        return await self._parse_structured_once(
+            prompt, system, response_model, max_tokens=max_tokens
+        )
+
+    @abstractmethod
+    async def _parse_structured_once(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,
+    ) -> T:
+        """Single attempt at structured parsing — implemented by each subclass."""
+        ...
+
+    async def _openai_parse_structured_once(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,
+    ) -> T:
+        """Shared OpenAI-compatible structured parsing with BadRequestError fallback.
+
+        Used by OpenAIClient, OpenRouterClient, GroqClient, DeepSeekClient.
+        Falls back to complete(json_mode=True) + model_validate_json() when the
+        model does not support structured output (raises BadRequestError).
+        """
+        try:
+            completion = await self._client.beta.chat.completions.parse(  # type: ignore[attr-defined]
+                model=self._model,  # type: ignore[attr-defined]
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=max_tokens or 1024,
+                response_format=response_model,
+            )
+        except openai.BadRequestError:
+            _log.warning(
+                "structured_output_fallback",
+                model=self._model,  # type: ignore[attr-defined]
+                client=type(self).__name__,
+            )
+            raw = await self._complete_once(prompt, system, json_mode=True, max_tokens=max_tokens)
+            return response_model.model_validate_json(raw)
+        except openai.RateLimitError as exc:
+            msg = f"{type(self).__name__} rate limit: {exc}"
+            raise LLMRateLimitError(msg) from exc
+        except openai.OpenAIError as exc:
+            msg = f"{type(self).__name__} API error: {exc}"
+            raise LLMError(msg) from exc
+        parsed = completion.choices[0].message.parsed
+        if parsed is None:
+            msg = f"{type(self).__name__} structured output returned None — model refused"
+            raise LLMError(msg)
+        return parsed
+
 
 class OpenRouterClient(_CachingLLMClient):
     """LLM client using OpenRouter API (OpenAI-compatible, many models)."""
@@ -200,6 +304,18 @@ class OpenRouterClient(_CachingLLMClient):
             raise LLMError(msg)
         return content
 
+    async def _parse_structured_once(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,
+    ) -> T:
+        return await self._openai_parse_structured_once(
+            prompt, system, response_model, max_tokens=max_tokens
+        )
+
 
 class OpenAIClient(_CachingLLMClient):
     """LLM client using OpenAI API directly."""
@@ -241,6 +357,18 @@ class OpenAIClient(_CachingLLMClient):
             msg = "OpenAI returned empty response"
             raise LLMError(msg)
         return content
+
+    async def _parse_structured_once(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,
+    ) -> T:
+        return await self._openai_parse_structured_once(
+            prompt, system, response_model, max_tokens=max_tokens
+        )
 
 
 class AnthropicClient(_CachingLLMClient):
@@ -286,6 +414,30 @@ class AnthropicClient(_CachingLLMClient):
             raise LLMError(msg)
         return block.text
 
+    async def _parse_structured_once(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,
+    ) -> T:
+        try:
+            message = await self._client.messages.parse(
+                model=self._model,
+                max_tokens=max_tokens or 1024,
+                system=system,
+                messages=[{"role": "user", "content": prompt}],
+                output_format=response_model,
+            )
+        except anthropic.RateLimitError as exc:
+            msg = f"Anthropic rate limit: {exc}"
+            raise LLMRateLimitError(msg) from exc
+        except anthropic.APIError as exc:
+            msg = f"Anthropic API error: {exc}"
+            raise LLMError(msg) from exc
+        return message.parsed_output  # type: ignore[return-value]
+
 
 class GroqClient(_CachingLLMClient):
     """LLM client using Groq API (OpenAI-compatible, free tier: 14400 req/day)."""
@@ -329,6 +481,18 @@ class GroqClient(_CachingLLMClient):
             msg = "Groq returned empty response"
             raise LLMError(msg)
         return content
+
+    async def _parse_structured_once(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,
+    ) -> T:
+        return await self._openai_parse_structured_once(
+            prompt, system, response_model, max_tokens=max_tokens
+        )
 
 
 class DeepSeekClient(_CachingLLMClient):
@@ -374,6 +538,18 @@ class DeepSeekClient(_CachingLLMClient):
             raise LLMError(msg)
         return content
 
+    async def _parse_structured_once(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,
+    ) -> T:
+        return await self._openai_parse_structured_once(
+            prompt, system, response_model, max_tokens=max_tokens
+        )
+
 
 class FallbackLLMClient(LLMClient):
     """Wraps a primary and fallback client; switches on rate limit errors.
@@ -417,6 +593,35 @@ class FallbackLLMClient(LLMClient):
                     )
         return await self._fallback.complete(
             prompt, system, json_mode=json_mode, max_tokens=max_tokens
+        )
+
+    async def parse_structured(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,
+    ) -> T:
+        """Try primary; on rate limit, use fallback for structured parsing."""
+        now = time.monotonic()
+        if now >= self._fallback_until:
+            self._logged_fallback = False
+            try:
+                return await self._primary.parse_structured(
+                    prompt, system, response_model, max_tokens=max_tokens
+                )
+            except LLMRateLimitError:
+                self._fallback_until = now + self._FALLBACK_COOLDOWN_SECONDS
+                if not self._logged_fallback:
+                    self._logged_fallback = True
+                    _log.warning(
+                        "llm_fallback_activated",
+                        reason="rate_limit",
+                        cooldown_seconds=self._FALLBACK_COOLDOWN_SECONDS,
+                    )
+        return await self._fallback.parse_structured(
+            prompt, system, response_model, max_tokens=max_tokens
         )
 
 
