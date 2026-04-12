@@ -220,6 +220,12 @@ class TradingLoop:
         # Entry price tracking for Kelly P&L computation
         self._entry_prices: dict[str, Decimal] = {}
 
+        # Position ownership tracking: symbol -> strategy_name that opened the position
+        # Set on BUY fill, cleared on SELL fill and stop-loss trigger.
+        # Used by PresetApplicator (Plan 38-01) to check for open positions before
+        # disabling a strategy via auto-apply.
+        self._entry_strategy: dict[str, str] = {}
+
         self._ml_registry = ml_registry
         self._scheduler: BackgroundScheduler | None = None
         self._stop_event = threading.Event()
@@ -1839,7 +1845,7 @@ class TradingLoop:
             strategy=signal.strategy_name,
             market=market_id,
         )
-        self._submit_order(order, market_id, candles=candles)
+        self._submit_order(order, market_id, candles=candles, strategy_name=signal.strategy_name)
         self._cycle_orders_submitted += 1
 
         # 6A.7: Record day trade after successful order submission
@@ -2052,11 +2058,20 @@ class TradingLoop:
         self._segment_min_confidence[seg_id] = result
         return result
 
+    def get_entry_strategies(self) -> dict[str, str]:
+        """Return a snapshot of {symbol: strategy_name} for currently open positions.
+
+        Used by PresetApplicator to check position ownership before disabling a
+        strategy via auto-apply.  Returns a copy so callers cannot mutate internal state.
+        """
+        return dict(self._entry_strategy)
+
     def _submit_order(
         self,
         order: OrderRequest,
         market_id: str,
         candles: list[Candle] | None = None,
+        strategy_name: str = "",
     ) -> None:
         """Submit order, set stop-loss on BUY fill, clear on SELL fill."""
         from finalayze.risk.stop_loss import compute_atr_stop_loss  # noqa: PLC0415
@@ -2107,6 +2122,9 @@ class TradingLoop:
                         slippage_bps=slippage_bps,
                         fill_latency_seconds=0.0,
                     )
+                # Track position ownership for PresetApplicator (APPLY-03)
+                if order.side == "BUY":
+                    self._entry_strategy[order.symbol] = strategy_name
                 # Wire stop-loss on BUY fill + track entry price for Kelly
                 if order.side == "BUY" and candles and result.fill_price is not None:
                     self._entry_prices[order.symbol] = result.fill_price
@@ -2134,6 +2152,7 @@ class TradingLoop:
                         self._update_kelly(order.symbol, result.fill_price)
                     with self._stop_loss_lock:
                         self._stop_states.pop(order.symbol, None)
+                    self._entry_strategy.pop(order.symbol, None)
             else:
                 _log.warning(
                     "order_rejected",
@@ -2214,6 +2233,7 @@ class TradingLoop:
                 self._update_kelly(symbol, current_price)
             # Clear stop state after successful trigger (or zero position)
             del self._stop_states[symbol]
+            self._entry_strategy.pop(symbol, None)
             self._cycle_exited_symbols.add(symbol)  # PARITY-04
 
     def _update_kelly(self, symbol: str, fill_price: Decimal) -> None:

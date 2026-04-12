@@ -690,6 +690,7 @@ class TestEntryStrategy:
             quantity=Decimal("1"),
         )
         loop._broker_router.submit.return_value = order_result  # type: ignore[attr-defined]
+        loop._persist_to_db = MagicMock()  # type: ignore[attr-defined]
 
         loop._submit_order(order, "moex", strategy_name="dual_momentum")  # type: ignore[attr-defined]
 
@@ -704,6 +705,7 @@ class TestEntryStrategy:
         loop = _make_loop_with_broker()
         loop._entry_strategy["SBER"] = "dual_momentum"  # type: ignore[attr-defined]
         loop._entry_prices["SBER"] = Decimal("100")  # type: ignore[attr-defined]
+        loop._persist_to_db = MagicMock()  # type: ignore[attr-defined]
 
         sell_result = OrderResult(
             filled=True,
