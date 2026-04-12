@@ -1,521 +1,386 @@
-# Architecture Patterns
+# Architecture Research
 
-**Domain:** Sandbox stability and observability fixes for MOEX autonomous trading system
-**Researched:** 2026-03-30
-**Confidence:** HIGH -- based on direct codebase inspection of all modified components
-
-## Current Architecture Overview
-
-```
-                     APScheduler (BackgroundScheduler)
-                     ├── news_cycle     (executor: "news", 1 thread)
-                     ├── strategy_cycle (executor: "default", 4 threads)
-                     ├── bond_cycle     (cron: 10:30 MSK)
-                     ├── daily_reset    (cron)
-                     ├── fx_update      (interval: 60 min)
-                     └── macro_refresh  (cron: 10:00 MSK)
-                              │
-                     ┌────────┴─────────┐
-                     │  TradingLoop     │  (Layer 5 -- orchestration/)
-                     │  _async_loop ────│──── background asyncio thread (SHARED)
-                     │  _run_async()    │     ├── gRPC calls (TinkoffBroker)
-                     │                  │     ├── gRPC calls (TinkoffFetcher)
-                     │                  │     ├── FX updates (httpx async)
-                     │                  │     ├── Telegram send (httpx async)
-                     │                  │     └── DB persist (SQLAlchemy async)
-                     └──────────────────┘
-                              │
-              ┌───────────────┼──────────────────┐
-              │               │                  │
-     TinkoffBroker    TinkoffFetcher      FXRateService
-     (own _loop)      (own _loop)         (uses TL._async_loop)
-     execution/       data/fetchers/      markets/
-```
-
-**Critical problem:** Three separate `asyncio.new_event_loop()` instances exist:
-1. `TradingLoop._async_loop` -- background thread for general async work
-2. `TinkoffBroker._loop` -- own background thread for gRPC broker calls
-3. `TinkoffFetcher._loop` -- own background thread for gRPC data calls
-
-The gRPC C-core library registers its `PollerCompletionQueue` callbacks on whichever asyncio event loop creates the gRPC channel. When multiple gRPC channels coexist on a loop with non-gRPC work (FX updates, DB writes, Telegram), the poller saturates the loop's self-pipe buffer, producing `BlockingIOError` and starving APScheduler cycles (drift up to 60 min).
-
-### Component Boundaries
-
-| Component | Responsibility | Communicates With | Layer |
-|-----------|---------------|-------------------|-------|
-| `TradingLoop` | Orchestrates all scheduled cycles | All below | L5 (orchestration/) |
-| `TinkoffBroker` | Order submission, portfolio queries via gRPC | T-Bank gRPC API | L5 (execution/) |
-| `TinkoffFetcher` | Candle/instrument data via gRPC | T-Bank gRPC API | L2 (data/fetchers/) |
-| `FXRateService` | USD/RUB rate from CBR XML | CBR HTTP API | L2 (markets/) |
-| `TelegramAlerter` | Alert dispatch via Telegram Bot API | Telegram HTTP API | L6 (api/) |
-| `SandboxMonitorService` | Cycle metrics persistence | PostgreSQL (async) | L6 (monitoring/) |
-| `ValidationLogger` | Structured cycle log entries | stdout (structlog) | L0 (core/) |
-| `OrderModel` / `SignalModel` | DB persistence for orders/signals | PostgreSQL | L0 (core/models.py) |
-| `NewsArticleModel` | DB persistence for news | PostgreSQL | L0 (core/models.py) |
-| Promtail | Log shipper (Docker container) | Loki via HTTP push | Infrastructure |
-| Loki | Log aggregation | Grafana queries | Infrastructure |
+**Domain:** Agent integration & autonomous decision loop for a live trading system
+**Researched:** 2026-04-12
+**Confidence:** HIGH — based on direct codebase inspection
 
 ---
 
-## Recommended Architecture (Post-Fix)
+## Standard Architecture
+
+### System Overview — v8.0 Target State
 
 ```
-                     APScheduler (BackgroundScheduler)
-                     ├── news_cycle
-                     ├── strategy_cycle
-                     ├── bond_cycle
-                     ├── daily_reset
-                     └── fx_update
-                              │
-                     ┌────────┴─────────┐
-                     │  TradingLoop     │
-                     │  _async_loop ────│──── background thread (general async)
-                     │                  │     ├── FX updates (httpx)
-                     │                  │     ├── Telegram (httpx)
-                     │                  │     └── DB persist (SQLAlchemy async)
-                     │                  │
-                     │  _grpc_loop ─────│──── DEDICATED gRPC thread (NEW)
-                     │                  │     ├── TinkoffBroker calls
-                     │                  │     └── TinkoffFetcher calls
-                     └──────────────────┘
-                              │
-              ┌───────────────┼──────────────────┐
-              │               │                  │
-     TinkoffBroker    TinkoffFetcher      FXRateService
-     (uses TL._grpc_loop)  (uses TL._grpc_loop) (uses TL._async_loop)
-```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Layer 6: API / Dashboard                                           │
+│  ┌──────────────────┐  ┌───────────────────┐  ┌─────────────────┐  │
+│  │ api/v1/debates   │  │ api/v1/experiments│  │ dashboard/pages │  │
+│  │  (NEW REST)      │  │  (NEW REST)       │  │ experiments_list│  │
+│  └──────────┬───────┘  └────────┬──────────┘  └────────┬────────┘  │
+├─────────────┼───────────────────┼─────────────────────┼────────────┤
+│  Layer 5: Orchestration                                             │
+│  ┌──────────┴───────────────────┴─────────────────────┴─────────┐  │
+│  │  orchestration/agent_orchestrator.py  (NEW)                  │  │
+│  │  - Collects AgentOutputs from domain agents                  │  │
+│  │  - Runs ConflictDetector                                     │  │
+│  │  - Routes conflicts → DebateManager → arbiter-agent          │  │
+│  │  - Routes escalations → ExperimentManager → backtest runner  │  │
+│  │  - On ACCEPTED verdict → PresetApplicator                    │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│  ┌─────────────────────────┐   ┌──────────────────────────────┐    │
+│  │ orchestration/conflict_ │   │ orchestration/preset_        │    │
+│  │ detector.py  (NEW)      │   │ applicator.py  (NEW)         │    │
+│  └─────────────────────────┘   └──────────────────────────────┘    │
+├─────────────────────────────────────────────────────────────────────│
+│  Layer 4: Strategy / Risk                                           │
+│  strategies/combiner.py      risk/position_sizing_pipeline.py       │
+│  (UNCHANGED — receives applied presets)                             │
+├─────────────────────────────────────────────────────────────────────│
+│  Layer 3: Analysis / ML                                             │
+│  analysis/*, ml/*            (domain agents invoke these)           │
+├─────────────────────────────────────────────────────────────────────│
+│  Layer 0: Types & Schemas                                           │
+│  ┌────────────────┐  ┌────────────────────┐  ┌──────────────────┐  │
+│  │ core/schemas.py│  │ core/debate_manager│  │ core/experiment_ │  │
+│  │ AgentOutput    │  │ .py  (EXISTS)      │  │ manager.py       │  │
+│  │ Claim          │  │                    │  │ (EXISTS)         │  │
+│  │ DebateState    │  └────────────────────┘  └──────────────────┘  │
+│  │ ExperimentState│                                                 │
+│  └────────────────┘                                                 │
+└─────────────────────────────────────────────────────────────────────┘
 
-**Key change:** All gRPC work is isolated to a single dedicated event loop thread. TinkoffBroker and TinkoffFetcher no longer manage their own loops -- they accept the shared gRPC loop from TradingLoop. Non-gRPC async work (HTTP, DB) stays on `_async_loop`, completely free from gRPC poller contention.
+File-based stores (.planning/debates/, .planning/experiments/):
+  ← DebateManager reads/writes →  ← ExperimentManager reads/writes →
+
+Script-based runner (scripts/run_iteration.py --hypothesis <id>):
+  ← invoked by orchestrator or manually →
+```
 
 ---
 
-## Integration Analysis: 10 Fixes
+## Component Responsibilities
 
-### Fix 1: gRPC Event Loop Isolation
+### Existing Components — Unchanged or Lightly Modified
 
-**Problem:** gRPC C-core's `PollerCompletionQueue` registers on the asyncio loop that creates the channel. When TradingLoop's `_async_loop` hosts both gRPC and non-gRPC coroutines, the poller saturates the pipe buffer, causing `BlockingIOError` and starving APScheduler cycles (drift up to 60 min).
+| Component | Layer | Responsibility | v8.0 Change |
+|-----------|-------|----------------|-------------|
+| `core/schemas.py` | 0 | Pydantic types: `AgentOutput`, `Claim`, `DebateState`, `ExperimentState` | Add `ConflictReport` schema; no structural changes |
+| `core/debate_manager.py` | 0 | CRUD for `.planning/debates/*.md` YAML frontmatter files | No changes needed |
+| `core/experiment_manager.py` | 0 | CRUD for `.planning/experiments/*.md`, verdict logic | No changes needed |
+| `scripts/run_iteration.py` | Script | Backtest runner; `--hypothesis` flag merges `preset_overrides` into strategy configs | No changes needed — already fully wired |
+| `scripts/run_interaction_test.py` | Script | A/B/AB comparison via subprocess calls to `run_iteration.py` | No changes needed |
+| `.claude/agents/arbiter-agent.md` | Agent | Fact-checks claims from `AgentOutput`, produces `FactCheckReport` | No changes needed |
+| `strategies/presets/*.yaml` | Config | Strategy parameter files per segment | MODIFIED by `PresetApplicator` on ACCEPT |
+| `dashboard/pages/experiments_list.py` | 6 | Experiment Lab UI with list/detail/history tabs | Minor: add debate link display in detail view |
 
-**Files to modify:**
-| File | Change |
-|------|--------|
-| `src/finalayze/orchestration/trading_loop.py` | Add `_grpc_loop` + `_grpc_thread`. Add `_run_grpc(coro)` method. Route all broker/fetcher calls through it. |
-| `src/finalayze/execution/tinkoff_broker.py` | Remove self-managed `_loop` / `_loop_thread`. Accept external `grpc_loop: asyncio.AbstractEventLoop` via constructor or setter. |
-| `src/finalayze/data/fetchers/tinkoff_data.py` | Same: accept external `grpc_loop`, remove self-managed loop. |
+### New Components Required
 
-**Data flow change:**
-```
-Before: APScheduler thread -> TradingLoop._run_async() -> TL._async_loop (gRPC + everything)
-After:  APScheduler thread -> TradingLoop._run_grpc()  -> TL._grpc_loop  (gRPC only)
-        APScheduler thread -> TradingLoop._run_async() -> TL._async_loop (FX, DB, Telegram)
-```
-
-**Call sites that must switch from `_run_async()` to `_run_grpc()`:**
-- `_get_cached_portfolio()` -- calls `broker.get_portfolio()` which uses gRPC
-- `_process_instrument()` -- calls fetcher for candles (gRPC)
-- `_submit_order()` -- calls `broker_router.submit()` which routes to TinkoffBroker (gRPC)
-- `_bond_cycle()` -- bond processor calls TinkoffBroker (gRPC)
-- `_reconcile_inflight_orders()` -- calls `broker.get_open_orders()` (gRPC)
-- `_attempt_grpc_reconnect()` -- calls `broker.reconnect_client()` (gRPC)
-
-**Call sites that stay on `_run_async()`:**
-- `_fx_update_cycle()` -- CBR HTTP via httpx
-- `_persist_snapshots_async()` -- SQLAlchemy async DB write
-- `_news_cycle()` / `_analyze_impact_batch()` -- LLM HTTP calls
-- Telegram alert sends
-
-**Lifecycle changes:**
-- `start()` must initialize both loops before starting scheduler
-- `stop()` / `close()` must tear down both loops
-- TinkoffBroker.`close()` no longer stops its own loop (it does not own one)
-
-**Risk to live trading:** MEDIUM. Most architectural change. But the current state is already broken (60-min drift), so the risk of NOT fixing is higher. The `_run_grpc()` method is structurally identical to `_run_async()` -- just targets a different loop.
+| Component | Layer | Responsibility |
+|-----------|-------|----------------|
+| `orchestration/conflict_detector.py` | 5 | Compares multiple `AgentOutput` objects; detects contradictions in recommendations or overlapping metric claims |
+| `orchestration/preset_applicator.py` | 5 | Applies `ExperimentState.preset_overrides` to `strategies/presets/*.yaml` on ACCEPT verdict with backup + diff logging |
+| `orchestration/agent_orchestrator.py` | 5 | Full pipeline coordinator: collect outputs → detect conflicts → trigger debate → arbiter → experiment → verdict → apply |
+| `api/v1/debates.py` | 6 | REST endpoints: `GET /debates`, `GET /debates/{id}`, `POST /debates` |
+| `api/v1/experiments.py` | 6 | REST endpoints: `GET /experiments`, `GET /experiments/{id}`, `POST /experiments/{id}/apply` |
 
 ---
 
-### Fix 2: T-Bank API Error 70001 Resilience
+## Recommended Project Structure
 
-**Problem:** T-Bank Sandbox API returns error code 70001 intermittently. `get_portfolio()` fails, causing strategy cycle to skip the market entirely for hours.
-
-**Files to modify:**
-| File | Change |
-|------|--------|
-| `src/finalayze/execution/tinkoff_broker.py` | Add `_last_known_portfolio: PortfolioState` cache. On successful `get_portfolio()`, save result. On 70001 failure, return cached copy. Track staleness age. |
-
-**Data flow change:**
 ```
-Before: get_portfolio() -> gRPC -> 70001 -> raise BrokerError -> market skipped
-After:  get_portfolio() -> gRPC -> 70001 -> return _last_known_portfolio (+ warning log)
+src/finalayze/
+├── core/
+│   ├── schemas.py              # EXISTS — add ConflictReport schema only
+│   ├── debate_manager.py       # EXISTS — no changes
+│   └── experiment_manager.py   # EXISTS — no changes
+├── orchestration/
+│   ├── trading_loop.py         # EXISTS
+│   ├── bond_cycle.py           # EXISTS
+│   ├── conflict_detector.py    # NEW
+│   ├── preset_applicator.py    # NEW
+│   └── agent_orchestrator.py   # NEW
+├── api/
+│   └── v1/
+│       ├── router.py           # EXISTS — register new routers
+│       ├── debates.py          # NEW
+│       └── experiments.py      # NEW (experiments apply endpoint)
+└── dashboard/
+    └── pages/
+        └── experiments_list.py # EXISTS — minor: show debate link in detail
+
+scripts/
+├── run_iteration.py            # EXISTS — already wired with --hypothesis
+└── run_interaction_test.py     # EXISTS — already wired
+
+.planning/
+├── debates/                    # EXISTS (empty at start) — debate files written here
+└── experiments/                # EXISTS (empty at start) — experiment files written here
+
+strategies/presets/
+├── ru_blue_chips.yaml          # EXISTS — modified by PresetApplicator on ACCEPT
+├── ru_blue_chips.yaml.bak.{experiment_id}  # CREATED by PresetApplicator as backup
+└── ...
 ```
-
-**Integration points:**
-- `TinkoffBroker.get_portfolio()` is the sync method called from `_get_cached_portfolio()` in TradingLoop
-- Must detect "70001" in exception message or gRPC status detail
-- Log the staleness age so operators know how old the fallback is
-- After N consecutive 70001 errors (e.g., 5), trigger `reconnect_client()` automatically
-
-**Dependency on Fix 1:** The broker refactoring (removing self-managed loop) should be done first. Fix 2 then adds fallback logic to the already-refactored broker.
-
-**Risk to live trading:** LOW. Stale portfolio data is acceptable for position sizing (positions change slowly). The alternative (market skip for hours) is worse.
 
 ---
 
-### Fix 3: DB Persistence for Orders, Signals, News, Sentiment
+## Architectural Patterns
 
-**Problem:** `OrderModel`, `SignalModel`, `NewsArticleModel`, `SentimentScoreModel` tables exist in `core/models.py` with Alembic migrations, but TradingLoop never writes to them. All trade data is ephemeral (log-only).
+### Pattern 1: Structured Output Emission
 
-**Files to modify:**
-| File | Change |
-|------|--------|
-| `src/finalayze/orchestration/persistence.py` | **NEW FILE.** Extract persistence helpers. `persist_signal()`, `persist_order()`, `persist_news_article()`, `persist_sentiment()`. |
-| `src/finalayze/orchestration/trading_loop.py` | Call persistence helpers from `_process_instrument()` (signals), `_submit_order()` (orders), `_news_cycle()` (articles/sentiment). |
+**What:** Each domain agent (quant-analyst, risk-officer, ml-engineer) must return an `AgentOutput` Pydantic model when asked for a recommendation. The schema is already defined in `core/schemas.py`.
 
-**Data flow -- signal persistence:**
-```
-_process_instrument():
-  combiner.generate_signal() -> Signal schema
-  -> NEW: persist_signal(signal, segment_id, market_id) -> SignalModel -> DB (via _run_async)
-  -> returns signal_id: UUID
-  -> _submit_order(order, market_id, signal_id=signal_id)
-```
+**When to use:** Any time two or more domain agents are invoked on the same question (e.g., "should we increase momentum weight in ru_blue_chips?").
 
-**Data flow -- order persistence:**
-```
-_submit_order():
-  broker_router.submit(order) -> OrderResult
-  -> NEW: persist_order(order, result, signal_id, market_id) -> OrderModel -> DB (via _run_async)
-```
+**Critical constraint:** `AgentOutput.claims` requires at least one `Claim` with a typed `source` (`FileLineSource` or `MetricSource`). Agents cannot emit opinions without evidence-backed assertions. This is enforced by `min_length=1` in the field definition.
 
-**Data flow -- news persistence:**
-```
-_news_cycle():
-  _analyze_impact_batch(articles)
-    -> for each article: analyzer.analyze(article) -> NewsImpactResult
-    -> NEW: persist_news_article(article, result) -> NewsArticleModel -> DB
-    -> NEW: persist_sentiment(symbol, score, market_id) -> SentimentScoreModel -> DB
-```
+**How agents connect today:** Agent definitions in `.claude/agents/*.md` are Claude Code sub-agents. They do not have a Python calling interface. The orchestrator (itself a Claude Code agent) invokes them via the sub-agent protocol, then parses the returned text to extract the `AgentOutput` JSON structure. The orchestrator prompt must demand JSON-formatted `AgentOutput`.
 
-**Integration points:**
-- DB writes go through `_run_async()` (not `_run_grpc()`): SQLAlchemy async, not gRPC
-- `get_async_session_factory()` from `core/db.py` provides the session factory
-- `_process_instrument()` signature must pass `signal_id` to `_submit_order()` for FK linking
-- All persistence is fire-and-forget: wrap in try/except, log warning on failure, never block trading
-- Separate file (`persistence.py`) because `trading_loop.py` is already 2400+ lines
+### Pattern 2: Conflict Detection
 
-**Risk to live trading:** LOW. All persistence is additive. Failure to persist logs a warning but does not interrupt trading.
+**What:** `ConflictDetector` compares a list of `AgentOutput` objects and identifies contradictions.
 
----
+**Implementation approach:** Rule-based detection only — no LLM semantic comparison. Two outputs conflict when:
+1. Their `recommendation` fields contain opposing keywords (enable vs disable, increase vs decrease, raise vs lower)
+2. Their `MetricSource` claims reference the same `metric_name` from the same `iteration` but with values differing by more than a tolerance (e.g., 0.01)
 
-### Fix 4: Loki Log Pipeline (Promtail Configuration)
+**Output:** A new `ConflictReport` schema in `core/schemas.py` (Layer 0) containing the conflicting agent pair and a human-readable conflict description.
 
-**Problem:** Promtail ships 0 log entries to Loki despite correct config structure. Root cause: Promtail uses Docker service discovery (`docker_sd_configs`) to find containers, but it only mounts `/var/run/docker.sock` -- it can discover the container but cannot read its log files because the Docker log directory (`/var/lib/docker/containers/`) is not volume-mounted.
+**Why rule-based:** Deterministic, fast (no LLM call in the hot path), unit-testable with pure fixtures.
 
-**Files to modify:**
-| File | Change |
-|------|--------|
-| `docker/docker-compose.sandbox.yml` | Add volume mount for Docker container logs into Promtail service. |
-| `monitoring/promtail/promtail-config.yml` | Possibly no change needed if Docker SD + log file mount works. May need to verify `__path__` label resolution. |
+### Pattern 3: Debate → Arbiter → Escalation Pipeline
 
-**Fix:**
-```yaml
-# docker-compose.sandbox.yml - promtail service volumes
-volumes:
-  - ../monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
-  - /var/run/docker.sock:/var/run/docker.sock:ro
-  - /var/lib/docker/containers:/var/lib/docker/containers:ro  # ADD THIS
-```
+**What:** When `ConflictDetector` returns a non-empty `ConflictReport`, the orchestrator executes:
+1. `DebateManager.create_debate(topic, agents)` — creates `.planning/debates/{id}.md`
+2. `DebateManager.add_agent_position(debate_id, agent_name, output)` for each conflicting agent
+3. Invokes `arbiter-agent` sub-agent with debate ID and both `AgentOutput` JSON objects
+4. Arbiter produces `FactCheckReport`; orchestrator calls `DebateManager.add_arbiter_report(debate_id, report)`
+5. If `FactCheckReport.has_contradictions`: calls `ExperimentManager.create_experiment()` which internally calls `DebateManager.escalate_debate()` (bidirectional link)
+6. If no contradictions: calls `DebateManager.resolve_debate(debate_id, resolution)`
 
-**Data flow (corrected):**
-```
-app container -> stdout -> Docker json-file driver -> /var/lib/docker/containers/<id>/*-json.log
-  -> Promtail (now has read access via volume mount)
-  -> Promtail parses JSON (event, level, timestamp per pipeline_stages)
-  -> HTTP push to http://loki:3100/loki/api/v1/push
-  -> Loki stores in /loki/chunks (tsdb store, filesystem backend)
-  -> Grafana queries Loki via provisioned datasource
-```
+**The bidirectional link is already implemented:** `ExperimentManager.create_experiment(debate_id=...)` calls `DebateManager.escalate_debate()` at line 135 of `experiment_manager.py`. No new wiring needed here.
 
-**Integration points:**
-- The app's structlog JSON output must match Promtail's `pipeline_stages.json.expressions` (keys: `event`, `level`, `timestamp`)
-- Loki config (`monitoring/loki/loki-config.yml`) is already correct: tsdb store, filesystem backend, schema v13
-- Grafana Loki datasource provisioning exists at `monitoring/grafana/provisioning/datasources/loki.yml`
-- Drop rules for noisy health/metrics access logs already configured
+### Pattern 4: Experiment → Backtest → Verdict → Auto-Apply
 
-**Risk to live trading:** NONE. Infrastructure-only change. No application code modified.
+**What:** After experiment creation (status=PENDING), the orchestrator triggers the backtest pipeline:
+1. Invokes `scripts/run_iteration.py --hypothesis <experiment_id>` (or `run_interaction_test.py` for A/B comparison)
+2. The script reads `ExperimentState.preset_overrides`, deep-merges into strategy configs (lines 1068-1080 of `run_iteration.py`), runs backtest, calls `ExperimentManager.link_result()`
+3. The script calls `ExperimentManager.record_verdict(metric_value)` — computes ACCEPTED/REJECTED/INCONCLUSIVE
+4. Orchestrator reads final `ExperimentState`; if ACCEPTED → `PresetApplicator.apply(experiment)`
+5. If REJECTED/INCONCLUSIVE → no file changes; orchestrator logs and Telegram-alerts
+
+**The backtest wiring is already complete:** Steps 1-3 exist in `run_iteration.py`. The only missing piece is step 4 (PresetApplicator) and the orchestrator reading the final verdict.
+
+### Pattern 5: PresetApplicator Safety Protocol
+
+**What:** A single-responsibility module writing `preset_overrides` to `strategies/presets/*.yaml` on ACCEPT.
+
+**Where:** `orchestration/preset_applicator.py` (Layer 5). Imports `core/schemas.py` (Layer 0). Writes to `strategies/presets/` (filesystem, not a Python import — no layer violation).
+
+**Safety requirements:**
+1. Always back up before writing: `{segment}.yaml.bak.{experiment_id}`
+2. Use the same `_deep_merge()` function pattern as `run_iteration.py` (lines 950-959) for consistency
+3. Log the full YAML diff at INFO level before writing
+4. On write failure, restore from backup and raise
+5. Write a `{segment}.yaml.applied.{experiment_id}` marker file after successful apply — idempotency guard
+
+**Scope limitation:** PresetApplicator writes YAML only. The live `TradingLoop` reads presets at startup. A live-reload signal or restart is required for changes to affect live trading. This is explicitly out of scope for v8.0 — presets apply to the next backtest or restart.
 
 ---
 
-### Fix 5: FX Rate Fallback via CBR XML API
+## Data Flow
 
-**Problem:** `FXRateService.update_usdrub()` uses CBR daily XML feed (HTTP). On failure, returns None and the `CurrencyConverter` retains its last-set rate. If the service never succeeds on startup, the rate stays at whatever initial default was set (potentially stale).
+### Full Orchestration Flow
 
-**Files to modify:**
-| File | Change |
-|------|--------|
-| `src/finalayze/markets/fx_service.py` | Add fallback chain: (1) CBR XML_daily.asp (existing), (2) CBR XML_dynamic.asp (last 3 days, via `CBRClient`), (3) keep previous rate + log warning. |
-| `src/finalayze/markets/currency.py` | Add `_rate_updated_at: dict[str, datetime]` to track freshness. Add `rate_age()` method. |
-
-**Data flow:**
 ```
-Before: FXRateService -> CBR XML_daily -> fail -> return None (no update)
-After:  FXRateService -> CBR XML_daily -> fail
-                       -> CBR XML_dynamic (last 3 days, from data/fetchers/cbr.py) -> fail
-                       -> log warning, keep previous rate
+Domain agents invoked (quant-analyst, risk-officer, ml-engineer)
+    ↓ each returns AgentOutput JSON (recommendation + claims with sources)
+ConflictDetector.detect(outputs: list[AgentOutput]) → ConflictReport
+    ↓ if no conflicts
+    → debate skipped; winning recommendation logged
+    ↓ if conflicts found
+DebateManager.create_debate(topic, agents) → debate_id
+DebateManager.add_agent_position(debate_id, agent, output) × N
+    ↓
+arbiter-agent invoked with debate_id + AgentOutputs JSON
+    ↓ returns FactCheckReport
+DebateManager.add_arbiter_report(debate_id, report)
+    ↓ if report.has_contradictions == False
+DebateManager.resolve_debate(debate_id, resolution)
+    ↓ if report.has_contradictions == True
+ExperimentManager.create_experiment(
+    experiment_id, hypothesis, success_criteria, debate_id, preset_overrides)
+    → internally calls DebateManager.escalate_debate(debate_id, experiment_id)
+    ↓
+scripts/run_iteration.py --hypothesis <experiment_id>
+    → ExperimentManager.update_status(RUNNING)
+    → reads preset_overrides, deep-merges into strategy_configs
+    → runs backtest engine
+    → ExperimentManager.link_result(ExperimentResult)
+    → ExperimentManager.record_verdict(primary_metric_value)
+      → status = ACCEPTED | REJECTED | INCONCLUSIVE
+    ↓ if status == ACCEPTED
+PresetApplicator.apply(experiment_state)
+    → backs up strategies/presets/{segment}.yaml → .yaml.bak.{experiment_id}
+    → deep-merges preset_overrides into YAML
+    → writes new YAML
+    → logs diff
+    → writes .yaml.applied.{experiment_id} marker
+    ↓ if status == REJECTED or INCONCLUSIVE
+    → log + Telegram alert; no file changes
 ```
 
-**Integration points:**
-- `CBRClient` from `data/fetchers/cbr.py` already has `fetch_fx_rates()` that queries `XML_dynamic.asp` -- same layer (L2), no import violation
-- TradingLoop's `_fx_update_cycle()` calls `self._run_async(self._fx_service.update_usdrub())` -- no change needed
-- Staleness tracking in `CurrencyConverter` is informational (log + metrics)
+### State Persistence
 
-**Risk to live trading:** LOW. Additive fallback logic. If all HTTP sources fail, existing rate is preserved.
+All state is file-based. No new database tables are needed for v8.0.
+
+```
+.planning/debates/{debate_id}.md         — YAML frontmatter + markdown body
+.planning/experiments/{exp_id}.md        — YAML frontmatter + markdown body
+results/experiments/{exp_id}/            — per-run backtest JSON files
+results/experiments/{exp_id}/control.json
+results/experiments/{exp_id}/A-only.json (interaction test)
+results/experiments/{exp_id}/B-only.json
+results/experiments/{exp_id}/AB.json
+strategies/presets/{segment}.yaml        — modified by PresetApplicator on ACCEPT
+strategies/presets/{segment}.yaml.bak.{exp_id}  — backup before modification
+strategies/presets/{segment}.yaml.applied.{exp_id}  — idempotency marker
+```
+
+### Agent Invocation Model
+
+Domain agents (quant-analyst, risk-officer, ml-engineer) are Claude Code sub-agents in `.claude/agents/*.md`. They have no Python callable interface and require the Claude Code runtime for MCP tools (`Read`, `Bash`, `ast-index`).
+
+For v8.0, the orchestration pipeline is triggered in two ways:
+
+1. **Manually via Claude Code agent** — human invokes `agent-orchestrator` sub-agent which spawns domain agents, collects outputs, and calls the Python pipeline modules via `Bash` tool
+2. **Via REST API** — `POST /debates` endpoint accepts pre-collected `AgentOutput` JSON bodies and runs the Python pipeline directly (no Claude Code sub-agent invocation from Python)
+
+A fully autonomous trigger from `TradingLoop` (e.g., schedule-based agent invocations) is out of scope for v8.0 because agents require the Claude Code runtime environment, which is not available within the Python process.
 
 ---
 
-### Fix 6: Market-Hours Gate in Strategy Cycle
+## Integration Points — New vs Modified
 
-**Problem:** Strategy cycle runs every N minutes regardless of market hours, wasting gRPC calls and producing stale-candle warnings off-hours.
-
-**Current state:** `_is_market_open()` exists (line 1312) and is already called per-market at line 1260 (`_strategy_cycle_impl()`), and for bonds at line 654. Individual markets are skipped if closed.
-
-**What is actually missing:** The cycle still runs the full startup sequence (increment counter, clear caches, create CycleLogEntry, compute drawdown) even when ALL markets are closed. The fix is a top-level early exit.
-
-**Files to modify:**
-| File | Change |
-|------|--------|
-| `src/finalayze/orchestration/trading_loop.py` | Add early return at top of `_strategy_cycle()` if no market in `_circuit_breakers.keys()` is currently open. Log at DEBUG level. |
-
-**Code sketch:**
-```python
-def _strategy_cycle(self) -> None:
-    now = self._now()
-    if not any(self._is_market_open(m, now) for m in self._circuit_breakers):
-        _log.debug("strategy_cycle_all_markets_closed")
-        return
-    # ... existing code
-```
-
-**Risk to live trading:** LOW. Conservative check -- if ANY market is open, full cycle runs.
+| Component | Status | Integration Boundary |
+|-----------|--------|---------------------|
+| `core/schemas.py` | MODIFIED (minimal) | Add `ConflictReport` schema; imported by `conflict_detector.py` (Layer 5) |
+| `orchestration/conflict_detector.py` | NEW | Imports `AgentOutput`, `ConflictReport` from Layer 0 |
+| `orchestration/preset_applicator.py` | NEW | Imports `ExperimentState` from Layer 0; writes `strategies/presets/*.yaml` via filesystem |
+| `orchestration/agent_orchestrator.py` | NEW | Imports `ConflictDetector`, `PresetApplicator` (Layer 5); calls `DebateManager`, `ExperimentManager` (Layer 0) |
+| `api/v1/debates.py` | NEW | Registers on `api/v1/router.py`; reads/writes via `DebateManager` |
+| `api/v1/experiments.py` | NEW | Registers on `api/v1/router.py`; reads via `ExperimentManager`; POST /apply triggers `PresetApplicator` |
+| `api/v1/router.py` | MODIFIED | Include `debates_router` and `experiments_router` |
+| `dashboard/pages/experiments_list.py` | MODIFIED (minor) | Add debate link display in experiment detail tab |
+| `scripts/run_iteration.py` | NOT MODIFIED | Already fully wired with `--hypothesis` and `preset_overrides` merge |
+| `scripts/run_interaction_test.py` | NOT MODIFIED | Already wired for A/B/AB comparison |
+| `core/debate_manager.py` | NOT MODIFIED | All required methods exist: `create_debate`, `add_agent_position`, `add_arbiter_report`, `resolve_debate`, `escalate_debate` |
+| `core/experiment_manager.py` | NOT MODIFIED | All required methods exist: `create_experiment`, `link_result`, `record_verdict`, `get_by_debate` |
 
 ---
 
-### Fix 7: Stale Ticker Cleanup
+## Suggested Build Order
 
-**Problem:** Segment configs reference tickers renamed on MOEX.
+Dependencies drive the order. Lower-layer components must exist before higher-layer consumers.
 
-**Current state in `config/segments.py`:**
-- `FIVE` already updated to `X5` (line 169)
-- `YNDX` already updated to `YDEX` (line 103)
-- `HHRU` present in `ru_tech` (line 103) -- needs updating to `HH`
-- `FIXP` and `POLY` not present in any segment (already removed)
+### Phase 36: Conflict Detection
 
-**Files to modify:**
-| File | Change |
-|------|--------|
-| `config/segments.py` | Change `HHRU` to `HH` in `ru_tech` segment (line 103). |
-| Instrument registry / FIGI mapping | Verify FIGI for `HH` ticker. |
+1. Add `ConflictReport` schema to `core/schemas.py` (Layer 0 — no deps)
+2. Implement `orchestration/conflict_detector.py` with `detect(outputs: list[AgentOutput]) -> ConflictReport`
+3. Update domain agent `.md` definitions (quant-analyst, risk-officer, ml-engineer) to include instructions for emitting `AgentOutput` JSON
+4. Unit tests for `ConflictDetector` with synthetic `AgentOutput` fixtures
 
-**Risk to live trading:** LOW. Config-only change. Must verify FIGI mapping is correct before deploying.
+**Rationale:** No upstream dependencies. Can be built and validated in isolation. ConflictDetector is the entry point of the whole pipeline — everything else gates on it.
 
----
+### Phase 37: Agent Orchestrator + Debate API
 
-### Fix 8: LLM Article Deduplication
+1. Implement `orchestration/agent_orchestrator.py` — full pipeline from conflict detection through debate creation and arbiter invocation
+2. Add `api/v1/debates.py` REST endpoints (`GET /debates`, `GET /debates/{id}`, `POST /debates`)
+3. Add read-only endpoints to `api/v1/experiments.py` (`GET /experiments`, `GET /experiments/{id}`)
+4. Register both routers in `api/v1/router.py`
+5. Integration test: supply two conflicting `AgentOutput` JSON objects via `POST /debates`, verify debate file created and arbiter-agent invoked correctly
 
-**Problem:** RSS and Telegram fetchers have URL-based dedup (`_seen_urls` OrderedDict), but the same story from different sources (RBC vs Interfax vs Telegram) with different URLs gets analyzed twice, wasting LLM quota.
+**Rationale:** Orchestrator depends on ConflictDetector (Phase 36) and existing DebateManager/ExperimentManager. REST endpoints depend on orchestrator. PresetApplicator is not needed yet — keep scope tight.
 
-**Files to modify:**
-| File | Change |
-|------|--------|
-| `src/finalayze/analysis/dedup.py` | **NEW FILE.** `deduplicate_articles(articles: list[NewsArticle]) -> list[NewsArticle]` using normalized title hash. |
-| `src/finalayze/orchestration/trading_loop.py` | Call `deduplicate_articles()` after fetching but before `_analyze_impact_batch()` in `_news_cycle()`. |
+### Phase 38: PresetApplicator + Auto-Apply
 
-**Data flow:**
-```
-Before: articles = rss_articles + tg_articles -> _analyze_impact_batch(articles)
-After:  articles = rss_articles + tg_articles
-        -> deduplicate_articles(articles)  # title-hash dedup
-        -> _analyze_impact_batch(unique_articles)
-```
+1. Implement `orchestration/preset_applicator.py` with YAML backup + deep merge + diff logging + idempotency marker
+2. Wire `POST /experiments/{id}/apply` endpoint to `PresetApplicator`
+3. Add "Apply to Presets" button to `dashboard/pages/experiments_list.py` detail view (calls API endpoint)
+4. End-to-end integration test: create experiment → run backtest → ACCEPT verdict → verify YAML written, backup exists, marker file created
 
-**Dedup approach:** Normalize title (lowercase, strip punctuation, collapse whitespace), take first 100 chars, hash. Keep first occurrence per hash. Simple, deterministic, no ML needed.
-
-**Risk to live trading:** LOW. Reduces LLM calls, does not affect trading logic.
+**Rationale:** PresetApplicator is last because it has the highest blast radius — it writes production config files. Validate the full pipeline (Phases 36-37) before enabling write-back.
 
 ---
 
-### Fix 9: Telegram Alerter Startup Resilience
+## Anti-Patterns
 
-**Problem:** If Telegram bot token is invalid or Telegram API is unreachable at startup, the TradingLoop may fail to start because `on_startup()` sends a Telegram alert synchronously.
+### Anti-Pattern 1: Moving DebateManager / ExperimentManager to Layer 5
 
-**Files to modify:**
-| File | Change |
-|------|--------|
-| `src/finalayze/api/alerts.py` | Ensure `send_alert()` catches all exceptions internally when used in fire-and-forget mode. |
-| `src/finalayze/orchestration/trading_loop.py` | Wrap `_alerter.on_startup()` call in try/except. Trading must not fail because Telegram is unreachable. |
+**What people do:** Notice that these managers do file I/O (not pure data types) and move them to `orchestration/`.
 
-**Risk to live trading:** LOW. Telegram is monitoring-only, not trading-critical.
+**Why it's wrong:** `core/schemas.py` depends on `DebateState` and `ExperimentState`. If managers move to Layer 5, the UI (Layer 6) and API (Layer 6) that directly import managers would create an import path from Layer 6 through Layer 5 — which is legal. But then tests at Layer 0 could not import managers. More importantly, the Layer 0 classification is based on zero project imports (only stdlib + pydantic + yaml), which DebateManager and ExperimentManager satisfy. Moving them would be a cosmetic change with no structural benefit.
 
----
+**Do this instead:** Keep managers in `core/`. The file I/O is an implementation detail. The Layer 0 rule is about import dependencies, not about "pure data only".
 
-### Fix 10: Combined FX Staleness Tracking (extension of Fix 5)
+### Anti-Pattern 2: Invoking Claude Code Agents from Python via Subprocess
 
-**Files to modify:** Same as Fix 5 (`currency.py`, `fx_service.py`). Adds `_rate_updated_at` tracking and a `rate_age()` method. TradingLoop can optionally log/alert when FX rate is older than 24 hours.
+**What people do:** Implement `agent_orchestrator.py` as a Python script that calls `claude --agent quant-analyst` via subprocess and parses stdout.
 
----
+**Why it's wrong:** Claude Code sub-agents require the full Claude Code runtime (MCP tools, file access, `ast-index`). Subprocess invocation does not provide this context and will fail for any agent that uses `Read`, `Bash`, or `ast-index` — which is all of them.
 
-## Build Order (Dependency-Aware)
+**Do this instead:** The orchestrator is itself a Claude Code agent (`.claude/agents/agent-orchestrator.md`). It spawns domain agents via the Claude Code sub-agent protocol. The Python `orchestration/agent_orchestrator.py` module provides the data pipeline (conflict detection, DebateManager calls, ExperimentManager calls, PresetApplicator) and is called via the `Bash` tool by the Claude Code orchestrator agent after collecting outputs.
 
-### Dependency Graph
+### Anti-Pattern 3: ConflictDetector Using LLM Semantic Comparison
 
-```
-Fix 7 (stale tickers) ---- independent, trivial
-Fix 6 (market-hours)  ---- independent, trivial
-Fix 9 (telegram)      ---- independent, trivial
+**What people do:** Send both `AgentOutput.recommendation` strings to an LLM and ask it to determine if they conflict.
 
-Fix 1 (gRPC isolation)
-  |
-  +---> Fix 2 (70001 resilience) -- depends on broker refactoring from Fix 1
+**Why it's wrong:** Nondeterministic output, adds LLM latency to every orchestration run, costly, and impossible to unit-test reliably.
 
-Fix 4 (Loki pipeline) ---- independent, infrastructure-only
+**Do this instead:** Rule-based detection on structured fields. `recommendation` fields contain binary-opposition keywords. `MetricSource` claims with the same `metric_name` + `iteration` but different `value` are objective contradictions. This is deterministic and covered by pure Python unit tests.
 
-Fix 3 (DB persistence) ---- independent, but more valuable after Fix 1 (stable cycles)
-Fix 5 (FX fallback)    ---- independent
-Fix 8 (LLM dedup)      ---- independent
-```
+### Anti-Pattern 4: PresetApplicator Writing Without Backup
 
-### Recommended Build Order
+**What people do:** Write directly to `strategies/presets/ru_blue_chips.yaml` on ACCEPT verdict.
 
-| Phase | Fix | Rationale | Risk | Effort |
-|-------|-----|-----------|------|--------|
-| 1 | **Fix 7: Stale tickers** | Config-only, zero risk, unblocks correct data flow | NONE | XS |
-| 1 | **Fix 6: Market-hours gate** | Simple early-exit, reduces off-hours noise immediately | LOW | S |
-| 1 | **Fix 9: Telegram resilience** | try/except wrapper, prevents startup crash | LOW | S |
-| 2 | **Fix 1: gRPC isolation** | Most critical fix. Strategy cycle 60-min drift is the top blocker. | MEDIUM | L |
-| 2 | **Fix 4: Loki pipeline** | Infrastructure-only, no code risk. Enables log visibility for remaining fixes. | NONE | S |
-| 3 | **Fix 2: 70001 resilience** | Builds on Fix 1 broker refactoring. Adds fallback portfolio cache. | LOW | M |
-| 3 | **Fix 5+10: FX fallback + staleness** | Independent but lower priority. Rates rarely fail for extended periods. | LOW | S |
-| 4 | **Fix 3: DB persistence** | Largest scope. Needs stable gRPC (Fix 1) to produce useful data. | LOW | L |
-| 4 | **Fix 8: LLM dedup** | Reduces wasted LLM calls. Lower urgency than core stability. | LOW | S |
+**Why it's wrong:** A bug in `preset_overrides` (wrong key path, wrong data type) silently corrupts the preset and breaks all subsequent backtests and live trading. No recovery path.
 
-### Phase Ordering Rationale
+**Do this instead:** Always write backup first (`{segment}.yaml.bak.{experiment_id}`), then overwrite. On any write error, restore from backup. Log the full diff of old vs new YAML at INFO level. Write idempotency marker file last.
 
-1. **Phase 1 (Quick wins):** Zero-risk config fixes and simple guards. Deploy immediately to reduce noise and fix trivial bugs. Can ship same day.
-2. **Phase 2 (Core stability):** gRPC isolation is THE blocking issue -- strategy cycles drifting 60 min makes the system non-functional. Loki gives visibility into remaining problems once cycles are stable.
-3. **Phase 3 (Resilience):** Error 70001 and FX fallback are defense-in-depth after core stability is fixed. Fix 2 depends on Fix 1's broker refactoring.
-4. **Phase 4 (Data capture):** DB persistence and dedup are valuable but not urgent. They require stable infrastructure to produce meaningful data.
+### Anti-Pattern 5: Arbiter Calling `record_verdict()` Directly
+
+**What people do:** Have the arbiter sub-agent call `ExperimentManager.record_verdict()` as part of its fact-check run.
+
+**Why it's wrong:** The arbiter's role is fact-checking only — it verifies claims but does not decide on experiment outcomes. Verdict determination is a separate step based on backtest metrics, not claim verification. Mixing these responsibilities makes the arbiter a decision-making agent, which violates its defined constraints (see `arbiter-agent.md` section 5, rule 1).
+
+**Do this instead:** Arbiter produces `FactCheckReport`. Orchestrator reads the report, decides whether to escalate (create experiment) or resolve. Verdict is computed by `ExperimentManager.record_verdict()` after backtest results are linked.
 
 ---
 
-## Patterns to Follow
+## Scaling Considerations
 
-### Pattern 1: Dedicated Event Loop per IO Domain
-**What:** Separate asyncio event loops for gRPC vs HTTP/DB work.
-**When:** gRPC C-core's PollerCompletionQueue monopolizes the event loop's self-pipe.
-**Example:**
-```python
-class TradingLoop:
-    def _init_loops(self) -> None:
-        # General async (HTTP, DB, Telegram)
-        self._async_loop = asyncio.new_event_loop()
-        threading.Thread(target=self._async_loop.run_forever, daemon=True).start()
-
-        # gRPC-only (TinkoffBroker, TinkoffFetcher)
-        self._grpc_loop = asyncio.new_event_loop()
-        threading.Thread(target=self._grpc_loop.run_forever, daemon=True).start()
-
-    def _run_grpc(self, coro: Any, *, timeout: int = 30) -> Any:
-        future = asyncio.run_coroutine_threadsafe(coro, self._grpc_loop)
-        return future.result(timeout=timeout)
-```
-
-### Pattern 2: Fire-and-Forget Persistence
-**What:** DB writes are non-blocking, non-fatal. Trading continues even if persistence fails.
-**When:** Any DB write from the trading loop hot path.
-**Example:**
-```python
-def _persist_signal(self, signal: Signal, seg_id: str, market_id: str) -> uuid.UUID | None:
-    try:
-        signal_id = uuid.uuid4()
-        self._run_async(self._persist_signal_async(signal_id, signal, seg_id, market_id))
-        return signal_id
-    except Exception:
-        _log.warning("signal_persist_failed", symbol=signal.symbol, exc_info=True)
-        return None
-```
-
-### Pattern 3: Last-Known Fallback Cache
-**What:** Cache last successful API response; return stale data on transient failure.
-**When:** Portfolio queries, FX rates -- any data that changes slowly.
-**Example:**
-```python
-class TinkoffBroker:
-    _last_known_portfolio: PortfolioState | None = None
-    _last_portfolio_at: datetime | None = None
-
-    def get_portfolio(self) -> PortfolioState:
-        try:
-            portfolio = self._call(lambda: self._run_async(...))
-            self._last_known_portfolio = portfolio
-            self._last_portfolio_at = datetime.now(UTC)
-            return portfolio
-        except BrokerError as exc:
-            if "70001" in str(exc) and self._last_known_portfolio is not None:
-                age = datetime.now(UTC) - self._last_portfolio_at
-                _log.warning("portfolio_fallback_stale", age_s=age.total_seconds())
-                return self._last_known_portfolio
-            raise
-```
-
-## Anti-Patterns to Avoid
-
-### Anti-Pattern 1: Shared Event Loop for Mixed IO
-**What:** Running gRPC and non-gRPC coroutines on the same asyncio event loop.
-**Why bad:** gRPC C-core registers `PollerCompletionQueue` callbacks that saturate the loop's self-pipe, causing `BlockingIOError` and starving other coroutines.
-**Instead:** Dedicate a separate event loop (and thread) for all gRPC work.
-
-### Anti-Pattern 2: Blocking DB Writes in Trading Hot Path
-**What:** Awaiting DB persistence before processing the next instrument.
-**Why bad:** DB latency delays signal generation for subsequent instruments, compounding cycle drift.
-**Instead:** Use fire-and-forget async persistence. Log failures but do not block trading.
-
-### Anti-Pattern 3: Hard Failure on Monitoring Subsystem
-**What:** Letting Telegram/alerter/Loki failures crash the trading loop.
-**Why bad:** Monitoring is secondary to trading. A Telegram API timeout should not halt live trading.
-**Instead:** Wrap all monitoring/alerting calls in try/except at the integration boundary.
-
-### Anti-Pattern 4: Each gRPC Client Managing Its Own Event Loop
-**What:** TinkoffBroker, TinkoffFetcher, and TradingLoop each create `asyncio.new_event_loop()`.
-**Why bad:** Three daemon threads running three event loops. gRPC channels created on different loops cannot share connection state. Resource waste and complexity.
-**Instead:** Single gRPC loop owned by TradingLoop, shared via constructor injection into broker and fetcher.
+| Scale | Architecture Note |
+|-------|------------------|
+| Current (file-based, <100 experiments) | `.planning/debates/` and `.planning/experiments/` work fine. `list_experiments()` scans directory — O(n), negligible at this volume. |
+| Future (>500 experiments) | Replace directory scan with a SQLite index or append-only JSONL index file. `ExperimentManager` API does not need to change — only persistence backend. |
+| Future (autonomous conflict detection) | If `TradingLoop` needs to trigger debates without human initiation, add a Redis Streams event (`debate.conflict_detected`) that the orchestrator listens to. Infrastructure exists in `core/events.py`. |
+| Future (parallel agent execution) | Domain agents currently invoked sequentially by the orchestrator. Claude Code sub-agent protocol can invoke them in parallel via tool batching. No code change needed — orchestrator agent prompt handles this. |
 
 ---
-
-## File Modification Summary
-
-| File | Fixes | Type | Est. Lines |
-|------|-------|------|-----------|
-| `src/finalayze/orchestration/trading_loop.py` | 1,3,6,8,9 | Modify | ~200 new |
-| `src/finalayze/execution/tinkoff_broker.py` | 1,2 | Modify | ~80 new |
-| `src/finalayze/data/fetchers/tinkoff_data.py` | 1 | Modify | ~30 changed |
-| `src/finalayze/markets/fx_service.py` | 5,10 | Modify | ~40 new |
-| `src/finalayze/markets/currency.py` | 10 | Modify | ~15 new |
-| `src/finalayze/api/alerts.py` | 9 | Modify | ~10 new |
-| `config/segments.py` | 7 | Modify | ~2 changed |
-| `monitoring/promtail/promtail-config.yml` | 4 | Modify | ~1 added |
-| `docker/docker-compose.sandbox.yml` | 4 | Modify | ~1 added |
-| `src/finalayze/analysis/dedup.py` | 8 | **New** | ~40 |
-| `src/finalayze/orchestration/persistence.py` | 3 | **New** | ~120 |
-
-**Total:** 9 modified files, 2 new files, ~540 new/changed lines.
 
 ## Sources
 
-- Codebase: `src/finalayze/orchestration/trading_loop.py` (2400+ lines, all cycle methods inspected)
-- Codebase: `src/finalayze/execution/tinkoff_broker.py` (519 lines, event loop and reconnect logic)
-- Codebase: `src/finalayze/data/fetchers/tinkoff_data.py` (persistent gRPC client pattern)
-- Codebase: `src/finalayze/core/models.py` (ORM models for SignalModel, OrderModel, NewsArticleModel, SentimentScoreModel)
-- Codebase: `docker/docker-compose.sandbox.yml` + `monitoring/promtail/promtail-config.yml` + `monitoring/loki/loki-config.yml`
-- Codebase: `src/finalayze/markets/fx_service.py` (CBR XML integration)
-- Codebase: `src/finalayze/data/fetchers/cbr.py` (CBR XML_dynamic.asp fallback endpoint)
-- Codebase: `config/segments.py` (ticker universe -- HHRU needs HH rename)
-- gRPC Python docs: C-core PollerCompletionQueue + asyncio interaction (HIGH confidence)
-- Docker/Promtail docs: Docker SD requires container log directory mount (HIGH confidence)
+- Direct inspection of `src/finalayze/core/schemas.py` — `AgentOutput`, `Claim`, `DebateState`, `ExperimentState` schemas (HIGH confidence)
+- Direct inspection of `src/finalayze/core/debate_manager.py` — full CRUD API including `add_arbiter_report`, `escalate_debate`, `add_agent_position` (HIGH confidence)
+- Direct inspection of `src/finalayze/core/experiment_manager.py` lines 92-255 — `create_experiment` with bidirectional debate link at line 135, `record_verdict`, `get_by_debate` (HIGH confidence)
+- Direct inspection of `scripts/run_iteration.py` lines 1068-1345 — `--hypothesis` flag, `preset_overrides` deep merge, `ExperimentManager.link_result()` call (HIGH confidence)
+- Direct inspection of `scripts/run_interaction_test.py` — A/B/AB subprocess pattern via `_run_hypothesis()` (HIGH confidence)
+- Direct inspection of `.claude/agents/arbiter-agent.md` — arbiter fact-checking protocol, input/output format, path scope constraints (HIGH confidence)
+- Direct inspection of `src/finalayze/core/CLAUDE.md` — Layer 0 constraint: zero project imports (HIGH confidence)
+- Direct inspection of `.planning/phases/33-structured-debate-protocol/33-CONTEXT.md` — Phase 33 design decisions (HIGH confidence)
+- Direct inspection of `.planning/phases/34-experiment-registry-runner/34-CONTEXT.md` — Phase 34 design decisions (HIGH confidence)
+
+---
+
+*Architecture research for: v8.0 Agent Integration & Autonomous Decision Loop*
+*Researched: 2026-04-12*
