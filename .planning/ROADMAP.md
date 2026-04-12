@@ -106,7 +106,7 @@ Full details in Phase Details section below (collapsed milestone).
 
 **Milestone Goal:** Wire debate/experiment infrastructure into live agent workflows so agents emit structured claims, conflicts auto-trigger debates, and experiment verdicts auto-apply to live strategy parameters.
 
-- [ ] **Phase 36: Conflict Detection Foundation** - Agents emit structured AgentOutput; ConflictDetector with debouncing and severity scoring (Phases 36-38 in progress)
+- [x] **Phase 36: Conflict Detection Foundation** - Agents emit structured AgentOutput; ConflictDetector with debouncing and severity scoring (Phases 36-38 in progress) (completed 2026-04-12)
 - [ ] **Phase 37: Agent Orchestrator + Debate/Experiment REST API** - Full conflict→debate→arbiter→experiment→verdict pipeline with REST endpoints and snapshot safety
 - [ ] **Phase 38: PresetApplicator + Auto-Apply Loop** - Atomic YAML write-back, circuit-breaker gate, position-ownership tracking, sandbox validation gate
 
@@ -238,10 +238,10 @@ Plans:
   3. `ConflictDetector.detect(outputs)` returns a `ConflictReport` using deterministic rule-based similarity scoring -- no LLM call is made inside the detector, execution completes in under 50 ms per pair
   4. `ConflictReport` schema is defined in `core/schemas.py` with `conflict_type`, `severity`, and `involved_claims` fields -- downstream orchestration can read conflict details without parsing free-text
   5. Topic-level deduplication and a minimum confidence delta of >0.15 are enforced before a conflict is escalated -- the same disagreement on the same topic does not trigger multiple debate entries within a single session
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 36-01-PLAN.md -- ConflictReport schema + parse_structured() on all LLM clients (CONF-02, AGOUT-02)
-- [ ] 36-02-PLAN.md -- ConflictDetector + agent .md Output Format sections (CONF-01, CONF-03, CONF-04, AGOUT-01)
+- [x] 36-02-PLAN.md -- ConflictDetector + agent .md Output Format sections (CONF-01, CONF-03, CONF-04, AGOUT-01)
 
 ### Phase 37: Agent Orchestrator + Debate/Experiment REST API
 **Goal**: The full conflict→debate→arbiter→experiment→verdict pipeline runs end-to-end, manually triggerable via REST, with snapshot safety preventing false contradiction verdicts after code changes
@@ -291,6 +291,6 @@ v8.0: 36 -> 37 -> 38
 | 33. Structured Debate Protocol | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 35. Experiment Lab UI | v7.0 | 2/2 | Complete | 2026-04-08 |
-| 36. Conflict Detection Foundation | v8.0 | 1/2 | In Progress|  |
+| 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete    | 2026-04-12 |
 | 37. Agent Orchestrator + REST API | v8.0 | 0/TBD | Not started | - |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 0/TBD | Not started | - |
