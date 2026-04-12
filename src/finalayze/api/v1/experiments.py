@@ -7,14 +7,19 @@ and applying accepted verdicts to strategy YAML presets (Phase 38).
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
+from finalayze.api.alerts import TelegramAlerter
 from finalayze.api.v1.auth import api_key_auth
 from finalayze.core.experiment_manager import ExperimentManager
+from finalayze.risk.circuit_breaker import CircuitBreaker
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/experiments",
@@ -72,10 +77,11 @@ class ApplyRequest(BaseModel):
 
 
 # Phase 38 limitation: REST endpoint lacks access to TradingLoop runtime state.
-# - circuit_breakers={}: Circuit breaker check is authoritative only in
-#   TradingLoop context. The APPLY-02 gate is a no-op here because the REST
-#   endpoint has no reference to live CircuitBreaker instances. The sandbox
-#   gate and key validation still protect against unsafe applies.
+# - circuit_breakers=_get_circuit_breakers(): Creates a new CircuitBreaker("moex")
+#   at NORMAL level. This is independent of TradingLoop circuit breaker state —
+#   full integration requires sharing state via Redis or DB (future enhancement).
+#   The key improvement is: the code path exercises a real CircuitBreaker object
+#   instead of the previous empty dict which silently skipped the gate.
 # - entry_strategy_getter=lambda: {}: Position ownership check (APPLY-01
 #   step 8) cannot detect open positions from REST. TradingLoop callers
 #   will inject their real get_entry_strategies() method.
@@ -85,14 +91,33 @@ class ApplyRequest(BaseModel):
 _PRESETS_DIR = Path("src/finalayze/strategies/presets")
 
 
-def _make_no_op_alerter() -> Any:
-    """Return a no-op alerter for use in REST context (no Telegram config available)."""
+def _make_alerter() -> TelegramAlerter:
+    """Return a TelegramAlerter configured from settings.
 
-    class _NoOpAlerter:
-        def send_alert(self, message: str, *, priority: Any = None) -> None:
-            pass
+    When telegram_bot_token is empty string, TelegramAlerter already returns
+    immediately on all send_* calls without making any network requests — so
+    no special no-op class is needed.
+    """
+    import config.settings as _settings_mod  # noqa: PLC0415
 
-    return _NoOpAlerter()
+    s = _settings_mod.get_settings()
+    return TelegramAlerter(bot_token=s.telegram_bot_token, chat_id=s.telegram_chat_id)
+
+
+def _get_circuit_breakers() -> dict[str, CircuitBreaker]:
+    """Return a dict with a fresh CircuitBreaker for the MOEX market.
+
+    NOTE: This CircuitBreaker starts at NORMAL level (no drawdown history).
+    It is independent of the TradingLoop runtime state. Full real-time
+    integration requires persisting circuit breaker state to Redis or the DB,
+    which is out of scope for REST gap closure.
+    """
+    _log.warning(
+        "REST circuit_breakers is independent of TradingLoop state — "
+        "starts at NORMAL level with no drawdown history"
+    )
+    cb = CircuitBreaker("moex")
+    return {"moex": cb}
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -154,7 +179,8 @@ async def apply_experiment(
     """Apply an accepted experiment verdict to the strategy YAML preset.
 
     Invokes PresetApplicator with Phase 38 limitations documented above:
-    circuit breakers are a no-op, position ownership check is skipped,
+    circuit breaker starts at NORMAL (independent of TradingLoop state),
+    position ownership check is skipped (no REST access to open positions),
     and combiner cache invalidation is skipped.
 
     Args:
@@ -181,8 +207,8 @@ async def apply_experiment(
 
     em = ExperimentManager()
     applicator = PresetApplicator(
-        circuit_breakers={},
-        alerter=_make_no_op_alerter(),
+        circuit_breakers=_get_circuit_breakers(),
+        alerter=_make_alerter(),
         experiment_manager=em,
         presets_dir=_PRESETS_DIR,
         sandbox_gate=SandboxGate(),

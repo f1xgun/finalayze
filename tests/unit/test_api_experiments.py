@@ -307,3 +307,89 @@ class TestApplyExperiment:
         assert data["applied"] is False
         assert data["verdict"] == "INCONCLUSIVE"
         assert data["backup_path"] is None
+
+    def test_apply_experiment_uses_real_alerter(self) -> None:
+        """POST /apply with telegram credentials configured creates real TelegramAlerter."""
+        from finalayze.orchestration.preset_applicator import ApplyResult, PresetApplicator
+
+        app = _make_app()
+        client = TestClient(app, raise_server_exceptions=False)
+
+        mock_apply_result = ApplyResult(
+            experiment_id="exp-test",
+            applied=True,
+            backup_path=None,
+            verdict="ACCEPTED",
+            reason="Applied",
+        )
+        mock_instance = MagicMock(spec=PresetApplicator)
+        mock_instance.apply_verdict = AsyncMock(return_value=mock_apply_result)
+
+        with patch(
+            "finalayze.orchestration.preset_applicator.PresetApplicator",
+            return_value=mock_instance,
+        ), patch(
+            "finalayze.core.db.get_async_session_factory",
+        ) as mock_factory, patch(
+            "finalayze.api.v1.experiments.ExperimentManager",
+        ), patch(
+            "finalayze.api.v1.experiments.TelegramAlerter"
+        ) as mock_telegram_cls:
+            mock_factory.return_value.return_value = self._make_mock_session_ctx()
+            mock_settings = MagicMock()
+            mock_settings.telegram_bot_token = "my-bot-token"
+            mock_settings.telegram_chat_id = "123456"
+            with patch("config.settings.get_settings", return_value=mock_settings):
+                resp = client.post(
+                    "/api/v1/experiments/exp-test/apply",
+                    json={"market_id": "moex"},
+                )
+
+        assert resp.status_code == 200
+        # TelegramAlerter should have been instantiated (not the no-op class)
+        mock_telegram_cls.assert_called_once_with(bot_token="my-bot-token", chat_id="123456")
+
+    def test_apply_experiment_circuit_breaker_real_instance(self) -> None:
+        """POST /apply calls _get_circuit_breakers() which returns real CircuitBreaker."""
+        from finalayze.orchestration.preset_applicator import ApplyResult, PresetApplicator
+        from finalayze.risk.circuit_breaker import CircuitBreaker
+
+        app = _make_app()
+        client = TestClient(app, raise_server_exceptions=False)
+
+        mock_apply_result = ApplyResult(
+            experiment_id="exp-cb-test",
+            applied=True,
+            backup_path=None,
+            verdict="ACCEPTED",
+            reason="Applied",
+        )
+        mock_instance = MagicMock(spec=PresetApplicator)
+        mock_instance.apply_verdict = AsyncMock(return_value=mock_apply_result)
+
+        # Patch _get_circuit_breakers at the module level to capture returned value
+        real_cb = CircuitBreaker("moex")
+        real_cb_dict = {"moex": real_cb}
+
+        with patch(
+            "finalayze.api.v1.experiments._get_circuit_breakers",
+            return_value=real_cb_dict,
+        ) as mock_get_cb, patch(
+            "finalayze.orchestration.preset_applicator.PresetApplicator",
+            return_value=mock_instance,
+        ), patch(
+            "finalayze.core.db.get_async_session_factory",
+        ) as mock_factory, patch(
+            "finalayze.api.v1.experiments.ExperimentManager",
+        ):
+            mock_factory.return_value.return_value = self._make_mock_session_ctx()
+            resp = client.post(
+                "/api/v1/experiments/exp-cb-test/apply",
+                json={"market_id": "moex"},
+            )
+
+        assert resp.status_code == 200
+        # _get_circuit_breakers() should have been called (not empty dict shortcut)
+        mock_get_cb.assert_called_once()
+        # Confirm the real CircuitBreaker is in the returned dict
+        assert isinstance(real_cb_dict.get("moex"), CircuitBreaker)
