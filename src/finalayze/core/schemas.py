@@ -5,6 +5,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from dataclasses import field as dc_field
@@ -547,6 +548,14 @@ class FileLineSource(BaseModel):
     path: str
     line: int
     excerpt: str
+    snapshot_sha: str | None = None
+    """SHA-256 digest of the file content at claim creation time.
+
+    Used by the arbiter to detect file changes between claim creation and
+    verification. If the file's current SHA differs from snapshot_sha, the
+    arbiter skips the line-level check and marks the claim as UNTESTABLE
+    rather than incorrectly CONTRADICTED.
+    """
 
 
 class MetricSource(BaseModel):
@@ -795,3 +804,26 @@ class ExperimentState(BaseModel):
             msg = "verdict is required when status is terminal (ACCEPTED/REJECTED/INCONCLUSIVE)"
             raise ValueError(msg)
         return self
+
+
+# ── Snapshot helpers ──────────────────────────────────────────────────────────
+
+
+def compute_file_sha(path: str) -> str:
+    """Compute SHA-256 digest of a file's content.
+
+    Used by agent definitions when creating FileLineSource claims to capture
+    the file's integrity at claim-creation time. The arbiter compares this
+    digest against the current file content to detect post-claim edits.
+
+    Args:
+        path: Absolute or relative path to the file.
+
+    Returns:
+        Hex-encoded SHA-256 digest string (64 characters).
+
+    Raises:
+        FileNotFoundError: if the file does not exist.
+        OSError: if the file cannot be read.
+    """
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()  # noqa: PTH123, SIM115

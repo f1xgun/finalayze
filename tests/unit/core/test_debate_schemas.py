@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 
 import pytest
@@ -359,3 +360,56 @@ class TestConflictReport:
         report = self._make_report()
         with pytest.raises(Exception):  # noqa: B017
             report.conflict_id = "mutated"  # type: ignore[misc]
+
+
+# ── FileLineSource snapshot_sha ──────────────────────────────────────────────
+
+
+class TestFileLineSourceSnapshotSha:
+    _SHA = hashlib.sha256(b"test content").hexdigest()
+
+    def test_file_line_source_without_snapshot_sha_is_backward_compatible(self) -> None:
+        """Constructing without snapshot_sha uses None default — backward compatible."""
+        src = FileLineSource(
+            path="src/finalayze/strategies/combiner.py",
+            line=142,
+            excerpt="class StrategyCombiner",
+        )
+        assert src.snapshot_sha is None
+
+    def test_file_line_source_with_snapshot_sha(self) -> None:
+        """Constructing with a SHA stores it correctly."""
+        src = FileLineSource(
+            path="src/finalayze/strategies/combiner.py",
+            line=142,
+            excerpt="class StrategyCombiner",
+            snapshot_sha=self._SHA,
+        )
+        assert src.snapshot_sha == self._SHA
+
+    def test_file_line_source_none_sha_serializes_without_error(self) -> None:
+        """FileLineSource with snapshot_sha=None serializes via model_dump_json()."""
+        src = FileLineSource(
+            path="src/x.py",
+            line=10,
+            excerpt="foo",
+            snapshot_sha=None,
+        )
+        json_str = src.model_dump_json()
+        assert "snapshot_sha" in json_str
+
+    def test_claim_with_file_line_source_snapshot_sha_validates(self) -> None:
+        """Claim wrapping a FileLineSource with snapshot_sha still validates (regression)."""
+        src = FileLineSource(
+            path="src/finalayze/core/schemas.py",
+            line=541,
+            excerpt="class FileLineSource",
+            snapshot_sha=self._SHA,
+        )
+        claim = Claim(
+            statement="FileLineSource is a frozen Pydantic model",
+            source=src,
+            confidence=0.95,
+        )
+        assert isinstance(claim.source, FileLineSource)
+        assert claim.source.snapshot_sha == self._SHA
