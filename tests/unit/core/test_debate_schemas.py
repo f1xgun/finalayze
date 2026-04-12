@@ -12,6 +12,9 @@ from finalayze.core.schemas import (
     Claim,
     ClaimCheckResult,
     ClaimVerdict,
+    ConflictReport,
+    ConflictSeverity,
+    ConflictType,
     DebateState,
     DebateStatus,
     FactCheckReport,
@@ -279,3 +282,80 @@ class TestDebateState:
             experiment_id="EXP-001",
         )
         assert state.experiment_id == "EXP-001"
+
+
+# ── ConflictType ─────────────────────────────────────────────────────────────
+
+
+class TestConflictType:
+    def test_conflict_type_enum_values(self) -> None:
+        assert ConflictType.DIRECTION == "direction"
+        assert ConflictType.METRIC == "metric"
+        assert ConflictType.STATEMENT == "statement"
+
+
+# ── ConflictSeverity ─────────────────────────────────────────────────────────
+
+
+class TestConflictSeverity:
+    def test_conflict_severity_enum_values(self) -> None:
+        assert ConflictSeverity.CRITICAL == "critical"
+        assert ConflictSeverity.HIGH == "high"
+        assert ConflictSeverity.LOW == "low"
+
+
+# ── ConflictReport ───────────────────────────────────────────────────────────
+
+
+class TestConflictReport:
+    def _make_report(
+        self,
+        *,
+        involved_claims: list[Claim] | None = None,
+        agent_names: list[str] | None = None,
+        confidence_delta: float | None = None,
+    ) -> ConflictReport:
+        if involved_claims is None:
+            involved_claims = [_CLAIM_FILE, _CLAIM_METRIC]
+        if agent_names is None:
+            agent_names = ["quant-analyst", "risk-officer"]
+        return ConflictReport(
+            conflict_id="abc123def456",
+            conflict_type=ConflictType.DIRECTION,
+            severity=ConflictSeverity.HIGH,
+            involved_claims=involved_claims,
+            agent_names=agent_names,
+            detected_at=_DT,
+            confidence_delta=confidence_delta,
+        )
+
+    def test_conflict_report_valid(self) -> None:
+        report = self._make_report()
+        assert report.conflict_id == "abc123def456"
+        assert report.conflict_type == ConflictType.DIRECTION
+        assert report.severity == ConflictSeverity.HIGH
+        assert len(report.involved_claims) == 2
+        assert len(report.agent_names) == 2
+        assert report.detected_at == _DT
+        assert report.confidence_delta is None
+
+    def test_conflict_report_rejects_fewer_than_two_claims(self) -> None:
+        with pytest.raises(ValidationError):
+            self._make_report(involved_claims=[_CLAIM_FILE])
+
+    def test_conflict_report_rejects_fewer_than_two_agent_names(self) -> None:
+        with pytest.raises(ValidationError):
+            self._make_report(agent_names=["quant-analyst"])
+
+    def test_conflict_report_with_confidence_delta_none(self) -> None:
+        report = self._make_report(confidence_delta=None)
+        assert report.confidence_delta is None
+
+    def test_conflict_report_with_confidence_delta_value(self) -> None:
+        report = self._make_report(confidence_delta=0.25)
+        assert report.confidence_delta == pytest.approx(0.25)
+
+    def test_conflict_report_is_frozen(self) -> None:
+        report = self._make_report()
+        with pytest.raises(Exception):  # noqa: B017
+            report.conflict_id = "mutated"  # type: ignore[misc]

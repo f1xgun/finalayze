@@ -596,6 +596,36 @@ class AgentOutput(BaseModel):
     timestamp: datetime
 
 
+class ConflictType(StrEnum):
+    """Type of conflict detected between agent outputs."""
+
+    DIRECTION = "direction"
+    METRIC = "metric"
+    STATEMENT = "statement"
+
+
+class ConflictSeverity(StrEnum):
+    """Severity level of a detected conflict."""
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    LOW = "low"
+
+
+class ConflictReport(BaseModel):
+    """Structured report of a detected conflict between agent claims."""
+
+    model_config = ConfigDict(frozen=True)
+
+    conflict_id: str  # SHA-256 hex digest dedup key
+    conflict_type: ConflictType
+    severity: ConflictSeverity
+    involved_claims: list[Claim] = Field(min_length=2)
+    agent_names: list[str] = Field(min_length=2)
+    detected_at: datetime
+    confidence_delta: float | None = None
+
+
 class ClaimVerdict(StrEnum):
     """Verdict from arbiter fact-checking a claim."""
 
