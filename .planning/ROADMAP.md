@@ -107,7 +107,7 @@ Full details in Phase Details section below (collapsed milestone).
 **Milestone Goal:** Wire debate/experiment infrastructure into live agent workflows so agents emit structured claims, conflicts auto-trigger debates, and experiment verdicts auto-apply to live strategy parameters.
 
 - [x] **Phase 36: Conflict Detection Foundation** - Agents emit structured AgentOutput; ConflictDetector with debouncing and severity scoring (Phases 36-38 in progress) (completed 2026-04-12)
-- [ ] **Phase 37: Agent Orchestrator + Debate/Experiment REST API** - Full conflict→debate→arbiter→experiment→verdict pipeline with REST endpoints and snapshot safety
+- [x] **Phase 37: Agent Orchestrator + Debate/Experiment REST API** - Full conflict→debate→arbiter→experiment→verdict pipeline with REST endpoints and snapshot safety (completed 2026-04-12)
 - [ ] **Phase 38: PresetApplicator + Auto-Apply Loop** - Atomic YAML write-back, circuit-breaker gate, position-ownership tracking, sandbox validation gate
 
 ## Phase Details
@@ -256,7 +256,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 37-01-PLAN.md -- snapshot_sha schema + AgentOrchestrator pipeline (ORCH-01, ORCH-03)
-- [ ] 37-02-PLAN.md -- Debates + Experiments REST API, agent-orchestrator.md (ORCH-02, ORCH-04)
+- [x] 37-02-PLAN.md -- Debates + Experiments REST API, agent-orchestrator.md (ORCH-02, ORCH-04)
 
 ### Phase 38: PresetApplicator + Auto-Apply Loop
 **Goal**: Accepted experiment verdicts atomically update strategy YAML presets with full safety gates -- circuit breaker, position ownership check, and mandatory sandbox validation before any live apply
@@ -271,7 +271,7 @@ Plans:
   6. A sandbox validation gate requires at least 3 trading days of sandbox metrics after an ACCEPT verdict before the live apply is permitted -- backtest acceptance alone is not sufficient for live promotion
 **Plans**: 2 plans
 Plans:
-- [ ] 37-01-PLAN.md -- snapshot_sha schema + AgentOrchestrator pipeline (ORCH-01, ORCH-03)
+- [x] 37-01-PLAN.md -- snapshot_sha schema + AgentOrchestrator pipeline (ORCH-01, ORCH-03)
 - [ ] 37-02-PLAN.md -- Debates + Experiments REST API, agent-orchestrator.md (ORCH-02, ORCH-04)
 
 ## Progress
@@ -298,5 +298,5 @@ v8.0: 36 -> 37 -> 38
 | 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 35. Experiment Lab UI | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete    | 2026-04-12 |
-| 37. Agent Orchestrator + REST API | v8.0 | 1/2 | In Progress|  |
+| 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete   | 2026-04-12 |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 0/TBD | Not started | - |
