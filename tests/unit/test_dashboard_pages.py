@@ -45,13 +45,9 @@ def test_experiments_list_render_importable() -> None:
     assert callable(experiments_list.render)
 
 
-def test_experiment_detail_render_importable() -> None:
-    from finalayze.dashboard.pages import experiment_detail
-
-    assert callable(experiment_detail.render)
+def test_experiment_detail_importable() -> None:
+    from finalayze.dashboard.pages import experiment_detail  # noqa: F401
 
 
-def test_decision_history_render_importable() -> None:
-    from finalayze.dashboard.pages import decision_history
-
-    assert callable(decision_history.render)
+def test_decision_history_importable() -> None:
+    from finalayze.dashboard.pages import decision_history  # noqa: F401

@@ -68,3 +68,11 @@ def render(api: ApiClient) -> None:
         "Rejection Rate",
         f"{rej_rate:.1f}%" if rej_rate is not None else "N/A",
     )
+
+
+# Streamlit multipage auto-discovery requires module-level execution
+if not st.session_state.get("authenticated", False):
+    st.warning("Please log in on the main page first.")
+    st.stop()
+
+render(st.session_state.get("api"))  # type: ignore[arg-type]

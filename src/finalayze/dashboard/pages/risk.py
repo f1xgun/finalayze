@@ -94,3 +94,11 @@ def render(api: ApiClient) -> None:
                 else:
                     detail = resp.json().get("detail", f"HTTP {resp.status_code}")
                     st.error(f"Override failed: {detail}")
+
+
+# Streamlit multipage auto-discovery requires module-level execution
+if not st.session_state.get("authenticated", False):
+    st.warning("Please log in on the main page first.")
+    st.stop()
+
+render(st.session_state.get("api"))  # type: ignore[arg-type]

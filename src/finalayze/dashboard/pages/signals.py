@@ -69,3 +69,11 @@ def render(api: ApiClient) -> None:
         st.dataframe(sig_display, use_container_width=True)
     else:
         st.info("No signals recorded yet.")
+
+
+# Streamlit multipage auto-discovery requires module-level execution
+if not st.session_state.get("authenticated", False):
+    st.warning("Please log in on the main page first.")
+    st.stop()
+
+render(st.session_state.get("api"))  # type: ignore[arg-type]

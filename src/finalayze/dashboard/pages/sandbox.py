@@ -172,3 +172,11 @@ def render(api: ApiClient) -> None:
             st.info("No slippage data available yet.")
     else:
         st.info("No slippage data available yet.")
+
+
+# Streamlit multipage auto-discovery requires module-level execution
+if not st.session_state.get("authenticated", False):
+    st.warning("Please log in on the main page first.")
+    st.stop()
+
+render(st.session_state.get("api"))  # type: ignore[arg-type]
