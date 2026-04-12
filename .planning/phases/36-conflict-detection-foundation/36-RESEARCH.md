@@ -535,7 +535,7 @@ No missing dependencies. All tools available.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **strategies-agent structured output**
    - What we know: `strategies-agent.md` exists but was not fully read — it's an implementer agent, not a domain expert
