@@ -238,9 +238,9 @@ Plans:
   3. `ConflictDetector.detect(outputs)` returns a `ConflictReport` using deterministic rule-based similarity scoring -- no LLM call is made inside the detector, execution completes in under 50 ms per pair
   4. `ConflictReport` schema is defined in `core/schemas.py` with `conflict_type`, `severity`, and `involved_claims` fields -- downstream orchestration can read conflict details without parsing free-text
   5. Topic-level deduplication and a minimum confidence delta of >0.15 are enforced before a conflict is escalated -- the same disagreement on the same topic does not trigger multiple debate entries within a single session
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 36-01-PLAN.md -- ConflictReport schema + parse_structured() on all LLM clients (CONF-02, AGOUT-02)
+- [x] 36-01-PLAN.md -- ConflictReport schema + parse_structured() on all LLM clients (CONF-02, AGOUT-02)
 - [ ] 36-02-PLAN.md -- ConflictDetector + agent .md Output Format sections (CONF-01, CONF-03, CONF-04, AGOUT-01)
 
 ### Phase 37: Agent Orchestrator + Debate/Experiment REST API
@@ -291,6 +291,6 @@ v8.0: 36 -> 37 -> 38
 | 33. Structured Debate Protocol | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 35. Experiment Lab UI | v7.0 | 2/2 | Complete | 2026-04-08 |
-| 36. Conflict Detection Foundation | v8.0 | 0/2 | Not started | - |
+| 36. Conflict Detection Foundation | v8.0 | 1/2 | In Progress|  |
 | 37. Agent Orchestrator + REST API | v8.0 | 0/TBD | Not started | - |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 0/TBD | Not started | - |
