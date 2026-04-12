@@ -12,7 +12,18 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
-## Current State: v6.0 shipped
+## Current State: v7.0 shipped
+
+v7.0 Agent Intelligence & Experiment Framework shipped 2026-04-12. 4 phases, 10 plans.
+Sandbox signal fixes: candle lookback 210, kill switch guard, MINIMAL rollout default, 72h staleness with MOEX holidays.
+CachingFetcher + RateLimiter wired in sandbox, event_driven enabled for all MOEX segments.
+ML quality gates fixed: profit_factor computed from fold predictions, Brier score uses calibrated probabilities.
+Structured debate protocol: Pydantic claim schemas with source references, arbiter agent for fact-checking, debate persistence in .planning/debates/.
+Experiment registry: hypothesis lifecycle (PENDING→RUNNING→ACCEPTED/REJECTED/INCONCLUSIVE), interaction testing (A/B/AB), automated verdict computation.
+Experiment Lab UI: Streamlit dashboard with list/detail/history views, Plotly comparison charts.
+
+<details>
+<summary>v6.0 Sandbox Stability & Observability (2026-03-31)</summary>
 
 v6.0 Sandbox Stability & Observability shipped 2026-03-31. 4 phases, 8 plans.
 Fixed gRPC event loop isolation (dedicated loop eliminates 60-min cycle drift).
@@ -20,6 +31,7 @@ T-Bank 70001 errors handled with portfolio cache fallback + auto-reconnect.
 DB persistence wired for orders, signals, news articles, sentiment scores (fire-and-forget).
 Loki log pipeline fixed (Promtail volume mount + JSON parsing + 30-day retention).
 FX rate CBR XML fallback, market-hours gate, stale tickers cleaned, LLM article dedup added.
+</details>
 
 v4.0 Architecture Hardening shipped 2026-03-22. 4 phases, 10 plans.
 Fixed concurrency bugs (stop-loss TOCTOU, async lock, session leak), async correctness
