@@ -66,9 +66,11 @@ Run the following steps for **every claim** in every AgentOutput. Record verdict
 
 3. **Confirm file is indexed**: Run `ast-index outline {source.path}` to confirm the file exists and is indexed. If the file is not found, mark UNTESTABLE with evidence: "File not found in ast-index: {source.path}".
 
-4. **Read the file at the claimed line**: Use the Read tool to read the file at `source.line` (±5 lines for context) and compare against `source.excerpt`.
+4. **Check snapshot_sha (if present)**: If `source.snapshot_sha` is not null, compute the SHA-256 of the current file content (`hashlib.sha256(Path(source.path).read_bytes()).hexdigest()`) and compare to `source.snapshot_sha`. If they differ, mark **UNTESTABLE** with evidence: "File {path} has changed since claim was recorded (expected SHA {source.snapshot_sha[:12]}..., current SHA {current_sha[:12]}...). Claim cannot be verified against modified source." Do NOT proceed to step 5.
 
-5. **Apply verdict**:
+5. **Read the file at the claimed line**: Use the Read tool to read the file at `source.line` (±5 lines for context) and compare against `source.excerpt`.
+
+6. **Apply verdict**:
    - If `source.excerpt` appears at `source.line` exactly → **VERIFIED**. Evidence: "Found '{excerpt}' at line {line} in {path}."
    - If `source.excerpt` appears at a different line → **VERIFIED** with note. Evidence: "Found '{excerpt}' at line {actual_line} (claimed {source.line}) in {path}."
    - If `source.excerpt` not found anywhere in the file → **CONTRADICTED**. Evidence: "Excerpt '{excerpt}' not found anywhere in {path}. File exists but excerpt is absent."
