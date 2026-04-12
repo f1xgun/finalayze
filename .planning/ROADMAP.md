@@ -253,7 +253,10 @@ Plans:
   3. `GET /api/v1/experiments` and `GET /api/v1/experiments/{id}` return experiment state and linked backtest results -- all experiment data is accessible via REST without filesystem access
   4. `FileLineSource` carries a `snapshot_sha` field; when the referenced file has changed since the claim was recorded, the arbiter marks that claim `UNTESTABLE` instead of `CONTRADICTED` -- stale source references do not trigger false conflict escalations
   5. The `.claude/agents/agent-orchestrator.md` definition exists and can be invoked as a Claude Code sub-agent to run a full orchestration cycle autonomously
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 37-01-PLAN.md -- snapshot_sha schema + AgentOrchestrator pipeline (ORCH-01, ORCH-03)
+- [ ] 37-02-PLAN.md -- Debates + Experiments REST API, agent-orchestrator.md (ORCH-02, ORCH-04)
 
 ### Phase 38: PresetApplicator + Auto-Apply Loop
 **Goal**: Accepted experiment verdicts atomically update strategy YAML presets with full safety gates -- circuit breaker, position ownership check, and mandatory sandbox validation before any live apply
@@ -266,7 +269,10 @@ Plans:
   4. `combiner.invalidate_segment_cache()` is called immediately after atomic YAML rename -- the next strategy cycle reads fresh preset values without requiring a process restart
   5. An INCONCLUSIVE verdict sends a Telegram alert with experiment ID and metric summary and does not trigger any YAML write -- the operator is notified and retains full control
   6. A sandbox validation gate requires at least 3 trading days of sandbox metrics after an ACCEPT verdict before the live apply is permitted -- backtest acceptance alone is not sufficient for live promotion
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 37-01-PLAN.md -- snapshot_sha schema + AgentOrchestrator pipeline (ORCH-01, ORCH-03)
+- [ ] 37-02-PLAN.md -- Debates + Experiments REST API, agent-orchestrator.md (ORCH-02, ORCH-04)
 
 ## Progress
 
@@ -292,5 +298,5 @@ v8.0: 36 -> 37 -> 38
 | 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 35. Experiment Lab UI | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete    | 2026-04-12 |
-| 37. Agent Orchestrator + REST API | v8.0 | 0/TBD | Not started | - |
+| 37. Agent Orchestrator + REST API | v8.0 | 0/2 | Not started | - |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 0/TBD | Not started | - |
