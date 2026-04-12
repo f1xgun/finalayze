@@ -21,9 +21,9 @@ Requirements for Agent Integration & Autonomous Decision Loop milestone.
 
 ### Orchestration Pipeline
 
-- [ ] **ORCH-01**: `AgentOrchestrator` coordinates full pipeline: conflict → debate → arbiter → experiment → backtest → verdict
+- [x] **ORCH-01**: `AgentOrchestrator` coordinates full pipeline: conflict → debate → arbiter → experiment → backtest → verdict
 - [ ] **ORCH-02**: REST API endpoints for debates (list, detail, create) and experiments (list, detail) — manual pipeline invocation
-- [ ] **ORCH-03**: `snapshot_sha` field on `FileLineSource` prevents false CONTRADICTED verdicts after code changes
+- [x] **ORCH-03**: `snapshot_sha` field on `FileLineSource` prevents false CONTRADICTED verdicts after code changes
 - [ ] **ORCH-04**: Claude Code `agent-orchestrator.md` definition enables autonomous pipeline runs
 
 ### Auto-Apply & Safety
@@ -136,9 +136,9 @@ Requirements for Agent Intelligence & Experiment Framework milestone.
 | CONF-02 | Phase 36 | Pending |
 | CONF-03 | Phase 36 | Pending |
 | CONF-04 | Phase 36 | Pending |
-| ORCH-01 | Phase 37 | Pending |
+| ORCH-01 | Phase 37 | Complete |
 | ORCH-02 | Phase 37 | Pending |
-| ORCH-03 | Phase 37 | Pending |
+| ORCH-03 | Phase 37 | Complete |
 | ORCH-04 | Phase 37 | Pending |
 | APPLY-01 | Phase 38 | Pending |
 | APPLY-02 | Phase 38 | Pending |

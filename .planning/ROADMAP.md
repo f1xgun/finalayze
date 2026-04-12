@@ -255,7 +255,7 @@ Plans:
   5. The `.claude/agents/agent-orchestrator.md` definition exists and can be invoked as a Claude Code sub-agent to run a full orchestration cycle autonomously
 **Plans**: 2 plans
 Plans:
-- [ ] 37-01-PLAN.md -- snapshot_sha schema + AgentOrchestrator pipeline (ORCH-01, ORCH-03)
+- [x] 37-01-PLAN.md -- snapshot_sha schema + AgentOrchestrator pipeline (ORCH-01, ORCH-03)
 - [ ] 37-02-PLAN.md -- Debates + Experiments REST API, agent-orchestrator.md (ORCH-02, ORCH-04)
 
 ### Phase 38: PresetApplicator + Auto-Apply Loop
@@ -298,5 +298,5 @@ v8.0: 36 -> 37 -> 38
 | 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 35. Experiment Lab UI | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete    | 2026-04-12 |
-| 37. Agent Orchestrator + REST API | v8.0 | 0/2 | Not started | - |
+| 37. Agent Orchestrator + REST API | v8.0 | 1/2 | In Progress|  |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 0/TBD | Not started | - |
