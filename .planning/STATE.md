@@ -1,30 +1,32 @@
 ---
 gsd_state_version: 1.0
-milestone: v7.0
-milestone_name: Agent Intelligence & Experiment Framework
-status: unknown
-stopped_at: Completed 35-02-PLAN.md
-last_updated: "2026-04-12T12:30:25.731Z"
+milestone: v8.0
+milestone_name: Agent Integration & Autonomous Decision Loop
+status: active
+stopped_at: null
+last_updated: "2026-04-12T18:00:00.000Z"
 progress:
-  total_phases: 8
-  completed_phases: 8
-  total_plans: 18
-  completed_plans: 18
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-30)
+See: .planning/PROJECT.md (updated 2026-04-12)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 35 — experiment-lab-ui
+**Current focus:** Defining requirements for v8.0
 
 ## Current Position
 
-Phase: 35
-Plan: Not started
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-12 — Milestone v8.0 started
 
 ## Performance Metrics
 

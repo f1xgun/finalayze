@@ -12,6 +12,17 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
+## Current Milestone: v8.0 Agent Integration & Autonomous Decision Loop
+
+**Goal:** Wire debate/experiment infrastructure into live agent workflows so agents emit structured claims, conflicts auto-trigger debates, and experiment verdicts auto-apply.
+
+**Target features:**
+- Agents emit AgentOutput with structured Claim objects (source references required)
+- Conflict detector comparing multi-agent outputs for contradictions
+- Arbiter auto-triggers on detected conflicts
+- Full orchestration: disagreement → debate → arbiter → experiment → backtest → verdict
+- Auto-apply: experiment ACCEPT/REJECT → parameter changes or strategy toggles
+
 ## Current State: v7.0 shipped
 
 v7.0 Agent Intelligence & Experiment Framework shipped 2026-04-12. 4 phases, 10 plans.
@@ -133,9 +144,13 @@ v3.0 integration gaps closed (Telegram /gonogo import, HealthMonitor feed freshn
 
 ### Active
 
-<!-- Next milestone scope — to be defined -->
+<!-- v8.0 scope -->
 
-(None yet — define with `/gsd:new-milestone`)
+- [ ] Agents emit AgentOutput with structured Claim objects (source references required)
+- [ ] Conflict detector comparing multi-agent outputs for contradictions
+- [ ] Arbiter auto-triggers on detected conflicts
+- [ ] Full orchestration: disagreement → debate → arbiter → experiment → backtest → verdict
+- [ ] Auto-apply: experiment ACCEPT/REJECT → parameter changes or strategy toggles
 
 ### Out of Scope
 
@@ -238,4 +253,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-31 after v6.0 milestone shipped*
+*Last updated: 2026-04-12 after v8.0 milestone started*
