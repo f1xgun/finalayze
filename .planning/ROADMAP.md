@@ -285,7 +285,9 @@ Plans:
   2. `POST /experiments/{id}/apply` checks live circuit breaker state from a shared source — empty `circuit_breakers={}` replaced with actual circuit breaker lookup
   3. `POST /debates` response includes `debate_ids: list[str]` containing all created debate IDs — multi-debate cases are fully represented
   4. `POST /debates/{id}/finalize` endpoint accepts a FactCheckReport and calls `AgentOrchestrator.finalize_debate()` — the arbiter-to-experiment loop is REST-triggerable
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 39-01-PLAN.md -- Wire real alerter, circuit breaker, multi-debate response, finalize endpoint (ORCH-01, ORCH-02, APPLY-02, APPLY-05)
 
 ## Progress
 
@@ -313,4 +315,4 @@ v8.0: 36 -> 37 -> 38 -> 39
 | 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete    | 2026-04-12 |
 | 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete    | 2026-04-12 |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete    | 2026-04-12 |
-| 39. REST Endpoint Hardening | v8.0 | 0/TBD | Not started | - |
+| 39. REST Endpoint Hardening | v8.0 | 0/1 | In Progress | - |
