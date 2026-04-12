@@ -8,7 +8,8 @@
 - ✅ **v4.0 Architecture Hardening** -- Phases 19-22 (shipped 2026-03-22)
 - ✅ **v5.0 Data Flow Correctness** -- Phases 23-27 (shipped 2026-03-24)
 - ✅ **v6.0 Sandbox Stability & Observability** -- Phases 28-31 (shipped 2026-03-30)
-- 🚧 **v7.0 Agent Intelligence & Experiment Framework** -- Phases 32-35
+- ✅ **v7.0 Agent Intelligence & Experiment Framework** -- Phases 32-35 (shipped 2026-04-12)
+- 🚧 **v8.0 Agent Integration & Autonomous Decision Loop** -- Phases 36-38
 
 ## Phases
 
@@ -79,14 +80,35 @@ Full details: `.planning/milestones/v5.0-ROADMAP.md`
 
 </details>
 
-### v6.0 Sandbox Stability & Observability (In Progress)
-
-**Milestone Goal:** Fix all critical issues discovered during week-long sandbox validation run (March 20-30) to make the system production-ready. Stable 5-min strategy cycles, complete audit trail, operational log pipeline, and resilient broker connectivity.
+<details>
+<summary>✅ v6.0 Sandbox Stability & Observability (Phases 28-31) -- SHIPPED 2026-03-30</summary>
 
 - [x] **Phase 28: Operational Hygiene** - Fix stale tickers, add market-hours gate, LLM dedup, alerter resilience (completed 2026-03-30)
 - [x] **Phase 29: Core Stability** - gRPC event loop isolation and Loki log pipeline fix (completed 2026-03-30)
 - [x] **Phase 30: Broker Resilience** - gRPC 70001 reconnect, portfolio cache fallback, FX rate fallback (completed 2026-03-30)
 - [x] **Phase 31: Data Capture** - DB persistence for orders, signals, news articles, sentiment scores (completed 2026-03-30)
+
+Full details in Phase Details section below (collapsed milestone).
+
+</details>
+
+<details>
+<summary>✅ v7.0 Agent Intelligence & Experiment Framework (Phases 32-35) -- SHIPPED 2026-04-12</summary>
+
+- [x] **Phase 32: Critical Sandbox Fixes** - Fix _CANDLE_LOOKBACK=210, kill switch startup check, rollout default for sandbox mode (completed 2026-04-07)
+- [x] **Phase 33: Structured Debate Protocol** - Evidence-based agent output format, arbiter agent, debate state tracking (completed 2026-04-08)
+- [x] **Phase 34: Experiment Registry & Runner** - Hypothesis lifecycle, parameterized backtest runner, interaction testing (completed 2026-04-08)
+- [x] **Phase 35: Experiment Lab UI** - Streamlit experiment lifecycle: hypothesis context, success criteria, results, decision history (completed 2026-04-08)
+
+</details>
+
+### 🚧 v8.0 Agent Integration & Autonomous Decision Loop (In Progress)
+
+**Milestone Goal:** Wire debate/experiment infrastructure into live agent workflows so agents emit structured claims, conflicts auto-trigger debates, and experiment verdicts auto-apply to live strategy parameters.
+
+- [ ] **Phase 36: Conflict Detection Foundation** - Agents emit structured AgentOutput; ConflictDetector with debouncing and severity scoring (Phases 36-38 in progress)
+- [ ] **Phase 37: Agent Orchestrator + Debate/Experiment REST API** - Full conflict→debate→arbiter→experiment→verdict pipeline with REST endpoints and snapshot safety
+- [ ] **Phase 38: PresetApplicator + Auto-Apply Loop** - Atomic YAML write-back, circuit-breaker gate, position-ownership tracking, sandbox validation gate
 
 ## Phase Details
 
@@ -145,15 +167,6 @@ Plans:
 - [x] 31-01-PLAN.md -- Fire-and-forget helper, order and signal persistence (PERSIST-01, PERSIST-02, PERSIST-05)
 - [x] 31-02-PLAN.md -- News article and sentiment score persistence (PERSIST-03, PERSIST-04)
 
-### v7.0 Agent Intelligence & Experiment Framework
-
-**Milestone Goal:** Build a scientific decision-making system: structured debate protocol for agent recommendations, experiment registry with pre-defined success criteria, backtest-based A/B testing with interaction effects, and Streamlit Experiment Lab UI for full lifecycle visibility.
-
-- [x] **Phase 32: Critical Sandbox Fixes** - Fix _CANDLE_LOOKBACK=210, kill switch startup check, rollout default for sandbox mode (prerequisite for meaningful experiments) (completed 2026-04-07)
-- [x] **Phase 33: Structured Debate Protocol** - Evidence-based agent output format (claim + source + prediction + risk), arbiter agent for fact-checking, debate state tracking (completed 2026-04-08)
-- [x] **Phase 34: Experiment Registry & Runner** - Hypothesis lifecycle (define → criteria → run → compare → verdict), parameterized backtest runner with hypothesis_id, interaction testing (A, B, A+B), integration with history.jsonl (completed 2026-04-08)
-- [x] **Phase 35: Experiment Lab UI** - Streamlit app for experiment lifecycle: hypothesis context, pre-defined success criteria, execution status, results vs expectations, decision history (completed 2026-04-08)
-
 ### Phase 32: Critical Sandbox Fixes
 **Goal**: All strategies function correctly in MOEX sandbox mode, safety defaults prevent accidental production-level risk, news pipeline activated, and signal diagnostics available
 **Depends on**: Nothing (zero-risk fixes)
@@ -185,8 +198,8 @@ Plans:
   3. Debate state (claims, conflicts, resolutions) is persisted in `.planning/debates/` for audit trail -- every multi-agent decision has a traceable history
 **Plans:** 2/2 plans complete
 Plans:
-- [x] 33-01-PLAN.md — Debate protocol schemas (TDD): Claim, AgentOutput, FactCheckReport, DebateState (DEBATE-01, DEBATE-02, DEBATE-03)
-- [x] 33-02-PLAN.md — Arbiter agent, DebateManager CRUD, debates directory (DEBATE-02, DEBATE-03)
+- [x] 33-01-PLAN.md -- Debate protocol schemas (TDD): Claim, AgentOutput, FactCheckReport, DebateState (DEBATE-01, DEBATE-02, DEBATE-03)
+- [x] 33-02-PLAN.md -- Arbiter agent, DebateManager CRUD, debates directory (DEBATE-02, DEBATE-03)
 
 ### Phase 34: Experiment Registry & Runner
 **Goal**: Hypotheses are defined with success criteria before execution, backtest experiments test proposals in isolation and combination, and results are structured for comparison
@@ -199,8 +212,8 @@ Plans:
   4. Experiment verdicts (ACCEPT/REJECT/INCONCLUSIVE) are recorded with reasoning and linked to the debate that triggered them
 **Plans:** 2/2 plans complete
 Plans:
-- [x] 34-01-PLAN.md — Experiment schemas (TDD) + ExperimentManager CRUD, verdict, debate linkage (EXP-01, EXP-04)
-- [x] 34-02-PLAN.md — run_iteration.py --hypothesis extension + interaction test runner (EXP-02, EXP-03)
+- [x] 34-01-PLAN.md -- Experiment schemas (TDD) + ExperimentManager CRUD, verdict, debate linkage (EXP-01, EXP-04)
+- [x] 34-02-PLAN.md -- run_iteration.py --hypothesis extension + interaction test runner (EXP-02, EXP-03)
 
 ### Phase 35: Experiment Lab UI
 **Goal**: Full experiment lifecycle is visible in a Streamlit web app -- from debate context through execution to final decision
@@ -212,15 +225,53 @@ Plans:
   3. Decision history page shows accepted/rejected experiments with reasoning -- the team can review past decisions and understand why the system is configured the way it is
 **Plans:** 2/2 plans complete
 Plans:
-- [x] 35-01-PLAN.md — Smoke tests + Experiments List page (UI-EXP-01)
-- [x] 35-02-PLAN.md — Experiment Detail page + Decision History page (UI-EXP-02, UI-EXP-03)
+- [x] 35-01-PLAN.md -- Smoke tests + Experiments List page (UI-EXP-01)
+- [x] 35-02-PLAN.md -- Experiment Detail page + Decision History page (UI-EXP-02, UI-EXP-03)
+
+### Phase 36: Conflict Detection Foundation
+**Goal**: Domain agents emit schema-validated AgentOutput with sourced Claim objects, and the ConflictDetector identifies contradictions deterministically with debouncing and severity scoring
+**Depends on**: Phase 35 (builds on v7.0 AgentOutput/Claim schemas already shipped)
+**Requirements**: AGOUT-01, AGOUT-02, CONF-01, CONF-02, CONF-03, CONF-04
+**Success Criteria** (what must be TRUE):
+  1. A domain agent invocation returns an `AgentOutput` object with at least one `Claim`, each claim carrying a mandatory `source` field (file:line or metric name+value) -- no unsourced assertions pass schema validation
+  2. `AnthropicClient.parse_structured()` wraps `client.messages.parse()` and guarantees the returned object matches the target Pydantic model -- structured output is enforced by the SDK, not by post-hoc string parsing
+  3. `ConflictDetector.detect(outputs)` returns a `ConflictReport` using deterministic rule-based similarity scoring -- no LLM call is made inside the detector, execution completes in under 50 ms per pair
+  4. `ConflictReport` schema is defined in `core/schemas.py` with `conflict_type`, `severity`, and `involved_claims` fields -- downstream orchestration can read conflict details without parsing free-text
+  5. Topic-level deduplication and a minimum confidence delta of >0.15 are enforced before a conflict is escalated -- the same disagreement on the same topic does not trigger multiple debate entries within a single session
+**Plans**: TBD
+
+### Phase 37: Agent Orchestrator + Debate/Experiment REST API
+**Goal**: The full conflict→debate→arbiter→experiment→verdict pipeline runs end-to-end, manually triggerable via REST, with snapshot safety preventing false contradiction verdicts after code changes
+**Depends on**: Phase 36 (requires ConflictDetector and AgentOutput emission)
+**Requirements**: ORCH-01, ORCH-02, ORCH-03, ORCH-04
+**Success Criteria** (what must be TRUE):
+  1. `AgentOrchestrator.run(outputs)` executes the full pipeline -- detected conflict triggers a DebateManager entry, arbiter produces a FactCheckReport, and an experiment is created with a verdict -- the entire flow completes without manual intervention
+  2. `GET /api/v1/debates` and `GET /api/v1/debates/{id}` return debate list and detail; `POST /api/v1/debates` creates a debate manually -- the pipeline is invocable without writing Python
+  3. `GET /api/v1/experiments` and `GET /api/v1/experiments/{id}` return experiment state and linked backtest results -- all experiment data is accessible via REST without filesystem access
+  4. `FileLineSource` carries a `snapshot_sha` field; when the referenced file has changed since the claim was recorded, the arbiter marks that claim `UNTESTABLE` instead of `CONTRADICTED` -- stale source references do not trigger false conflict escalations
+  5. The `.claude/agents/agent-orchestrator.md` definition exists and can be invoked as a Claude Code sub-agent to run a full orchestration cycle autonomously
+**Plans**: TBD
+
+### Phase 38: PresetApplicator + Auto-Apply Loop
+**Goal**: Accepted experiment verdicts atomically update strategy YAML presets with full safety gates -- circuit breaker, position ownership check, and mandatory sandbox validation before any live apply
+**Depends on**: Phase 37 (verdict must exist before apply; orchestrator must be wired before auto-apply is meaningful)
+**Requirements**: APPLY-01, APPLY-02, APPLY-03, APPLY-04, APPLY-05, APPLY-06
+**Success Criteria** (what must be TRUE):
+  1. `PresetApplicator.apply(experiment_id)` writes `preset_overrides` to the target strategy YAML using atomic `os.replace()` rename with a timestamped backup -- no partial write is visible to the strategy cycle; the backup is queryable post-apply
+  2. When `CircuitLevel != NORMAL`, `apply_verdict()` raises and logs a rejection -- no YAML is written while a circuit breaker is active, regardless of verdict status
+  3. `TradingLoop._entry_strategy` tracks which strategy opened each open position; attempting to disable a strategy via auto-apply while it holds open positions results in a blocked apply with a Telegram alert sent -- no strategy is disabled under live exposure
+  4. `combiner.invalidate_segment_cache()` is called immediately after atomic YAML rename -- the next strategy cycle reads fresh preset values without requiring a process restart
+  5. An INCONCLUSIVE verdict sends a Telegram alert with experiment ID and metric summary and does not trigger any YAML write -- the operator is notified and retains full control
+  6. A sandbox validation gate requires at least 3 trading days of sandbox metrics after an ACCEPT verdict before the live apply is permitted -- backtest acceptance alone is not sufficient for live promotion
+**Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
 
 v6.0: 28 -> 29 -> 30 -> 31 (all complete)
-v7.0: 32 -> 33 -> 34 -> 35
+v7.0: 32 -> 33 -> 34 -> 35 (all complete)
+v8.0: 36 -> 37 -> 38
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
@@ -233,7 +284,10 @@ v7.0: 32 -> 33 -> 34 -> 35
 | 29. Core Stability | v6.0 | 2/2 | Complete | 2026-03-30 |
 | 30. Broker Resilience | v6.0 | 2/2 | Complete | 2026-03-30 |
 | 31. Data Capture | v6.0 | 2/2 | Complete | 2026-03-30 |
-| 32. Critical Sandbox Fixes | v7.0 | 4/4 | Complete    | 2026-04-07 |
-| 33. Structured Debate Protocol | v7.0 | 2/2 | Complete    | 2026-04-08 |
-| 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete    | 2026-04-08 |
-| 35. Experiment Lab UI | v7.0 | 2/2 | Complete    | 2026-04-08 |
+| 32. Critical Sandbox Fixes | v7.0 | 4/4 | Complete | 2026-04-07 |
+| 33. Structured Debate Protocol | v7.0 | 2/2 | Complete | 2026-04-08 |
+| 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete | 2026-04-08 |
+| 35. Experiment Lab UI | v7.0 | 2/2 | Complete | 2026-04-08 |
+| 36. Conflict Detection Foundation | v8.0 | 0/TBD | Not started | - |
+| 37. Agent Orchestrator + REST API | v8.0 | 0/TBD | Not started | - |
+| 38. PresetApplicator + Auto-Apply | v8.0 | 0/TBD | Not started | - |
