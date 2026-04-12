@@ -3,6 +3,38 @@
 **Defined:** 2026-03-30
 **Core Value:** Autonomous profitable MOEX trading with acceptable risk limits
 
+## v8.0 Requirements
+
+Requirements for Agent Integration & Autonomous Decision Loop milestone.
+
+### Agent Output
+
+- [ ] **AGOUT-01**: Domain agents emit `AgentOutput` with structured `Claim` objects and mandatory source references — no unsourced assertions in agent recommendations
+- [ ] **AGOUT-02**: `AnthropicClient.parse_structured()` wraps `client.messages.parse()` with Pydantic model schema derivation — structured output guaranteed by SDK
+
+### Conflict Detection
+
+- [ ] **CONF-01**: `ConflictDetector` compares `list[AgentOutput]` and returns `ConflictReport` using deterministic rule-based logic — no LLM in the hot path
+- [ ] **CONF-02**: `ConflictReport` schema added to `core/schemas.py` with conflict type, severity, and involved claims
+- [ ] **CONF-03**: Debouncing: topic-level deduplication and minimum confidence delta (>0.15) before escalation — prevents debate storms
+- [ ] **CONF-04**: Conflict severity scoring ranks contradictions by impact to reduce noise
+
+### Orchestration Pipeline
+
+- [ ] **ORCH-01**: `AgentOrchestrator` coordinates full pipeline: conflict → debate → arbiter → experiment → backtest → verdict
+- [ ] **ORCH-02**: REST API endpoints for debates (list, detail, create) and experiments (list, detail) — manual pipeline invocation
+- [ ] **ORCH-03**: `snapshot_sha` field on `FileLineSource` prevents false CONTRADICTED verdicts after code changes
+- [ ] **ORCH-04**: Claude Code `agent-orchestrator.md` definition enables autonomous pipeline runs
+
+### Auto-Apply & Safety
+
+- [ ] **APPLY-01**: `PresetApplicator` writes experiment `preset_overrides` to strategy YAML with backup snapshot and atomic `os.replace()` rename
+- [ ] **APPLY-02**: Circuit-breaker gate blocks auto-apply when `CircuitLevel != NORMAL`
+- [ ] **APPLY-03**: `_entry_strategy` dict in `TradingLoop` tracks which strategy opened each position; blocks strategy-disable if positions exist
+- [ ] **APPLY-04**: `combiner.invalidate_segment_cache()` method forces preset reload after YAML write
+- [ ] **APPLY-05**: INCONCLUSIVE experiment verdicts route to Telegram alert (no auto-apply)
+- [ ] **APPLY-06**: Sandbox validation gate (≥3 trading days) required between ACCEPT verdict and live apply
+
 ## v6.0 Requirements
 
 Requirements for Sandbox Stability & Observability milestone.
@@ -89,14 +121,31 @@ Requirements for Agent Intelligence & Experiment Framework milestone.
 | Full gRPC SDK replacement | t-tech-investments SDK works, only isolation needed |
 | Real-time WebSocket data feeds | Current polling interval matches strategy timeframe |
 | Multi-provider LLM orchestration | Single primary + fallback is sufficient |
-| Automated go/no-go from DB metrics | Advisory report pattern proven in v3.0 |
-| Log-based alerting (Loki alerts) | Prometheus alerts already cover critical paths |
-| DB-level trade analytics/reporting | Out of scope — persist first, analyze later |
+| LLM-based semantic conflict detection | Nondeterministic, costly, adds latency to hot path |
+| Agent consensus overriding backtest | LLM consensus cannot override empirical evidence |
+| Real-time inline conflict detection | Adds latency to sub-minute trading cycles |
+| Full LLM-to-LLM debate on every cycle | Cost/latency infeasible for daily operation |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| AGOUT-01 | Phase 36 | Pending |
+| AGOUT-02 | Phase 36 | Pending |
+| CONF-01 | Phase 36 | Pending |
+| CONF-02 | Phase 36 | Pending |
+| CONF-03 | Phase 36 | Pending |
+| CONF-04 | Phase 36 | Pending |
+| ORCH-01 | Phase 37 | Pending |
+| ORCH-02 | Phase 37 | Pending |
+| ORCH-03 | Phase 37 | Pending |
+| ORCH-04 | Phase 37 | Pending |
+| APPLY-01 | Phase 38 | Pending |
+| APPLY-02 | Phase 38 | Pending |
+| APPLY-03 | Phase 38 | Pending |
+| APPLY-04 | Phase 38 | Pending |
+| APPLY-05 | Phase 38 | Pending |
+| APPLY-06 | Phase 38 | Pending |
 | GRPC-01 | Phase 29 | Complete |
 | GRPC-02 | Phase 30 | Complete |
 | GRPC-03 | Phase 30 | Complete |
@@ -112,7 +161,6 @@ Requirements for Agent Intelligence & Experiment Framework milestone.
 | OPS-02 | Phase 28 | Complete |
 | OPS-03 | Phase 28 | Complete |
 | OPS-04 | Phase 28 | Complete |
-
 | SANDBOX-FIX-01 | Phase 32 | Complete |
 | SANDBOX-FIX-02 | Phase 32 | Complete |
 | SANDBOX-FIX-03 | Phase 32 | Complete |
@@ -135,9 +183,10 @@ Requirements for Agent Intelligence & Experiment Framework milestone.
 | UI-EXP-03 | Phase 35 | Complete |
 
 **Coverage:**
-- v6.0 requirements: 15 total, 15 mapped, 0 unmapped
-- v7.0 requirements: 20 total, 20 mapped, 0 unmapped
+- v8.0 requirements: 16 total
+- Mapped to phases: 16
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-04-08 after v7.0 milestone audit*
+*Last updated: 2026-04-12 after v8.0 milestone requirements defined*
