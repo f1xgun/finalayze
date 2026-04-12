@@ -109,6 +109,7 @@ Full details in Phase Details section below (collapsed milestone).
 - [x] **Phase 36: Conflict Detection Foundation** - Agents emit structured AgentOutput; ConflictDetector with debouncing and severity scoring (Phases 36-38 in progress) (completed 2026-04-12)
 - [x] **Phase 37: Agent Orchestrator + Debate/Experiment REST API** - Full conflict→debate→arbiter→experiment→verdict pipeline with REST endpoints and snapshot safety (completed 2026-04-12)
 - [x] **Phase 38: PresetApplicator + Auto-Apply Loop** - Atomic YAML write-back, circuit-breaker gate, position-ownership tracking, sandbox validation gate (completed 2026-04-12)
+- [ ] **Phase 39: REST Endpoint Hardening** - Wire real alerter, circuit breaker state, multi-debate response, and finalize endpoint into REST API
 
 ## Phase Details
 
@@ -274,13 +275,25 @@ Plans:
 - [x] 38-01-PLAN.md -- PresetApplicator + SandboxGate + REST apply endpoint (APPLY-01, APPLY-02, APPLY-05, APPLY-06)
 - [x] 38-02-PLAN.md -- _entry_strategy tracking + invalidate_segment_cache (APPLY-03, APPLY-04)
 
+### Phase 39: REST Endpoint Hardening
+**Goal**: REST API endpoints for debates and experiments have real safety gates wired — Telegram alerts fire on INCONCLUSIVE, circuit breaker state is injected, multi-debate responses return all debate IDs, and finalize_debate() is REST-accessible
+**Depends on**: Phase 38 (needs PresetApplicator and AgentOrchestrator fully implemented)
+**Requirements**: ORCH-01, ORCH-02, APPLY-02, APPLY-05
+**Gap Closure**: Closes integration/flow gaps from v8.0 audit
+**Success Criteria** (what must be TRUE):
+  1. `POST /experiments/{id}/apply` with INCONCLUSIVE verdict sends a real Telegram alert — no-op alerter replaced with a real or injectable alerter in the REST context
+  2. `POST /experiments/{id}/apply` checks live circuit breaker state from a shared source — empty `circuit_breakers={}` replaced with actual circuit breaker lookup
+  3. `POST /debates` response includes `debate_ids: list[str]` containing all created debate IDs — multi-debate cases are fully represented
+  4. `POST /debates/{id}/finalize` endpoint accepts a FactCheckReport and calls `AgentOrchestrator.finalize_debate()` — the arbiter-to-experiment loop is REST-triggerable
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
 
 v6.0: 28 -> 29 -> 30 -> 31 (all complete)
 v7.0: 32 -> 33 -> 34 -> 35 (all complete)
-v8.0: 36 -> 37 -> 38
+v8.0: 36 -> 37 -> 38 -> 39
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
@@ -300,3 +313,4 @@ v8.0: 36 -> 37 -> 38
 | 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete    | 2026-04-12 |
 | 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete    | 2026-04-12 |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete    | 2026-04-12 |
+| 39. REST Endpoint Hardening | v8.0 | 0/TBD | Not started | - |
