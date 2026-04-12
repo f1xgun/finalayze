@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -179,11 +180,130 @@ class TestGetExperimentDetail:
 
         assert resp.status_code == 404
 
-    def test_experiments_has_no_write_endpoints(self) -> None:
-        """Experiments router is read-only — no POST/PUT/PATCH/DELETE routes."""
+    def test_experiments_collection_post_not_allowed(self) -> None:
+        """POST to /experiments collection (no id) returns 404 or 405."""
         app = _make_app()
-        # POST should return 405 Method Not Allowed (route exists but not POST)
-        # or 404 if no route at all
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/api/v1/experiments", json={})
         assert resp.status_code in (404, 405)
+
+
+class TestApplyExperiment:
+    """POST /api/v1/experiments/{id}/apply tests."""
+
+    def _make_mock_session_ctx(self) -> MagicMock:
+        """Return a mock async context manager that yields an AsyncMock session."""
+        mock_session = AsyncMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        return mock_ctx
+
+    def test_apply_experiment_not_found(self) -> None:
+        """POST to /experiments/nonexistent/apply -> 404."""
+        app = _make_app()
+        client = TestClient(app, raise_server_exceptions=False)
+
+        mock_instance = MagicMock()
+        mock_instance.apply_verdict = AsyncMock(side_effect=FileNotFoundError("not found"))
+
+        with patch(
+            "finalayze.orchestration.preset_applicator.PresetApplicator",
+            return_value=mock_instance,
+        ), patch(
+            "finalayze.api.v1.experiments.PresetApplicator",
+            return_value=mock_instance,
+        ) if False else patch(
+            "finalayze.core.db.get_async_session_factory",
+        ) as mock_factory, patch(
+            "finalayze.api.v1.experiments.ExperimentManager",
+        ):
+            mock_factory.return_value.return_value = self._make_mock_session_ctx()
+            # The deferred import in apply_experiment uses the real PresetApplicator;
+            # we need to patch at the source module and inject via ExperimentManager mock
+            # that raises FileNotFoundError inside apply_verdict.
+            # Simplest: patch PresetApplicator at its source so all imports get the mock.
+            with patch(
+                "finalayze.orchestration.preset_applicator.PresetApplicator",
+                return_value=mock_instance,
+            ):
+                resp = client.post("/api/v1/experiments/nonexistent-exp/apply", json={})
+
+        # The endpoint catches FileNotFoundError -> 404
+        assert resp.status_code == 404
+
+    def test_apply_experiment_success(self, tmp_path: Path) -> None:
+        """POST /experiments/{id}/apply with ACCEPTED experiment -> 200, applied=True."""
+        from finalayze.orchestration.preset_applicator import ApplyResult, PresetApplicator
+
+        app = _make_app()
+        client = TestClient(app, raise_server_exceptions=False)
+
+        mock_apply_result = ApplyResult(
+            experiment_id="exp-accepted",
+            applied=True,
+            backup_path="/tmp/us_tech.yaml.bak.20260412T120000Z",
+            verdict="ACCEPTED",
+            reason="Applied successfully",
+        )
+
+        mock_instance = MagicMock(spec=PresetApplicator)
+        mock_instance.apply_verdict = AsyncMock(return_value=mock_apply_result)
+
+        with patch(
+            "finalayze.orchestration.preset_applicator.PresetApplicator",
+            return_value=mock_instance,
+        ), patch(
+            "finalayze.core.db.get_async_session_factory",
+        ) as mock_factory, patch(
+            "finalayze.api.v1.experiments.ExperimentManager",
+        ):
+            mock_factory.return_value.return_value = self._make_mock_session_ctx()
+            resp = client.post(
+                "/api/v1/experiments/exp-accepted/apply",
+                json={"market_id": "moex"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["applied"] is True
+        assert data["verdict"] == "ACCEPTED"
+        assert data["experiment_id"] == "exp-accepted"
+
+    def test_apply_experiment_inconclusive(self) -> None:
+        """POST /experiments/{id}/apply with INCONCLUSIVE verdict -> 200, applied=False."""
+        from finalayze.orchestration.preset_applicator import ApplyResult, PresetApplicator
+
+        app = _make_app()
+        client = TestClient(app, raise_server_exceptions=False)
+
+        mock_apply_result = ApplyResult(
+            experiment_id="exp-inconclusive",
+            applied=False,
+            backup_path=None,
+            verdict="INCONCLUSIVE",
+            reason="Routed to operator via Telegram",
+        )
+
+        mock_instance = MagicMock(spec=PresetApplicator)
+        mock_instance.apply_verdict = AsyncMock(return_value=mock_apply_result)
+
+        with patch(
+            "finalayze.orchestration.preset_applicator.PresetApplicator",
+            return_value=mock_instance,
+        ), patch(
+            "finalayze.core.db.get_async_session_factory",
+        ) as mock_factory, patch(
+            "finalayze.api.v1.experiments.ExperimentManager",
+        ):
+            mock_factory.return_value.return_value = self._make_mock_session_ctx()
+            resp = client.post(
+                "/api/v1/experiments/exp-inconclusive/apply",
+                json={"market_id": "moex"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["applied"] is False
+        assert data["verdict"] == "INCONCLUSIVE"
+        assert data["backup_path"] is None
