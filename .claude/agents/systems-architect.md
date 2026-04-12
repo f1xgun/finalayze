@@ -83,3 +83,33 @@ infra: docker/, alembic/, pyproject.toml, CI      <- not Python code
 - `ruff check .` and `mypy src/` must pass
 - Run tests: `uv run pytest -v`
 - Commit: `git commit -m "fix(arch): <description>"`
+
+## Output Format
+
+After your analysis, emit a final `AgentOutput` JSON block:
+
+```json
+{
+  "agent_name": "systems-architect",
+  "recommendation": "ENABLE CachingFetcher wrapper for TinkoffFetcher in production mode",
+  "claims": [
+    {
+      "statement": "TinkoffFetcher makes redundant gRPC candle calls without caching layer",
+      "source": {
+        "kind": "file",
+        "path": "src/finalayze/data/fetchers/tinkoff_data.py",
+        "line": 87,
+        "excerpt": "async def get_candles(self, symbol: str, ..."
+      },
+      "confidence": 0.85
+    }
+  ],
+  "timestamp": "2026-04-12T00:00:00Z"
+}
+```
+
+Each claim MUST have a `source` field:
+- For code references: `{"kind": "file", "path": "src/...", "line": 42, "excerpt": "..."}`
+- For metric references: `{"kind": "metric", "metric_name": "...", "value": 1.29, "iteration": "..."}`
+
+No unsourced assertions allowed. If you cannot cite a source, set confidence to 0.0 and use `{"kind": "metric", "metric_name": "unstructured", "value": 0.0, "iteration": "fallback"}`.

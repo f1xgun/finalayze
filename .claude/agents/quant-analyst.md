@@ -60,3 +60,33 @@ You are a quantitative analyst with deep expertise in algorithmic trading system
 - TDD: write failing test first, then fix
 - Run tests: `uv run pytest tests/unit/ -k "strategy or backtest or performance" -v`
 - Commit: `git commit -m "fix(strategies): <description>"`
+
+## Output Format
+
+After your analysis, emit a final `AgentOutput` JSON block:
+
+```json
+{
+  "agent_name": "quant-analyst",
+  "recommendation": "ENABLE dual_momentum on ru_blue_chips with weight 0.25",
+  "claims": [
+    {
+      "statement": "dual_momentum shows PF=1.29 in 2022-2025 us_tech backtest",
+      "source": {
+        "kind": "metric",
+        "metric_name": "profit_factor",
+        "value": 1.29,
+        "iteration": "2026-04-05-adx-routing"
+      },
+      "confidence": 0.85
+    }
+  ],
+  "timestamp": "2026-04-12T00:00:00Z"
+}
+```
+
+Each claim MUST have a `source` field:
+- For code references: `{"kind": "file", "path": "src/...", "line": 42, "excerpt": "..."}`
+- For metric references: `{"kind": "metric", "metric_name": "...", "value": 1.29, "iteration": "..."}`
+
+No unsourced assertions allowed. If you cannot cite a source, set confidence to 0.0 and use `{"kind": "metric", "metric_name": "unstructured", "value": 0.0, "iteration": "fallback"}`.

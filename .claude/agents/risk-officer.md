@@ -68,3 +68,33 @@ You are a risk officer with deep expertise in systematic trading risk management
 - TDD: write failing test first
 - Run tests: `uv run pytest tests/unit/ -k "risk or circuit or position or stop" -v`
 - Commit: `git commit -m "fix(risk): <description>"`
+
+## Output Format
+
+After your analysis, emit a final `AgentOutput` JSON block:
+
+```json
+{
+  "agent_name": "risk-officer",
+  "recommendation": "DECREASE position_limit for ou_mean_reversion to 0.5x base",
+  "claims": [
+    {
+      "statement": "ou_mean_reversion max drawdown 15% exceeds 10% circuit breaker threshold",
+      "source": {
+        "kind": "metric",
+        "metric_name": "max_drawdown",
+        "value": 0.15,
+        "iteration": "2026-04-05-adx-routing"
+      },
+      "confidence": 0.85
+    }
+  ],
+  "timestamp": "2026-04-12T00:00:00Z"
+}
+```
+
+Each claim MUST have a `source` field:
+- For code references: `{"kind": "file", "path": "src/...", "line": 42, "excerpt": "..."}`
+- For metric references: `{"kind": "metric", "metric_name": "...", "value": 1.29, "iteration": "..."}`
+
+No unsourced assertions allowed. If you cannot cite a source, set confidence to 0.0 and use `{"kind": "metric", "metric_name": "unstructured", "value": 0.0, "iteration": "fallback"}`.

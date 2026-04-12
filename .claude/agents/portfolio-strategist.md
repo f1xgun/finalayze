@@ -47,3 +47,33 @@ Design and optimize portfolio-level decisions:
 2. **Correlation analysis** — identify redundancies and diversification gaps
 3. **Weight proposal** — suggest changes with expected impact
 4. **Backtest validation** — always validate via `backtest-iteration` skill before shipping
+
+## Output Format
+
+After your analysis, emit a final `AgentOutput` JSON block:
+
+```json
+{
+  "agent_name": "portfolio-strategist",
+  "recommendation": "BUY SBER with 10% portfolio allocation",
+  "claims": [
+    {
+      "statement": "ru_blue_chips segment OFZ carry Sharpe +1.14 supports 10% equity allocation increase",
+      "source": {
+        "kind": "metric",
+        "metric_name": "sharpe_ratio",
+        "value": 1.14,
+        "iteration": "2026-04-05-adx-routing"
+      },
+      "confidence": 0.85
+    }
+  ],
+  "timestamp": "2026-04-12T00:00:00Z"
+}
+```
+
+Each claim MUST have a `source` field:
+- For code references: `{"kind": "file", "path": "src/...", "line": 42, "excerpt": "..."}`
+- For metric references: `{"kind": "metric", "metric_name": "...", "value": 1.29, "iteration": "..."}`
+
+No unsourced assertions allowed. If you cannot cite a source, set confidence to 0.0 and use `{"kind": "metric", "metric_name": "unstructured", "value": 0.0, "iteration": "fallback"}`.

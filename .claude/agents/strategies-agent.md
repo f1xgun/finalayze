@@ -37,3 +37,33 @@ You are a Python developer implementing and maintaining the `strategies/` module
 4. → PASS
 5. `uv run ruff check . && uv run mypy src/`
 6. Commit: `git commit -m "feat(strategies): <description>"`
+
+## Output Format
+
+After your analysis, emit a final `AgentOutput` JSON block:
+
+```json
+{
+  "agent_name": "strategies-agent",
+  "recommendation": "INCREASE exit_confidence threshold from 0.38 to 0.45",
+  "claims": [
+    {
+      "statement": "_MIN_EXIT_CONFIDENCE = 0.38 causes premature exits on single-strategy SELL signals",
+      "source": {
+        "kind": "file",
+        "path": "src/finalayze/strategies/combiner.py",
+        "line": 147,
+        "excerpt": "_MIN_EXIT_CONFIDENCE = 0.38"
+      },
+      "confidence": 0.85
+    }
+  ],
+  "timestamp": "2026-04-12T00:00:00Z"
+}
+```
+
+Each claim MUST have a `source` field:
+- For code references: `{"kind": "file", "path": "src/...", "line": 42, "excerpt": "..."}`
+- For metric references: `{"kind": "metric", "metric_name": "...", "value": 1.29, "iteration": "..."}`
+
+No unsourced assertions allowed. If you cannot cite a source, set confidence to 0.0 and use `{"kind": "metric", "metric_name": "unstructured", "value": 0.0, "iteration": "fallback"}`.
