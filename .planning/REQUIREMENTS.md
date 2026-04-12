@@ -28,12 +28,12 @@ Requirements for Agent Integration & Autonomous Decision Loop milestone.
 
 ### Auto-Apply & Safety
 
-- [ ] **APPLY-01**: `PresetApplicator` writes experiment `preset_overrides` to strategy YAML with backup snapshot and atomic `os.replace()` rename
-- [ ] **APPLY-02**: Circuit-breaker gate blocks auto-apply when `CircuitLevel != NORMAL`
+- [x] **APPLY-01**: `PresetApplicator` writes experiment `preset_overrides` to strategy YAML with backup snapshot and atomic `os.replace()` rename
+- [x] **APPLY-02**: Circuit-breaker gate blocks auto-apply when `CircuitLevel != NORMAL`
 - [x] **APPLY-03**: `_entry_strategy` dict in `TradingLoop` tracks which strategy opened each position; blocks strategy-disable if positions exist
 - [x] **APPLY-04**: `combiner.invalidate_segment_cache()` method forces preset reload after YAML write
-- [ ] **APPLY-05**: INCONCLUSIVE experiment verdicts route to Telegram alert (no auto-apply)
-- [ ] **APPLY-06**: Sandbox validation gate (≥3 trading days) required between ACCEPT verdict and live apply
+- [x] **APPLY-05**: INCONCLUSIVE experiment verdicts route to Telegram alert (no auto-apply)
+- [x] **APPLY-06**: Sandbox validation gate (≥3 trading days) required between ACCEPT verdict and live apply
 
 ## v6.0 Requirements
 
@@ -140,12 +140,12 @@ Requirements for Agent Intelligence & Experiment Framework milestone.
 | ORCH-02 | Phase 37 | Complete |
 | ORCH-03 | Phase 37 | Complete |
 | ORCH-04 | Phase 37 | Complete |
-| APPLY-01 | Phase 38 | Pending |
-| APPLY-02 | Phase 38 | Pending |
+| APPLY-01 | Phase 38 | Complete |
+| APPLY-02 | Phase 38 | Complete |
 | APPLY-03 | Phase 38 | Complete |
 | APPLY-04 | Phase 38 | Complete |
-| APPLY-05 | Phase 38 | Pending |
-| APPLY-06 | Phase 38 | Pending |
+| APPLY-05 | Phase 38 | Complete |
+| APPLY-06 | Phase 38 | Complete |
 | GRPC-01 | Phase 29 | Complete |
 | GRPC-02 | Phase 30 | Complete |
 | GRPC-03 | Phase 30 | Complete |

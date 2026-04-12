@@ -108,7 +108,7 @@ Full details in Phase Details section below (collapsed milestone).
 
 - [x] **Phase 36: Conflict Detection Foundation** - Agents emit structured AgentOutput; ConflictDetector with debouncing and severity scoring (Phases 36-38 in progress) (completed 2026-04-12)
 - [x] **Phase 37: Agent Orchestrator + Debate/Experiment REST API** - Full conflict→debate→arbiter→experiment→verdict pipeline with REST endpoints and snapshot safety (completed 2026-04-12)
-- [ ] **Phase 38: PresetApplicator + Auto-Apply Loop** - Atomic YAML write-back, circuit-breaker gate, position-ownership tracking, sandbox validation gate
+- [x] **Phase 38: PresetApplicator + Auto-Apply Loop** - Atomic YAML write-back, circuit-breaker gate, position-ownership tracking, sandbox validation gate (completed 2026-04-12)
 
 ## Phase Details
 
@@ -269,9 +269,9 @@ Plans:
   4. `combiner.invalidate_segment_cache()` is called immediately after atomic YAML rename -- the next strategy cycle reads fresh preset values without requiring a process restart
   5. An INCONCLUSIVE verdict sends a Telegram alert with experiment ID and metric summary and does not trigger any YAML write -- the operator is notified and retains full control
   6. A sandbox validation gate requires at least 3 trading days of sandbox metrics after an ACCEPT verdict before the live apply is permitted -- backtest acceptance alone is not sufficient for live promotion
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
-- [ ] 38-01-PLAN.md -- PresetApplicator + SandboxGate + REST apply endpoint (APPLY-01, APPLY-02, APPLY-05, APPLY-06)
+- [x] 38-01-PLAN.md -- PresetApplicator + SandboxGate + REST apply endpoint (APPLY-01, APPLY-02, APPLY-05, APPLY-06)
 - [x] 38-02-PLAN.md -- _entry_strategy tracking + invalidate_segment_cache (APPLY-03, APPLY-04)
 
 ## Progress
@@ -299,4 +299,4 @@ v8.0: 36 -> 37 -> 38
 | 35. Experiment Lab UI | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete    | 2026-04-12 |
 | 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete    | 2026-04-12 |
-| 38. PresetApplicator + Auto-Apply | v8.0 | 1/2 | In Progress|  |
+| 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete   | 2026-04-12 |
