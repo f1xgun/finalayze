@@ -510,3 +510,20 @@ class StrategyCombiner:
             return dict(result) if isinstance(result, dict) else {}
         except (FileNotFoundError, OSError, yaml.YAMLError):
             return {}
+
+    def invalidate_segment_cache(self, segment_id: str) -> None:
+        """Invalidate any cached preset configuration for the given segment.
+
+        Currently ``_load_config`` reads YAML from disk on every call, so there
+        is no in-memory cache to clear.  This method exists as a forward-
+        compatibility hook: callers (e.g. ``PresetApplicator``) should invoke it
+        after modifying a preset file so that any future caching addition is
+        automatically handled.
+
+        Args:
+            segment_id: The segment whose cached config should be discarded.
+        """
+        # No-op: _load_config reads from disk on every invocation.
+        # If a cache is added in the future, clear it here.
+        _log = structlog.get_logger()
+        _log.debug("segment_cache_invalidated", segment_id=segment_id, cache_exists=False)
