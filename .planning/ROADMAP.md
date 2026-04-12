@@ -109,7 +109,7 @@ Full details in Phase Details section below (collapsed milestone).
 - [x] **Phase 36: Conflict Detection Foundation** - Agents emit structured AgentOutput; ConflictDetector with debouncing and severity scoring (Phases 36-38 in progress) (completed 2026-04-12)
 - [x] **Phase 37: Agent Orchestrator + Debate/Experiment REST API** - Full conflict→debate→arbiter→experiment→verdict pipeline with REST endpoints and snapshot safety (completed 2026-04-12)
 - [x] **Phase 38: PresetApplicator + Auto-Apply Loop** - Atomic YAML write-back, circuit-breaker gate, position-ownership tracking, sandbox validation gate (completed 2026-04-12)
-- [ ] **Phase 39: REST Endpoint Hardening** - Wire real alerter, circuit breaker state, multi-debate response, and finalize endpoint into REST API
+- [x] **Phase 39: REST Endpoint Hardening** - Wire real alerter, circuit breaker state, multi-debate response, and finalize endpoint into REST API (completed 2026-04-12)
 
 ## Phase Details
 
@@ -287,7 +287,7 @@ Plans:
   4. `POST /debates/{id}/finalize` endpoint accepts a FactCheckReport and calls `AgentOrchestrator.finalize_debate()` — the arbiter-to-experiment loop is REST-triggerable
 **Plans**: 1 plan
 Plans:
-- [ ] 39-01-PLAN.md -- Wire real alerter, circuit breaker, multi-debate response, finalize endpoint (ORCH-01, ORCH-02, APPLY-02, APPLY-05)
+- [x] 39-01-PLAN.md -- Wire real alerter, circuit breaker, multi-debate response, finalize endpoint (ORCH-01, ORCH-02, APPLY-02, APPLY-05)
 
 ## Progress
 
@@ -315,4 +315,4 @@ v8.0: 36 -> 37 -> 38 -> 39
 | 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete    | 2026-04-12 |
 | 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete    | 2026-04-12 |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete    | 2026-04-12 |
-| 39. REST Endpoint Hardening | v8.0 | 0/1 | In Progress | - |
+| 39. REST Endpoint Hardening | v8.0 | 1/1 | Complete   | 2026-04-12 |
