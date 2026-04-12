@@ -1,5 +1,36 @@
 # Milestones
 
+## v8.0 Agent Integration & Autonomous Decision Loop (Shipped: 2026-04-12)
+
+**Phases completed:** 4 phases, 7 plans, ~14 tasks
+
+**Key accomplishments:**
+
+- ConflictDetector with deterministic rule-based contradiction detection (direction/metric/statement), 3-level severity scoring, SHA-256 topic deduplication, and confidence delta filtering
+- parse_structured() on all 5 LLM clients (Anthropic, OpenAI, OpenRouter, Groq, DeepSeek) with BadRequestError fallback to JSON mode
+- AgentOrchestrator pipeline coordinator: conflict → debate → arbiter → experiment → verdict, with snapshot_sha safety on FileLineSource
+- REST API for debates (POST create, GET list/detail, POST finalize) and experiments (GET list/detail, POST apply) with X-API-Key auth
+- PresetApplicator with 7-gate safety pipeline: circuit breaker first, INCONCLUSIVE Telegram routing, SandboxGate (3+ trading days), atomic os.replace() with timestamped backup
+- _entry_strategy position-ownership tracking in TradingLoop, invalidate_segment_cache() on StrategyCombiner
+- agent-orchestrator.md Claude Code sub-agent definition for autonomous pipeline runs
+- 87+ new tests across all phases
+- Fire-and-forget DB persistence for news articles (with SHA-256 content hash) and batch sentiment scores after LLM analysis
+- CachingFetcher with 4 req/sec RateLimiter wired in both sandbox entry points, event_driven enabled for all MOEX segments, per-gate signal drop counters in CycleLogEntry
+- Per-fold EnsembleCalibrator fitted on cal_idx and wired to _evaluate_fold_metrics so walk-forward Brier score uses calibrated probabilities
+- One-liner:
+- Experiment registry with Pydantic schemas (6-status lifecycle, operator whitelist, path-safe IDs) and ExperimentManager CRUD with automated ACCEPT/REJECT/INCONCLUSIVE verdict computation and bidirectional debate linkage
+- Hypothesis-linked backtest runner with --hypothesis/--run-name flags and A/B/AB interaction test comparison orchestrator
+- Streamlit Experiments List page with status/hypothesis filtering, gradient-colored Sharpe/PF metrics, and navigation to detail view
+- Experiment detail page with debate context, A/B/AB grouped bar chart, and decision history page with reverse-chronological audit trail
+- Status:
+- 1. [Rule 1 - Bug] Test confidence values caused unintended filter suppression
+- One-liner:
+- One-liner:
+- One-liner:
+- One-liner:
+
+---
+
 ## v7.0 Agent Intelligence & Experiment Framework (Shipped: 2026-04-12)
 
 **Phases completed:** 8 phases, 18 plans, 28 tasks
