@@ -391,7 +391,7 @@ api_router.include_router(experiments_router)
 | A2 | One debate per `run()` call (all conflicts from one batch → one debate) | Architecture Patterns | May need multi-debate creation if conflicts are unrelated |
 | A3 | Short-circuiting on zero conflicts is the right behavior for `AgentOrchestrator.run()` | Architecture Patterns | Some callers may want a response even with no conflicts; add flag if needed |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Debate ID generation strategy**
    - What we know: ConflictDetector uses SHA-256 of agents+topics+type for `conflict_id`
