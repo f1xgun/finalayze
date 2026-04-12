@@ -298,5 +298,5 @@ v8.0: 36 -> 37 -> 38
 | 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 35. Experiment Lab UI | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete    | 2026-04-12 |
-| 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete   | 2026-04-12 |
+| 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete    | 2026-04-12 |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 0/TBD | Not started | - |
