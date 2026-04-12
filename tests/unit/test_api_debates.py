@@ -76,7 +76,7 @@ class TestPostDebates:
     """POST /api/v1/debates tests."""
 
     def test_post_debates_with_conflicts_returns_201(self) -> None:
-        """POST with conflicting outputs returns 201 with debate_id."""
+        """POST with conflicting outputs returns 201 with debate_ids list."""
         app = _make_app()
         client = TestClient(app)
 
@@ -99,11 +99,11 @@ class TestPostDebates:
 
         assert resp.status_code == 201
         data = resp.json()
-        assert data["debate_id"] == "debate-abc123"
+        assert data["debate_ids"] == ["debate-abc123"]
         assert data["conflicts_found"] == 1
 
     def test_post_debates_no_conflicts_returns_200(self) -> None:
-        """POST with non-conflicting outputs returns 200 with debate_id=null."""
+        """POST with non-conflicting outputs returns 200 with debate_ids=[]."""
         app = _make_app()
         client = TestClient(app)
 
@@ -121,7 +121,7 @@ class TestPostDebates:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["debate_id"] is None
+        assert data["debate_ids"] == []
         assert data["conflicts_found"] == 0
 
     def test_post_debates_without_api_key_returns_401(self) -> None:
@@ -259,5 +259,158 @@ class TestGetDebateDetail:
             return_value=mock_dm,
         ):
             resp = client.get("/api/v1/debates/nonexistent-id")
+
+        assert resp.status_code == 404
+
+
+class TestPostDebatesMultiDebate:
+    """POST /api/v1/debates multi-debate response tests (ORCH-02 fix)."""
+
+    def test_post_debates_with_multiple_conflicts_returns_all_ids(self) -> None:
+        """POST with 3 conflicts returns debate_ids list with all 3 IDs."""
+        app = _make_app()
+        client = TestClient(app)
+
+        mock_orch = MagicMock()
+        mock_orch.run.return_value = ["debate-id1", "debate-id2", "debate-id3"]
+
+        with patch(
+            "finalayze.api.v1.debates.AgentOrchestrator",
+            return_value=mock_orch,
+        ):
+            resp = client.post(
+                "/api/v1/debates",
+                json={
+                    "outputs": [
+                        _make_agent_output_json(),
+                        _make_conflict_output_json(),
+                    ]
+                },
+            )
+
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["debate_ids"] == ["debate-id1", "debate-id2", "debate-id3"]
+        assert data["conflicts_found"] == 3
+
+    def test_post_debates_no_conflicts_returns_empty_debate_ids(self) -> None:
+        """POST with no conflicts returns debate_ids=[] and conflicts_found=0."""
+        app = _make_app()
+        client = TestClient(app)
+
+        mock_orch = MagicMock()
+        mock_orch.run.return_value = []
+
+        with patch(
+            "finalayze.api.v1.debates.AgentOrchestrator",
+            return_value=mock_orch,
+        ):
+            resp = client.post(
+                "/api/v1/debates",
+                json={"outputs": [_make_agent_output_json()]},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["debate_ids"] == []
+        assert data["conflicts_found"] == 0
+
+
+class TestFinalizeDebate:
+    """POST /api/v1/debates/{id}/finalize tests (ORCH-01)."""
+
+    def _make_fact_check_report_json(
+        self, debate_id: str = "debate-abc123", with_contradiction: bool = True
+    ) -> dict:
+        """Build a minimal FactCheckReport JSON body."""
+        return {
+            "report": {
+                "debate_id": debate_id,
+                "arbiter_timestamp": datetime.now(UTC).isoformat(),
+                "results": [
+                    {
+                        "claim": {
+                            "statement": "ML improves Sharpe by 10%",
+                            "source": {
+                                "kind": "metric",
+                                "metric_name": "sharpe",
+                                "value": 0.137,
+                                "iteration": "2026-04-05-adx-routing",
+                            },
+                            "confidence": 0.8,
+                        },
+                        "verdict": "contradicted" if with_contradiction else "verified",
+                        "evidence": "Contradicted by risk-officer" if with_contradiction else "Verified",
+                    }
+                ],
+            }
+        }
+
+    def test_finalize_debate_with_contradictions_returns_experiment_id(self) -> None:
+        """POST /debates/{id}/finalize with contradictions returns experiment_id."""
+        app = _make_app()
+        client = TestClient(app)
+
+        mock_orch = MagicMock()
+        mock_orch.finalize_debate.return_value = "exp-debate-abc12"
+
+        with patch(
+            "finalayze.api.v1.debates.AgentOrchestrator",
+            return_value=mock_orch,
+        ):
+            resp = client.post(
+                "/api/v1/debates/debate-abc123/finalize",
+                json=self._make_fact_check_report_json(
+                    debate_id="debate-abc123", with_contradiction=True
+                ),
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["debate_id"] == "debate-abc123"
+        assert data["experiment_id"] == "exp-debate-abc12"
+        assert data["resolved"] is False
+
+    def test_finalize_debate_no_contradictions_returns_resolved(self) -> None:
+        """POST /debates/{id}/finalize with no contradictions returns resolved=True."""
+        app = _make_app()
+        client = TestClient(app)
+
+        mock_orch = MagicMock()
+        mock_orch.finalize_debate.return_value = None
+
+        with patch(
+            "finalayze.api.v1.debates.AgentOrchestrator",
+            return_value=mock_orch,
+        ):
+            resp = client.post(
+                "/api/v1/debates/debate-xyz/finalize",
+                json=self._make_fact_check_report_json(
+                    debate_id="debate-xyz", with_contradiction=False
+                ),
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["debate_id"] == "debate-xyz"
+        assert data["experiment_id"] is None
+        assert data["resolved"] is True
+
+    def test_finalize_debate_nonexistent_returns_404(self) -> None:
+        """POST /debates/{id}/finalize with nonexistent debate returns 404."""
+        app = _make_app()
+        client = TestClient(app, raise_server_exceptions=False)
+
+        mock_orch = MagicMock()
+        mock_orch.finalize_debate.side_effect = FileNotFoundError("debate not found")
+
+        with patch(
+            "finalayze.api.v1.debates.AgentOrchestrator",
+            return_value=mock_orch,
+        ):
+            resp = client.post(
+                "/api/v1/debates/nonexistent-debate/finalize",
+                json=self._make_fact_check_report_json(debate_id="nonexistent-debate"),
+            )
 
         assert resp.status_code == 404

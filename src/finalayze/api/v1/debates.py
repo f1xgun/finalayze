@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from finalayze.api.v1.auth import api_key_auth
 from finalayze.core.debate_manager import DebateManager
-from finalayze.core.schemas import AgentOutput
+from finalayze.core.schemas import AgentOutput, FactCheckReport  # noqa: TC001
 from finalayze.orchestration.agent_orchestrator import AgentOrchestrator
 
 router = APIRouter(
@@ -39,8 +39,26 @@ class CreateDebateResponse(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    debate_id: str | None
+    debate_ids: list[str]
     conflicts_found: int
+
+
+class FinalizeDebateRequest(BaseModel):
+    """Request body for POST /debates/{debate_id}/finalize."""
+
+    model_config = ConfigDict(frozen=True)
+
+    report: FactCheckReport
+
+
+class FinalizeDebateResponse(BaseModel):
+    """Response for POST /debates/{debate_id}/finalize."""
+
+    model_config = ConfigDict(frozen=True)
+
+    debate_id: str
+    experiment_id: str | None
+    resolved: bool
 
 
 class DebateListResponse(BaseModel):
@@ -81,7 +99,7 @@ async def create_debate(req: CreateDebateRequest) -> JSONResponse:
     debate_ids = orch.run(list(req.outputs))
 
     payload = CreateDebateResponse(
-        debate_id=debate_ids[0] if debate_ids else None,
+        debate_ids=debate_ids,
         conflicts_found=len(debate_ids),
     )
     status_code = 201 if debate_ids else 200
@@ -120,4 +138,41 @@ async def get_debate(debate_id: str) -> DebateDetailResponse:
         resolution=state.resolution,
         experiment_id=state.experiment_id,
         has_arbiter_report=state.arbiter_report is not None,
+    )
+
+
+@router.post("/{debate_id}/finalize", response_model=FinalizeDebateResponse)
+async def finalize_debate(
+    debate_id: str,
+    req: FinalizeDebateRequest,
+) -> FinalizeDebateResponse:
+    """Finalize a debate with an arbiter FactCheckReport.
+
+    Calls AgentOrchestrator.finalize_debate() with the provided report.
+    If the report contains contradictions, an experiment is created and
+    experiment_id is returned with resolved=False.
+    If no contradictions, the debate is resolved and resolved=True is returned.
+
+    Args:
+        debate_id: The debate to finalize.
+        req: Request body containing the FactCheckReport.
+
+    Returns:
+        FinalizeDebateResponse with debate_id, experiment_id, and resolved flag.
+
+    Raises:
+        HTTPException(404): if the debate does not exist.
+    """
+    orch = AgentOrchestrator()
+    try:
+        experiment_id = orch.finalize_debate(debate_id, req.report)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Debate not found: {debate_id!r}"
+        ) from exc
+
+    return FinalizeDebateResponse(
+        debate_id=debate_id,
+        experiment_id=experiment_id,
+        resolved=experiment_id is None,
     )
