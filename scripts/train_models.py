@@ -46,7 +46,7 @@ from finalayze.ml.models.catboost_model import CatBoostModel
 from finalayze.ml.models.lightgbm_model import LightGBMModel
 from finalayze.ml.models.xgboost_model import XGBoostModel
 from finalayze.ml.training import DEFAULT_WINDOW_SIZE, _slice_market_context, build_windows
-from finalayze.ml.training.feature_selection import select_features_mi
+from finalayze.ml.training.feature_selection import select_features_efficient, select_features_mi
 from finalayze.ml.training.labeling import build_triple_barrier_dataset
 from finalayze.ml.training.quality_gates import FoldMetrics
 from finalayze.ml.training.sample_weights import compute_decay_weights, sequential_bootstrap
@@ -69,6 +69,10 @@ _MOEX_ATR_UPLIFT = 1.2  # MOEX 1.2x uplift for wider barriers
 LABEL_MODE_TRIPLE_BARRIER = "triple_barrier"
 LABEL_MODE_DIRECTION = "direction"
 LABEL_MODE_TREND_SCANNING = "trend_scanning"
+
+# Feature selection mode choices
+FEAT_SEL_MI = "mi"
+FEAT_SEL_EFFICIENT = "efficient"
 
 # Benchmark tickers for market-neutral (excess return) labels
 _US_BENCHMARK = "SPY"
@@ -98,6 +102,27 @@ _MOEX_MAX_DEPTH = 3
 # MI feature selection: fewer features for MOEX (smaller dataset, 50:1 sample-to-feature ratio)
 _US_MAX_FEATURES = 15
 _MOEX_MAX_FEATURES = 10
+
+
+def _select_features(
+    train_df: object,
+    train_series: object,
+    max_feats: int,
+    mode: str = FEAT_SEL_EFFICIENT,
+) -> list[str]:
+    """Dispatch feature selection by mode.
+
+    Args use ``object`` to avoid top-level pandas import; callers already pass
+    ``pd.DataFrame`` / ``pd.Series``.
+    """
+    import pandas as _pd  # noqa: PLC0415
+
+    df = _pd.DataFrame(train_df) if not isinstance(train_df, _pd.DataFrame) else train_df
+    s = _pd.Series(train_series) if not isinstance(train_series, _pd.Series) else train_series
+    if mode == FEAT_SEL_EFFICIENT:
+        return select_features_efficient(df, s, max_features=max_feats)
+    return select_features_mi(df, s, max_features=max_feats)
+
 
 # MOEX-specific ensemble hyperparameters: more trees + lower LR for small dataset
 _MOEX_N_ESTIMATORS = 300
@@ -1066,9 +1091,7 @@ def _evaluate_fold_metrics(
             else:
                 gross_loss += 1.0
     profit_factor = (
-        gross_profit / gross_loss
-        if gross_loss > 0
-        else (2.0 if gross_profit > 0 else 1.0)
+        gross_profit / gross_loss if gross_loss > 0 else (2.0 if gross_profit > 0 else 1.0)
     )
 
     return FoldMetrics(
@@ -1097,6 +1120,7 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
     force_save: bool = False,
     seq_bootstrap: bool = True,
     market_context: MarketContext | None = None,
+    feat_sel_mode: str = FEAT_SEL_EFFICIENT,
 ) -> dict[str, float] | None:
     """Train models using walk-forward validation (D1).
 
@@ -1170,7 +1194,7 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         train_df = pd.DataFrame(train_f)
         train_series = pd.Series(train_l)
         max_feats = _get_max_features(segment_id)
-        selected = select_features_mi(train_df, train_series, max_features=max_feats)
+        selected = _select_features(train_df, train_series, max_feats, mode=feat_sel_mode)
 
         if selected:
             train_f = [{k: row[k] for k in selected} for row in train_f]
@@ -1261,7 +1285,11 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         # Evaluate on test fold
         if test_f:
             fold_metrics = _evaluate_fold_metrics(
-                models, test_f, test_l, mean_uniq, avg_hold_bars=fold_avg_hold,
+                models,
+                test_f,
+                test_l,
+                mean_uniq,
+                avg_hold_bars=fold_avg_hold,
                 calibrator=fold_calibrator,
             )
             gate_results = evaluate_fold(fold_metrics)
@@ -1388,6 +1416,7 @@ def train_one_segment(  # noqa: PLR0915
     excess_returns: bool = False,
     seq_bootstrap: bool = True,
     market_context: MarketContext | None = None,
+    feat_sel_mode: str = FEAT_SEL_EFFICIENT,
 ) -> None:
     """Train and save models for a single segment.
 
@@ -1451,7 +1480,7 @@ def train_one_segment(  # noqa: PLR0915
         train_df = pd.DataFrame(train_features)
         train_series = pd.Series(train_labels)
         max_feats = _get_max_features(segment_id)
-        selected_features = select_features_mi(train_df, train_series, max_features=max_feats)
+        selected_features = _select_features(train_df, train_series, max_feats, mode=feat_sel_mode)
         if selected_features:
             print(
                 f"[{segment_id}] Selected {len(selected_features)}/{len(feature_names)} "
@@ -1839,6 +1868,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Default: enabled."
         ),
     )
+    parser.add_argument(
+        "--feature-selection",
+        default=FEAT_SEL_EFFICIENT,
+        choices=[FEAT_SEL_MI, FEAT_SEL_EFFICIENT],
+        help=(
+            f"Feature selection method: '{FEAT_SEL_MI}' uses Mutual Information only, "
+            f"'{FEAT_SEL_EFFICIENT}' uses MI weighted by feature complexity "
+            f"(prefers cheap informative features). Default: {FEAT_SEL_EFFICIENT}."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1871,7 +1910,7 @@ def _build_market_data_loader(segment_ids: list[str]) -> MarketDataLoader:
     )
 
 
-def main() -> None:  # noqa: PLR0912
+def main() -> None:  # noqa: PLR0912, PLR0915
     """Entry point."""
     from types import SimpleNamespace  # noqa: PLC0415
 
@@ -1882,6 +1921,7 @@ def main() -> None:  # noqa: PLR0912
     excess_returns: bool = args.excess_returns
     force_save: bool = args.force_save
     seq_bootstrap: bool = args.sequential_bootstrap
+    feat_sel_mode: str = args.feature_selection
 
     if args.segment:
         segments = {args.segment: _SEGMENT_SYMBOLS.get(args.segment, [])}
@@ -1891,7 +1931,7 @@ def main() -> None:  # noqa: PLR0912
     print(
         f"Label mode: {label_mode}, Walk-forward: {walk_forward}, "
         f"Excess returns: {excess_returns}, Force save: {force_save}, "
-        f"Sequential bootstrap: {seq_bootstrap}"
+        f"Sequential bootstrap: {seq_bootstrap}, Feature selection: {feat_sel_mode}"
     )
 
     # Build MarketDataLoader — single instance reused across all segments.
@@ -1931,6 +1971,7 @@ def main() -> None:  # noqa: PLR0912
                         force_save=force_save,
                         seq_bootstrap=seq_bootstrap,
                         market_context=market_context,
+                        feat_sel_mode=feat_sel_mode,
                     )
                     if gate_rates and "accuracy" in gate_rates:
                         # Load best accuracy from saved results
@@ -1947,6 +1988,7 @@ def main() -> None:  # noqa: PLR0912
                         excess_returns=excess_returns,
                         seq_bootstrap=seq_bootstrap,
                         market_context=market_context,
+                        feat_sel_mode=feat_sel_mode,
                     )
             except FileNotFoundError as exc:
                 print(f"[{segment_id}] FileNotFoundError -- {exc}, skipping.")

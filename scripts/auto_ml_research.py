@@ -1,0 +1,960 @@
+"""Autonomous ML experiment loop — autoresearch-inspired.
+
+Runs unattended, trying feature/model configurations, evaluating with
+walk-forward quality gates, and keeping improvements.  Logs every experiment
+to ``results/experiments/experiment_log.jsonl``.
+
+Inspired by karpathy/autoresearch: hypothesis → experiment → keep/discard → repeat.
+
+Usage::
+
+    # Feature ablation (drop features one at a time)
+    uv run python scripts/auto_ml_research.py --segment us_tech --strategy ablation
+
+    # Efficiency-driven feature selection (Pareto-optimal)
+    uv run python scripts/auto_ml_research.py --segment us_tech --strategy efficiency
+
+    # Hyperparameter perturbation (coordinate descent)
+    uv run python scripts/auto_ml_research.py --segment us_tech --strategy hyperparameter
+
+    # Random feature subsets
+    uv run python scripts/auto_ml_research.py --segment us_tech --strategy random_subset
+
+    # Run all strategies sequentially
+    uv run python scripts/auto_ml_research.py --segment us_tech --strategy all
+
+    # Limit experiments
+    uv run python scripts/auto_ml_research.py --segment us_tech --max-experiments 20
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import sys
+import time
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+# Ensure src/ and project root are importable
+_PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+sys.path.insert(0, str(_PROJECT_ROOT))
+
+import numpy as _np
+import pandas as pd
+import structlog
+
+# torch must be imported before lightgbm to prevent OpenMP thread-pool conflicts
+import torch  # noqa: F401
+from sklearn.metrics import accuracy_score, brier_score_loss
+
+from finalayze.core.schemas import Candle, MarketContext
+from finalayze.data.fetchers.yfinance import YFinanceFetcher
+from finalayze.ml.models.catboost_model import CatBoostModel
+from finalayze.ml.models.lightgbm_model import LightGBMModel
+from finalayze.ml.models.xgboost_model import XGBoostModel
+from finalayze.ml.training.feature_complexity import (
+    summarize_complexity,
+)
+from finalayze.ml.training.feature_selection import (
+    select_features_efficient,
+)
+from finalayze.ml.training.labeling import build_triple_barrier_dataset
+from finalayze.ml.training.quality_gates import (
+    FoldMetrics,
+    evaluate_fold,
+    evaluate_walk_forward,
+)
+from finalayze.ml.training.sample_weights import compute_decay_weights
+
+logger = structlog.get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_WINDOW_SIZE = 80
+_TB_UPPER_ATR_MULT = 2.0
+_TB_LOWER_ATR_MULT = 2.0
+_TB_MAX_HOLD = 20
+_TB_ATR_PERIOD = 14
+_MOEX_ATR_UPLIFT = 1.2
+_LOOKBACK_DAYS = 1825
+_MOEX_LOOKBACK_DAYS = 730
+_US_MAX_FEATURES = 15
+_MOEX_MAX_FEATURES = 10
+
+_WF_TRAIN_MONTHS = 12
+_WF_CAL_MONTHS = 2
+_WF_TEST_MONTHS = 4
+_WF_STEP_MONTHS = 3
+_PURGE_GAP = 100
+
+_US_BENCHMARK = "SPY"
+_VIX_TICKER = "^VIX"
+
+_SEGMENT_SYMBOLS: dict[str, list[str]] = {
+    "us_tech": [
+        "AAPL",
+        "MSFT",
+        "GOOGL",
+        "NVDA",
+        "META",
+        "AMZN",
+        "TSLA",
+        "CRM",
+        "ADBE",
+        "INTC",
+        "AMD",
+        "AVGO",
+        "CSCO",
+        "ORCL",
+        "QCOM",
+    ],
+    "us_healthcare": [
+        "JNJ",
+        "PFE",
+        "UNH",
+        "ABBV",
+        "MRK",
+        "LLY",
+        "TMO",
+        "ABT",
+        "BMY",
+        "AMGN",
+        "GILD",
+        "MDT",
+    ],
+    "us_finance": [
+        "JPM",
+        "BAC",
+        "GS",
+        "MS",
+        "WFC",
+        "C",
+        "BLK",
+        "SCHW",
+        "AXP",
+        "USB",
+        "PNC",
+        "TFC",
+    ],
+    "us_broad": ["SPY", "QQQ", "DIA", "IWM", "VTI"],
+}
+
+_RESULTS_DIR = _PROJECT_ROOT / "results" / "experiments"
+
+# Default XGBoost / LightGBM / CatBoost hyperparameters
+_DEFAULT_HPARAMS = {
+    "xgb_max_depth": 5,
+    "xgb_n_estimators": 200,
+    "xgb_learning_rate": 0.05,
+    "lgbm_n_estimators": 200,
+    "lgbm_learning_rate": 0.05,
+    "lgbm_num_leaves": 31,
+    "cat_depth": 4,
+    "cat_iterations": 200,
+    "cat_learning_rate": 0.05,
+}
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ExperimentConfig:
+    """What to try in this experiment."""
+
+    name: str
+    description: str
+    strategy: str  # ablation, efficiency, hyperparameter, random_subset
+    feature_subset: list[str] | None = None
+    max_features: int = _US_MAX_FEATURES
+    hparams: dict[str, float | int] = field(default_factory=lambda: dict(_DEFAULT_HPARAMS))
+
+
+@dataclass
+class ExperimentResult:
+    """What we got from the experiment."""
+
+    config: ExperimentConfig
+    n_folds: int = 0
+    gate_pass_rates: dict[str, float] = field(default_factory=dict)
+    overall_passed: bool = False
+    avg_accuracy: float = 0.0
+    avg_brier: float = 0.0
+    avg_profit_factor: float = 0.0
+    feature_count: int = 0
+    features_used: list[str] = field(default_factory=list)
+    complexity_summary: dict[str, float] = field(default_factory=dict)
+    score: float = 0.0  # composite score for comparison
+    status: str = "crash"  # keep, discard, crash
+    duration_seconds: float = 0.0
+    timestamp: str = ""
+    error: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Data loading (one-time)
+# ---------------------------------------------------------------------------
+
+
+def _fetch_us_candles(segment_id: str, symbols: list[str]) -> dict[str, list[Candle]]:
+    """Fetch candles per symbol via yfinance."""
+    market_id = segment_id.split("_", maxsplit=1)[0]
+    fetcher = YFinanceFetcher(market_id=market_id)
+    end = datetime.now(tz=UTC)
+    start = end - timedelta(days=_LOOKBACK_DAYS)
+    candles_by_sym: dict[str, list[Candle]] = {}
+    for sym in symbols:
+        try:
+            candles = fetcher.fetch_candles(sym, start, end)
+            if candles:
+                candles_by_sym[sym] = candles
+                print(f"  Fetched {len(candles)} candles for {sym}")
+        except Exception as exc:
+            print(f"  Failed to fetch {sym}: {exc}")
+    return candles_by_sym
+
+
+def _fetch_benchmark(segment_id: str) -> list[Candle] | None:
+    """Fetch SPY benchmark candles."""
+    market_id = segment_id.split("_", maxsplit=1)[0]
+    fetcher = YFinanceFetcher(market_id=market_id)
+    end = datetime.now(tz=UTC)
+    start = end - timedelta(days=_LOOKBACK_DAYS)
+    try:
+        candles = fetcher.fetch_candles(_US_BENCHMARK, start, end)
+        print(f"  Benchmark ({_US_BENCHMARK}): {len(candles)} candles")
+        return candles
+    except Exception as exc:
+        print(f"  Benchmark fetch failed: {exc}")
+        return None
+
+
+def _fetch_vix(segment_id: str) -> list[Candle] | None:
+    """Fetch VIX candles for regime features."""
+    market_id = segment_id.split("_", maxsplit=1)[0]
+    fetcher = YFinanceFetcher(market_id=market_id)
+    end = datetime.now(tz=UTC)
+    start = end - timedelta(days=_LOOKBACK_DAYS)
+    try:
+        candles = fetcher.fetch_candles(_VIX_TICKER, start, end)
+        print(f"  VIX: {len(candles)} candles")
+        return candles
+    except Exception as exc:
+        print(f"  VIX fetch failed: {exc}")
+        return None
+
+
+def _align_benchmark(stock_candles: list[Candle], bench_candles: list[Candle]) -> list[Candle]:
+    """Align benchmark to stock candles by date (forward-fill)."""
+    if not bench_candles or not stock_candles:
+        return []
+    bench_by_date: dict[datetime, Candle] = {}
+    for c in bench_candles:
+        key = c.timestamp.replace(hour=0, minute=0, second=0, microsecond=0)
+        bench_by_date[key] = c
+    sorted_dates = sorted(bench_by_date.keys())
+    if not sorted_dates:
+        return []
+
+    # Forward-fill
+    min_d = min(
+        sorted_dates[0],
+        stock_candles[0].timestamp.replace(hour=0, minute=0, second=0, microsecond=0),
+    )
+    max_d = max(
+        sorted_dates[-1],
+        stock_candles[-1].timestamp.replace(hour=0, minute=0, second=0, microsecond=0),
+    )
+    ffill: dict[datetime, Candle] = {}
+    cur = min_d
+    cur_bench = bench_by_date[sorted_dates[0]]
+    day = timedelta(days=1)
+    while cur <= max_d:
+        if cur in bench_by_date:
+            cur_bench = bench_by_date[cur]
+        ffill[cur] = cur_bench
+        cur += day
+
+    aligned: list[Candle] = []
+    for sc in stock_candles:
+        sd = sc.timestamp.replace(hour=0, minute=0, second=0, microsecond=0)
+        aligned.append(ffill.get(sd, cur_bench))
+    return aligned
+
+
+def build_full_dataset(
+    _segment_id: str,
+    candles_by_sym: dict[str, list[Candle]],
+    benchmark_candles: list[Candle] | None,
+    vix_candles: list[Candle] | None,
+) -> tuple[list[dict[str, float]], list[int], _np.ndarray | None, list[int] | None, list[datetime]]:
+    """Build triple-barrier dataset from pre-fetched candles."""
+    min_candles = _WINDOW_SIZE + _TB_MAX_HOLD + 1
+    rows: list[tuple[datetime, dict[str, float], int, float, int]] = []
+
+    for candles in candles_by_sym.values():
+        if len(candles) < min_candles:
+            continue
+        aligned_bench: list[Candle] | None = None
+        if benchmark_candles:
+            aligned_bench = _align_benchmark(candles, benchmark_candles)
+            if len(aligned_bench) != len(candles):
+                aligned_bench = None
+
+        market_ctx = MarketContext(
+            benchmark_candles=benchmark_candles,
+            vix_candles=vix_candles,
+        )
+
+        x, y, w, ts, hb = build_triple_barrier_dataset(
+            candles,
+            window_size=_WINDOW_SIZE,
+            upper_atr_mult=_TB_UPPER_ATR_MULT,
+            lower_atr_mult=_TB_LOWER_ATR_MULT,
+            max_hold=_TB_MAX_HOLD,
+            atr_period=_TB_ATR_PERIOD,
+            atr_scale=True,
+            benchmark_candles=aligned_bench,
+            vix_candles=vix_candles,
+            market_context=market_ctx,
+        )
+        for t, feat, lbl, wt, h in zip(ts, x, y, w, hb, strict=True):
+            rows.append((t, feat, lbl, wt, h))
+
+    rows.sort(key=lambda r: r[0])
+    features = [r[1] for r in rows]
+    labels = [r[2] for r in rows]
+    weights = _np.array([r[3] for r in rows], dtype=float) if rows else None
+    hold_bars = [r[4] for r in rows] if rows else None
+    timestamps = [r[0] for r in rows]
+
+    print(
+        f"\nDataset: {len(features)} samples, "
+        f"{sum(labels)}/{len(labels)} positive ({sum(labels) / len(labels):.1%})"
+    )
+    return features, labels, weights, hold_bars, timestamps
+
+
+# ---------------------------------------------------------------------------
+# Walk-forward folds
+# ---------------------------------------------------------------------------
+
+
+def generate_folds(
+    timestamps: list[datetime],
+) -> list[tuple[list[int], list[int], list[int]]]:
+    """Generate walk-forward train/cal/test folds by calendar date."""
+    if not timestamps:
+        return []
+    start = timestamps[0]
+    end = timestamps[-1]
+    folds: list[tuple[list[int], list[int], list[int]]] = []
+    fold_start = start
+
+    while True:
+        train_end = fold_start + timedelta(days=_WF_TRAIN_MONTHS * 30)
+        purge1_end = train_end + timedelta(days=_PURGE_GAP)
+        cal_end = purge1_end + timedelta(days=_WF_CAL_MONTHS * 30)
+        purge2_end = cal_end + timedelta(days=_PURGE_GAP)
+        test_end = purge2_end + timedelta(days=_WF_TEST_MONTHS * 30)
+
+        if test_end > end + timedelta(days=1):
+            break
+        train_idx = [i for i, t in enumerate(timestamps) if fold_start <= t < train_end]
+        cal_idx = [i for i, t in enumerate(timestamps) if purge1_end <= t < cal_end]
+        test_idx = [i for i, t in enumerate(timestamps) if purge2_end <= t < test_end]
+        if train_idx and test_idx:
+            folds.append((train_idx, cal_idx, test_idx))
+        fold_start += timedelta(days=_WF_STEP_MONTHS * 30)
+
+    return folds
+
+
+# ---------------------------------------------------------------------------
+# Single experiment execution
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_models(
+    models: list[XGBoostModel | LightGBMModel | CatBoostModel],
+    test_f: list[dict[str, float]],
+    test_l: list[int],
+    mean_uniqueness: float,
+    avg_hold_bars: float,
+) -> FoldMetrics:
+    """Evaluate ensemble on test fold → FoldMetrics."""
+    probas: list[float] = []
+    for feat in test_f:
+        probs = []
+        for m in models:
+            trained = getattr(m, "_trained", None) or getattr(m, "_model", None)
+            if trained is None:
+                continue
+            try:
+                probs.append(m.predict_proba(feat))
+            except Exception:
+                continue
+        probas.append(sum(probs) / len(probs) if probs else 0.5)
+
+    preds = [round(p) for p in probas]
+    n = len(test_l)
+    n_pos = sum(test_l)
+    n_neg = n - n_pos
+    acc = float(accuracy_score(test_l, preds)) if n > 0 else 0.5
+    brier = float(brier_score_loss(test_l, probas)) if n > 0 else 0.25
+
+    tp = sum(1 for p, y in zip(preds, test_l, strict=True) if p == 1 and y == 1)
+    tn = sum(1 for p, y in zip(preds, test_l, strict=True) if p == 0 and y == 0)
+    sensitivity = tp / n_pos if n_pos > 0 else 0.0
+    specificity = tn / n_neg if n_neg > 0 else 0.0
+    buy_ratio = sum(preds) / n if n > 0 else 0.5
+
+    pf_threshold = 0.55
+    gross_profit = sum(
+        1.0 for prob, lbl in zip(probas, test_l, strict=True) if prob >= pf_threshold and lbl == 1
+    )
+    gross_loss = sum(
+        1.0 for prob, lbl in zip(probas, test_l, strict=True) if prob >= pf_threshold and lbl == 0
+    )
+    pf = gross_profit / gross_loss if gross_loss > 0 else (2.0 if gross_profit > 0 else 1.0)
+
+    return FoldMetrics(
+        accuracy=acc,
+        brier_score=brier,
+        log_loss=0.0,
+        n_test=n,
+        mean_uniqueness=mean_uniqueness,
+        buy_ratio=buy_ratio,
+        sensitivity=sensitivity,
+        specificity=specificity,
+        profit_factor=pf,
+        signal_count=n,
+        avg_hold_bars=avg_hold_bars,
+    )
+
+
+def _run_fold(
+    train_idx: list[int],
+    test_idx: list[int],
+    all_features: list[dict[str, float]],
+    labels: list[int],
+    hold_bars: list[int] | None,
+    config: ExperimentConfig,
+    segment_id: str,
+) -> tuple[list, FoldMetrics, list[str]] | None:
+    """Train and evaluate a single fold.  Returns None if fold is skipped."""
+    train_f = [all_features[i] for i in train_idx]
+    train_l = [labels[i] for i in train_idx]
+    test_f = [all_features[i] for i in test_idx]
+    test_l = [labels[i] for i in test_idx]
+
+    if len(train_f) < _WINDOW_SIZE:
+        return None
+
+    if config.feature_subset is not None:
+        selected = config.feature_subset
+    else:
+        train_df = pd.DataFrame(train_f)
+        train_s = pd.Series(train_l)
+        selected = select_features_efficient(
+            train_df,
+            train_s,
+            max_features=config.max_features,
+        )
+
+    if selected:
+        train_f = [{k: row.get(k, 0.0) for k in selected} for row in train_f]
+        test_f = [{k: row.get(k, 0.0) for k in selected} for row in test_f]
+
+    sw = compute_decay_weights(len(train_f))
+
+    hp = config.hparams
+    xgb_model = XGBoostModel(
+        segment_id=segment_id,
+        max_depth=int(hp.get("xgb_max_depth", 5)),
+    )
+    lgbm_model = LightGBMModel(segment_id=segment_id)
+    cat_model = CatBoostModel(
+        segment_id=segment_id,
+        depth=int(hp.get("cat_depth", 4)),
+    )
+    xgb_model.fit(train_f, train_l, sample_weight=sw)
+    lgbm_model.fit(train_f, train_l, sample_weight=sw)
+    cat_model.fit(train_f, train_l, sample_weight=sw)
+    models = [xgb_model, lgbm_model, cat_model]
+
+    fold_avg_hold = 1.0
+    if hold_bars is not None:
+        test_hb = [hold_bars[i] for i in test_idx if i < len(hold_bars)]
+        fold_avg_hold = float(_np.mean(test_hb)) if test_hb else 1.0
+
+    fold_metrics = _evaluate_models(models, test_f, test_l, 1.0, fold_avg_hold)
+    gate_results = evaluate_fold(fold_metrics)
+    return gate_results, fold_metrics, list(selected) if selected else []
+
+
+def run_experiment(
+    config: ExperimentConfig,
+    all_features: list[dict[str, float]],
+    labels: list[int],
+    hold_bars: list[int] | None,
+    folds: list[tuple[list[int], list[int], list[int]]],
+    segment_id: str,
+) -> ExperimentResult:
+    """Run one experiment: select features → train → evaluate → score."""
+    t0 = time.monotonic()
+    result = ExperimentResult(
+        config=config,
+        timestamp=datetime.now(tz=UTC).isoformat(),
+    )
+
+    try:
+        all_fold_results: list[list] = []
+        fold_accs: list[float] = []
+        fold_briers: list[float] = []
+        fold_pfs: list[float] = []
+        features_used: list[str] = []
+
+        for fold_idx, (train_idx, _cal_idx, test_idx) in enumerate(folds):
+            fold_out = _run_fold(
+                train_idx,
+                test_idx,
+                all_features,
+                labels,
+                hold_bars,
+                config,
+                segment_id,
+            )
+            if fold_out is None:
+                continue
+            gate_results, fold_metrics, selected = fold_out
+            all_fold_results.append(gate_results)
+            fold_accs.append(fold_metrics.accuracy)
+            fold_briers.append(fold_metrics.brier_score)
+            fold_pfs.append(fold_metrics.profit_factor)
+            if fold_idx == 0:
+                features_used = selected
+
+        if not all_fold_results:
+            result.error = "no valid folds"
+            result.duration_seconds = time.monotonic() - t0
+            return result
+
+        _fill_result(result, all_fold_results, fold_accs, fold_briers, fold_pfs, features_used)
+
+    except Exception as exc:
+        result.error = str(exc)
+        result.status = "crash"
+
+    result.duration_seconds = round(time.monotonic() - t0, 1)
+    return result
+
+
+# ---------------------------------------------------------------------------
+def _fill_result(
+    result: ExperimentResult,
+    all_fold_results: list[list],
+    fold_accs: list[float],
+    fold_briers: list[float],
+    fold_pfs: list[float],
+    features_used: list[str],
+) -> None:
+    """Populate result fields from fold evaluations."""
+    overall_passed, gate_pass_rates = evaluate_walk_forward(all_fold_results)
+
+    result.n_folds = len(all_fold_results)
+    result.gate_pass_rates = gate_pass_rates
+    result.overall_passed = overall_passed
+    result.avg_accuracy = float(_np.mean(fold_accs))
+    result.avg_brier = float(_np.mean(fold_briers))
+    result.avg_profit_factor = float(_np.mean(fold_pfs))
+    result.feature_count = len(features_used)
+    result.features_used = features_used
+    result.complexity_summary = summarize_complexity(features_used)
+
+    complexity_penalty = result.complexity_summary.get("mean", 0.5)
+    result.score = (
+        0.4 * result.avg_accuracy
+        + 0.3 * (1.0 - result.avg_brier)
+        + 0.2 * sum(gate_pass_rates.values()) / max(len(gate_pass_rates), 1)
+        + 0.1 * (1.0 - complexity_penalty)
+    )
+    result.status = "keep" if overall_passed else "discard"
+
+
+# ---------------------------------------------------------------------------
+# Hypothesis generation strategies
+# ---------------------------------------------------------------------------
+
+
+def generate_ablation_experiments(
+    baseline_features: list[str],
+) -> list[ExperimentConfig]:
+    """Drop each feature one at a time to measure its marginal contribution."""
+    experiments: list[ExperimentConfig] = []
+    for feat in baseline_features:
+        subset = [f for f in baseline_features if f != feat]
+        experiments.append(
+            ExperimentConfig(
+                name=f"ablate-{feat}",
+                description=f"Drop {feat}, test if quality holds (simplification check)",
+                strategy="ablation",
+                feature_subset=subset,
+            )
+        )
+    return experiments
+
+
+def generate_efficiency_experiments() -> list[ExperimentConfig]:
+    """Try efficiency-weighted selection with varying budgets."""
+    return [
+        ExperimentConfig(
+            name=f"efficient-top{max_f}",
+            description=f"Efficiency-weighted selection, max {max_f} features",
+            strategy="efficiency",
+            max_features=max_f,
+        )
+        for max_f in [5, 8, 10, 12, 15]
+    ]
+
+
+def generate_hyperparameter_experiments(
+    baseline_features: list[str],
+) -> list[ExperimentConfig]:
+    """Perturb model hyperparameters one at a time."""
+    experiments: list[ExperimentConfig] = []
+
+    perturbations = [
+        ("xgb_max_depth", [3, 4, 6, 7]),
+        ("xgb_learning_rate", [0.01, 0.03, 0.08, 0.10]),
+        ("lgbm_num_leaves", [15, 20, 40, 63]),
+        ("cat_depth", [3, 5, 6]),
+    ]
+    for param, values in perturbations:
+        for val in values:
+            if val == _DEFAULT_HPARAMS.get(param):
+                continue
+            hp = dict(_DEFAULT_HPARAMS)
+            hp[param] = val
+            experiments.append(
+                ExperimentConfig(
+                    name=f"hp-{param}={val}",
+                    description=f"Perturb {param} to {val}",
+                    strategy="hyperparameter",
+                    feature_subset=baseline_features,
+                    hparams=hp,
+                )
+            )
+    return experiments
+
+
+def generate_random_subset_experiments(
+    all_feature_names: list[str],
+    n_experiments: int = 10,
+) -> list[ExperimentConfig]:
+    """Random feature subsets of varying sizes."""
+    experiments: list[ExperimentConfig] = []
+    for i in range(n_experiments):
+        size = random.randint(5, min(15, len(all_feature_names)))  # noqa: S311
+        subset = sorted(random.sample(all_feature_names, size))
+        name = f"random-{i + 1}-n{size}"
+        experiments.append(
+            ExperimentConfig(
+                name=name,
+                description=f"Random subset of {size} features",
+                strategy="random_subset",
+                feature_subset=subset,
+            )
+        )
+    return experiments
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+
+def _log_result(result: ExperimentResult, log_path: Path) -> None:
+    """Append experiment result to JSONL log."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "name": result.config.name,
+        "description": result.config.description,
+        "strategy": result.config.strategy,
+        "timestamp": result.timestamp,
+        "status": result.status,
+        "score": round(result.score, 6),
+        "avg_accuracy": round(result.avg_accuracy, 4),
+        "avg_brier": round(result.avg_brier, 4),
+        "avg_profit_factor": round(result.avg_profit_factor, 4),
+        "feature_count": result.feature_count,
+        "features_used": result.features_used,
+        "complexity": result.complexity_summary,
+        "gate_pass_rates": {k: round(v, 3) for k, v in result.gate_pass_rates.items()},
+        "overall_passed": result.overall_passed,
+        "n_folds": result.n_folds,
+        "duration_seconds": result.duration_seconds,
+        "hparams": result.config.hparams,
+        "error": result.error,
+    }
+    with log_path.open("a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def _print_result(result: ExperimentResult, baseline_score: float) -> None:
+    """Print experiment result to console."""
+    delta = result.score - baseline_score
+    icon = "+" if delta > 0 else ("-" if delta < 0 else "=")
+    status_icons = {"keep": "KEEP", "discard": "DISC", "crash": "FAIL"}
+    print(
+        f"  [{status_icons.get(result.status, '????')}] {result.config.name:40s} "
+        f"score={result.score:.4f} ({icon}{abs(delta):.4f}) "
+        f"acc={result.avg_accuracy:.3f} brier={result.avg_brier:.3f} "
+        f"pf={result.avg_profit_factor:.2f} feats={result.feature_count} "
+        f"({result.duration_seconds:.0f}s)"
+    )
+    if result.error:
+        print(f"         error: {result.error}")
+
+
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
+
+
+def _generate_experiments(
+    strategy: str,
+    baseline_features: list[str],
+    all_feature_names: list[str],
+    max_experiments: int,
+) -> list[ExperimentConfig]:
+    """Generate experiment configs for the chosen strategy."""
+    experiments: list[ExperimentConfig] = []
+    if strategy in ("ablation", "all"):
+        experiments.extend(generate_ablation_experiments(baseline_features))
+    if strategy in ("efficiency", "all"):
+        experiments.extend(generate_efficiency_experiments())
+    if strategy in ("hyperparameter", "all"):
+        experiments.extend(generate_hyperparameter_experiments(baseline_features))
+    if strategy in ("random_subset", "all"):
+        experiments.extend(generate_random_subset_experiments(all_feature_names))
+    return experiments[:max_experiments]
+
+
+def _print_summary(
+    log_path: Path,
+    n_experiments: int,
+    improvements: int,
+    best_name: str,
+    best_score: float,
+    baseline_score: float,
+    total_time: float,
+) -> None:
+    """Print final summary and top experiments."""
+    print(f"\n{'=' * 70}")
+    print("  RESEARCH COMPLETE")
+    print(f"{'=' * 70}")
+    print(f"  Experiments run: {n_experiments + 1} (incl. baseline)")
+    print(f"  Improvements found: {improvements}")
+    print(f"  Best experiment: {best_name} (score={best_score:.4f})")
+    print(f"  Baseline score: {baseline_score:.4f}")
+    print(f"  Total time: {total_time:.0f}s")
+    print(f"  Results logged to: {log_path}")
+
+    print("\n  Top experiments by score:")
+    all_results: list[dict] = []
+    if log_path.exists():
+        with log_path.open() as f:
+            all_results.extend(json.loads(line) for line in f if line.strip())
+    all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
+    for i, r in enumerate(all_results[:5], 1):
+        print(
+            f"    {i}. {r['name']:35s} score={r['score']:.4f} "
+            f"feats={r['feature_count']} status={r['status']}"
+        )
+
+
+def _prepare_data(
+    segment_id: str,
+) -> (
+    tuple[
+        list[dict[str, float]],
+        list[int],
+        list[int] | None,
+        list[tuple[list[int], list[int], list[int]]],
+    ]
+    | None
+):
+    """Fetch data, build dataset, generate folds. Returns None on failure."""
+    symbols = _SEGMENT_SYMBOLS.get(segment_id)
+    if not symbols:
+        print(f"Unknown segment: {segment_id}")
+        return None
+
+    print("Step 1: Fetching data...")
+    candles_by_sym = _fetch_us_candles(segment_id, symbols)
+    benchmark = _fetch_benchmark(segment_id)
+    vix = _fetch_vix(segment_id)
+
+    if not candles_by_sym:
+        print("No data fetched, aborting.")
+        return None
+
+    print("\nStep 2: Building dataset...")
+    features, labels, _weights, hold_bars, timestamps = build_full_dataset(
+        segment_id,
+        candles_by_sym,
+        benchmark,
+        vix,
+    )
+
+    if not features:
+        print("Empty dataset, aborting.")
+        return None
+
+    print("\nStep 3: Generating walk-forward folds...")
+    folds = generate_folds(timestamps)
+    print(f"  {len(folds)} walk-forward folds")
+
+    if not folds:
+        print("No valid folds, aborting.")
+        return None
+
+    return features, labels, hold_bars, folds
+
+
+def run_research_loop(
+    segment_id: str,
+    strategy: str = "all",
+    max_experiments: int = 100,
+) -> None:
+    """Run the autonomous experiment loop."""
+    print(f"\n{'=' * 70}")
+    print(f"  AUTO-ML RESEARCH — segment={segment_id}, strategy={strategy}")
+    print(f"{'=' * 70}\n")
+
+    prepared = _prepare_data(segment_id)
+    if prepared is None:
+        return
+    features, labels, hold_bars, folds = prepared
+
+    # Step 4: Baseline experiment
+    print("\nStep 4: Running baseline...")
+    all_feature_names = sorted(features[0].keys())
+    baseline_config = ExperimentConfig(
+        name="baseline",
+        description="Baseline with standard MI feature selection",
+        strategy="baseline",
+    )
+    baseline_result = run_experiment(
+        baseline_config,
+        features,
+        labels,
+        hold_bars,
+        folds,
+        segment_id,
+    )
+
+    log_path = _RESULTS_DIR / f"{segment_id}_experiment_log.jsonl"
+    _log_result(baseline_result, log_path)
+    print(
+        f"\n  Baseline: score={baseline_result.score:.4f} "
+        f"acc={baseline_result.avg_accuracy:.3f} "
+        f"brier={baseline_result.avg_brier:.3f} "
+        f"pf={baseline_result.avg_profit_factor:.2f} "
+        f"feats={baseline_result.feature_count}"
+    )
+
+    baseline_features = baseline_result.features_used
+    baseline_score = baseline_result.score
+
+    # Step 5: Generate experiments
+    print(f"\nStep 5: Generating experiments (strategy={strategy})...")
+    experiments = _generate_experiments(
+        strategy,
+        baseline_features,
+        all_feature_names,
+        max_experiments,
+    )
+    print(f"  {len(experiments)} experiments queued")
+
+    # Step 6: Run experiments
+    print("\nStep 6: Running experiments...")
+    best_score = baseline_score
+    best_name = "baseline"
+    improvements = 0
+    total_time = 0.0
+
+    for idx, config in enumerate(experiments, 1):
+        print(f"\n[{idx}/{len(experiments)}] {config.name}: {config.description}")
+        result = run_experiment(config, features, labels, hold_bars, folds, segment_id)
+        _log_result(result, log_path)
+        _print_result(result, baseline_score)
+        total_time += result.duration_seconds
+
+        if result.score > best_score:
+            best_score = result.score
+            best_name = result.config.name
+            improvements += 1
+
+    _print_summary(
+        log_path,
+        len(experiments),
+        improvements,
+        best_name,
+        best_score,
+        baseline_score,
+        total_time,
+    )
+
+
+def main() -> None:
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(
+        description="Autonomous ML experiment loop (autoresearch-inspired)"
+    )
+    parser.add_argument(
+        "--segment",
+        required=True,
+        choices=list(_SEGMENT_SYMBOLS.keys()),
+        help="Market segment to experiment on",
+    )
+    parser.add_argument(
+        "--strategy",
+        default="all",
+        choices=["ablation", "efficiency", "hyperparameter", "random_subset", "all"],
+        help="Experiment strategy (default: all)",
+    )
+    parser.add_argument(
+        "--max-experiments",
+        type=int,
+        default=100,
+        help="Maximum number of experiments to run (default: 100)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility (default: 42)",
+    )
+    args = parser.parse_args()
+    random.seed(args.seed)
+    _np.random.seed(args.seed)
+
+    run_research_loop(
+        segment_id=args.segment,
+        strategy=args.strategy,
+        max_experiments=args.max_experiments,
+    )
+
+
+if __name__ == "__main__":
+    main()

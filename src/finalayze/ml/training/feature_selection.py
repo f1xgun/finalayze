@@ -3,9 +3,10 @@
 Drops low-importance features and deduplicates highly correlated ones
 to reduce overfitting and improve model generalization.
 
-Provides two approaches:
+Provides three approaches:
 - Pearson correlation-based (original): ``select_features``
 - Mutual Information-based: ``select_features_mi``, ``compute_feature_mi``
+- Efficiency-weighted (MI + complexity): ``select_features_efficient``
 
 See docs/plans/2026-03-02-enhanced-improvement-plan.md, task B.7.
 """
@@ -321,3 +322,119 @@ def _build_importance_map(model: xgb.XGBClassifier, feature_names: list[str]) ->
             importance_map[name] /= total_importance
 
     return importance_map
+
+
+# ---------------------------------------------------------------------------
+# Efficiency-weighted feature selection (MI + complexity)
+# ---------------------------------------------------------------------------
+
+
+def select_features_efficient(
+    x: pd.DataFrame,
+    y: pd.Series,
+    *,
+    max_features: int = 15,
+    mi_threshold: float = 0.02,
+    min_features: int = _MIN_FEATURE_COUNT,
+    min_efficiency: float = 0.0,
+    max_total_complexity: float | None = None,
+) -> list[str]:
+    """Select features by efficiency = MI / complexity_score.
+
+    Combines Mutual Information (signal quality) with complexity cost
+    from :mod:`feature_complexity` to prefer cheap-but-informative features
+    over expensive-but-marginal ones.
+
+    Steps:
+        1. Compute MI between each feature and target.
+        2. Remove features with MI < ``mi_threshold`` (uninformative).
+        3. Compute efficiency = MI / complexity_score for each survivor.
+        4. Greedy selection in descending efficiency order, subject to
+           ``max_features`` and optional ``max_total_complexity`` budget.
+        5. Apply minimum feature floor.
+        6. Deduplicate by pairwise MI (same as ``select_features_mi``).
+
+    Args:
+        x: Feature matrix (n_samples, n_features).
+        y: Binary target labels.
+        max_features: Maximum features to return.
+        mi_threshold: Minimum MI with target to keep.
+        min_features: Minimum features to return (floor).
+        min_efficiency: Skip features below this efficiency.
+        max_total_complexity: Optional complexity budget (sum of scores).
+
+    Returns:
+        Selected feature names ordered by efficiency (descending).
+    """
+    from finalayze.ml.training.feature_complexity import (  # noqa: PLC0415
+        compute_efficiency,
+        get_complexity,
+        summarize_complexity,
+    )
+
+    total_features = x.shape[1] if not x.empty else 0
+    if x.empty or total_features == 0:
+        return []
+
+    # Step 1: MI with target
+    mi_scores = compute_feature_mi(x, y)
+
+    # Step 2: filter uninformative
+    effective_min = min(min_features, total_features)
+    informative = mi_scores[mi_scores >= mi_threshold]
+    if len(informative) < effective_min:
+        informative = mi_scores.sort_values(ascending=False).head(effective_min)
+
+    if informative.empty:
+        return []
+
+    # Step 3: compute efficiency for each surviving feature
+    efficiencies: list[tuple[str, float, float]] = []  # (name, efficiency, complexity)
+    for name in informative.index:
+        mi_val = float(informative[name])
+        eff = compute_efficiency(name, mi_val)
+        cx = get_complexity(name).complexity_score
+        efficiencies.append((name, eff, cx))
+
+    # Sort by efficiency descending
+    efficiencies.sort(key=lambda t: t[1], reverse=True)
+
+    # Step 4: greedy selection with budget
+    selected: list[str] = []
+    total_cx = 0.0
+    for name, eff, cx in efficiencies:
+        if len(selected) >= max_features:
+            break
+        if eff < min_efficiency:
+            continue
+        if max_total_complexity is not None and total_cx + cx > max_total_complexity:
+            continue
+        selected.append(name)
+        total_cx += cx
+
+    # Step 5: floor
+    if len(selected) < effective_min:
+        selected_set = set(selected)
+        for name, _eff, cx in efficiencies:
+            if len(selected) >= effective_min:
+                break
+            if name not in selected_set:
+                selected.append(name)
+                selected_set.add(name)
+                total_cx += cx
+
+    selected = selected[:max_features]
+
+    # Step 6: log complexity summary
+    summary = summarize_complexity(selected)
+    logger.info(
+        "feature_selection_efficient_complete",
+        selected_count=len(selected),
+        total_features=total_features,
+        complexity_total=summary["total"],
+        complexity_mean=summary["mean"],
+        n_external=summary["n_external"],
+        n_high_compute=summary["n_high_compute"],
+    )
+
+    return selected
