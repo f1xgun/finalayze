@@ -9,15 +9,15 @@ Requirements for Agent Integration & Autonomous Decision Loop milestone.
 
 ### Agent Output
 
-- [ ] **AGOUT-01**: Domain agents emit `AgentOutput` with structured `Claim` objects and mandatory source references — no unsourced assertions in agent recommendations
-- [ ] **AGOUT-02**: `AnthropicClient.parse_structured()` wraps `client.messages.parse()` with Pydantic model schema derivation — structured output guaranteed by SDK
+- [x] **AGOUT-01**: Domain agents emit `AgentOutput` with structured `Claim` objects and mandatory source references — no unsourced assertions in agent recommendations
+- [x] **AGOUT-02**: `AnthropicClient.parse_structured()` wraps `client.messages.parse()` with Pydantic model schema derivation — structured output guaranteed by SDK
 
 ### Conflict Detection
 
-- [ ] **CONF-01**: `ConflictDetector` compares `list[AgentOutput]` and returns `ConflictReport` using deterministic rule-based logic — no LLM in the hot path
-- [ ] **CONF-02**: `ConflictReport` schema added to `core/schemas.py` with conflict type, severity, and involved claims
-- [ ] **CONF-03**: Debouncing: topic-level deduplication and minimum confidence delta (>0.15) before escalation — prevents debate storms
-- [ ] **CONF-04**: Conflict severity scoring ranks contradictions by impact to reduce noise
+- [x] **CONF-01**: `ConflictDetector` compares `list[AgentOutput]` and returns `ConflictReport` using deterministic rule-based logic — no LLM in the hot path
+- [x] **CONF-02**: `ConflictReport` schema added to `core/schemas.py` with conflict type, severity, and involved claims
+- [x] **CONF-03**: Debouncing: topic-level deduplication and minimum confidence delta (>0.15) before escalation — prevents debate storms
+- [x] **CONF-04**: Conflict severity scoring ranks contradictions by impact to reduce noise
 
 ### Orchestration Pipeline
 
@@ -130,12 +130,12 @@ Requirements for Agent Intelligence & Experiment Framework milestone.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| AGOUT-01 | Phase 36 | Pending |
-| AGOUT-02 | Phase 36 | Pending |
-| CONF-01 | Phase 36 | Pending |
-| CONF-02 | Phase 36 | Pending |
-| CONF-03 | Phase 36 | Pending |
-| CONF-04 | Phase 36 | Pending |
+| AGOUT-01 | Phase 36 | Complete |
+| AGOUT-02 | Phase 36 | Complete |
+| CONF-01 | Phase 36 | Complete |
+| CONF-02 | Phase 36 | Complete |
+| CONF-03 | Phase 36 | Complete |
+| CONF-04 | Phase 36 | Complete |
 | ORCH-01 | Phase 37 | Complete |
 | ORCH-02 | Phase 37 | Complete |
 | ORCH-03 | Phase 37 | Complete |
