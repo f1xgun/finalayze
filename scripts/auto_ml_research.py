@@ -493,10 +493,10 @@ def build_full_dataset(
     hold_bars = [r[4] for r in rows] if rows else None
     timestamps = [r[0] for r in rows]
 
-    print(
-        f"\nDataset: {len(features)} samples, "
-        f"{sum(labels)}/{len(labels)} positive ({sum(labels) / len(labels):.1%})"
-    )
+    n_total = len(labels)
+    n_pos = sum(labels)
+    pos_pct = n_pos / n_total if n_total > 0 else 0.0
+    print(f"\nDataset: {len(features)} samples, {n_pos}/{n_total} positive ({pos_pct:.1%})")
     return features, labels, weights, hold_bars, timestamps
 
 

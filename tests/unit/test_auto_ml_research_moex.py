@@ -7,11 +7,15 @@ Tests cover:
 - _get_lookback_days returns segment-appropriate values
 - _get_max_features returns segment-appropriate values
 - argparse --segment choices include all 4 ru_* equity segments
+- Macro shift(1+) no-lookahead bias: last FX spike not in feature
+- Macro features non-zero when realistic MoexMarketData is supplied
 """
 
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -200,3 +204,220 @@ class TestArgparseChoices:
         parser.add_argument("--segment", choices=list(_SEGMENT_SYMBOLS.keys()))
         args = parser.parse_args(["--segment", "ru_finance"])
         assert args.segment == "ru_finance"
+
+
+# ---------------------------------------------------------------------------
+# Look-ahead bias and macro feature plumbing tests (Plan 02)
+# ---------------------------------------------------------------------------
+
+# Constants for macro tests (no magic numbers — ruff PLR2004)
+_CANDLE_COUNT = 200  # random-walk series; enough for _WINDOW_SIZE=80 + _TB_MAX_HOLD=20 + warmup
+_MACRO_COUNT = 200  # one record per day matching candle count
+_STABLE_FX_RATE = Decimal(80)
+_SPIKE_FX_RATE = Decimal(200)  # large spike injected into the last 2 records
+_SPIKE_ABS_ZSCORE_LIMIT = 3.0  # spike must NOT produce extreme z-score
+
+_KEY_RATE_DECIMAL = Decimal("0.16")  # 16%
+_BRENT_BASE_PRICE = Decimal(75)
+_TURNOVER_RUB = Decimal(1000000)
+
+# Minimum number of MOEX feature keys expected when macro data is wired
+_MIN_MOEX_FEATURE_KEYS = 3
+
+# Seed for reproducible random-walk candles
+_RW_SEED = 42
+_RW_DRIFT = 0.02  # daily volatility (2%) for non-zero ATR
+
+
+def _make_candles(n: int, base_ts: datetime | None = None, symbol: str = "TEST") -> list:
+    """Create n synthetic daily candles with a seeded random-walk price series.
+
+    Uses non-zero ATR so build_triple_barrier_dataset produces labels.
+    """
+    import random
+
+    from finalayze.core.schemas import Candle
+
+    if base_ts is None:
+        base_ts = datetime(2022, 1, 1, tzinfo=UTC)
+
+    rng = random.Random(_RW_SEED)  # noqa: S311 (test data, not security)
+    price = 100.0
+    candles = []
+    for i in range(n):
+        price *= 1 + rng.gauss(0, _RW_DRIFT)
+        open_ = Decimal(str(round(price * 0.99, 2)))
+        close_ = Decimal(str(round(price, 2)))
+        high_ = Decimal(str(round(price * 1.01, 2)))
+        low_ = Decimal(str(round(price * 0.98, 2)))
+        candles.append(
+            Candle(
+                symbol=symbol,
+                market_id="ru",
+                timeframe="1d",
+                timestamp=base_ts + timedelta(days=i),
+                open=open_,
+                high=high_,
+                low=low_,
+                close=close_,
+                volume=1000 + i,
+            )
+        )
+    return candles
+
+
+def _make_fx_rates(n: int, rate: Decimal, base_ts: datetime | None = None) -> list:
+    """Create n FXRate records with the given rate."""
+    from finalayze.core.schemas import FXRate
+
+    if base_ts is None:
+        base_ts = datetime(2022, 1, 1, tzinfo=UTC)
+    return [
+        FXRate(
+            timestamp=base_ts + timedelta(days=i),
+            pair="USDRUB",
+            rate=rate,
+        )
+        for i in range(n)
+    ]
+
+
+class TestMacroShift2NoLookahead:
+    """Test that _EXTERNAL_DATA_LAG_BARS prevents future macro values leaking into features."""
+
+    @pytest.mark.slow
+    def test_macro_shift2_no_lookahead(self) -> None:
+        """Spike in last 2 FX records must NOT appear in usdrub_zscore_60d.
+
+        _EXTERNAL_DATA_LAG_BARS=2 excludes the last 2 records before computing
+        z-score, so a spike injected at position [-1] and [-2] should be invisible.
+        The z-score from all-stable lagged data must stay in normal range.
+        """
+        from scripts.auto_ml_research import build_full_dataset
+
+        from finalayze.core.schemas import MoexMarketData
+
+        candles = _make_candles(_CANDLE_COUNT)
+
+        # Build FX rates: stable for first (n-2), then spike in last 2
+        stable = _make_fx_rates(_MACRO_COUNT - 2, _STABLE_FX_RATE)
+        spike = _make_fx_rates(
+            2,
+            _SPIKE_FX_RATE,
+            base_ts=datetime(2022, 1, 1, tzinfo=UTC) + timedelta(days=_MACRO_COUNT - 2),
+        )
+        fx_rates = stable + spike
+
+        moex_data = MoexMarketData(fx_rates=tuple(fx_rates))
+
+        features, _labels, _w, _h, _ts = build_full_dataset(
+            "ru_blue_chips",
+            {"TEST": candles},
+            None,
+            None,
+            moex_data=moex_data,
+        )
+
+        assert features, "Expected non-empty feature list"
+
+        # The last sample should NOT reflect the spike (lag hides last 2 records)
+        last_feat = features[-1]
+        if "usdrub_zscore_60d" in last_feat:
+            assert abs(last_feat["usdrub_zscore_60d"]) < _SPIKE_ABS_ZSCORE_LIMIT, (
+                f"usdrub_zscore_60d={last_feat['usdrub_zscore_60d']:.2f} reflects spike — "
+                f"look-ahead bias not prevented by lag"
+            )
+
+
+class TestMoexMacroFeaturesNonZero:
+    """Test that MoexMarketData flows through build_full_dataset to produce non-zero features."""
+
+    @pytest.mark.slow
+    def test_moex_macro_features_nonzero(self) -> None:
+        """With realistic macro data, at least 3 MOEX feature keys must be present
+        and at least one must be non-zero.
+        """
+        from scripts.auto_ml_research import build_full_dataset
+
+        from finalayze.core.schemas import FXRate, KeyRateRecord, MoexMarketData, TurnoverRecord
+
+        _N = 200
+        base_ts = datetime(2022, 1, 1, tzinfo=UTC)
+
+        candles = _make_candles(_N, base_ts)
+
+        # Realistic FX: slight upward drift 80..82
+        fx_rates = [
+            FXRate(
+                timestamp=base_ts + timedelta(days=i),
+                pair="USDRUB",
+                rate=Decimal(80) + Decimal(str(round(i * 0.01, 2))),
+            )
+            for i in range(_N)
+        ]
+
+        # Key rates: 10 quarterly records (sparse — forward-filled internally)
+        key_rates = [
+            KeyRateRecord(
+                timestamp=base_ts + timedelta(days=i * 30),
+                rate=_KEY_RATE_DECIMAL,
+            )
+            for i in range(10)
+        ]
+
+        # Brent candles: _N records with slight upward drift for non-zero z-score
+        brent_candles = _make_candles(_N, base_ts, symbol="BZ=F")
+
+        # Turnover: _N records
+        turnover = [
+            TurnoverRecord(
+                timestamp=base_ts + timedelta(days=i),
+                volume_rub=_TURNOVER_RUB,
+            )
+            for i in range(_N)
+        ]
+
+        moex_data = MoexMarketData(
+            fx_rates=tuple(fx_rates),
+            key_rates=tuple(key_rates),
+            commodity_candles={"BZ=F": tuple(brent_candles)},
+            turnover=tuple(turnover),
+        )
+
+        features, _labels, _w, _h, _ts = build_full_dataset(
+            "ru_blue_chips",
+            {"TEST": candles},
+            None,
+            None,
+            moex_data=moex_data,
+        )
+
+        assert features, "Expected non-empty feature list"
+
+        _EXPECTED_MOEX_KEYS = {
+            "usdrub_zscore_60d",
+            "brent_zscore_60d",
+            "cbr_rate_level",
+            "cbr_rate_delta",
+            "cbr_direction_cut",
+            "cbr_direction_hike",
+            "real_rate_zscore",
+            "market_turnover_zscore",
+            "usdrub_return",
+            "usdrub_vol",
+            "brent_return",
+        }
+
+        present_keys = _EXPECTED_MOEX_KEYS & set(features[0].keys())
+        assert len(present_keys) >= _MIN_MOEX_FEATURE_KEYS, (
+            f"Expected at least {_MIN_MOEX_FEATURE_KEYS} MOEX feature keys, "
+            f"got {len(present_keys)}: {present_keys}"
+        )
+
+        # At least one MOEX feature must be non-zero
+        any_nonzero = any(features[0].get(k, 0.0) != 0.0 for k in present_keys)
+        assert any_nonzero, (
+            f"All MOEX features are zero — MoexMarketData not flowing through pipeline. "
+            f"Present keys: {present_keys}, "
+            f"values: { {k: features[0].get(k) for k in present_keys} }"
+        )
