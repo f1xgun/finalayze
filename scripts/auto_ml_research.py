@@ -952,6 +952,208 @@ def generate_transfer_experiments(segment_id: str) -> list[ExperimentConfig]:
     ]
 
 
+def _add_lag_ratio_candidates(
+    df: pd.DataFrame,
+    base_features: list[str],
+    candidates: list[str],
+    cap: int,
+) -> None:
+    """Add lag ratio features (feat[t] / feat[t-lag]) for close/volume columns in-place."""
+    close_vol_feats = [f for f in base_features if "close" in f or "volume" in f]
+    for feat in close_vol_feats:
+        if feat not in df.columns:
+            continue
+        series = df[feat]
+        for lag in (5, 10, 20):
+            col_name = f"{feat}_lag{lag}_ratio"
+            shifted = series.shift(lag)
+            ratio = series / shifted.replace(0, float("nan"))
+            df[col_name] = ratio.fillna(0.0)
+            candidates.append(col_name)
+            if len(candidates) >= cap:
+                return
+        if len(candidates) >= cap:
+            return
+
+
+def _add_rolling_zscore_candidates(
+    df: pd.DataFrame,
+    base_features: list[str],
+    candidates: list[str],
+    cap: int,
+) -> None:
+    """Add rolling z-score features for all base columns in-place."""
+    for feat in base_features:
+        if feat not in df.columns:
+            continue
+        series = df[feat]
+        for window in (20, 60):
+            col_name = f"{feat}_zscore_{window}"
+            roll_mean = series.rolling(window, min_periods=1).mean()
+            roll_std = series.rolling(window, min_periods=1).std().replace(0, float("nan"))
+            df[col_name] = ((series - roll_mean) / roll_std).fillna(0.0)
+            candidates.append(col_name)
+            if len(candidates) >= cap:
+                return
+        if len(candidates) >= cap:
+            return
+
+
+def _add_interaction_candidates(
+    df: pd.DataFrame,
+    base_features: list[str],
+    candidates: list[str],
+    cap: int,
+) -> None:
+    """Add cross-feature interaction columns (RSI x volume) in-place."""
+    # Cross-feature interactions: RSI x volume_ratio pairs
+    rsi_feats = [f for f in base_features if "rsi" in f.lower() and f in df.columns]
+    vol_feats = [f for f in base_features if "volume" in f.lower() and f in df.columns]
+    for rsi_feat in rsi_feats:
+        for vol_feat in vol_feats:
+            col_name = f"{rsi_feat}_x_{vol_feat}"
+            df[col_name] = df[rsi_feat] * df[vol_feat]
+            candidates.append(col_name)
+            if len(candidates) >= cap:
+                return
+        if len(candidates) >= cap:
+            return
+
+
+def _generate_feature_candidates(
+    base_features: list[str],
+    all_features: list[dict[str, float]],
+    labels: list[int],  # noqa: ARG001 — reserved for future importance-aware generation
+    cap: int,
+) -> tuple[list[str], list[dict[str, float]]]:
+    """Generate domain-motivated engineered feature candidates from base features.
+
+    Produces three types of engineered features:
+    - Lag ratios: feat[t] / feat[t-5] for close/volume features (lags 5, 10, 20)
+    - Rolling z-scores: (feat - mean_W) / std_W for windows 20, 60
+    - Cross-feature interactions: rsi x volume_ratio for matching pairs
+
+    Returns (candidate_names, augmented_feature_dicts) where augmented dicts
+    contain the original features plus new columns (up to ``cap`` candidates).
+    """
+    if not all_features:
+        return [], all_features
+
+    df = pd.DataFrame(all_features)
+    candidates: list[str] = []
+
+    _add_lag_ratio_candidates(df, base_features, candidates, cap)
+    if len(candidates) < cap:
+        _add_rolling_zscore_candidates(df, base_features, candidates, cap)
+    if len(candidates) < cap:
+        _add_interaction_candidates(df, base_features, candidates, cap)
+
+    candidates = candidates[:cap]
+    augmented = df.to_dict(orient="records")
+    return candidates, augmented
+
+
+def _filter_by_permutation_importance(
+    features: list[dict[str, float]],
+    labels: list[int],
+    candidate_names: list[str],
+    baseline_features: list[str],
+) -> list[str]:
+    """Filter engineered features by permutation importance.
+
+    Trains a single XGBoost model on baseline + candidate features, then runs
+    sklearn permutation importance. Discards candidates whose mean importance <= 0.
+
+    Returns the list of surviving candidate names.
+    """
+    import xgboost as xgb  # noqa: PLC0415
+    from sklearn.inspection import permutation_importance  # noqa: PLC0415
+
+    if not candidate_names or not features:
+        return []
+
+    all_col_names = baseline_features + candidate_names
+    df = pd.DataFrame(features)
+
+    # Keep only columns that exist in the DataFrame
+    available_cols = [c for c in all_col_names if c in df.columns]
+    x_df = df[available_cols].fillna(0.0)
+    y_arr = _np.array(labels)
+
+    # Train a lightweight XGBoost classifier directly (no segment_id coupling)
+    clf = xgb.XGBClassifier(
+        max_depth=4,
+        n_estimators=50,
+        learning_rate=0.1,
+        eval_metric="logloss",
+        use_label_encoder=False,
+        verbosity=0,
+        random_state=42,
+    )
+    clf.fit(x_df, y_arr)
+
+    # Permutation importance: returns shape (n_features, n_repeats)
+    result = permutation_importance(
+        clf,
+        x_df,
+        y_arr,
+        n_repeats=5,
+        random_state=42,
+    )
+
+    # Map importance back to candidate indices
+    survivors: list[str] = []
+    for i, col in enumerate(available_cols):
+        if col in candidate_names:
+            mean_imp = result.importances_mean[i]
+            if mean_imp > 0:
+                survivors.append(col)
+
+    return survivors
+
+
+def generate_feature_engineering_experiments(
+    baseline_features: list[str],
+    all_features: list[dict[str, float]],
+    labels: list[int],
+    n_samples: int,
+) -> list[ExperimentConfig]:
+    """Generate feature engineering experiments with domain-motivated combinations.
+
+    Applies a hard cap of n_samples // 20 on candidate count to prevent overfitting.
+    Uses permutation importance to discard noise-only features before building configs.
+    """
+    cap = n_samples // 20
+    if cap == 0:
+        return []
+
+    candidate_names, augmented = _generate_feature_candidates(
+        baseline_features, all_features, labels, cap
+    )
+
+    if not candidate_names:
+        return []
+
+    survivors = _filter_by_permutation_importance(
+        augmented, labels, candidate_names, baseline_features
+    )
+
+    if not survivors:
+        return []
+
+    return [
+        ExperimentConfig(
+            name=f"feat-eng-{len(survivors)}new",
+            description=(
+                f"Feature engineering: {len(survivors)} new domain-motivated features "
+                f"(lag ratios, z-scores, interactions) filtered by permutation importance"
+            ),
+            strategy="feature_engineering",
+            feature_subset=baseline_features + survivors,
+        )
+    ]
+
+
 def generate_ensemble_weight_experiments() -> list[ExperimentConfig]:
     """Explore XGB/LGBM/CatBoost weight simplex with step 0.1, cap 0.7."""
     experiments: list[ExperimentConfig] = []
@@ -1102,6 +1304,9 @@ def _generate_experiments(
     all_feature_names: list[str],
     max_experiments: int,
     segment_id: str = "us_tech",
+    all_features: list[dict[str, float]] | None = None,
+    labels: list[int] | None = None,
+    n_samples: int = 0,
 ) -> list[ExperimentConfig]:
     """Generate experiment configs for the chosen strategy."""
     experiments: list[ExperimentConfig] = []
@@ -1117,6 +1322,20 @@ def _generate_experiments(
         experiments.extend(generate_ensemble_weight_experiments())
     if strategy in ("cross_segment_transfer", "all"):
         experiments.extend(generate_transfer_experiments(segment_id))
+    if (
+        strategy in ("feature_engineering", "all")
+        and all_features is not None
+        and labels is not None
+        and n_samples > 0
+    ):
+        experiments.extend(
+            generate_feature_engineering_experiments(
+                baseline_features,
+                all_features,
+                labels,
+                n_samples,
+            )
+        )
     return experiments[:max_experiments]
 
 
@@ -1290,6 +1509,9 @@ def run_research_loop(
         all_feature_names,
         max_experiments,
         segment_id=segment_id,
+        all_features=features,
+        labels=labels,
+        n_samples=len(features),
     )
     print(f"  {len(experiments)} experiments queued")
 
@@ -1353,6 +1575,7 @@ def main() -> None:
             "random_subset",
             "ensemble_weights",
             "cross_segment_transfer",
+            "feature_engineering",
             "all",
         ],
         help="Experiment strategy (default: all)",
