@@ -336,7 +336,9 @@ Plans:
   1. Running `auto_ml_research.py --segment ru_blue_chips --experiment-id ru_blue_chips_baseline_20260413_1200` creates an ExperimentManager entry, links per-fold results, and records ACCEPT/REJECT/INCONCLUSIVE at completion — the experiment is queryable via ExperimentManager.get()
   2. Two concurrent segment runs with different --experiment-id values produce non-overlapping experiment files — no ID collision or shared-state corruption
   3. Running `auto_ml_research.py --segment ru_blue_chips` without --experiment-id completes normally with JSONL output only — existing invocations are not broken by the integration
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 42-01-PLAN.md -- ExperimentManager integration with --experiment-id flag (EXPINT-01, EXPINT-02)
 
 ### Phase 43: Ensemble Weight Optimization
 **Goal**: A new ensemble_weights search strategy explores the XGB/LGBM/CatBoost weight simplex, enforces overfitting guards, and logs optimization gain separately from baseline
@@ -346,7 +348,9 @@ Plans:
   1. `auto_ml_research.py --strategy ensemble_weights --segment ru_blue_chips` evaluates 9-12 distinct weight configurations across the simplex — XGB, LGBM, CatBoost weights are explored in bounded combinations, each summing to 1.0
   2. No single model weight exceeds 0.7 in any evaluated configuration — the overfitting constraint is enforced at generation time, not post-hoc
   3. When fewer than 4 independent folds are available, equal weights (1/3 each) are used as the default and optimization is skipped with a logged warning — small dataset safety is automatic
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 42-01-PLAN.md -- ExperimentManager integration with --experiment-id flag (EXPINT-01, EXPINT-02)
 
 ### Phase 44: New Search Strategies
 **Goal**: Two new search strategies extend the research loop — cross-segment transfer validates US-learned features on MOEX, and feature engineering generates domain-motivated combinations with hard overfitting caps
@@ -356,7 +360,9 @@ Plans:
   1. `auto_ml_research.py --strategy cross_segment_transfer --segment ru_blue_chips` reads best US experiment features from JSONL history and filters to market-neutral intersection — VIX-only and MOEX-only features are excluded from the transfer set, and the filtered feature list is logged
   2. `auto_ml_research.py --strategy feature_engineering --segment ru_blue_chips` generates domain-motivated feature combinations (lag ratios, rolling z-scores, cross-feature interactions) with a hard cap of n_samples/20 candidates — no more than ~36 candidates are generated for a 730-day MOEX dataset
   3. Generated features that do not pass a permutation importance test are discarded before model training — feature engineering cannot add noise-only columns to the feature matrix
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 42-01-PLAN.md -- ExperimentManager integration with --experiment-id flag (EXPINT-01, EXPINT-02)
 
 ## Progress
 
@@ -388,6 +394,6 @@ v9.0: 40 -> 41 -> 42 -> 43 -> 44
 | 39. REST Endpoint Hardening | v8.0 | 1/1 | Complete | 2026-04-12 |
 | 40. MOEX Data Adapter & Macro Features | v9.0 | 2/2 | Complete    | 2026-04-13 |
 | 41. Adaptive Quality Gates | v9.0 | 2/2 | Complete    | 2026-04-13 |
-| 42. ExperimentManager Integration | v9.0 | 0/TBD | Not started | - |
+| 42. ExperimentManager Integration | v9.0 | 0/1 | Not started | - |
 | 43. Ensemble Weight Optimization | v9.0 | 0/TBD | Not started | - |
 | 44. New Search Strategies | v9.0 | 0/TBD | Not started | - |
