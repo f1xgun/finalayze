@@ -172,6 +172,8 @@ for _seg in DEFAULT_SEGMENTS:
 
 _RESULTS_DIR = _PROJECT_ROOT / "results" / "experiments"
 
+_MARKET_SPECIFIC_KEYWORDS = ("vix", "usdrub", "brent", "cbr", "imoex", "turnover")
+
 # Default XGBoost / LightGBM / CatBoost hyperparameters
 _DEFAULT_HPARAMS = {
     "xgb_max_depth": 5,
@@ -881,6 +883,75 @@ def generate_random_subset_experiments(
     return experiments
 
 
+def generate_transfer_experiments(segment_id: str) -> list[ExperimentConfig]:
+    """Transfer best US "keep" experiment features to a MOEX segment.
+
+    Reads the best "keep" entry (highest score) from the US tech JSONL log,
+    filters out market-specific features (VIX, USDRUB, Brent, CBR, IMOEX, turnover),
+    and returns a single ExperimentConfig with the surviving market-neutral features.
+
+    Only applies to ru_* segments (MOEX). US segments return an empty list.
+    """
+    if not segment_id.startswith("ru_"):
+        return []
+
+    source_log = _RESULTS_DIR / "us_tech_experiment_log.jsonl"
+    if not source_log.exists():
+        logger.warning(
+            "Cross-segment transfer skipped: US JSONL log not found",
+            path=str(source_log),
+        )
+        return []
+
+    keep_entries: list[dict] = []
+    with source_log.open() as f:
+        for raw_line in f:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                entry = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("status") == "keep":
+                keep_entries.append(entry)
+
+    if not keep_entries:
+        logger.warning(
+            "Cross-segment transfer skipped: no 'keep' entries in US JSONL log",
+            path=str(source_log),
+        )
+        return []
+
+    best = max(keep_entries, key=lambda e: e.get("score", 0.0))
+    raw_features: list[str] = best.get("features_used", [])
+
+    filtered = [
+        feat
+        for feat in raw_features
+        if not any(kw in feat.lower() for kw in _MARKET_SPECIFIC_KEYWORDS)
+    ]
+
+    if not filtered:
+        logger.warning(
+            "Cross-segment transfer skipped: all features are market-specific after filtering",
+            segment_id=segment_id,
+        )
+        return []
+
+    return [
+        ExperimentConfig(
+            name=f"transfer-us-to-{segment_id}",
+            description=(
+                f"Transfer US market-neutral features from best keep experiment "
+                f"(score={best.get('score', 0):.4f}) to {segment_id}"
+            ),
+            strategy="cross_segment_transfer",
+            feature_subset=filtered,
+        )
+    ]
+
+
 def generate_ensemble_weight_experiments() -> list[ExperimentConfig]:
     """Explore XGB/LGBM/CatBoost weight simplex with step 0.1, cap 0.7."""
     experiments: list[ExperimentConfig] = []
@@ -1030,6 +1101,7 @@ def _generate_experiments(
     baseline_features: list[str],
     all_feature_names: list[str],
     max_experiments: int,
+    segment_id: str = "us_tech",
 ) -> list[ExperimentConfig]:
     """Generate experiment configs for the chosen strategy."""
     experiments: list[ExperimentConfig] = []
@@ -1043,6 +1115,8 @@ def _generate_experiments(
         experiments.extend(generate_random_subset_experiments(all_feature_names))
     if strategy in ("ensemble_weights", "all"):
         experiments.extend(generate_ensemble_weight_experiments())
+    if strategy in ("cross_segment_transfer", "all"):
+        experiments.extend(generate_transfer_experiments(segment_id))
     return experiments[:max_experiments]
 
 
@@ -1215,6 +1289,7 @@ def run_research_loop(
         baseline_features,
         all_feature_names,
         max_experiments,
+        segment_id=segment_id,
     )
     print(f"  {len(experiments)} experiments queued")
 
@@ -1277,6 +1352,7 @@ def main() -> None:
             "hyperparameter",
             "random_subset",
             "ensemble_weights",
+            "cross_segment_transfer",
             "all",
         ],
         help="Experiment strategy (default: all)",
