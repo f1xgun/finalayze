@@ -119,7 +119,7 @@ Full details in Phase Details section below (collapsed milestone).
 
 - [x] **Phase 40: MOEX Data Adapter & Macro Features** - Wire TinkoffFetcher and MOEX macro features into auto_ml_research for all ru_* segments (completed 2026-04-13)
 - [x] **Phase 41: Adaptive Quality Gates** - Parametrize min_signals, add MOEX fold constants, add degenerate predictor guard (completed 2026-04-13)
-- [ ] **Phase 42: ExperimentManager Integration** - Opt-in --experiment-id flag with hypothesis lifecycle and backward-compatible JSONL audit trail
+- [x] **Phase 42: ExperimentManager Integration** - Opt-in --experiment-id flag with hypothesis lifecycle and backward-compatible JSONL audit trail (completed 2026-04-13)
 - [ ] **Phase 43: Ensemble Weight Optimization** - Bounded XGB/LGBM/CatBoost weight grid search with overfitting guard
 - [ ] **Phase 44: New Search Strategies** - Cross-segment US→MOEX feature transfer and domain-motivated feature engineering
 
@@ -336,9 +336,9 @@ Plans:
   1. Running `auto_ml_research.py --segment ru_blue_chips --experiment-id ru_blue_chips_baseline_20260413_1200` creates an ExperimentManager entry, links per-fold results, and records ACCEPT/REJECT/INCONCLUSIVE at completion — the experiment is queryable via ExperimentManager.get()
   2. Two concurrent segment runs with different --experiment-id values produce non-overlapping experiment files — no ID collision or shared-state corruption
   3. Running `auto_ml_research.py --segment ru_blue_chips` without --experiment-id completes normally with JSONL output only — existing invocations are not broken by the integration
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 Plans:
-- [ ] 42-01-PLAN.md -- ExperimentManager integration with --experiment-id flag (EXPINT-01, EXPINT-02)
+- [x] 42-01-PLAN.md -- ExperimentManager integration with --experiment-id flag (EXPINT-01, EXPINT-02)
 
 ### Phase 43: Ensemble Weight Optimization
 **Goal**: A new ensemble_weights search strategy explores the XGB/LGBM/CatBoost weight simplex, enforces overfitting guards, and logs optimization gain separately from baseline
@@ -394,6 +394,6 @@ v9.0: 40 -> 41 -> 42 -> 43 -> 44
 | 39. REST Endpoint Hardening | v8.0 | 1/1 | Complete | 2026-04-12 |
 | 40. MOEX Data Adapter & Macro Features | v9.0 | 2/2 | Complete    | 2026-04-13 |
 | 41. Adaptive Quality Gates | v9.0 | 2/2 | Complete    | 2026-04-13 |
-| 42. ExperimentManager Integration | v9.0 | 0/1 | Not started | - |
+| 42. ExperimentManager Integration | v9.0 | 1/1 | Complete   | 2026-04-13 |
 | 43. Ensemble Weight Optimization | v9.0 | 0/TBD | Not started | - |
 | 44. New Search Strategies | v9.0 | 0/TBD | Not started | - |

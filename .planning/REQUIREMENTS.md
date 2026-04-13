@@ -21,8 +21,8 @@ Requirements for ML AutoResearch & MOEX Adaptation milestone.
 
 ### Experiment Infrastructure
 
-- [ ] **EXPINT-01**: `--experiment-id` flag creates ExperimentManager entry at loop start, links results per experiment, records ACCEPT/REJECT/INCONCLUSIVE verdict at end
-- [ ] **EXPINT-02**: JSONL log preserved as audit trail alongside ExperimentManager integration — backward compatible when `--experiment-id` not provided
+- [x] **EXPINT-01**: `--experiment-id` flag creates ExperimentManager entry at loop start, links results per experiment, records ACCEPT/REJECT/INCONCLUSIVE verdict at end
+- [x] **EXPINT-02**: JSONL log preserved as audit trail alongside ExperimentManager integration — backward compatible when `--experiment-id` not provided
 
 ### New Search Strategies
 
@@ -58,8 +58,8 @@ Requirements for ML AutoResearch & MOEX Adaptation milestone.
 | GATE-01 | Phase 41 | Complete |
 | GATE-02 | Phase 41 | Complete |
 | GATE-03 | Phase 41 | Complete |
-| EXPINT-01 | Phase 42 | Pending |
-| EXPINT-02 | Phase 42 | Pending |
+| EXPINT-01 | Phase 42 | Complete |
+| EXPINT-02 | Phase 42 | Complete |
 | STRAT-01 | Phase 43 | Pending |
 | STRAT-02 | Phase 44 | Pending |
 | STRAT-03 | Phase 44 | Pending |
