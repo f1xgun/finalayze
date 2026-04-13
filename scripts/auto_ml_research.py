@@ -53,7 +53,14 @@ import torch  # noqa: F401
 from config.segments import DEFAULT_SEGMENTS
 from sklearn.metrics import accuracy_score, brier_score_loss
 
-from finalayze.core.schemas import Candle, MarketContext
+from finalayze.core.schemas import (
+    Candle,
+    FXRate,
+    KeyRateRecord,
+    MarketContext,
+    MoexMarketData,
+    TurnoverRecord,
+)
 from finalayze.data.fetchers.yfinance import YFinanceFetcher
 from finalayze.ml.models.catboost_model import CatBoostModel
 from finalayze.ml.models.lightgbm_model import LightGBMModel
@@ -337,6 +344,64 @@ def _fetch_moex_benchmark(segment_id: str) -> list[Candle] | None:
     return None
 
 
+def _fetch_moex_macro_data() -> MoexMarketData | None:
+    """Fetch MOEX macro data: CBR key rate, USDRUB, Brent, turnover.
+
+    Fetched once at script start and reused across all MOEX segments.
+    Returns None if FINALAYZE_TINKOFF_TOKEN is not set (macro data requires API
+    access for turnover).
+    All 4 sources are fetched independently — individual failures fall back to
+    empty data rather than aborting the whole fetch.
+    """
+    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN")
+    if not token:
+        print("  MOEX macro data unavailable (no FINALAYZE_TINKOFF_TOKEN)")
+        return None
+
+    end_dt = datetime.now(tz=UTC)
+    start_dt = end_dt - timedelta(days=_MOEX_LOOKBACK_DAYS + 90)  # extra 90d for z-score warmup
+
+    # --- CBR key rate and FX rates (synchronous) ---
+    key_rates: list[KeyRateRecord] = []
+    fx_rates: list[FXRate] = []
+    try:
+        from finalayze.data.fetchers.cbr import CBRFetcher  # noqa: PLC0415
+
+        with CBRFetcher() as cbr:
+            key_rates = cbr.fetch_key_rate(start_dt, end_dt)
+            fx_rates = cbr.fetch_fx_rates("USD", start_dt, end_dt)
+        print(f"  CBR: {len(key_rates)} key rate records, {len(fx_rates)} FX rate records")
+    except Exception as exc:
+        print(f"  CBR fetch failed: {exc}")
+
+    # --- MOEX turnover (synchronous) ---
+    turnover: list[TurnoverRecord] = []
+    try:
+        from finalayze.data.fetchers.moex_iss import MoexISSFetcher  # noqa: PLC0415
+
+        with MoexISSFetcher() as iss:
+            turnover = iss.fetch_market_turnover(start_dt, end_dt)
+        print(f"  Turnover: {len(turnover)} records")
+    except Exception as exc:
+        print(f"  Turnover fetch failed: {exc}")
+
+    # --- Brent crude via yfinance (sync, BZ=F is not a MOEX ticker) ---
+    brent_candles: list[Candle] = []
+    try:
+        yf = YFinanceFetcher(market_id="us")
+        brent_candles = yf.fetch_candles("BZ=F", start_dt, end_dt)
+        print(f"  Brent (BZ=F): {len(brent_candles)} candles")
+    except Exception as exc:
+        print(f"  Brent fetch failed: {exc}")
+
+    return MoexMarketData(
+        fx_rates=tuple(fx_rates) if fx_rates else None,
+        key_rates=tuple(key_rates) if key_rates else None,
+        commodity_candles={"BZ=F": tuple(brent_candles)} if brent_candles else None,
+        turnover=tuple(turnover) if turnover else None,
+    )
+
+
 def _align_benchmark(stock_candles: list[Candle], bench_candles: list[Candle]) -> list[Candle]:
     """Align benchmark to stock candles by date (forward-fill)."""
     if not bench_candles or not stock_candles:
@@ -380,6 +445,7 @@ def build_full_dataset(
     candles_by_sym: dict[str, list[Candle]],
     benchmark_candles: list[Candle] | None,
     vix_candles: list[Candle] | None,
+    moex_data: MoexMarketData | None = None,
 ) -> tuple[list[dict[str, float]], list[int], _np.ndarray | None, list[int] | None, list[datetime]]:
     """Build triple-barrier dataset from pre-fetched candles."""
     min_candles = _WINDOW_SIZE + _TB_MAX_HOLD + 1
@@ -402,6 +468,7 @@ def build_full_dataset(
         market_ctx = MarketContext(
             benchmark_candles=benchmark_candles,
             vix_candles=vix_candles,
+            moex_data=moex_data,
         )
 
         x, y, w, ts, hb = build_triple_barrier_dataset(
@@ -874,6 +941,7 @@ def _print_summary(
 
 def _prepare_data(
     segment_id: str,
+    moex_data: MoexMarketData | None = None,
 ) -> (
     tuple[
         list[dict[str, float]],
@@ -911,6 +979,7 @@ def _prepare_data(
         candles_by_sym,
         benchmark,
         vix,
+        moex_data=moex_data if is_moex else None,
     )
 
     if not features:
@@ -938,7 +1007,13 @@ def run_research_loop(
     print(f"  AUTO-ML RESEARCH — segment={segment_id}, strategy={strategy}")
     print(f"{'=' * 70}\n")
 
-    prepared = _prepare_data(segment_id)
+    # Fetch MOEX macro data once (reused across segments if called multiple times)
+    moex_data: MoexMarketData | None = None
+    if _is_moex_segment(segment_id):
+        print("\nFetching MOEX macro data (CBR, USDRUB, Brent, turnover)...")
+        moex_data = _fetch_moex_macro_data()
+
+    prepared = _prepare_data(segment_id, moex_data=moex_data)
     if prepared is None:
         return
     features, labels, hold_bars, folds = prepared
