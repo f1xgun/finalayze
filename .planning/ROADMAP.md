@@ -121,7 +121,7 @@ Full details in Phase Details section below (collapsed milestone).
 - [x] **Phase 41: Adaptive Quality Gates** - Parametrize min_signals, add MOEX fold constants, add degenerate predictor guard (completed 2026-04-13)
 - [x] **Phase 42: ExperimentManager Integration** - Opt-in --experiment-id flag with hypothesis lifecycle and backward-compatible JSONL audit trail (completed 2026-04-13)
 - [x] **Phase 43: Ensemble Weight Optimization** - Bounded XGB/LGBM/CatBoost weight grid search with overfitting guard (completed 2026-04-13)
-- [ ] **Phase 44: New Search Strategies** - Cross-segment US→MOEX feature transfer and domain-motivated feature engineering
+- [x] **Phase 44: New Search Strategies** - Cross-segment US→MOEX feature transfer and domain-motivated feature engineering (completed 2026-04-13)
 
 ## Phase Details
 
@@ -360,7 +360,7 @@ Plans:
   1. `auto_ml_research.py --strategy cross_segment_transfer --segment ru_blue_chips` reads best US experiment features from JSONL history and filters to market-neutral intersection — VIX-only and MOEX-only features are excluded from the transfer set, and the filtered feature list is logged
   2. `auto_ml_research.py --strategy feature_engineering --segment ru_blue_chips` generates domain-motivated feature combinations (lag ratios, rolling z-scores, cross-feature interactions) with a hard cap of n_samples/20 candidates — no more than ~36 candidates are generated for a 730-day MOEX dataset
   3. Generated features that do not pass a permutation importance test are discarded before model training — feature engineering cannot add noise-only columns to the feature matrix
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 Plans:
 - [ ] 44-01-PLAN.md -- Cross-segment transfer + feature engineering strategies (STRAT-02, STRAT-03)
 
@@ -396,4 +396,4 @@ v9.0: 40 -> 41 -> 42 -> 43 -> 44
 | 41. Adaptive Quality Gates | v9.0 | 2/2 | Complete    | 2026-04-13 |
 | 42. ExperimentManager Integration | v9.0 | 1/1 | Complete    | 2026-04-13 |
 | 43. Ensemble Weight Optimization | v9.0 | 1/1 | Complete    | 2026-04-13 |
-| 44. New Search Strategies | v9.0 | 0/TBD | Not started | - |
+| 44. New Search Strategies | v9.0 | 0/TBD | Complete    | 2026-04-13 |
