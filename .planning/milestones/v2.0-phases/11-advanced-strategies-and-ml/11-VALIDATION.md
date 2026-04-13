@@ -19,7 +19,7 @@ created: 2026-03-20
 |----------|-------|
 | **Framework** | pytest (existing) |
 | **Config file** | pyproject.toml [tool.pytest.ini_options] |
-| **Quick run command** | `uv run pytest tests/unit/test_pairs_strategy.py tests/unit/test_ml_features.py -x -q` |
+| **Quick run command** | `uv run pytest tests/unit/test_pairs_strategy.py tests/unit/test_features_moex.py -x -q` |
 | **Full suite command** | `uv run pytest tests/unit/ -x --timeout=30` |
 | **Estimated runtime** | ~30 seconds |
 
@@ -39,8 +39,8 @@ created: 2026-03-20
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
 | 11-01-01 | 01 | 1 | ADV-01 | unit | `uv run pytest tests/unit/test_pairs_strategy.py -x` | Partial | ⬜ pending |
-| 11-02-01 | 02 | 1 | ADV-02 | unit | `uv run pytest tests/unit/test_ml_features.py -x` | Partial | ⬜ pending |
-| 11-03-01 | 03 | 2 | ADV-03 | unit | `uv run pytest tests/unit/test_ml_features.py -x` | Partial | ⬜ pending |
+| 11-02-01 | 02 | 1 | ADV-02 | unit | `uv run pytest tests/unit/test_features_moex.py -x` | Partial | ⬜ pending |
+| 11-03-01 | 03 | 2 | ADV-03 | unit | `uv run pytest tests/unit/test_features_moex.py -x` | Partial | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -49,7 +49,7 @@ created: 2026-03-20
 ## Wave 0 Requirements
 
 - [ ] `tests/unit/test_pairs_strategy.py` — add MOEX pref share pair tests (allow_short=False)
-- [ ] `tests/unit/test_ml_features.py` — add CBR macro feature computation tests
+- [ ] `tests/unit/test_features_moex.py` — add CBR macro feature computation tests
 
 *Existing infrastructure covers framework needs. Only new test cases required.*
 

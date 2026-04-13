@@ -21,7 +21,7 @@ Add macro regime gating to MOEX equity and bond allocation: CBRRegimeStep sizes 
 
 ### OFZ PK-to-PD Rotation
 - Cutting cycle detection: 2+ consecutive cuts from MacroSnapshot.last_cbr_decision history (matches success criteria)
-- Logic location: new OFZRotationTrigger class in bond_cycle.py — modifies LayerConfig.capital_pct dynamically before _process_layer
+- Logic location: OFZ rotation logic in bond_cycle.py (class or function at Claude's discretion) — modifies LayerConfig.capital_pct dynamically before _process_layer
 - PK→PD shift: CORE (PK floaters) drops from 40%→25%, STRATEGIC (PD fixed) rises from 30%→45% — 15% shift toward duration
 - Revert trigger: first hike after cutting cycle reverts to default allocations — simple, avoids oscillation
 
