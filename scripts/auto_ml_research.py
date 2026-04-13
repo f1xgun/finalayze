@@ -102,6 +102,14 @@ _WF_TEST_MONTHS = 4
 _WF_STEP_MONTHS = 3
 _PURGE_GAP = 100
 
+_MOEX_WF_TRAIN_MONTHS = 8
+_MOEX_WF_CAL_MONTHS = 1
+_MOEX_WF_TEST_MONTHS = 3
+_MOEX_WF_STEP_MONTHS = 2
+_MOEX_PURGE_GAP = 21
+_MOEX_MIN_SIGNALS = 15
+_US_MIN_SIGNALS = 50
+
 _US_BENCHMARK = "SPY"
 _MOEX_BENCHMARK = "IMOEX"
 _VIX_TICKER = "^VIX"
@@ -507,6 +515,12 @@ def build_full_dataset(
 
 def generate_folds(
     timestamps: list[datetime],
+    *,
+    train_months: int = _WF_TRAIN_MONTHS,
+    cal_months: int = _WF_CAL_MONTHS,
+    test_months: int = _WF_TEST_MONTHS,
+    step_months: int = _WF_STEP_MONTHS,
+    purge_gap: int = _PURGE_GAP,
 ) -> list[tuple[list[int], list[int], list[int]]]:
     """Generate walk-forward train/cal/test folds by calendar date."""
     if not timestamps:
@@ -517,11 +531,11 @@ def generate_folds(
     fold_start = start
 
     while True:
-        train_end = fold_start + timedelta(days=_WF_TRAIN_MONTHS * 30)
-        purge1_end = train_end + timedelta(days=_PURGE_GAP)
-        cal_end = purge1_end + timedelta(days=_WF_CAL_MONTHS * 30)
-        purge2_end = cal_end + timedelta(days=_PURGE_GAP)
-        test_end = purge2_end + timedelta(days=_WF_TEST_MONTHS * 30)
+        train_end = fold_start + timedelta(days=train_months * 30)
+        purge1_end = train_end + timedelta(days=purge_gap)
+        cal_end = purge1_end + timedelta(days=cal_months * 30)
+        purge2_end = cal_end + timedelta(days=purge_gap)
+        test_end = purge2_end + timedelta(days=test_months * 30)
 
         if test_end > end + timedelta(days=1):
             break
@@ -530,7 +544,7 @@ def generate_folds(
         test_idx = [i for i, t in enumerate(timestamps) if purge2_end <= t < test_end]
         if train_idx and test_idx:
             folds.append((train_idx, cal_idx, test_idx))
-        fold_start += timedelta(days=_WF_STEP_MONTHS * 30)
+        fold_start += timedelta(days=step_months * 30)
 
     return folds
 
@@ -606,6 +620,7 @@ def _run_fold(
     hold_bars: list[int] | None,
     config: ExperimentConfig,
     segment_id: str,
+    min_signals: int = _US_MIN_SIGNALS,
 ) -> tuple[list, FoldMetrics, list[str]] | None:
     """Train and evaluate a single fold.  Returns None if fold is skipped."""
     train_f = [all_features[i] for i in train_idx]
@@ -654,7 +669,7 @@ def _run_fold(
         fold_avg_hold = float(_np.mean(test_hb)) if test_hb else 1.0
 
     fold_metrics = _evaluate_models(models, test_f, test_l, 1.0, fold_avg_hold)
-    gate_results = evaluate_fold(fold_metrics)
+    gate_results = evaluate_fold(fold_metrics, min_signals=min_signals)
     return gate_results, fold_metrics, list(selected) if selected else []
 
 
@@ -680,6 +695,7 @@ def run_experiment(
         fold_pfs: list[float] = []
         features_used: list[str] = []
 
+        min_signals = _MOEX_MIN_SIGNALS if _is_moex_segment(segment_id) else _US_MIN_SIGNALS
         for fold_idx, (train_idx, _cal_idx, test_idx) in enumerate(folds):
             fold_out = _run_fold(
                 train_idx,
@@ -689,6 +705,7 @@ def run_experiment(
                 hold_bars,
                 config,
                 segment_id,
+                min_signals=min_signals,
             )
             if fold_out is None:
                 continue
@@ -987,7 +1004,16 @@ def _prepare_data(
         return None
 
     print("\nStep 3: Generating walk-forward folds...")
-    folds = generate_folds(timestamps)
+    fold_kwargs: dict[str, int] = {}
+    if is_moex:
+        fold_kwargs = {
+            "train_months": _MOEX_WF_TRAIN_MONTHS,
+            "cal_months": _MOEX_WF_CAL_MONTHS,
+            "test_months": _MOEX_WF_TEST_MONTHS,
+            "step_months": _MOEX_WF_STEP_MONTHS,
+            "purge_gap": _MOEX_PURGE_GAP,
+        }
+    folds = generate_folds(timestamps, **fold_kwargs)
     print(f"  {len(folds)} walk-forward folds")
 
     if not folds:
