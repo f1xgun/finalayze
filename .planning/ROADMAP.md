@@ -383,7 +383,7 @@ v9.0: 40 -> 41 -> 42 -> 43 -> 44
 | 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete | 2026-04-12 |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete | 2026-04-12 |
 | 39. REST Endpoint Hardening | v8.0 | 1/1 | Complete | 2026-04-12 |
-| 40. MOEX Data Adapter & Macro Features | v9.0 | 2/2 | Complete   | 2026-04-13 |
+| 40. MOEX Data Adapter & Macro Features | v9.0 | 2/2 | Complete    | 2026-04-13 |
 | 41. Adaptive Quality Gates | v9.0 | 0/TBD | Not started | - |
 | 42. ExperimentManager Integration | v9.0 | 0/TBD | Not started | - |
 | 43. Ensemble Weight Optimization | v9.0 | 0/TBD | Not started | - |
