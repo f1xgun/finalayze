@@ -120,7 +120,7 @@ Full details in Phase Details section below (collapsed milestone).
 - [x] **Phase 40: MOEX Data Adapter & Macro Features** - Wire TinkoffFetcher and MOEX macro features into auto_ml_research for all ru_* segments (completed 2026-04-13)
 - [x] **Phase 41: Adaptive Quality Gates** - Parametrize min_signals, add MOEX fold constants, add degenerate predictor guard (completed 2026-04-13)
 - [x] **Phase 42: ExperimentManager Integration** - Opt-in --experiment-id flag with hypothesis lifecycle and backward-compatible JSONL audit trail (completed 2026-04-13)
-- [ ] **Phase 43: Ensemble Weight Optimization** - Bounded XGB/LGBM/CatBoost weight grid search with overfitting guard
+- [x] **Phase 43: Ensemble Weight Optimization** - Bounded XGB/LGBM/CatBoost weight grid search with overfitting guard (completed 2026-04-13)
 - [ ] **Phase 44: New Search Strategies** - Cross-segment US→MOEX feature transfer and domain-motivated feature engineering
 
 ## Phase Details
@@ -348,9 +348,9 @@ Plans:
   1. `auto_ml_research.py --strategy ensemble_weights --segment ru_blue_chips` evaluates 9-12 distinct weight configurations across the simplex — XGB, LGBM, CatBoost weights are explored in bounded combinations, each summing to 1.0
   2. No single model weight exceeds 0.7 in any evaluated configuration — the overfitting constraint is enforced at generation time, not post-hoc
   3. When fewer than 4 independent folds are available, equal weights (1/3 each) are used as the default and optimization is skipped with a logged warning — small dataset safety is automatic
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 Plans:
-- [ ] 43-01-PLAN.md -- Ensemble weight simplex generator, weighted averaging, small-fold guard (STRAT-01)
+- [x] 43-01-PLAN.md -- Ensemble weight simplex generator, weighted averaging, small-fold guard (STRAT-01)
 
 ### Phase 44: New Search Strategies
 **Goal**: Two new search strategies extend the research loop — cross-segment transfer validates US-learned features on MOEX, and feature engineering generates domain-motivated combinations with hard overfitting caps
@@ -395,5 +395,5 @@ v9.0: 40 -> 41 -> 42 -> 43 -> 44
 | 40. MOEX Data Adapter & Macro Features | v9.0 | 2/2 | Complete    | 2026-04-13 |
 | 41. Adaptive Quality Gates | v9.0 | 2/2 | Complete    | 2026-04-13 |
 | 42. ExperimentManager Integration | v9.0 | 1/1 | Complete    | 2026-04-13 |
-| 43. Ensemble Weight Optimization | v9.0 | 0/TBD | Not started | - |
+| 43. Ensemble Weight Optimization | v9.0 | 1/1 | Complete   | 2026-04-13 |
 | 44. New Search Strategies | v9.0 | 0/TBD | Not started | - |
