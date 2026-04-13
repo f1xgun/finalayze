@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 import time
@@ -49,6 +50,7 @@ import structlog
 
 # torch must be imported before lightgbm to prevent OpenMP thread-pool conflicts
 import torch  # noqa: F401
+from config.segments import DEFAULT_SEGMENTS
 from sklearn.metrics import accuracy_score, brier_score_loss
 
 from finalayze.core.schemas import Candle, MarketContext
@@ -94,6 +96,7 @@ _WF_STEP_MONTHS = 3
 _PURGE_GAP = 100
 
 _US_BENCHMARK = "SPY"
+_MOEX_BENCHMARK = "IMOEX"
 _VIX_TICKER = "^VIX"
 
 _SEGMENT_SYMBOLS: dict[str, list[str]] = {
@@ -145,6 +148,12 @@ _SEGMENT_SYMBOLS: dict[str, list[str]] = {
     "us_broad": ["SPY", "QQQ", "DIA", "IWM", "VTI"],
 }
 
+# Populate ru_* equity segments from config/segments.py (single source of truth).
+# Bond segments (instrument_type != "stock") are intentionally excluded.
+for _seg in DEFAULT_SEGMENTS:
+    if _seg.segment_id.startswith("ru_") and _seg.instrument_type == "stock":
+        _SEGMENT_SYMBOLS[_seg.segment_id] = list(_seg.symbols)
+
 _RESULTS_DIR = _PROJECT_ROOT / "results" / "experiments"
 
 # Default XGBoost / LightGBM / CatBoost hyperparameters
@@ -159,6 +168,26 @@ _DEFAULT_HPARAMS = {
     "cat_iterations": 200,
     "cat_learning_rate": 0.05,
 }
+
+
+# ---------------------------------------------------------------------------
+# Segment helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_moex_segment(segment_id: str) -> bool:
+    """Return True if segment_id is a MOEX/Russian segment."""
+    return segment_id.startswith("ru_")
+
+
+def _get_lookback_days(segment_id: str) -> int:
+    """Return lookback days: 730 for MOEX, 1825 for US."""
+    return _MOEX_LOOKBACK_DAYS if _is_moex_segment(segment_id) else _LOOKBACK_DAYS
+
+
+def _get_max_features(segment_id: str) -> int:
+    """Return max MI-selected features: 10 for MOEX, 15 for US."""
+    return _MOEX_MAX_FEATURES if _is_moex_segment(segment_id) else _US_MAX_FEATURES
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +281,62 @@ def _fetch_vix(segment_id: str) -> list[Candle] | None:
         return None
 
 
+def _fetch_moex_candles(segment_id: str, symbols: list[str]) -> dict[str, list[Candle]]:
+    """Fetch candles per symbol via TinkoffFetcher for MOEX segments.
+
+    Requires FINALAYZE_TINKOFF_TOKEN env var. Returns empty dict if token missing.
+    Token is never logged or printed (T-40-01 mitigation).
+    """
+    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN")
+    if not token:
+        print(f"  ERROR: FINALAYZE_TINKOFF_TOKEN not set — cannot fetch MOEX data for {segment_id}")
+        return {}
+    from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
+    from finalayze.markets.instruments import build_default_registry  # noqa: PLC0415
+
+    registry = build_default_registry()
+    fetcher = TinkoffFetcher(token=token, registry=registry, sandbox=False)
+    end = datetime.now(tz=UTC)
+    start = end - timedelta(days=_MOEX_LOOKBACK_DAYS)
+    candles_by_sym: dict[str, list[Candle]] = {}
+    for sym in symbols:
+        try:
+            candles = fetcher.fetch_candles(sym, start, end)
+            if candles:
+                candles_by_sym[sym] = candles
+                print(f"  Fetched {len(candles)} candles for {sym}")
+        except Exception as exc:
+            print(f"  Failed to fetch {sym}: {exc}")
+    return candles_by_sym
+
+
+def _fetch_moex_benchmark(segment_id: str) -> list[Candle] | None:
+    """Fetch IMOEX benchmark for MOEX segments via TinkoffFetcher.
+
+    Returns None if token is not set or fetch fails.
+    Token is never logged or printed (T-40-01 mitigation).
+    """
+    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN")
+    if not token:
+        print(f"  [{segment_id}] FINALAYZE_TINKOFF_TOKEN not set, skipping MOEX benchmark.")
+        return None
+    from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
+    from finalayze.markets.instruments import build_default_registry  # noqa: PLC0415
+
+    registry = build_default_registry()
+    fetcher = TinkoffFetcher(token=token, registry=registry, sandbox=False)
+    end = datetime.now(tz=UTC)
+    start = end - timedelta(days=_MOEX_LOOKBACK_DAYS)
+    try:
+        candles = fetcher.fetch_candles(_MOEX_BENCHMARK, start, end)
+        if candles:
+            print(f"  Benchmark ({_MOEX_BENCHMARK}): {len(candles)} candles")
+            return candles
+    except Exception as exc:
+        print(f"  Benchmark fetch failed: {exc}")
+    return None
+
+
 def _align_benchmark(stock_candles: list[Candle], bench_candles: list[Candle]) -> list[Candle]:
     """Align benchmark to stock candles by date (forward-fill)."""
     if not bench_candles or not stock_candles:
@@ -300,6 +385,11 @@ def build_full_dataset(
     min_candles = _WINDOW_SIZE + _TB_MAX_HOLD + 1
     rows: list[tuple[datetime, dict[str, float], int, float, int]] = []
 
+    # Apply ATR uplift for MOEX segments (wider barriers for higher volatility)
+    is_moex = _segment_id.startswith("ru_")
+    upper_mult = _TB_UPPER_ATR_MULT * (_MOEX_ATR_UPLIFT if is_moex else 1.0)
+    lower_mult = _TB_LOWER_ATR_MULT * (_MOEX_ATR_UPLIFT if is_moex else 1.0)
+
     for candles in candles_by_sym.values():
         if len(candles) < min_candles:
             continue
@@ -317,8 +407,8 @@ def build_full_dataset(
         x, y, w, ts, hb = build_triple_barrier_dataset(
             candles,
             window_size=_WINDOW_SIZE,
-            upper_atr_mult=_TB_UPPER_ATR_MULT,
-            lower_atr_mult=_TB_LOWER_ATR_MULT,
+            upper_atr_mult=upper_mult,
+            lower_atr_mult=lower_mult,
             max_hold=_TB_MAX_HOLD,
             atr_period=_TB_ATR_PERIOD,
             atr_scale=True,
@@ -799,10 +889,17 @@ def _prepare_data(
         print(f"Unknown segment: {segment_id}")
         return None
 
+    is_moex = _is_moex_segment(segment_id)
+
     print("Step 1: Fetching data...")
-    candles_by_sym = _fetch_us_candles(segment_id, symbols)
-    benchmark = _fetch_benchmark(segment_id)
-    vix = _fetch_vix(segment_id)
+    if is_moex:
+        candles_by_sym = _fetch_moex_candles(segment_id, symbols)
+        benchmark = _fetch_moex_benchmark(segment_id)
+        vix = None  # VIX is US-specific
+    else:
+        candles_by_sym = _fetch_us_candles(segment_id, symbols)
+        benchmark = _fetch_benchmark(segment_id)
+        vix = _fetch_vix(segment_id)
 
     if not candles_by_sym:
         print("No data fetched, aborting.")
@@ -853,6 +950,7 @@ def run_research_loop(
         name="baseline",
         description="Baseline with standard MI feature selection",
         strategy="baseline",
+        max_features=_get_max_features(segment_id),
     )
     baseline_result = run_experiment(
         baseline_config,
