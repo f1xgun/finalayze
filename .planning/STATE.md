@@ -4,11 +4,11 @@ milestone: v9.0
 milestone_name: ML AutoResearch & MOEX Adaptation
 status: unknown
 stopped_at: Completed 43-01-PLAN.md
-last_updated: "2026-04-13T07:00:11.045Z"
+last_updated: "2026-04-13T07:07:13.096Z"
 progress:
   total_phases: 17
   completed_phases: 4
-  total_plans: 6
+  total_plans: 7
   completed_plans: 6
 ---
 
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 43 — Ensemble Weight Optimization
+**Current focus:** Phase 44 — New Search Strategies
 
 ## Current Position
 
-Phase: 44
-Plan: Not started
+Phase: 44 (New Search Strategies) — EXECUTING
+Plan: 1 of 1
 
 ## Performance Metrics
 
