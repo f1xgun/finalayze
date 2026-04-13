@@ -362,7 +362,7 @@ Plans:
   3. Generated features that do not pass a permutation importance test are discarded before model training — feature engineering cannot add noise-only columns to the feature matrix
 **Plans:** 1 plan
 Plans:
-- [ ] 42-01-PLAN.md -- ExperimentManager integration with --experiment-id flag (EXPINT-01, EXPINT-02)
+- [ ] 44-01-PLAN.md -- Cross-segment transfer + feature engineering strategies (STRAT-02, STRAT-03)
 
 ## Progress
 
