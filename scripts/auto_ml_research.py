@@ -560,6 +560,7 @@ def _evaluate_models(
     test_l: list[int],
     mean_uniqueness: float,
     avg_hold_bars: float,
+    weights: list[float] | None = None,
 ) -> FoldMetrics:
     """Evaluate ensemble on test fold → FoldMetrics."""
     probas: list[float] = []
@@ -573,7 +574,10 @@ def _evaluate_models(
                 probs.append(m.predict_proba(feat))
             except Exception:
                 continue
-        probas.append(sum(probs) / len(probs) if probs else 0.5)
+        if weights and len(probs) == len(weights):
+            probas.append(sum(p * w for p, w in zip(probs, weights, strict=True)))
+        else:
+            probas.append(sum(probs) / len(probs) if probs else 0.5)
 
     preds = [round(p) for p in probas]
     n = len(test_l)
@@ -668,7 +672,12 @@ def _run_fold(
         test_hb = [hold_bars[i] for i in test_idx if i < len(hold_bars)]
         fold_avg_hold = float(_np.mean(test_hb)) if test_hb else 1.0
 
-    fold_metrics = _evaluate_models(models, test_f, test_l, 1.0, fold_avg_hold)
+    hp = config.hparams
+    w_keys = ("xgb_weight", "lgbm_weight", "cat_weight")
+    fold_weights = (
+        [float(hp[k]) for k in w_keys] if all(k in hp for k in w_keys) else None
+    )
+    fold_metrics = _evaluate_models(models, test_f, test_l, 1.0, fold_avg_hold, weights=fold_weights)
     gate_results = evaluate_fold(fold_metrics, min_signals=min_signals)
     return gate_results, fold_metrics, list(selected) if selected else []
 
@@ -851,6 +860,36 @@ def generate_random_subset_experiments(
     return experiments
 
 
+def generate_ensemble_weight_experiments() -> list[ExperimentConfig]:
+    """Explore XGB/LGBM/CatBoost weight simplex with step 0.1, cap 0.7."""
+    experiments: list[ExperimentConfig] = []
+    step = 10  # work in integers to avoid float drift
+    max_single = 7  # 0.7 cap
+    for i in range(step + 1):
+        for j in range(step + 1 - i):
+            k = step - i - j
+            if i > max_single or j > max_single or k > max_single:
+                continue
+            if i == 0 or j == 0 or k == 0:
+                continue  # require all three models present
+            w_xgb = i / step
+            w_lgbm = j / step
+            w_cat = k / step
+            hp = dict(_DEFAULT_HPARAMS)
+            hp["xgb_weight"] = w_xgb
+            hp["lgbm_weight"] = w_lgbm
+            hp["cat_weight"] = w_cat
+            experiments.append(
+                ExperimentConfig(
+                    name=f"ew-{w_xgb:.1f}-{w_lgbm:.1f}-{w_cat:.1f}",
+                    description=f"Ensemble weights: XGB={w_xgb:.1f} LGBM={w_lgbm:.1f} Cat={w_cat:.1f}",
+                    strategy="ensemble_weights",
+                    hparams=hp,
+                )
+            )
+    return experiments
+
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -979,6 +1018,8 @@ def _generate_experiments(
         experiments.extend(generate_hyperparameter_experiments(baseline_features))
     if strategy in ("random_subset", "all"):
         experiments.extend(generate_random_subset_experiments(all_feature_names))
+    if strategy in ("ensemble_weights", "all"):
+        experiments.extend(generate_ensemble_weight_experiments())
     return experiments[:max_experiments]
 
 
@@ -1207,7 +1248,7 @@ def main() -> None:
     parser.add_argument(
         "--strategy",
         default="all",
-        choices=["ablation", "efficiency", "hyperparameter", "random_subset", "all"],
+        choices=["ablation", "efficiency", "hyperparameter", "random_subset", "ensemble_weights", "all"],
         help="Experiment strategy (default: all)",
     )
     parser.add_argument(
