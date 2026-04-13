@@ -52,23 +52,23 @@ Requirements for ML AutoResearch & MOEX Adaptation milestone.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MOEX-01 | — | Pending |
-| MOEX-02 | — | Pending |
-| MOEX-03 | — | Pending |
-| GATE-01 | — | Pending |
-| GATE-02 | — | Pending |
-| GATE-03 | — | Pending |
-| EXPINT-01 | — | Pending |
-| EXPINT-02 | — | Pending |
-| STRAT-01 | — | Pending |
-| STRAT-02 | — | Pending |
-| STRAT-03 | — | Pending |
+| MOEX-01 | Phase 40 | Pending |
+| MOEX-02 | Phase 40 | Pending |
+| MOEX-03 | Phase 40 | Pending |
+| GATE-01 | Phase 41 | Pending |
+| GATE-02 | Phase 41 | Pending |
+| GATE-03 | Phase 41 | Pending |
+| EXPINT-01 | Phase 42 | Pending |
+| EXPINT-02 | Phase 42 | Pending |
+| STRAT-01 | Phase 43 | Pending |
+| STRAT-02 | Phase 44 | Pending |
+| STRAT-03 | Phase 44 | Pending |
 
 **Coverage:**
 - v9.0 requirements: 11 total
-- Mapped to phases: 0
-- Unmapped: 11 ⚠️
+- Mapped to phases: 11
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-04-13*
-*Last updated: 2026-04-13 after initial definition*
+*Last updated: 2026-04-13 after roadmap creation*

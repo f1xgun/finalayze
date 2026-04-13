@@ -9,7 +9,8 @@
 - ✅ **v5.0 Data Flow Correctness** -- Phases 23-27 (shipped 2026-03-24)
 - ✅ **v6.0 Sandbox Stability & Observability** -- Phases 28-31 (shipped 2026-03-30)
 - ✅ **v7.0 Agent Intelligence & Experiment Framework** -- Phases 32-35 (shipped 2026-04-12)
-- 🚧 **v8.0 Agent Integration & Autonomous Decision Loop** -- Phases 36-38
+- ✅ **v8.0 Agent Integration & Autonomous Decision Loop** -- Phases 36-39 (shipped 2026-04-12)
+- 🚧 **v9.0 ML AutoResearch & MOEX Adaptation** -- Phases 40-44
 
 ## Phases
 
@@ -102,14 +103,25 @@ Full details in Phase Details section below (collapsed milestone).
 
 </details>
 
-### 🚧 v8.0 Agent Integration & Autonomous Decision Loop (In Progress)
+<details>
+<summary>✅ v8.0 Agent Integration & Autonomous Decision Loop (Phases 36-39) -- SHIPPED 2026-04-12</summary>
 
-**Milestone Goal:** Wire debate/experiment infrastructure into live agent workflows so agents emit structured claims, conflicts auto-trigger debates, and experiment verdicts auto-apply to live strategy parameters.
-
-- [x] **Phase 36: Conflict Detection Foundation** - Agents emit structured AgentOutput; ConflictDetector with debouncing and severity scoring (Phases 36-38 in progress) (completed 2026-04-12)
+- [x] **Phase 36: Conflict Detection Foundation** - Agents emit structured AgentOutput; ConflictDetector with debouncing and severity scoring (completed 2026-04-12)
 - [x] **Phase 37: Agent Orchestrator + Debate/Experiment REST API** - Full conflict→debate→arbiter→experiment→verdict pipeline with REST endpoints and snapshot safety (completed 2026-04-12)
 - [x] **Phase 38: PresetApplicator + Auto-Apply Loop** - Atomic YAML write-back, circuit-breaker gate, position-ownership tracking, sandbox validation gate (completed 2026-04-12)
 - [x] **Phase 39: REST Endpoint Hardening** - Wire real alerter, circuit breaker state, multi-debate response, and finalize endpoint into REST API (completed 2026-04-12)
+
+</details>
+
+### 🚧 v9.0 ML AutoResearch & MOEX Adaptation (In Progress)
+
+**Milestone Goal:** Adapt auto_ml_research for MOEX market — TinkoffFetcher data adapter, MOEX macro features, adaptive quality gates, ExperimentManager integration, and three new search strategies.
+
+- [ ] **Phase 40: MOEX Data Adapter & Macro Features** - Wire TinkoffFetcher and MOEX macro features into auto_ml_research for all ru_* segments
+- [ ] **Phase 41: Adaptive Quality Gates** - Parametrize min_signals, add MOEX fold constants, add degenerate predictor guard
+- [ ] **Phase 42: ExperimentManager Integration** - Opt-in --experiment-id flag with hypothesis lifecycle and backward-compatible JSONL audit trail
+- [ ] **Phase 43: Ensemble Weight Optimization** - Bounded XGB/LGBM/CatBoost weight grid search with overfitting guard
+- [ ] **Phase 44: New Search Strategies** - Cross-segment US→MOEX feature transfer and domain-motivated feature engineering
 
 ## Phase Details
 
@@ -289,13 +301,65 @@ Plans:
 Plans:
 - [x] 39-01-PLAN.md -- Wire real alerter, circuit breaker, multi-debate response, finalize endpoint (ORCH-01, ORCH-02, APPLY-02, APPLY-05)
 
+### Phase 40: MOEX Data Adapter & Macro Features
+**Goal**: auto_ml_research runs end-to-end on all four ru_* segments using TinkoffFetcher for candles and real MOEX macro features (CBR rate, USDRUB, IMOEX, Brent) in the feature pipeline
+**Depends on**: Phase 39 (v8.0 complete; this starts v9.0)
+**Requirements**: MOEX-01, MOEX-02, MOEX-03
+**Success Criteria** (what must be TRUE):
+  1. `python scripts/auto_ml_research.py --segment ru_blue_chips` completes data loading without error — candle counts are printed and TinkoffFetcher is used (not yfinance) for all ru_* segments
+  2. `_SEGMENT_SYMBOLS` in auto_ml_research.py contains ru_blue_chips, ru_energy, ru_finance, ru_tech symbols that match the production universe in config/segments.py — no symbol lookup errors at runtime
+  3. All 10 MOEX macro features (usdrub_zscore_60d, brent_zscore_60d, cbr_rate_level, cbr_rate_delta, real_rate_zscore, etc.) are non-zero in the feature matrix for any MOEX experiment run — macro context is actually flowing through build_full_dataset()
+  4. Macro series are shift(1) aligned before join — a unit test with a synthetic macro series verifies no future value leaks into the feature vector (look-ahead bias absent)
+**Plans**: TBD
+
+### Phase 41: Adaptive Quality Gates
+**Goal**: MOEX experiments produce trustworthy walk-forward results — signal count gates are calibrated to MOEX dataset sizes, folds never collapse to fewer than 3, and degenerate all-BUY/all-SELL models are rejected automatically
+**Depends on**: Phase 40 (needs working MOEX data flow to validate gate thresholds empirically)
+**Requirements**: GATE-01, GATE-02, GATE-03
+**Success Criteria** (what must be TRUE):
+  1. `evaluate_fold(min_signals=15)` accepts a MOEX experiment with 15-30 signals per fold — the hardcoded _MIN_SIGNALS=50 no longer blocks all MOEX runs
+  2. A 730-day MOEX dataset produces 3 or more valid walk-forward folds using MOEX-specific fold constants — the experiment does not trivially pass on a single fold
+  3. A model that predicts BUY on 92% of samples fails the degenerate predictor gate and is logged as REJECTED with buy_ratio=0.92 — all-directional models cannot receive a verdict without this check
+**Plans**: TBD
+
+### Phase 42: ExperimentManager Integration
+**Goal**: auto_ml_research research runs are tracked as named experiments with hypothesis lifecycle, verdicts, and backward-compatible JSONL audit trail when --experiment-id is not provided
+**Depends on**: Phase 41 (quality gates must be reliable before experiment verdicts carry meaning)
+**Requirements**: EXPINT-01, EXPINT-02
+**Success Criteria** (what must be TRUE):
+  1. Running `auto_ml_research.py --segment ru_blue_chips --experiment-id ru_blue_chips_baseline_20260413_1200` creates an ExperimentManager entry, links per-fold results, and records ACCEPT/REJECT/INCONCLUSIVE at completion — the experiment is queryable via ExperimentManager.get()
+  2. Two concurrent segment runs with different --experiment-id values produce non-overlapping experiment files — no ID collision or shared-state corruption
+  3. Running `auto_ml_research.py --segment ru_blue_chips` without --experiment-id completes normally with JSONL output only — existing invocations are not broken by the integration
+**Plans**: TBD
+
+### Phase 43: Ensemble Weight Optimization
+**Goal**: A new ensemble_weights search strategy explores the XGB/LGBM/CatBoost weight simplex, enforces overfitting guards, and logs optimization gain separately from baseline
+**Depends on**: Phase 42 (experiment tracking must be in place to compare weight configurations as named hypotheses)
+**Requirements**: STRAT-01
+**Success Criteria** (what must be TRUE):
+  1. `auto_ml_research.py --strategy ensemble_weights --segment ru_blue_chips` evaluates 9-12 distinct weight configurations across the simplex — XGB, LGBM, CatBoost weights are explored in bounded combinations, each summing to 1.0
+  2. No single model weight exceeds 0.7 in any evaluated configuration — the overfitting constraint is enforced at generation time, not post-hoc
+  3. When fewer than 4 independent folds are available, equal weights (1/3 each) are used as the default and optimization is skipped with a logged warning — small dataset safety is automatic
+**Plans**: TBD
+
+### Phase 44: New Search Strategies
+**Goal**: Two new search strategies extend the research loop — cross-segment transfer validates US-learned features on MOEX, and feature engineering generates domain-motivated combinations with hard overfitting caps
+**Depends on**: Phase 43 (stable MOEX baseline and reliable experiment tracking needed before adding high-complexity strategies)
+**Requirements**: STRAT-02, STRAT-03
+**Success Criteria** (what must be TRUE):
+  1. `auto_ml_research.py --strategy cross_segment_transfer --segment ru_blue_chips` reads best US experiment features from JSONL history and filters to market-neutral intersection — VIX-only and MOEX-only features are excluded from the transfer set, and the filtered feature list is logged
+  2. `auto_ml_research.py --strategy feature_engineering --segment ru_blue_chips` generates domain-motivated feature combinations (lag ratios, rolling z-scores, cross-feature interactions) with a hard cap of n_samples/20 candidates — no more than ~36 candidates are generated for a 730-day MOEX dataset
+  3. Generated features that do not pass a permutation importance test are discarded before model training — feature engineering cannot add noise-only columns to the feature matrix
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
 
 v6.0: 28 -> 29 -> 30 -> 31 (all complete)
 v7.0: 32 -> 33 -> 34 -> 35 (all complete)
-v8.0: 36 -> 37 -> 38 -> 39
+v8.0: 36 -> 37 -> 38 -> 39 (all complete)
+v9.0: 40 -> 41 -> 42 -> 43 -> 44
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
@@ -312,7 +376,12 @@ v8.0: 36 -> 37 -> 38 -> 39
 | 33. Structured Debate Protocol | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 34. Experiment Registry & Runner | v7.0 | 2/2 | Complete | 2026-04-08 |
 | 35. Experiment Lab UI | v7.0 | 2/2 | Complete | 2026-04-08 |
-| 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete    | 2026-04-12 |
-| 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete    | 2026-04-12 |
-| 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete    | 2026-04-12 |
-| 39. REST Endpoint Hardening | v8.0 | 1/1 | Complete    | 2026-04-12 |
+| 36. Conflict Detection Foundation | v8.0 | 2/2 | Complete | 2026-04-12 |
+| 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete | 2026-04-12 |
+| 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete | 2026-04-12 |
+| 39. REST Endpoint Hardening | v8.0 | 1/1 | Complete | 2026-04-12 |
+| 40. MOEX Data Adapter & Macro Features | v9.0 | 0/TBD | Not started | - |
+| 41. Adaptive Quality Gates | v9.0 | 0/TBD | Not started | - |
+| 42. ExperimentManager Integration | v9.0 | 0/TBD | Not started | - |
+| 43. Ensemble Weight Optimization | v9.0 | 0/TBD | Not started | - |
+| 44. New Search Strategies | v9.0 | 0/TBD | Not started | - |
