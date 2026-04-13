@@ -95,6 +95,7 @@ _LOOKBACK_DAYS = 1825
 _MOEX_LOOKBACK_DAYS = 730
 _US_MAX_FEATURES = 15
 _MOEX_MAX_FEATURES = 10
+_ENSEMBLE_WEIGHTS_MIN_FOLDS = 4  # minimum folds required to use optimized ensemble weights
 
 _WF_TRAIN_MONTHS = 12
 _WF_CAL_MONTHS = 2
@@ -674,10 +675,10 @@ def _run_fold(
 
     hp = config.hparams
     w_keys = ("xgb_weight", "lgbm_weight", "cat_weight")
-    fold_weights = (
-        [float(hp[k]) for k in w_keys] if all(k in hp for k in w_keys) else None
+    fold_weights = [float(hp[k]) for k in w_keys] if all(k in hp for k in w_keys) else None
+    fold_metrics = _evaluate_models(
+        models, test_f, test_l, 1.0, fold_avg_hold, weights=fold_weights
     )
-    fold_metrics = _evaluate_models(models, test_f, test_l, 1.0, fold_avg_hold, weights=fold_weights)
     gate_results = evaluate_fold(fold_metrics, min_signals=min_signals)
     return gate_results, fold_metrics, list(selected) if selected else []
 
@@ -696,6 +697,26 @@ def run_experiment(
         config=config,
         timestamp=datetime.now(tz=UTC).isoformat(),
     )
+
+    # Small-fold guard: skip weight optimization when too few folds
+    if config.strategy == "ensemble_weights" and len(folds) < _ENSEMBLE_WEIGHTS_MIN_FOLDS:
+        logger.warning(
+            "ensemble_weights: fewer than 4 folds, using equal weights",
+            n_folds=len(folds),
+        )
+        config = ExperimentConfig(
+            name=config.name,
+            description=config.description + " (equal weights — insufficient folds)",
+            strategy=config.strategy,
+            feature_subset=config.feature_subset,
+            max_features=config.max_features,
+            hparams={
+                **config.hparams,
+                "xgb_weight": 1 / 3,
+                "lgbm_weight": 1 / 3,
+                "cat_weight": 1 / 3,
+            },
+        )
 
     try:
         all_fold_results: list[list] = []
@@ -882,7 +903,9 @@ def generate_ensemble_weight_experiments() -> list[ExperimentConfig]:
             experiments.append(
                 ExperimentConfig(
                     name=f"ew-{w_xgb:.1f}-{w_lgbm:.1f}-{w_cat:.1f}",
-                    description=f"Ensemble weights: XGB={w_xgb:.1f} LGBM={w_lgbm:.1f} Cat={w_cat:.1f}",
+                    description=(
+                        f"Ensemble weights: XGB={w_xgb:.1f} LGBM={w_lgbm:.1f} Cat={w_cat:.1f}"
+                    ),
                     strategy="ensemble_weights",
                     hparams=hp,
                 )
@@ -1248,7 +1271,14 @@ def main() -> None:
     parser.add_argument(
         "--strategy",
         default="all",
-        choices=["ablation", "efficiency", "hyperparameter", "random_subset", "ensemble_weights", "all"],
+        choices=[
+            "ablation",
+            "efficiency",
+            "hyperparameter",
+            "random_subset",
+            "ensemble_weights",
+            "all",
+        ],
         help="Experiment strategy (default: all)",
     )
     parser.add_argument(

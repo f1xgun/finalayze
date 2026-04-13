@@ -3,7 +3,8 @@
 Tests for generate_ensemble_weight_experiments, weighted _evaluate_models,
 small-fold guard in run_experiment, and CLI wiring.
 
-- T1: generate_ensemble_weight_experiments returns ExperimentConfig items with strategy="ensemble_weights"
+- T1: generate_ensemble_weight_experiments returns ExperimentConfig items
+      with strategy="ensemble_weights"
 - T2: Generated configs count is between 9 and 12
 - T3: Every config has xgb_weight + lgbm_weight + cat_weight == 1.0 (within tolerance)
 - T4: No config has any single weight > 0.7
@@ -57,20 +58,22 @@ def _import_module() -> Any:
 
 
 def test_t1_generator_returns_ensemble_weights_strategy() -> None:
-    """T1: generate_ensemble_weight_experiments returns ExperimentConfig items with strategy='ensemble_weights'."""
+    """T1: generate_ensemble_weight_experiments returns configs with strategy='ensemble_weights'."""
     mod = _import_module()
     experiments = mod.generate_ensemble_weight_experiments()
     assert len(experiments) > 0
     for exp in experiments:
-        assert exp.strategy == "ensemble_weights", f"Expected 'ensemble_weights', got {exp.strategy!r}"
+        assert exp.strategy == "ensemble_weights", (
+            f"Expected 'ensemble_weights', got {exp.strategy!r}"
+        )
 
 
 def test_t2_generator_count_in_range() -> None:
-    """T2: Generated configs count is at least 9 (simplex step=0.1, filtered by 0.7 cap and min 0.1).
+    """T2: Generated configs count is at least 9.
 
-    The simplex with step=0.1, min=0.1 per model, and max=0.7 per model produces 33 configs.
+    With step=0.1, min=0.1, max=0.7 per model the simplex produces 33 configs.
     The plan's original "9-12" estimate was a miscalculation — 33 is correct.
-    We assert at least 9 to validate the simplex is populated.
+    We assert >=9 to validate the simplex is populated.
     """
     mod = _import_module()
     experiments = mod.generate_ensemble_weight_experiments()
@@ -79,15 +82,13 @@ def test_t2_generator_count_in_range() -> None:
 
 
 def test_t3_weights_sum_to_one() -> None:
-    """T3: Every generated config has xgb_weight + lgbm_weight + cat_weight == 1.0 (within float tolerance)."""
+    """T3: Every generated config has weights summing to 1.0 (within float tolerance)."""
     mod = _import_module()
     experiments = mod.generate_ensemble_weight_experiments()
     for exp in experiments:
         hp = exp.hparams
         total = hp["xgb_weight"] + hp["lgbm_weight"] + hp["cat_weight"]
-        assert abs(total - 1.0) < 1e-9, (
-            f"Weights don't sum to 1.0 for {exp.name}: {total}"
-        )
+        assert abs(total - 1.0) < 1e-9, f"Weights don't sum to 1.0 for {exp.name}: {total}"
 
 
 def test_t4_no_weight_exceeds_cap() -> None:
@@ -97,9 +98,7 @@ def test_t4_no_weight_exceeds_cap() -> None:
     for exp in experiments:
         hp = exp.hparams
         for key in ("xgb_weight", "lgbm_weight", "cat_weight"):
-            assert hp[key] <= 0.7, (
-                f"Weight {key}={hp[key]} exceeds 0.7 in {exp.name}"
-            )
+            assert hp[key] <= 0.7, f"Weight {key}={hp[key]} exceeds 0.7 in {exp.name}"
 
 
 def test_t5_all_weights_at_least_minimum() -> None:
@@ -109,9 +108,7 @@ def test_t5_all_weights_at_least_minimum() -> None:
     for exp in experiments:
         hp = exp.hparams
         for key in ("xgb_weight", "lgbm_weight", "cat_weight"):
-            assert hp[key] >= 0.1, (
-                f"Weight {key}={hp[key]} is below 0.1 in {exp.name}"
-            )
+            assert hp[key] >= 0.1, f"Weight {key}={hp[key]} is below 0.1 in {exp.name}"
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +126,7 @@ def _make_mock_model(proba: float) -> MagicMock:
 
 
 def test_t6_weighted_average_when_weights_provided() -> None:
-    """T6: _evaluate_models with weights=[0.5, 0.3, 0.2] produces weighted average, not equal average."""
+    """T6: _evaluate_models with weights=[0.5, 0.3, 0.2] produces weighted, not equal, average."""
     mod = _import_module()
 
     # Three models with fixed probas: 0.8, 0.4, 0.6
@@ -205,7 +202,7 @@ def test_t8_ensemble_weights_in_cli_choices() -> None:
 
 
 def test_t9_generate_experiments_routes_ensemble_weights() -> None:
-    """T9: _generate_experiments("ensemble_weights", ...) returns non-empty list from the generator."""
+    """T9: _generate_experiments("ensemble_weights") returns non-empty list from the generator."""
     mod = _import_module()
     experiments = mod._generate_experiments(
         strategy="ensemble_weights",
@@ -230,7 +227,7 @@ def _make_minimal_folds(count: int) -> list[tuple[list[int], list[int], list[int
 
 
 def test_t10_small_fold_guard_overrides_weights() -> None:
-    """T10: run_experiment with < 4 folds and strategy='ensemble_weights' uses equal weights (1/3 each)."""
+    """T10: run_experiment with <4 folds and strategy='ensemble_weights' uses equal weights."""
     mod = _import_module()
 
     captured_configs: list[Any] = []
@@ -246,7 +243,6 @@ def test_t10_small_fold_guard_overrides_weights() -> None:
         min_signals: Any = None,
     ) -> None:
         captured_configs.append(config)
-        return None  # skip fold
 
     config = mod.ExperimentConfig(
         name="ew-0.5-0.3-0.2",
@@ -277,7 +273,7 @@ def test_t10_small_fold_guard_overrides_weights() -> None:
 
 
 def test_t11_sufficient_folds_preserve_weights() -> None:
-    """T11: run_experiment with >= 4 folds and strategy='ensemble_weights' preserves original weights."""
+    """T11: run_experiment with >=4 folds and strategy='ensemble_weights' keeps original weights."""
     mod = _import_module()
 
     captured_configs: list[Any] = []
@@ -293,7 +289,6 @@ def test_t11_sufficient_folds_preserve_weights() -> None:
         min_signals: Any = None,
     ) -> None:
         captured_configs.append(config)
-        return None  # skip fold
 
     config = mod.ExperimentConfig(
         name="ew-0.5-0.3-0.2",
@@ -340,7 +335,6 @@ def test_t12_non_ensemble_strategy_unaffected_by_small_fold_guard() -> None:
         min_signals: Any = None,
     ) -> None:
         captured_configs.append(config)
-        return None  # skip fold
 
     # Use ablation strategy with no weight keys
     config = mod.ExperimentConfig(
@@ -359,8 +353,7 @@ def test_t12_non_ensemble_strategy_unaffected_by_small_fold_guard() -> None:
 
     # For ablation, no weight keys should be present (or at least not 1/3)
     for captured in captured_configs:
-        assert "xgb_weight" not in captured.hparams or captured.hparams["xgb_weight"] != 1 / 3 or captured.strategy != "ensemble_weights", (
-            "Non-ensemble strategy should not have equal-weight override applied"
+        # The strategy must remain ablation — guard only applies to ensemble_weights
+        assert captured.strategy == "ablation", (
+            "Non-ensemble strategy should not be mutated by the small-fold guard"
         )
-        # The strategy must remain ablation
-        assert captured.strategy == "ablation"
