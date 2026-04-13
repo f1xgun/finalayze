@@ -883,6 +883,65 @@ def _log_result(result: ExperimentResult, log_path: Path) -> None:
         f.write(json.dumps(entry) + "\n")
 
 
+def _init_experiment_manager(
+    experiment_id: str,
+    strategy: str,
+    segment_id: str,
+) -> object | None:
+    """Create and start an ExperimentManager entry (non-crashing).
+
+    Returns the ExperimentManager instance on success, or None on failure.
+    """
+    try:
+        from finalayze.core.experiment_manager import ExperimentManager  # noqa: PLC0415
+        from finalayze.core.schemas import SuccessCriteria as SuccessCriteriaSchema  # noqa: PLC0415
+
+        mgr = ExperimentManager()
+        mgr.create_experiment(
+            experiment_id=experiment_id,
+            hypothesis=f"AutoML research: {strategy} on {segment_id}",
+            success_criteria=SuccessCriteriaSchema(
+                metric="composite_score", threshold=0.0, operator=">="
+            ),
+        )
+        mgr.update_status(experiment_id, "running")
+        return mgr
+    except Exception:
+        logger.warning(
+            "ExperimentManager init failed — research loop will continue without tracking"
+        )
+        return None
+
+
+def _link_to_experiment_manager(
+    mgr: object,
+    experiment_id: str,
+    result: ExperimentResult,
+    segment_id: str,
+) -> None:
+    """Link a single ExperimentResult to the ExperimentManager (non-crashing)."""
+    try:
+        from finalayze.core.schemas import (  # noqa: PLC0415
+            ExperimentResult as ExperimentResultSchema,
+        )
+
+        schema_result = ExperimentResultSchema(
+            run_name=result.config.name,
+            iteration_name=f"{segment_id}_{result.config.strategy}",
+            metrics={
+                "score": result.score,
+                "accuracy": result.avg_accuracy,
+                "brier": result.avg_brier,
+                "profit_factor": result.avg_profit_factor,
+                "feature_count": result.feature_count,
+                "status": result.status,
+            },
+        )
+        mgr.link_result(experiment_id, schema_result)  # type: ignore[union-attr]
+    except Exception:
+        logger.warning("ExperimentManager link_result failed — continuing")
+
+
 def _print_result(result: ExperimentResult, baseline_score: float) -> None:
     """Print experiment result to console."""
     delta = result.score - baseline_score
@@ -1027,11 +1086,19 @@ def run_research_loop(
     segment_id: str,
     strategy: str = "all",
     max_experiments: int = 100,
+    experiment_id: str | None = None,
 ) -> None:
     """Run the autonomous experiment loop."""
     print(f"\n{'=' * 70}")
     print(f"  AUTO-ML RESEARCH — segment={segment_id}, strategy={strategy}")
     print(f"{'=' * 70}\n")
+
+    # ExperimentManager (opt-in via --experiment-id) -------------------------
+    _exp_mgr: object | None = (
+        _init_experiment_manager(experiment_id, strategy, segment_id)
+        if experiment_id is not None
+        else None
+    )
 
     # Fetch MOEX macro data once (reused across segments if called multiple times)
     moex_data: MoexMarketData | None = None
@@ -1064,6 +1131,8 @@ def run_research_loop(
 
     log_path = _RESULTS_DIR / f"{segment_id}_experiment_log.jsonl"
     _log_result(baseline_result, log_path)
+    if _exp_mgr is not None and experiment_id is not None:
+        _link_to_experiment_manager(_exp_mgr, experiment_id, baseline_result, segment_id)
     print(
         f"\n  Baseline: score={baseline_result.score:.4f} "
         f"acc={baseline_result.avg_accuracy:.3f} "
@@ -1096,6 +1165,8 @@ def run_research_loop(
         print(f"\n[{idx}/{len(experiments)}] {config.name}: {config.description}")
         result = run_experiment(config, features, labels, hold_bars, folds, segment_id)
         _log_result(result, log_path)
+        if _exp_mgr is not None and experiment_id is not None:
+            _link_to_experiment_manager(_exp_mgr, experiment_id, result, segment_id)
         _print_result(result, baseline_score)
         total_time += result.duration_seconds
 
@@ -1113,6 +1184,13 @@ def run_research_loop(
         baseline_score,
         total_time,
     )
+
+    if _exp_mgr is not None and experiment_id is not None:
+        try:
+            _exp_mgr.record_verdict(experiment_id, best_score)  # type: ignore[union-attr]
+            print(f"  ExperimentManager verdict recorded for {experiment_id}")
+        except Exception:
+            logger.warning("ExperimentManager record_verdict failed — continuing")
 
 
 def main() -> None:
@@ -1144,6 +1222,27 @@ def main() -> None:
         default=42,
         help="Random seed for reproducibility (default: 42)",
     )
+
+    import re as _re  # noqa: PLC0415
+
+    def _valid_experiment_id(value: str) -> str:
+        if not _re.match(r"^[a-zA-Z0-9_-]+$", value):
+            parser.error(
+                f"--experiment-id '{value}' is invalid: only [a-zA-Z0-9_-] characters are allowed"
+            )
+        return value
+
+    parser.add_argument(
+        "--experiment-id",
+        type=_valid_experiment_id,
+        default=None,
+        metavar="ID",
+        help=(
+            "Optional experiment ID for ExperimentManager tracking. "
+            "Only [a-zA-Z0-9_-] characters allowed. "
+            "Creates a named experiment with hypothesis lifecycle and verdict."
+        ),
+    )
     args = parser.parse_args()
     random.seed(args.seed)
     _np.random.seed(args.seed)
@@ -1152,6 +1251,7 @@ def main() -> None:
         segment_id=args.segment,
         strategy=args.strategy,
         max_experiments=args.max_experiments,
+        experiment_id=args.experiment_id,
     )
 
 
