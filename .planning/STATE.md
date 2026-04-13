@@ -1,38 +1,32 @@
 ---
 gsd_state_version: 1.0
-milestone: v8.0
-milestone_name: Agent Integration & Autonomous Decision Loop
-status: unknown
-stopped_at: Completed 39-01-PLAN.md
-last_updated: "2026-04-12T19:12:13.735Z"
+milestone: v9.0
+milestone_name: ML AutoResearch & MOEX Adaptation
+status: defining_requirements
+stopped_at: Milestone started
+last_updated: "2026-04-13"
 progress:
-  total_phases: 12
-  completed_phases: 12
-  total_plans: 25
-  completed_plans: 25
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-12)
+See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 39 — REST Endpoint Hardening
+**Current focus:** Defining requirements for v9.0
 
 ## Current Position
 
-Phase: 39
-Plan: Not started
-
-## Performance Metrics
-
-**Velocity:**
-
-- Total plans completed: 0 (v8.0)
-- Average duration: --
-- Total execution time: 0 hours
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-13 — Milestone v9.0 started
 
 ## Accumulated Context
 
@@ -44,11 +38,6 @@ Plan: Not started
 - Circuit-breaker gate is FIRST check in `apply_verdict()` -- safety before write
 - `snapshot_sha` on `FileLineSource` prevents false CONTRADICTED verdicts post-refactor
 
-### Research Flags
-
-- Phase 37: Claude Code sub-agent orchestrator invocation protocol needs validation during planning
-- Phase 38: Sandbox gate scoring thresholds (pass/fail criteria for 3-day sandbox run) to be defined during planning
-
 ### Pending Todos
 
 None.
@@ -59,6 +48,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-12T19:07:33.614Z
-Stopped at: Completed 39-01-PLAN.md
+Last session: 2026-04-13
+Stopped at: Milestone v9.0 started — defining requirements
 Resume file: None

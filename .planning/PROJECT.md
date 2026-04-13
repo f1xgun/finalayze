@@ -12,6 +12,17 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
+## Current Milestone: v9.0 ML AutoResearch & MOEX Adaptation
+
+**Goal:** Adapt auto_ml_research for MOEX market with TinkoffFetcher, macro features, adaptive quality gates, and integrate with v8.0 experiment infrastructure.
+
+**Target features:**
+- MOEX data adapter (TinkoffFetcher replacing yfinance for ru_* segments)
+- MOEX macro features (CBR rate, USDRUB, IMOEX, Brent) in feature pipeline
+- Adaptive quality gates for small MOEX datasets (n_eff scaling)
+- ExperimentManager integration (auto_ml_research → hypotheses/verdicts/debates)
+- New search strategies: ensemble weights, feature engineering, cross-segment transfer
+
 ## Current State: v8.0 shipped
 
 v8.0 Agent Integration & Autonomous Decision Loop shipped 2026-04-12. 4 phases, 7 plans.
@@ -151,9 +162,15 @@ v3.0 integration gaps closed (Telegram /gonogo import, HealthMonitor feed freshn
 
 ### Active
 
-<!-- Next milestone scope — to be defined -->
+<!-- v9.0 ML AutoResearch & MOEX Adaptation -->
 
-(None yet — define with `/gsd:new-milestone`)
+- [ ] MOEX data adapter for auto_ml_research (TinkoffFetcher instead of yfinance)
+- [ ] MOEX macro features in ML pipeline (CBR rate, USDRUB, IMOEX, Brent)
+- [ ] Adaptive quality gates for small MOEX datasets
+- [ ] ExperimentManager integration (hypotheses, verdicts, debate linkage)
+- [ ] Ensemble weight optimization strategy
+- [ ] Automatic feature engineering strategy
+- [ ] Cross-segment transfer strategy (US → MOEX)
 
 ### Out of Scope
 
@@ -256,4 +273,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-12 after v8.0 milestone shipped*
+*Last updated: 2026-04-13 after v9.0 milestone started*
