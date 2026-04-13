@@ -1,152 +1,235 @@
 # Pitfalls Research
 
-**Domain:** Adding multi-agent orchestration, conflict detection, and auto-apply loops to a live MOEX trading system (v8.0)
-**Researched:** 2026-04-12
-**Confidence:** HIGH (codebase analysis of 480+ files, prior phase research docs, risk module inspection)
+**Domain:** MOEX ML AutoResearch & Adaptation — adding autonomous ML experiment capabilities with MOEX data support to an existing trading system (v9.0)
+**Researched:** 2026-04-13
+**Confidence:** HIGH (grounded in codebase inspection of auto_ml_research.py, quality_gates.py, tinkoff_data.py, and known constraints in PROJECT.md and MEMORY.md)
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Auto-Apply Bypasses the 11-Check Pre-Trade Pipeline
+### Pitfall 1: Calling TinkoffFetcher from a Sync Script Without InstrumentRegistry
 
 **What goes wrong:**
-The experiment verdict auto-apply path (ACCEPT → strategy toggle or parameter change) modifies preset YAML files directly and reloads config. If auto-apply skips the normal `PreTradeChecker` evaluation, a parameter set that passes backtesting (on historical data) can produce positions that fail the 11 live pre-trade checks: max exposure, drawdown limits, PDT rule, correlation limits, parameter freshness, etc. The system might load a new config that, on the next strategy cycle, generates a signal that the pre-trade checker would block — but only if the checker runs. If auto-apply also restarts or reloads the combiner mid-cycle, the checker is bypassed for the in-flight cycle.
+`auto_ml_research.py` is a synchronous script that currently creates `YFinanceFetcher` directly (no dependencies). `TinkoffFetcher` requires `InstrumentRegistry` to perform FIGI lookups before each gRPC fetch call. If `InstrumentRegistry` is not initialized (it reads instrument configs and potentially the DB), every `fetch_candles()` call raises `InstrumentNotFoundError` and silently falls through the `except Exception` handler — returning empty candles for every MOEX symbol. The research loop continues with zero data and produces a "no valid folds" abort with no clear error about the root cause.
 
 **Why it happens:**
-Auto-apply is designed as a write operation on YAML presets. The strategy combiner re-reads presets on the next cycle. But nothing in the auto-apply path enforces that the new parameters produce compliant pre-trade results. A backtest environment does not run `PreTradeChecker` — it uses a simulated broker and positions are reset per walk-forward window. The live pre-trade checker tracks cumulative drawdown, position history, and rolling PDT trades — none of which exist in backtest context.
+The script was built for US markets where `YFinanceFetcher(market_id=market_id)` is the entire instantiation. Swapping the fetcher without understanding the `InstrumentRegistry` dependency creates a silent failure: the `_fetch_us_candles()` function swallows exceptions with `print(f"  Failed to fetch {sym}: {exc}")` rather than raising. With 15 symbols all returning empty, the absence of data looks identical to a network timeout rather than a configuration error.
 
 **How to avoid:**
-- Auto-apply MUST gate on circuit breaker state before writing any preset: if `CircuitLevel != NORMAL`, reject the apply and log `auto_apply_blocked_by_circuit_breaker`.
-- After writing the YAML, do NOT reload the combiner mid-cycle. Apply takes effect at the next cycle boundary only (APScheduler's `misfire_grace_time` already provides this naturally).
-- Add a dry-run pre-trade check as part of verdict execution: generate a synthetic signal with the new parameters and run it through `PreTradeChecker`. If it fails, mark the experiment `INCONCLUSIVE` rather than applying.
-- Log all auto-apply events to the Telegram alerter with the changed parameters, so a human can observe and revert if needed.
+Create a dedicated `_fetch_moex_candles()` function that: (1) asserts `FINALAYZE_TINKOFF_TOKEN` is set and non-empty before constructing anything, (2) builds a minimal `InstrumentRegistry` from the static YAML instrument map (not from DB — this avoids needing a running database for training scripts), (3) instantiates `TinkoffFetcher` with `sandbox=False` (sandbox has no historical candles), (4) logs a prominent error and exits if candles_by_sym is empty after fetching. Add a guard: if `len(candles_by_sym) == 0`, raise `RuntimeError("No candles fetched — check FINALAYZE_TINKOFF_TOKEN and instrument registry")` rather than returning `None` quietly.
 
 **Warning signs:**
-- Experiment verdict is ACCEPT but circuit breaker immediately trips on next cycle.
-- PreTradeChecker starts failing checks it never failed before, shortly after an auto-apply event.
-- Rapid CAUTION → HALTED escalation within 2 cycles of parameter application.
+- `fetch_candles()` returns `[]` for known symbols like `SBER` with no exception raised
+- All 15 symbols print `"Failed to fetch {sym}: InstrumentNotFoundError"` in sequence
+- Script reaches "No data fetched, aborting." after spending 0 seconds on fetching (no network calls made)
+- `InstrumentNotFoundError` in logs — registry was not populated
 
 **Phase to address:**
-Phase implementing auto-apply (the v8.0 "auto-apply loop" phase). Circuit-breaker gate must be the FIRST check in `apply_verdict()`.
+Phase 1 (MOEX data adapter). Write a smoke test that calls the MOEX fetch path with the real token (skipped in CI without token) before any other phase work.
 
 ---
 
-### Pitfall 2: Conflict Detector Triggers Continuous Debate Storms
+### Pitfall 2: Look-Ahead Bias When Joining Macro Features to the Feature Vector
 
 **What goes wrong:**
-The conflict detector compares multi-agent outputs for contradictions. If the comparison is too sensitive (e.g., any disagreement on a float metric triggers a conflict), and multiple agents run in each cycle, the system generates dozens of debates per day. Each debate spawns an experiment, each experiment runs 3 backtests (A/B/AB), and each backtest is 12+ months of walk-forward data. The system becomes permanently occupied running backtests and cannot process live trading decisions. Worse: if debate escalation triggers auto-apply, and two simultaneous debates both ACCEPT conflicting parameter changes, the second write overwrites the first within the same cycle.
+MOEX macro features — CBR key rate, USDRUB close, IMOEX close, Brent close — are indexed by date. Joining them to the candle feature vector with `merge(on='date', how='left')` gives the macro value for the same trading day as the bar being labeled. At open-of-day decision time, today's USDRUB close does not yet exist; yesterday's is the only available value. This is classic look-ahead bias: the model appears to know where USDRUB closed before the market session ends.
+
+CBR rate is even worse: the CBR announces rate changes at ~13:30 Moscow time. A model trained on `cbr_rate[t]` has seen information that was not available at the open-of-day entry decision for `t`, causing it to pick up rate-announcement effects that cannot be exploited live.
 
 **Why it happens:**
-Debates are file-based and stateless from the trading loop's perspective. Nothing prevents two agents from both creating debate files about the same parameter at the same time (e.g., both `quant-analyst` and `risk-officer` disagree about the ADX threshold). Without debouncing or deduplication on the topic, the system can stack up 10+ debates on the same strategy parameter within one day, each spawning its own A/B/AB backtest triple.
+pandas `merge(on='date')` is the natural operation and it "works" — no error, full join, no NaN. The look-ahead is invisible in the merged dataframe. `build_triple_barrier_dataset()` in `labeling.py` accepts `benchmark_candles` and `vix_candles` as pre-aligned lists — any alignment shift must be done by the caller, which is easy to forget when adding new macro series.
 
 **How to avoid:**
-- Implement topic-level debate deduplication: before creating a debate file, scan `.planning/debates/` for any open or escalated debate on the same topic slug. If one exists and is < 7 days old, do not create a new debate — link to the existing one.
-- Rate-limit conflict detection: only trigger a debate if the same contradiction is observed in at least 2 consecutive agent cycles (not a single observation). One-off disagreements should be logged but not escalated.
-- Backtest runs from experiment verdicts must be queued, not parallelized. A single queue with `max_concurrent=1` prevents backtest pile-up.
-- Define a minimum confidence delta for conflict: only flag as contradiction if agent confidence values differ by > 0.15 (not just any disagreement).
+Always `shift(1)` all macro series before joining: `macro_df['cbr_rate'] = macro_df['cbr_rate'].shift(1)`. Do this inside the macro feature builder, not at the call site. Add an explicit assertion in the feature builder: after computing features for bar at timestamp `t`, verify that the CBR rate used was announced before `t`. Write a unit test: feed a synthetic macro series with a known event at day `d`, verify that the feature vector for day `d` uses the value from day `d-1`, not day `d`.
 
 **Warning signs:**
-- `.planning/debates/` directory contains > 10 files with `status: open`.
-- `results/experiments/` directory growing faster than 3 entries/day.
-- Strategy cycles start taking longer than 5 minutes (backtest processes consuming CPU).
+- Walk-forward in-sample accuracy substantially higher than out-of-sample (look-ahead inflates in-sample)
+- Macro feature importance ranks `cbr_rate` or `usdrub_close` at the top — plausible but suspicious without the shift test
+- Backtest profit factor > 2.5 on MOEX but sandbox shows profit factor near 1.0
 
 **Phase to address:**
-Phase implementing the conflict detector. Debouncing and deduplication logic belongs in the detector, not the debate manager.
+Phase 2 (MOEX macro features). Add the shift test as a mandatory unit test before merging macro feature code.
 
 ---
 
-### Pitfall 3: File-Based Preset Write Races with Live Strategy Cycle
+### Pitfall 3: Walk-Forward Folds Produce Zero or One Valid Folds for MOEX
 
 **What goes wrong:**
-The strategy combiner reads preset YAML files on first call per segment (cached in memory). Auto-apply writes a new preset YAML. If the write happens mid-cycle while the combiner has already read the old preset for some instruments but not yet for others, the cycle runs with two different parameter sets for the same segment — half the instruments use old parameters, half use new. This is particularly dangerous for `min_combined_confidence` and strategy weights, which gate trade entry.
+`generate_folds()` uses `_WF_TRAIN_MONTHS=12`, `_WF_CAL_MONTHS=2`, `_WF_TEST_MONTHS=4`, `_WF_STEP_MONTHS=3`, `_PURGE_GAP=100` (days). One fold requires approximately `12*30 + 100 + 2*30 + 100 + 4*30 = 740` days of data. With `_MOEX_LOOKBACK_DAYS=730`, the first fold barely fits (if at all) and the step of 3 months immediately pushes the second fold beyond the end of data. Result: 0 or 1 folds.
+
+With 1 fold, `evaluate_walk_forward()` computes `passes/1 = 1.0` for any gate that passes on that single fold — trivially meeting the `min_passing_folds_ratio=0.60` threshold. The model is declared "overall passed" on essentially zero cross-validation, producing confident but meaningless verdicts.
 
 **Why it happens:**
-`StrategyCombiner` uses a module-level or instance-level cache that is populated lazily. `auto_apply_verdict()` writes the YAML file directly (via `Path.write_text()`). There is no lock or versioning between the file write and the combiner's cache. The trading loop's APScheduler cycle and the auto-apply event (triggered by experiment verdict) are independent — they do not share a lock.
+The fold constants were tuned for US data (5 years = ~60 months, producing 10–12 folds). Nobody adjusted them for the 24-month MOEX window. The code path `if not folds: print("No valid folds, aborting.")` correctly aborts on 0 folds, but silently proceeds with 1 fold — the dangerous case.
 
 **How to avoid:**
-- Auto-apply MUST write to a staging file (e.g., `presets/ru_blue_chips.yaml.pending`) and only rename to the live path at a cycle boundary.
-- Add a cycle-start hook in `TradingLoop._strategy_cycle_impl()` that checks for `.pending` files and renames them before the combiner processes any instrument. This keeps the rename atomic within a cycle.
-- The combiner cache should have a `reload_segment(segment_id)` method. Call it explicitly after the rename, before processing any instruments for that segment.
-- Use `os.replace()` (atomic on Linux) not `Path.write_text()` for the final rename — ensures no partial reads.
+Define MOEX-specific fold constants: `MOEX_WF_TRAIN_MONTHS=8`, `MOEX_WF_CAL_MONTHS=1`, `MOEX_WF_TEST_MONTHS=3`, `MOEX_WF_STEP_MONTHS=2`, `MOEX_PURGE_GAP=21` (21 trading days ~= 1 calendar month). This yields 3–4 folds on 730 days. Parameterize `generate_folds()` to accept these via a `FoldConfig` dataclass instead of module-level globals. Add a guard: `if len(folds) < 3: raise RuntimeError(f"Insufficient folds ({len(folds)}) for robust walk-forward validation")`.
 
 **Warning signs:**
-- Trade log shows instruments in the same segment with different `min_combined_confidence` values in the same cycle.
-- Combiner logs cache hits with an old timestamp shortly after a preset write.
-- A BUY signal fires with old parameters, and the new parameters would have blocked it.
+- `generate_folds()` returns `[1 fold]` for any `ru_*` segment
+- `evaluate_walk_forward()` logs `n_folds=1` with `overall_passed=True`
+- Walk-forward Sharpe computed from a single 3-month test window (extremely high variance)
+- Experiment score of ~0.85 for a MOEX segment that the quality team knows should score ~0.55
 
 **Phase to address:**
-Phase implementing auto-apply. Staging-file-plus-atomic-rename must be the write pattern, enforced in the `apply_verdict()` function.
+Phase 1 (MOEX data adapter) to establish what volume is available, and Phase 3 (adaptive quality gates) to tune fold constants for that volume.
 
 ---
 
-### Pitfall 4: Experiment ACCEPT on Backtest Sharpe Does Not Translate to Live Performance
+### Pitfall 4: Adaptive Quality Gate Relaxation Enabling Degenerate Predictors
 
 **What goes wrong:**
-The experiment success criteria use backtest metrics (WF Sharpe, profit factor, max drawdown) as the verdict gate. An experiment that shows WF Sharpe improvement from 0.08 to 0.14 on walk-forward data gets ACCEPTED and auto-applied. But backtests use end-of-bar prices, no slippage for strategy parameter changes (parameters are static across the walk-forward window), and no execution latency. In live MOEX trading, the same parameters may not translate to the same improvement — especially for `ou_mean_reversion` (stationary-parameter strategies) and `pairs` (cointegration-based), where the walk-forward parameter freshness check (`_MAX_PARAM_AGE_BARS = 5`) means parameters fitted on old data may be stale by the time they're applied live.
+`check_accuracy_gate()` caps the threshold at `0.55` for `n_eff < 20`. On a MOEX test fold with 60 samples and `avg_hold_bars=4.0`, `n_eff = 60/4 = 15`. A model that predicts all-BUY on a 60%-positive class achieves 0.60 accuracy and clears the capped 0.55 gate — not because it has skill but because it learned class imbalance. `check_class_balance_gate()` exists to catch this (`_MIN_CLASS_RATIO=0.30`), but gate ordering matters: if accuracy is evaluated before class balance, the result can be misleadingly `gate_pass_rates = {accuracy: 1.0, class_balance: 0.0}` with `overall_passed=False` — correct outcome but confusing diagnostic.
+
+The deeper issue: when the cap at 0.55 is further relaxed to handle even smaller MOEX datasets, the gap between "model has skill" and "model predicts majority class" narrows to zero. The quality gate system can no longer distinguish.
 
 **Why it happens:**
-Backtest and live environments differ in: (1) execution slippage (MOEX has 0.1%-0.3% bid-ask for mid-cap stocks), (2) parameter fitting (OU and pairs strategies fit parameters on in-sample data, which isn't available in the live environment), (3) walk-forward Sharpe is computed on 6-month test windows — insufficient to measure regime sensitivity. The experiment registry compares backtest metrics to a fixed threshold, not to a live baseline.
+Adaptive gate relaxation is the correct direction for small samples. But the existing implementation relaxes the accuracy gate without adding a compensating signal-quality check. The Brier gate with `_dynamic_brier_threshold` (floor at 0.15, tighter for small `n_eff`) is the intended compensator — but a degenerate all-BUY predictor also achieves a low Brier score on an imbalanced class (if positive class probability is ~0.6, always predicting 1 gives Brier of `(1-0.6)^2 * 0.4 + (0-0.6)^2 * 0.6 ≈ 0.22`, which passes the 0.25 cap but fails the 0.15 floor for `n_eff=15`). So the Brier gate does protect — verify this path is actually firing.
 
 **How to avoid:**
-- Add a mandatory sandbox validation gate before auto-apply: any ACCEPTED experiment must run for ≥3 sandbox trading days before applying to live parameters. The auto-apply pipeline should be: ACCEPT → sandbox\_monitoring → sandbox\_score\_gate → live\_apply.
-- Success criteria thresholds should be conservative: WF Sharpe improvement must exceed 0.05 (not 0.01) to avoid applying noise as signal.
-- For `ou_mean_reversion` and `pairs`, auto-apply is blocked by default. Mark these strategies with `auto_apply_blocked: true` in the experiment definition schema, requiring manual override.
-- Log the live sandbox performance delta against the experiment's projected improvement. If delta > 50% mismatch after 5 trading days, flag for human review rather than keeping the auto-applied parameters.
+Do not raise `_MAX_ACCURACY_THRESHOLD` beyond 0.57 for any `n_eff` value. Add a fold-level variance check as a new gate: if accuracy standard deviation across folds exceeds 0.15, flag as high-variance and require all 4+ folds to be present before declaring PASS. Add an explicit unit test: feed an all-BUY predictor on a 60%-positive class, verify class_balance gate fails, verify overall_passed=False regardless of accuracy value.
 
 **Warning signs:**
-- Auto-applied parameters produce lower WF Sharpe in the next backtest iteration than the pre-apply baseline.
-- Sandbox position fill rates drop after auto-apply (market impact from parameter changes).
-- Strategy fires more frequently than expected (weight changes not accounting for regime filter impact).
+- `buy_ratio` consistently above 0.75 across folds (degenerate predictor signature)
+- Sensitivity near 1.0, specificity near 0.0
+- `gate_pass_rates = {accuracy: 1.0, class_balance: 0.0, ...}` with `overall_passed=False` — correct but check that class_balance fires reliably
+- `avg_profit_factor` near 1.0 despite high `avg_accuracy` (degenerate predictor has no edge on profitable trades specifically)
 
 **Phase to address:**
-Phase implementing auto-apply verdict execution. The sandbox-gate requirement must be in the `apply_verdict()` workflow, not deferred to a later phase.
+Phase 3 (adaptive quality gates).
 
 ---
 
-### Pitfall 5: Arbiter Agent Claims Create Circular Dependency on Codebase State
+### Pitfall 5: ExperimentManager Integration Creating ID Conflicts Across Parallel Segment Runs
 
 **What goes wrong:**
-The arbiter verifies `FileLineSource` claims by checking that a file path and line number contain the stated excerpt. If auto-apply has modified a preset YAML (which changes strategy parameters), and a subsequent debate references the OLD parameter values in a `FileLineSource` claim (citing the old preset line), the arbiter marks the claim CONTRADICTED (because the file now shows new values). This is a false contradiction — the claim was valid at debate creation time but invalid at arbiter evaluation time. The false CONTRADICTED verdict triggers another experiment, which reverses the auto-apply, which triggers another debate, creating a loop.
+`auto_ml_research.py` generates experiment config names like `ablate-rsi`, `hp-xgb_max_depth=3`, `random-1-n8`. If the research loop creates an `ExperimentManager` markdown file for each of these 100+ configs (one `.md` per config), running the loop for two segments concurrently — e.g., `ru_blue_chips` and `us_tech` — produces ID collisions: both try to write `.planning/experiments/ablate-rsi.md`. `ExperimentManager._write_file()` uses `path.write_text()` (non-atomic), so concurrent writes corrupt the YAML frontmatter.
+
+Even without concurrency, re-running the same segment wipes previous results because the experiment ID is not namespaced by segment or run timestamp.
 
 **Why it happens:**
-Debates are created and arbitrated asynchronously. The gap between debate creation and arbiter execution can span hours or days. In that window, auto-apply may have already changed the referenced file. The arbiter has no concept of "file state at debate creation time" — it always checks the current file state.
+The research loop's experiment naming convention was designed for internal logging, not for the ExperimentManager's flat file namespace. The ExperimentManager expects unique, stable experiment IDs per hypothesis — the research loop generates hundreds of disposable config names per run.
 
 **How to avoid:**
-- Add a `snapshot_sha` field to `FileLineSource`: when a debate claim is created, record the git SHA or file content hash at that line. The arbiter compares the current file state against the snapshot, not an expected value. If the file has changed (SHA differs), mark the claim `UNTESTABLE` (not CONTRADICTED) with a note that the referenced code has been modified since the claim was made.
-- Auto-apply must create a git commit (or at minimum write a changelog entry to `.planning/debates/changelog.md`) with the applied change, so the arbiter can detect that a file change was intentional and corresponds to a completed experiment.
-- Implement a "debate freeze" period: after auto-apply, block new debates on the same topic for 48 hours. This prevents immediate re-debate of freshly applied parameters.
+Map the two concepts to their correct abstraction levels. Use `ExperimentManager` for the top-level research hypothesis (one experiment per `run_research_loop()` invocation): ID = `{segment}_{strategy}_{YYYYMMDD_HHMM}`. Use the existing JSONL log (`results/experiments/{segment}_experiment_log.jsonl`) for per-config sub-results. Only promote the single best result (winner of the internal competition) to an ExperimentManager hypothesis with a meaningful description. This keeps ExperimentManager's namespace clean and human-readable.
 
 **Warning signs:**
-- Arbiter CONTRADICTED verdicts spike after auto-apply events.
-- Debates reference file lines that no longer exist (line number drift after preset rewrite).
-- `experiment_id` values in debates point to other experiments that have already been ACCEPTED — circular experiment chains.
+- `.planning/experiments/` contains files named `ablate-rsi.md` or `hp-xgb_max_depth=3.md` with no segment context
+- Concurrent runs produce corrupt YAML frontmatter (YAML parse error when loading experiment state)
+- `experiment_manager.list_experiments()` returns experiments whose IDs do not correspond to meaningful hypotheses
 
 **Phase to address:**
-Phase implementing arbiter integration with auto-apply. The `snapshot_sha` field belongs in Phase 33 schemas; the changelog write belongs in the auto-apply phase.
+Phase 4 (ExperimentManager integration). Define the ID schema before writing any integration code.
 
 ---
 
-### Pitfall 6: Strategy Toggle Auto-Apply Leaves Open Positions Unmanaged
+### Pitfall 6: Ensemble Weight Optimization Overfitting to Small MOEX Validation Sets
 
 **What goes wrong:**
-Auto-apply can toggle a strategy from enabled to disabled (REJECT verdict on a strategy enablement experiment, or ACCEPT verdict on a strategy disablement experiment). If the strategy being disabled (`event_driven`, `dual_momentum`, etc.) currently has open positions that it generated signals for, disabling the strategy does not close those positions. The positions remain open but now have no strategy actively managing their exit. Stop-loss still applies (ATR-based, independent of strategy), but the strategy's exit signals (SELL on momentum reversal, mean-reversion target hit, etc.) will no longer fire.
+Optimizing XGBoost/LightGBM/CatBoost ensemble weights via grid search or Optuna on a MOEX validation set of 30–80 samples finds spurious optima. A weight vector [0.7, 0.2, 0.1] that scores well on one 3-month window will perform like random weighting on the next window because the optimization signal is dominated by noise at this sample size. The parameter space has 2 degrees of freedom (3 weights summing to 1), and with 30 samples and a noisy binary target, the expected improvement over equal weights is statistically near zero — but in-sample observed improvement can be 5–8%.
 
 **Why it happens:**
-Strategy toggling in the preset YAML changes whether the combiner includes that strategy in signal generation. It does not affect `_stop_states`, `_entry_prices`, or `_cycle_exited_symbols` in `TradingLoop`. These dictionaries track ALL open positions regardless of which strategy generated them. A disabled strategy is simply absent from signal generation — its positions coast on ATR stop-loss only.
+Weight optimization is conceptually attractive: each model has different strengths. But the validation set is too small to distinguish model-specific skill from random correlation with the class distribution of that window. This is the same overfitting problem as hyperparameter search on small datasets, but disguised as "ensemble calibration."
 
 **How to avoid:**
-- Before disabling a strategy via auto-apply, query `TradingLoop.get_positions()` for positions tagged with that strategy (this requires strategy tagging on position entry — `_entry_strategy: dict[str, str]`).
-- If any positions exist that were opened by the strategy being disabled, block the disable and mark the experiment `INCONCLUSIVE` with reason "open positions must be closed first".
-- Alternatively: apply the disable at the next DAILY RESET boundary (not mid-cycle), so the daily reset closes or re-evaluates all positions before the strategy goes dark.
+Default to equal weights (1/3 each) for MOEX segments unless the optimization is validated across 4+ independent folds. Use bootstrap confidence intervals: if the 95% CI on any weight includes 1/3, do not deviate from equal weighting. Constrain the weight search space so no single model weight exceeds 0.5 (simplex constraint). Log the weight-optimization gain separately so it can be audited: if optimized weights show accuracy improvement < 0.01 on OOS folds, revert to equal weights.
 
 **Warning signs:**
-- Strategy is marked disabled in preset YAML but `_stop_states` still contains symbols it would have managed.
-- Position exits are delayed after a strategy toggle (ATR-based exits fire much later than strategy-based exits).
-- Profit factor drops on segments where a strategy was disabled without position cleanup.
+- Optimized weights differ dramatically fold-to-fold: [0.8,0.1,0.1] then [0.1,0.8,0.1]
+- Average optimized-weight accuracy lower than average equal-weight accuracy across held-out folds
+- Score improvement from weight optimization > 3% on MOEX (suspicious at this sample size — would be extraordinary if real)
 
 **Phase to address:**
-Phase implementing auto-apply for strategy toggles. Position-ownership tagging should be added to `TradingLoop._entry_prices` or a new `_entry_strategy` dict.
+Phase 5 (ensemble weight optimization strategy).
+
+---
+
+### Pitfall 7: Cross-Segment Feature Transfer Breaking on MOEX Distribution Shift
+
+**What goes wrong:**
+Feature names are shared across segments (same keys in `dict[str, float]`), creating an illusion of compatibility. A feature importance ranking trained on `us_tech` (AAPL, MSFT, NVDA) reflects US market dynamics: Amihud illiquidity rank, momentum z-scores, and VIX-based volatility regime. Transferring the same selected feature list to `ru_blue_chips` (SBER, LKOH, GAZP) creates a feature set that is identical in name but different in statistical properties:
+- MOEX Amihud values are orders of magnitude larger (thinner market)
+- MOEX momentum decays faster due to thinner order books
+- Calendar features have Russian holidays (not NYSE calendar) — the existing `moex_calendar.trading_days_gap` handles this, but features using `timedelta` directly do not
+- VIX is replaced by IMOEX volatility regime on MOEX — the US VIX feature has no MOEX analog
+
+**Why it happens:**
+The feature pipeline computes whatever is in `compute_features()` regardless of market. Cross-segment transfer naively uses "same feature name = same feature meaning." The distribution shift is only visible at model evaluation time when MOEX accuracy is below 0.52.
+
+**How to avoid:**
+Before applying US-selected features to MOEX, run a distribution shift check: compute Jensen-Shannon divergence between US and MOEX feature distributions for each selected feature. Flag features with JS divergence > 0.3 as "potentially invalid transfers" — log them and consider excluding. When adding MOEX macro features (CBR rate, USDRUB, IMOEX), give them priority over US-derived features: if the feature budget is 10, fill 4 slots with MOEX macro features first before drawing from US-derived feature rankings. Do not transfer hyperparameter configurations without re-tuning: MOEX's noisier labels benefit from shallower trees (max_depth 3–4 vs 5–6 for US).
+
+**Warning signs:**
+- Walk-forward accuracy on MOEX with US-selected features consistently below 0.52 (noise floor)
+- Feature importance on MOEX shows VIX-based features with near-zero importance (VIX irrelevant for MOEX)
+- MOEX macro features added in Phase 2 appear at the bottom of importance rankings (wrong feature set inherited from US selection)
+
+**Phase to address:**
+Phase 6 (cross-segment transfer strategy).
+
+---
+
+### Pitfall 8: Brent Fetch via yfinance Causing Non-Deterministic Training
+
+**What goes wrong:**
+`PROJECT.md` §Data Sources confirms Brent crude (`BZ=F`) is fetched via yfinance. If MOEX macro features include Brent as a predictor and it is fetched at training time via yfinance, the feature values depend on yfinance availability at that moment. In CI environments without network access, yfinance returns empty data — Brent feature is NaN or missing — and training silently proceeds on incomplete features. Two training runs on the same code at different times produce different models because Brent data differs.
+
+**Why it happens:**
+yfinance is an unofficial API with no SLA, rate limits, and schema changes without notice. It is already excluded from MOEX candle fetching by policy, but Brent as a CME commodity has no T-Invest equivalent. The macro feature builder may use a conditional fallback — which hides the failure mode in production.
+
+**How to avoid:**
+Cache Brent candles to disk using `CachingFetcher` with a 24-hour TTL immediately after fetching. Store fixture Brent data in `tests/fixtures/brent_candles.json` for use in CI. Make the Brent fetch a graceful degradation: if yfinance fails, use the cached file; if no cache exists, use a neutral value (zero-mean, unit-variance normalized to 0.5) and log a `WARNING`. Never fail training because Brent is unavailable — degrade, not crash.
+
+**Warning signs:**
+- `pytest` passes locally but fails in CI with `KeyError: 'brent_return'` or empty Brent series
+- Two training runs on identical code produce different feature importance rankings (Brent present vs absent)
+- MOEX macro feature importances vary dramatically between runs
+
+**Phase to address:**
+Phase 2 (MOEX macro features). Write the Brent fixture and caching before writing macro feature code — not after.
+
+---
+
+### Pitfall 9: T-Bank Sandbox Endpoint Has No Historical Candles
+
+**What goes wrong:**
+`TinkoffFetcher` defaults to `sandbox=True` for development safety. The sandbox gRPC endpoint (`sandbox-invest-public-api.tbank.ru:443`) is a paper-trading environment — it has no historical candle data. Calling `fetch_candles(symbol, start, end)` on the sandbox returns an empty list for any historical date range. The research script fetches zero candles, the dataset is empty, and the script aborts with "Empty dataset, aborting." — with no indication that the issue is the sandbox flag, not the symbol or date range.
+
+**Why it happens:**
+The sandbox-vs-live distinction is correct for the live trading loop (sandbox prevents accidental real orders). For historical data training scripts, sandbox=True is always wrong. The default is set in `TinkoffFetcher.__init__` for safety, but training scripts must override it explicitly.
+
+**How to avoid:**
+In `_fetch_moex_candles()`, always construct `TinkoffFetcher` with `sandbox=False`. Add a startup assertion: `assert not fetcher._sandbox, "TinkoffFetcher for training must use sandbox=False (historical data not available in sandbox)"`. Document this in the function docstring and in the script's `--help` output. In tests, use a mock fetcher that returns pre-seeded candles rather than connecting to any endpoint.
+
+**Warning signs:**
+- All symbols return 0 candles despite valid token and correct symbol names
+- No gRPC error logs — the call succeeds but returns empty (sandbox has no data, not an error)
+- Script aborts at "Empty dataset, aborting." on first run but not after changing to `sandbox=False`
+
+**Phase to address:**
+Phase 1 (MOEX data adapter). This is a one-line fix but a common trap for anyone unfamiliar with the dual-endpoint design.
+
+---
+
+### Pitfall 10: Combinatorial Feature Engineering Explosion on Small Datasets
+
+**What goes wrong:**
+One of the v9.0 research strategies is "automatic feature engineering" — generating candidate features by combining existing ones (ratios, products, lags, differences). On a 730-day MOEX dataset with 10 base features, generating all pairwise ratios and lagged versions yields hundreds of candidate features. Feature selection then runs on a dataset where `n_samples` (730) << `n_features` (300+), making any selection method statistically unreliable. The selected features are almost certainly overfit to the specific 730-day window.
+
+**Why it happens:**
+Combinatorial feature generation works well when `n_samples >> n_features` (e.g., US tech with 1825 days and 15 features → ratio ~120:1). On MOEX, the ratio inverts: 730 days and 300 candidate features → ratio ~2.4:1. Standard feature selection methods (mutual information, LASSO) cannot distinguish signal from noise at this ratio.
+
+**How to avoid:**
+Cap the candidate feature set hard: no more than `n_samples / 20` candidate features before selection. For MOEX with 730 days, the cap is ~36 features. Do not generate all pairwise combinations — generate only domain-motivated combinations (e.g., `return / volatility`, `momentum / liquidity`), not statistical fishing. Run a permutation test on any generated feature: if the feature's mutual information with the label is not significantly above the mutual information after label shuffling (p > 0.05), discard it before selection.
+
+**Warning signs:**
+- Feature selection step takes > 5 minutes (hundreds of candidates being evaluated)
+- Selected features include `feature_a_times_feature_b` type combinations without domain motivation
+- Ablation experiments show no consistent winner — every subset scores within noise of every other subset
+
+**Phase to address:**
+Phase 6 (automatic feature engineering strategy). This phase needs the constraint built in from the start, not discovered after running a 300-feature experiment.
 
 ---
 
@@ -154,12 +237,14 @@ Phase implementing auto-apply for strategy toggles. Position-ownership tagging s
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Skip sandbox gate for "safe" parameter changes (weight adjustment < 0.05) | Faster auto-apply cycle | Small weight changes compound — multiple small changes over weeks drift the portfolio far from backtested parameters | Never — always require sandbox gate |
-| Use file modification timestamp as conflict dedup key instead of topic hash | Simple implementation | Two debates on the same topic within 1 second both survive dedup, race condition | Never — use topic slug hash |
-| Hard-code success criteria thresholds in Python instead of per-experiment YAML | One less moving part | Thresholds cannot be adjusted per strategy or market regime without code changes | Only if thresholds never differ across strategy types |
-| Apply verdict immediately (not at cycle boundary) to reduce latency | Parameters available sooner | Races with in-flight cycle reading old parameters | Never for live trading — cycle boundary is mandatory |
-| Use subprocess for interaction test backtest runs instead of in-process | Isolation, no state leakage | Subprocess startup overhead: each backtest takes 30+ minutes already, adding 2-3s startup is fine, but subprocess makes it harder to mock in tests | Acceptable for production, use in-process mocks for tests |
-| Store debate claims as plain text (not Pydantic models) to simplify agent prompt | Agent produces simpler output | Unvalidated claims reach the arbiter, which must handle malformed input gracefully — increases arbiter complexity | Never — schema validation at ingestion is cheaper than arbiter error handling |
+| Reuse US fold constants for MOEX | No code change needed | 0–1 valid folds, misleadingly high gate pass rates | Never — constants must be parameterized |
+| Skip `InstrumentRegistry` init, use mock in production scripts | Fast to code | Missing FIGI → all fetches fail silently in production | Never in production; test mocks only |
+| Use `shift(0)` (no shift) for macro series join | Simplest pandas join | Look-ahead bias corrupts all trained models | Never |
+| Raise accuracy cap to 0.60 for MOEX | Models pass gates more easily | Enables degenerate predictors on 50–80 sample folds | Never |
+| Store all 100+ experiment configs as ExperimentManager files | Full traceability | Namespace pollution, file conflicts, slow list_experiments() | Never — promote only the research run winner |
+| Use `sandbox=True` for historical data fetches | Safe default | Returns empty data, training aborts silently | Never for training scripts |
+| Generate all pairwise feature combinations | Explores more space | n_features > n_samples → selection is noise | Never without permutation test and hard cap |
+| Equal weights always for ensemble (skip optimization) | No overfitting risk | May leave 2–5% accuracy on the table | Acceptable for MVP when n_folds < 4 |
 
 ---
 
@@ -167,12 +252,15 @@ Phase implementing auto-apply for strategy toggles. Position-ownership tagging s
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| File-based experiment registry + live preset YAML | Writing experiment result and preset YAML in same `apply_verdict()` call without checking if the experiment file still exists | Always read-then-write: `ExperimentManager.read_experiment()` first, check `status == ACCEPTED`, THEN write preset. Prevents stale experiment refs from triggering duplicate applies |
-| Arbiter agent + `history.jsonl` metric lookup | Comparing float values with `==` (metric value `1.2900001` does not equal claimed `1.29`) | Use `abs(actual - claimed) <= 0.01` tolerance as documented in Phase 33 research. Store claimed value with 4 decimal places |
-| Conflict detector + existing agent outputs (freeform markdown) | Trying to detect conflicts in freeform agent text with regex | Only compare agents that emit structured `AgentOutput` with typed `Claim` objects. Freeform text agents must be opted-in explicitly, not included automatically |
-| Auto-apply + `StrategyCombiner` preset cache | Combiner caches preset on first use per segment (instance variable). Auto-apply writes new YAML. Combiner never sees new file until restart | Call `combiner.invalidate_segment_cache(segment_id)` after successful preset write. Requires adding this method to StrategyCombiner |
-| Experiment backtest + `results/iterations/history.jsonl` | Experiment runs appending to `history.jsonl` pollute the `backtest-iteration` skill's iteration history, making trend tracking noisy | Tag experiment entries with `"tags": ["experiment", experiment_id]`. The `iteration-history` skill must filter out `experiment`-tagged entries by default |
-| Debate persistence + git history | Auto-apply writes preset YAML but does not commit, so debate claims citing old git SHA become UNTESTABLE after the working tree changes | Auto-apply should write a changelog entry (not a git commit) that records what changed, when, and why. Full git commits are not appropriate for automated agent actions |
+| TinkoffFetcher in sync script | Instantiating without `InstrumentRegistry` | Build minimal registry from static YAML map; assert token present before constructing |
+| TinkoffFetcher gRPC | Forgetting `GRPC_DNS_RESOLVER=native` before SDK import | `tinkoff_data.py` sets it at module level — import that module before any `t_tech.invest` usage |
+| TinkoffFetcher endpoint | Using default SDK target (`invest-public-api.tinkoff.ru`) that no longer resolves | Always pass `target=_TBANK_GRPC_TARGET` from `tinkoff_data.py` |
+| TinkoffFetcher for training | Using `sandbox=True` (default) | Explicitly set `sandbox=False`; sandbox endpoint has no historical candles |
+| CBR rate as macro feature | Fetching rate for "today" and using as same-day feature | `shift(1)`: CBR announces at ~13:30 Moscow time, unavailable at open-of-day |
+| MOEX ISS IMOEX | Using same-day IMOEX close as open-of-day feature | `shift(1)`: yesterday's close is the only available value at today's open |
+| Brent via yfinance | No caching, fails offline/CI | `CachingFetcher` with 24h TTL; fixture data in tests |
+| ExperimentManager | One file per internal research config (100+ files) | One experiment per research loop run; use JSONL for sub-results |
+| Feature engineering | All pairwise combinations without cap | Hard cap at `n_samples / 20`; permutation test before selection |
 
 ---
 
@@ -180,11 +268,10 @@ Phase implementing auto-apply for strategy toggles. Position-ownership tagging s
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Running all 3 interaction test backtests sequentially without segment filtering | Interaction test takes 3-4 hours per run (3 backtests × 12 segments × 30min each) | Pass `--segments <relevant_segment>` to interaction test runner. Most experiments affect 1-2 segments | Immediately — a 3-segment A/B/AB test already takes ~3 hours |
-| Conflict detector running on every agent invocation (no cooldown) | Agent invocations slow from <1s to 5s+ as detector reads all debate files | Conflict detector reads debate file directory once per agent session, not per claim. Cache directory listing with 60s TTL | When `.planning/debates/` accumulates > 50 files |
-| Arbiter running `ast-index rebuild` before every claim verification | Arbiter runs take 30+ minutes instead of 30s | `ast-index rebuild` only when codebase changes (detect via `git status --porcelain`). Otherwise use existing index | Immediately if rebuild is in every arbiter invocation |
-| Experiment registry scanning all experiment files for `get_by_debate()` | Reverse lookup (debate → experiment) takes O(N) file reads | Add a reverse index: on experiment create, append to `.planning/experiments/index.json` with `{debate_id: experiment_id}` mapping | When > 20 experiments exist |
-| Auto-apply triggering a full `run_iteration.py` for backtest validation pre-apply | Adds 30+ minutes to every auto-apply event | Separate the backtest-validate step (run by experiment runner) from the apply step (triggered by verdict). Apply should consume pre-existing results, not re-run backtests | Immediately if validation backtest is inline in apply |
+| Fetching all MOEX candles in single gRPC call | `grpc_timeout` exceeded; fetch returns empty | Batch by 30-day windows (T-Invest API limit); retry on `UNAVAILABLE` | Any symbol with > 1 year of daily candles |
+| Re-training 3 models per fold per experiment without data caching | 2–4 hour runtime for one MOEX segment research run | Pre-cache feature matrices to disk after first build; add `--skip-data-fetch` flag | Any run beyond 20 experiment configs |
+| `select_features_efficient()` called independently per fold | Feature sets differ fold-to-fold, adding noise to fold comparison | Fix feature set after first baseline fold; reuse across subsequent folds of same experiment | Every multi-fold experiment — already partially avoided by `config.feature_subset` |
+| Combinatorial feature generation without cap | Feature selection takes > 5 min; hundreds of pointless candidates | Hard cap at `n_samples / 20` candidates; generate domain-motivated pairs only | Any MOEX segment with < 1000 samples |
 
 ---
 
@@ -192,34 +279,23 @@ Phase implementing auto-apply for strategy toggles. Position-ownership tagging s
 
 | Mistake | Risk | Prevention |
 |---------|------|------------|
-| Writing auto-applied preset YAML content derived from experiment YAML frontmatter without sanitizing `preset_overrides` | Path traversal or YAML injection if `experiment_id` or `preset_overrides` keys contain `../` or YAML anchors | Validate `experiment_id` with `[a-zA-Z0-9_-]` pattern at experiment creation. Use `yaml.safe_load()` for all YAML reads. Validate that `preset_overrides` keys match known segment IDs before applying |
-| Arbiter agent executes `ast-index` with a `FileLineSource.path` that contains shell metacharacters | Shell injection if arbiter uses `subprocess.run(f"ast-index outline {path}", shell=True)` | Always pass arguments as a list to `subprocess.run()`: `["ast-index", "outline", path]`. Never use `shell=True`. Validate that `path` starts with `src/` or `tests/` before passing to subprocess |
-| Auto-apply modifies strategy parameters that affect position sizing limits | Malicious or buggy experiment verdict could set `weight: 10.0` (10x normal weight), bypassing Kelly sizing limits | Validate all auto-applied numeric parameters against schema bounds before writing: `weight` must be in `[0.0, 1.0]`, `min_combined_confidence` must be in `[0.30, 0.60]`. Reject any value outside predefined safe ranges |
-| Debate file YAML frontmatter allows arbitrary `experiment_id` strings that map to file paths | A crafted `experiment_id` of `../../some_other_file` could cause `ExperimentManager._experiment_path()` to write outside `.planning/experiments/` | Strip and validate `experiment_id` to `[a-zA-Z0-9_-]` only. Use `Path(self._base_dir / f"{experiment_id}.md").resolve()` and assert it starts with `self._base_dir.resolve()` |
-
----
-
-## UX Pitfalls
-
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Experiment verdict shown as "ACCEPTED" in dashboard but auto-apply is still pending (sandbox gate not cleared) | User believes parameters are live; audits the system; finds old parameters | Add explicit `PENDING_APPLY` status between ACCEPTED and applied. Dashboard shows "Accepted — awaiting sandbox validation (Day 2/3)" |
-| Debate files accumulate without resolution; dashboard shows 30+ "open" debates | User loses trust in the debate system — debates are created but nothing comes of them | Add a "stale debate" alert: any debate with `status: open` and `arbiter_report: null` older than 48 hours triggers a Telegram warning |
-| Auto-apply event not surfaced in Telegram alerts | User not notified that strategy parameters changed autonomously during live trading | Every auto-apply event MUST fire a Telegram alert with: old parameters, new parameters, experiment ID, and a "REVERT" command option |
-| Experiment Lab UI shows experiment history mixed with backtest iterations | User cannot distinguish "experiment ran as hypothesis test" from "regular optimization run" | Filter experiment-tagged entries from the main iteration history view. Show experiments only in the Experiment Lab tab |
+| Logging `FINALAYZE_TINKOFF_TOKEN` in experiment JSONL | Token in plaintext file that may be committed to git | Never include env vars in `ExperimentResult`; scrub config dict before logging |
+| Storing trained model pickle files in `results/experiments/` | Pickle deserialization vulnerability if results dir is shared | Keep model files in `models/<segment>/` only; reference by path in experiment log |
+| ExperimentManager writing verdicts without snapshot_sha | Stale claim applied to wrong codebase version | Reuse `snapshot_sha` mechanism from `AgentOrchestrator` when integrating |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Conflict detection**: Often missing the "same-topic debounce" check — verify that creating two debates on the same topic within 24 hours creates only one file, not two
-- [ ] **Auto-apply circuit breaker gate**: Often implemented but only checked at verdict time, not at apply time — verify that a circuit breaker trip BETWEEN verdict and apply still blocks the apply
-- [ ] **Preset cache invalidation**: Often missing after auto-apply — verify that the combiner uses new parameters on the NEXT cycle, not 2+ cycles later
-- [ ] **Position ownership tagging**: Required for strategy-disable auto-apply — verify that `_entry_strategy` tracking exists before the disable path is implemented
-- [ ] **Telegram auto-apply alerts**: Often added to the happy path but not to the rejection/rollback path — verify alerts fire for BOTH successful apply and blocked apply events
-- [ ] **Sandbox gate completion**: Auto-apply may mark experiment as "applied" before the sandbox gate period completes — verify that `status: applied` is only set after all sandbox gate checks pass, not when the YAML write completes
-- [ ] **Experiment-tagged history.jsonl entries**: Often experiment runs are indistinguishable from regular runs — verify `tags: [experiment, {experiment_id}]` is present on all experiment iteration entries
-- [ ] **Atomic preset rename**: Often implemented as `write_text()` (non-atomic) — verify that the staging-file-plus-rename pattern is used, not direct overwrite
+- [ ] **MOEX data adapter:** `_fetch_moex_candles()` returns non-empty candles for `SBER` — verify by running against live API, not just a unit test with a mock
+- [ ] **Sandbox=False for training:** `TinkoffFetcher` instantiated with `sandbox=False` in training path — check the constructor call, not just docs
+- [ ] **Macro features shift:** `cbr_rate` in feature vector uses yesterday's rate, not today's — inspect first 3 rows of feature matrix manually for a known CBR announcement date
+- [ ] **Walk-forward folds count:** `generate_folds()` for `ru_blue_chips` returns >= 3 folds — log fold count before proceeding; abort if < 3
+- [ ] **Degenerate predictor rejection:** All-BUY predictor fails `class_balance` gate before accuracy is evaluated — add unit test for this exact scenario
+- [ ] **ExperimentManager ID uniqueness:** Running the script twice for the same segment produces experiment IDs with different timestamps — no file collisions, no overwrites
+- [ ] **Ensemble weight confidence interval:** Weight optimization uses OOS folds for fitting — inspect weight fitting code for any use of training data
+- [ ] **Cross-segment distribution shift:** JS divergence check executed and logged before applying US feature list to MOEX — look for `feature_distribution_shift` log entry
+- [ ] **Brent fixture in CI:** `pytest` passes without network access using fixture Brent candles — run with `FINALAYZE_TINKOFF_TOKEN=` unset to simulate CI
 
 ---
 
@@ -227,12 +303,14 @@ Phase implementing auto-apply for strategy toggles. Position-ownership tagging s
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Auto-apply applied bad parameters to live preset | HIGH | 1. Send `/stop` via Telegram bot to halt trading. 2. Manually restore preset YAML from git history (`git show HEAD:src/finalayze/strategies/presets/ru_blue_chips.yaml`). 3. Restart TradingLoop. 4. Mark experiment as REJECTED manually. 5. Review circuit breaker state before resuming |
-| Debate storm created 20+ experiments from one conflict | MEDIUM | 1. Set all `status: open` debate files to `status: closed` manually. 2. Delete pending experiment files with no backtest results. 3. Tighten conflict detector confidence delta threshold. 4. Restart experiment queue |
-| Preset file partially written (truncated during crash) | MEDIUM | 1. Check `.planning/experiments/` for `.pending` files. 2. Compare file size against git baseline: `git diff --stat HEAD`. 3. Restore from git or from the most recent `history.jsonl` entry that preceded the crash |
-| Strategy disabled while positions open | HIGH | 1. Do not re-enable the strategy (creates new signals that may contradict open position direction). 2. Wait for ATR stop-loss to close positions naturally. 3. If position is deeply negative, use Telegram `/stop` + manual close via broker UI. 4. After positions clear, re-enable strategy if appropriate |
-| Arbiter creates false CONTRADICTED verdict (due to file change after claim creation) | LOW | 1. Mark debate as `status: closed` with note "arbiter evaluated stale code state". 2. If experiment was triggered, set experiment to `status: inconclusive`. 3. Add `snapshot_sha` to the claim schema for future debates |
-| Circular experiment chain (experiment reverses auto-apply, triggers new experiment) | HIGH | 1. Manually set all chained experiments to `status: inconclusive`. 2. Remove `.pending` preset files. 3. Set circuit breaker to manual hold. 4. Add topic freeze in conflict detector for the contested parameter |
+| Look-ahead bias in macro features | HIGH | Fix shift; retrain all MOEX models from scratch; invalidate all saved `ru_*` model files in `models/` |
+| TinkoffFetcher returns empty candles | LOW | Check token present, `sandbox=False`, registry initialized; add debug logging to `_run_async`; test manually |
+| Zero valid folds for MOEX | MEDIUM | Adjust fold constants per MOEX-specific values; may need to reduce `_PURGE_GAP` proportionally to MOEX trading days (~250/yr) |
+| ExperimentManager file conflicts | LOW | Delete conflicting `.md` files; add segment prefix + timestamp to all IDs going forward |
+| Ensemble weights overfit | MEDIUM | Reset to equal weights; re-run quality gate evaluation; document that weight optimization requires >= 4 folds |
+| Cross-segment transfer fails | MEDIUM | Discard US feature list; run MOEX-native feature selection from scratch on MOEX data only |
+| Combinatorial feature explosion | LOW | Delete generated candidates; cap at `n_samples / 20`; add permutation test before selection |
+| Brent non-determinism in CI | LOW | Add fixture file; wrap Brent fetch in `CachingFetcher` with 24h TTL |
 
 ---
 
@@ -240,27 +318,32 @@ Phase implementing auto-apply for strategy toggles. Position-ownership tagging s
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Auto-apply bypasses pre-trade pipeline (Pitfall 1) | Auto-apply phase: `apply_verdict()` implementation | Test: set circuit breaker to HALTED, trigger auto-apply verdict, verify no preset file written |
-| Debate storm from oversensitive conflict detection (Pitfall 2) | Conflict detector phase | Test: inject 10 conflicting agent outputs for same topic, verify only 1 debate file created with debouncing |
-| File-write race with live cycle (Pitfall 3) | Auto-apply phase: staging-file-plus-rename pattern | Test: write preset mid-cycle and verify combiner uses old params for current cycle, new params for next |
-| Backtest ACCEPT doesn't translate to live (Pitfall 4) | Auto-apply phase: sandbox gate requirement | Test: sandbox gate must be required field in apply workflow; missing gate = apply blocked |
-| Arbiter false CONTRADICTED after code change (Pitfall 5) | Debate schema phase (add `snapshot_sha`) and auto-apply changelog phase | Test: modify a preset, then run arbiter on a pre-change claim, verify `UNTESTABLE` not `CONTRADICTED` |
-| Strategy toggle leaves unmanaged positions (Pitfall 6) | Auto-apply phase for toggles + position ownership tagging | Test: open position with strategy X, disable strategy X via auto-apply, verify apply is blocked until position closes |
+| TinkoffFetcher sync integration (Pitfall 1) | Phase 1: MOEX data adapter | pytest with real or mock fetcher returns candles for 3+ MOEX symbols; 0-candle result fails loudly |
+| Sandbox endpoint for training (Pitfall 9) | Phase 1: MOEX data adapter | `sandbox=False` assertion in training code; unit test verifies correct endpoint used |
+| Look-ahead bias in macro features (Pitfall 2) | Phase 2: MOEX macro features | Unit test: synthetic macro with known lag, assert feature uses t-1 value |
+| Brent yfinance non-determinism (Pitfall 8) | Phase 2: MOEX macro features | pytest passes without network access using fixture data |
+| Zero valid folds for MOEX (Pitfall 3) | Phase 1 + Phase 3 | `generate_folds()` returns >= 3 folds for `ru_blue_chips`; script aborts if fewer |
+| Degenerate predictor bypass (Pitfall 4) | Phase 3: Adaptive quality gates | Unit test: all-BUY predictor on 60%-positive class fails class_balance gate; overall_passed=False |
+| ExperimentManager ID conflicts (Pitfall 5) | Phase 4: ExperimentManager integration | Two parallel segment runs produce non-overlapping `.md` files |
+| Ensemble weight overfitting (Pitfall 6) | Phase 5: Ensemble weight optimization | CI check: equal weights used when n_folds < 4; weight CI includes 1/3 → no deviation |
+| Cross-segment distribution shift (Pitfall 7) | Phase 6: Cross-segment transfer | Distribution shift log present; US-only features excluded from MOEX feature set |
+| Combinatorial feature explosion (Pitfall 10) | Phase 6: Automatic feature engineering | Feature candidate count logged; always <= n_samples/20 before selection |
 
 ---
 
 ## Sources
 
-- Codebase analysis: `src/finalayze/risk/circuit_breaker.py` — CircuitLevel states, sticky escalation rules
-- Codebase analysis: `src/finalayze/risk/pre_trade_check.py` — 11-check pipeline, `_HALTING_LEVELS`
-- Codebase analysis: `src/finalayze/orchestration/trading_loop.py` — `_stop_states`, `_entry_prices`, APScheduler cycle structure
-- Codebase analysis: `src/finalayze/strategies/combiner.py` — preset cache loading, segment-per-instance caching
-- Codebase analysis: `src/finalayze/strategies/presets/ru_blue_chips.yaml` — preset YAML structure
-- Phase 33 research: `.planning/phases/33-structured-debate-protocol/33-RESEARCH.md` — debate schema pitfalls (line drift, float tolerance, orphan debates)
-- Phase 34 research: `.planning/phases/34-experiment-registry-runner/34-RESEARCH.md` — preset override mechanics, verdict computation, interaction test race conditions
-- `.planning/PROJECT.md` — v8.0 requirements, constraints (500K-2.5M RUB capital, 10% max drawdown hard limit)
-- `.planning/research/PITFALLS.md` (v6.0) — prior stability pitfalls; pattern for this document
+- Codebase inspection: `scripts/auto_ml_research.py` (sync data fetch pattern, fold generation constants, experiment config naming)
+- Codebase inspection: `src/finalayze/ml/training/quality_gates.py` (accuracy cap at 0.55, `_SMALL_SAMPLE_CUTOFF=20`, Brier dynamic threshold, gate evaluation order)
+- Codebase inspection: `src/finalayze/data/fetchers/tinkoff_data.py` (gRPC event loop pattern, sandbox vs live endpoint, `GRPC_DNS_RESOLVER=native`)
+- Codebase inspection: `src/finalayze/core/experiment_manager.py` (file-based CRUD, flat namespace, `write_text()` non-atomicity)
+- Codebase inspection: `src/finalayze/ml/features/technical.py` (feature naming, `_MIN_CANDLES=80`, `MoexMarketData` usage)
+- `.planning/PROJECT.md` §Data Sources (Brent via yfinance, CBR XML, MOEX ISS), §Known Issues (ML quality gates fail for small MOEX datasets), §Constraints
+- `MEMORY.md` (gRPC C-ares resolver fix, SDK target override, sandbox vs live endpoint distinction, `FINALAYZE_TINKOFF_TOKEN` env var)
+- Known constraint: T-Invest sandbox endpoint has no historical candles (verified in prior v6.0 development)
+- Known constraint: MOEX history ~730 days vs US ~1825 days (documented in `auto_ml_research.py` constants `_MOEX_LOOKBACK_DAYS=730`)
+- Known constraint: `_MOEX_MAX_FEATURES=10` vs `_US_MAX_FEATURES=15` (documented in `auto_ml_research.py`)
 
 ---
-*Pitfalls research for: multi-agent orchestration + conflict detection + auto-apply loop on live MOEX trading system*
-*Researched: 2026-04-12*
+*Pitfalls research for: MOEX ML AutoResearch & Adaptation (v9.0 milestone)*
+*Researched: 2026-04-13*

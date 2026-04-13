@@ -1,240 +1,122 @@
-# Feature Research
+# Feature Landscape
 
-**Domain:** Multi-agent orchestration & autonomous decision loop for algorithmic trading
-**Researched:** 2026-04-12
-**Confidence:** HIGH (grounded in existing codebase + industry research)
+**Domain:** ML AutoResearch & MOEX Adaptation
+**Researched:** 2026-04-13
 
----
+## Context
 
-## Context: What Already Exists (v7.0 baseline)
+This milestone (v9.0) extends the existing `auto_ml_research.py` — which already runs 4 search strategies (ablation, efficiency, hyperparameter, random_subset) on US segments only — to support MOEX segments via TinkoffFetcher, and adds 3 new search strategies (ensemble_weights, feature_engineering, cross_segment_transfer). The ExperimentManager (markdown+YAML frontmatter, CRUD, verdict lifecycle) already exists from v8.0 and must be integrated as the persistence backend.
 
-Before categorizing features, the existing infrastructure must be understood to avoid
-re-building what is already there:
+### Key Existing Constraints
 
-| Component | Status | Location |
-|-----------|--------|----------|
-| `AgentOutput` schema (claims, recommendation, timestamp) | BUILT | `core/schemas.py` |
-| `Claim` schema with `ClaimSource` (file/metric discriminator) | BUILT | `core/schemas.py` |
-| `FactCheckReport`, `ClaimVerdict`, `ClaimCheckResult` | BUILT | `core/schemas.py` |
-| `DebateState`, `DebateStatus` (open/resolved/escalated) | BUILT | `core/schemas.py` |
-| `DebateManager` (CRUD, add_agent_position, add_arbiter_report, escalate) | BUILT | `core/debate_manager.py` |
-| `ExperimentManager` (create, link_result, record_verdict, list, get_by_debate) | BUILT | `core/experiment_manager.py` |
-| `ExperimentState`, `SuccessCriteria`, `ExperimentResult`, `ExperimentStatus` | BUILT | `core/schemas.py` |
-| `_compute_verdict()` with INCONCLUSIVE 10% band | BUILT | `core/experiment_manager.py` |
-| Experiment Lab Streamlit UI (list/detail/history tabs, Plotly charts) | BUILT | `dashboard/pages/experiments_list.py` |
-| 18 Claude Code sub-agents (quant-analyst, risk-officer, ml-engineer, etc.) | BUILT | `.claude/agents/` |
-| Weekly deep-dive skill (parallel sub-agents + deliberation rounds) | BUILT | `.claude/skills/weekly-deep-dive.md` |
-| Backtest engine with `--hypothesis` and `--run-name` flags | BUILT | `backtest/` |
-| Debate→experiment bidirectional link (escalate_debate, debate_id on ExperimentState) | BUILT | both managers |
-
-**The gap:** None of the above components are wired to each other in a running pipeline.
-Agents (weekly-deep-dive, daily-review) produce unstructured markdown. `AgentOutput` is
-never emitted by any agent skill. Conflict detection does not exist. Debate/experiment
-lifecycle is manually invoked only. Auto-apply on verdict is not implemented.
+- `auto_ml_research.py` is a standalone script; its data path is hardcoded to `YFinanceFetcher`. No MOEX segment IDs appear in `_SEGMENT_SYMBOLS`.
+- `train_models.py` already has MOEX-aware helpers: `_is_moex_segment()`, `_get_lookback_days()` (730 days), `_get_max_features()` (10 vs 15), `_get_xgboost_max_depth()` (3 vs 5), and uses `TinkoffFetcher` for `ru_*` segments. These patterns must be replicated — not reinvented — in `auto_ml_research.py`.
+- Quality gates already have partial MOEX accommodation: accuracy gate caps at 0.55 for n_eff < 20, and Brier gate uses dynamic thresholds via `_dynamic_brier_threshold(n_eff)`. The signal_count gate (_MIN_SIGNALS = 50) is the primary blocker for MOEX: MOEX walk-forward folds with 730 days of history produce far fewer than 50 signals per fold.
+- 10 Russian macro features already exist in `ml/features/technical.py` (USDRUB z-score, Brent z-score, CBR key rate, IMOEX turnover, etc.) behind `MoexMarketData`. These features are wired in `train_models.py` but not yet fetched inside `auto_ml_research.py`.
+- `EnsembleModel` accepts `model_weights: dict[str, float]` and has a `_get_model_weight()` resolver. Equal weighting is the default when no weights dict is provided.
+- `ExperimentState` + `ExperimentManager` are in Layer 0 / Layer 0; they persist experiments as markdown files in `.planning/experiments/`. Integration means creating an ExperimentState at loop start and recording results/verdicts at loop end.
 
 ---
 
-## Feature Landscape
+## Table Stakes
 
-### Table Stakes (Users Expect These)
-
-These are the minimum features for v8.0 to deliver on its stated goal: "wire debate/experiment
-infrastructure into live agent workflows so agents emit structured claims, conflicts
-auto-trigger debates, and experiment verdicts auto-apply."
+Features users expect. Missing = autoresearch pipeline feels broken for MOEX.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Agents emit `AgentOutput` with structured `Claim` objects | Foundational contract -- all downstream features require it. Currently agents produce unstructured markdown, making the debate/experiment infrastructure unreachable. | MEDIUM | Wire into weekly-deep-dive and daily-review skills. `Claim` must include source references (`MetricSource` from history.jsonl or `FileLineSource` from YAML presets). Ungrounded claims are worse than markdown -- false precision. |
-| Conflict detector comparing multi-agent outputs for contradictions | The only reason to run multiple agents in parallel is to surface disagreements. Without detection, parallel agents are just expensive parallel summarizers. | HIGH | Compare `AgentOutput` objects from the same review round. Identify claims with the same topic but opposing direction or contradicting magnitude. Must handle same claim stated in different words (semantic, not string equality). See complexity notes below. |
-| Arbiter auto-triggers on detected conflict | Manual arbiter invocation breaks the autonomous loop. Without auto-trigger, conflicts sit unresolved in files indefinitely. | HIGH | When `ConflictDetector` fires: create debate via `DebateManager.create_debate()`, add agent positions, run arbiter agent, record `FactCheckReport` via `add_arbiter_report()`, escalate to experiment if warranted via `escalate_debate()`. |
-| Full orchestration: disagreement -> debate -> experiment -> backtest -> verdict | The complete v8.0 value proposition. All sub-components exist; the work is the coordinator that sequences them. | HIGH | Orchestrator calls: detect -> create debate -> arbiter runs -> escalate -> trigger backtest (`--hypothesis`, `--run-name`) -> `record_verdict()`. Must be resumable: file-based state in DebateManager/ExperimentManager already provides persistence. |
-| Auto-apply on ACCEPT: parameter changes or strategy toggles | Without auto-apply, `ExperimentStatus.ACCEPTED` verdicts sit in files with zero effect on the live system. The loop is not autonomous if humans must manually apply results. | HIGH | Read `preset_overrides` from `ExperimentState`, write to strategy YAML presets. Snapshot current YAML to `.planning/param-history/` before overwrite. Log apply action to history.jsonl with `source: experiment_id`. Never apply on INCONCLUSIVE or REJECTED. |
-| INCONCLUSIVE routing -> Telegram alert | The 10% inconclusive band already exists in `_compute_verdict()`. Without routing INCONCLUSIVE to human review, these results stall the pipeline silently. | LOW | On `ExperimentStatus.INCONCLUSIVE`: emit Telegram alert to human with experiment_id and verdict reasoning. Add to a pending review queue. Do not auto-apply. |
+| MOEX data adapter (TinkoffFetcher path) | `auto_ml_research.py` is US-only today; no MOEX segments work | Medium | Must mirror `train_models.py` MOEX branch: TinkoffFetcher for candles, MOEX ISS for IMOEX index, CBR XML for key rate + FX, yfinance for Brent (BZ=F). Async wrappers exist in TinkoffFetcher; the fetch must be driven via `_run_async()` from sync context like the fetcher already does. |
+| MOEX macro features in autoresearch pipeline | Already computed in `train_models.py` for `ru_*`; absence here is a gap | Medium | `MoexMarketData` schema exists. Need to build it in `auto_ml_research.py` then pass as `market_context.moex_data` to `build_triple_barrier_dataset()`. The 10 features (usdrub_zscore_60d, brent_zscore_60d, cbr_key_rate, imoex_index, etc.) are already implemented in `technical.py`; the gap is the fetch-and-wire step. |
+| Adaptive quality gates for small MOEX datasets | MOEX 730-day history yields ~2 walk-forward folds with current WF params; signal_count gate (min 50) fails almost universally | Medium | Accuracy and Brier gates are already partially adaptive. Critical gap: signal_count gate uses a fixed threshold of 50 that does not scale with dataset size. Need n_eff-scaled minimum: `max(10, int(50 * n_eff / 100))` or similar. Also need MOEX-specific WF params: shorter train (6 mo), shorter test (2 mo), shorter step (1.5 mo) to generate more folds from 730 days. |
+| ExperimentManager integration | v8.0 built the entire experiment lifecycle (create, run, verdict, debate linkage); autoresearch currently writes raw JSONL with no connection to this | Medium | At loop start: `manager.create(experiment_id, hypothesis, success_criteria)`. After each experiment: `manager.record_result(...)`. At loop end: `manager.compute_verdict(...)`. The JSONL log can remain as a parallel append-only audit trail. |
+| MOEX segment symbols in _SEGMENT_SYMBOLS | Current dict only has US segments; trying `--segment ru_blue_chips` crashes immediately | Low | Copy from `train_models.py`: ru_blue_chips, ru_energy, ru_tech, ru_finance. FIGI resolution already handled inside TinkoffFetcher (`_symbol_to_figi()`). |
+| MOEX-tuned default hyperparameters | XGBoost max_depth should default to 3 (not 5), CatBoost depth to 3 (not 4) for MOEX to prevent overfitting on small datasets | Low | Pattern already in `train_models.py`. `ExperimentConfig.hparams` needs a `_MOEX_DEFAULT_HPARAMS` variant and the loader should pick based on `_is_moex_segment()`. |
 
-### Differentiators (Beyond Standard Multi-Agent Patterns)
+---
 
-These features go beyond the TradingAgents-style debate pattern and are specific to
-Finalayze's needs as a live trading system managing real capital (500K-2.5M RUB).
+## Differentiators
+
+Features that set the ML autoresearch apart and add real value. Not expected from table stakes alone.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Claim source traceability (file:line or metric:value mandatory) | Makes arbitration fact-checkable against actual data, not LLM opinion. Without this, a `FactCheckReport` is just one LLM judging another LLM with no ground truth. | LOW | Schema already supports it. Gap: agents must populate sources. `MetricSource` ties to history.jsonl (Sharpe, PF, DD). `FileLineSource` references strategy YAML paths. Enforcement: `Claim.source` is already required by the Pydantic schema. |
-| Conflict severity scoring | Not all contradictions are equal. A 2% Sharpe disagreement between agents is less critical than one agent recommending disabling a strategy while another recommends increasing its weight. | MEDIUM | Score based on: magnitude of disagreement, risk category of topic, confidence delta between claims. High-severity conflicts escalate to full debate. Low-severity get noted in weekly summary only. Reduces noise from trivial disagreements. |
-| Rollback safety gate on auto-apply | Auto-apply to live trading parameters without rollback is a production risk. The system must be able to recover from a bad auto-apply before it causes drawdown. | MEDIUM | Before writing preset overrides: snapshot current YAML to `.planning/param-history/YYYYMMDD-HH.yaml`. After apply: on next backtest iteration, if Sharpe or PF degrades beyond a threshold, auto-revert and Telegram alert. One revert attempt only to avoid oscillation. |
-| Debate->experiment UI link in Experiment Lab | Enables auditing why a parameter changed: which agents disagreed, which experiment ran, what verdict was reached. | LOW | The bidirectional link exists in data (DebateState.experiment_id, ExperimentState.debate_id). Gap: Experiment Lab UI does not surface it. Add clickable link to debate file from experiment detail view. |
+| Ensemble weight optimization strategy | Instead of equal weighting or Optuna hyperparameter tuning, directly search the XGB/LGBM/CatBoost weight simplex to maximize composite score | Medium | Use scipy.optimize.minimize with Dirichlet constraint (weights sum to 1, all >= 0), or grid search over (0.1, 0.2, ... 0.7) for 3-model simplex. Pass found weights to EnsembleModel via `model_weights` dict. Requires evaluation to use the weighted ensemble path, not the simple per-model average. ~15-30 candidate weight sets is a reasonable budget. |
+| Feature engineering strategy (auto-generate lags/rolling/interactions) | Discovers MOEX-specific signal combinations not in the hand-crafted 45-feature set | High | Generate candidate features: rolling windows (5, 10, 20, 60 days) of existing features, lag-1/lag-5 of macro features, ratio features (e.g. close/imoex, volume_zscore * cbr_direction). Then run MI-based selection from the expanded pool. Risk: combinatorial explosion — cap at generating 3x the existing feature count, then MI selects down to max_features. |
+| Cross-segment transfer strategy (US to MOEX) | Validates whether feature sets and hyperparameter configs that worked for us_tech translate to ru_blue_chips, avoiding redundant search | High | Fetch the best experiment result from `results/experiments/us_tech_experiment_log.jsonl`, extract `features_used` and `hparams`, run those configs on the target MOEX segment without additional search. Record as a hypothesis: "US-optimal config transfers to MOEX". Expected outcome: partial transfer (regime/macro features transfer, US-specific cross-asset features do not). |
+| Hypothesis-linked verdicts in ExperimentManager | Each autoresearch run becomes a tracked scientific hypothesis with automated ACCEPTED/REJECTED/INCONCLUSIVE verdict, linkable to debates | Low (given ExperimentManager exists) | The `SuccessCriteria` maps naturally to the composite score threshold (e.g., `metric: "avg_accuracy", threshold: 0.53, operator: ">="`). Verdict computation is already implemented in `ExperimentManager.compute_verdict()`. The work is wiring call sites: create experiment before loop, record after each fold batch, compute verdict at end. |
+| Per-strategy experiment IDs | Each autoresearch strategy (ablation, efficiency, hyperparameter, random_subset, ensemble_weights, feature_engineering, cross_segment_transfer) creates a separate ExperimentState | Low | Allows surgical comparison: "did ensemble weight optimization on ru_blue_chips outperform hyperparameter search?" Experiment IDs follow pattern: `{segment_id}-{strategy}-{date}`. |
 
-### Anti-Features (Commonly Requested, Often Problematic)
+---
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| Full LLM-to-LLM natural language debate for every daily analysis cycle | "Agents should argue like humans" -- rich deliberation sounds thorough | Massively expensive at daily frequency ($5-10/week for weekly review is acceptable; $5-10/day is not). Latency adds 10-60s to daily cycle. LLMs without structured grounding hallucinate evidence in debates. | Reserve natural language deliberation for the weekly-deep-dive skill where it already works well. Daily cycles emit structured `AgentOutput` only. |
-| Real-time conflict detection during live trading | "Catch conflicts as they happen" -- sounds like maximum responsiveness | MOEX trading cycles are sub-minute. Conflict detection adds 10-60s latency. False positives could delay trade execution during market hours. Agents generating signals in real-time are not the same agents doing strategic analysis. | Run conflict detection on the post-cycle analysis batch (weekly-deep-dive, daily-review), not inline with the trading loop. |
-| Automatically hold cash when agents conflict | "Conflict = uncertainty = don't trade" -- sounds risk-conservative | Destroys the trading edge. Agents will frequently disagree on signal magnitude while agreeing on direction. The system would hold cash most of the time. | Use the existing circuit breaker and confidence threshold system. Agent conflicts feed the experiment queue, not the signal combiner. |
-| Agent consensus voting to override backtest threshold | "If all agents agree, the backtest threshold can be lowered" -- appeals to consensus | Undermines empirical validation. LLM consensus is a prior; backtest metrics are evidence. Priors do not override evidence, especially not for live capital deployment. | Agent consensus can increase experiment priority but cannot bypass `SuccessCriteria`. All `ACCEPTED` verdicts require passing the backtest threshold. |
-| Version-controlled parameter history in the database | "Full DB auditability of every parameter change" -- sounds rigorous | Over-engineered for current scale. Adds migration, schema, ORM model, and query layer for a feature that file-based storage handles adequately at 500K-2.5M RUB capital scale. | `preset_overrides` in `ExperimentState` plus YAML backup snapshots provide adequate auditability. |
-| Full gRPC async migration for experiment runner | "The experiment trigger should use fully async gRPC" -- sounds architecturally pure | The backtest engine runs as a subprocess/script, not an async service. Converting it to gRPC is a multi-week rewrite with zero benefit for v8.0. | Trigger backtest via subprocess call (already done with `--hypothesis` and `--run-name` flags). Record results by reading history.jsonl after completion. |
+## Anti-Features
+
+Features to explicitly NOT build.
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| Neural architecture search (LSTM hyperparameter sweep) | LSTM training is 10-50x slower than XGB/LGBM/CatBoost per fold; autoresearch on 730-day MOEX data would take hours per experiment | Keep LSTM out of autoresearch; train LSTM separately via `train_models.py --lstm` only when tree ensemble is validated |
+| Optuna integration inside autoresearch loop | Optuna + walk-forward = nested optimization = severe overfitting; Optuna already exists in `train_models.py` for production training | Autoresearch uses coordinate perturbation (one param at a time) not Bayesian optimization |
+| Real-time data fetching per experiment | Fetching candles for each of 100 experiments would hit TinkoffFetcher rate limits and take hours | Fetch once at loop start (like current `_prepare_data()`), cache in memory, reuse across all experiments |
+| Automated preset application from autoresearch | Autoresearch is research, not production; the 7-gate PresetApplicator pipeline (circuit breaker, SandboxGate, etc.) exists for a reason | autoresearch records experiment_id; human or AgentOrchestrator decides whether to escalate to PresetApplicator |
+| Multi-segment parallel execution | Parallel TinkoffFetcher gRPC calls from multiple processes will exhaust the single API token rate limits | Run segments sequentially; each `--segment` invocation is a separate CLI call |
+| Feature importance persistence as model update | Autoresearch results are research artifacts, not model updates; writing new `selected_features.json` from autoresearch would bypass the production training pipeline | Log `features_used` in JSONL + ExperimentManager only; actual model update requires `train_models.py` run + quality gates |
 
 ---
 
 ## Feature Dependencies
 
 ```
-[Agents emit AgentOutput]
-    └──required-by──> [Conflict Detector]
-                          └──required-by──> [Arbiter auto-trigger]
-                                                └──required-by──> [Full orchestration pipeline]
-                                                                      └──required-by──> [Auto-apply on ACCEPT]
-                                                                      └──required-by──> [INCONCLUSIVE -> Telegram]
-
-[Claim source traceability] ──enhances──> [Agents emit AgentOutput]
-    └──enables──> [Arbiter auto-trigger] (fact-checking requires grounded sources)
-
-[Conflict severity scoring] ──enhances──> [Conflict Detector]
-    └──feeds-into──> [Full orchestration pipeline] (low-severity skips debate, high-severity escalates)
-
-[Rollback safety gate] ──requires──> [Auto-apply on ACCEPT]
-    (cannot rollback what was never applied)
-
-[Debate->experiment UI link] ──requires──> bidirectional link (already built)
-    └──gap: surface in Streamlit only
+MOEX segment symbols in _SEGMENT_SYMBOLS
+  -> MOEX data adapter (TinkoffFetcher path)
+    -> MOEX macro features in autoresearch pipeline
+      -> Adaptive quality gates (signal_count n_eff scaling)
+        -> ExperimentManager integration (hypothesis + verdict)
+          -> Per-strategy experiment IDs
+            -> Cross-segment transfer strategy (reads US experiment results)
+            -> Ensemble weight optimization strategy
+            -> Feature engineering strategy
 ```
 
-### Dependency Notes
-
-- **AgentOutput with sources is the enabler:** Without structured output from agents, the
-  conflict detector has nothing to compare, the arbiter has nothing to fact-check, and the
-  orchestration pipeline cannot start. This must be Phase 1.
-
-- **Conflict detection precedes arbiter:** The arbiter makes an LLM API call. It should only
-  run when the conflict detector identifies a real contradiction, not on every analysis round.
-
-- **INCONCLUSIVE and Auto-apply are mutually exclusive paths:** The `_compute_verdict()` logic
-  already separates these. The gap is routing each path to the correct downstream action
-  (apply vs alert), not the verdict computation itself.
-
-- **Rollback gate depends on auto-apply existing:** It makes no sense to implement rollback
-  before auto-apply is working. Rollback is a v8.x hardening feature, not a v8.0 blocker.
+Critical path: segment symbols -> data adapter -> macro features -> quality gates -> ExperimentManager. The 3 new search strategies depend on all prior steps being stable.
 
 ---
 
-## MVP Definition
+## MVP Recommendation
 
-### Launch With (v8.0)
+Prioritize:
+1. MOEX segment symbols + TinkoffFetcher data adapter — without this, nothing runs on MOEX
+2. MOEX macro features wired into `build_full_dataset()` — already computed in `train_models.py`, gap is only the fetch-and-wire
+3. Adaptive signal_count gate (n_eff-scaled minimum) — current fixed threshold of 50 blocks all MOEX folds
+4. MOEX-tuned default hyperparameters — prevents immediate overfitting before WF can detect it
+5. ExperimentManager integration — research tracking, hypothesis lifecycle
 
-- [ ] Agents emit `AgentOutput` with structured `Claim` objects and mandatory source references --
-      wire into weekly-deep-dive and daily-review skills. This is the prerequisite for all else.
-- [ ] Conflict detector: compare `AgentOutput` objects from the same review round, identify
-      contradicting claims, emit a structured conflict report.
-- [ ] Arbiter auto-triggers on detected conflict: creates debate via `DebateManager`,
-      runs arbiter agent, records `FactCheckReport`, escalates to experiment.
-- [ ] Full orchestration: detect -> debate -> experiment -> backtest trigger -> `record_verdict()`.
-      State persistence via existing file-based managers (no new DB tables needed).
-- [ ] Auto-apply on ACCEPT: read `preset_overrides`, write to YAML preset with backup snapshot.
-- [ ] INCONCLUSIVE routing: Telegram alert to human, no auto-apply.
-- [ ] Claim source traceability: enforce populated sources in agent output (schema already
-      requires it; agent skill implementations must comply).
-
-### Add After Validation (v8.x)
-
-Features to add once the core loop has run in sandbox for 2-4 weeks:
-
-- [ ] Conflict severity scoring -- add after observing real conflict patterns and tuning the
-      detector. Implement once false-positive rate is measurable.
-- [ ] Rollback safety gate -- add once auto-apply has demonstrated it makes changes that need
-      reverting. Premature rollback logic adds complexity with no benefit yet.
-- [ ] Debate->experiment UI link in Experiment Lab -- low-effort, add opportunistically.
-
-### Future Consideration (v9+)
-
-- [ ] Automated daily-review conflict detection (currently weekly only) -- defer until weekly
-      loop is validated and false-positive rate is known.
-- [ ] Agent performance tracking (which agents' claims are VERIFIED vs CONTRADICTED most often).
-- [ ] Multi-experiment interaction testing at orchestration level (beyond manual A/B/AB).
+Defer (later phases):
+- Feature engineering strategy: high complexity, high overfitting risk, low expected signal quality on 730-day MOEX data where variance is high
+- Cross-segment transfer strategy: valuable but depends on having stable US experiment history; run after MOEX baseline is established
+- Ensemble weight optimization: medium value, medium complexity; run after quality gates are confirmed working
 
 ---
 
-## Feature Prioritization Matrix
+## MOEX-Specific Considerations
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Agents emit AgentOutput | HIGH (enabler) | MEDIUM | P1 |
-| Claim source traceability | HIGH (safety) | LOW | P1 |
-| Conflict detector | HIGH | HIGH | P1 |
-| Arbiter auto-trigger | HIGH | HIGH | P1 |
-| Full orchestration pipeline | HIGH | HIGH | P1 |
-| Auto-apply on ACCEPT | HIGH | MEDIUM | P1 |
-| INCONCLUSIVE -> Telegram routing | HIGH (safety) | LOW | P1 |
-| Rollback safety gate | MEDIUM (safety) | MEDIUM | P2 |
-| Conflict severity scoring | MEDIUM | MEDIUM | P2 |
-| Debate->experiment UI link | LOW | LOW | P3 |
+**Dataset size asymmetry:** US segments have 1825 days (~7.3 folds with current WF params). MOEX has 730 days. With current params (12mo train + 2mo cal + 4mo test, 3mo step), MOEX yields only ~1-2 folds — insufficient for `evaluate_walk_forward()` (needs multiple folds to compute gate pass rates). MOEX-specific WF params (6mo train + 1mo cal + 2mo test, 1.5mo step) yield ~4-5 folds from 730 days.
 
-**Priority key:**
-- P1: Must have for v8.0
-- P2: Add when core loop proves out
-- P3: Nice to have, defer to v8.x
+**Symbol universe:** MOEX blue chips (SBER, LKOH, GMKN, ROSN, NVTK, MGNT, TATN, TCSG) have very different data characteristics than US tech. Volume, turnover, and bid-ask spread patterns differ significantly. The ATR uplift of 1.2x (already in `_MOEX_ATR_UPLIFT`) must propagate to autoresearch triple-barrier labeling.
 
----
+**Benchmark alignment:** MOEX uses IMOEX as benchmark (not SPY). The `_align_benchmark()` function is benchmark-agnostic. The `_fetch_benchmark()` function in `auto_ml_research.py` is hardcoded to SPY/yfinance; it needs a MOEX branch fetching IMOEX via MOEX ISS REST API.
 
-## Complexity Notes (for Roadmap Phase Sizing)
+**VIX substitute:** VIX is a US instrument. For MOEX segments, VIX features default to 0.0 (already the default in `technical.py` when `vix_candles=None`). No MOEX volatility index substitute is available via existing fetchers.
 
-### Conflict Detection is the Hardest Problem
-
-Comparing two LLM-generated `AgentOutput` objects for semantic contradiction is non-trivial:
-- String equality fails (same claim, different wording = false negative)
-- Pure embedding similarity misses directional opposition ("strong buy signal" vs "weak sell
-  signal" have similar embeddings but opposite recommendations)
-- Cosine similarity cannot distinguish "Sharpe 0.52" from "Sharpe 0.48" as contradictory
-
-**Practical approach:** Constrain `Claim.statement` vocabulary in agent skill instructions.
-Require claims to follow a structured template: `[METRIC] [DIRECTION] [MAGNITUDE]` where
-DIRECTION is one of: INCREASE/DECREASE/STABLE/ENABLE/DISABLE. This enables deterministic
-contradiction detection (same METRIC, opposite DIRECTION) without LLM involvement for
-common cases. Reserve LLM-based semantic comparison for edge cases where structured parsing
-fails.
-
-**TradingAgents precedent:** The TradingAgents framework (arxiv:2412.20138) uses structured
-documents for information transfer and natural language dialogue only for debates within the
-Researcher Team. This hybrid validates the approach: structure first, narrative second.
-
-### Auto-Apply is a Trust Boundary
-
-Writing to strategy YAML presets affects live capital (500K-2.5M RUB). Implementation must:
-1. Validate that `preset_overrides` keys exist in the target YAML before writing (no key injection)
-2. Snapshot current YAML to `.planning/param-history/` before overwrite (point-in-time backup)
-3. Log the apply action to `results/iterations/history.jsonl` with `source: experiment_id`
-4. Never apply on INCONCLUSIVE or REJECTED (this logic already exists in `_compute_verdict()`)
-5. Validate the resulting YAML parses correctly before committing (avoid corrupted presets)
-
-### Orchestration Pipeline is Coordination Logic, Not New Infrastructure
-
-The sub-components (DebateManager, ExperimentManager, backtest engine with --hypothesis flag)
-already work and are tested. The v8.0 work is writing the coordinator that sequences them.
-This is medium-complexity Python, not infrastructure work. The state machine is:
-
-```
-IDLE -> CONFLICT_DETECTED -> DEBATE_OPEN -> ARBITER_RAN -> EXPERIMENT_CREATED
-     -> BACKTEST_TRIGGERED -> VERDICT_RECORDED -> (APPLIED | HUMAN_REVIEW | REJECTED)
-```
-
-Each transition writes to a file (debate or experiment markdown). Crashes are recoverable
-by reading the current file state and resuming from the last completed transition.
+**Market hours and calendar:** TinkoffFetcher returns candles on MOEX trading days only (already handles Russian holidays). No additional calendar filtering needed in autoresearch.
 
 ---
 
 ## Sources
 
-- Codebase review: `src/finalayze/core/schemas.py` (lines 563-757), `core/debate_manager.py`,
-  `core/experiment_manager.py` -- confirmed existing infrastructure
-- `.planning/PROJECT.md` -- v8.0 requirements confirmed (active requirements section)
-- `.claude/skills/weekly-deep-dive.md` -- existing agent emission pattern (unstructured markdown)
-- TradingAgents framework (arxiv:2412.20138 v7, 2025): bull/bear researcher debate pattern,
-  structured documents + natural language dialogue combination validated at ICML 2025
-- Cogent: multi-agent orchestration failure playbook (semantic hashing for loop detection,
-  escape sequences on conflict detection)
-- Microsoft Azure Architecture Center: AI agent design patterns for enterprise orchestration
-- Multi-agent systems orchestration research (arxiv:2601.13671v1): coordination patterns,
-  centralized/hierarchical models
-
----
-*Feature research for: v8.0 Agent Integration & Autonomous Decision Loop*
-*Researched: 2026-04-12*
+- `scripts/auto_ml_research.py` — current implementation, US-only, 4 strategies
+- `scripts/train_models.py` lines 239-274 — MOEX segment symbols, `_is_moex_segment()`, MOEX-tuned hyperparameters
+- `src/finalayze/ml/training/quality_gates.py` — existing gates; signal_count gate uses fixed `_MIN_SIGNALS = 50`
+- `src/finalayze/ml/features/technical.py` lines 77-463 — 10 MOEX macro features already implemented, behind `MoexMarketData`
+- `src/finalayze/core/schemas.py` lines 453-474, 720-806 — `MoexMarketData`, `ExperimentState`, `SuccessCriteria`
+- `src/finalayze/core/experiment_manager.py` — ExperimentManager CRUD, verdict computation
+- `src/finalayze/ml/models/ensemble.py` lines 40-175 — `model_weights` parameter, `_get_model_weight()` resolver
+- `.planning/PROJECT.md` lines 166-173 — v9.0 active requirements

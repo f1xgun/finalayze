@@ -1,386 +1,398 @@
 # Architecture Research
 
-**Domain:** Agent integration & autonomous decision loop for a live trading system
-**Researched:** 2026-04-12
-**Confidence:** HIGH — based on direct codebase inspection
-
----
+**Domain:** ML AutoResearch & MOEX Adaptation (v9.0)
+**Researched:** 2026-04-13
+**Confidence:** HIGH (direct codebase inspection, no external sources needed)
 
 ## Standard Architecture
 
-### System Overview — v8.0 Target State
+### System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Layer 6: API / Dashboard                                           │
-│  ┌──────────────────┐  ┌───────────────────┐  ┌─────────────────┐  │
-│  │ api/v1/debates   │  │ api/v1/experiments│  │ dashboard/pages │  │
-│  │  (NEW REST)      │  │  (NEW REST)       │  │ experiments_list│  │
-│  └──────────┬───────┘  └────────┬──────────┘  └────────┬────────┘  │
-├─────────────┼───────────────────┼─────────────────────┼────────────┤
-│  Layer 5: Orchestration                                             │
-│  ┌──────────┴───────────────────┴─────────────────────┴─────────┐  │
-│  │  orchestration/agent_orchestrator.py  (NEW)                  │  │
-│  │  - Collects AgentOutputs from domain agents                  │  │
-│  │  - Runs ConflictDetector                                     │  │
-│  │  - Routes conflicts → DebateManager → arbiter-agent          │  │
-│  │  - Routes escalations → ExperimentManager → backtest runner  │  │
-│  │  - On ACCEPTED verdict → PresetApplicator                    │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│  ┌─────────────────────────┐   ┌──────────────────────────────┐    │
-│  │ orchestration/conflict_ │   │ orchestration/preset_        │    │
-│  │ detector.py  (NEW)      │   │ applicator.py  (NEW)         │    │
-│  └─────────────────────────┘   └──────────────────────────────┘    │
-├─────────────────────────────────────────────────────────────────────│
-│  Layer 4: Strategy / Risk                                           │
-│  strategies/combiner.py      risk/position_sizing_pipeline.py       │
-│  (UNCHANGED — receives applied presets)                             │
-├─────────────────────────────────────────────────────────────────────│
-│  Layer 3: Analysis / ML                                             │
-│  analysis/*, ml/*            (domain agents invoke these)           │
-├─────────────────────────────────────────────────────────────────────│
-│  Layer 0: Types & Schemas                                           │
-│  ┌────────────────┐  ┌────────────────────┐  ┌──────────────────┐  │
-│  │ core/schemas.py│  │ core/debate_manager│  │ core/experiment_ │  │
-│  │ AgentOutput    │  │ .py  (EXISTS)      │  │ manager.py       │  │
-│  │ Claim          │  │                    │  │ (EXISTS)         │  │
-│  │ DebateState    │  └────────────────────┘  └──────────────────┘  │
-│  │ ExperimentState│                                                 │
-│  └────────────────┘                                                 │
-└─────────────────────────────────────────────────────────────────────┘
-
-File-based stores (.planning/debates/, .planning/experiments/):
-  ← DebateManager reads/writes →  ← ExperimentManager reads/writes →
-
-Script-based runner (scripts/run_iteration.py --hypothesis <id>):
-  ← invoked by orchestrator or manually →
+scripts/auto_ml_research.py  (sync CLI, entry point)
+        │
+        ├── _prepare_data()           ← MODIFICATION: add MOEX branch
+        │       ├── _fetch_us_candles()   (existing — yfinance)
+        │       └── _fetch_moex_candles() (NEW — TinkoffFetcher via sync bridge)
+        │
+        ├── build_full_dataset()      ← MODIFICATION: accept moex_data kwarg
+        │       └── build_triple_barrier_dataset()
+        │               └── compute_features() in technical.py
+        │                       └── MOEX macro features (already exist, just not wired)
+        │
+        ├── run_experiment()          ← MODIFICATION: pass min_signals threshold
+        │       ├── _run_fold()
+        │       └── evaluate_fold()   ← quality_gates.py (MODIFICATION: min_signals param)
+        │
+        └── _log_result()             ← MODIFICATION: also call ExperimentManager
+                └── ExperimentManager.create_experiment() / link_result() (existing L0)
 ```
 
----
+### New Components vs Modified Components
 
-## Component Responsibilities
+| Component | Status | Location | What Changes |
+|-----------|--------|----------|--------------|
+| `_fetch_moex_candles()` | NEW | `scripts/auto_ml_research.py` | Sync wrapper around TinkoffFetcher |
+| `_fetch_moex_macro()` | NEW | `scripts/auto_ml_research.py` | Loads CBR + IMOEX + Brent into MoexMarketData |
+| `_MOEX_SEGMENT_SYMBOLS` | NEW | `scripts/auto_ml_research.py` | Dict of ru_* segment to symbol lists |
+| `_prepare_data()` | MODIFIED | `scripts/auto_ml_research.py` | Route by segment prefix (us_ vs ru_) |
+| `build_full_dataset()` | MODIFIED | `scripts/auto_ml_research.py` | Accept `moex_data: MoexMarketData | None` kwarg |
+| `run_research_loop()` | MODIFIED | `scripts/auto_ml_research.py` | Accept MOEX segment IDs; set max_features=10 |
+| `main()` argparse | MODIFIED | `scripts/auto_ml_research.py` | Expand --segment choices to include ru_* |
+| `evaluate_fold()` | MODIFIED | `src/finalayze/ml/training/quality_gates.py` | Add `min_signals: int` parameter |
+| Experiment wiring | NEW (opt-in) | `scripts/auto_ml_research.py` | Call ExperimentManager when --experiment-id set |
+| Ensemble weight strategy | NEW | `scripts/auto_ml_research.py` | `generate_ensemble_weight_experiments()` |
+| Feature engineering strategy | NEW | `scripts/auto_ml_research.py` | `generate_feature_engineering_experiments()` |
+| Cross-segment transfer strategy | NEW | `scripts/auto_ml_research.py` | `generate_transfer_experiments()` |
 
-### Existing Components — Unchanged or Lightly Modified
+## Async/Sync Bridging
 
-| Component | Layer | Responsibility | v8.0 Change |
-|-----------|-------|----------------|-------------|
-| `core/schemas.py` | 0 | Pydantic types: `AgentOutput`, `Claim`, `DebateState`, `ExperimentState` | Add `ConflictReport` schema; no structural changes |
-| `core/debate_manager.py` | 0 | CRUD for `.planning/debates/*.md` YAML frontmatter files | No changes needed |
-| `core/experiment_manager.py` | 0 | CRUD for `.planning/experiments/*.md`, verdict logic | No changes needed |
-| `scripts/run_iteration.py` | Script | Backtest runner; `--hypothesis` flag merges `preset_overrides` into strategy configs | No changes needed — already fully wired |
-| `scripts/run_interaction_test.py` | Script | A/B/AB comparison via subprocess calls to `run_iteration.py` | No changes needed |
-| `.claude/agents/arbiter-agent.md` | Agent | Fact-checks claims from `AgentOutput`, produces `FactCheckReport` | No changes needed |
-| `strategies/presets/*.yaml` | Config | Strategy parameter files per segment | MODIFIED by `PresetApplicator` on ACCEPT |
-| `dashboard/pages/experiments_list.py` | 6 | Experiment Lab UI with list/detail/history tabs | Minor: add debate link display in detail view |
+### The Problem
 
-### New Components Required
+`auto_ml_research.py` is a synchronous CLI script. `TinkoffFetcher` exposes a sync `fetch_candles()` method that internally uses `run_coroutine_threadsafe()` on a self-managed background event loop. So **TinkoffFetcher is already safe to call from sync code without any new bridging**.
 
-| Component | Layer | Responsibility |
-|-----------|-------|----------------|
-| `orchestration/conflict_detector.py` | 5 | Compares multiple `AgentOutput` objects; detects contradictions in recommendations or overlapping metric claims |
-| `orchestration/preset_applicator.py` | 5 | Applies `ExperimentState.preset_overrides` to `strategies/presets/*.yaml` on ACCEPT verdict with backup + diff logging |
-| `orchestration/agent_orchestrator.py` | 5 | Full pipeline coordinator: collect outputs → detect conflicts → trigger debate → arbiter → experiment → verdict → apply |
-| `api/v1/debates.py` | 6 | REST endpoints: `GET /debates`, `GET /debates/{id}`, `POST /debates` |
-| `api/v1/experiments.py` | 6 | REST endpoints: `GET /experiments`, `GET /experiments/{id}`, `POST /experiments/{id}/apply` |
-
----
-
-## Recommended Project Structure
+### How TinkoffFetcher Self-Bridges
 
 ```
-src/finalayze/
-├── core/
-│   ├── schemas.py              # EXISTS — add ConflictReport schema only
-│   ├── debate_manager.py       # EXISTS — no changes
-│   └── experiment_manager.py   # EXISTS — no changes
-├── orchestration/
-│   ├── trading_loop.py         # EXISTS
-│   ├── bond_cycle.py           # EXISTS
-│   ├── conflict_detector.py    # NEW
-│   ├── preset_applicator.py    # NEW
-│   └── agent_orchestrator.py   # NEW
-├── api/
-│   └── v1/
-│       ├── router.py           # EXISTS — register new routers
-│       ├── debates.py          # NEW
-│       └── experiments.py      # NEW (experiments apply endpoint)
-└── dashboard/
-    └── pages/
-        └── experiments_list.py # EXISTS — minor: show debate link in detail
+sync caller (autoresearch script)
+    │
+    └── TinkoffFetcher.fetch_candles(sym, start, end)     [sync method]
+            │
+            └── self._run_async(self._fetch_async(...))
+                    │
+                    └── asyncio.run_coroutine_threadsafe(coro, self._loop)
+                            │
+                            └── background daemon thread running event loop
+                                    │
+                                    └── gRPC call → T-Bank API
+```
 
+**Conclusion:** No new bridging code needed. The self-managed loop fallback in `_run_async()` (lines 119-132 of `tinkoff_data.py`) handles standalone script use cases explicitly. The script only needs to construct `TinkoffFetcher` with a valid token and registry.
+
+### Construction in Autoresearch Script
+
+TinkoffFetcher requires two constructor dependencies:
+1. `token: str` — from `FINALAYZE_TINKOFF_TOKEN` env var
+2. `registry: InstrumentRegistry` — from `build_default_registry()` in `src/finalayze/markets/instruments.py`
+
+```python
+# Minimal construction for autoresearch
+import os
+from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
+from finalayze.markets.instruments import build_default_registry
+
+def _make_tinkoff_fetcher() -> TinkoffFetcher:
+    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN", "")
+    if not token:
+        raise RuntimeError("FINALAYZE_TINKOFF_TOKEN not set")
+    registry = build_default_registry()
+    return TinkoffFetcher(token=token, registry=registry, sandbox=True)
+```
+
+`CBRFetcher` and `MoexISSFetcher` are async HTTP (httpx-based). Verify at implementation whether they expose sync wrappers. If not, use `asyncio.run()` once per fetch call — acceptable for a CLI script that is not itself running inside an event loop.
+
+## MOEX Macro Feature Generation
+
+### Existing vs New
+
+The `technical.py` module already computes 10 MOEX macro features when `MoexMarketData` is provided:
+- `usdrub_zscore_60d` (FX z-score)
+- `brent_zscore_60d` (commodity z-score with holiday suppression)
+- `real_rate_zscore` (CBR rate minus CPI, 252d window)
+- `cbr_rate_level`, `cbr_rate_delta` (key rate features)
+- `usdrub_return`, `usdrub_vol` (FX return features)
+- `turnover_zscore` / `turnover_ratio` (MOEX turnover features)
+- `imoex_beta`, `imoex_corr` (cross-asset features against IMOEX benchmark)
+
+**No new feature code is needed in `technical.py`.** The gap is that `auto_ml_research.py` currently passes `vix_candles` and `benchmark_candles` to `build_triple_barrier_dataset()` but never constructs or passes a `MoexMarketData` object, so all MOEX macro features silently default to 0.0 for MOEX segments.
+
+### Integration Point
+
+`build_full_dataset()` must be extended to accept and pass through `moex_data`:
+
+```python
+def build_full_dataset(
+    segment_id: str,
+    candles_by_sym: dict[str, list[Candle]],
+    benchmark_candles: list[Candle] | None,
+    vix_candles: list[Candle] | None,
+    moex_data: MoexMarketData | None = None,  # NEW parameter
+) -> tuple[...]:
+    ...
+    market_ctx = MarketContext(
+        benchmark_candles=benchmark_candles,
+        vix_candles=vix_candles,
+        moex_data=moex_data,  # pass through
+    )
+```
+
+`MarketContext` already holds `moex_data: MoexMarketData | None`. `build_triple_barrier_dataset()` already receives `market_context` and routes to macro features. The wire-up is a 2-line change.
+
+### Macro Data Sources for Autoresearch
+
+The `_fetch_moex_macro()` function must load:
+1. IMOEX candles — via `MoexISSFetcher.fetch_candles("IMOEX", start, end)` (serves as benchmark)
+2. USD/RUB rates — via `CBRFetcher.fetch_fx_rates(start, end)`
+3. CBR key rates — via `CBRFetcher.fetch_key_rates(start, end)`
+4. Brent candles — via `YFinanceFetcher.fetch_candles("BZ=F", start, end)` (yfinance is fine for Brent)
+5. MOEX turnover — via `MoexISSFetcher.fetch_turnover(start, end)` (optional, suppress if unavailable)
+
+Then construct `MoexMarketData(fx_rates=..., key_rates=..., commodity_candles={"BZ=F": brent}, ...)` and pass to `build_full_dataset`.
+
+The preferred shortcut: instantiate `MarketDataLoader` with the same fetchers already used in production and call `loader.load(segment_config_stub, start.date(), end.date())` to get a ready-made `MarketContext` including `moex_data`. This reuses all caching and error-handling logic already tested.
+
+## ExperimentManager Integration
+
+### Current State
+
+`ExperimentManager` is a file-based CRUD store at Layer 0. It operates entirely in sync (file I/O + YAML). It has:
+- `create_experiment(id, hypothesis, success_criteria, debate_id, preset_overrides)` — writes `.planning/experiments/{id}.md`
+- `link_result(id, ExperimentResult)` — appends backtest metrics
+- `record_verdict(id, metric_value)` — computes ACCEPTED/REJECTED/INCONCLUSIVE
+
+### Integration Pattern for Autoresearch
+
+Each research run maps to one `ExperimentManager` experiment. The mapping:
+
+```
+autoresearch concept           ExperimentManager concept
+---------------------------------------------------------
+ExperimentConfig.name       →  experiment_id
+ExperimentConfig.description→  hypothesis
+ExperimentResult.score      →  metric_value (for record_verdict)
+gate_pass_rates + avg_*     →  ExperimentResult.metrics dict
+```
+
+### Wire-up Location
+
+Add optional `--experiment-id` CLI flag. When set, the script:
+1. Calls `ExperimentManager.create_experiment()` once at start of `run_research_loop()`
+2. After each individual experiment in the loop, calls `em.link_result()` with fold metrics
+3. After the loop completes, calls `em.record_verdict()` with `best_score` as the observed metric
+
+When `--experiment-id` is not set, the script runs as before (JSONL log only). This makes the integration opt-in and non-breaking for existing invocations.
+
+### SuccessCriteria for Autoresearch Experiments
+
+```python
+SuccessCriteria(
+    metric="composite_score",
+    threshold=baseline_score,   # must beat the baseline to be ACCEPTED
+    operator="gt",
+)
+```
+
+## New Search Strategies
+
+### Ensemble Weight Optimization
+
+**What it does:** Tries different weighting ratios for XGBoost / LightGBM / CatBoost rather than the default equal-weight average used in `_evaluate_models()`.
+
+**Implementation:** New `generate_ensemble_weight_experiments()`. Adds `ensemble_weights: dict[str, float]` to `ExperimentConfig`. `_evaluate_models()` accepts optional per-model weights and computes weighted average instead of arithmetic mean.
+
+**Weight space:** Grid of (xgb: 0.2-0.6, lgbm: 0.2-0.5, cat: 0.1-0.4), normalized to sum=1.0, ~9-12 configs. Weights stored in `ExperimentConfig.hparams` under keys `w_xgb`, `w_lgbm`, `w_cat`.
+
+### Automatic Feature Engineering
+
+**What it does:** Computes derived features (ratios, lags, pairwise interactions) on top of the base 45 features, then runs efficiency selection on the expanded pool.
+
+**Implementation:** New `generate_feature_engineering_experiments()`. Pre-processing step computes interaction terms (e.g., `rsi14 * volume_zscore_20d`) and lag features (`feat_t-1`, `feat_t-2`). Expands the feature dict before passing to `build_triple_barrier_dataset`. Feature selection (`select_features_efficient`) then prunes from the larger pool.
+
+**Constraints:** Cap at 20 interaction terms (selected by marginal mutual information with label). Lag features add exactly 2 copies per selected base feature. Total expanded pool stays below 90 features to keep selection tractable.
+
+### Cross-Segment Transfer
+
+**What it does:** Trains on US segment data, evaluates on MOEX segment data to test feature transferability. Tests whether US-learned feature importance carries over to MOEX dynamics.
+
+**Implementation:** New `generate_transfer_experiments()`. Loads both segment datasets independently. Computes `shared_features = set(us_features) & set(moex_features)` — this intersection excludes VIX features (US-only) and MOEX macro features (MOEX-only). Trains on US folds using shared features only, evaluates on MOEX test folds.
+
+**Key constraint:** VIX-derived features (vix_level, vix_pct, vix_change) must be excluded from the transferred subset because MOEX returns 0.0 for them. The intersection check handles this automatically.
+
+## Adaptive Quality Gates
+
+### Current Problem
+
+`check_signal_count_gate` uses `_MIN_SIGNALS = 50` as a hard constant. MOEX segments have 3-8 symbols with 730-day lookbacks, producing 15-30 signals per fold — a data-size reality, not a model failure. The gate currently makes every MOEX experiment automatically fail the signal_count check.
+
+### Proposed Fix
+
+Add `min_signals: int = _MIN_SIGNALS` parameter to `evaluate_fold()` and propagate it through `_run_fold()`:
+
+```python
+_MOEX_MIN_SIGNALS = 15  # new constant in quality_gates.py
+
+def evaluate_fold(
+    metrics: FoldMetrics,
+    *,
+    min_signals: int = _MIN_SIGNALS,  # NEW parameter
+) -> list[QualityGateResult]:
+    return [
+        check_accuracy_gate(metrics),
+        check_brier_gate(metrics),
+        check_profit_factor_gate(metrics),
+        check_signal_count_gate(metrics, min_signals=min_signals),  # threaded through
+        check_class_balance_gate(metrics),
+        check_sensitivity_gate(metrics),
+        check_specificity_gate(metrics),
+    ]
+```
+
+Autoresearch script passes `min_signals=_MOEX_MIN_SIGNALS` for `ru_*` segments, `min_signals=_MIN_SIGNALS` for `us_*`. All existing callers of `evaluate_fold()` that pass no `min_signals` get unchanged behavior.
+
+The accuracy gate already has adaptive thresholds for small n_eff (the `_MAX_ACCURACY_THRESHOLD = 0.55` cap). The Brier gate already uses `_dynamic_brier_threshold(n_eff)`. Signal count is the only gate that needs this treatment.
+
+## Data Flow: MOEX Autoresearch Path
+
+```
+CLI: uv run python scripts/auto_ml_research.py --segment ru_blue_chips --strategy all
+
+_prepare_data("ru_blue_chips")
+    │
+    ├── _fetch_moex_candles(["SBER","LKOH","GMKN"], start, end)
+    │       → TinkoffFetcher.fetch_candles()  [sync self-managed loop — no bridge needed]
+    │       → dict[str, list[Candle]]
+    │
+    └── _fetch_moex_macro(start, end)
+            → CBRFetcher.fetch_fx_rates()      [asyncio.run() or MarketDataLoader]
+            → CBRFetcher.fetch_key_rates()
+            → MoexISSFetcher.fetch_candles("IMOEX")
+            → YFinanceFetcher.fetch_candles("BZ=F")
+            → MoexMarketData(fx_rates, key_rates, commodity_candles, ...)
+    │
+    ↓
+build_full_dataset(segment_id, candles_by_sym, benchmark=IMOEX, vix=None, moex_data=moex_data)
+    → build_triple_barrier_dataset() per symbol
+        → compute_features()
+            → 45 technical features
+            → _compute_fx_features(moex_data)        → usdrub_zscore_60d
+            → _compute_commodity_features(moex_data) → brent_zscore_60d
+            → _compute_macro_features(moex_data)     → real_rate_zscore
+            → _compute_cbr_features(moex_data)       → cbr_rate_level, cbr_rate_delta
+    → features: list[dict[str, float]] with MOEX macro features populated (not zeros)
+    │
+    ↓
+generate_folds(timestamps)  [no change]
+    │
+    ↓
+run_research_loop() with max_features=_MOEX_MAX_FEATURES=10, min_signals=15
+    → baseline experiment
+    → ablation / efficiency / hyperparameter / ensemble_weight / feature_eng experiments
+    → _run_fold() → evaluate_fold(metrics, min_signals=15)
+    → _log_result() to JSONL
+    → ExperimentManager.link_result()  [if --experiment-id set]
+    │
+    ↓
+ExperimentManager.record_verdict(experiment_id, best_score)
+    → .planning/experiments/{id}.md updated with ACCEPTED/REJECTED/INCONCLUSIVE
+```
+
+## Recommended File Changes
+
+```
 scripts/
-├── run_iteration.py            # EXISTS — already wired with --hypothesis
-└── run_interaction_test.py     # EXISTS — already wired
+└── auto_ml_research.py          # MODIFIED (~280 lines added)
+    ├── _MOEX_SEGMENT_SYMBOLS    # new constant dict
+    ├── _fetch_moex_candles()    # new function
+    ├── _fetch_moex_macro()      # new function
+    ├── build_full_dataset()     # moex_data param added
+    ├── _prepare_data()          # us/moex routing branch
+    ├── _run_fold()              # min_signals param threaded through
+    ├── generate_ensemble_weight_experiments()    # new strategy
+    ├── generate_feature_engineering_experiments() # new strategy
+    ├── generate_transfer_experiments()            # new strategy
+    └── run_research_loop()      # ExperimentManager opt-in wiring
 
-.planning/
-├── debates/                    # EXISTS (empty at start) — debate files written here
-└── experiments/                # EXISTS (empty at start) — experiment files written here
-
-strategies/presets/
-├── ru_blue_chips.yaml          # EXISTS — modified by PresetApplicator on ACCEPT
-├── ru_blue_chips.yaml.bak.{experiment_id}  # CREATED by PresetApplicator as backup
-└── ...
+src/finalayze/ml/training/
+└── quality_gates.py             # MODIFIED: min_signals param in evaluate_fold()
+                                 #           _MOEX_MIN_SIGNALS = 15 constant
 ```
 
----
+No new source modules are needed. All changes are additive within existing files.
 
-## Architectural Patterns
+## Build Order (Dependency-Driven)
 
-### Pattern 1: Structured Output Emission
+**Step 1: MOEX data adapter** (foundation, no ML changes)
+- Add `_MOEX_SEGMENT_SYMBOLS`, `_fetch_moex_candles()`, `_fetch_moex_macro()` to autoresearch script
+- Route `_prepare_data()` on segment prefix (`ru_` vs `us_`)
+- Verify TinkoffFetcher constructs correctly with `build_default_registry()`
+- Confirm CBRFetcher / MoexISSFetcher can be called from CLI context
 
-**What:** Each domain agent (quant-analyst, risk-officer, ml-engineer) must return an `AgentOutput` Pydantic model when asked for a recommendation. The schema is already defined in `core/schemas.py`.
+Deliverable: `--segment ru_blue_chips` loads data without error, prints candle counts
 
-**When to use:** Any time two or more domain agents are invoked on the same question (e.g., "should we increase momentum weight in ru_blue_chips?").
+**Step 2: MOEX macro features wired** (depends on Step 1)
+- Add `moex_data` kwarg to `build_full_dataset()` and `MarketContext` pass-through
+- Verify MOEX macro features are non-zero in output feature dicts for MOEX segments
 
-**Critical constraint:** `AgentOutput.claims` requires at least one `Claim` with a typed `source` (`FileLineSource` or `MetricSource`). Agents cannot emit opinions without evidence-backed assertions. This is enforced by `min_length=1` in the field definition.
+Deliverable: Feature dicts for MOEX include `usdrub_zscore_60d`, `brent_zscore_60d`, etc. with real values
 
-**How agents connect today:** Agent definitions in `.claude/agents/*.md` are Claude Code sub-agents. They do not have a Python calling interface. The orchestrator (itself a Claude Code agent) invokes them via the sub-agent protocol, then parses the returned text to extract the `AgentOutput` JSON structure. The orchestrator prompt must demand JSON-formatted `AgentOutput`.
+**Step 3: Adaptive quality gates** (independent — can be done in parallel with Steps 1-2)
+- Add `min_signals: int = _MIN_SIGNALS` to `evaluate_fold()` and `check_signal_count_gate()`
+- Add `_MOEX_MIN_SIGNALS = 15` constant to quality_gates.py
+- Pass correct threshold from autoresearch based on segment prefix
 
-### Pattern 2: Conflict Detection
+Deliverable: MOEX experiments no longer auto-fail signal_count gate on 15-30 signals per fold
 
-**What:** `ConflictDetector` compares a list of `AgentOutput` objects and identifies contradictions.
+**Step 4: ExperimentManager integration** (depends on Step 1, independent of Steps 2-3)
+- Add `--experiment-id` optional CLI arg
+- Add opt-in `ExperimentManager` wiring in `run_research_loop()`
+- Map autoresearch `ExperimentResult` fields to `ExperimentManager.link_result()` format
 
-**Implementation approach:** Rule-based detection only — no LLM semantic comparison. Two outputs conflict when:
-1. Their `recommendation` fields contain opposing keywords (enable vs disable, increase vs decrease, raise vs lower)
-2. Their `MetricSource` claims reference the same `metric_name` from the same `iteration` but with values differing by more than a tolerance (e.g., 0.01)
+Deliverable: `--experiment-id moex-v9-ablation` creates experiment file with metrics and verdict
 
-**Output:** A new `ConflictReport` schema in `core/schemas.py` (Layer 0) containing the conflicting agent pair and a human-readable conflict description.
+**Step 5: New search strategies** (depends on Steps 1-3 having a working MOEX baseline)
+- `generate_ensemble_weight_experiments()` — modify `_evaluate_models()` to accept weights
+- `generate_feature_engineering_experiments()` — interaction terms + lag features preprocessing
+- `generate_transfer_experiments()` — cross-segment shared-features training
 
-**Why rule-based:** Deterministic, fast (no LLM call in the hot path), unit-testable with pure fixtures.
+Deliverable: All three new `--strategy` choices work on both US and MOEX segments
 
-### Pattern 3: Debate → Arbiter → Escalation Pipeline
+## Integration Boundaries
 
-**What:** When `ConflictDetector` returns a non-empty `ConflictReport`, the orchestrator executes:
-1. `DebateManager.create_debate(topic, agents)` — creates `.planning/debates/{id}.md`
-2. `DebateManager.add_agent_position(debate_id, agent_name, output)` for each conflicting agent
-3. Invokes `arbiter-agent` sub-agent with debate ID and both `AgentOutput` JSON objects
-4. Arbiter produces `FactCheckReport`; orchestrator calls `DebateManager.add_arbiter_report(debate_id, report)`
-5. If `FactCheckReport.has_contradictions`: calls `ExperimentManager.create_experiment()` which internally calls `DebateManager.escalate_debate()` (bidirectional link)
-6. If no contradictions: calls `DebateManager.resolve_debate(debate_id, resolution)`
-
-**The bidirectional link is already implemented:** `ExperimentManager.create_experiment(debate_id=...)` calls `DebateManager.escalate_debate()` at line 135 of `experiment_manager.py`. No new wiring needed here.
-
-### Pattern 4: Experiment → Backtest → Verdict → Auto-Apply
-
-**What:** After experiment creation (status=PENDING), the orchestrator triggers the backtest pipeline:
-1. Invokes `scripts/run_iteration.py --hypothesis <experiment_id>` (or `run_interaction_test.py` for A/B comparison)
-2. The script reads `ExperimentState.preset_overrides`, deep-merges into strategy configs (lines 1068-1080 of `run_iteration.py`), runs backtest, calls `ExperimentManager.link_result()`
-3. The script calls `ExperimentManager.record_verdict(metric_value)` — computes ACCEPTED/REJECTED/INCONCLUSIVE
-4. Orchestrator reads final `ExperimentState`; if ACCEPTED → `PresetApplicator.apply(experiment)`
-5. If REJECTED/INCONCLUSIVE → no file changes; orchestrator logs and Telegram-alerts
-
-**The backtest wiring is already complete:** Steps 1-3 exist in `run_iteration.py`. The only missing piece is step 4 (PresetApplicator) and the orchestrator reading the final verdict.
-
-### Pattern 5: PresetApplicator Safety Protocol
-
-**What:** A single-responsibility module writing `preset_overrides` to `strategies/presets/*.yaml` on ACCEPT.
-
-**Where:** `orchestration/preset_applicator.py` (Layer 5). Imports `core/schemas.py` (Layer 0). Writes to `strategies/presets/` (filesystem, not a Python import — no layer violation).
-
-**Safety requirements:**
-1. Always back up before writing: `{segment}.yaml.bak.{experiment_id}`
-2. Use the same `_deep_merge()` function pattern as `run_iteration.py` (lines 950-959) for consistency
-3. Log the full YAML diff at INFO level before writing
-4. On write failure, restore from backup and raise
-5. Write a `{segment}.yaml.applied.{experiment_id}` marker file after successful apply — idempotency guard
-
-**Scope limitation:** PresetApplicator writes YAML only. The live `TradingLoop` reads presets at startup. A live-reload signal or restart is required for changes to affect live trading. This is explicitly out of scope for v8.0 — presets apply to the next backtest or restart.
-
----
-
-## Data Flow
-
-### Full Orchestration Flow
-
-```
-Domain agents invoked (quant-analyst, risk-officer, ml-engineer)
-    ↓ each returns AgentOutput JSON (recommendation + claims with sources)
-ConflictDetector.detect(outputs: list[AgentOutput]) → ConflictReport
-    ↓ if no conflicts
-    → debate skipped; winning recommendation logged
-    ↓ if conflicts found
-DebateManager.create_debate(topic, agents) → debate_id
-DebateManager.add_agent_position(debate_id, agent, output) × N
-    ↓
-arbiter-agent invoked with debate_id + AgentOutputs JSON
-    ↓ returns FactCheckReport
-DebateManager.add_arbiter_report(debate_id, report)
-    ↓ if report.has_contradictions == False
-DebateManager.resolve_debate(debate_id, resolution)
-    ↓ if report.has_contradictions == True
-ExperimentManager.create_experiment(
-    experiment_id, hypothesis, success_criteria, debate_id, preset_overrides)
-    → internally calls DebateManager.escalate_debate(debate_id, experiment_id)
-    ↓
-scripts/run_iteration.py --hypothesis <experiment_id>
-    → ExperimentManager.update_status(RUNNING)
-    → reads preset_overrides, deep-merges into strategy_configs
-    → runs backtest engine
-    → ExperimentManager.link_result(ExperimentResult)
-    → ExperimentManager.record_verdict(primary_metric_value)
-      → status = ACCEPTED | REJECTED | INCONCLUSIVE
-    ↓ if status == ACCEPTED
-PresetApplicator.apply(experiment_state)
-    → backs up strategies/presets/{segment}.yaml → .yaml.bak.{experiment_id}
-    → deep-merges preset_overrides into YAML
-    → writes new YAML
-    → logs diff
-    → writes .yaml.applied.{experiment_id} marker
-    ↓ if status == REJECTED or INCONCLUSIVE
-    → log + Telegram alert; no file changes
-```
-
-### State Persistence
-
-All state is file-based. No new database tables are needed for v8.0.
-
-```
-.planning/debates/{debate_id}.md         — YAML frontmatter + markdown body
-.planning/experiments/{exp_id}.md        — YAML frontmatter + markdown body
-results/experiments/{exp_id}/            — per-run backtest JSON files
-results/experiments/{exp_id}/control.json
-results/experiments/{exp_id}/A-only.json (interaction test)
-results/experiments/{exp_id}/B-only.json
-results/experiments/{exp_id}/AB.json
-strategies/presets/{segment}.yaml        — modified by PresetApplicator on ACCEPT
-strategies/presets/{segment}.yaml.bak.{exp_id}  — backup before modification
-strategies/presets/{segment}.yaml.applied.{exp_id}  — idempotency marker
-```
-
-### Agent Invocation Model
-
-Domain agents (quant-analyst, risk-officer, ml-engineer) are Claude Code sub-agents in `.claude/agents/*.md`. They have no Python callable interface and require the Claude Code runtime for MCP tools (`Read`, `Bash`, `ast-index`).
-
-For v8.0, the orchestration pipeline is triggered in two ways:
-
-1. **Manually via Claude Code agent** — human invokes `agent-orchestrator` sub-agent which spawns domain agents, collects outputs, and calls the Python pipeline modules via `Bash` tool
-2. **Via REST API** — `POST /debates` endpoint accepts pre-collected `AgentOutput` JSON bodies and runs the Python pipeline directly (no Claude Code sub-agent invocation from Python)
-
-A fully autonomous trigger from `TradingLoop` (e.g., schedule-based agent invocations) is out of scope for v8.0 because agents require the Claude Code runtime environment, which is not available within the Python process.
-
----
-
-## Integration Points — New vs Modified
-
-| Component | Status | Integration Boundary |
-|-----------|--------|---------------------|
-| `core/schemas.py` | MODIFIED (minimal) | Add `ConflictReport` schema; imported by `conflict_detector.py` (Layer 5) |
-| `orchestration/conflict_detector.py` | NEW | Imports `AgentOutput`, `ConflictReport` from Layer 0 |
-| `orchestration/preset_applicator.py` | NEW | Imports `ExperimentState` from Layer 0; writes `strategies/presets/*.yaml` via filesystem |
-| `orchestration/agent_orchestrator.py` | NEW | Imports `ConflictDetector`, `PresetApplicator` (Layer 5); calls `DebateManager`, `ExperimentManager` (Layer 0) |
-| `api/v1/debates.py` | NEW | Registers on `api/v1/router.py`; reads/writes via `DebateManager` |
-| `api/v1/experiments.py` | NEW | Registers on `api/v1/router.py`; reads via `ExperimentManager`; POST /apply triggers `PresetApplicator` |
-| `api/v1/router.py` | MODIFIED | Include `debates_router` and `experiments_router` |
-| `dashboard/pages/experiments_list.py` | MODIFIED (minor) | Add debate link display in experiment detail tab |
-| `scripts/run_iteration.py` | NOT MODIFIED | Already fully wired with `--hypothesis` and `preset_overrides` merge |
-| `scripts/run_interaction_test.py` | NOT MODIFIED | Already wired for A/B/AB comparison |
-| `core/debate_manager.py` | NOT MODIFIED | All required methods exist: `create_debate`, `add_agent_position`, `add_arbiter_report`, `resolve_debate`, `escalate_debate` |
-| `core/experiment_manager.py` | NOT MODIFIED | All required methods exist: `create_experiment`, `link_result`, `record_verdict`, `get_by_debate` |
-
----
-
-## Suggested Build Order
-
-Dependencies drive the order. Lower-layer components must exist before higher-layer consumers.
-
-### Phase 36: Conflict Detection
-
-1. Add `ConflictReport` schema to `core/schemas.py` (Layer 0 — no deps)
-2. Implement `orchestration/conflict_detector.py` with `detect(outputs: list[AgentOutput]) -> ConflictReport`
-3. Update domain agent `.md` definitions (quant-analyst, risk-officer, ml-engineer) to include instructions for emitting `AgentOutput` JSON
-4. Unit tests for `ConflictDetector` with synthetic `AgentOutput` fixtures
-
-**Rationale:** No upstream dependencies. Can be built and validated in isolation. ConflictDetector is the entry point of the whole pipeline — everything else gates on it.
-
-### Phase 37: Agent Orchestrator + Debate API
-
-1. Implement `orchestration/agent_orchestrator.py` — full pipeline from conflict detection through debate creation and arbiter invocation
-2. Add `api/v1/debates.py` REST endpoints (`GET /debates`, `GET /debates/{id}`, `POST /debates`)
-3. Add read-only endpoints to `api/v1/experiments.py` (`GET /experiments`, `GET /experiments/{id}`)
-4. Register both routers in `api/v1/router.py`
-5. Integration test: supply two conflicting `AgentOutput` JSON objects via `POST /debates`, verify debate file created and arbiter-agent invoked correctly
-
-**Rationale:** Orchestrator depends on ConflictDetector (Phase 36) and existing DebateManager/ExperimentManager. REST endpoints depend on orchestrator. PresetApplicator is not needed yet — keep scope tight.
-
-### Phase 38: PresetApplicator + Auto-Apply
-
-1. Implement `orchestration/preset_applicator.py` with YAML backup + deep merge + diff logging + idempotency marker
-2. Wire `POST /experiments/{id}/apply` endpoint to `PresetApplicator`
-3. Add "Apply to Presets" button to `dashboard/pages/experiments_list.py` detail view (calls API endpoint)
-4. End-to-end integration test: create experiment → run backtest → ACCEPT verdict → verify YAML written, backup exists, marker file created
-
-**Rationale:** PresetApplicator is last because it has the highest blast radius — it writes production config files. Validate the full pipeline (Phases 36-37) before enabling write-back.
-
----
+| Boundary | Communication | Notes |
+|----------|---------------|-------|
+| autoresearch script → TinkoffFetcher | Direct sync call | Self-managed background loop handles standalone script use; no bridge needed |
+| autoresearch script → CBRFetcher | `asyncio.run()` or via MarketDataLoader | Must not be called from inside a running event loop |
+| autoresearch script → ExperimentManager | Direct sync CRUD (file I/O) | Fully sync; no async involved |
+| autoresearch script → quality_gates | Direct function call with new param | Add min_signals; all existing callers get unchanged default behavior |
+| technical.py → MoexMarketData | Kwarg pass-through via MarketContext | Already implemented in technical.py; gap is only in autoresearch pipeline wiring |
+| new strategies → existing experiment loop | In-process function calls | No new processes or threads; same event loop context |
 
 ## Anti-Patterns
 
-### Anti-Pattern 1: Moving DebateManager / ExperimentManager to Layer 5
+### Anti-Pattern 1: Re-implementing Async Data Fetching
 
-**What people do:** Notice that these managers do file I/O (not pure data types) and move them to `orchestration/`.
+**What people do:** Write a new `asyncio.run(gather_all_moex_data())` orchestrator in the script that duplicates `MarketDataLoader._load_moex()`.
 
-**Why it's wrong:** `core/schemas.py` depends on `DebateState` and `ExperimentState`. If managers move to Layer 5, the UI (Layer 6) and API (Layer 6) that directly import managers would create an import path from Layer 6 through Layer 5 — which is legal. But then tests at Layer 0 could not import managers. More importantly, the Layer 0 classification is based on zero project imports (only stdlib + pydantic + yaml), which DebateManager and ExperimentManager satisfy. Moving them would be a cosmetic change with no structural benefit.
+**Why it's wrong:** `MarketDataLoader` already handles CBR + IMOEX + Brent + turnover + file caching for MOEX. Duplicating it creates two maintenance surfaces and loses the file-cache benefit (critical for CI speed when running 100 experiments).
 
-**Do this instead:** Keep managers in `core/`. The file I/O is an implementation detail. The Layer 0 rule is about import dependencies, not about "pure data only".
+**Do this instead:** Instantiate `MarketDataLoader` with the same fetchers it uses in production, call `loader.load(segment_config, start.date(), end.date())`, extract `market_ctx.moex_data`. Reuse existing tested infrastructure.
 
-### Anti-Pattern 2: Invoking Claude Code Agents from Python via Subprocess
+### Anti-Pattern 2: Modifying Quality Gate Constants Globally
 
-**What people do:** Implement `agent_orchestrator.py` as a Python script that calls `claude --agent quant-analyst` via subprocess and parses stdout.
+**What people do:** Change `_MIN_SIGNALS = 50` to `_MIN_SIGNALS = 15` globally to make MOEX experiments pass.
 
-**Why it's wrong:** Claude Code sub-agents require the full Claude Code runtime (MCP tools, file access, `ast-index`). Subprocess invocation does not provide this context and will fail for any agent that uses `Read`, `Bash`, or `ast-index` — which is all of them.
+**Why it's wrong:** This breaks US segment quality enforcement (50 signals is correct for 15-symbol US datasets). MOEX and US need different thresholds.
 
-**Do this instead:** The orchestrator is itself a Claude Code agent (`.claude/agents/agent-orchestrator.md`). It spawns domain agents via the Claude Code sub-agent protocol. The Python `orchestration/agent_orchestrator.py` module provides the data pipeline (conflict detection, DebateManager calls, ExperimentManager calls, PresetApplicator) and is called via the `Bash` tool by the Claude Code orchestrator agent after collecting outputs.
+**Do this instead:** Add `min_signals: int = _MIN_SIGNALS` parameter to `evaluate_fold()`. Pass `_MOEX_MIN_SIGNALS` from the autoresearch script when the segment is `ru_*`. Default remains unchanged for all existing callers (train_models.py, backtest engine).
 
-### Anti-Pattern 3: ConflictDetector Using LLM Semantic Comparison
+### Anti-Pattern 3: Cross-Segment Features Without Intersection Check
 
-**What people do:** Send both `AgentOutput.recommendation` strings to an LLM and ask it to determine if they conflict.
+**What people do:** Train on US features (which include VIX-derived features) and apply directly to MOEX folds where VIX is None.
 
-**Why it's wrong:** Nondeterministic output, adds LLM latency to every orchestration run, costly, and impossible to unit-test reliably.
+**Why it's wrong:** VIX features default to 0.0 for MOEX. A US-trained model that relies heavily on VIX features will produce systematically biased predictions on MOEX zero-VIX inputs, and the experiment measures model-data mismatch not feature transferability.
 
-**Do this instead:** Rule-based detection on structured fields. `recommendation` fields contain binary-opposition keywords. `MetricSource` claims with the same `metric_name` + `iteration` but different `value` are objective contradictions. This is deterministic and covered by pure Python unit tests.
-
-### Anti-Pattern 4: PresetApplicator Writing Without Backup
-
-**What people do:** Write directly to `strategies/presets/ru_blue_chips.yaml` on ACCEPT verdict.
-
-**Why it's wrong:** A bug in `preset_overrides` (wrong key path, wrong data type) silently corrupts the preset and breaks all subsequent backtests and live trading. No recovery path.
-
-**Do this instead:** Always write backup first (`{segment}.yaml.bak.{experiment_id}`), then overwrite. On any write error, restore from backup. Log the full diff of old vs new YAML at INFO level. Write idempotency marker file last.
-
-### Anti-Pattern 5: Arbiter Calling `record_verdict()` Directly
-
-**What people do:** Have the arbiter sub-agent call `ExperimentManager.record_verdict()` as part of its fact-check run.
-
-**Why it's wrong:** The arbiter's role is fact-checking only — it verifies claims but does not decide on experiment outcomes. Verdict determination is a separate step based on backtest metrics, not claim verification. Mixing these responsibilities makes the arbiter a decision-making agent, which violates its defined constraints (see `arbiter-agent.md` section 5, rule 1).
-
-**Do this instead:** Arbiter produces `FactCheckReport`. Orchestrator reads the report, decides whether to escalate (create experiment) or resolve. Verdict is computed by `ExperimentManager.record_verdict()` after backtest results are linked.
-
----
-
-## Scaling Considerations
-
-| Scale | Architecture Note |
-|-------|------------------|
-| Current (file-based, <100 experiments) | `.planning/debates/` and `.planning/experiments/` work fine. `list_experiments()` scans directory — O(n), negligible at this volume. |
-| Future (>500 experiments) | Replace directory scan with a SQLite index or append-only JSONL index file. `ExperimentManager` API does not need to change — only persistence backend. |
-| Future (autonomous conflict detection) | If `TradingLoop` needs to trigger debates without human initiation, add a Redis Streams event (`debate.conflict_detected`) that the orchestrator listens to. Infrastructure exists in `core/events.py`. |
-| Future (parallel agent execution) | Domain agents currently invoked sequentially by the orchestrator. Claude Code sub-agent protocol can invoke them in parallel via tool batching. No code change needed — orchestrator agent prompt handles this. |
-
----
+**Do this instead:** In `generate_transfer_experiments()`, compute `shared_features = set(us_features) & set(moex_features)` and restrict the transfer subset to shared features only. The `vix_*` and MOEX-specific macro features are mutually exclusive by design and will not appear in the intersection.
 
 ## Sources
 
-- Direct inspection of `src/finalayze/core/schemas.py` — `AgentOutput`, `Claim`, `DebateState`, `ExperimentState` schemas (HIGH confidence)
-- Direct inspection of `src/finalayze/core/debate_manager.py` — full CRUD API including `add_arbiter_report`, `escalate_debate`, `add_agent_position` (HIGH confidence)
-- Direct inspection of `src/finalayze/core/experiment_manager.py` lines 92-255 — `create_experiment` with bidirectional debate link at line 135, `record_verdict`, `get_by_debate` (HIGH confidence)
-- Direct inspection of `scripts/run_iteration.py` lines 1068-1345 — `--hypothesis` flag, `preset_overrides` deep merge, `ExperimentManager.link_result()` call (HIGH confidence)
-- Direct inspection of `scripts/run_interaction_test.py` — A/B/AB subprocess pattern via `_run_hypothesis()` (HIGH confidence)
-- Direct inspection of `.claude/agents/arbiter-agent.md` — arbiter fact-checking protocol, input/output format, path scope constraints (HIGH confidence)
-- Direct inspection of `src/finalayze/core/CLAUDE.md` — Layer 0 constraint: zero project imports (HIGH confidence)
-- Direct inspection of `.planning/phases/33-structured-debate-protocol/33-CONTEXT.md` — Phase 33 design decisions (HIGH confidence)
-- Direct inspection of `.planning/phases/34-experiment-registry-runner/34-CONTEXT.md` — Phase 34 design decisions (HIGH confidence)
+- Direct inspection of `scripts/auto_ml_research.py` (960 lines, v9.0 baseline)
+- Direct inspection of `src/finalayze/data/fetchers/tinkoff_data.py` (TinkoffFetcher._run_async, lines 106-132)
+- Direct inspection of `src/finalayze/ml/features/technical.py` (MOEX macro feature functions, lines 394-650)
+- Direct inspection of `src/finalayze/ml/training/quality_gates.py` (evaluate_fold, adaptive thresholds)
+- Direct inspection of `src/finalayze/core/experiment_manager.py` (CRUD API: create/link/verdict)
+- Direct inspection of `src/finalayze/data/loader.py` (MarketDataLoader._load_moex)
+- Direct inspection of `config/segments.py` (ru_* segment definitions and symbol lists)
 
 ---
-
-*Architecture research for: v8.0 Agent Integration & Autonomous Decision Loop*
-*Researched: 2026-04-12*
+*Architecture research for: v9.0 ML AutoResearch & MOEX Adaptation*
+*Researched: 2026-04-13*
