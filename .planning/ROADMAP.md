@@ -310,9 +310,9 @@ Plans:
   2. `_SEGMENT_SYMBOLS` in auto_ml_research.py contains ru_blue_chips, ru_energy, ru_finance, ru_tech symbols that match the production universe in config/segments.py — no symbol lookup errors at runtime
   3. All 10 MOEX macro features (usdrub_zscore_60d, brent_zscore_60d, cbr_rate_level, cbr_rate_delta, real_rate_zscore, etc.) are non-zero in the feature matrix for any MOEX experiment run — macro context is actually flowing through build_full_dataset()
   4. Macro series are shift(1) aligned before join — a unit test with a synthetic macro series verifies no future value leaks into the feature vector (look-ahead bias absent)
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 40-01-PLAN.md -- MOEX segment symbols and TinkoffFetcher data loading (MOEX-01, MOEX-02)
+- [x] 40-01-PLAN.md -- MOEX segment symbols and TinkoffFetcher data loading (MOEX-01, MOEX-02)
 - [ ] 40-02-PLAN.md -- MOEX macro data fetching and MarketContext wiring (MOEX-03)
 
 ### Phase 41: Adaptive Quality Gates
@@ -383,7 +383,7 @@ v9.0: 40 -> 41 -> 42 -> 43 -> 44
 | 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete | 2026-04-12 |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete | 2026-04-12 |
 | 39. REST Endpoint Hardening | v8.0 | 1/1 | Complete | 2026-04-12 |
-| 40. MOEX Data Adapter & Macro Features | v9.0 | 0/2 | Planning | - |
+| 40. MOEX Data Adapter & Macro Features | v9.0 | 1/2 | In Progress|  |
 | 41. Adaptive Quality Gates | v9.0 | 0/TBD | Not started | - |
 | 42. ExperimentManager Integration | v9.0 | 0/TBD | Not started | - |
 | 43. Ensemble Weight Optimization | v9.0 | 0/TBD | Not started | - |
