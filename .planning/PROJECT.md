@@ -12,27 +12,27 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
-## Current Milestone: v9.0 ML AutoResearch & MOEX Adaptation
+## Current State: v9.0 shipped
 
-**Goal:** Adapt auto_ml_research for MOEX market with TinkoffFetcher, macro features, adaptive quality gates, and integrate with v8.0 experiment infrastructure.
+v9.0 ML AutoResearch & MOEX Adaptation shipped 2026-04-13. 5 phases, 7 plans.
+auto_ml_research.py now runs on all MOEX equity segments via TinkoffFetcher with macro features
+(CBR rate, USDRUB, IMOEX, Brent) and 2-bar look-ahead bias prevention.
+Adaptive quality gates: min_signals=15 for MOEX, degenerate predictor guard (0.15-0.85 bounds),
+MOEX walk-forward fold constants (8/1/3/21/2mo) producing 3+ folds on 730-day data.
+ExperimentManager integration via --experiment-id with ACCEPT/REJECT/INCONCLUSIVE verdict lifecycle.
+3 new search strategies: ensemble_weights (33 simplex configs), cross_segment_transfer (US→MOEX),
+feature_engineering (domain-motivated combos + permutation importance filter).
 
-**Target features:**
-- MOEX data adapter (TinkoffFetcher replacing yfinance for ru_* segments)
-- MOEX macro features (CBR rate, USDRUB, IMOEX, Brent) in feature pipeline
-- Adaptive quality gates for small MOEX datasets (n_eff scaling)
-- ExperimentManager integration (auto_ml_research → hypotheses/verdicts/debates)
-- New search strategies: ensemble weights, feature engineering, cross-segment transfer
+<details>
+<summary>v8.0 Agent Integration & Autonomous Decision Loop (2026-04-12)</summary>
 
-## Current State: v8.0 shipped
-
-v8.0 Agent Integration & Autonomous Decision Loop shipped 2026-04-12. 4 phases, 7 plans.
+v8.0 shipped 2026-04-12. 4 phases, 7 plans.
 Agents emit structured AgentOutput with sourced Claims via parse_structured() on all 5 LLM clients.
-ConflictDetector with deterministic rule-based contradiction detection (direction/metric/statement), 3-level severity, SHA-256 dedup.
+ConflictDetector with deterministic rule-based contradiction detection, 3-level severity, SHA-256 dedup.
 AgentOrchestrator pipeline: conflict → debate → arbiter → experiment → verdict, with snapshot_sha safety.
-REST API for debates (POST/GET + finalize) and experiments (GET + POST /apply) with X-API-Key auth.
-PresetApplicator with 7-gate safety pipeline: circuit breaker, INCONCLUSIVE Telegram routing, SandboxGate (3+ days), atomic os.replace().
-Position-ownership tracking (_entry_strategy) in TradingLoop, combiner cache invalidation hook.
-agent-orchestrator.md Claude Code sub-agent for autonomous pipeline runs.
+REST API for debates and experiments with X-API-Key auth.
+PresetApplicator with 7-gate safety pipeline. Position-ownership tracking in TradingLoop.
+</details>
 
 <details>
 <summary>v7.0 Agent Intelligence & Experiment Framework (2026-04-12)</summary>
@@ -160,17 +160,20 @@ v3.0 integration gaps closed (Telegram /gonogo import, HealthMonitor feed freshn
 - ✓ Position-ownership tracking (_entry_strategy) and INCONCLUSIVE Telegram routing — v8.0
 - ✓ agent-orchestrator.md Claude Code sub-agent for autonomous pipeline runs — v8.0
 
+- ✓ MOEX data adapter for auto_ml_research (TinkoffFetcher, symbols from segments.py) — v9.0
+- ✓ MOEX macro features in ML pipeline (CBR rate, USDRUB, IMOEX, Brent) with 2-bar bias prevention — v9.0
+- ✓ Adaptive quality gates for small MOEX datasets (min_signals=15, degenerate predictor guard) — v9.0
+- ✓ MOEX walk-forward fold constants (8/1/3/21/2mo) producing 3+ folds on 730-day data — v9.0
+- ✓ ExperimentManager integration via --experiment-id (hypotheses, verdicts, backward-compatible JSONL) — v9.0
+- ✓ Ensemble weight optimization strategy (33 simplex configs, 0.7 cap, small-fold guard) — v9.0
+- ✓ Cross-segment transfer strategy (US→MOEX market-neutral feature filtering) — v9.0
+- ✓ Feature engineering strategy (domain-motivated combos, n_samples/20 cap, permutation filter) — v9.0
+
 ### Active
 
-<!-- v9.0 ML AutoResearch & MOEX Adaptation -->
+<!-- Next milestone scope — to be defined -->
 
-- [ ] MOEX data adapter for auto_ml_research (TinkoffFetcher instead of yfinance)
-- [ ] MOEX macro features in ML pipeline (CBR rate, USDRUB, IMOEX, Brent)
-- [ ] Adaptive quality gates for small MOEX datasets
-- [ ] ExperimentManager integration (hypotheses, verdicts, debate linkage)
-- [ ] Ensemble weight optimization strategy
-- [ ] Automatic feature engineering strategy
-- [ ] Cross-segment transfer strategy (US → MOEX)
+(None yet — define with `/gsd:new-milestone`)
 
 ### Out of Scope
 
@@ -273,4 +276,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-13 after v9.0 milestone started*
+*Last updated: 2026-04-13 after v9.0 milestone shipped*

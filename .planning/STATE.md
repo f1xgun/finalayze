@@ -4,7 +4,7 @@ milestone: v9.0
 milestone_name: ML AutoResearch & MOEX Adaptation
 status: unknown
 stopped_at: Completed 43-01-PLAN.md
-last_updated: "2026-04-13T07:18:19.292Z"
+last_updated: "2026-04-13T07:23:44.763Z"
 progress:
   total_phases: 17
   completed_phases: 5

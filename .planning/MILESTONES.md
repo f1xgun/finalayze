@@ -1,5 +1,21 @@
 # Milestones
 
+## v9.0 ML AutoResearch & MOEX Adaptation (Shipped: 2026-04-13)
+
+**Phases completed:** 5 phases, 7 plans, 4 tasks
+
+**Key accomplishments:**
+
+- TinkoffFetcher adapter for all ru_* MOEX equity segments with symbols sourced from config/segments.py (single source of truth), IMOEX benchmark, and graceful FINALAYZE_TINKOFF_TOKEN skip
+- MOEX macro features (CBR rate, USDRUB, IMOEX turnover, Brent) fetched once and wired via MoexMarketData into build_full_dataset() with 2-bar look-ahead bias prevention
+- Adaptive min_signals parameter in evaluate_fold() (default 50 for US, 15 for MOEX) and degenerate predictor guard (buy_ratio 0.15-0.85 bounds) as 8th quality gate
+- MOEX-specific walk-forward fold constants (8mo/1mo/3mo/21d/2mo) producing 3+ folds on 730-day MOEX data
+- Opt-in --experiment-id flag wiring ExperimentManager lifecycle (create → link → verdict) with backward-compatible JSONL audit trail
+- Ensemble weight optimization strategy (33 simplex configs, 0.7 cap, small-fold guard)
+- Cross-segment transfer (US→MOEX market-neutral feature filtering) and feature engineering (domain-motivated combinations with n_samples/20 cap + permutation importance filter)
+
+---
+
 ## v8.0 Agent Integration & Autonomous Decision Loop (Shipped: 2026-04-12)
 
 **Phases completed:** 4 phases, 7 plans, ~14 tasks
