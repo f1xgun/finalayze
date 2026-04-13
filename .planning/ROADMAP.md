@@ -350,7 +350,7 @@ Plans:
   3. When fewer than 4 independent folds are available, equal weights (1/3 each) are used as the default and optimization is skipped with a logged warning — small dataset safety is automatic
 **Plans:** 1 plan
 Plans:
-- [ ] 42-01-PLAN.md -- ExperimentManager integration with --experiment-id flag (EXPINT-01, EXPINT-02)
+- [ ] 43-01-PLAN.md -- Ensemble weight simplex generator, weighted averaging, small-fold guard (STRAT-01)
 
 ### Phase 44: New Search Strategies
 **Goal**: Two new search strategies extend the research loop — cross-segment transfer validates US-learned features on MOEX, and feature engineering generates domain-motivated combinations with hard overfitting caps
