@@ -323,9 +323,9 @@ Plans:
   1. `evaluate_fold(min_signals=15)` accepts a MOEX experiment with 15-30 signals per fold — the hardcoded _MIN_SIGNALS=50 no longer blocks all MOEX runs
   2. A 730-day MOEX dataset produces 3 or more valid walk-forward folds using MOEX-specific fold constants — the experiment does not trivially pass on a single fold
   3. A model that predicts BUY on 92% of samples fails the degenerate predictor gate and is logged as REJECTED with buy_ratio=0.92 — all-directional models cannot receive a verdict without this check
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 41-01-PLAN.md -- Adaptive min_signals + degenerate predictor gate in quality_gates.py (GATE-01, GATE-03)
+- [x] 41-01-PLAN.md -- Adaptive min_signals + degenerate predictor gate in quality_gates.py (GATE-01, GATE-03)
 - [ ] 41-02-PLAN.md -- MOEX fold constants + min_signals wiring in auto_ml_research.py (GATE-02)
 
 ### Phase 42: ExperimentManager Integration
@@ -387,7 +387,7 @@ v9.0: 40 -> 41 -> 42 -> 43 -> 44
 | 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete | 2026-04-12 |
 | 39. REST Endpoint Hardening | v8.0 | 1/1 | Complete | 2026-04-12 |
 | 40. MOEX Data Adapter & Macro Features | v9.0 | 2/2 | Complete    | 2026-04-13 |
-| 41. Adaptive Quality Gates | v9.0 | 0/2 | Not started | - |
+| 41. Adaptive Quality Gates | v9.0 | 1/2 | In Progress|  |
 | 42. ExperimentManager Integration | v9.0 | 0/TBD | Not started | - |
 | 43. Ensemble Weight Optimization | v9.0 | 0/TBD | Not started | - |
 | 44. New Search Strategies | v9.0 | 0/TBD | Not started | - |
