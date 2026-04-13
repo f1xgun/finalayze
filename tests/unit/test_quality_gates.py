@@ -9,6 +9,7 @@ from finalayze.ml.training.quality_gates import (
     check_accuracy_gate,
     check_brier_gate,
     check_class_balance_gate,
+    check_degenerate_predictor_gate,
     check_profit_factor_gate,
     check_sensitivity_gate,
     check_signal_count_gate,
@@ -20,6 +21,7 @@ from finalayze.ml.training.quality_gates import (
 _LARGE_SAMPLE = 1000
 _SMALL_SAMPLE = 50
 _SEVEN_GATES = 7
+_EIGHT_GATES = 8
 
 
 def _make_metrics(**kwargs: object) -> FoldMetrics:
@@ -152,6 +154,34 @@ class TestSignalCountGate:
         assert result.passed is False
 
 
+class TestSignalCountGateWithMinSignals:
+    def test_custom_min_signals_pass(self) -> None:
+        """signal_count=20 with min_signals=15 should pass."""
+        _signal_count = 20
+        _min_signals = 15
+        metrics = _make_metrics(signal_count=_signal_count)
+        result = check_signal_count_gate(metrics, min_signals=_min_signals)
+        assert result.passed is True
+        assert result.threshold == float(_min_signals)
+
+    def test_custom_min_signals_fail(self) -> None:
+        """signal_count=10 with min_signals=15 should fail."""
+        _signal_count = 10
+        _min_signals = 15
+        metrics = _make_metrics(signal_count=_signal_count)
+        result = check_signal_count_gate(metrics, min_signals=_min_signals)
+        assert result.passed is False
+
+    def test_default_min_signals_unchanged(self) -> None:
+        """signal_count=30 without min_signals kwarg should fail (default=50)."""
+        _signal_count = 30
+        metrics = _make_metrics(signal_count=_signal_count)
+        result = check_signal_count_gate(metrics)
+        assert result.passed is False
+        _default_threshold = 50
+        assert result.threshold == float(_default_threshold)
+
+
 # --- Class balance gate ---
 
 
@@ -210,7 +240,7 @@ class TestEvaluateFold:
     def test_returns_all_gates(self) -> None:
         metrics = _make_metrics()
         results = evaluate_fold(metrics)
-        assert len(results) == _SEVEN_GATES
+        assert len(results) == _EIGHT_GATES
         gate_names = {r.gate_name for r in results}
         assert gate_names == {
             "accuracy",
@@ -220,6 +250,7 @@ class TestEvaluateFold:
             "class_balance",
             "sensitivity",
             "specificity",
+            "degenerate_predictor",
         }
 
 
@@ -278,3 +309,81 @@ class TestEvaluateWalkForward:
         overall, rates = evaluate_walk_forward([])
         assert overall is False
         assert rates == {}
+
+
+# --- Degenerate predictor gate ---
+
+
+class TestDegeneratePredictorGate:
+    def test_all_buy_fails(self) -> None:
+        """buy_ratio=0.92 -> passed=False (degenerate all-BUY)."""
+        _buy_ratio = 0.92
+        metrics = _make_metrics(buy_ratio=_buy_ratio)
+        result = check_degenerate_predictor_gate(metrics)
+        assert result.passed is False
+        assert result.gate_name == "degenerate_predictor"
+        assert f"buy_ratio={_buy_ratio:.2f}" in result.detail
+
+    def test_all_sell_fails(self) -> None:
+        """buy_ratio=0.08 -> passed=False (degenerate all-SELL)."""
+        _buy_ratio = 0.08
+        metrics = _make_metrics(buy_ratio=_buy_ratio)
+        result = check_degenerate_predictor_gate(metrics)
+        assert result.passed is False
+
+    def test_balanced_passes(self) -> None:
+        """buy_ratio=0.50 -> passed=True."""
+        metrics = _make_metrics(buy_ratio=0.50)
+        result = check_degenerate_predictor_gate(metrics)
+        assert result.passed is True
+
+    def test_boundary_low_passes(self) -> None:
+        """buy_ratio=0.15 -> passed=True (on boundary)."""
+        metrics = _make_metrics(buy_ratio=0.15)
+        result = check_degenerate_predictor_gate(metrics)
+        assert result.passed is True
+
+    def test_boundary_high_passes(self) -> None:
+        """buy_ratio=0.85 -> passed=True (on boundary)."""
+        metrics = _make_metrics(buy_ratio=0.85)
+        result = check_degenerate_predictor_gate(metrics)
+        assert result.passed is True
+
+    def test_just_outside_high_fails(self) -> None:
+        """buy_ratio=0.86 -> passed=False (just outside upper bound)."""
+        _buy_ratio = 0.86
+        metrics = _make_metrics(buy_ratio=_buy_ratio)
+        result = check_degenerate_predictor_gate(metrics)
+        assert result.passed is False
+
+    def test_just_outside_low_fails(self) -> None:
+        """buy_ratio=0.14 -> passed=False (just outside lower bound)."""
+        _buy_ratio = 0.14
+        metrics = _make_metrics(buy_ratio=_buy_ratio)
+        result = check_degenerate_predictor_gate(metrics)
+        assert result.passed is False
+
+
+# --- evaluate_fold with min_signals ---
+
+
+class TestEvaluateFoldWithMinSignals:
+    def test_min_signals_passed_through(self) -> None:
+        """evaluate_fold with min_signals=15 passes threshold to signal_count gate."""
+        _signal_count = 20
+        _min_signals = 15
+        metrics = _make_metrics(signal_count=_signal_count)
+        results = evaluate_fold(metrics, min_signals=_min_signals)
+        signal_gate = next(r for r in results if r.gate_name == "signal_count")
+        assert signal_gate.passed is True
+        assert signal_gate.threshold == float(_min_signals)
+
+    def test_default_min_signals(self) -> None:
+        """evaluate_fold without min_signals uses default=50; signal_count=30 fails."""
+        _signal_count = 30
+        metrics = _make_metrics(signal_count=_signal_count)
+        results = evaluate_fold(metrics)
+        signal_gate = next(r for r in results if r.gate_name == "signal_count")
+        assert signal_gate.passed is False
+        _default_threshold = 50
+        assert signal_gate.threshold == float(_default_threshold)
