@@ -16,7 +16,7 @@ Requirements for ML AutoResearch & MOEX Adaptation milestone.
 ### Quality Gate Adaptation
 
 - [x] **GATE-01**: `evaluate_fold()` accepts `min_signals` parameter — MOEX experiments use n_eff-scaled threshold instead of hardcoded 50
-- [ ] **GATE-02**: MOEX-specific walk-forward fold constants produce 3+ folds on 730-day dataset — no single-fold trivial pass
+- [x] **GATE-02**: MOEX-specific walk-forward fold constants produce 3+ folds on 730-day dataset — no single-fold trivial pass
 - [x] **GATE-03**: Degenerate predictor guard rejects all-BUY/all-SELL models (buy_ratio outside 0.15–0.85 range fails gate)
 
 ### Experiment Infrastructure
@@ -56,7 +56,7 @@ Requirements for ML AutoResearch & MOEX Adaptation milestone.
 | MOEX-02 | Phase 40 | Complete |
 | MOEX-03 | Phase 40 | Complete |
 | GATE-01 | Phase 41 | Complete |
-| GATE-02 | Phase 41 | Pending |
+| GATE-02 | Phase 41 | Complete |
 | GATE-03 | Phase 41 | Complete |
 | EXPINT-01 | Phase 42 | Pending |
 | EXPINT-02 | Phase 42 | Pending |
