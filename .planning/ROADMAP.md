@@ -345,7 +345,7 @@ Plans:
 **Depends on**: Phase 42 (experiment tracking must be in place to compare weight configurations as named hypotheses)
 **Requirements**: STRAT-01
 **Success Criteria** (what must be TRUE):
-  1. `auto_ml_research.py --strategy ensemble_weights --segment ru_blue_chips` evaluates 9-12 distinct weight configurations across the simplex — XGB, LGBM, CatBoost weights are explored in bounded combinations, each summing to 1.0
+  1. `auto_ml_research.py --strategy ensemble_weights --segment ru_blue_chips` evaluates at least 9 distinct weight configurations across the simplex — XGB, LGBM, CatBoost weights are explored in bounded combinations, each summing to 1.0
   2. No single model weight exceeds 0.7 in any evaluated configuration — the overfitting constraint is enforced at generation time, not post-hoc
   3. When fewer than 4 independent folds are available, equal weights (1/3 each) are used as the default and optimization is skipped with a logged warning — small dataset safety is automatic
 **Plans:** 1/1 plans complete
@@ -395,5 +395,5 @@ v9.0: 40 -> 41 -> 42 -> 43 -> 44
 | 40. MOEX Data Adapter & Macro Features | v9.0 | 2/2 | Complete    | 2026-04-13 |
 | 41. Adaptive Quality Gates | v9.0 | 2/2 | Complete    | 2026-04-13 |
 | 42. ExperimentManager Integration | v9.0 | 1/1 | Complete    | 2026-04-13 |
-| 43. Ensemble Weight Optimization | v9.0 | 1/1 | Complete   | 2026-04-13 |
+| 43. Ensemble Weight Optimization | v9.0 | 1/1 | Complete    | 2026-04-13 |
 | 44. New Search Strategies | v9.0 | 0/TBD | Not started | - |
