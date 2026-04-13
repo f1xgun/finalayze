@@ -11,7 +11,7 @@ Requirements for ML AutoResearch & MOEX Adaptation milestone.
 
 - [x] **MOEX-01**: `auto_ml_research.py` fetches MOEX candles via TinkoffFetcher for ru_blue_chips, ru_energy, ru_finance, ru_tech segments — yfinance not used for any ru_* segment
 - [x] **MOEX-02**: MOEX segment symbols defined in `_SEGMENT_SYMBOLS` matching production `config/segments.py` universe
-- [ ] **MOEX-03**: MOEX macro features (CBR rate, USDRUB, IMOEX, Brent) passed via `MoexMarketData` to `build_full_dataset()` — all 10 macro features non-zero in MOEX experiments
+- [x] **MOEX-03**: MOEX macro features (CBR rate, USDRUB, IMOEX, Brent) passed via `MoexMarketData` to `build_full_dataset()` — all 10 macro features non-zero in MOEX experiments
 
 ### Quality Gate Adaptation
 
@@ -54,7 +54,7 @@ Requirements for ML AutoResearch & MOEX Adaptation milestone.
 |-------------|-------|--------|
 | MOEX-01 | Phase 40 | Complete |
 | MOEX-02 | Phase 40 | Complete |
-| MOEX-03 | Phase 40 | Pending |
+| MOEX-03 | Phase 40 | Complete |
 | GATE-01 | Phase 41 | Pending |
 | GATE-02 | Phase 41 | Pending |
 | GATE-03 | Phase 41 | Pending |

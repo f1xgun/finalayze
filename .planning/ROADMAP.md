@@ -117,7 +117,7 @@ Full details in Phase Details section below (collapsed milestone).
 
 **Milestone Goal:** Adapt auto_ml_research for MOEX market — TinkoffFetcher data adapter, MOEX macro features, adaptive quality gates, ExperimentManager integration, and three new search strategies.
 
-- [ ] **Phase 40: MOEX Data Adapter & Macro Features** - Wire TinkoffFetcher and MOEX macro features into auto_ml_research for all ru_* segments
+- [x] **Phase 40: MOEX Data Adapter & Macro Features** - Wire TinkoffFetcher and MOEX macro features into auto_ml_research for all ru_* segments (completed 2026-04-13)
 - [ ] **Phase 41: Adaptive Quality Gates** - Parametrize min_signals, add MOEX fold constants, add degenerate predictor guard
 - [ ] **Phase 42: ExperimentManager Integration** - Opt-in --experiment-id flag with hypothesis lifecycle and backward-compatible JSONL audit trail
 - [ ] **Phase 43: Ensemble Weight Optimization** - Bounded XGB/LGBM/CatBoost weight grid search with overfitting guard
@@ -310,10 +310,10 @@ Plans:
   2. `_SEGMENT_SYMBOLS` in auto_ml_research.py contains ru_blue_chips, ru_energy, ru_finance, ru_tech symbols that match the production universe in config/segments.py — no symbol lookup errors at runtime
   3. All 10 MOEX macro features (usdrub_zscore_60d, brent_zscore_60d, cbr_rate_level, cbr_rate_delta, real_rate_zscore, etc.) are non-zero in the feature matrix for any MOEX experiment run — macro context is actually flowing through build_full_dataset()
   4. Macro series are shift(1) aligned before join — a unit test with a synthetic macro series verifies no future value leaks into the feature vector (look-ahead bias absent)
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 40-01-PLAN.md -- MOEX segment symbols and TinkoffFetcher data loading (MOEX-01, MOEX-02)
-- [ ] 40-02-PLAN.md -- MOEX macro data fetching and MarketContext wiring (MOEX-03)
+- [x] 40-02-PLAN.md -- MOEX macro data fetching and MarketContext wiring (MOEX-03)
 
 ### Phase 41: Adaptive Quality Gates
 **Goal**: MOEX experiments produce trustworthy walk-forward results — signal count gates are calibrated to MOEX dataset sizes, folds never collapse to fewer than 3, and degenerate all-BUY/all-SELL models are rejected automatically
@@ -383,7 +383,7 @@ v9.0: 40 -> 41 -> 42 -> 43 -> 44
 | 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete | 2026-04-12 |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete | 2026-04-12 |
 | 39. REST Endpoint Hardening | v8.0 | 1/1 | Complete | 2026-04-12 |
-| 40. MOEX Data Adapter & Macro Features | v9.0 | 1/2 | In Progress|  |
+| 40. MOEX Data Adapter & Macro Features | v9.0 | 2/2 | Complete   | 2026-04-13 |
 | 41. Adaptive Quality Gates | v9.0 | 0/TBD | Not started | - |
 | 42. ExperimentManager Integration | v9.0 | 0/TBD | Not started | - |
 | 43. Ensemble Weight Optimization | v9.0 | 0/TBD | Not started | - |
