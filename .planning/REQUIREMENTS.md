@@ -27,8 +27,8 @@ Requirements for ML AutoResearch & MOEX Adaptation milestone.
 ### New Search Strategies
 
 - [x] **STRAT-01**: Ensemble weight optimization strategy searches bounded weight grid for XGB/LGBM/CatBoost — weights sum to 1.0, no single model >0.7
-- [ ] **STRAT-02**: Cross-segment transfer strategy reads best US experiment features and filters to market-neutral intersection (excludes VIX-only and MOEX-only features)
-- [ ] **STRAT-03**: Feature engineering strategy generates domain-motivated combinations (lag ratios, rolling z-scores, cross-feature interactions) with hard cap on generated feature count to prevent overfitting
+- [x] **STRAT-02**: Cross-segment transfer strategy reads best US experiment features and filters to market-neutral intersection (excludes VIX-only and MOEX-only features)
+- [x] **STRAT-03**: Feature engineering strategy generates domain-motivated combinations (lag ratios, rolling z-scores, cross-feature interactions) with hard cap on generated feature count to prevent overfitting
 
 ## Future Requirements
 
@@ -61,8 +61,8 @@ Requirements for ML AutoResearch & MOEX Adaptation milestone.
 | EXPINT-01 | Phase 42 | Complete |
 | EXPINT-02 | Phase 42 | Complete |
 | STRAT-01 | Phase 43 | Complete |
-| STRAT-02 | Phase 44 | Pending |
-| STRAT-03 | Phase 44 | Pending |
+| STRAT-02 | Phase 44 | Complete |
+| STRAT-03 | Phase 44 | Complete |
 
 **Coverage:**
 - v9.0 requirements: 11 total
