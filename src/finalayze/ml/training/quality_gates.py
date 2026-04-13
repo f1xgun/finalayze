@@ -40,6 +40,8 @@ _COIN_FLIP_ACCURACY = 0.50
 _MAX_BRIER = 0.25
 _MIN_PROFIT_FACTOR = 1.10
 _MIN_SIGNALS = 50
+_DEGEN_MIN_BUY_RATIO = 0.15
+_DEGEN_MAX_BUY_RATIO = 0.85
 _MIN_CLASS_RATIO = 0.30
 _MIN_SENSITIVITY = 0.45
 _MIN_SPECIFICITY = 0.45
@@ -131,14 +133,22 @@ def check_profit_factor_gate(metrics: FoldMetrics) -> QualityGateResult:
     )
 
 
-def check_signal_count_gate(metrics: FoldMetrics) -> QualityGateResult:
-    """Minimum number of signals per fold."""
-    passed = metrics.signal_count >= _MIN_SIGNALS
+def check_signal_count_gate(
+    metrics: FoldMetrics, *, min_signals: int = _MIN_SIGNALS
+) -> QualityGateResult:
+    """Minimum number of signals per fold.
+
+    Args:
+        metrics: Fold metrics to evaluate.
+        min_signals: Minimum required signal count. Defaults to _MIN_SIGNALS (50).
+            Pass a smaller value (e.g. 15) for MOEX segments with fewer data points.
+    """
+    passed = metrics.signal_count >= min_signals
     return QualityGateResult(
         passed=passed,
         gate_name="signal_count",
         value=float(metrics.signal_count),
-        threshold=float(_MIN_SIGNALS),
+        threshold=float(min_signals),
     )
 
 
@@ -173,16 +183,49 @@ def check_specificity_gate(metrics: FoldMetrics) -> QualityGateResult:
     )
 
 
-def evaluate_fold(metrics: FoldMetrics) -> list[QualityGateResult]:
-    """Run all quality gates on a single fold's metrics."""
+def check_degenerate_predictor_gate(metrics: FoldMetrics) -> QualityGateResult:
+    """Reject models that predict overwhelmingly one direction.
+
+    A model predicting BUY on >85% or <15% of samples is likely degenerate
+    (all-BUY or all-SELL) and should not pass quality gates.
+
+    This gate complements the class_balance gate: class_balance uses min(ratio, 1-ratio)
+    and a 0.30 threshold, while this gate uses the raw buy_ratio with tighter [0.15, 0.85]
+    bounds and explicit degenerate_predictor naming for clearer diagnostics.
+    """
+    passed = _DEGEN_MIN_BUY_RATIO <= metrics.buy_ratio <= _DEGEN_MAX_BUY_RATIO
+    return QualityGateResult(
+        passed=passed,
+        gate_name="degenerate_predictor",
+        value=metrics.buy_ratio,
+        threshold=_DEGEN_MAX_BUY_RATIO,
+        detail=(
+            f"buy_ratio={metrics.buy_ratio:.2f},"
+            f" bounds=[{_DEGEN_MIN_BUY_RATIO}, {_DEGEN_MAX_BUY_RATIO}]"
+        ),
+    )
+
+
+def evaluate_fold(
+    metrics: FoldMetrics, *, min_signals: int = _MIN_SIGNALS
+) -> list[QualityGateResult]:
+    """Run all quality gates on a single fold's metrics.
+
+    Args:
+        metrics: Fold metrics to evaluate.
+        min_signals: Minimum required signal count for the signal_count gate.
+            Defaults to _MIN_SIGNALS (50). Pass a smaller value (e.g. 15) for
+            MOEX segments with fewer data points.
+    """
     return [
         check_accuracy_gate(metrics),
         check_brier_gate(metrics),
         check_profit_factor_gate(metrics),
-        check_signal_count_gate(metrics),
+        check_signal_count_gate(metrics, min_signals=min_signals),
         check_class_balance_gate(metrics),
         check_sensitivity_gate(metrics),
         check_specificity_gate(metrics),
+        check_degenerate_predictor_gate(metrics),
     ]
 
 
