@@ -397,7 +397,9 @@ Plans:
   1. The `_run_fold` loop in auto_ml_research does not call feature selection — feature selection executes once before the fold loop begins, on the full pre-test slice of data
   2. All walk-forward folds use the identical feature list — a unit test with 3 synthetic folds confirms the same feature names appear in every fold's training DataFrame
   3. The selected feature count is logged once before fold execution begins, not once per fold — a single "Selected N features" log line appears per segment run
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 46-01-PLAN.md — Lift feature selection before fold loop + stability tests (FSEL-01, FSEL-02)
 
 ### Phase 47: Cross-Asset Features & Asymmetric Barriers
 **Goal**: ru_energy models have access to Brent crude return features, and energy stocks use asymmetric triple barriers that account for commodity-linked downside volatility
