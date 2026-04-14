@@ -64,6 +64,11 @@ _TB_LOWER_ATR_MULT = 2.0  # symmetric barriers
 _TB_MAX_HOLD = 20  # match DEFAULT_STRATEGY_HOLD_BARS["ml_ensemble"]
 _TB_ATR_PERIOD = 14  # standard
 _MOEX_ATR_UPLIFT = 1.2  # MOEX 1.2x uplift for wider barriers
+# Pre-uplift barrier multipliers per segment. MOEX uplift applied in _get_barrier_params().
+# Must stay in sync with auto_ml_research.py _SEGMENT_BARRIER_CONFIG.
+_SEGMENT_BARRIER_CONFIG: dict[str, tuple[float, float]] = {
+    "ru_energy": (1.5, 2.0),  # (upper, lower) — wider downside for commodity-linked volatility
+}
 
 # Label mode choices
 LABEL_MODE_TRIPLE_BARRIER = "triple_barrier"
@@ -549,17 +554,22 @@ def _fetch_candles(
     return candles
 
 
+def _get_barrier_params(segment_id: str) -> tuple[float, float]:
+    """Return (upper_atr_mult, lower_atr_mult) with MOEX uplift applied."""
+    base_upper, base_lower = _SEGMENT_BARRIER_CONFIG.get(
+        segment_id, (_TB_UPPER_ATR_MULT, _TB_LOWER_ATR_MULT)
+    )
+    if _is_moex_segment(segment_id):
+        return base_upper * _MOEX_ATR_UPLIFT, base_lower * _MOEX_ATR_UPLIFT
+    return base_upper, base_lower
+
+
 def _get_triple_barrier_params(segment_id: str) -> dict[str, float | int | bool]:
     """Return triple barrier parameters for a segment.
 
-    MOEX segments get 1.2x ATR uplift for wider barriers (higher volatility).
+    MOEX segments get 1.2x ATR uplift. ru_energy gets asymmetric barriers.
     """
-    if _is_moex_segment(segment_id):
-        upper = _TB_UPPER_ATR_MULT * _MOEX_ATR_UPLIFT
-        lower = _TB_LOWER_ATR_MULT * _MOEX_ATR_UPLIFT
-    else:
-        upper = _TB_UPPER_ATR_MULT
-        lower = _TB_LOWER_ATR_MULT
+    upper, lower = _get_barrier_params(segment_id)
     return {
         "upper_atr_mult": upper,
         "lower_atr_mult": lower,
