@@ -61,6 +61,7 @@ _CANDLE_LOOKBACK = 60  # number of bars to fetch per symbol
 _CAUTION_SIZE_FACTOR = Decimal("0.5")  # halve position size at CAUTION
 _MIN_CONFIDENCE_BOOST = 1.2  # raise required confidence 20% at CAUTION
 _DEFAULT_SENTIMENT = 0.0
+_MAX_ARTICLES_PER_CYCLE = 20  # budget cap: prevent LLM cost explosion on busy news days
 _ZERO = Decimal(0)
 _WEEKEND_WEEKDAY = 5  # Saturday=5, Sunday=6
 _ATR_MULTIPLIER_US = Decimal("2.0")
@@ -283,6 +284,8 @@ class TradingLoop:
 
     def _news_cycle(self) -> None:
         """Fetch latest news, analyze sentiment, update _sentiment_cache."""
+        from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
         now = datetime.now(UTC)
         from_date = now - timedelta(hours=_NEWS_LOOKBACK_HOURS)
         try:
@@ -295,6 +298,16 @@ class TradingLoop:
             _log.exception("_news_cycle: failed to fetch news")
             self._alerter.on_error("NewsApiFetcher", "fetch_news failed")
             return
+
+        # Budget cap: limit articles to prevent LLM cost explosion
+        if len(articles) > _MAX_ARTICLES_PER_CYCLE:
+            _log.warning(
+                "news_budget_cap_hit",
+                total=len(articles),
+                cap=_MAX_ARTICLES_PER_CYCLE,
+            )
+            MetricsCollector.inc_news_budget_cap_hit()
+            articles = articles[:_MAX_ARTICLES_PER_CYCLE]
 
         for article in articles:
             try:

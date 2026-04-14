@@ -117,6 +117,12 @@ news_feed_last_article_timestamp = Gauge(
 )
 
 # ── Currency ──────────────────────────────────────────────────────────────────
+# ── News pipeline ─────────────────────────────────────────────────────────
+news_budget_cap_total = Counter(
+    "finalayze_news_budget_cap_total",
+    "Number of news cycles where article count exceeded budget cap",
+)
+
 usd_rub_rate = Gauge(
     "finalayze_usd_rub_rate",
     "USD/RUB exchange rate",
@@ -210,6 +216,11 @@ class MetricsCollector:
     def set_news_feed_timestamp(scope: str, ts: float) -> None:
         """Set the Unix timestamp of the last processed news article."""
         news_feed_last_article_timestamp.labels(scope=scope).set(ts)
+
+    @staticmethod
+    def inc_news_budget_cap_hit() -> None:
+        """Increment news budget cap hit counter."""
+        news_budget_cap_total.inc()
 
     @staticmethod
     def set_usd_rub_rate(rate: float) -> None:
