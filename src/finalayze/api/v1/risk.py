@@ -128,15 +128,18 @@ async def risk_exposure(request: Request) -> ExposureResponse:
         seg_values: dict[str, float] = defaultdict(float)
         total_equity = 0.0
 
+        import contextlib  # noqa: PLC0415
+
         for market_def in registry.list_markets():
-            broker = broker_router.route(market_def.id)
+            try:
+                broker = broker_router.route(market_def.id)
+            except Exception:  # noqa: S112
+                continue  # skip markets without a broker (e.g. US in sandbox)
             detail_fn = getattr(broker, "get_positions_detail", None)
             if detail_fn is not None:
                 for p in detail_fn():
                     figi = p.get("figi", "")
                     symbol = figi
-                    import contextlib  # noqa: PLC0415
-
                     with contextlib.suppress(Exception):
                         symbol = inst_reg.get_by_figi(figi).symbol
                     seg_id = sym_to_seg.get(symbol, "unknown")
