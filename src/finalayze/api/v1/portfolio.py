@@ -48,8 +48,10 @@ class PositionDetail(BaseModel):
     market_id: str
     segment_id: str
     quantity: float
-    market_value_usd: float
-    unrealized_pnl_usd: float
+    avg_price: float
+    current_price: float
+    market_value: float
+    unrealized_pnl: float
     unrealized_pnl_pct: float
     stop_distance_atr: float | None
 
@@ -146,28 +148,56 @@ async def get_positions(request: Request) -> PositionsResponse:
         market_id = market_def.id
         try:
             broker = broker_router.route(market_id)
-            raw = broker.get_positions()
-            for key, qty in raw.items():
-                if qty > Decimal(0):
-                    # Resolve FIGI to ticker if possible
-                    display_symbol = key
+            # Use enriched positions if available (TinkoffBroker)
+            detail_fn = getattr(broker, "get_positions_detail", None)
+            if detail_fn is not None:
+                for p in detail_fn():
+                    figi = p.get("figi", "")
+                    display_symbol = str(figi)
                     try:
-                        inst = instrument_registry.get_by_figi(key)
+                        inst = instrument_registry.get_by_figi(figi)
                         display_symbol = inst.symbol
                     except Exception:  # noqa: S110
-                        pass  # keep FIGI as fallback
+                        pass
                     positions.append(
                         PositionDetail(
                             symbol=display_symbol,
                             market_id=market_id,
                             segment_id="",
-                            quantity=float(qty),
-                            market_value_usd=0.0,
-                            unrealized_pnl_usd=0.0,
-                            unrealized_pnl_pct=0.0,
+                            quantity=float(p.get("quantity", 0)),
+                            avg_price=float(p.get("avg_price", 0)),
+                            current_price=float(p.get("current_price", 0)),
+                            market_value=float(p.get("market_value", 0)),
+                            unrealized_pnl=float(p.get("unrealized_pnl", 0)),
+                            unrealized_pnl_pct=float(p.get("unrealized_pnl_pct", 0)),
                             stop_distance_atr=None,
                         )
                     )
+            else:
+                # Fallback for brokers without get_positions_detail
+                raw = broker.get_positions()
+                for key, qty in raw.items():
+                    if qty > Decimal(0):
+                        display_symbol = key
+                        try:
+                            inst = instrument_registry.get_by_figi(key)
+                            display_symbol = inst.symbol
+                        except Exception:  # noqa: S110
+                            pass
+                        positions.append(
+                            PositionDetail(
+                                symbol=display_symbol,
+                                market_id=market_id,
+                                segment_id="",
+                                quantity=float(qty),
+                                avg_price=0.0,
+                                current_price=0.0,
+                                market_value=0.0,
+                                unrealized_pnl=0.0,
+                                unrealized_pnl_pct=0.0,
+                                stop_distance_atr=None,
+                            )
+                        )
         except Exception as exc:
             _log.warning("Failed to fetch positions for market %s: %s", market_id, exc)
 

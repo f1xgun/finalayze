@@ -13,18 +13,11 @@ def render(api: ApiClient) -> None:
     st.title("Signals")
 
     try:
-        strategies_raw = api.get("/api/v1/strategies/performance")
-        signals_raw = api.get("/api/v1/signals")
+        strategies_resp = api.get("/api/v1/strategies/performance").json()
+        signals_resp = api.get("/api/v1/signals").json()
     except Exception:
         st.error("Cannot reach API server")
         return
-
-    if signals_raw.status_code == 501:  # noqa: PLR2004
-        st.info("Signals endpoint not yet implemented. Data will appear after strategy cycles run.")
-        return
-
-    strategies_resp = strategies_raw.json() if strategies_raw.status_code == 200 else {}  # noqa: PLR2004
-    signals_resp = signals_raw.json()
 
     strategies = strategies_resp.get("strategies", [])
     signals = signals_resp.get("signals", [])

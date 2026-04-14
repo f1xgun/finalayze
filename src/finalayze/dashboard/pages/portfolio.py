@@ -70,18 +70,29 @@ def render(api: ApiClient) -> None:
     else:
         st.info("No historical data yet — equity curve will appear after the first trading cycle.")
 
-    # Per-market equity table
-    markets = portfolio.get("markets", [])
+    # Per-market equity table — rename _usd columns to actual currency
     if markets and isinstance(markets, list):
         st.subheader("By Market")
         mdf = pd.DataFrame(markets)
+        _col_rename = {
+            "equity_usd": f"equity_{currency_label.lower()}",
+            "cash_usd": f"cash_{currency_label.lower()}",
+            "positions_value_usd": f"positions_value_{currency_label.lower()}",
+            "daily_pnl_usd": f"daily_pnl_{currency_label.lower()}",
+        }
+        mdf = mdf.rename(columns={k: v for k, v in _col_rename.items() if k in mdf.columns})
         st.dataframe(mdf, use_container_width=True)
 
-    # Open positions heatmap
+    # Open positions heatmap — rename _usd columns
     pos_list = positions_data.get("positions", [])
     if pos_list and isinstance(pos_list, list):
         st.subheader("Open Positions")
         pdf = pd.DataFrame(pos_list)
+        _pos_rename = {
+            "market_value_usd": f"market_value_{currency_label.lower()}",
+            "unrealized_pnl_usd": f"unrealized_pnl_{currency_label.lower()}",
+        }
+        pdf = pdf.rename(columns={k: v for k, v in _pos_rename.items() if k in pdf.columns})
         if "unrealized_pnl_pct" in pdf.columns:
             st.dataframe(
                 pdf.style.background_gradient(

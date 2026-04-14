@@ -135,12 +135,16 @@ def render(api: ApiClient) -> None:
     fig.update_layout(height=500, margin={"t": 30, "b": 30})
     st.plotly_chart(fig, use_container_width=True)
 
-    # Section 3: Uptime %
+    # Section 3: Uptime — total successful cycles over period
     st.subheader("Uptime")
-    total_rows = len(df)
-    max_uptime = int(df["uptime_cycles"].max()) if "uptime_cycles" in df.columns else 0
-    uptime_pct = max_uptime / total_rows * 100 if total_rows > 0 else 0.0
-    st.metric("Uptime", f"{uptime_pct:.1f}%")
+    if "uptime_cycles" in df.columns:
+        total_cycles = int(df["uptime_cycles"].sum())
+        # Only count market hours (MOEX: ~8.7h/day, 5 days/week)
+        market_hours = days * 8.7 * 5 / 7
+        uptime_pct = min(total_cycles / market_hours * 100, 100.0) if market_hours > 0 else 0.0
+        st.metric("Uptime", f"{uptime_pct:.1f}%", delta=f"{total_cycles} cycles")
+    else:
+        st.metric("Uptime", "N/A")
 
     # Section 4: Fill rate gauge
     st.subheader("Fill Rate")

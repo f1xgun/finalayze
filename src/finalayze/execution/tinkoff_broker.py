@@ -37,6 +37,8 @@ if TYPE_CHECKING:
 
 # gRPC C-ares DNS resolver may fail on some systems; use native resolver.
 os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
+# Use "poll" strategy to avoid BlockingIOError spam from C-ares poller on aarch64/Docker.
+os.environ.setdefault("GRPC_POLL_STRATEGY", "poll")
 
 _MOEX_MARKET_ID = "moex"
 _NANO_DIVISOR = Decimal(1_000_000_000)
@@ -122,6 +124,33 @@ class TinkoffBroker(BrokerBase):
                     self._client = AsyncClient(self._token, target=target)
                     self._services = await self._client.__aenter__()
         return self._services
+
+    async def _auto_reconnect(self, coro: object) -> object:
+        """Execute coroutine, resetting gRPC channel on UNAVAILABLE.
+
+        When a stale/broken channel raises UNAVAILABLE, resets _services
+        and _client so the next RetryPolicy attempt creates a fresh connection.
+        """
+        import contextlib  # noqa: PLC0415
+
+        try:
+            return await coro  # type: ignore[misc]
+        except Exception as exc:
+            if self._is_grpc_unavailable(exc):
+                _log.warning("grpc_unavailable_resetting_channel", error=str(exc))
+                old_client = self._client
+                self._services = None
+                self._client = None
+                if old_client is not None:
+                    with contextlib.suppress(Exception):
+                        await old_client.__aexit__(None, None, None)
+            raise
+
+    @staticmethod
+    def _is_grpc_unavailable(exc: BaseException) -> bool:
+        """Check if error is gRPC UNAVAILABLE (stale/closed channel)."""
+        exc_str = str(exc)
+        return "StatusCode.UNAVAILABLE" in exc_str or "Socket closed" in exc_str
 
     # Keep backward compat alias
     def _get_client(self) -> AsyncClient:
@@ -223,7 +252,7 @@ class TinkoffBroker(BrokerBase):
     async def _get_accounts_async(self) -> object:
         """Async call to fetch accounts list."""
         services = await self._get_services_async()
-        return await services.users.get_accounts()  # type: ignore[attr-defined]
+        return await self._auto_reconnect(services.users.get_accounts())  # type: ignore[attr-defined]
 
     def submit_order(
         self,
@@ -309,13 +338,13 @@ class TinkoffBroker(BrokerBase):
     ) -> object:
         """Async call to Tinkoff SDK post_order."""
         client = await self._get_services_async()
-        return await client.orders.post_order(  # type: ignore[attr-defined]
+        return await self._auto_reconnect(client.orders.post_order(  # type: ignore[attr-defined]
             figi=figi,
             quantity=quantity,
             direction=direction,
             order_type=OrderType.ORDER_TYPE_MARKET,
             account_id=self._account_id,
-        )
+        ))
 
     def get_last_prices(self, symbols: list[str]) -> dict[str, Decimal]:
         """Fetch last prices for given symbols via T-Invest GetLastPrices.
@@ -365,7 +394,7 @@ class TinkoffBroker(BrokerBase):
     async def _get_last_prices_async(self, figis: list[str]) -> object:
         """Async call to T-Invest GetLastPrices."""
         client = await self._get_services_async()
-        return await client.market_data.get_last_prices(figi=figis)  # type: ignore[attr-defined]
+        return await self._auto_reconnect(client.market_data.get_last_prices(figi=figis))  # type: ignore[attr-defined]
 
     def get_order_state(self, order_id: str) -> OrderStateResult:
         """Query order state from T-Invest API.
@@ -399,10 +428,10 @@ class TinkoffBroker(BrokerBase):
     async def _get_order_state_async(self, order_id: str) -> object:
         """Async call to T-Invest get_order_state."""
         client = await self._get_services_async()
-        return await client.orders.get_order_state(  # type: ignore[attr-defined]
+        return await self._auto_reconnect(client.orders.get_order_state(  # type: ignore[attr-defined]
             account_id=self._account_id,
             order_id=order_id,
-        )
+        ))
 
     def get_portfolio(self) -> PortfolioState:
         """Return current MOEX portfolio state from Tinkoff.
@@ -494,7 +523,10 @@ class TinkoffBroker(BrokerBase):
     async def _get_portfolio_async(self) -> object:
         """Async call to Tinkoff SDK get_portfolio."""
         services = await self._get_services_async()
-        return await services.operations.get_portfolio(account_id=self._account_id)  # type: ignore[attr-defined]
+        coro = services.operations.get_portfolio(  # type: ignore[attr-defined]
+            account_id=self._account_id,
+        )
+        return await self._auto_reconnect(coro)
 
     def has_position(self, symbol: str) -> bool:
         """Return True if Tinkoff account holds a non-zero position in symbol."""
@@ -511,6 +543,43 @@ class TinkoffBroker(BrokerBase):
         """Return current Tinkoff positions (FIGI-keyed) as Decimal quantities."""
         return dict(self.get_portfolio().positions)
 
+    def get_positions_detail(self) -> list[dict[str, object]]:
+        """Return enriched position data with avg price and current price.
+
+        Each dict: {figi, quantity, avg_price, current_price, market_value, unrealized_pnl}.
+        Falls back to empty list on error.
+        """
+        try:
+            self._ensure_account_id()
+            portfolio = self._call(lambda: self._run_async(self._get_portfolio_async()))
+        except Exception:
+            _log.warning("get_positions_detail_failed", exc_info=True)
+            return []
+
+        result: list[dict[str, object]] = []
+        for pos in portfolio.positions:  # type: ignore[attr-defined]
+            if getattr(pos, "instrument_type", "") == "currency":
+                continue
+            qty = self._quotation_to_decimal(pos.quantity)
+            if qty <= 0:
+                continue
+            avg_price = self._quotation_to_decimal(pos.average_position_price)
+            cur_price = self._quotation_to_decimal(pos.current_price)
+            market_val = qty * cur_price
+            cost_basis = qty * avg_price
+            unrealized = market_val - cost_basis
+            pnl_pct = float(unrealized / cost_basis * 100) if cost_basis else 0.0
+            result.append({
+                "figi": pos.figi,
+                "quantity": float(qty),
+                "avg_price": float(avg_price),
+                "current_price": float(cur_price),
+                "market_value": float(market_val),
+                "unrealized_pnl": float(unrealized),
+                "unrealized_pnl_pct": pnl_pct,
+            })
+        return result
+
     def cancel_order(self, order_id: str) -> None:
         """Cancel a pending Tinkoff order by ID."""
         try:
@@ -523,7 +592,10 @@ class TinkoffBroker(BrokerBase):
     async def _cancel_order_async(self, order_id: str) -> None:
         """Async call to Tinkoff SDK cancel_order."""
         client = await self._get_services_async()
-        await client.orders.cancel_order(account_id=self._account_id, order_id=order_id)  # type: ignore[attr-defined]
+        coro = client.orders.cancel_order(  # type: ignore[attr-defined]
+            account_id=self._account_id, order_id=order_id,
+        )
+        await self._auto_reconnect(coro)
 
     def reconnect_client(self) -> bool:
         """Destroy existing gRPC client and create a new one.
@@ -585,7 +657,7 @@ class TinkoffBroker(BrokerBase):
     async def _get_orders_async(self) -> object:
         """Async call to T-Invest get_orders."""
         client = await self._get_services_async()
-        return await client.orders.get_orders(account_id=self._account_id)  # type: ignore[attr-defined]
+        return await self._auto_reconnect(client.orders.get_orders(account_id=self._account_id))  # type: ignore[attr-defined]
 
     def cancel_order_safe(self, order_id: str) -> bool:
         """Cancel a specific order by ID. Returns True on success, False on error.
