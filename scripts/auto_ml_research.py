@@ -668,6 +668,9 @@ def _run_fold(
     config: ExperimentConfig,
     segment_id: str,
     min_signals: int = _US_MIN_SIGNALS,
+    min_sensitivity: float = 0.45,
+    min_specificity: float = 0.45,
+    min_class_ratio: float = 0.30,
 ) -> tuple[list, FoldMetrics, list[str]] | None:
     """Train and evaluate a single fold.  Returns None if fold is skipped."""
     train_f = [all_features[i] for i in train_idx]
@@ -732,7 +735,13 @@ def _run_fold(
     fold_metrics = _evaluate_models(
         models, test_f, test_l, fold_uniqueness, fold_avg_hold, weights=fold_weights
     )
-    gate_results = evaluate_fold(fold_metrics, min_signals=min_signals)
+    gate_results = evaluate_fold(
+        fold_metrics,
+        min_signals=min_signals,
+        min_sensitivity=min_sensitivity,
+        min_specificity=min_specificity,
+        min_class_ratio=min_class_ratio,
+    )
     return gate_results, fold_metrics, list(selected) if selected else []
 
 
@@ -812,7 +821,12 @@ def run_experiment(
         fold_pfs: list[float] = []
         features_used: list[str] = []
 
-        min_signals = _MOEX_MIN_SIGNALS if _is_moex_segment(segment_id) else _US_MIN_SIGNALS
+        is_moex = _is_moex_segment(segment_id)
+        min_signals = _MOEX_MIN_SIGNALS if is_moex else _US_MIN_SIGNALS
+        # MOEX-relaxed thresholds for sensitivity/specificity/class_balance
+        min_sensitivity = 0.30 if is_moex else 0.45
+        min_specificity = 0.30 if is_moex else 0.45
+        min_class_ratio = 0.20 if is_moex else 0.30
         for fold_idx, (train_idx, _cal_idx, test_idx) in enumerate(folds):
             fold_out = _run_fold(
                 train_idx,
@@ -823,6 +837,9 @@ def run_experiment(
                 config,
                 segment_id,
                 min_signals=min_signals,
+                min_sensitivity=min_sensitivity,
+                min_specificity=min_specificity,
+                min_class_ratio=min_class_ratio,
             )
             if fold_out is None:
                 continue

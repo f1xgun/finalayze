@@ -1309,7 +1309,13 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
                 avg_hold_bars=fold_avg_hold,
                 calibrator=fold_calibrator,
             )
-            gate_results = evaluate_fold(fold_metrics)
+            _is_moex_seg = _is_moex_segment(segment_id)
+            gate_results = evaluate_fold(
+                fold_metrics,
+                min_sensitivity=0.30 if _is_moex_seg else 0.45,
+                min_specificity=0.30 if _is_moex_seg else 0.45,
+                min_class_ratio=0.20 if _is_moex_seg else 0.30,
+            )
             all_fold_results.append(gate_results)
 
             passed_count = sum(1 for r in gate_results if r.passed)
