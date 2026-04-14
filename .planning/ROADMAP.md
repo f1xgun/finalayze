@@ -384,10 +384,10 @@ Plans:
   2. MOEX hyperparameter defaults are defined in a separate config block from US defaults — changing US model depth does not affect MOEX model depth
   3. When sample_weight is provided, XGBoost sets scale_pos_weight=1.0 (matching LightGBM) — a unit test confirms XGB and LGBM receive identical effective class weights under the same sample_weight input
   4. All three ensemble members (XGB, LGBM, CatBoost) apply class rebalancing exclusively through sample_weight — no member applies both sample_weight and an internal pos_weight multiplier simultaneously
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 45-01-PLAN.md — MOEX-specific hyperparameters and routing in autoresearch (MCPX-01, MCPX-02)
-- [ ] 45-02-PLAN.md — Ensemble consistency: fix XGBoost and CatBoost double-rebalancing (ENSM-01, ENSM-02)
+- [x] 45-02-PLAN.md — Ensemble consistency: fix XGBoost and CatBoost double-rebalancing (ENSM-01, ENSM-02)
 
 ### Phase 46: Feature Selection Stability
 **Goal**: Feature selection runs once on the full pre-test dataset and the selected feature set is reused identically across all walk-forward folds — eliminating fold-to-fold feature churn that degrades model consistency
@@ -454,7 +454,7 @@ v9.1: 45 -> 46 -> 47 -> 48
 | 42. ExperimentManager Integration | v9.0 | 1/1 | Complete | 2026-04-13 |
 | 43. Ensemble Weight Optimization | v9.0 | 1/1 | Complete | 2026-04-13 |
 | 44. New Search Strategies | v9.0 | 1/1 | Complete | 2026-04-13 |
-| 45. Model Complexity & Ensemble Consistency | v9.1 | 0/TBD | Not started | - |
+| 45. Model Complexity & Ensemble Consistency | v9.1 | 1/2 | In Progress|  |
 | 46. Feature Selection Stability | v9.1 | 0/TBD | Not started | - |
 | 47. Cross-Asset Features & Asymmetric Barriers | v9.1 | 0/TBD | Not started | - |
 | 48. Segment Restructuring & Validation | v9.1 | 0/TBD | Not started | - |

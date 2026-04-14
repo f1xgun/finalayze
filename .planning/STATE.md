@@ -2,14 +2,15 @@
 gsd_state_version: 1.0
 milestone: v9.1
 milestone_name: MOEX ML Model Quality
-status: ready_to_plan
-stopped_at: Roadmap created, Phase 45 ready to plan
-last_updated: "2026-04-14"
+status: Ready to execute
+stopped_at: Completed 45-02-PLAN.md
+last_updated: "2026-04-14T10:48:57.377Z"
 progress:
-  total_phases: 4
+  total_phases: 21
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
+  percent: 50
 ---
 
 # Project State
@@ -19,16 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** v9.1 — Phase 45: Model Complexity & Ensemble Consistency
+**Current focus:** Phase 45 — Model Complexity & Ensemble Consistency
 
 ## Current Position
 
-Phase: 45 of 48 (Model Complexity & Ensemble Consistency)
-Plan: — of — (not yet planned)
-Status: Ready to plan
-Last activity: 2026-04-14 — Roadmap created for v9.1, 4 phases (45-48)
-
-Progress: [░░░░░░░░░░] 0%
+Phase: 45 (Model Complexity & Ensemble Consistency) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -55,6 +52,8 @@ Progress: [░░░░░░░░░░] 0%
 - Phase 46 before 47: stable feature selection makes it meaningful to add new features
 - Phase 47 before 48: features and barriers must be in place before final validation run
 - SBERP removal goes in Phase 48 (segment config), not Phase 45 (model config)
+- [Phase 45]: XGBoost scale_pos_weight=1.0 when sample_weight provided — prevents double-rebalancing with class ratio
+- [Phase 45]: CatBoost auto_class_weights=None when sample_weight provided — same consistency pattern as XGBoost/LightGBM
 
 ### Pending Todos
 
@@ -66,6 +65,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-14
-Stopped at: Roadmap written. Next: `/gsd:plan-phase 45`
+Last session: 2026-04-14T10:48:57.374Z
+Stopped at: Completed 45-02-PLAN.md
 Resume file: None

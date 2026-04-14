@@ -17,8 +17,8 @@
 
 ### Ensemble Consistency
 
-- [ ] **ENSM-01**: XGBoost sets scale_pos_weight=1.0 when sample_weight is provided (matching LightGBM behavior)
-- [ ] **ENSM-02**: All 3 ensemble members (XGB, LGBM, CatBoost) use consistent class rebalancing strategy
+- [x] **ENSM-01**: XGBoost sets scale_pos_weight=1.0 when sample_weight is provided (matching LightGBM behavior)
+- [x] **ENSM-02**: All 3 ensemble members (XGB, LGBM, CatBoost) use consistent class rebalancing strategy
 
 ### Feature Selection Stability
 
@@ -59,8 +59,8 @@
 |-------------|-------|--------|
 | MCPX-01 | Phase 45 | Pending |
 | MCPX-02 | Phase 45 | Pending |
-| ENSM-01 | Phase 45 | Pending |
-| ENSM-02 | Phase 45 | Pending |
+| ENSM-01 | Phase 45 | Complete |
+| ENSM-02 | Phase 45 | Complete |
 | FSEL-01 | Phase 46 | Pending |
 | FSEL-02 | Phase 46 | Pending |
 | FEAT-01 | Phase 47 | Pending |
