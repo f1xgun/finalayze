@@ -103,8 +103,69 @@ async def risk_status(request: Request) -> RiskStatusResponse:
 
 
 @router.get("/exposure", response_model=ExposureResponse)
-async def risk_exposure() -> ExposureResponse:
-    return ExposureResponse(segments=[], total_invested_pct=0.0)
+async def risk_exposure(request: Request) -> ExposureResponse:
+    """Per-segment exposure from live broker positions."""
+    broker_router = getattr(request.app.state, "broker_router", None)
+    if broker_router is None:
+        return ExposureResponse(segments=[], total_invested_pct=0.0)
+
+    try:
+        from collections import defaultdict  # noqa: PLC0415
+
+        from config.segments import DEFAULT_SEGMENTS  # noqa: PLC0415
+
+        # Build symbol→segment lookup
+        sym_to_seg: dict[str, str] = {}
+        for seg in DEFAULT_SEGMENTS:
+            for sym in seg.symbols:
+                sym_to_seg[sym] = seg.segment_id
+
+        from finalayze.markets.instruments import build_default_registry  # noqa: PLC0415
+
+        inst_reg = build_default_registry()
+        registry = default_registry()
+
+        seg_values: dict[str, float] = defaultdict(float)
+        total_equity = 0.0
+
+        import contextlib  # noqa: PLC0415
+
+        for market_def in registry.list_markets():
+            try:
+                broker = broker_router.route(market_def.id)
+            except Exception:  # noqa: S112
+                continue  # skip markets without a broker (e.g. US in sandbox)
+            detail_fn = getattr(broker, "get_positions_detail", None)
+            if detail_fn is not None:
+                for p in detail_fn():
+                    figi = p.get("figi", "")
+                    symbol = figi
+                    with contextlib.suppress(Exception):
+                        symbol = inst_reg.get_by_figi(figi).symbol
+                    seg_id = sym_to_seg.get(symbol, "unassigned")
+                    mv = float(p.get("market_value", 0))
+                    seg_values[seg_id] += mv
+
+            # Get total equity
+            portfolio = broker.get_portfolio()
+            total_equity += float(portfolio.equity)
+
+        if total_equity <= 0:
+            return ExposureResponse(segments=[], total_invested_pct=0.0)
+
+        segments = [
+            SegmentExposure(
+                segment_id=seg_id,
+                market_id="moex",
+                value_usd=val,
+                pct_of_portfolio=val / total_equity * 100,
+            )
+            for seg_id, val in sorted(seg_values.items())
+        ]
+        total_invested = sum(s.pct_of_portfolio for s in segments)
+        return ExposureResponse(segments=segments, total_invested_pct=total_invested)
+    except Exception:
+        return ExposureResponse(segments=[], total_invested_pct=0.0)
 
 
 @router.post("/override", response_model=OverrideResponse)

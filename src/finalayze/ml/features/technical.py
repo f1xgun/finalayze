@@ -677,13 +677,17 @@ def _compute_fx_return_features(moex_data: MoexMarketData | None) -> dict[str, f
 
 
 def _compute_brent_return_features(moex_data: MoexMarketData | None) -> dict[str, float]:
-    """Compute Brent crude log return feature.
+    """Compute Brent crude log return features.
 
-    Returns 1 feature:
-    - brent_return: log return of Brent over 1 bar, lagged by _EXTERNAL_DATA_LAG_BARS.
-      Clipped to [-0.15, 0.15].
+    Returns 3 features: brent_return (1-bar), brent_ret_5d (5-bar), brent_ret_21d (21-bar).
+    Each is a log return lagged by _EXTERNAL_DATA_LAG_BARS, clipped.
+    Each feature falls back to 0.0 independently.
     """
-    _default: dict[str, float] = {"brent_return": 0.0}
+    _default: dict[str, float] = {
+        "brent_return": 0.0,
+        "brent_ret_5d": 0.0,
+        "brent_ret_21d": 0.0,
+    }
 
     if moex_data is None or not moex_data.commodity_candles:
         return _default
@@ -693,19 +697,30 @@ def _compute_brent_return_features(moex_data: MoexMarketData | None) -> dict[str
         return _default
 
     lag = _EXTERNAL_DATA_LAG_BARS
-    min_required = lag + 2
-    if len(brent) < min_required:
-        return _default
+    result = dict(_default)
 
-    close_prev = float(brent[-lag - 2].close)
-    close_curr = float(brent[-lag - 1].close)
+    # 1-bar return (existing logic, unchanged behavior)
+    if len(brent) >= lag + 2:
+        close_prev = float(brent[-lag - 2].close)
+        close_curr = float(brent[-lag - 1].close)
+        if close_prev > 0 and close_curr > 0:
+            result["brent_return"] = float(np.clip(np.log(close_curr / close_prev), -0.15, 0.15))
 
-    if close_prev <= 0 or close_curr <= 0:
-        return _default
+    # 5-bar return
+    if len(brent) >= lag + 6:
+        c0 = float(brent[-lag - 6].close)
+        c1 = float(brent[-lag - 1].close)
+        if c0 > 0 and c1 > 0:
+            result["brent_ret_5d"] = float(np.clip(np.log(c1 / c0), -0.30, 0.30))
 
-    brent_return = float(np.clip(np.log(close_curr / close_prev), -0.15, 0.15))
+    # 21-bar return
+    if len(brent) >= lag + 22:
+        c0 = float(brent[-lag - 22].close)
+        c1 = float(brent[-lag - 1].close)
+        if c0 > 0 and c1 > 0:
+            result["brent_ret_21d"] = float(np.clip(np.log(c1 / c0), -0.50, 0.50))
 
-    return {"brent_return": brent_return}
+    return result
 
 
 def compute_features(

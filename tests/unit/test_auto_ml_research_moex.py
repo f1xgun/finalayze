@@ -26,7 +26,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 # Constants (no magic numbers — ruff PLR2004)
-_MOEX_LOOKBACK_DAYS_EXPECTED = 730
+_MOEX_LOOKBACK_DAYS_EXPECTED = 1095
 _US_LOOKBACK_DAYS_EXPECTED = 1825
 _MOEX_MAX_FEATURES_EXPECTED = 10
 _US_MAX_FEATURES_EXPECTED = 15
@@ -36,6 +36,51 @@ _BOND_SEGMENTS = ["ru_ofz_pd", "ru_ofz_pk"]
 
 # Expected symbols for ru_blue_chips from config/segments.py
 _RU_BLUE_CHIPS_SYMBOLS = ["SBER", "LKOH", "GMKN"]
+
+
+class TestBarrierConfig:
+    """Tests for _SEGMENT_BARRIER_CONFIG and _get_barrier_params."""
+
+    def test_ru_energy_asymmetric(self) -> None:
+        from scripts.auto_ml_research import _get_barrier_params
+
+        upper, lower = _get_barrier_params("ru_energy")
+        assert upper == pytest.approx(1.8)   # 1.5 * 1.2
+        assert lower == pytest.approx(2.4)   # 2.0 * 1.2
+
+    def test_ru_energy_lower_wider_than_upper(self) -> None:
+        from scripts.auto_ml_research import _get_barrier_params
+
+        upper, lower = _get_barrier_params("ru_energy")
+        assert lower > upper
+
+    def test_ru_finance_symmetric(self) -> None:
+        from scripts.auto_ml_research import _get_barrier_params
+
+        upper, lower = _get_barrier_params("ru_finance")
+        assert upper == pytest.approx(2.4)   # 2.0 * 1.2
+        assert lower == pytest.approx(2.4)   # 2.0 * 1.2
+
+    def test_us_tech_no_uplift(self) -> None:
+        from scripts.auto_ml_research import _get_barrier_params
+
+        upper, lower = _get_barrier_params("us_tech")
+        assert upper == pytest.approx(2.0)
+        assert lower == pytest.approx(2.0)
+
+    def test_config_driven(self) -> None:
+        """Changing _SEGMENT_BARRIER_CONFIG affects output."""
+        from scripts.auto_ml_research import _SEGMENT_BARRIER_CONFIG, _get_barrier_params
+
+        original = _SEGMENT_BARRIER_CONFIG.get("ru_energy")
+        try:
+            _SEGMENT_BARRIER_CONFIG["ru_energy"] = (1.0, 3.0)
+            upper, lower = _get_barrier_params("ru_energy")
+            assert upper == pytest.approx(1.2)   # 1.0 * 1.2
+            assert lower == pytest.approx(3.6)   # 3.0 * 1.2
+        finally:
+            if original is not None:
+                _SEGMENT_BARRIER_CONFIG["ru_energy"] = original
 
 
 class TestIsModexSegment:
@@ -116,14 +161,14 @@ class TestSegmentSymbols:
 class TestGetLookbackDays:
     """Test _get_lookback_days returns segment-appropriate values."""
 
-    def test_ru_blue_chips_returns_730(self) -> None:
-        """_get_lookback_days('ru_blue_chips') returns 730."""
+    def test_ru_blue_chips_returns_1095(self) -> None:
+        """_get_lookback_days('ru_blue_chips') returns 1095."""
         from scripts.auto_ml_research import _get_lookback_days
 
         assert _get_lookback_days("ru_blue_chips") == _MOEX_LOOKBACK_DAYS_EXPECTED
 
-    def test_ru_energy_returns_730(self) -> None:
-        """_get_lookback_days('ru_energy') returns 730."""
+    def test_ru_energy_returns_1095(self) -> None:
+        """_get_lookback_days('ru_energy') returns 1095."""
         from scripts.auto_ml_research import _get_lookback_days
 
         assert _get_lookback_days("ru_energy") == _MOEX_LOOKBACK_DAYS_EXPECTED
@@ -211,8 +256,8 @@ class TestArgparseChoices:
 # ---------------------------------------------------------------------------
 
 # Constants for macro tests (no magic numbers — ruff PLR2004)
-_CANDLE_COUNT = 200  # random-walk series; enough for _WINDOW_SIZE=80 + _TB_MAX_HOLD=20 + warmup
-_MACRO_COUNT = 200  # one record per day matching candle count
+_CANDLE_COUNT = 500  # must meet _MIN_HISTORY_DAYS=500 gate; also covers _WINDOW_SIZE=80 + _TB_MAX_HOLD=20
+_MACRO_COUNT = 500  # one record per day matching candle count
 _STABLE_FX_RATE = Decimal(80)
 _SPIKE_FX_RATE = Decimal(200)  # large spike injected into the last 2 records
 _SPIKE_ABS_ZSCORE_LIMIT = 3.0  # spike must NOT produce extreme z-score
@@ -341,12 +386,12 @@ class TestMoexMacroFeaturesNonZero:
 
         from finalayze.core.schemas import FXRate, KeyRateRecord, MoexMarketData, TurnoverRecord
 
-        _N = 200
+        _N = 500  # must meet _MIN_HISTORY_DAYS=500 gate
         base_ts = datetime(2022, 1, 1, tzinfo=UTC)
 
         candles = _make_candles(_N, base_ts)
 
-        # Realistic FX: slight upward drift 80..82
+        # Realistic FX: slight upward drift 80..85
         fx_rates = [
             FXRate(
                 timestamp=base_ts + timedelta(days=i),
@@ -421,3 +466,119 @@ class TestMoexMacroFeaturesNonZero:
             f"Present keys: {present_keys}, "
             f"values: { {k: features[0].get(k) for k in present_keys} }"
         )
+
+
+# ---------------------------------------------------------------------------
+# MOEX hyperparameter routing tests (Plan 45-01)
+# ---------------------------------------------------------------------------
+
+# Constants for MOEX hparam tests (no magic numbers — ruff PLR2004)
+_MOEX_EXPECTED_XGB_MAX_DEPTH = 3
+_MOEX_EXPECTED_XGB_N_ESTIMATORS = 100
+_MOEX_EXPECTED_XGB_MIN_CHILD_WEIGHT = 20
+_MOEX_EXPECTED_LGBM_N_ESTIMATORS = 100
+_MOEX_EXPECTED_LGBM_NUM_LEAVES = 15
+_MOEX_EXPECTED_CAT_DEPTH = 3
+_MOEX_EXPECTED_CAT_ITERATIONS = 100
+
+_US_EXPECTED_XGB_MAX_DEPTH = 5
+_US_EXPECTED_XGB_N_ESTIMATORS = 200
+
+
+class TestMoexHparams:
+    """Test MOEX-specific reduced-complexity hyperparameters and routing."""
+
+    def test_moex_hparams_xgb_max_depth(self) -> None:
+        """_MOEX_HPARAMS['xgb_max_depth'] == 3."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["xgb_max_depth"] == _MOEX_EXPECTED_XGB_MAX_DEPTH
+
+    def test_moex_hparams_xgb_n_estimators(self) -> None:
+        """_MOEX_HPARAMS['xgb_n_estimators'] == 100."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["xgb_n_estimators"] == _MOEX_EXPECTED_XGB_N_ESTIMATORS
+
+    def test_moex_hparams_xgb_min_child_weight(self) -> None:
+        """_MOEX_HPARAMS['xgb_min_child_weight'] == 20."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["xgb_min_child_weight"] == _MOEX_EXPECTED_XGB_MIN_CHILD_WEIGHT
+
+    def test_moex_hparams_lgbm_n_estimators(self) -> None:
+        """_MOEX_HPARAMS['lgbm_n_estimators'] == 100."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["lgbm_n_estimators"] == _MOEX_EXPECTED_LGBM_N_ESTIMATORS
+
+    def test_moex_hparams_lgbm_num_leaves(self) -> None:
+        """_MOEX_HPARAMS['lgbm_num_leaves'] == 15."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["lgbm_num_leaves"] == _MOEX_EXPECTED_LGBM_NUM_LEAVES
+
+    def test_moex_hparams_cat_depth(self) -> None:
+        """_MOEX_HPARAMS['cat_depth'] == 3."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["cat_depth"] == _MOEX_EXPECTED_CAT_DEPTH
+
+    def test_moex_hparams_cat_iterations(self) -> None:
+        """_MOEX_HPARAMS['cat_iterations'] == 100."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["cat_iterations"] == _MOEX_EXPECTED_CAT_ITERATIONS
+
+    def test_get_hparams_moex_segment_returns_moex_hparams(self) -> None:
+        """_get_hparams('ru_energy') returns MOEX-profile values."""
+        from scripts.auto_ml_research import _get_hparams
+
+        hp = _get_hparams("ru_energy")
+        assert hp["xgb_max_depth"] == _MOEX_EXPECTED_XGB_MAX_DEPTH
+        assert hp["xgb_n_estimators"] == _MOEX_EXPECTED_XGB_N_ESTIMATORS
+
+    def test_get_hparams_us_segment_returns_default_hparams(self) -> None:
+        """_get_hparams('us_tech') returns US-profile (default) values."""
+        from scripts.auto_ml_research import _get_hparams
+
+        hp = _get_hparams("us_tech")
+        assert hp["xgb_max_depth"] == _US_EXPECTED_XGB_MAX_DEPTH
+        assert hp["xgb_n_estimators"] == _US_EXPECTED_XGB_N_ESTIMATORS
+
+    def test_default_hparams_unchanged_max_depth(self) -> None:
+        """_DEFAULT_HPARAMS still has xgb_max_depth == 5 (US segments unchanged)."""
+        from scripts.auto_ml_research import _DEFAULT_HPARAMS
+
+        assert _DEFAULT_HPARAMS["xgb_max_depth"] == _US_EXPECTED_XGB_MAX_DEPTH
+
+    def test_default_hparams_unchanged_n_estimators(self) -> None:
+        """_DEFAULT_HPARAMS still has xgb_n_estimators == 200 (US segments unchanged)."""
+        from scripts.auto_ml_research import _DEFAULT_HPARAMS
+
+        assert _DEFAULT_HPARAMS["xgb_n_estimators"] == _US_EXPECTED_XGB_N_ESTIMATORS
+
+    def test_get_hparams_returns_copy(self) -> None:
+        """_get_hparams returns a copy so mutations do not affect the constant."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS, _get_hparams
+
+        hp = _get_hparams("ru_blue_chips")
+        hp["xgb_max_depth"] = 999
+        assert _MOEX_HPARAMS["xgb_max_depth"] == _MOEX_EXPECTED_XGB_MAX_DEPTH
+
+
+# ---------------------------------------------------------------------------
+# Minimum history gate
+# ---------------------------------------------------------------------------
+
+
+class TestMinHistoryGate:
+    def test_constant_value(self) -> None:
+        from scripts.auto_ml_research import _MIN_HISTORY_DAYS
+
+        assert _MIN_HISTORY_DAYS == 500
+
+    def test_sberp_not_in_ru_finance_symbols(self) -> None:
+        from scripts.auto_ml_research import _SEGMENT_SYMBOLS
+
+        assert "SBERP" not in _SEGMENT_SYMBOLS["ru_finance"]

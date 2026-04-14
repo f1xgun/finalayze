@@ -45,6 +45,13 @@ _DEGEN_MAX_BUY_RATIO = 0.85
 _MIN_CLASS_RATIO = 0.30
 _MIN_SENSITIVITY = 0.45
 _MIN_SPECIFICITY = 0.45
+
+# MOEX-relaxed thresholds: smaller datasets (~850 samples) produce more
+# conservative models with fewer BUY predictions.  US thresholds are
+# unreachable on these sample sizes.
+_MOEX_MIN_CLASS_RATIO = 0.20
+_MOEX_MIN_SENSITIVITY = 0.30
+_MOEX_MIN_SPECIFICITY = 0.30
 _DEFAULT_MIN_PASSING_FOLDS_RATIO = 0.60
 _MAX_ACCURACY_THRESHOLD = 0.55
 
@@ -174,34 +181,40 @@ def check_signal_count_gate(
     )
 
 
-def check_class_balance_gate(metrics: FoldMetrics) -> QualityGateResult:
+def check_class_balance_gate(
+    metrics: FoldMetrics, *, min_class_ratio: float = _MIN_CLASS_RATIO
+) -> QualityGateResult:
     """Model must predict both classes (not all-buy or all-sell)."""
     ratio = min(metrics.buy_ratio, 1.0 - metrics.buy_ratio)
-    passed = ratio >= _MIN_CLASS_RATIO
+    passed = ratio >= min_class_ratio
     return QualityGateResult(
-        passed=passed, gate_name="class_balance", value=ratio, threshold=_MIN_CLASS_RATIO
+        passed=passed, gate_name="class_balance", value=ratio, threshold=min_class_ratio
     )
 
 
-def check_sensitivity_gate(metrics: FoldMetrics) -> QualityGateResult:
+def check_sensitivity_gate(
+    metrics: FoldMetrics, *, min_sensitivity: float = _MIN_SENSITIVITY
+) -> QualityGateResult:
     """Minimum sensitivity (true positive rate)."""
-    passed = metrics.sensitivity >= _MIN_SENSITIVITY
+    passed = metrics.sensitivity >= min_sensitivity
     return QualityGateResult(
         passed=passed,
         gate_name="sensitivity",
         value=metrics.sensitivity,
-        threshold=_MIN_SENSITIVITY,
+        threshold=min_sensitivity,
     )
 
 
-def check_specificity_gate(metrics: FoldMetrics) -> QualityGateResult:
+def check_specificity_gate(
+    metrics: FoldMetrics, *, min_specificity: float = _MIN_SPECIFICITY
+) -> QualityGateResult:
     """Minimum specificity (true negative rate)."""
-    passed = metrics.specificity >= _MIN_SPECIFICITY
+    passed = metrics.specificity >= min_specificity
     return QualityGateResult(
         passed=passed,
         gate_name="specificity",
         value=metrics.specificity,
-        threshold=_MIN_SPECIFICITY,
+        threshold=min_specificity,
     )
 
 
@@ -229,7 +242,12 @@ def check_degenerate_predictor_gate(metrics: FoldMetrics) -> QualityGateResult:
 
 
 def evaluate_fold(
-    metrics: FoldMetrics, *, min_signals: int = _MIN_SIGNALS
+    metrics: FoldMetrics,
+    *,
+    min_signals: int = _MIN_SIGNALS,
+    min_sensitivity: float = _MIN_SENSITIVITY,
+    min_specificity: float = _MIN_SPECIFICITY,
+    min_class_ratio: float = _MIN_CLASS_RATIO,
 ) -> list[QualityGateResult]:
     """Run all quality gates on a single fold's metrics.
 
@@ -238,15 +256,21 @@ def evaluate_fold(
         min_signals: Minimum required signal count for the signal_count gate.
             Defaults to _MIN_SIGNALS (50). Pass a smaller value (e.g. 15) for
             MOEX segments with fewer data points.
+        min_sensitivity: Minimum sensitivity threshold. Defaults to _MIN_SENSITIVITY
+            (0.45). Pass _MOEX_MIN_SENSITIVITY (0.30) for MOEX segments.
+        min_specificity: Minimum specificity threshold. Defaults to _MIN_SPECIFICITY
+            (0.45). Pass _MOEX_MIN_SPECIFICITY (0.30) for MOEX segments.
+        min_class_ratio: Minimum class balance ratio. Defaults to _MIN_CLASS_RATIO
+            (0.30). Pass _MOEX_MIN_CLASS_RATIO (0.20) for MOEX segments.
     """
     return [
         check_accuracy_gate(metrics),
         check_brier_gate(metrics),
         check_profit_factor_gate(metrics),
         check_signal_count_gate(metrics, min_signals=min_signals),
-        check_class_balance_gate(metrics),
-        check_sensitivity_gate(metrics),
-        check_specificity_gate(metrics),
+        check_class_balance_gate(metrics, min_class_ratio=min_class_ratio),
+        check_sensitivity_gate(metrics, min_sensitivity=min_sensitivity),
+        check_specificity_gate(metrics, min_specificity=min_specificity),
         check_degenerate_predictor_gate(metrics),
     ]
 

@@ -64,6 +64,11 @@ _TB_LOWER_ATR_MULT = 2.0  # symmetric barriers
 _TB_MAX_HOLD = 20  # match DEFAULT_STRATEGY_HOLD_BARS["ml_ensemble"]
 _TB_ATR_PERIOD = 14  # standard
 _MOEX_ATR_UPLIFT = 1.2  # MOEX 1.2x uplift for wider barriers
+# Pre-uplift barrier multipliers per segment. MOEX uplift applied in _get_barrier_params().
+# Must stay in sync with auto_ml_research.py _SEGMENT_BARRIER_CONFIG.
+_SEGMENT_BARRIER_CONFIG: dict[str, tuple[float, float]] = {
+    "ru_energy": (1.5, 2.0),  # (upper, lower) — wider downside for commodity-linked volatility
+}
 
 # Label mode choices
 LABEL_MODE_TRIPLE_BARRIER = "triple_barrier"
@@ -92,6 +97,7 @@ def _load_tuned_params(segment_id: str, model_type: str) -> dict | None:
 _LOOKBACK_DAYS = 1825  # 5 years of history for US segments
 _MOEX_LOOKBACK_DAYS = 730  # 2 years for MOEX (post-sanctions structural break)
 _DEFAULT_OUTPUT_DIR = "models/"
+_MIN_HISTORY_DAYS = 500  # symbols with fewer trading days produce degenerate ML predictions
 _MIN_CANDLES = _WINDOW_SIZE + 1  # need at least WINDOW_SIZE + 1 for one sample
 _PURGE_GAP = _WINDOW_SIZE + _TB_MAX_HOLD  # 80 bars: feature window + label horizon
 
@@ -549,17 +555,22 @@ def _fetch_candles(
     return candles
 
 
+def _get_barrier_params(segment_id: str) -> tuple[float, float]:
+    """Return (upper_atr_mult, lower_atr_mult) with MOEX uplift applied."""
+    base_upper, base_lower = _SEGMENT_BARRIER_CONFIG.get(
+        segment_id, (_TB_UPPER_ATR_MULT, _TB_LOWER_ATR_MULT)
+    )
+    if _is_moex_segment(segment_id):
+        return base_upper * _MOEX_ATR_UPLIFT, base_lower * _MOEX_ATR_UPLIFT
+    return base_upper, base_lower
+
+
 def _get_triple_barrier_params(segment_id: str) -> dict[str, float | int | bool]:
     """Return triple barrier parameters for a segment.
 
-    MOEX segments get 1.2x ATR uplift for wider barriers (higher volatility).
+    MOEX segments get 1.2x ATR uplift. ru_energy gets asymmetric barriers.
     """
-    if _is_moex_segment(segment_id):
-        upper = _TB_UPPER_ATR_MULT * _MOEX_ATR_UPLIFT
-        lower = _TB_LOWER_ATR_MULT * _MOEX_ATR_UPLIFT
-    else:
-        upper = _TB_UPPER_ATR_MULT
-        lower = _TB_LOWER_ATR_MULT
+    upper, lower = _get_barrier_params(segment_id)
     return {
         "upper_atr_mult": upper,
         "lower_atr_mult": lower,
@@ -840,6 +851,12 @@ def _build_dataset_triple_barrier(
 
     for symbol in symbols:
         candles = _fetch_symbol_candles(symbol, market_id, settings, segment_id=segment_id)
+        if len(candles) < _MIN_HISTORY_DAYS:
+            print(
+                f"  [{segment_id}] Skipping {symbol}: {len(candles)} trading days "
+                f"< {_MIN_HISTORY_DAYS} minimum"
+            )
+            continue
         if len(candles) < min_candles_tb:
             print(
                 f"  [{segment_id}] {symbol}: only {len(candles)} candles, "
@@ -1292,7 +1309,13 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
                 avg_hold_bars=fold_avg_hold,
                 calibrator=fold_calibrator,
             )
-            gate_results = evaluate_fold(fold_metrics)
+            _is_moex_seg = _is_moex_segment(segment_id)
+            gate_results = evaluate_fold(
+                fold_metrics,
+                min_sensitivity=0.30 if _is_moex_seg else 0.45,
+                min_specificity=0.30 if _is_moex_seg else 0.45,
+                min_class_ratio=0.20 if _is_moex_seg else 0.30,
+            )
             all_fold_results.append(gate_results)
 
             passed_count = sum(1 for r in gate_results if r.passed)

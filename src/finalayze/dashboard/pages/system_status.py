@@ -97,7 +97,7 @@ def render(api: ApiClient) -> None:
         payload: dict[str, object] = {"mode": new_mode}
         if confirm:
             payload["confirm_token"] = confirm
-        resp = api.post("/api/v1/system/mode", json=payload)
+        resp = api.post("/api/v1/mode", json=payload)
         if resp.status_code == _HTTP_OK:
             st.success(f"Mode changed to {new_mode.upper()}")
             st.rerun()

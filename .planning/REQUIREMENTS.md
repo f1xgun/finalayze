@@ -1,81 +1,95 @@
-# Requirements: Finalayze v9.1 MOEX ML Model Quality
+# Requirements: Finalayze v10.0
 
-**Defined:** 2026-04-14
-**Core Value:** Raise ML model quality on failing MOEX segments to pass quality gates
+**Defined:** 2026-04-15
+**Core Value:** Autonomous profitable MOEX trading with acceptable risk limits
 
-## v9.1 Requirements
+## v10.0 Requirements
 
-### Model Complexity
+Requirements for runtime LLM trading agents milestone. Each maps to roadmap phases.
 
-- [ ] **MCPX-01**: Autoresearch uses reduced model complexity for MOEX segments (max_depth=3, n_estimators=100, min_child_weight=20)
-- [ ] **MCPX-02**: MOEX-specific hyperparameter defaults are separate from US defaults in autoresearch config
+### News Pipeline
 
-### Cross-Asset Features
+- [ ] **NEWS-01**: News pipeline processes MOEX RSS feeds (RBC, Interfax, TASS, MOEX ISS) with 5-second per-article LLM timeout
+- [ ] **NEWS-02**: NewsAnalyzer migrated from json.loads() to parse_structured() for reliable sentiment parsing
+- [ ] **NEWS-03**: Source credibility map wired (RSS: 0.8, Telegram: 0.7) and passed to EventDrivenStrategy
+- [ ] **NEWS-04**: Ticker whitelist validation filters LLM-extracted entities against InstrumentRegistry
+- [ ] **NEWS-05**: LLM liveness check added to HealthMonitor with Telegram alert on sustained failure
+- [ ] **NEWS-06**: Article budget cap (max 20 articles/cycle) prevents LLM cost explosion
 
-- [ ] **FEAT-01**: Brent crude return features (ret_5d, ret_21d) available in technical feature set for MOEX segments
-- [ ] **FEAT-02**: Brent features wired from existing `_fetch_moex_macro_data()` into feature engineering pipeline
+### EventDriven Activation
 
-### Ensemble Consistency
+- [ ] **EVNT-01**: EventDrivenStrategy enabled on all ru_* segments with weight 0.15
+- [ ] **EVNT-02**: CBR/dividend duplicate signal guard prevents double-weight with cbr_calendar strategy
+- [ ] **EVNT-03**: Sentiment decay respects market hours (freeze during MOEX close, resume on open)
 
-- [ ] **ENSM-01**: XGBoost sets scale_pos_weight=1.0 when sample_weight is provided (matching LightGBM behavior)
-- [ ] **ENSM-02**: All 3 ensemble members (XGB, LGBM, CatBoost) use consistent class rebalancing strategy
+### Portfolio Review Agent
 
-### Feature Selection Stability
+- [ ] **PFRA-01**: Daily LLM portfolio review runs outside market hours with structured PortfolioReviewResult output
+- [ ] **PFRA-02**: Review results delivered via Telegram with concentration risk and upcoming catalyst analysis
+- [ ] **PFRA-03**: Advisory-only enforcement — schema has no trade-directive fields, no write access to order pipeline
 
-- [ ] **FSEL-01**: Feature selection runs once on full pre-test dataset, not per-fold, in autoresearch pipeline
-- [ ] **FSEL-02**: Selected feature set is stable across walk-forward folds (same features used in all folds)
+### Anomaly Interpreter
 
-### Segment Restructuring
+- [ ] **ANMI-01**: AnomalyDetector fires raw alert immediately, then async LLM enrichment follows
+- [ ] **ANMI-02**: LLM explanation appended to Telegram alert labeled "AI interpretation (unverified)"
+- [ ] **ANMI-03**: Graceful degradation — LLM timeout/failure does not suppress or delay raw statistical alert
 
-- [ ] **SEGM-01**: SBERP removed from ru_finance segment (rho > 0.95 with SBER adds noise without signal)
-- [ ] **SEGM-02**: Minimum history check (500 trading days) gates ML eligibility per symbol in autoresearch
-- [ ] **SEGM-03**: ru_tech segment has defined ML policy (disabled, merged, or min-history filtered)
+### Sentiment ML Infrastructure
 
-### Asymmetric Barriers
+- [ ] **STML-01**: TimescaleDB continuous aggregate for rolling sentiment (1d/7d/30d buckets)
+- [ ] **STML-02**: SentimentStore reader (Layer 2) provides rolling aggregation query for future ML feature extraction
 
-- [ ] **BARR-01**: Energy stocks use asymmetric triple barrier (wider lower ATR multiplier for commodity-linked volatility)
-- [ ] **BARR-02**: Barrier asymmetry configurable per segment in autoresearch
+## v11.0 Requirements
 
-## Future Requirements
+Deferred to future release. Tracked but not in current roadmap.
 
-### Advanced Model Improvements
+### Sentiment as ML Features
 
-- **ADVML-01**: Per-segment feature engineering (sector-specific feature sets)
-- **ADVML-02**: Calibration improvement via isotonic regression post-hoc on MOEX folds
-- **ADVML-03**: Cross-segment transfer learning (US→MOEX feature transfer with domain adaptation)
+- **STML-10**: Sentiment rolling features (news_sentiment_ema_24h, news_sentiment_ema_7d, event_count_24h) added to XGBoost feature set
+- **STML-11**: Sentiment features pass quality gates (Brier validation, feature importance budget, CPCV)
+
+### Cached Reasoning Overlay
+
+- **OVRL-01**: Async pre-computation of LLM trade reasoning in news_cycle → Redis cache
+- **OVRL-02**: Lightweight sync ReasoningOverlayStep reads cached reasoning in PositionSizingPipeline
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| US market ML changes | MOEX-only focus per user directive |
-| New model architectures (LSTM, Transformer) | Current tree ensembles sufficient, complexity not warranted |
-| Live trading integration of ML | Separate milestone — v9.1 is autoresearch pipeline only |
-| Quality gates relaxation beyond current fixes | Already adapted in v9.0+; further relaxation masks real model weakness |
+| Pre-Trade Reasoning Agent (LLM modifier in sizing pipeline) | Unanimous REJECT by 5 domain experts: non-determinism, uncalibrated output, irreproducible backtests, sync/async mismatch |
+| Live A/B testing | 4/5 REJECT: formally underpowered (need 6+ years data), backtest via CPCV instead |
+| T-Pulse API integration | T-Invest SDK has no news service; unofficial REST endpoint has uncertain post-2024 auth status |
+| Autonomous rebalancing from Portfolio Review | Risk Officer condition: suggestions only, never autonomous execution |
+| LLM control of CircuitBreaker | Risk Officer condition: read-only access, no override of automated risk systems |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MCPX-01 | Phase 45 | Pending |
-| MCPX-02 | Phase 45 | Pending |
-| ENSM-01 | Phase 45 | Pending |
-| ENSM-02 | Phase 45 | Pending |
-| FSEL-01 | Phase 46 | Pending |
-| FSEL-02 | Phase 46 | Pending |
-| FEAT-01 | Phase 47 | Pending |
-| FEAT-02 | Phase 47 | Pending |
-| BARR-01 | Phase 47 | Pending |
-| BARR-02 | Phase 47 | Pending |
-| SEGM-01 | Phase 48 | Pending |
-| SEGM-02 | Phase 48 | Pending |
-| SEGM-03 | Phase 48 | Pending |
+| NEWS-01 | Phase 49 | Pending |
+| NEWS-02 | Phase 49 | Pending |
+| NEWS-03 | Phase 49 | Pending |
+| NEWS-04 | Phase 49 | Pending |
+| NEWS-05 | Phase 49 | Pending |
+| NEWS-06 | Phase 49 | Pending |
+| EVNT-01 | Phase 50 | Pending |
+| EVNT-02 | Phase 50 | Pending |
+| EVNT-03 | Phase 50 | Pending |
+| ANMI-01 | Phase 51 | Pending |
+| ANMI-02 | Phase 51 | Pending |
+| ANMI-03 | Phase 51 | Pending |
+| PFRA-01 | Phase 52 | Pending |
+| PFRA-02 | Phase 52 | Pending |
+| PFRA-03 | Phase 52 | Pending |
+| STML-01 | Phase 53 | Pending |
+| STML-02 | Phase 53 | Pending |
 
 **Coverage:**
-- v9.1 requirements: 13 total
-- Mapped to phases: 13
+- v10.0 requirements: 17 total
+- Mapped to phases: 17
 - Unmapped: 0 ✓
 
 ---
-*Requirements defined: 2026-04-14*
-*Last updated: 2026-04-14 after roadmap creation*
+*Requirements defined: 2026-04-15*
+*Last updated: 2026-04-15 — traceability filled after roadmap creation*

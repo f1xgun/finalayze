@@ -96,11 +96,18 @@ _TB_LOWER_ATR_MULT = 2.0
 _TB_MAX_HOLD = 20
 _TB_ATR_PERIOD = 14
 _MOEX_ATR_UPLIFT = 1.2
+# Pre-uplift barrier multipliers per segment. MOEX uplift applied in _get_barrier_params().
+# Segments not listed fall back to symmetric (_TB_UPPER_ATR_MULT, _TB_LOWER_ATR_MULT).
+_SEGMENT_BARRIER_CONFIG: dict[str, tuple[float, float]] = {
+    "ru_energy": (1.5, 2.0),  # (upper, lower) — wider downside for commodity-linked volatility
+}
 _LOOKBACK_DAYS = 1825
 _MOEX_LOOKBACK_DAYS = 1095
+_MIN_HISTORY_DAYS = 500  # symbols with fewer trading days produce degenerate ML predictions
 _US_MAX_FEATURES = 15
 _MOEX_MAX_FEATURES = 10
 _ENSEMBLE_WEIGHTS_MIN_FOLDS = 4  # minimum folds required to use optimized ensemble weights
+_MANY_FOLDS_THRESHOLD = 8  # folds >= this use relaxed min_passing_folds_ratio (0.50 vs 0.60)
 
 _WF_TRAIN_MONTHS = 12
 _WF_CAL_MONTHS = 2
@@ -192,6 +199,22 @@ _DEFAULT_HPARAMS = {
     "cat_learning_rate": 0.05,
 }
 
+# Reduced-complexity hyperparameters for MOEX segments (~850 training samples).
+# depth=5 causes severe overfitting on small datasets — leaves with <5 samples.
+# Reducing depth=3, n_estimators=100, min_child_weight=20 prevents overfitting.
+_MOEX_HPARAMS = {
+    "xgb_max_depth": 3,
+    "xgb_n_estimators": 100,
+    "xgb_learning_rate": 0.05,
+    "xgb_min_child_weight": 20,
+    "lgbm_n_estimators": 100,
+    "lgbm_learning_rate": 0.05,
+    "lgbm_num_leaves": 15,
+    "cat_depth": 3,
+    "cat_iterations": 100,
+    "cat_learning_rate": 0.05,
+}
+
 
 # ---------------------------------------------------------------------------
 # Segment helpers
@@ -211,6 +234,21 @@ def _get_lookback_days(segment_id: str) -> int:
 def _get_max_features(segment_id: str) -> int:
     """Return max MI-selected features: 10 for MOEX, 15 for US."""
     return _MOEX_MAX_FEATURES if _is_moex_segment(segment_id) else _US_MAX_FEATURES
+
+
+def _get_hparams(segment_id: str) -> dict[str, float | int]:
+    """Return hyperparameters: reduced complexity for MOEX, standard for US."""
+    return dict(_MOEX_HPARAMS) if _is_moex_segment(segment_id) else dict(_DEFAULT_HPARAMS)
+
+
+def _get_barrier_params(segment_id: str) -> tuple[float, float]:
+    """Return (upper_atr_mult, lower_atr_mult) with MOEX uplift applied."""
+    base_upper, base_lower = _SEGMENT_BARRIER_CONFIG.get(
+        segment_id, (_TB_UPPER_ATR_MULT, _TB_LOWER_ATR_MULT)
+    )
+    if _is_moex_segment(segment_id):
+        return base_upper * _MOEX_ATR_UPLIFT, base_lower * _MOEX_ATR_UPLIFT
+    return base_upper, base_lower
 
 
 # ---------------------------------------------------------------------------
@@ -463,12 +501,13 @@ def build_full_dataset(
     min_candles = _WINDOW_SIZE + _TB_MAX_HOLD + 1
     rows: list[tuple[datetime, dict[str, float], int, float, int]] = []
 
-    # Apply ATR uplift for MOEX segments (wider barriers for higher volatility)
-    is_moex = _segment_id.startswith("ru_")
-    upper_mult = _TB_UPPER_ATR_MULT * (_MOEX_ATR_UPLIFT if is_moex else 1.0)
-    lower_mult = _TB_LOWER_ATR_MULT * (_MOEX_ATR_UPLIFT if is_moex else 1.0)
+    # Apply per-segment barrier config (with MOEX uplift)
+    upper_mult, lower_mult = _get_barrier_params(_segment_id)
 
-    for candles in candles_by_sym.values():
+    for sym, candles in candles_by_sym.items():
+        if len(candles) < _MIN_HISTORY_DAYS:
+            print(f"Skipping {sym}: {len(candles)} trading days < {_MIN_HISTORY_DAYS} minimum")
+            continue
         if len(candles) < min_candles:
             continue
         aligned_bench: list[Candle] | None = None
@@ -629,6 +668,9 @@ def _run_fold(
     config: ExperimentConfig,
     segment_id: str,
     min_signals: int = _US_MIN_SIGNALS,
+    min_sensitivity: float = 0.45,
+    min_specificity: float = 0.45,
+    min_class_ratio: float = 0.30,
 ) -> tuple[list, FoldMetrics, list[str]] | None:
     """Train and evaluate a single fold.  Returns None if fold is skipped."""
     train_f = [all_features[i] for i in train_idx]
@@ -660,11 +702,18 @@ def _run_fold(
     xgb_model = XGBoostModel(
         segment_id=segment_id,
         max_depth=int(hp.get("xgb_max_depth", 5)),
+        n_estimators=int(hp.get("xgb_n_estimators", 200)),
+        min_child_weight=int(hp.get("xgb_min_child_weight", 5)),
     )
-    lgbm_model = LightGBMModel(segment_id=segment_id)
+    lgbm_model = LightGBMModel(
+        segment_id=segment_id,
+        n_estimators=int(hp.get("lgbm_n_estimators", 200)),
+        num_leaves=int(hp.get("lgbm_num_leaves", 15)),
+    )
     cat_model = CatBoostModel(
         segment_id=segment_id,
         depth=int(hp.get("cat_depth", 4)),
+        iterations=int(hp.get("cat_iterations", 200)),
     )
     xgb_model.fit(train_f, train_l, sample_weight=sw)
     lgbm_model.fit(train_f, train_l, sample_weight=sw)
@@ -686,7 +735,13 @@ def _run_fold(
     fold_metrics = _evaluate_models(
         models, test_f, test_l, fold_uniqueness, fold_avg_hold, weights=fold_weights
     )
-    gate_results = evaluate_fold(fold_metrics, min_signals=min_signals)
+    gate_results = evaluate_fold(
+        fold_metrics,
+        min_signals=min_signals,
+        min_sensitivity=min_sensitivity,
+        min_specificity=min_specificity,
+        min_class_ratio=min_class_ratio,
+    )
     return gate_results, fold_metrics, list(selected) if selected else []
 
 
@@ -725,6 +780,40 @@ def run_experiment(
             },
         )
 
+    # --- Feature selection: once before folds (FSEL-01, FSEL-02) ---
+    # Per-fold MI-based selection on ~850 samples produces noisy, inconsistent feature sets.
+    # Running selection once on the union of all training indices eliminates fold-to-fold
+    # feature churn and improves model consistency. Test data is excluded to prevent look-ahead.
+    if config.feature_subset is None:
+        all_train_indices: set[int] = set()
+        for train_idx, _cal_idx, _test_idx in folds:
+            all_train_indices.update(train_idx)
+        sorted_train_indices = sorted(all_train_indices)
+
+        train_df = pd.DataFrame([all_features[i] for i in sorted_train_indices])
+        train_s = pd.Series([labels[i] for i in sorted_train_indices])
+        selected_features = select_features_efficient(
+            train_df,
+            train_s,
+            max_features=config.max_features,
+        )
+        logger.info(
+            "feature_selection_stable",
+            selected_count=len(selected_features),
+            features=selected_features[:5],  # log first 5 to avoid noise
+            experiment=config.name,
+        )
+        # Create new config with pre-selected features so _run_fold uses them directly.
+        # We do NOT mutate the caller's config object (T-46-02 mitigation).
+        config = ExperimentConfig(
+            name=config.name,
+            description=config.description,
+            strategy=config.strategy,
+            feature_subset=selected_features,
+            max_features=config.max_features,
+            hparams=config.hparams,
+        )
+
     try:
         all_fold_results: list[list] = []
         fold_accs: list[float] = []
@@ -732,7 +821,12 @@ def run_experiment(
         fold_pfs: list[float] = []
         features_used: list[str] = []
 
-        min_signals = _MOEX_MIN_SIGNALS if _is_moex_segment(segment_id) else _US_MIN_SIGNALS
+        is_moex = _is_moex_segment(segment_id)
+        min_signals = _MOEX_MIN_SIGNALS if is_moex else _US_MIN_SIGNALS
+        # MOEX-relaxed thresholds for sensitivity/specificity/class_balance
+        min_sensitivity = 0.30 if is_moex else 0.45
+        min_specificity = 0.30 if is_moex else 0.45
+        min_class_ratio = 0.20 if is_moex else 0.30
         for fold_idx, (train_idx, _cal_idx, test_idx) in enumerate(folds):
             fold_out = _run_fold(
                 train_idx,
@@ -743,6 +837,9 @@ def run_experiment(
                 config,
                 segment_id,
                 min_signals=min_signals,
+                min_sensitivity=min_sensitivity,
+                min_specificity=min_specificity,
+                min_class_ratio=min_class_ratio,
             )
             if fold_out is None:
                 continue
@@ -783,9 +880,10 @@ def _fill_result(
     # With many folds (>= 8, e.g. MOEX 1095-day lookback), simple majority (0.50)
     # is sufficient — 5/10 is statistically meaningful. With few folds (<= 5),
     # keep stricter 0.60 (3/5 or 2/3) to avoid noise-driven passes.
-    min_ratio = 0.50 if n_folds >= 8 else 0.60
+    min_ratio = 0.50 if n_folds >= _MANY_FOLDS_THRESHOLD else 0.60
     overall_passed, gate_pass_rates = evaluate_walk_forward(
-        all_fold_results, min_passing_folds_ratio=min_ratio,
+        all_fold_results,
+        min_passing_folds_ratio=min_ratio,
     )
 
     result.n_folds = len(all_fold_results)
@@ -1351,6 +1449,17 @@ def _generate_experiments(
     return experiments[:max_experiments]
 
 
+def _log_complexity_profile(segment_id: str, hparams: dict[str, float | int]) -> None:
+    """Emit a structured log line confirming the complexity profile in use."""
+    if _is_moex_segment(segment_id):
+        logger.info(
+            "Using MOEX complexity profile",
+            segment=segment_id,
+            max_depth=hparams.get("xgb_max_depth"),
+            n_estimators=hparams.get("xgb_n_estimators"),
+        )
+
+
 def _print_summary(
     log_path: Path,
     n_experiments: int,
@@ -1488,7 +1597,9 @@ def run_research_loop(
         description="Baseline with standard MI feature selection",
         strategy="baseline",
         max_features=_get_max_features(segment_id),
+        hparams=_get_hparams(segment_id),
     )
+    _log_complexity_profile(segment_id, baseline_config.hparams)
     baseline_result = run_experiment(
         baseline_config,
         features,

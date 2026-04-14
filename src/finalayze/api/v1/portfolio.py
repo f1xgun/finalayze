@@ -11,7 +11,25 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from finalayze.api.v1.auth import api_key_auth
+from finalayze.markets.instruments import build_default_registry
 from finalayze.markets.registry import default_registry
+
+# Symbol → segment_id mapping (populated lazily from config)
+_symbol_to_segment: dict[str, str] = {}
+
+
+def _get_segment_for_symbol(symbol: str) -> str:
+    """Resolve symbol to segment_id using config/segments.py."""
+    if not _symbol_to_segment:
+        try:
+            from config.segments import DEFAULT_SEGMENTS  # noqa: PLC0415
+
+            for seg in DEFAULT_SEGMENTS:
+                for sym in seg.symbols:
+                    _symbol_to_segment[sym] = seg.segment_id
+        except Exception:  # noqa: S110
+            pass  # segments config unavailable
+    return _symbol_to_segment.get(symbol, "")
 
 _log = structlog.get_logger()
 
@@ -47,8 +65,10 @@ class PositionDetail(BaseModel):
     market_id: str
     segment_id: str
     quantity: float
-    market_value_usd: float
-    unrealized_pnl_usd: float
+    avg_price: float
+    current_price: float
+    market_value: float
+    unrealized_pnl: float
     unrealized_pnl_pct: float
     stop_distance_atr: float | None
 
@@ -138,27 +158,63 @@ async def get_positions(request: Request) -> PositionsResponse:
     if broker_router is None:
         return PositionsResponse(positions=[])
 
-    registry = default_registry()
+    market_registry = default_registry()
+    instrument_registry = build_default_registry()
     positions: list[PositionDetail] = []
-    for market_def in registry.list_markets():
+    for market_def in market_registry.list_markets():
         market_id = market_def.id
         try:
             broker = broker_router.route(market_id)
-            raw = broker.get_positions()
-            for symbol, qty in raw.items():
-                if qty > Decimal(0):
+            # Use enriched positions if available (TinkoffBroker)
+            detail_fn = getattr(broker, "get_positions_detail", None)
+            if detail_fn is not None:
+                for p in detail_fn():
+                    figi = p.get("figi", "")
+                    display_symbol = str(figi)
+                    try:
+                        inst = instrument_registry.get_by_figi(figi)
+                        display_symbol = inst.symbol
+                    except Exception:  # noqa: S110
+                        pass
                     positions.append(
                         PositionDetail(
-                            symbol=symbol,
+                            symbol=display_symbol,
                             market_id=market_id,
-                            segment_id="",
-                            quantity=float(qty),
-                            market_value_usd=0.0,
-                            unrealized_pnl_usd=0.0,
-                            unrealized_pnl_pct=0.0,
+                            segment_id=_get_segment_for_symbol(display_symbol),
+                            quantity=float(p.get("quantity", 0)),
+                            avg_price=float(p.get("avg_price", 0)),
+                            current_price=float(p.get("current_price", 0)),
+                            market_value=float(p.get("market_value", 0)),
+                            unrealized_pnl=float(p.get("unrealized_pnl", 0)),
+                            unrealized_pnl_pct=float(p.get("unrealized_pnl_pct", 0)),
                             stop_distance_atr=None,
                         )
                     )
+            else:
+                # Fallback for brokers without get_positions_detail
+                raw = broker.get_positions()
+                for key, qty in raw.items():
+                    if qty > Decimal(0):
+                        display_symbol = key
+                        try:
+                            inst = instrument_registry.get_by_figi(key)
+                            display_symbol = inst.symbol
+                        except Exception:  # noqa: S110
+                            pass
+                        positions.append(
+                            PositionDetail(
+                                symbol=display_symbol,
+                                market_id=market_id,
+                                segment_id=_get_segment_for_symbol(display_symbol),
+                                quantity=float(qty),
+                                avg_price=0.0,
+                                current_price=0.0,
+                                market_value=0.0,
+                                unrealized_pnl=0.0,
+                                unrealized_pnl_pct=0.0,
+                                stop_distance_atr=None,
+                            )
+                        )
         except Exception as exc:
             _log.warning("Failed to fetch positions for market %s: %s", market_id, exc)
 
@@ -177,8 +233,38 @@ async def get_position(symbol: str, request: Request) -> PositionDetail:
 
 @router.get("/history", response_model=HistoryResponse)
 async def get_portfolio_history() -> HistoryResponse:
-    """Equity curve from portfolio_snapshots table (last 30 days). Stub."""
-    return HistoryResponse(snapshots=[])
+    """Equity curve from sandbox_metrics table (last 30 days)."""
+    try:
+        from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+
+        from sqlalchemy import select, text  # noqa: PLC0415
+
+        from finalayze.core.db import async_session_factory  # noqa: PLC0415
+        from finalayze.core.models import SandboxMetricRow  # noqa: PLC0415
+
+        cutoff = datetime.now(UTC) - timedelta(days=30)
+        async with async_session_factory()() as session:
+            stmt = (
+                select(SandboxMetricRow)
+                .where(SandboxMetricRow.timestamp >= cutoff)
+                .order_by(text("timestamp asc"))
+            )
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+
+        snapshots = [
+            SnapshotEntry(
+                timestamp=r.timestamp.isoformat(),
+                market_id=r.market_id,
+                equity=float(r.equity_rub),
+                drawdown_pct=float(r.drawdown_pct) if r.drawdown_pct is not None else 0.0,
+            )
+            for r in rows
+        ]
+        return HistoryResponse(snapshots=snapshots)
+    except Exception as exc:
+        _log.warning("portfolio_history_failed", error=str(exc))
+        return HistoryResponse(snapshots=[])
 
 
 @router.get("/performance", response_model=PerformanceResponse)
