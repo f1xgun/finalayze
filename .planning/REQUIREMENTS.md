@@ -1,74 +1,81 @@
-# Requirements: Finalayze
+# Requirements: Finalayze v9.1 MOEX ML Model Quality
 
-**Defined:** 2026-04-13
-**Core Value:** Autonomous profitable MOEX trading with acceptable risk limits
+**Defined:** 2026-04-14
+**Core Value:** Raise ML model quality on failing MOEX segments to pass quality gates
 
-## v9.0 Requirements
+## v9.1 Requirements
 
-Requirements for ML AutoResearch & MOEX Adaptation milestone.
+### Model Complexity
 
-### MOEX Data Integration
+- [ ] **MCPX-01**: Autoresearch uses reduced model complexity for MOEX segments (max_depth=3, n_estimators=100, min_child_weight=20)
+- [ ] **MCPX-02**: MOEX-specific hyperparameter defaults are separate from US defaults in autoresearch config
 
-- [x] **MOEX-01**: `auto_ml_research.py` fetches MOEX candles via TinkoffFetcher for ru_blue_chips, ru_energy, ru_finance, ru_tech segments — yfinance not used for any ru_* segment
-- [x] **MOEX-02**: MOEX segment symbols defined in `_SEGMENT_SYMBOLS` matching production `config/segments.py` universe
-- [x] **MOEX-03**: MOEX macro features (CBR rate, USDRUB, IMOEX, Brent) passed via `MoexMarketData` to `build_full_dataset()` — all 10 macro features non-zero in MOEX experiments
+### Cross-Asset Features
 
-### Quality Gate Adaptation
+- [ ] **FEAT-01**: Brent crude return features (ret_5d, ret_21d) available in technical feature set for MOEX segments
+- [ ] **FEAT-02**: Brent features wired from existing `_fetch_moex_macro_data()` into feature engineering pipeline
 
-- [x] **GATE-01**: `evaluate_fold()` accepts `min_signals` parameter — MOEX experiments use n_eff-scaled threshold instead of hardcoded 50
-- [x] **GATE-02**: MOEX-specific walk-forward fold constants produce 3+ folds on 730-day dataset — no single-fold trivial pass
-- [x] **GATE-03**: Degenerate predictor guard rejects all-BUY/all-SELL models (buy_ratio outside 0.15–0.85 range fails gate)
+### Ensemble Consistency
 
-### Experiment Infrastructure
+- [ ] **ENSM-01**: XGBoost sets scale_pos_weight=1.0 when sample_weight is provided (matching LightGBM behavior)
+- [ ] **ENSM-02**: All 3 ensemble members (XGB, LGBM, CatBoost) use consistent class rebalancing strategy
 
-- [x] **EXPINT-01**: `--experiment-id` flag creates ExperimentManager entry at loop start, links results per experiment, records ACCEPT/REJECT/INCONCLUSIVE verdict at end
-- [x] **EXPINT-02**: JSONL log preserved as audit trail alongside ExperimentManager integration — backward compatible when `--experiment-id` not provided
+### Feature Selection Stability
 
-### New Search Strategies
+- [ ] **FSEL-01**: Feature selection runs once on full pre-test dataset, not per-fold, in autoresearch pipeline
+- [ ] **FSEL-02**: Selected feature set is stable across walk-forward folds (same features used in all folds)
 
-- [x] **STRAT-01**: Ensemble weight optimization strategy searches bounded weight grid for XGB/LGBM/CatBoost — weights sum to 1.0, no single model >0.7
-- [x] **STRAT-02**: Cross-segment transfer strategy reads best US experiment features and filters to market-neutral intersection (excludes VIX-only and MOEX-only features)
-- [x] **STRAT-03**: Feature engineering strategy generates domain-motivated combinations (lag ratios, rolling z-scores, cross-feature interactions) with hard cap on generated feature count to prevent overfitting
+### Segment Restructuring
+
+- [ ] **SEGM-01**: SBERP removed from ru_finance segment (rho > 0.95 with SBER adds noise without signal)
+- [ ] **SEGM-02**: Minimum history check (500 trading days) gates ML eligibility per symbol in autoresearch
+- [ ] **SEGM-03**: ru_tech segment has defined ML policy (disabled, merged, or min-history filtered)
+
+### Asymmetric Barriers
+
+- [ ] **BARR-01**: Energy stocks use asymmetric triple barrier (wider lower ATR multiplier for commodity-linked volatility)
+- [ ] **BARR-02**: Barrier asymmetry configurable per segment in autoresearch
 
 ## Future Requirements
 
-### ML Pipeline Enhancement
+### Advanced Model Improvements
 
-- **MLPIPE-F01**: Auto-apply best experiment results to production model via PresetApplicator
-- **MLPIPE-F02**: Scheduled auto_ml_research runs (cron/APScheduler)
-- **MLPIPE-F03**: Dashboard page for autoresearch results visualization
+- **ADVML-01**: Per-segment feature engineering (sector-specific feature sets)
+- **ADVML-02**: Calibration improvement via isotonic regression post-hoc on MOEX folds
+- **ADVML-03**: Cross-segment transfer learning (US→MOEX feature transfer with domain adaptation)
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Neural architecture search (NAS) | Overkill for tree-based ensemble; complexity not justified |
-| AutoML frameworks (AutoGluon, H2O) | Would replace existing pipeline rather than enhance it |
-| Real-time model retraining | System operates on daily bars; batch retraining sufficient |
-| GPU-accelerated training | Dataset size too small to benefit; CPU training completes in seconds |
-| Multi-objective optimization (NSGA-II) | Single composite score sufficient for current experiment loop |
+| US market ML changes | MOEX-only focus per user directive |
+| New model architectures (LSTM, Transformer) | Current tree ensembles sufficient, complexity not warranted |
+| Live trading integration of ML | Separate milestone — v9.1 is autoresearch pipeline only |
+| Quality gates relaxation beyond current fixes | Already adapted in v9.0+; further relaxation masks real model weakness |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MOEX-01 | Phase 40 | Complete |
-| MOEX-02 | Phase 40 | Complete |
-| MOEX-03 | Phase 40 | Complete |
-| GATE-01 | Phase 41 | Complete |
-| GATE-02 | Phase 41 | Complete |
-| GATE-03 | Phase 41 | Complete |
-| EXPINT-01 | Phase 42 | Complete |
-| EXPINT-02 | Phase 42 | Complete |
-| STRAT-01 | Phase 43 | Complete |
-| STRAT-02 | Phase 44 | Complete |
-| STRAT-03 | Phase 44 | Complete |
+| MCPX-01 | — | Pending |
+| MCPX-02 | — | Pending |
+| FEAT-01 | — | Pending |
+| FEAT-02 | — | Pending |
+| ENSM-01 | — | Pending |
+| ENSM-02 | — | Pending |
+| FSEL-01 | — | Pending |
+| FSEL-02 | — | Pending |
+| SEGM-01 | — | Pending |
+| SEGM-02 | — | Pending |
+| SEGM-03 | — | Pending |
+| BARR-01 | — | Pending |
+| BARR-02 | — | Pending |
 
 **Coverage:**
-- v9.0 requirements: 11 total
-- Mapped to phases: 11
-- Unmapped: 0 ✓
+- v9.1 requirements: 13 total
+- Mapped to phases: 0
+- Unmapped: 13 ⚠️
 
 ---
-*Requirements defined: 2026-04-13*
-*Last updated: 2026-04-13 after roadmap creation*
+*Requirements defined: 2026-04-14*
+*Last updated: 2026-04-14 after initial definition*
