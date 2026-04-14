@@ -15,6 +15,7 @@ import structlog
 
 if TYPE_CHECKING:
     from finalayze.api.alerts import TelegramAlerter
+    from finalayze.markets.schedule import MarketSchedule
     from finalayze.monitoring.sandbox_monitor import CycleMetrics
 
 _log = structlog.get_logger()
@@ -37,14 +38,17 @@ class AnomalyDetector:
     _SLIPPAGE_CEILING_BPS: float = 50.0
     _ZSCORE_THRESHOLD: float = 2.0
     _MIN_WINDOW_FOR_ZSCORE: int = 3
+    _MIN_DRAWDOWN_FOR_ZSCORE: float = 0.005  # ignore z-score when DD < 0.5%
 
     def __init__(
         self,
         alerter: TelegramAlerter | None = None,
         window: int = 20,
+        market_schedule: MarketSchedule | None = None,
     ) -> None:
         self._alerter = alerter
         self._window = window
+        self._market_schedule = market_schedule
         self._drawdown_history: deque[float] = deque(maxlen=window)
         self._last_alert: dict[str, float] = {}
 
@@ -65,17 +69,23 @@ class AnomalyDetector:
         self._drawdown_history.append(drawdown_pct)
         if len(self._drawdown_history) < self._MIN_WINDOW_FOR_ZSCORE:
             return False
+        # Skip z-score when drawdown is negligible — near-zero baselines
+        # produce false positives from tiny equity fluctuations.
+        if drawdown_pct < self._MIN_DRAWDOWN_FOR_ZSCORE:
+            return False
         mean = statistics.mean(self._drawdown_history)
         stdev = statistics.stdev(self._drawdown_history)
         if stdev == 0:
             return False
         z = (drawdown_pct - mean) / stdev
         if z > self._ZSCORE_THRESHOLD and self._is_cooled_down("drawdown"):
-            self._fire_alert("drawdown", drawdown_pct, self._ZSCORE_THRESHOLD)
+            self._fire_alert("drawdown", drawdown_pct, self._ZSCORE_THRESHOLD, z_score=z)
             return True
         return False
 
     def _check_fill_rate(self, fill_rate: float) -> bool:
+        if self._market_schedule is not None and not self._market_schedule.is_market_open():
+            return False
         if fill_rate < self._FILL_RATE_FLOOR and self._is_cooled_down("fill_rate"):
             self._fire_alert("fill_rate", fill_rate, self._FILL_RATE_FLOOR)
             return True
@@ -91,9 +101,17 @@ class AnomalyDetector:
         last = self._last_alert.get(metric, 0.0)
         return (time.monotonic() - last) >= self._COOLDOWN_SECONDS
 
-    def _fire_alert(self, metric: str, value: float, threshold: float) -> None:
+    def _fire_alert(
+        self, metric: str, value: float, threshold: float, *, z_score: float | None = None
+    ) -> None:
         self._last_alert[metric] = time.monotonic()
-        msg = f"Sandbox anomaly: {metric} = {value:.2f} (threshold: {threshold:.2f})"
+        if z_score is not None:
+            msg = (
+                f"Sandbox anomaly: {metric} = {value:.4f} "
+                f"(z-score: {z_score:.2f}, threshold: {threshold:.1f}σ)"
+            )
+        else:
+            msg = f"Sandbox anomaly: {metric} = {value:.2f} (threshold: {threshold:.2f})"
         _log.warning("sandbox_anomaly", metric=metric, value=value, threshold=threshold)
         if self._alerter is not None:
             from finalayze.api.alerts import AlertPriority  # noqa: PLC0415

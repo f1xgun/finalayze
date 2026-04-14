@@ -60,6 +60,16 @@ class TestDrawdownZScore:
             result = detector.check(_make_metrics(drawdown_pct=0.02))
         assert "drawdown" not in result
 
+    def test_zscore_no_trigger_below_min_drawdown(self) -> None:
+        """Near-zero drawdown spikes are ignored (false positive suppression)."""
+        detector = AnomalyDetector()
+        # Build baseline of exact zeros
+        for _ in range(10):
+            detector.check(_make_metrics(drawdown_pct=0.0))
+        # Tiny fluctuation would have huge z-score but should be suppressed
+        result = detector.check(_make_metrics(drawdown_pct=0.001))
+        assert "drawdown" not in result
+
 
 class TestFillRate:
     """Fill rate threshold checks."""
@@ -78,6 +88,22 @@ class TestFillRate:
         detector = AnomalyDetector()
         result = detector.check(_make_metrics(fill_rate=0.90))
         assert "fill_rate" not in result
+
+    def test_fill_rate_skipped_when_market_closed(self) -> None:
+        """Fill rate alert is suppressed outside market hours."""
+        mock_schedule = MagicMock()
+        mock_schedule.is_market_open.return_value = False
+        detector = AnomalyDetector(market_schedule=mock_schedule)
+        result = detector.check(_make_metrics(fill_rate=0.0))
+        assert "fill_rate" not in result
+
+    def test_fill_rate_fires_when_market_open(self) -> None:
+        """Fill rate alert fires during market hours."""
+        mock_schedule = MagicMock()
+        mock_schedule.is_market_open.return_value = True
+        detector = AnomalyDetector(market_schedule=mock_schedule)
+        result = detector.check(_make_metrics(fill_rate=0.0))
+        assert "fill_rate" in result
 
 
 class TestSlippage:

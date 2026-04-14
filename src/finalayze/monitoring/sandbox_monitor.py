@@ -58,10 +58,14 @@ class SandboxMonitorService:
         alerter: TelegramAlerter | None = None,
         market_id: str = "moex",
     ) -> None:
+        from finalayze.markets.schedule import SCHEDULES  # noqa: PLC0415
         from finalayze.monitoring.anomaly_detector import AnomalyDetector  # noqa: PLC0415
 
         self._market_id = market_id
-        self._anomaly_detector = AnomalyDetector(alerter=alerter)
+        self._anomaly_detector = AnomalyDetector(
+            alerter=alerter,
+            market_schedule=SCHEDULES.get(market_id),
+        )
         self._cycle_count: int = 0
         self._slippage_buffer: list[float] = []
 
