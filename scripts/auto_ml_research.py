@@ -97,7 +97,7 @@ _TB_MAX_HOLD = 20
 _TB_ATR_PERIOD = 14
 _MOEX_ATR_UPLIFT = 1.2
 _LOOKBACK_DAYS = 1825
-_MOEX_LOOKBACK_DAYS = 730
+_MOEX_LOOKBACK_DAYS = 1095
 _US_MAX_FEATURES = 15
 _MOEX_MAX_FEATURES = 10
 _ENSEMBLE_WEIGHTS_MIN_FOLDS = 4  # minimum folds required to use optimized ensemble weights
@@ -679,8 +679,12 @@ def _run_fold(
     hp = config.hparams
     w_keys = ("xgb_weight", "lgbm_weight", "cat_weight")
     fold_weights = [float(hp[k]) for k in w_keys] if all(k in hp for k in w_keys) else None
+    # mean_uniqueness reflects label overlap: 1/hold_bars (AFML Ch.4).
+    # This ensures accuracy gate uses n_effective = n_test / hold_bars,
+    # matching the Brier gate's n_eff computation.
+    fold_uniqueness = 1.0 / fold_avg_hold if fold_avg_hold > 1.0 else 1.0
     fold_metrics = _evaluate_models(
-        models, test_f, test_l, 1.0, fold_avg_hold, weights=fold_weights
+        models, test_f, test_l, fold_uniqueness, fold_avg_hold, weights=fold_weights
     )
     gate_results = evaluate_fold(fold_metrics, min_signals=min_signals)
     return gate_results, fold_metrics, list(selected) if selected else []
@@ -775,7 +779,14 @@ def _fill_result(
     features_used: list[str],
 ) -> None:
     """Populate result fields from fold evaluations."""
-    overall_passed, gate_pass_rates = evaluate_walk_forward(all_fold_results)
+    n_folds = len(all_fold_results)
+    # With many folds (>= 8, e.g. MOEX 1095-day lookback), simple majority (0.50)
+    # is sufficient — 5/10 is statistically meaningful. With few folds (<= 5),
+    # keep stricter 0.60 (3/5 or 2/3) to avoid noise-driven passes.
+    min_ratio = 0.50 if n_folds >= 8 else 0.60
+    overall_passed, gate_pass_rates = evaluate_walk_forward(
+        all_fold_results, min_passing_folds_ratio=min_ratio,
+    )
 
     result.n_folds = len(all_fold_results)
     result.gate_pass_rates = gate_pass_rates

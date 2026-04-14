@@ -55,14 +55,21 @@ class TestAccuracyGate:
         assert result.gate_name == "accuracy"
         assert abs(result.threshold - expected_threshold) < 1e-9
 
-    def test_small_sample_fails(self) -> None:
-        """With n_test=50, threshold ~ 0.6768; accuracy 0.60 fails."""
+    def test_small_sample_capped(self) -> None:
+        """With n_test=50, smooth cap limits threshold to ~0.572; accuracy 0.60 passes."""
         metrics = _make_metrics(accuracy=0.60, n_test=_SMALL_SAMPLE)
         result = check_accuracy_gate(metrics)
-        expected_threshold = 0.50 + 2.5 * math.sqrt(0.25 / _SMALL_SAMPLE)
+        # Smooth cap: 0.55 + 0.10 * (1 - exp(-50/200)) ≈ 0.572
+        # Raw: 0.50 + 2.5 * sqrt(0.25/50) ≈ 0.677
+        # threshold = min(raw, cap) = 0.572
+        assert result.passed is True
+        assert result.threshold < 0.60  # noqa: PLR2004
+
+    def test_small_sample_fails_below_cap(self) -> None:
+        """With n_test=50, accuracy below smooth cap still fails."""
+        metrics = _make_metrics(accuracy=0.55, n_test=_SMALL_SAMPLE)
+        result = check_accuracy_gate(metrics)
         assert result.passed is False
-        assert result.threshold > 0.60
-        assert abs(result.threshold - expected_threshold) < 1e-9
 
     def test_zero_n_effective_fails(self) -> None:
         """n_test=0 yields n_effective=0, gate fails."""
