@@ -454,7 +454,7 @@ v9.1: 45 -> 46 -> 47 -> 48
 | 42. ExperimentManager Integration | v9.0 | 1/1 | Complete | 2026-04-13 |
 | 43. Ensemble Weight Optimization | v9.0 | 1/1 | Complete | 2026-04-13 |
 | 44. New Search Strategies | v9.0 | 1/1 | Complete | 2026-04-13 |
-| 45. Model Complexity & Ensemble Consistency | v9.1 | 2/2 | Complete   | 2026-04-14 |
+| 45. Model Complexity & Ensemble Consistency | v9.1 | 2/2 | Complete    | 2026-04-14 |
 | 46. Feature Selection Stability | v9.1 | 0/TBD | Not started | - |
 | 47. Cross-Asset Features & Asymmetric Barriers | v9.1 | 0/TBD | Not started | - |
 | 48. Segment Restructuring & Validation | v9.1 | 0/TBD | Not started | - |
