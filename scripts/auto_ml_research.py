@@ -44,6 +44,11 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+# Load .env for FINALAYZE_TINKOFF_TOKEN and other secrets
+from dotenv import load_dotenv
+
+load_dotenv(_PROJECT_ROOT / ".env")
+
 import numpy as _np
 import pandas as pd
 import structlog
@@ -328,21 +333,17 @@ def _fetch_moex_candles(segment_id: str, symbols: list[str]) -> dict[str, list[C
     return candles_by_sym
 
 
-def _fetch_moex_benchmark(segment_id: str) -> list[Candle] | None:
-    """Fetch IMOEX benchmark for MOEX segments via TinkoffFetcher.
+def _fetch_moex_benchmark(_segment_id: str) -> list[Candle] | None:
+    """Fetch IMOEX benchmark for MOEX segments via MoexISSFetcher.
 
-    Returns None if token is not set or fetch fails.
-    Token is never logged or printed (T-40-01 mitigation).
+    IMOEX is an index (not a tradeable instrument), so it must be fetched
+    via MOEX ISS HTTP API, not TinkoffFetcher which only handles instruments.
+
+    Returns None if fetch fails.
     """
-    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN")
-    if not token:
-        print(f"  [{segment_id}] FINALAYZE_TINKOFF_TOKEN not set, skipping MOEX benchmark.")
-        return None
-    from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
-    from finalayze.markets.instruments import build_default_registry  # noqa: PLC0415
+    from finalayze.data.fetchers.moex_iss import MoexISSFetcher  # noqa: PLC0415
 
-    registry = build_default_registry()
-    fetcher = TinkoffFetcher(token=token, registry=registry, sandbox=False)
+    fetcher = MoexISSFetcher()
     end = datetime.now(tz=UTC)
     start = end - timedelta(days=_MOEX_LOOKBACK_DAYS)
     try:

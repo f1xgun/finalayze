@@ -200,11 +200,19 @@ class MoexISSFetcher(BaseFetcher):
         symbol: str,
         start: datetime,
         end: datetime,
-        interval: int,
+        _interval: int,
         timeframe: str,
     ) -> list[Candle]:
-        """Paginate through ISS candle endpoint for a single date range."""
-        url = f"{_BASE_URL}/history/engines/stock/markets/index/securities/{symbol}/candles.json"
+        """Paginate through ISS history endpoint for index securities.
+
+        Uses ``/history/.../securities/{symbol}.json`` which returns daily
+        OHLCV rows for index tickers like IMOEX and RTSI.  The older
+        ``/candles.json`` sub-path returns empty data for these instruments.
+        """
+        url = (
+            f"{_BASE_URL}/history/engines/stock/markets/index"
+            f"/securities/{symbol}.json"
+        )
         # §19-M1: ISS `till` is INCLUSIVE — subtract 1 day from the exclusive `end`
         from_str = start.strftime("%Y-%m-%d")
         till_str = (end - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -216,14 +224,18 @@ class MoexISSFetcher(BaseFetcher):
             params: dict[str, Any] = {
                 "from": from_str,
                 "till": till_str,
-                "interval": interval,
                 "start": offset,
             }
             data = self._get_json(url, params=params)
-            rows = self._fetch_candles_page(data)
+            block = data.get("history", {})
+            columns: list[str] = block.get("columns", [])
+            rows: list[list[Any]] = block.get("data", [])
+
+            if not columns or not rows:
+                break
 
             for row in rows:
-                candle = self._parse_candle_row(row, symbol, timeframe)
+                candle = self._parse_history_row(row, columns, symbol, timeframe)
                 if candle is not None:
                     candles.append(candle)
 
@@ -249,10 +261,18 @@ class MoexISSFetcher(BaseFetcher):
         open_price, close_price, high_price, low_price = row[0], row[1], row[2], row[3]
         row[4]  # value (turnover in RUB) -- not used for Candle.volume
         share_volume = row[5]  # share volume (correct for volume-based indicators)
-        begin_str: str = row[6]
+        begin_raw = row[6]
+
+        # ISS may return non-string values (float, None) for the begin field
+        if begin_raw is None:
+            return None
+        begin_str = str(begin_raw)
 
         # Parse begin timestamp as MSK-naive, then convert to UTC
-        ts_msk = datetime.strptime(begin_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_MSK_TZ)
+        try:
+            ts_msk = datetime.strptime(begin_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_MSK_TZ)
+        except ValueError:
+            return None
         ts_utc = ts_msk.astimezone(UTC)
 
         return Candle(
@@ -265,6 +285,44 @@ class MoexISSFetcher(BaseFetcher):
             low=Decimal(str(low_price)),
             close=Decimal(str(close_price)),
             volume=int(share_volume) if share_volume else 0,
+            source=_ISS_SOURCE,
+        )
+
+    def _parse_history_row(
+        self,
+        row: list[Any],
+        columns: list[str],
+        symbol: str,
+        timeframe: str,
+    ) -> Candle | None:
+        """Parse an ISS history row (column-keyed) into a Candle."""
+        try:
+            col = {name: idx for idx, name in enumerate(columns)}
+            trade_date = row[col["TRADEDATE"]]
+            open_price = row[col["OPEN"]]
+            high_price = row[col["HIGH"]]
+            low_price = row[col["LOW"]]
+            close_price = row[col["CLOSE"]]
+            volume = row[col.get("VOLUME", -1)] if "VOLUME" in col else 0
+        except (KeyError, IndexError):
+            return None
+
+        if any(v is None for v in (trade_date, open_price, high_price, low_price, close_price)):
+            return None
+
+        ts_msk = datetime.strptime(str(trade_date), "%Y-%m-%d").replace(tzinfo=_MSK_TZ)
+        ts_utc = ts_msk.astimezone(UTC)
+
+        return Candle(
+            symbol=symbol,
+            market_id=_MOEX_MARKET_ID,
+            timeframe=timeframe,
+            timestamp=ts_utc,
+            open=Decimal(str(open_price)),
+            high=Decimal(str(high_price)),
+            low=Decimal(str(low_price)),
+            close=Decimal(str(close_price)),
+            volume=int(volume) if volume else 0,
             source=_ISS_SOURCE,
         )
 
