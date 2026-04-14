@@ -130,7 +130,7 @@ Full details in Phase Details section below (collapsed milestone).
 **Milestone Goal:** Raise ML model quality on failing MOEX segments (ru_energy, ru_tech, ru_finance) to pass quality gates, by fixing model complexity, ensemble consistency, feature selection stability, cross-asset features, asymmetric barriers, and segment configuration.
 
 - [x] **Phase 45: Model Complexity & Ensemble Consistency** - Reduce MOEX model complexity and fix XGB/LGBM/CatBoost class rebalancing inconsistency (completed 2026-04-14)
-- [ ] **Phase 46: Feature Selection Stability** - Run feature selection once on full pre-test data instead of per-fold to eliminate fold-to-fold instability
+- [x] **Phase 46: Feature Selection Stability** - Run feature selection once on full pre-test data instead of per-fold to eliminate fold-to-fold instability (completed 2026-04-14)
 - [ ] **Phase 47: Cross-Asset Features & Asymmetric Barriers** - Wire Brent return features and introduce asymmetric triple barrier for energy stocks
 - [ ] **Phase 48: Segment Restructuring & Validation** - Remove SBERP from ru_finance, add minimum history gate, validate all three failing segments pass quality gates
 
@@ -399,7 +399,7 @@ Plans:
   3. The selected feature count is logged once before fold execution begins, not once per fold — a single "Selected N features" log line appears per segment run
 **Plans**: 1 plan
 Plans:
-- [ ] 46-01-PLAN.md — Lift feature selection before fold loop + stability tests (FSEL-01, FSEL-02)
+- [x] 46-01-PLAN.md — Lift feature selection before fold loop + stability tests (FSEL-01, FSEL-02)
 
 ### Phase 47: Cross-Asset Features & Asymmetric Barriers
 **Goal**: ru_energy models have access to Brent crude return features, and energy stocks use asymmetric triple barriers that account for commodity-linked downside volatility
@@ -457,6 +457,6 @@ v9.1: 45 -> 46 -> 47 -> 48
 | 43. Ensemble Weight Optimization | v9.0 | 1/1 | Complete | 2026-04-13 |
 | 44. New Search Strategies | v9.0 | 1/1 | Complete | 2026-04-13 |
 | 45. Model Complexity & Ensemble Consistency | v9.1 | 2/2 | Complete    | 2026-04-14 |
-| 46. Feature Selection Stability | v9.1 | 0/TBD | Not started | - |
+| 46. Feature Selection Stability | v9.1 | 1/1 | Complete   | 2026-04-14 |
 | 47. Cross-Asset Features & Asymmetric Barriers | v9.1 | 0/TBD | Not started | - |
 | 48. Segment Restructuring & Validation | v9.1 | 0/TBD | Not started | - |

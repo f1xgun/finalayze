@@ -2,14 +2,15 @@
 gsd_state_version: 1.0
 milestone: v9.1
 milestone_name: MOEX ML Model Quality
-status: unknown
-stopped_at: Completed 45-01-PLAN.md
-last_updated: "2026-04-14T10:56:16.585Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 46-01-PLAN.md
+last_updated: "2026-04-14T11:26:03.137Z"
 progress:
   total_phases: 21
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  completed_phases: 2
+  total_plans: 3
+  completed_plans: 3
+  percent: 100
 ---
 
 # Project State
@@ -19,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 45 — Model Complexity & Ensemble Consistency
+**Current focus:** Phase 46 — Feature Selection Stability
 
 ## Current Position
 
-Phase: 46
-Plan: Not started
+Phase: 46 (Feature Selection Stability) — EXECUTING
+Plan: 1 of 1
 
 ## Performance Metrics
 
@@ -54,6 +55,8 @@ Plan: Not started
 - [Phase 45]: XGBoost scale_pos_weight=1.0 when sample_weight provided — prevents double-rebalancing with class ratio
 - [Phase 45]: CatBoost auto_class_weights=None when sample_weight provided — same consistency pattern as XGBoost/LightGBM
 - [Phase 45]: MOEX segments use reduced hyperparameters (depth=3, n_estimators=100, min_child_weight=20) via _get_hparams() helper routing; _DEFAULT_HPARAMS unchanged for US segments
+- [Phase 46]: select_features_efficient called once on union of all training indices (pre-fold) to eliminate feature churn
+- [Phase 46]: New ExperimentConfig created with feature_subset set — caller's config not mutated (T-46-02 mitigation)
 
 ### Pending Todos
 
@@ -65,6 +68,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-14T10:50:37.537Z
-Stopped at: Completed 45-01-PLAN.md
+Last session: 2026-04-14T11:26:03.134Z
+Stopped at: Completed 46-01-PLAN.md
 Resume file: None

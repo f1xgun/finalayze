@@ -7,8 +7,8 @@
 
 ### Model Complexity
 
-- [ ] **MCPX-01**: Autoresearch uses reduced model complexity for MOEX segments (max_depth=3, n_estimators=100, min_child_weight=20)
-- [ ] **MCPX-02**: MOEX-specific hyperparameter defaults are separate from US defaults in autoresearch config
+- [x] **MCPX-01**: Autoresearch uses reduced model complexity for MOEX segments (max_depth=3, n_estimators=100, min_child_weight=20)
+- [x] **MCPX-02**: MOEX-specific hyperparameter defaults are separate from US defaults in autoresearch config
 
 ### Cross-Asset Features
 
@@ -22,8 +22,8 @@
 
 ### Feature Selection Stability
 
-- [ ] **FSEL-01**: Feature selection runs once on full pre-test dataset, not per-fold, in autoresearch pipeline
-- [ ] **FSEL-02**: Selected feature set is stable across walk-forward folds (same features used in all folds)
+- [x] **FSEL-01**: Feature selection runs once on full pre-test dataset, not per-fold, in autoresearch pipeline
+- [x] **FSEL-02**: Selected feature set is stable across walk-forward folds (same features used in all folds)
 
 ### Segment Restructuring
 
@@ -57,12 +57,12 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MCPX-01 | Phase 45 | Pending |
-| MCPX-02 | Phase 45 | Pending |
+| MCPX-01 | Phase 45 | Complete |
+| MCPX-02 | Phase 45 | Complete |
 | ENSM-01 | Phase 45 | Complete |
 | ENSM-02 | Phase 45 | Complete |
-| FSEL-01 | Phase 46 | Pending |
-| FSEL-02 | Phase 46 | Pending |
+| FSEL-01 | Phase 46 | Complete |
+| FSEL-02 | Phase 46 | Complete |
 | FEAT-01 | Phase 47 | Pending |
 | FEAT-02 | Phase 47 | Pending |
 | BARR-01 | Phase 47 | Pending |
