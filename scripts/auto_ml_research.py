@@ -103,6 +103,7 @@ _SEGMENT_BARRIER_CONFIG: dict[str, tuple[float, float]] = {
 }
 _LOOKBACK_DAYS = 1825
 _MOEX_LOOKBACK_DAYS = 1095
+_MIN_HISTORY_DAYS = 500  # symbols with fewer trading days produce degenerate ML predictions
 _US_MAX_FEATURES = 15
 _MOEX_MAX_FEATURES = 10
 _ENSEMBLE_WEIGHTS_MIN_FOLDS = 4  # minimum folds required to use optimized ensemble weights
@@ -503,7 +504,10 @@ def build_full_dataset(
     # Apply per-segment barrier config (with MOEX uplift)
     upper_mult, lower_mult = _get_barrier_params(_segment_id)
 
-    for candles in candles_by_sym.values():
+    for sym, candles in candles_by_sym.items():
+        if len(candles) < _MIN_HISTORY_DAYS:
+            print(f"Skipping {sym}: {len(candles)} trading days < {_MIN_HISTORY_DAYS} minimum")
+            continue
         if len(candles) < min_candles:
             continue
         aligned_bench: list[Candle] | None = None
