@@ -152,10 +152,10 @@ Full details in Phase Details section below (collapsed milestone).
 **Goal**: News pipeline bugs fixed and production safeguards active before Phase 50 activates EventDrivenStrategy
 **Depends on**: Nothing (fixes existing code)
 **Requirements**: NEWS-01, NEWS-02, NEWS-03, NEWS-04, NEWS-05, NEWS-06
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
-- [ ] 49-01-PLAN.md -- Bug fixes: parse_structured migration, per-article 5s timeout, threading.Lock fix, article budget cap
+- [x] 49-01-PLAN.md -- Bug fixes: parse_structured migration, per-article 5s timeout, threading.Lock fix, article budget cap
 - [ ] 49-02-PLAN.md -- Production safeguards: source credibility map, ticker validation, LLM liveness monitoring
 
 ### Phase 28: Operational Hygiene
@@ -473,7 +473,7 @@ v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 | 36-39 | v8.0 | 7/7 | Complete | 2026-04-12 |
 | 40-44 | v9.0 | 7/7 | Complete | 2026-04-13 |
 | 45-48 | v9.1 | 7/7 | Complete | 2026-04-14 |
-| 49. News Pipeline Hardening | v10.0 | 0/2 | Planned | - |
+| 49. News Pipeline Hardening | v10.0 | 1/2 | In Progress|  |
 | 50. EventDriven Activation | v10.0 | 0/TBD | Not started | - |
 | 51. Anomaly Interpreter Agent | v10.0 | 0/TBD | Not started | - |
 | 52. Portfolio Review Agent | v10.0 | 0/TBD | Not started | - |

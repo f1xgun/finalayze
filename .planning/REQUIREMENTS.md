@@ -9,12 +9,12 @@ Requirements for runtime LLM trading agents milestone. Each maps to roadmap phas
 
 ### News Pipeline
 
-- [ ] **NEWS-01**: News pipeline processes MOEX RSS feeds (RBC, Interfax, TASS, MOEX ISS) with 5-second per-article LLM timeout
-- [ ] **NEWS-02**: NewsAnalyzer migrated from json.loads() to parse_structured() for reliable sentiment parsing
+- [x] **NEWS-01**: News pipeline processes MOEX RSS feeds (RBC, Interfax, TASS, MOEX ISS) with 5-second per-article LLM timeout
+- [x] **NEWS-02**: NewsAnalyzer migrated from json.loads() to parse_structured() for reliable sentiment parsing
 - [ ] **NEWS-03**: Source credibility map wired (RSS: 0.8, Telegram: 0.7) and passed to EventDrivenStrategy
 - [ ] **NEWS-04**: Ticker whitelist validation filters LLM-extracted entities against InstrumentRegistry
 - [ ] **NEWS-05**: LLM liveness check added to HealthMonitor with Telegram alert on sustained failure
-- [ ] **NEWS-06**: Article budget cap (max 20 articles/cycle) prevents LLM cost explosion
+- [x] **NEWS-06**: Article budget cap (max 20 articles/cycle) prevents LLM cost explosion
 
 ### EventDriven Activation
 
@@ -67,12 +67,12 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| NEWS-01 | Phase 49 | Pending |
-| NEWS-02 | Phase 49 | Pending |
+| NEWS-01 | Phase 49 | Complete |
+| NEWS-02 | Phase 49 | Complete |
 | NEWS-03 | Phase 49 | Pending |
 | NEWS-04 | Phase 49 | Pending |
 | NEWS-05 | Phase 49 | Pending |
-| NEWS-06 | Phase 49 | Pending |
+| NEWS-06 | Phase 49 | Complete |
 | EVNT-01 | Phase 50 | Pending |
 | EVNT-02 | Phase 50 | Pending |
 | EVNT-03 | Phase 50 | Pending |
