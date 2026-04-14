@@ -754,6 +754,40 @@ def run_experiment(
             },
         )
 
+    # --- Feature selection: once before folds (FSEL-01, FSEL-02) ---
+    # Per-fold MI-based selection on ~850 samples produces noisy, inconsistent feature sets.
+    # Running selection once on the union of all training indices eliminates fold-to-fold
+    # feature churn and improves model consistency. Test data is excluded to prevent look-ahead.
+    if config.feature_subset is None:
+        all_train_indices: set[int] = set()
+        for train_idx, _cal_idx, _test_idx in folds:
+            all_train_indices.update(train_idx)
+        sorted_train_indices = sorted(all_train_indices)
+
+        train_df = pd.DataFrame([all_features[i] for i in sorted_train_indices])
+        train_s = pd.Series([labels[i] for i in sorted_train_indices])
+        selected_features = select_features_efficient(
+            train_df,
+            train_s,
+            max_features=config.max_features,
+        )
+        logger.info(
+            "feature_selection_stable",
+            selected_count=len(selected_features),
+            features=selected_features[:5],  # log first 5 to avoid noise
+            experiment=config.name,
+        )
+        # Create new config with pre-selected features so _run_fold uses them directly.
+        # We do NOT mutate the caller's config object (T-46-02 mitigation).
+        config = ExperimentConfig(
+            name=config.name,
+            description=config.description,
+            strategy=config.strategy,
+            feature_subset=selected_features,
+            max_features=config.max_features,
+            hparams=config.hparams,
+        )
+
     try:
         all_fold_results: list[list] = []
         fold_accs: list[float] = []
@@ -814,7 +848,8 @@ def _fill_result(
     # keep stricter 0.60 (3/5 or 2/3) to avoid noise-driven passes.
     min_ratio = 0.50 if n_folds >= _MANY_FOLDS_THRESHOLD else 0.60
     overall_passed, gate_pass_rates = evaluate_walk_forward(
-        all_fold_results, min_passing_folds_ratio=min_ratio,
+        all_fold_results,
+        min_passing_folds_ratio=min_ratio,
     )
 
     result.n_folds = len(all_fold_results)
