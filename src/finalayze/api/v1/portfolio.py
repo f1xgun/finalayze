@@ -14,6 +14,23 @@ from finalayze.api.v1.auth import api_key_auth
 from finalayze.markets.instruments import build_default_registry
 from finalayze.markets.registry import default_registry
 
+# Symbol → segment_id mapping (populated lazily from config)
+_symbol_to_segment: dict[str, str] = {}
+
+
+def _get_segment_for_symbol(symbol: str) -> str:
+    """Resolve symbol to segment_id using config/segments.py."""
+    if not _symbol_to_segment:
+        try:
+            from config.segments import DEFAULT_SEGMENTS  # noqa: PLC0415
+
+            for seg in DEFAULT_SEGMENTS:
+                for sym in seg.symbols:
+                    _symbol_to_segment[sym] = seg.segment_id
+        except Exception:  # noqa: S110
+            pass  # segments config unavailable
+    return _symbol_to_segment.get(symbol, "")
+
 _log = structlog.get_logger()
 
 router = APIRouter(
@@ -163,7 +180,7 @@ async def get_positions(request: Request) -> PositionsResponse:
                         PositionDetail(
                             symbol=display_symbol,
                             market_id=market_id,
-                            segment_id="",
+                            segment_id=_get_segment_for_symbol(display_symbol),
                             quantity=float(p.get("quantity", 0)),
                             avg_price=float(p.get("avg_price", 0)),
                             current_price=float(p.get("current_price", 0)),
@@ -188,7 +205,7 @@ async def get_positions(request: Request) -> PositionsResponse:
                             PositionDetail(
                                 symbol=display_symbol,
                                 market_id=market_id,
-                                segment_id="",
+                                segment_id=_get_segment_for_symbol(display_symbol),
                                 quantity=float(qty),
                                 avg_price=0.0,
                                 current_price=0.0,
