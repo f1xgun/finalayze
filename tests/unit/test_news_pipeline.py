@@ -213,6 +213,89 @@ class TestSentimentScoreModelCredibility:
         assert hasattr(SentimentScoreModel, "credibility")
 
 
+class TestLLMLiveness:
+    def _run_cycle_with_failure(self, loop: Any, *, fail: bool) -> None:
+        """Run a news cycle where all articles either fail or succeed."""
+        article = _make_article()
+        loop._news_fetcher.fetch_news.return_value = [article]
+
+        if fail:
+            loop._process_news_article = MagicMock(side_effect=Exception("LLM fail"))
+        else:
+            loop._process_news_article = MagicMock()
+
+        loop._news_cycle()
+
+    def test_llm_liveness_no_alert_under_threshold(self) -> None:
+        """2 consecutive all-fail cycles do not trigger alert."""
+        loop = _make_trading_loop()
+        loop._llm_consecutive_failures = 0
+
+        self._run_cycle_with_failure(loop, fail=True)
+        self._run_cycle_with_failure(loop, fail=True)
+
+        loop._alerter.on_error.assert_not_called()
+
+    def test_llm_liveness_alert_at_threshold(self) -> None:
+        """3 consecutive all-fail cycles trigger TelegramAlerter.on_error."""
+        loop = _make_trading_loop()
+        loop._llm_consecutive_failures = 0
+
+        self._run_cycle_with_failure(loop, fail=True)
+        self._run_cycle_with_failure(loop, fail=True)
+        self._run_cycle_with_failure(loop, fail=True)
+
+        loop._alerter.on_error.assert_called()
+        call_args = loop._alerter.on_error.call_args
+        assert call_args[0][0] == "LLMLiveness"
+
+    def test_llm_liveness_reset_on_success(self) -> None:
+        """After 2 fails, 1 success resets counter. 2 more fails do not alert."""
+        loop = _make_trading_loop()
+        loop._llm_consecutive_failures = 0
+
+        self._run_cycle_with_failure(loop, fail=True)
+        self._run_cycle_with_failure(loop, fail=True)
+        # Success resets
+        self._run_cycle_with_failure(loop, fail=False)
+        # 2 more fails
+        self._run_cycle_with_failure(loop, fail=True)
+        self._run_cycle_with_failure(loop, fail=True)
+
+        loop._alerter.on_error.assert_not_called()
+
+    def test_llm_liveness_prometheus_counter(self) -> None:
+        """Prometheus counter increments on each failure cycle."""
+        from finalayze.api.metrics import llm_liveness_failures
+
+        loop = _make_trading_loop()
+        loop._llm_consecutive_failures = 0
+
+        before = llm_liveness_failures._value.get()
+        self._run_cycle_with_failure(loop, fail=True)
+        self._run_cycle_with_failure(loop, fail=True)
+        self._run_cycle_with_failure(loop, fail=True)
+        after = llm_liveness_failures._value.get()
+
+        expected_increment = 3
+        assert after - before == expected_increment  # noqa: PLR2004
+
+    def test_llm_liveness_re_alert_on_sustained_failure(self) -> None:
+        """After 3 fails + alert, 3 more fails trigger a second alert."""
+        loop = _make_trading_loop()
+        loop._llm_consecutive_failures = 0
+
+        # First 3 fails -> first alert
+        for _ in range(3):
+            self._run_cycle_with_failure(loop, fail=True)
+        assert loop._alerter.on_error.call_count == 1
+
+        # 3 more fails -> second alert (at failure count 6)
+        for _ in range(3):
+            self._run_cycle_with_failure(loop, fail=True)
+        assert loop._alerter.on_error.call_count >= 2  # noqa: PLR2004
+
+
 class TestSentimentLockSafety:
     def test_sentiment_lock_not_in_async_methods(self) -> None:
         """_sentiment_lock must not be acquired in any async method."""

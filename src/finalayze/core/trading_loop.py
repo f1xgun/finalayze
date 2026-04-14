@@ -98,6 +98,8 @@ def validate_tickers(
     return valid
 
 
+_LLM_FAILURE_THRESHOLD = 3  # consecutive all-fail news cycles before alerting
+
 _WEEKEND_WEEKDAY = 5  # Saturday=5, Sunday=6
 _ATR_MULTIPLIER_US = Decimal("2.0")
 _ATR_MULTIPLIER_MOEX = Decimal("2.5")
@@ -169,6 +171,9 @@ class TradingLoop:
         # Thread-safe sentiment cache: segment_id -> weighted sentiment score
         self._sentiment_cache: dict[str, float] = {}
         self._sentiment_lock = threading.Lock()
+
+        # LLM liveness tracking: consecutive all-fail news cycles
+        self._llm_consecutive_failures: int = 0
 
         # Daily baseline equities: market_id -> equity at start of trading day
         self._baseline_equities: dict[str, Decimal] = {}
@@ -350,11 +355,28 @@ class TradingLoop:
             for art in articles
         ]
 
+        ok_count = 0
+        fail_count = 0
         for article in articles:
             try:
                 self._process_news_article(article)
+                ok_count += 1
             except Exception:
+                fail_count += 1
                 _log.exception("_news_cycle: error processing article %s", article.id)
+
+        # LLM liveness tracking (cycle level)
+        if articles:
+            if ok_count == 0 and fail_count > 0:
+                self._llm_consecutive_failures += 1
+                MetricsCollector.inc_llm_liveness_failure()
+                if self._llm_consecutive_failures >= _LLM_FAILURE_THRESHOLD:
+                    self._alerter.on_error(
+                        "LLMLiveness",
+                        f"LLM failed {self._llm_consecutive_failures} consecutive news cycles",
+                    )
+            else:
+                self._llm_consecutive_failures = 0
 
     async def _analyze_article(self, article: NewsArticle) -> tuple[SentimentResult, EventType]:
         """Run sentiment analysis and event classification concurrently."""

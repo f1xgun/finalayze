@@ -122,6 +122,10 @@ news_budget_cap_total = Counter(
     "finalayze_news_budget_cap_total",
     "Number of news cycles where article count exceeded budget cap",
 )
+llm_liveness_failures = Counter(
+    "finalayze_llm_liveness_failures_total",
+    "Count of all-fail LLM news cycles (each individual failure cycle)",
+)
 
 usd_rub_rate = Gauge(
     "finalayze_usd_rub_rate",
@@ -221,6 +225,11 @@ class MetricsCollector:
     def inc_news_budget_cap_hit() -> None:
         """Increment news budget cap hit counter."""
         news_budget_cap_total.inc()
+
+    @staticmethod
+    def inc_llm_liveness_failure() -> None:
+        """Increment LLM liveness failure counter."""
+        llm_liveness_failures.inc()
 
     @staticmethod
     def set_usd_rub_rate(rate: float) -> None:
