@@ -13,6 +13,7 @@
 - ✅ **v9.0 ML AutoResearch & MOEX Adaptation** -- Phases 40-44 (shipped 2026-04-13)
 - ✅ **v9.1 MOEX ML Model Quality** -- Phases 45-48 (shipped 2026-04-14)
 - 🚧 **v10.0 Runtime LLM Trading Agents** -- Phases 49-53 (in progress)
+- 🚧 **v10.1 Dashboard & Monitoring** -- Phases 54-57 (in progress)
 
 ## Phases
 
@@ -109,7 +110,7 @@ Full details in Phase Details section below (collapsed milestone).
 <summary>✅ v8.0 Agent Integration & Autonomous Decision Loop (Phases 36-39) -- SHIPPED 2026-04-12</summary>
 
 - [x] **Phase 36: Conflict Detection Foundation** - Agents emit structured AgentOutput; ConflictDetector with debouncing and severity scoring (completed 2026-04-12)
-- [x] **Phase 37: Agent Orchestrator + Debate/Experiment REST API** - Full conflict→debate→arbiter→experiment→verdict pipeline with REST endpoints and snapshot safety (completed 2026-04-12)
+- [x] **Phase 37: Agent Orchestrator + Debate/Experiment REST API** - Full conflict->debate->arbiter->experiment->verdict pipeline with REST endpoints and snapshot safety (completed 2026-04-12)
 - [x] **Phase 38: PresetApplicator + Auto-Apply Loop** - Atomic YAML write-back, circuit-breaker gate, position-ownership tracking, sandbox validation gate (completed 2026-04-12)
 - [x] **Phase 39: REST Endpoint Hardening** - Wire real alerter, circuit breaker state, multi-debate response, and finalize endpoint into REST API (completed 2026-04-12)
 
@@ -122,29 +123,39 @@ Full details in Phase Details section below (collapsed milestone).
 - [x] **Phase 41: Adaptive Quality Gates** - Parametrize min_signals, add MOEX fold constants, add degenerate predictor guard (completed 2026-04-13)
 - [x] **Phase 42: ExperimentManager Integration** - Opt-in --experiment-id flag with hypothesis lifecycle and backward-compatible JSONL audit trail (completed 2026-04-13)
 - [x] **Phase 43: Ensemble Weight Optimization** - Bounded XGB/LGBM/CatBoost weight grid search with overfitting guard (completed 2026-04-13)
-- [x] **Phase 44: New Search Strategies** - Cross-segment US→MOEX feature transfer and domain-motivated feature engineering (completed 2026-04-13)
+- [x] **Phase 44: New Search Strategies** - Cross-segment US->MOEX feature transfer and domain-motivated feature engineering (completed 2026-04-13)
 
 </details>
 
 <details>
-<summary>✅ v9.1 MOEX ML Model Quality (Phases 45-48) — SHIPPED 2026-04-14</summary>
+<summary>✅ v9.1 MOEX ML Model Quality (Phases 45-48) -- SHIPPED 2026-04-14</summary>
 
-- [x] Phase 45: Model Complexity & Ensemble Consistency (2/2 plans) — completed 2026-04-14
-- [x] Phase 46: Feature Selection Stability (1/1 plan) — completed 2026-04-14
-- [x] Phase 47: Cross-Asset Features & Asymmetric Barriers (2/2 plans) — completed 2026-04-14
-- [x] Phase 48: Segment Restructuring & Validation (2/2 plans) — completed 2026-04-14
+- [x] Phase 45: Model Complexity & Ensemble Consistency (2/2 plans) -- completed 2026-04-14
+- [x] Phase 46: Feature Selection Stability (1/1 plan) -- completed 2026-04-14
+- [x] Phase 47: Cross-Asset Features & Asymmetric Barriers (2/2 plans) -- completed 2026-04-14
+- [x] Phase 48: Segment Restructuring & Validation (2/2 plans) -- completed 2026-04-14
 
 </details>
 
-### 🚧 v10.0 Runtime LLM Trading Agents (In Progress)
-
-**Milestone Goal:** Add runtime LLM agents to the live trading pipeline — news ingestion hardened and activated, EventDrivenStrategy firing live signals, portfolio review and anomaly interpretation agents deployed, and sentiment data accumulating for future ML use.
+<details>
+<summary>🚧 v10.0 Runtime LLM Trading Agents (Phases 49-53) -- In Progress</summary>
 
 - [ ] **Phase 49: News Pipeline Hardening** - Fix latent bugs and add production safeguards before live news activation
 - [ ] **Phase 50: EventDriven Activation** - Enable event_driven strategy on all ru_* segments with signal quality guards
 - [ ] **Phase 51: Anomaly Interpreter Agent** - LLM enrichment for anomaly alerts via fire-and-forget async dispatch
 - [ ] **Phase 52: Portfolio Review Agent** - Daily advisory LLM portfolio analysis with structured Pydantic output
 - [ ] **Phase 53: Sentiment ML Infrastructure** - TimescaleDB continuous aggregates and SentimentStore reader for future ML features
+
+</details>
+
+### v10.1 Dashboard & Monitoring
+
+**Milestone Goal:** Complete dashboard monitoring capabilities -- position/stop-loss visualization, signals/trades DB wiring with analytics, equity curve with performance metrics, and alerting enhancements.
+
+- [ ] **Phase 54: Position Monitor & Stop-Loss Dashboard** - Every open position displays current trailing stop, distance to stop, and stop history
+- [ ] **Phase 55: Signals & Trades Analytics** - Strategy performance matrix, trade P&L attribution, slippage, win rate tracking
+- [ ] **Phase 56: Equity Curve & Performance Metrics** - Daily equity snapshots with real Sharpe, Sortino, max drawdown, rolling charts
+- [ ] **Phase 57: Alerting & Notification Enhancements** - Position P&L in Telegram alerts, stop-loss trigger details, alert history page
 
 ## Phase Details
 
@@ -280,7 +291,7 @@ Plans:
 - [x] 36-02-PLAN.md -- ConflictDetector + agent .md Output Format sections (CONF-01, CONF-03, CONF-04, AGOUT-01)
 
 ### Phase 37: Agent Orchestrator + Debate/Experiment REST API
-**Goal**: The full conflict→debate→arbiter→experiment→verdict pipeline runs end-to-end, manually triggerable via REST, with snapshot safety preventing false contradiction verdicts after code changes
+**Goal**: The full conflict->debate->arbiter->experiment->verdict pipeline runs end-to-end, manually triggerable via REST, with snapshot safety preventing false contradiction verdicts after code changes
 **Depends on**: Phase 36 (requires ConflictDetector and AgentOutput emission)
 **Requirements**: ORCH-01, ORCH-02, ORCH-03, ORCH-04
 **Success Criteria** (what must be TRUE):
@@ -311,15 +322,15 @@ Plans:
 - [x] 38-02-PLAN.md -- _entry_strategy tracking + invalidate_segment_cache (APPLY-03, APPLY-04)
 
 ### Phase 39: REST Endpoint Hardening
-**Goal**: REST API endpoints for debates and experiments have real safety gates wired — Telegram alerts fire on INCONCLUSIVE, circuit breaker state is injected, multi-debate responses return all debate IDs, and finalize_debate() is REST-accessible
+**Goal**: REST API endpoints for debates and experiments have real safety gates wired -- Telegram alerts fire on INCONCLUSIVE, circuit breaker state is injected, multi-debate responses return all debate IDs, and finalize_debate() is REST-accessible
 **Depends on**: Phase 38 (needs PresetApplicator and AgentOrchestrator fully implemented)
 **Requirements**: ORCH-01, ORCH-02, APPLY-02, APPLY-05
 **Gap Closure**: Closes integration/flow gaps from v8.0 audit
 **Success Criteria** (what must be TRUE):
-  1. `POST /experiments/{id}/apply` with INCONCLUSIVE verdict sends a real Telegram alert — no-op alerter replaced with a real or injectable alerter in the REST context
-  2. `POST /experiments/{id}/apply` checks live circuit breaker state from a shared source — empty `circuit_breakers={}` replaced with actual circuit breaker lookup
-  3. `POST /debates` response includes `debate_ids: list[str]` containing all created debate IDs — multi-debate cases are fully represented
-  4. `POST /debates/{id}/finalize` endpoint accepts a FactCheckReport and calls `AgentOrchestrator.finalize_debate()` — the arbiter-to-experiment loop is REST-triggerable
+  1. `POST /experiments/{id}/apply` with INCONCLUSIVE verdict sends a real Telegram alert -- no-op alerter replaced with a real or injectable alerter in the REST context
+  2. `POST /experiments/{id}/apply` checks live circuit breaker state from a shared source -- empty `circuit_breakers={}` replaced with actual circuit breaker lookup
+  3. `POST /debates` response includes `debate_ids: list[str]` containing all created debate IDs -- multi-debate cases are fully represented
+  4. `POST /debates/{id}/finalize` endpoint accepts a FactCheckReport and calls `AgentOrchestrator.finalize_debate()` -- the arbiter-to-experiment loop is REST-triggerable
 **Plans**: 1 plan
 Plans:
 - [x] 39-01-PLAN.md -- Wire real alerter, circuit breaker, multi-debate response, finalize endpoint (ORCH-01, ORCH-02, APPLY-02, APPLY-05)
@@ -329,23 +340,23 @@ Plans:
 **Depends on**: Phase 39 (v8.0 complete; this starts v9.0)
 **Requirements**: MOEX-01, MOEX-02, MOEX-03
 **Success Criteria** (what must be TRUE):
-  1. `python scripts/auto_ml_research.py --segment ru_blue_chips` completes data loading without error — candle counts are printed and TinkoffFetcher is used (not yfinance) for all ru_* segments
-  2. `_SEGMENT_SYMBOLS` in auto_ml_research.py contains ru_blue_chips, ru_energy, ru_finance, ru_tech symbols that match the production universe in config/segments.py — no symbol lookup errors at runtime
-  3. All 10 MOEX macro features (usdrub_zscore_60d, brent_zscore_60d, cbr_rate_level, cbr_rate_delta, real_rate_zscore, etc.) are non-zero in the feature matrix for any MOEX experiment run — macro context is actually flowing through build_full_dataset()
-  4. Macro series are shift(1) aligned before join — a unit test with a synthetic macro series verifies no future value leaks into the feature vector (look-ahead bias absent)
+  1. `python scripts/auto_ml_research.py --segment ru_blue_chips` completes data loading without error -- candle counts are printed and TinkoffFetcher is used (not yfinance) for all ru_* segments
+  2. `_SEGMENT_SYMBOLS` in auto_ml_research.py contains ru_blue_chips, ru_energy, ru_finance, ru_tech symbols that match the production universe in config/segments.py -- no symbol lookup errors at runtime
+  3. All 10 MOEX macro features (usdrub_zscore_60d, brent_zscore_60d, cbr_rate_level, cbr_rate_delta, real_rate_zscore, etc.) are non-zero in the feature matrix for any MOEX experiment run -- macro context is actually flowing through build_full_dataset()
+  4. Macro series are shift(1) aligned before join -- a unit test with a synthetic macro series verifies no future value leaks into the feature vector (look-ahead bias absent)
 **Plans:** 2/2 plans complete
 Plans:
 - [x] 40-01-PLAN.md -- MOEX segment symbols and TinkoffFetcher data loading (MOEX-01, MOEX-02)
 - [x] 40-02-PLAN.md -- MOEX macro data fetching and MarketContext wiring (MOEX-03)
 
 ### Phase 41: Adaptive Quality Gates
-**Goal**: MOEX experiments produce trustworthy walk-forward results — signal count gates are calibrated to MOEX dataset sizes, folds never collapse to fewer than 3, and degenerate all-BUY/all-SELL models are rejected automatically
+**Goal**: MOEX experiments produce trustworthy walk-forward results -- signal count gates are calibrated to MOEX dataset sizes, folds never collapse to fewer than 3, and degenerate all-BUY/all-SELL models are rejected automatically
 **Depends on**: Phase 40 (needs working MOEX data flow to validate gate thresholds empirically)
 **Requirements**: GATE-01, GATE-02, GATE-03
 **Success Criteria** (what must be TRUE):
-  1. `evaluate_fold(min_signals=15)` accepts a MOEX experiment with 15-30 signals per fold — the hardcoded _MIN_SIGNALS=50 no longer blocks all MOEX runs
-  2. A 730-day MOEX dataset produces 3 or more valid walk-forward folds using MOEX-specific fold constants — the experiment does not trivially pass on a single fold
-  3. A model that predicts BUY on 92% of samples fails the degenerate predictor gate and is logged as REJECTED with buy_ratio=0.92 — all-directional models cannot receive a verdict without this check
+  1. `evaluate_fold(min_signals=15)` accepts a MOEX experiment with 15-30 signals per fold -- the hardcoded _MIN_SIGNALS=50 no longer blocks all MOEX runs
+  2. A 730-day MOEX dataset produces 3 or more valid walk-forward folds using MOEX-specific fold constants -- the experiment does not trivially pass on a single fold
+  3. A model that predicts BUY on 92% of samples fails the degenerate predictor gate and is logged as REJECTED with buy_ratio=0.92 -- all-directional models cannot receive a verdict without this check
 **Plans:** 2/2 plans complete
 Plans:
 - [x] 41-01-PLAN.md -- Adaptive min_signals + degenerate predictor gate in quality_gates.py (GATE-01, GATE-03)
@@ -356,9 +367,9 @@ Plans:
 **Depends on**: Phase 41 (quality gates must be reliable before experiment verdicts carry meaning)
 **Requirements**: EXPINT-01, EXPINT-02
 **Success Criteria** (what must be TRUE):
-  1. Running `auto_ml_research.py --segment ru_blue_chips --experiment-id ru_blue_chips_baseline_20260413_1200` creates an ExperimentManager entry, links per-fold results, and records ACCEPT/REJECT/INCONCLUSIVE at completion — the experiment is queryable via ExperimentManager.get()
-  2. Two concurrent segment runs with different --experiment-id values produce non-overlapping experiment files — no ID collision or shared-state corruption
-  3. Running `auto_ml_research.py --segment ru_blue_chips` without --experiment-id completes normally with JSONL output only — existing invocations are not broken by the integration
+  1. Running `auto_ml_research.py --segment ru_blue_chips --experiment-id ru_blue_chips_baseline_20260413_1200` creates an ExperimentManager entry, links per-fold results, and records ACCEPT/REJECT/INCONCLUSIVE at completion -- the experiment is queryable via ExperimentManager.get()
+  2. Two concurrent segment runs with different --experiment-id values produce non-overlapping experiment files -- no ID collision or shared-state corruption
+  3. Running `auto_ml_research.py --segment ru_blue_chips` without --experiment-id completes normally with JSONL output only -- existing invocations are not broken by the integration
 **Plans:** 1/1 plans complete
 Plans:
 - [x] 42-01-PLAN.md -- ExperimentManager integration with --experiment-id flag (EXPINT-01, EXPINT-02)
@@ -368,35 +379,35 @@ Plans:
 **Depends on**: Phase 42 (experiment tracking must be in place to compare weight configurations as named hypotheses)
 **Requirements**: STRAT-01
 **Success Criteria** (what must be TRUE):
-  1. `auto_ml_research.py --strategy ensemble_weights --segment ru_blue_chips` evaluates at least 9 distinct weight configurations across the simplex — XGB, LGBM, CatBoost weights are explored in bounded combinations, each summing to 1.0
-  2. No single model weight exceeds 0.7 in any evaluated configuration — the overfitting constraint is enforced at generation time, not post-hoc
-  3. When fewer than 4 independent folds are available, equal weights (1/3 each) are used as the default and optimization is skipped with a logged warning — small dataset safety is automatic
+  1. `auto_ml_research.py --strategy ensemble_weights --segment ru_blue_chips` evaluates at least 9 distinct weight configurations across the simplex -- XGB, LGBM, CatBoost weights are explored in bounded combinations, each summing to 1.0
+  2. No single model weight exceeds 0.7 in any evaluated configuration -- the overfitting constraint is enforced at generation time, not post-hoc
+  3. When fewer than 4 independent folds are available, equal weights (1/3 each) are used as the default and optimization is skipped with a logged warning -- small dataset safety is automatic
 **Plans:** 1/1 plans complete
 Plans:
 - [x] 43-01-PLAN.md -- Ensemble weight simplex generator, weighted averaging, small-fold guard (STRAT-01)
 
 ### Phase 44: New Search Strategies
-**Goal**: Two new search strategies extend the research loop — cross-segment transfer validates US-learned features on MOEX, and feature engineering generates domain-motivated combinations with hard overfitting caps
+**Goal**: Two new search strategies extend the research loop -- cross-segment transfer validates US-learned features on MOEX, and feature engineering generates domain-motivated combinations with hard overfitting caps
 **Depends on**: Phase 43 (stable MOEX baseline and reliable experiment tracking needed before adding high-complexity strategies)
 **Requirements**: STRAT-02, STRAT-03
 **Success Criteria** (what must be TRUE):
-  1. `auto_ml_research.py --strategy cross_segment_transfer --segment ru_blue_chips` reads best US experiment features from JSONL history and filters to market-neutral intersection — VIX-only and MOEX-only features are excluded from the transfer set, and the filtered feature list is logged
-  2. `auto_ml_research.py --strategy feature_engineering --segment ru_blue_chips` generates domain-motivated feature combinations (lag ratios, rolling z-scores, cross-feature interactions) with a hard cap of n_samples/20 candidates — no more than ~36 candidates are generated for a 730-day MOEX dataset
-  3. Generated features that do not pass a permutation importance test are discarded before model training — feature engineering cannot add noise-only columns to the feature matrix
+  1. `auto_ml_research.py --strategy cross_segment_transfer --segment ru_blue_chips` reads best US experiment features from JSONL history and filters to market-neutral intersection -- VIX-only and MOEX-only features are excluded from the transfer set, and the filtered feature list is logged
+  2. `auto_ml_research.py --strategy feature_engineering --segment ru_blue_chips` generates domain-motivated feature combinations (lag ratios, rolling z-scores, cross-feature interactions) with a hard cap of n_samples/20 candidates -- no more than ~36 candidates are generated for a 730-day MOEX dataset
+  3. Generated features that do not pass a permutation importance test are discarded before model training -- feature engineering cannot add noise-only columns to the feature matrix
 **Plans:** 1/1 plans complete
 Plans:
 - [x] 44-01-PLAN.md -- Cross-segment transfer + feature engineering strategies (STRAT-02, STRAT-03)
 
 ### Phase 49: News Pipeline Hardening
-**Goal**: The news ingestion pipeline is production-safe — latent bugs fixed, cost safeguards in place, and signal quality guards active — before any live segment activation
+**Goal**: The news ingestion pipeline is production-safe -- latent bugs fixed, cost safeguards in place, and signal quality guards active -- before any live segment activation
 **Depends on**: Phase 48 (v9.1 complete; this starts v10.0)
 **Requirements**: NEWS-01, NEWS-02, NEWS-03, NEWS-04, NEWS-05, NEWS-06
 **Success Criteria** (what must be TRUE):
-  1. A news cycle processes up to 20 articles with a 5-second per-article LLM timeout — the APScheduler thread completes the cycle within 2 minutes regardless of LLM latency, and exceeding the budget logs a `news_budget_cap_hit` metric
-  2. Sentiment scores written to the `sentiment_scores` table reflect the originating source credibility (RSS sources: 0.8, Telegram: 0.7) — inspecting DB rows shows a non-null `credibility` column populated from the per-source map
-  3. An LLM-extracted ticker that does not appear in InstrumentRegistry is rejected with a structured log entry containing `entity_not_in_registry` and the rejected ticker — no ghost-ticker sentiment scores accumulate in the DB
-  4. When the LLM API fails for 3 consecutive cycles, a Telegram alert fires and `llm_liveness_failures` Prometheus counter increments — LLM downtime is observable from the monitoring dashboard
-  5. Calling `NewsAnalyzer.analyze()` on a news article returns a structured `SentimentResult` Pydantic object via `parse_structured()` — no `json.loads()` call remains in the news analysis path
+  1. A news cycle processes up to 20 articles with a 5-second per-article LLM timeout -- the APScheduler thread completes the cycle within 2 minutes regardless of LLM latency, and exceeding the budget logs a `news_budget_cap_hit` metric
+  2. Sentiment scores written to the `sentiment_scores` table reflect the originating source credibility (RSS sources: 0.8, Telegram: 0.7) -- inspecting DB rows shows a non-null `credibility` column populated from the per-source map
+  3. An LLM-extracted ticker that does not appear in InstrumentRegistry is rejected with a structured log entry containing `entity_not_in_registry` and the rejected ticker -- no ghost-ticker sentiment scores accumulate in the DB
+  4. When the LLM API fails for 3 consecutive cycles, a Telegram alert fires and `llm_liveness_failures` Prometheus counter increments -- LLM downtime is observable from the monitoring dashboard
+  5. Calling `NewsAnalyzer.analyze()` on a news article returns a structured `SentimentResult` Pydantic object via `parse_structured()` -- no `json.loads()` call remains in the news analysis path
 **Plans**: TBD
 
 ### Phase 50: EventDriven Activation
@@ -404,9 +415,9 @@ Plans:
 **Depends on**: Phase 49 (news pipeline must be production-safe before enabling live strategy signals)
 **Requirements**: EVNT-01, EVNT-02, EVNT-03
 **Success Criteria** (what must be TRUE):
-  1. All ru_* segment presets have `event_driven.enabled: true` with weight 0.15 — a sandbox strategy cycle that processes a news article generates at least one EventDrivenStrategy signal entry in the `signals` table
-  2. When an article classified as a CBR announcement arrives and `cbr_calendar` strategy also has a pending signal for the same ticker, the combiner suppresses the double-weight — the final combined confidence for that tick does not exceed what a single strategy would contribute
-  3. Between 18:50 MSK (MOEX close) and 09:50 MSK (MOEX open) the sentiment decay clock is frozen — the first article of the trading day produces a signal score within ±10% of the last signal from the previous session rather than spiking from a near-zero decayed baseline
+  1. All ru_* segment presets have `event_driven.enabled: true` with weight 0.15 -- a sandbox strategy cycle that processes a news article generates at least one EventDrivenStrategy signal entry in the `signals` table
+  2. When an article classified as a CBR announcement arrives and `cbr_calendar` strategy also has a pending signal for the same ticker, the combiner suppresses the double-weight -- the final combined confidence for that tick does not exceed what a single strategy would contribute
+  3. Between 18:50 MSK (MOEX close) and 09:50 MSK (MOEX open) the sentiment decay clock is frozen -- the first article of the trading day produces a signal score within +/-10% of the last signal from the previous session rather than spiking from a near-zero decayed baseline
 **Plans**: TBD
 
 ### Phase 51: Anomaly Interpreter Agent
@@ -414,9 +425,9 @@ Plans:
 **Depends on**: Phase 49 (fire-and-forget async pattern from news pipeline hardening; LLM liveness check establishes baseline reliability)
 **Requirements**: ANMI-01, ANMI-02, ANMI-03
 **Success Criteria** (what must be TRUE):
-  1. When AnomalyDetector fires an alert, the raw statistical alert message is sent to Telegram immediately — a unit test asserting that `TelegramAlerter.send()` is called before any LLM await passes
-  2. Within 30 seconds of the raw alert, a follow-up Telegram message arrives containing the LLM explanation labeled "AI interpretation (unverified)" — the enrichment is visible in the Telegram chat as a separate message after the original
-  3. When the LLM call times out or raises an exception, the raw alert is still delivered and a `anomaly_llm_failure` structlog entry is emitted — suppressing the raw alert on LLM failure is impossible by design
+  1. When AnomalyDetector fires an alert, the raw statistical alert message is sent to Telegram immediately -- a unit test asserting that `TelegramAlerter.send()` is called before any LLM await passes
+  2. Within 30 seconds of the raw alert, a follow-up Telegram message arrives containing the LLM explanation labeled "AI interpretation (unverified)" -- the enrichment is visible in the Telegram chat as a separate message after the original
+  3. When the LLM call times out or raises an exception, the raw alert is still delivered and a `anomaly_llm_failure` structlog entry is emitted -- suppressing the raw alert on LLM failure is impossible by design
 **Plans**: TBD
 
 ### Phase 52: Portfolio Review Agent
@@ -424,9 +435,9 @@ Plans:
 **Depends on**: Phase 49 (LLM async patterns and credibility safeguards established; Phase 51 validates advisory-only Telegram dispatch pattern)
 **Requirements**: PFRA-01, PFRA-02, PFRA-03
 **Success Criteria** (what must be TRUE):
-  1. A `PortfolioReviewResult` Pydantic schema exists in `core/schemas.py` with no `direction`, `confidence`, `symbol`+`market_id` combination that matches `Signal` or `OrderRequest` — a type-checker assertion at handler entry prevents accidental trade directive fields from being added
-  2. Daily at 19:00 MSK (after MOEX close), a Telegram message arrives summarizing open positions, concentration risk, and any upcoming catalyst events — the message is structured, not free-form prose, and references specific ticker names
-  3. The `PortfolioReviewAgent` handler writes only to `TelegramAlerter` — a code search for `BrokerRouter`, `place_order`, or `generate_signal` inside the agent handler returns zero results
+  1. A `PortfolioReviewResult` Pydantic schema exists in `core/schemas.py` with no `direction`, `confidence`, `symbol`+`market_id` combination that matches `Signal` or `OrderRequest` -- a type-checker assertion at handler entry prevents accidental trade directive fields from being added
+  2. Daily at 19:00 MSK (after MOEX close), a Telegram message arrives summarizing open positions, concentration risk, and any upcoming catalyst events -- the message is structured, not free-form prose, and references specific ticker names
+  3. The `PortfolioReviewAgent` handler writes only to `TelegramAlerter` -- a code search for `BrokerRouter`, `place_order`, or `generate_signal` inside the agent handler returns zero results
 **Plans**: TBD
 **UI hint**: yes
 
@@ -435,10 +446,58 @@ Plans:
 **Depends on**: Phase 49 (sentiment_scores table must be populating from live news before aggregation is meaningful)
 **Requirements**: STML-01, STML-02
 **Success Criteria** (what must be TRUE):
-  1. A TimescaleDB continuous aggregate view `sentiment_7d_avg` exists and auto-refreshes — `SELECT * FROM sentiment_7d_avg WHERE ticker = 'SBER' ORDER BY bucket DESC LIMIT 5` returns rows after one week of live sentiment data accumulation
-  2. `SentimentStore.get_rolling(ticker, window='7d')` (Layer 2) returns a list of `(bucket, avg_score, article_count)` rows — a unit test with seeded `sentiment_scores` fixture data verifies the query returns correct aggregates without Python-side computation
-  3. Querying `SentimentStore` on a ticker with no sentiment history returns an empty list without error — the v11 feature pipeline can call the accessor safely before data accumulates
+  1. A TimescaleDB continuous aggregate view `sentiment_7d_avg` exists and auto-refreshes -- `SELECT * FROM sentiment_7d_avg WHERE ticker = 'SBER' ORDER BY bucket DESC LIMIT 5` returns rows after one week of live sentiment data accumulation
+  2. `SentimentStore.get_rolling(ticker, window='7d')` (Layer 2) returns a list of `(bucket, avg_score, article_count)` rows -- a unit test with seeded `sentiment_scores` fixture data verifies the query returns correct aggregates without Python-side computation
+  3. Querying `SentimentStore` on a ticker with no sentiment history returns an empty list without error -- the v11 feature pipeline can call the accessor safely before data accumulates
 **Plans**: TBD
+
+### Phase 54: Position Monitor & Stop-Loss Dashboard
+**Goal**: Every open position displays its current trailing stop level, distance to stop (% and ATR), and stop history -- operators can see at a glance which positions are at risk
+**Depends on**: Nothing (builds on existing positions endpoint and stop-loss infrastructure)
+**Requirements**: STOP-01, STOP-02, STOP-03, STOP-04
+**Success Criteria** (what must be TRUE):
+  1. `GET /api/v1/positions/stops` returns a JSON array where each entry contains entry_price, highest_price, current_stop, trail_activated, and distance_pct -- the operator can query this endpoint and immediately see which positions are closest to their stop
+  2. The Streamlit positions table displays stop_level and distance_to_stop columns next to existing price columns -- no separate page navigation needed to see stop proximity
+  3. Clicking a position in the dashboard opens a detail view with a Plotly chart showing price line, entry marker, and trailing stop progression over time -- the operator can visually trace how the stop has moved since entry
+  4. Positions are color-coded by distance to stop: green (>5%), yellow (2-5%), red (<2%) -- at a glance, the operator identifies which positions need attention without reading numbers
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 55: Signals & Trades Analytics
+**Goal**: Signals and trades pages show real analytics -- strategy performance matrix from actual signals, trade P&L attribution, slippage calculation, and win rate tracking
+**Depends on**: Phase 54 (positions enrichment pattern reused for trades enrichment)
+**Requirements**: TRAD-01, TRAD-02, SIGP-01, SIGP-02
+**Success Criteria** (what must be TRUE):
+  1. `GET /api/v1/trades/analytics` returns a JSON object with win_rate, avg_win, avg_loss, and profit_factor computed from filled orders in the orders table -- the operator sees real P&L statistics, not nulls
+  2. Each trade in the trades list includes a slippage_bps field computed as the difference between fill_price and the signal price at signal generation time -- the operator can assess execution quality
+  3. `GET /api/v1/strategies/performance` returns per-strategy metrics (win_rate, profit_factor, signal_count, last_signal_at) by joining signals and orders tables -- the operator can compare which strategies are performing best in live trading
+  4. The Streamlit signals page displays a strategy performance heatmap with cells colored green (win_rate > 55%) or red (win_rate < 45%) -- at a glance, the operator sees which strategies are contributing positively
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 56: Equity Curve & Performance Metrics
+**Goal**: Daily equity snapshots are persisted automatically and the portfolio page shows real Sharpe, Sortino, max drawdown, and rolling performance charts
+**Depends on**: Phase 55 (needs trade data for accurate P&L in equity calculation)
+**Requirements**: EQTY-01, EQTY-02, PERF-01, PERF-02
+**Success Criteria** (what must be TRUE):
+  1. After each strategy cycle completes, a row is inserted into the daily_equity_snapshots table with date, market, total_equity, and realized_pnl -- equity history accumulates automatically without manual intervention
+  2. `GET /api/v1/portfolio/history` returns a 30-day equity timeseries with a drawdown_pct overlay column -- the operator can see both absolute equity and relative drawdown in a single response
+  3. `GET /api/v1/portfolio/performance` returns rolling_sharpe_30d, rolling_sortino_30d, and max_drawdown_30d computed from the equity snapshots table -- all metrics are non-null after 5 days of data accumulation
+  4. The Streamlit portfolio page shows a Plotly equity curve with a filled drawdown area chart beneath it -- the same visual pattern already proven on the sandbox metrics page
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 57: Alerting & Notification Enhancements
+**Goal**: Telegram alerts include position P&L context, stop-loss triggers produce detailed alerts, and a dashboard alert history page shows all past notifications
+**Depends on**: Phase 56 (equity data needed for daily summary P&L computation)
+**Requirements**: ALRT-01, ALRT-02, ALRT-03, ALRT-04
+**Success Criteria** (what must be TRUE):
+  1. When a stop-loss triggers, the Telegram alert message includes symbol, entry_price, stop_price, realized P&L (amount and %), and hold duration in bars -- the operator knows the financial impact without checking the dashboard
+  2. When a new signal is generated, the Telegram alert includes strategy name, confidence score, and whether this is a new position, an add-on, or a direction flip -- the operator understands the trade context from the alert alone
+  3. `GET /api/v1/alerts` returns a paginated list of all past alert messages from an `alerts` table with timestamp, alert_type, symbol, and message body -- the operator can review alert history in the dashboard without scrolling Telegram chat
+  4. At MOEX market close (18:50 MSK), a daily summary Telegram message reports total realized P&L, positions opened, positions closed, and equity change from previous close -- the operator gets a complete day recap without checking the dashboard
+**Plans**: TBD
+**UI hint**: yes
 
 ## Progress
 
@@ -450,6 +509,7 @@ v8.0: 36 -> 37 -> 38 -> 39 (all complete)
 v9.0: 40 -> 41 -> 42 -> 43 -> 44 (all complete)
 v9.1: 45 -> 46 -> 47 -> 48 (all complete)
 v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
+v10.1: 54 -> 55 -> 56 -> 57 (not started)
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
@@ -468,3 +528,7 @@ v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 | 51. Anomaly Interpreter Agent | v10.0 | 0/TBD | Not started | - |
 | 52. Portfolio Review Agent | v10.0 | 0/TBD | Not started | - |
 | 53. Sentiment ML Infrastructure | v10.0 | 0/TBD | Not started | - |
+| 54. Position Monitor & Stop-Loss Dashboard | v10.1 | 0/TBD | Not started | - |
+| 55. Signals & Trades Analytics | v10.1 | 0/TBD | Not started | - |
+| 56. Equity Curve & Performance Metrics | v10.1 | 0/TBD | Not started | - |
+| 57. Alerting & Notification Enhancements | v10.1 | 0/TBD | Not started | - |
