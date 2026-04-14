@@ -63,6 +63,41 @@ _MIN_CONFIDENCE_BOOST = 1.2  # raise required confidence 20% at CAUTION
 _DEFAULT_SENTIMENT = 0.0
 _MAX_ARTICLES_PER_CYCLE = 20  # budget cap: prevent LLM cost explosion on busy news days
 _ZERO = Decimal(0)
+
+# ── Source credibility ────────────────────────────────────────────────────
+SOURCE_CREDIBILITY: dict[str, float] = {
+    "rbc": 0.8,
+    "interfax": 0.8,
+    "tass": 0.8,
+    "moex_iss": 0.8,
+    "reuters": 0.8,
+    "telegram": 0.7,
+}
+
+
+def get_credibility(source: str) -> float:
+    """Return credibility score for a news source. Default 0.5 for unknown."""
+    return SOURCE_CREDIBILITY.get(source.lower(), 0.5)
+
+
+def validate_tickers(
+    tickers: list[str],
+    registry: InstrumentRegistry,
+    market_id: str,
+) -> list[str]:
+    """Filter tickers to only those in the instrument registry."""
+    from finalayze.core.exceptions import InstrumentNotFoundError  # noqa: PLC0415
+
+    valid: list[str] = []
+    for ticker in tickers:
+        try:
+            registry.get(ticker, market_id)
+            valid.append(ticker)
+        except InstrumentNotFoundError:
+            _log.warning("entity_not_in_registry", ticker=ticker, market_id=market_id)
+    return valid
+
+
 _WEEKEND_WEEKDAY = 5  # Saturday=5, Sunday=6
 _ATR_MULTIPLIER_US = Decimal("2.0")
 _ATR_MULTIPLIER_MOEX = Decimal("2.5")
@@ -308,6 +343,12 @@ class TradingLoop:
             )
             MetricsCollector.inc_news_budget_cap_hit()
             articles = articles[:_MAX_ARTICLES_PER_CYCLE]
+
+        # Attach source credibility scores
+        articles = [
+            art.model_copy(update={"credibility_score": get_credibility(art.source)})
+            for art in articles
+        ]
 
         for article in articles:
             try:
