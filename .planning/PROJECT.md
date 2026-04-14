@@ -12,20 +12,28 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
-## Current Milestone: v10.0 Runtime LLM Trading Agents
+## Current Milestone: v9.1 MOEX ML Model Quality
 
-**Goal:** Add runtime LLM agents to the live trading pipeline — news ingestion, portfolio review, anomaly interpretation, and sentiment data collection for future ML features.
+**Goal:** Raise ML model quality on failing MOEX segments (ru_energy, ru_tech, ru_finance) to pass quality gates, using insights from parallel agent analysis (quant-analyst, ml-engineer, data-quality).
 
 **Target features:**
-- News Pipeline: real MOEX news sources (RSS/Telegram/T-Pulse) feeding existing analysis pipeline
-- EventDrivenStrategy activation on live news feed with credibility cap and latency SLA
-- Portfolio Review Agent: daily LLM portfolio analysis, advisory only, structured Pydantic output
-- Anomaly Interpreter Agent: LLM explanation of detected anomalies, fire-and-forget
-- Sentiment ML features infrastructure: DB persistence + rolling aggregation for future XGBoost integration
+- Model complexity reduction for MOEX (depth=3, estimators=100)
+- Brent crude cross-asset features for ru_energy (returns, momentum)
+- XGBoost/LightGBM scale_pos_weight consistency fix
+- Stable feature selection (once on full pre-test data, not per-fold)
+- Segment restructuring (ru_finance SBERP removal, ru_tech min-history check)
+- Asymmetric triple barrier for energy stocks (wider lower barrier)
 
-**Expert validation:** 2 rounds of 5-agent debates (Quant, Risk, Architect, Portfolio, ML Engineer). Pre-Trade Reasoning Agent unanimously rejected — LLM modifiers in sizing pipeline break determinism, calibration, and backtestability.
+**Agent analysis (2026-04-14):** 3 parallel agents diagnosed root causes:
+- ml-engineer: overfitting (depth=5 on 850 samples), label imbalance from symmetric barriers, per-fold MI instability
+- quant-analyst: intra-segment correlation kills diversity, ru_tech IPOs too recent, SBER+SBERP zero independent signal
+- data-quality: HEAD ~370d, YDEX ~450d history; brier ~0.25 across all segments = poor calibration
 
-## Current State: v9.0 shipped
+## Next Milestone: v10.0 Runtime LLM Trading Agents (planned, not started)
+
+**Goal:** Add runtime LLM agents to the live trading pipeline.
+
+## Current State: v9.0 shipped, v9.1 in progress
 
 v9.0 ML AutoResearch & MOEX Adaptation shipped 2026-04-13. 5 phases, 7 plans.
 auto_ml_research.py now runs on all MOEX equity segments via TinkoffFetcher with macro features
