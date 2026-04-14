@@ -12,6 +12,19 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
+## Current Milestone: v10.0 Runtime LLM Trading Agents
+
+**Goal:** Add runtime LLM agents to the live trading pipeline — news ingestion, portfolio review, anomaly interpretation, and sentiment data collection for future ML features.
+
+**Target features:**
+- News Pipeline: real MOEX news sources (RSS/Telegram/T-Pulse) feeding existing analysis pipeline
+- EventDrivenStrategy activation on live news feed with credibility cap and latency SLA
+- Portfolio Review Agent: daily LLM portfolio analysis, advisory only, structured Pydantic output
+- Anomaly Interpreter Agent: LLM explanation of detected anomalies, fire-and-forget
+- Sentiment ML features infrastructure: DB persistence + rolling aggregation for future XGBoost integration
+
+**Expert validation:** 2 rounds of 5-agent debates (Quant, Risk, Architect, Portfolio, ML Engineer). Pre-Trade Reasoning Agent unanimously rejected — LLM modifiers in sizing pipeline break determinism, calibration, and backtestability.
+
 ## Current State: v9.0 shipped
 
 v9.0 ML AutoResearch & MOEX Adaptation shipped 2026-04-13. 5 phases, 7 plans.
@@ -171,9 +184,13 @@ v3.0 integration gaps closed (Telegram /gonogo import, HealthMonitor feed freshn
 
 ### Active
 
-<!-- Next milestone scope — to be defined -->
+<!-- v10.0 Runtime LLM Trading Agents -->
 
-(None yet — define with `/gsd:new-milestone`)
+- [ ] News ingestion pipeline with real MOEX sources (RSS, Telegram channels, T-Pulse)
+- [ ] EventDrivenStrategy enabled on live news feed with credibility cap 0.7
+- [ ] Portfolio Review Agent — daily LLM portfolio analysis, advisory only
+- [ ] Anomaly Interpreter Agent — LLM explanation of anomalies, fire-and-forget
+- [ ] Sentiment data persistence + rolling aggregation for future ML features
 
 ### Out of Scope
 
@@ -276,4 +293,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-13 after v9.0 milestone shipped*
+*Last updated: 2026-04-14 after v10.0 milestone started*

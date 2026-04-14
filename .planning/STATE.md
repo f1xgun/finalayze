@@ -1,56 +1,44 @@
 ---
 gsd_state_version: 1.0
-milestone: v9.0
-milestone_name: ML AutoResearch & MOEX Adaptation
-status: unknown
-stopped_at: Completed 43-01-PLAN.md
-last_updated: "2026-04-13T07:23:44.763Z"
+milestone: v10.0
+milestone_name: Runtime LLM Trading Agents
+status: defining_requirements
+stopped_at: Milestone started, research pending
+last_updated: "2026-04-14"
 progress:
-  total_phases: 17
-  completed_phases: 5
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-13)
+See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 44 — New Search Strategies
+**Current focus:** v10.0 — Runtime LLM Trading Agents
 
 ## Current Position
 
-Phase: 44
-Plan: Not started
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-14 — Milestone v10.0 started
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0 (v9.0)
+- Total plans completed: 0 (v10.0)
 - Average duration: —
 - Total execution time: —
 
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| - | - | - | - |
-
-*Updated after each plan completion*
-| Phase 40 P01 | 12 | 1 tasks | 2 files |
-| Phase 40 P02 | 7m | 2 tasks | 2 files |
-| Phase 41 P01 | 5m | 2 tasks | 2 files |
-| Phase 41 P02 | 4m | 2 tasks | 2 files |
-| Phase 42 P01 | 14m | 2 tasks | 2 files |
-| Phase 43 P01 | 6m | 2 tasks | 2 files |
-
 ## Accumulated Context
 
-### Key Architectural Decisions (v8.0 → v9.0)
+### Key Architectural Decisions (v9.0 → v10.0)
 
 - All v9.0 changes concentrated in `scripts/auto_ml_research.py` + `quality_gates.py` — no new modules
 - TinkoffFetcher sync-async bridge via `_run_async()` — no nest_asyncio needed in script context
@@ -58,18 +46,24 @@ Plan: Not started
 - ExperimentManager integration is opt-in via `--experiment-id` flag — existing JSONL invocations unaffected
 - Macro series must be `shift(1)` before feature join — look-ahead bias prevention
 
+### Expert Debate Results (v10.0 scoping)
+
+- 2 rounds, 5 domain agents (Quant, Risk, Architect, Portfolio, ML Engineer)
+- **APPROVED:** News Pipeline, EventDriven activation, Portfolio Review Agent, Anomaly Interpreter, Sentiment ML features infra
+- **REJECTED (unanimous):** Pre-Trade Reasoning Agent — non-determinism in sizing pipeline, uncalibrated output, irreproducible backtests
+- **DEFERRED:** Cached Reasoning Overlay (only if ML features < 0.55 AUC), live A/B testing
+- Key conditions: credibility cap 0.7, 5s hard timeout, advisory-only agents, Haiku for volume / Sonnet for reasoning
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-- Phase 40 research flag: verify actual MOEX candle counts per ru_* segment empirically on first run
-- Phase 41 research flag: MOEX walk-forward fold constants are analytically derived — validate against real data
-- Phase 44 research flag: feature engineering domain rules and permutation test threshold need explicit design decision before implementation
+None.
 
 ## Session Continuity
 
-Last session: 2026-04-13T06:56:31.917Z
-Stopped at: Completed 43-01-PLAN.md
+Last session: 2026-04-14
+Stopped at: Milestone v10.0 started, research pending
 Resume file: None
