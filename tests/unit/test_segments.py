@@ -104,3 +104,14 @@ class TestExistingStockSegments:
         for sid in _STOCK_SEGMENT_IDS:
             seg = _get(sid)
             assert seg.instrument_type == "stock", f"{sid} should be stock"
+
+
+# ---------------------------------------------------------------------------
+# ru_finance segment
+# ---------------------------------------------------------------------------
+
+
+class TestRuFinance:
+    def test_sberp_not_in_ru_finance(self) -> None:
+        seg = _get("ru_finance")
+        assert "SBERP" not in seg.symbols

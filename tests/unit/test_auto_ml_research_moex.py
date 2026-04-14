@@ -565,3 +565,20 @@ class TestMoexHparams:
         hp = _get_hparams("ru_blue_chips")
         hp["xgb_max_depth"] = 999
         assert _MOEX_HPARAMS["xgb_max_depth"] == _MOEX_EXPECTED_XGB_MAX_DEPTH
+
+
+# ---------------------------------------------------------------------------
+# Minimum history gate
+# ---------------------------------------------------------------------------
+
+
+class TestMinHistoryGate:
+    def test_constant_value(self) -> None:
+        from scripts.auto_ml_research import _MIN_HISTORY_DAYS
+
+        assert _MIN_HISTORY_DAYS == 500
+
+    def test_sberp_not_in_ru_finance_symbols(self) -> None:
+        from scripts.auto_ml_research import _SEGMENT_SYMBOLS
+
+        assert "SBERP" not in _SEGMENT_SYMBOLS["ru_finance"]

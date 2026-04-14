@@ -430,3 +430,16 @@ class TestDynamicQualityGates:
         """n_eff should never be < 1."""
         mod = _load_script_module()
         assert mod.compute_n_eff(1, _HOLD_BARS_100) >= 1  # type: ignore[union-attr]
+
+
+# ---------------------------------------------------------------------------
+# Minimum history gate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestMinHistoryGate:
+    def test_min_history_days_constant(self) -> None:
+        from scripts.train_models import _MIN_HISTORY_DAYS
+
+        assert _MIN_HISTORY_DAYS == 500
