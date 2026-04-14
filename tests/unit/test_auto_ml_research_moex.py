@@ -421,3 +421,102 @@ class TestMoexMacroFeaturesNonZero:
             f"Present keys: {present_keys}, "
             f"values: { {k: features[0].get(k) for k in present_keys} }"
         )
+
+
+# ---------------------------------------------------------------------------
+# MOEX hyperparameter routing tests (Plan 45-01)
+# ---------------------------------------------------------------------------
+
+# Constants for MOEX hparam tests (no magic numbers — ruff PLR2004)
+_MOEX_EXPECTED_XGB_MAX_DEPTH = 3
+_MOEX_EXPECTED_XGB_N_ESTIMATORS = 100
+_MOEX_EXPECTED_XGB_MIN_CHILD_WEIGHT = 20
+_MOEX_EXPECTED_LGBM_N_ESTIMATORS = 100
+_MOEX_EXPECTED_LGBM_NUM_LEAVES = 15
+_MOEX_EXPECTED_CAT_DEPTH = 3
+_MOEX_EXPECTED_CAT_ITERATIONS = 100
+
+_US_EXPECTED_XGB_MAX_DEPTH = 5
+_US_EXPECTED_XGB_N_ESTIMATORS = 200
+
+
+class TestMoexHparams:
+    """Test MOEX-specific reduced-complexity hyperparameters and routing."""
+
+    def test_moex_hparams_xgb_max_depth(self) -> None:
+        """_MOEX_HPARAMS['xgb_max_depth'] == 3."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["xgb_max_depth"] == _MOEX_EXPECTED_XGB_MAX_DEPTH
+
+    def test_moex_hparams_xgb_n_estimators(self) -> None:
+        """_MOEX_HPARAMS['xgb_n_estimators'] == 100."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["xgb_n_estimators"] == _MOEX_EXPECTED_XGB_N_ESTIMATORS
+
+    def test_moex_hparams_xgb_min_child_weight(self) -> None:
+        """_MOEX_HPARAMS['xgb_min_child_weight'] == 20."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["xgb_min_child_weight"] == _MOEX_EXPECTED_XGB_MIN_CHILD_WEIGHT
+
+    def test_moex_hparams_lgbm_n_estimators(self) -> None:
+        """_MOEX_HPARAMS['lgbm_n_estimators'] == 100."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["lgbm_n_estimators"] == _MOEX_EXPECTED_LGBM_N_ESTIMATORS
+
+    def test_moex_hparams_lgbm_num_leaves(self) -> None:
+        """_MOEX_HPARAMS['lgbm_num_leaves'] == 15."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["lgbm_num_leaves"] == _MOEX_EXPECTED_LGBM_NUM_LEAVES
+
+    def test_moex_hparams_cat_depth(self) -> None:
+        """_MOEX_HPARAMS['cat_depth'] == 3."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["cat_depth"] == _MOEX_EXPECTED_CAT_DEPTH
+
+    def test_moex_hparams_cat_iterations(self) -> None:
+        """_MOEX_HPARAMS['cat_iterations'] == 100."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS
+
+        assert _MOEX_HPARAMS["cat_iterations"] == _MOEX_EXPECTED_CAT_ITERATIONS
+
+    def test_get_hparams_moex_segment_returns_moex_hparams(self) -> None:
+        """_get_hparams('ru_energy') returns MOEX-profile values."""
+        from scripts.auto_ml_research import _get_hparams
+
+        hp = _get_hparams("ru_energy")
+        assert hp["xgb_max_depth"] == _MOEX_EXPECTED_XGB_MAX_DEPTH
+        assert hp["xgb_n_estimators"] == _MOEX_EXPECTED_XGB_N_ESTIMATORS
+
+    def test_get_hparams_us_segment_returns_default_hparams(self) -> None:
+        """_get_hparams('us_tech') returns US-profile (default) values."""
+        from scripts.auto_ml_research import _get_hparams
+
+        hp = _get_hparams("us_tech")
+        assert hp["xgb_max_depth"] == _US_EXPECTED_XGB_MAX_DEPTH
+        assert hp["xgb_n_estimators"] == _US_EXPECTED_XGB_N_ESTIMATORS
+
+    def test_default_hparams_unchanged_max_depth(self) -> None:
+        """_DEFAULT_HPARAMS still has xgb_max_depth == 5 (US segments unchanged)."""
+        from scripts.auto_ml_research import _DEFAULT_HPARAMS
+
+        assert _DEFAULT_HPARAMS["xgb_max_depth"] == _US_EXPECTED_XGB_MAX_DEPTH
+
+    def test_default_hparams_unchanged_n_estimators(self) -> None:
+        """_DEFAULT_HPARAMS still has xgb_n_estimators == 200 (US segments unchanged)."""
+        from scripts.auto_ml_research import _DEFAULT_HPARAMS
+
+        assert _DEFAULT_HPARAMS["xgb_n_estimators"] == _US_EXPECTED_XGB_N_ESTIMATORS
+
+    def test_get_hparams_returns_copy(self) -> None:
+        """_get_hparams returns a copy so mutations do not affect the constant."""
+        from scripts.auto_ml_research import _MOEX_HPARAMS, _get_hparams
+
+        hp = _get_hparams("ru_blue_chips")
+        hp["xgb_max_depth"] = 999
+        assert _MOEX_HPARAMS["xgb_max_depth"] == _MOEX_EXPECTED_XGB_MAX_DEPTH
