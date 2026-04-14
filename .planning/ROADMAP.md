@@ -384,7 +384,10 @@ Plans:
   2. MOEX hyperparameter defaults are defined in a separate config block from US defaults — changing US model depth does not affect MOEX model depth
   3. When sample_weight is provided, XGBoost sets scale_pos_weight=1.0 (matching LightGBM) — a unit test confirms XGB and LGBM receive identical effective class weights under the same sample_weight input
   4. All three ensemble members (XGB, LGBM, CatBoost) apply class rebalancing exclusively through sample_weight — no member applies both sample_weight and an internal pos_weight multiplier simultaneously
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 45-01-PLAN.md — MOEX-specific hyperparameters and routing in autoresearch (MCPX-01, MCPX-02)
+- [ ] 45-02-PLAN.md — Ensemble consistency: fix XGBoost and CatBoost double-rebalancing (ENSM-01, ENSM-02)
 
 ### Phase 46: Feature Selection Stability
 **Goal**: Feature selection runs once on the full pre-test dataset and the selected feature set is reused identically across all walk-forward folds — eliminating fold-to-fold feature churn that degrades model consistency
