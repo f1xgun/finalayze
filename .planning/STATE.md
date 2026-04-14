@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v10.0
 milestone_name: Runtime LLM Trading Agents
-status: defining_requirements
-stopped_at: Milestone started, requirements pending
+status: ready_to_plan
+stopped_at: Roadmap created, Phase 49 ready to plan
 last_updated: "2026-04-15"
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -19,38 +19,47 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** v10.0 — Runtime LLM Trading Agents
+**Current focus:** v10.0 Phase 49 — News Pipeline Hardening
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-04-15 — Milestone v10.0 started
+Phase: 49 of 53 (News Pipeline Hardening)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-04-15 — Roadmap created for v10.0 (5 phases, 17 requirements mapped)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
-
 - Total plans completed: 0 (v10.0)
 - Average duration: —
 - Total execution time: —
 
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| - | - | - | - |
+
+*Updated after each plan completion*
+
 ## Accumulated Context
 
-### Key Architectural Decisions (v9.1 → v10.0)
+### Key Architectural Decisions (v10.0)
 
-- v9.1 shipped: MOEX ML model quality improved (depth=3, stable feature selection, Brent features, asymmetric barriers)
-- All v9.1 changes in auto_ml_research.py + quality_gates.py + technical.py — no analysis/ or news pipeline changes
-- v10.0 research completed: STACK.md, FEATURES.md, ARCHITECTURE.md, PITFALLS.md, SUMMARY.md in .planning/research/
+- Pre-Trade Reasoning Agent REJECTED (unanimous): non-determinism, uncalibrated output, irreproducible backtests
+- Credibility cap 0.7 enforced at EventDrivenStrategy.generate_signal() injection point
+- AnomalyInterpreterAgent: fire-and-forget via asyncio.run_coroutine_threadsafe; raw alert NEVER delayed
+- PortfolioReviewAgent: advisory-only schema enforced — no direction/confidence/symbol+market_id fields
+- 5s per-article LLM timeout + 20-article budget cap replaces existing 1800s no-op timeout
+- T-Pulse integration deferred: SDK has no news service; REST endpoint auth status uncertain post-2024
 
-### Expert Debate Results (v10.0 scoping)
+### Research Flags (address during plan-phase)
 
-- 2 rounds, 5 domain agents (Quant, Risk, Architect, Portfolio, ML Engineer)
-- **APPROVED:** News Pipeline, EventDriven activation, Portfolio Review Agent, Anomaly Interpreter, Sentiment ML features infra
-- **REJECTED (unanimous):** Pre-Trade Reasoning Agent — non-determinism in sizing pipeline, uncalibrated output, irreproducible backtests
-- **DEFERRED:** Cached Reasoning Overlay (only if ML features < 0.55 AUC), live A/B testing
-- Key conditions: credibility cap 0.7, 5s hard timeout, advisory-only agents, Haiku for volume / Sonnet for reasoning
+- Phase 50: Verify StrategyCombiner._on_strategy_signal hook has access to other active signals in same cycle for CBR/dividend duplicate-signal suppression
+- Phase 53: Confirm timescaledb.enable_cagg_window_functions setting in Docker Compose PostgreSQL config; verify continuous aggregate refresh policy syntax for current TimescaleDB version
 
 ### Pending Todos
 
@@ -58,10 +67,10 @@ None.
 
 ### Blockers/Concerns
 
-None.
+- Phase 49 contains 3 confirmed latent bugs (json.loads, 1800s timeout, threading.Lock across await) — must be fixed before Phase 50 activation. Research HIGH confidence on all three.
 
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Milestone v10.0 started, requirements pending
+Stopped at: Roadmap written, REQUIREMENTS.md traceability updated, STATE.md initialized
 Resume file: None

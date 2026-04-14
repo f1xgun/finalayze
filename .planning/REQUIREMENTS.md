@@ -67,29 +67,29 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| NEWS-01 | — | Pending |
-| NEWS-02 | — | Pending |
-| NEWS-03 | — | Pending |
-| NEWS-04 | — | Pending |
-| NEWS-05 | — | Pending |
-| NEWS-06 | — | Pending |
-| EVNT-01 | — | Pending |
-| EVNT-02 | — | Pending |
-| EVNT-03 | — | Pending |
-| PFRA-01 | — | Pending |
-| PFRA-02 | — | Pending |
-| PFRA-03 | — | Pending |
-| ANMI-01 | — | Pending |
-| ANMI-02 | — | Pending |
-| ANMI-03 | — | Pending |
-| STML-01 | — | Pending |
-| STML-02 | — | Pending |
+| NEWS-01 | Phase 49 | Pending |
+| NEWS-02 | Phase 49 | Pending |
+| NEWS-03 | Phase 49 | Pending |
+| NEWS-04 | Phase 49 | Pending |
+| NEWS-05 | Phase 49 | Pending |
+| NEWS-06 | Phase 49 | Pending |
+| EVNT-01 | Phase 50 | Pending |
+| EVNT-02 | Phase 50 | Pending |
+| EVNT-03 | Phase 50 | Pending |
+| ANMI-01 | Phase 51 | Pending |
+| ANMI-02 | Phase 51 | Pending |
+| ANMI-03 | Phase 51 | Pending |
+| PFRA-01 | Phase 52 | Pending |
+| PFRA-02 | Phase 52 | Pending |
+| PFRA-03 | Phase 52 | Pending |
+| STML-01 | Phase 53 | Pending |
+| STML-02 | Phase 53 | Pending |
 
 **Coverage:**
 - v10.0 requirements: 17 total
-- Mapped to phases: 0
-- Unmapped: 17 ⚠️
+- Mapped to phases: 17
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-04-15*
-*Last updated: 2026-04-15 after initial definition*
+*Last updated: 2026-04-15 — traceability filled after roadmap creation*

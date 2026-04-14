@@ -12,6 +12,7 @@
 - ✅ **v8.0 Agent Integration & Autonomous Decision Loop** -- Phases 36-39 (shipped 2026-04-12)
 - ✅ **v9.0 ML AutoResearch & MOEX Adaptation** -- Phases 40-44 (shipped 2026-04-13)
 - ✅ **v9.1 MOEX ML Model Quality** -- Phases 45-48 (shipped 2026-04-14)
+- 🚧 **v10.0 Runtime LLM Trading Agents** -- Phases 49-53 (in progress)
 
 ## Phases
 
@@ -134,6 +135,16 @@ Full details in Phase Details section below (collapsed milestone).
 - [x] Phase 48: Segment Restructuring & Validation (2/2 plans) — completed 2026-04-14
 
 </details>
+
+### 🚧 v10.0 Runtime LLM Trading Agents (In Progress)
+
+**Milestone Goal:** Add runtime LLM agents to the live trading pipeline — news ingestion hardened and activated, EventDrivenStrategy firing live signals, portfolio review and anomaly interpretation agents deployed, and sentiment data accumulating for future ML use.
+
+- [ ] **Phase 49: News Pipeline Hardening** - Fix latent bugs and add production safeguards before live news activation
+- [ ] **Phase 50: EventDriven Activation** - Enable event_driven strategy on all ru_* segments with signal quality guards
+- [ ] **Phase 51: Anomaly Interpreter Agent** - LLM enrichment for anomaly alerts via fire-and-forget async dispatch
+- [ ] **Phase 52: Portfolio Review Agent** - Daily advisory LLM portfolio analysis with structured Pydantic output
+- [ ] **Phase 53: Sentiment ML Infrastructure** - TimescaleDB continuous aggregates and SentimentStore reader for future ML features
 
 ## Phase Details
 
@@ -376,6 +387,59 @@ Plans:
 Plans:
 - [x] 44-01-PLAN.md -- Cross-segment transfer + feature engineering strategies (STRAT-02, STRAT-03)
 
+### Phase 49: News Pipeline Hardening
+**Goal**: The news ingestion pipeline is production-safe — latent bugs fixed, cost safeguards in place, and signal quality guards active — before any live segment activation
+**Depends on**: Phase 48 (v9.1 complete; this starts v10.0)
+**Requirements**: NEWS-01, NEWS-02, NEWS-03, NEWS-04, NEWS-05, NEWS-06
+**Success Criteria** (what must be TRUE):
+  1. A news cycle processes up to 20 articles with a 5-second per-article LLM timeout — the APScheduler thread completes the cycle within 2 minutes regardless of LLM latency, and exceeding the budget logs a `news_budget_cap_hit` metric
+  2. Sentiment scores written to the `sentiment_scores` table reflect the originating source credibility (RSS sources: 0.8, Telegram: 0.7) — inspecting DB rows shows a non-null `credibility` column populated from the per-source map
+  3. An LLM-extracted ticker that does not appear in InstrumentRegistry is rejected with a structured log entry containing `entity_not_in_registry` and the rejected ticker — no ghost-ticker sentiment scores accumulate in the DB
+  4. When the LLM API fails for 3 consecutive cycles, a Telegram alert fires and `llm_liveness_failures` Prometheus counter increments — LLM downtime is observable from the monitoring dashboard
+  5. Calling `NewsAnalyzer.analyze()` on a news article returns a structured `SentimentResult` Pydantic object via `parse_structured()` — no `json.loads()` call remains in the news analysis path
+**Plans**: TBD
+
+### Phase 50: EventDriven Activation
+**Goal**: The event_driven strategy fires live signals on all ru_* segments with CBR/dividend duplicate-signal protection and sentiment decay gated on market hours
+**Depends on**: Phase 49 (news pipeline must be production-safe before enabling live strategy signals)
+**Requirements**: EVNT-01, EVNT-02, EVNT-03
+**Success Criteria** (what must be TRUE):
+  1. All ru_* segment presets have `event_driven.enabled: true` with weight 0.15 — a sandbox strategy cycle that processes a news article generates at least one EventDrivenStrategy signal entry in the `signals` table
+  2. When an article classified as a CBR announcement arrives and `cbr_calendar` strategy also has a pending signal for the same ticker, the combiner suppresses the double-weight — the final combined confidence for that tick does not exceed what a single strategy would contribute
+  3. Between 18:50 MSK (MOEX close) and 09:50 MSK (MOEX open) the sentiment decay clock is frozen — the first article of the trading day produces a signal score within ±10% of the last signal from the previous session rather than spiking from a near-zero decayed baseline
+**Plans**: TBD
+
+### Phase 51: Anomaly Interpreter Agent
+**Goal**: Detected anomalies receive an LLM explanation appended to the Telegram alert without ever delaying the raw statistical alert
+**Depends on**: Phase 49 (fire-and-forget async pattern from news pipeline hardening; LLM liveness check establishes baseline reliability)
+**Requirements**: ANMI-01, ANMI-02, ANMI-03
+**Success Criteria** (what must be TRUE):
+  1. When AnomalyDetector fires an alert, the raw statistical alert message is sent to Telegram immediately — a unit test asserting that `TelegramAlerter.send()` is called before any LLM await passes
+  2. Within 30 seconds of the raw alert, a follow-up Telegram message arrives containing the LLM explanation labeled "AI interpretation (unverified)" — the enrichment is visible in the Telegram chat as a separate message after the original
+  3. When the LLM call times out or raises an exception, the raw alert is still delivered and a `anomaly_llm_failure` structlog entry is emitted — suppressing the raw alert on LLM failure is impossible by design
+**Plans**: TBD
+
+### Phase 52: Portfolio Review Agent
+**Goal**: A daily LLM portfolio analysis runs outside market hours, delivers a structured advisory report via Telegram, and has no write path to the order pipeline
+**Depends on**: Phase 49 (LLM async patterns and credibility safeguards established; Phase 51 validates advisory-only Telegram dispatch pattern)
+**Requirements**: PFRA-01, PFRA-02, PFRA-03
+**Success Criteria** (what must be TRUE):
+  1. A `PortfolioReviewResult` Pydantic schema exists in `core/schemas.py` with no `direction`, `confidence`, `symbol`+`market_id` combination that matches `Signal` or `OrderRequest` — a type-checker assertion at handler entry prevents accidental trade directive fields from being added
+  2. Daily at 19:00 MSK (after MOEX close), a Telegram message arrives summarizing open positions, concentration risk, and any upcoming catalyst events — the message is structured, not free-form prose, and references specific ticker names
+  3. The `PortfolioReviewAgent` handler writes only to `TelegramAlerter` — a code search for `BrokerRouter`, `place_order`, or `generate_signal` inside the agent handler returns zero results
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 53: Sentiment ML Infrastructure
+**Goal**: Rolling sentiment aggregations accumulate in TimescaleDB and a Layer 2 accessor provides the read API that the v11 ML feature pipeline will consume
+**Depends on**: Phase 49 (sentiment_scores table must be populating from live news before aggregation is meaningful)
+**Requirements**: STML-01, STML-02
+**Success Criteria** (what must be TRUE):
+  1. A TimescaleDB continuous aggregate view `sentiment_7d_avg` exists and auto-refreshes — `SELECT * FROM sentiment_7d_avg WHERE ticker = 'SBER' ORDER BY bucket DESC LIMIT 5` returns rows after one week of live sentiment data accumulation
+  2. `SentimentStore.get_rolling(ticker, window='7d')` (Layer 2) returns a list of `(bucket, avg_score, article_count)` rows — a unit test with seeded `sentiment_scores` fixture data verifies the query returns correct aggregates without Python-side computation
+  3. Querying `SentimentStore` on a ticker with no sentiment history returns an empty list without error — the v11 feature pipeline can call the accessor safely before data accumulates
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
@@ -385,6 +449,7 @@ v7.0: 32 -> 33 -> 34 -> 35 (all complete)
 v8.0: 36 -> 37 -> 38 -> 39 (all complete)
 v9.0: 40 -> 41 -> 42 -> 43 -> 44 (all complete)
 v9.1: 45 -> 46 -> 47 -> 48 (all complete)
+v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
@@ -398,3 +463,8 @@ v9.1: 45 -> 46 -> 47 -> 48 (all complete)
 | 36-39 | v8.0 | 7/7 | Complete | 2026-04-12 |
 | 40-44 | v9.0 | 7/7 | Complete | 2026-04-13 |
 | 45-48 | v9.1 | 7/7 | Complete | 2026-04-14 |
+| 49. News Pipeline Hardening | v10.0 | 0/TBD | Not started | - |
+| 50. EventDriven Activation | v10.0 | 0/TBD | Not started | - |
+| 51. Anomaly Interpreter Agent | v10.0 | 0/TBD | Not started | - |
+| 52. Portfolio Review Agent | v10.0 | 0/TBD | Not started | - |
+| 53. Sentiment ML Infrastructure | v10.0 | 0/TBD | Not started | - |
