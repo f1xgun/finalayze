@@ -131,7 +131,7 @@ Full details in Phase Details section below (collapsed milestone).
 
 - [x] **Phase 45: Model Complexity & Ensemble Consistency** - Reduce MOEX model complexity and fix XGB/LGBM/CatBoost class rebalancing inconsistency (completed 2026-04-14)
 - [x] **Phase 46: Feature Selection Stability** - Run feature selection once on full pre-test data instead of per-fold to eliminate fold-to-fold instability (completed 2026-04-14)
-- [ ] **Phase 47: Cross-Asset Features & Asymmetric Barriers** - Wire Brent return features and introduce asymmetric triple barrier for energy stocks
+- [x] **Phase 47: Cross-Asset Features & Asymmetric Barriers** - Wire Brent return features and introduce asymmetric triple barrier for energy stocks (completed 2026-04-14)
 - [ ] **Phase 48: Segment Restructuring & Validation** - Remove SBERP from ru_finance, add minimum history gate, validate all three failing segments pass quality gates
 
 ## Phase Details
@@ -412,8 +412,8 @@ Plans:
   4. Barrier asymmetry multipliers are configurable per segment via an auto_ml_research config dict — changing ru_energy barrier parameters does not require code changes
 **Plans**: 2 plans
 Plans:
-- [ ] 47-01-PLAN.md — Multi-period Brent crude return features (brent_ret_5d, brent_ret_21d)
-- [ ] 47-02-PLAN.md — Per-segment asymmetric triple barrier configuration
+- [x] 47-01-PLAN.md — Multi-period Brent crude return features (brent_ret_5d, brent_ret_21d)
+- [x] 47-02-PLAN.md — Per-segment asymmetric triple barrier configuration
 
 ### Phase 48: Segment Restructuring & Validation
 **Goal**: SBERP is removed from ru_finance to eliminate near-zero-independent-signal redundancy, symbols with insufficient history are gated out of ML training, and all three previously-failing segments produce at least one ACCEPT verdict
@@ -464,5 +464,5 @@ v9.1: 45 -> 46 -> 47 -> 48
 | 44. New Search Strategies | v9.0 | 1/1 | Complete | 2026-04-13 |
 | 45. Model Complexity & Ensemble Consistency | v9.1 | 2/2 | Complete    | 2026-04-14 |
 | 46. Feature Selection Stability | v9.1 | 1/1 | Complete    | 2026-04-14 |
-| 47. Cross-Asset Features & Asymmetric Barriers | v9.1 | 0/TBD | Not started | - |
+| 47. Cross-Asset Features & Asymmetric Barriers | v9.1 | 2/2 | Complete   | 2026-04-14 |
 | 48. Segment Restructuring & Validation | v9.1 | 0/TBD | Not started | - |

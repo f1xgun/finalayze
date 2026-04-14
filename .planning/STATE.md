@@ -2,14 +2,15 @@
 gsd_state_version: 1.0
 milestone: v9.1
 milestone_name: MOEX ML Model Quality
-status: unknown
-stopped_at: Completed 46-01-PLAN.md
-last_updated: "2026-04-14T11:28:49.078Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 47-01-PLAN.md
+last_updated: "2026-04-14T11:48:05.229Z"
 progress:
   total_phases: 21
-  completed_phases: 2
-  total_plans: 3
-  completed_plans: 3
+  completed_phases: 3
+  total_plans: 5
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State
@@ -19,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 46 — Feature Selection Stability
+**Current focus:** Phase 47 — Cross-Asset Features & Asymmetric Barriers
 
 ## Current Position
 
-Phase: 47
-Plan: Not started
+Phase: 47 (Cross-Asset Features & Asymmetric Barriers) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -56,6 +57,8 @@ Plan: Not started
 - [Phase 45]: MOEX segments use reduced hyperparameters (depth=3, n_estimators=100, min_child_weight=20) via _get_hparams() helper routing; _DEFAULT_HPARAMS unchanged for US segments
 - [Phase 46]: select_features_efficient called once on union of all training indices (pre-fold) to eliminate feature churn
 - [Phase 46]: New ExperimentConfig created with feature_subset set — caller's config not mutated (T-46-02 mitigation)
+- [Phase 47]: Independent per-feature fallback: each Brent feature computes in its own if-block; partial data yields partial features
+- [Phase 47]: Clip bounds scale with horizon: 1d=[-0.15,0.15], 5d=[-0.30,0.30], 21d=[-0.50,0.50]
 
 ### Pending Todos
 
@@ -67,6 +70,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-14T11:26:03.134Z
-Stopped at: Completed 46-01-PLAN.md
+Last session: 2026-04-14T11:47:57.914Z
+Stopped at: Completed 47-01-PLAN.md
 Resume file: None

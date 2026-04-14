@@ -12,8 +12,8 @@
 
 ### Cross-Asset Features
 
-- [ ] **FEAT-01**: Brent crude return features (ret_5d, ret_21d) available in technical feature set for MOEX segments
-- [ ] **FEAT-02**: Brent features wired from existing `_fetch_moex_macro_data()` into feature engineering pipeline
+- [x] **FEAT-01**: Brent crude return features (ret_5d, ret_21d) available in technical feature set for MOEX segments
+- [x] **FEAT-02**: Brent features wired from existing `_fetch_moex_macro_data()` into feature engineering pipeline
 
 ### Ensemble Consistency
 
@@ -63,8 +63,8 @@
 | ENSM-02 | Phase 45 | Complete |
 | FSEL-01 | Phase 46 | Complete |
 | FSEL-02 | Phase 46 | Complete |
-| FEAT-01 | Phase 47 | Pending |
-| FEAT-02 | Phase 47 | Pending |
+| FEAT-01 | Phase 47 | Complete |
+| FEAT-02 | Phase 47 | Complete |
 | BARR-01 | Phase 47 | Pending |
 | BARR-02 | Phase 47 | Pending |
 | SEGM-01 | Phase 48 | Pending |
