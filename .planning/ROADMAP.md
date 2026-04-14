@@ -10,7 +10,8 @@
 - ✅ **v6.0 Sandbox Stability & Observability** -- Phases 28-31 (shipped 2026-03-30)
 - ✅ **v7.0 Agent Intelligence & Experiment Framework** -- Phases 32-35 (shipped 2026-04-12)
 - ✅ **v8.0 Agent Integration & Autonomous Decision Loop** -- Phases 36-39 (shipped 2026-04-12)
-- 🚧 **v9.0 ML AutoResearch & MOEX Adaptation** -- Phases 40-44
+- ✅ **v9.0 ML AutoResearch & MOEX Adaptation** -- Phases 40-44 (shipped 2026-04-13)
+- 🚧 **v9.1 MOEX ML Model Quality** -- Phases 45-48
 
 ## Phases
 
@@ -113,15 +114,25 @@ Full details in Phase Details section below (collapsed milestone).
 
 </details>
 
-### 🚧 v9.0 ML AutoResearch & MOEX Adaptation (In Progress)
-
-**Milestone Goal:** Adapt auto_ml_research for MOEX market — TinkoffFetcher data adapter, MOEX macro features, adaptive quality gates, ExperimentManager integration, and three new search strategies.
+<details>
+<summary>✅ v9.0 ML AutoResearch & MOEX Adaptation (Phases 40-44) -- SHIPPED 2026-04-13</summary>
 
 - [x] **Phase 40: MOEX Data Adapter & Macro Features** - Wire TinkoffFetcher and MOEX macro features into auto_ml_research for all ru_* segments (completed 2026-04-13)
 - [x] **Phase 41: Adaptive Quality Gates** - Parametrize min_signals, add MOEX fold constants, add degenerate predictor guard (completed 2026-04-13)
 - [x] **Phase 42: ExperimentManager Integration** - Opt-in --experiment-id flag with hypothesis lifecycle and backward-compatible JSONL audit trail (completed 2026-04-13)
 - [x] **Phase 43: Ensemble Weight Optimization** - Bounded XGB/LGBM/CatBoost weight grid search with overfitting guard (completed 2026-04-13)
 - [x] **Phase 44: New Search Strategies** - Cross-segment US→MOEX feature transfer and domain-motivated feature engineering (completed 2026-04-13)
+
+</details>
+
+### 🚧 v9.1 MOEX ML Model Quality (In Progress)
+
+**Milestone Goal:** Raise ML model quality on failing MOEX segments (ru_energy, ru_tech, ru_finance) to pass quality gates, by fixing model complexity, ensemble consistency, feature selection stability, cross-asset features, asymmetric barriers, and segment configuration.
+
+- [ ] **Phase 45: Model Complexity & Ensemble Consistency** - Reduce MOEX model complexity and fix XGB/LGBM/CatBoost class rebalancing inconsistency
+- [ ] **Phase 46: Feature Selection Stability** - Run feature selection once on full pre-test data instead of per-fold to eliminate fold-to-fold instability
+- [ ] **Phase 47: Cross-Asset Features & Asymmetric Barriers** - Wire Brent return features and introduce asymmetric triple barrier for energy stocks
+- [ ] **Phase 48: Segment Restructuring & Validation** - Remove SBERP from ru_finance, add minimum history gate, validate all three failing segments pass quality gates
 
 ## Phase Details
 
@@ -362,7 +373,49 @@ Plans:
   3. Generated features that do not pass a permutation importance test are discarded before model training — feature engineering cannot add noise-only columns to the feature matrix
 **Plans:** 1/1 plans complete
 Plans:
-- [ ] 44-01-PLAN.md -- Cross-segment transfer + feature engineering strategies (STRAT-02, STRAT-03)
+- [x] 44-01-PLAN.md -- Cross-segment transfer + feature engineering strategies (STRAT-02, STRAT-03)
+
+### Phase 45: Model Complexity & Ensemble Consistency
+**Goal**: MOEX models are trained with reduced complexity to prevent overfitting on small datasets, and all three ensemble members use a consistent class rebalancing strategy
+**Depends on**: Phase 44 (v9.0 complete)
+**Requirements**: MCPX-01, MCPX-02, ENSM-01, ENSM-02
+**Success Criteria** (what must be TRUE):
+  1. When `--segment` is a MOEX segment (ru_*), auto_ml_research uses max_depth=3, n_estimators=100, min_child_weight=20 for XGBoost — a log line confirms MOEX complexity profile is active
+  2. MOEX hyperparameter defaults are defined in a separate config block from US defaults — changing US model depth does not affect MOEX model depth
+  3. When sample_weight is provided, XGBoost sets scale_pos_weight=1.0 (matching LightGBM) — a unit test confirms XGB and LGBM receive identical effective class weights under the same sample_weight input
+  4. All three ensemble members (XGB, LGBM, CatBoost) apply class rebalancing exclusively through sample_weight — no member applies both sample_weight and an internal pos_weight multiplier simultaneously
+**Plans**: TBD
+
+### Phase 46: Feature Selection Stability
+**Goal**: Feature selection runs once on the full pre-test dataset and the selected feature set is reused identically across all walk-forward folds — eliminating fold-to-fold feature churn that degrades model consistency
+**Depends on**: Phase 45 (reduced complexity must be in place before measuring feature stability improvement)
+**Requirements**: FSEL-01, FSEL-02
+**Success Criteria** (what must be TRUE):
+  1. The `_run_fold` loop in auto_ml_research does not call feature selection — feature selection executes once before the fold loop begins, on the full pre-test slice of data
+  2. All walk-forward folds use the identical feature list — a unit test with 3 synthetic folds confirms the same feature names appear in every fold's training DataFrame
+  3. The selected feature count is logged once before fold execution begins, not once per fold — a single "Selected N features" log line appears per segment run
+**Plans**: TBD
+
+### Phase 47: Cross-Asset Features & Asymmetric Barriers
+**Goal**: ru_energy models have access to Brent crude return features, and energy stocks use asymmetric triple barriers that account for commodity-linked downside volatility
+**Depends on**: Phase 46 (stable feature set makes it meaningful to add new features — adding features to an unstable selection loop inflates noise)
+**Requirements**: FEAT-01, FEAT-02, BARR-01, BARR-02
+**Success Criteria** (what must be TRUE):
+  1. The feature matrix for any ru_energy experiment contains `brent_ret_5d` and `brent_ret_21d` columns with non-zero values — Brent return features are computed and not dropped by feature selection
+  2. Brent return features are derived from the existing `_fetch_moex_macro_data()` Brent price series — no new data fetch is introduced; the computation is a transformation of already-available data
+  3. When `--segment ru_energy` is passed, the triple barrier lower multiplier is wider than the upper multiplier (e.g., lower=2.0, upper=1.5 ATR) — asymmetry is confirmed by inspecting barrier parameters logged at run start
+  4. Barrier asymmetry multipliers are configurable per segment via an auto_ml_research config dict — changing ru_energy barrier parameters does not require code changes
+**Plans**: TBD
+
+### Phase 48: Segment Restructuring & Validation
+**Goal**: SBERP is removed from ru_finance to eliminate near-zero-independent-signal redundancy, symbols with insufficient history are gated out of ML training, and all three previously-failing segments produce at least one ACCEPT verdict
+**Depends on**: Phase 47 (feature and barrier improvements must be in place before final validation run)
+**Requirements**: SEGM-01, SEGM-02, SEGM-03
+**Success Criteria** (what must be TRUE):
+  1. SBERP does not appear in the ru_finance symbol list in config/segments.py or in the auto_ml_research segment symbol mapping — running `--segment ru_finance` trains without SBERP
+  2. A symbol with fewer than 500 trading days of history is skipped with a logged warning during auto_ml_research data loading — no model is trained on a symbol that fails the minimum history check
+  3. At least one experiment run on ru_energy, ru_finance, and ru_tech each produces an ACCEPT or INCONCLUSIVE verdict (not REJECT) after applying all v9.1 improvements — quality gates are no longer all-REJECT for the three previously-failing segments
+**Plans**: TBD
 
 ## Progress
 
@@ -371,7 +424,8 @@ Plans:
 v6.0: 28 -> 29 -> 30 -> 31 (all complete)
 v7.0: 32 -> 33 -> 34 -> 35 (all complete)
 v8.0: 36 -> 37 -> 38 -> 39 (all complete)
-v9.0: 40 -> 41 -> 42 -> 43 -> 44
+v9.0: 40 -> 41 -> 42 -> 43 -> 44 (all complete)
+v9.1: 45 -> 46 -> 47 -> 48
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
@@ -392,8 +446,12 @@ v9.0: 40 -> 41 -> 42 -> 43 -> 44
 | 37. Agent Orchestrator + REST API | v8.0 | 2/2 | Complete | 2026-04-12 |
 | 38. PresetApplicator + Auto-Apply | v8.0 | 2/2 | Complete | 2026-04-12 |
 | 39. REST Endpoint Hardening | v8.0 | 1/1 | Complete | 2026-04-12 |
-| 40. MOEX Data Adapter & Macro Features | v9.0 | 2/2 | Complete    | 2026-04-13 |
-| 41. Adaptive Quality Gates | v9.0 | 2/2 | Complete    | 2026-04-13 |
-| 42. ExperimentManager Integration | v9.0 | 1/1 | Complete    | 2026-04-13 |
-| 43. Ensemble Weight Optimization | v9.0 | 1/1 | Complete    | 2026-04-13 |
-| 44. New Search Strategies | v9.0 | 0/TBD | Complete    | 2026-04-13 |
+| 40. MOEX Data Adapter & Macro Features | v9.0 | 2/2 | Complete | 2026-04-13 |
+| 41. Adaptive Quality Gates | v9.0 | 2/2 | Complete | 2026-04-13 |
+| 42. ExperimentManager Integration | v9.0 | 1/1 | Complete | 2026-04-13 |
+| 43. Ensemble Weight Optimization | v9.0 | 1/1 | Complete | 2026-04-13 |
+| 44. New Search Strategies | v9.0 | 1/1 | Complete | 2026-04-13 |
+| 45. Model Complexity & Ensemble Consistency | v9.1 | 0/TBD | Not started | - |
+| 46. Feature Selection Stability | v9.1 | 0/TBD | Not started | - |
+| 47. Cross-Asset Features & Asymmetric Barriers | v9.1 | 0/TBD | Not started | - |
+| 48. Segment Restructuring & Validation | v9.1 | 0/TBD | Not started | - |

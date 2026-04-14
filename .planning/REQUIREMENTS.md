@@ -57,25 +57,25 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MCPX-01 | — | Pending |
-| MCPX-02 | — | Pending |
-| FEAT-01 | — | Pending |
-| FEAT-02 | — | Pending |
-| ENSM-01 | — | Pending |
-| ENSM-02 | — | Pending |
-| FSEL-01 | — | Pending |
-| FSEL-02 | — | Pending |
-| SEGM-01 | — | Pending |
-| SEGM-02 | — | Pending |
-| SEGM-03 | — | Pending |
-| BARR-01 | — | Pending |
-| BARR-02 | — | Pending |
+| MCPX-01 | Phase 45 | Pending |
+| MCPX-02 | Phase 45 | Pending |
+| ENSM-01 | Phase 45 | Pending |
+| ENSM-02 | Phase 45 | Pending |
+| FSEL-01 | Phase 46 | Pending |
+| FSEL-02 | Phase 46 | Pending |
+| FEAT-01 | Phase 47 | Pending |
+| FEAT-02 | Phase 47 | Pending |
+| BARR-01 | Phase 47 | Pending |
+| BARR-02 | Phase 47 | Pending |
+| SEGM-01 | Phase 48 | Pending |
+| SEGM-02 | Phase 48 | Pending |
+| SEGM-03 | Phase 48 | Pending |
 
 **Coverage:**
 - v9.1 requirements: 13 total
-- Mapped to phases: 0
-- Unmapped: 13 ⚠️
+- Mapped to phases: 13
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-04-14*
-*Last updated: 2026-04-14 after initial definition*
+*Last updated: 2026-04-14 after roadmap creation*
