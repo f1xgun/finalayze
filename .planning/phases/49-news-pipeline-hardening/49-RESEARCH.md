@@ -311,22 +311,13 @@ class LLMLivenessTracker:
 | A2 | OpenRouter supports `response_format` for structured outputs on supported models | Pitfall 1 | May need fallback to text + model_validate_json for OpenRouter |
 | A3 | Restructuring _process_news_article to return impacts (approach 2) is simpler than dual locks | Pattern 3 | May need asyncio.Lock approach instead |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **OpenRouter structured output support**
-   - What we know: OpenAI SDK `beta.chat.completions.parse()` works with OpenAI directly
-   - What's unclear: Whether OpenRouter's proxy fully supports `response_format` JSON Schema mode
-   - Recommendation: Implement with fallback -- try structured output, fall back to `model_validate_json()` on error
+1. RESOLVED: **OpenRouter structured output support** -- The `LLMClient.parse_structured()` ABC already exists in the codebase with a default implementation that does `complete() + model_validate_json()`. OpenAI/OpenRouter subclasses can override with `beta.chat.completions.parse()` when supported, falling back to the base implementation automatically. Plan 49-01 uses `parse_structured()` which handles this transparently.
 
-2. **Ticker extraction scope**
-   - What we know: SentimentResult currently has no tickers field; NewsArticle has a `symbols` list
-   - What's unclear: Whether tickers should be extracted by the LLM in the sentiment prompt or remain separate
-   - Recommendation: Add `tickers: list[str]` to SentimentResult and update prompts to extract them. Validate against InstrumentRegistry before writing to DB.
+2. RESOLVED: **Ticker extraction scope** -- Tickers are extracted by `NewsImpactAnalyzer` via `NewsImpactResult.direct_tickers`, not by `NewsAnalyzer`/`SentimentResult`. Plan 49-02 Task 1 validates `result.direct_tickers` against `InstrumentRegistry` after impact analysis, keeping ticker extraction separate from sentiment analysis.
 
-3. **Credibility column location**
-   - What we know: `SentimentScoreModel` has no `credibility` column; `NewsArticleModel` already has `credibility_score`
-   - What's unclear: Success criteria says "sentiment_scores table" should have credibility
-   - Recommendation: Add nullable `credibility` column to `SentimentScoreModel` via Alembic migration 004
+3. RESOLVED: **Credibility column location** -- Add nullable `credibility` column to `SentimentScoreModel` via Alembic migration 006 (not 004 as originally noted; 005 already exists for sandbox_metrics). Credibility flows from `get_credibility(article.source)` through `_persist_sentiment_batch_async()` (line ~2586 of trading_loop.py) into DB rows.
 
 ## Validation Architecture
 
