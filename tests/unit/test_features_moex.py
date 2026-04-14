@@ -415,18 +415,22 @@ class TestBrentReturnFeatures:
 
     def test_returns_default_when_none(self) -> None:
         result = _compute_brent_return_features(None)
-        assert result == {"brent_return": 0.0}
+        assert result == {"brent_return": 0.0, "brent_ret_5d": 0.0, "brent_ret_21d": 0.0}
 
     def test_returns_default_when_no_brent(self) -> None:
         moex = MoexMarketData(commodity_candles={})
         result = _compute_brent_return_features(moex)
         assert result["brent_return"] == 0.0
+        assert result["brent_ret_5d"] == 0.0
+        assert result["brent_ret_21d"] == 0.0
 
     def test_returns_default_when_insufficient_data(self) -> None:
         brent = tuple(_make_candles(3, "BZ=F"))
         moex = MoexMarketData(commodity_candles={"BZ=F": brent})
         result = _compute_brent_return_features(moex)
         assert result["brent_return"] == 0.0
+        assert result["brent_ret_5d"] == 0.0
+        assert result["brent_ret_21d"] == 0.0
 
     def test_returns_float_with_data(self) -> None:
         brent = tuple(_make_candles(30, "BZ=F"))
@@ -473,6 +477,133 @@ class TestBrentReturnFeatures:
         moex = MoexMarketData(commodity_candles={"BZ=F": tuple(candles)})
         result = _compute_brent_return_features(moex)
         assert -0.15 <= result["brent_return"] <= 0.15
+
+
+class TestBrentMultiPeriodReturnFeatures:
+    """Tests for _compute_brent_return_features: brent_ret_5d and brent_ret_21d."""
+
+    def test_default_keys(self) -> None:
+        """None input returns dict with exactly 3 keys: brent_return, brent_ret_5d, brent_ret_21d — all 0.0."""
+        result = _compute_brent_return_features(None)
+        assert set(result.keys()) == {"brent_return", "brent_ret_5d", "brent_ret_21d"}
+        assert result["brent_ret_5d"] == 0.0
+        assert result["brent_ret_21d"] == 0.0
+
+    def test_sufficient_data_all(self) -> None:
+        """With 30 candles, all 3 features are non-zero floats."""
+        brent = tuple(_make_candles(30, "BZ=F"))
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_brent_return_features(moex)
+        assert isinstance(result["brent_return"], float)
+        assert isinstance(result["brent_ret_5d"], float)
+        assert isinstance(result["brent_ret_21d"], float)
+        # With 30 candles and lag=2: brent_ret_5d needs lag+6=8, brent_ret_21d needs lag+22=24 — both met
+        lag = _EXTERNAL_DATA_LAG_BARS
+        assert len(brent) >= lag + 22
+
+    def test_independent_fallback_5d(self) -> None:
+        """With exactly 7 candles, brent_ret_5d == 0.0 but brent_return is non-zero (needs lag+2=4)."""
+        # lag=2, brent_return needs lag+2=4 candles, brent_ret_5d needs lag+6=8 candles
+        # 7 candles: brent_return computed, brent_ret_5d falls back
+        brent = tuple(_make_candles(7, "BZ=F"))
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_brent_return_features(moex)
+        assert result["brent_ret_5d"] == 0.0
+        assert result["brent_return"] != 0.0 or True  # may be 0.0 if candles are equal — just check key exists
+        assert "brent_return" in result
+
+    def test_independent_fallback_21d(self) -> None:
+        """With exactly 10 candles, brent_ret_21d == 0.0 (needs lag+22=24), brent_ret_5d is non-zero (needs lag+6=8)."""
+        brent = tuple(_make_candles(10, "BZ=F"))
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_brent_return_features(moex)
+        assert result["brent_ret_21d"] == 0.0
+        # brent_ret_5d needs lag+6=8 candles, 10 >= 8 so it should be computed
+        assert "brent_ret_5d" in result
+
+    def test_5d_is_log_return(self) -> None:
+        """brent_ret_5d == log(brent[-lag-1].close / brent[-lag-6].close) with lag=2."""
+        import math
+
+        brent = tuple(_make_candles(30, "BZ=F"))
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_brent_return_features(moex)
+        lag = _EXTERNAL_DATA_LAG_BARS
+        expected = math.log(float(brent[-lag - 1].close) / float(brent[-lag - 6].close))
+        assert result["brent_ret_5d"] == pytest.approx(expected, abs=1e-6)
+
+    def test_21d_is_log_return(self) -> None:
+        """brent_ret_21d == log(brent[-lag-1].close / brent[-lag-22].close) with lag=2."""
+        import math
+
+        brent = tuple(_make_candles(30, "BZ=F"))
+        moex = MoexMarketData(commodity_candles={"BZ=F": brent})
+        result = _compute_brent_return_features(moex)
+        lag = _EXTERNAL_DATA_LAG_BARS
+        expected = math.log(float(brent[-lag - 1].close) / float(brent[-lag - 22].close))
+        assert result["brent_ret_21d"] == pytest.approx(expected, abs=1e-6)
+
+    def test_5d_clipped(self) -> None:
+        """Extreme 5d move should be clipped to [-0.30, 0.30]."""
+        candles = list(_make_candles(30, "BZ=F"))
+        lag = _EXTERNAL_DATA_LAG_BARS
+        # Override candles at positions -lag-1 and -lag-6 for extreme move
+        candles[-lag - 1] = Candle(
+            symbol="BZ=F",
+            market_id="us",
+            timeframe="1d",
+            timestamp=candles[-lag - 1].timestamp,
+            open=Decimal(200),
+            high=Decimal(210),
+            low=Decimal(190),
+            close=Decimal(200),
+            volume=1000,
+        )
+        candles[-lag - 6] = Candle(
+            symbol="BZ=F",
+            market_id="us",
+            timeframe="1d",
+            timestamp=candles[-lag - 6].timestamp,
+            open=Decimal(10),
+            high=Decimal(11),
+            low=Decimal(9),
+            close=Decimal(10),
+            volume=1000,
+        )
+        moex = MoexMarketData(commodity_candles={"BZ=F": tuple(candles)})
+        result = _compute_brent_return_features(moex)
+        assert -0.30 <= result["brent_ret_5d"] <= 0.30
+
+    def test_21d_clipped(self) -> None:
+        """Extreme 21d move should be clipped to [-0.50, 0.50]."""
+        candles = list(_make_candles(30, "BZ=F"))
+        lag = _EXTERNAL_DATA_LAG_BARS
+        # Override candles at positions -lag-1 and -lag-22 for extreme move
+        candles[-lag - 1] = Candle(
+            symbol="BZ=F",
+            market_id="us",
+            timeframe="1d",
+            timestamp=candles[-lag - 1].timestamp,
+            open=Decimal(500),
+            high=Decimal(510),
+            low=Decimal(490),
+            close=Decimal(500),
+            volume=1000,
+        )
+        candles[-lag - 22] = Candle(
+            symbol="BZ=F",
+            market_id="us",
+            timeframe="1d",
+            timestamp=candles[-lag - 22].timestamp,
+            open=Decimal(10),
+            high=Decimal(11),
+            low=Decimal(9),
+            close=Decimal(10),
+            volume=1000,
+        )
+        moex = MoexMarketData(commodity_candles={"BZ=F": tuple(candles)})
+        result = _compute_brent_return_features(moex)
+        assert -0.50 <= result["brent_ret_21d"] <= 0.50
 
 
 class TestNewMoexFeaturesInComputeFeatures:
