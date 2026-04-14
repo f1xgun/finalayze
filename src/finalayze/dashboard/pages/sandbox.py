@@ -149,10 +149,14 @@ def render(api: ApiClient) -> None:
     # Section 4: Fill rate gauge
     st.subheader("Fill Rate")
     fill_values = df["fill_rate"].dropna() if "fill_rate" in df.columns else pd.Series(dtype=float)
-    avg_fill = float(fill_values.mean()) * 100 if len(fill_values) > 0 else 0.0
-    delta_fill = avg_fill - _FILL_RATE_TARGET_PCT
-    delta_label = f"{delta_fill:+.1f}% vs {_FILL_RATE_TARGET_PCT}% target"
-    st.metric("Fill Rate", f"{avg_fill:.1f}%", delta=delta_label)
+    total_trades = int(df["trade_count"].sum()) if "trade_count" in df.columns else 0
+    if total_trades == 0:
+        st.metric("Fill Rate", "N/A", delta="no trades yet")
+    else:
+        avg_fill = float(fill_values.mean()) * 100 if len(fill_values) > 0 else 0.0
+        delta_fill = avg_fill - _FILL_RATE_TARGET_PCT
+        delta_label = f"{delta_fill:+.1f}% vs {_FILL_RATE_TARGET_PCT}% target"
+        st.metric("Fill Rate", f"{avg_fill:.1f}%", delta=delta_label)
 
     # Section 5: Slippage histogram with 50bps threshold
     st.subheader("Slippage Distribution")

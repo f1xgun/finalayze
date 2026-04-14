@@ -142,7 +142,7 @@ async def risk_exposure(request: Request) -> ExposureResponse:
                     symbol = figi
                     with contextlib.suppress(Exception):
                         symbol = inst_reg.get_by_figi(figi).symbol
-                    seg_id = sym_to_seg.get(symbol, "unknown")
+                    seg_id = sym_to_seg.get(symbol, "unassigned")
                     mv = float(p.get("market_value", 0))
                     seg_values[seg_id] += mv
 

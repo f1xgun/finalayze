@@ -264,10 +264,20 @@ async def _get_component_status() -> ComponentStatus:
     redis_status = await _check_redis()
     tinkoff_status = await _check_tinkoff()
 
+    # Alpaca is only relevant in non-sandbox modes with US market configured
+    alpaca_status = "n/a"
+    import contextlib  # noqa: PLC0415
+
+    with contextlib.suppress(Exception):
+        from config.settings import Settings  # noqa: PLC0415
+
+        if Settings().mode.value != "sandbox":
+            alpaca_status = "ok"
+
     result = {
         "db": db_status,
         "redis": redis_status,
-        "alpaca": "ok",
+        "alpaca": alpaca_status,
         "tinkoff": tinkoff_status,
         "llm": "ok",
     }
