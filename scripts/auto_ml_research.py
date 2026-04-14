@@ -101,6 +101,7 @@ _MOEX_LOOKBACK_DAYS = 1095
 _US_MAX_FEATURES = 15
 _MOEX_MAX_FEATURES = 10
 _ENSEMBLE_WEIGHTS_MIN_FOLDS = 4  # minimum folds required to use optimized ensemble weights
+_MANY_FOLDS_THRESHOLD = 8  # folds >= this use relaxed min_passing_folds_ratio (0.50 vs 0.60)
 
 _WF_TRAIN_MONTHS = 12
 _WF_CAL_MONTHS = 2
@@ -811,7 +812,7 @@ def _fill_result(
     # With many folds (>= 8, e.g. MOEX 1095-day lookback), simple majority (0.50)
     # is sufficient — 5/10 is statistically meaningful. With few folds (<= 5),
     # keep stricter 0.60 (3/5 or 2/3) to avoid noise-driven passes.
-    min_ratio = 0.50 if n_folds >= 8 else 0.60
+    min_ratio = 0.50 if n_folds >= _MANY_FOLDS_THRESHOLD else 0.60
     overall_passed, gate_pass_rates = evaluate_walk_forward(
         all_fold_results, min_passing_folds_ratio=min_ratio,
     )
