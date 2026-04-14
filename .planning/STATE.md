@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v9.1
 milestone_name: MOEX ML Model Quality
-status: Phase complete — ready for verification
-stopped_at: Completed 47-02-PLAN.md
-last_updated: "2026-04-14T11:48:11.741Z"
+status: Ready to execute
+stopped_at: Completed 48-01-PLAN.md
+last_updated: "2026-04-14T13:15:29.548Z"
 progress:
   total_phases: 21
   completed_phases: 3
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  total_plans: 7
+  completed_plans: 6
+  percent: 86
 ---
 
 # Project State
@@ -20,11 +20,11 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Autonomous profitable MOEX trading with acceptable risk limits
-**Current focus:** Phase 47 — Cross-Asset Features & Asymmetric Barriers
+**Current focus:** Phase 48 — Segment Restructuring & Validation
 
 ## Current Position
 
-Phase: 47 (Cross-Asset Features & Asymmetric Barriers) — EXECUTING
+Phase: 48 (Segment Restructuring & Validation) — EXECUTING
 Plan: 2 of 2
 
 ## Performance Metrics
@@ -61,6 +61,8 @@ Plan: 2 of 2
 - [Phase 47]: Clip bounds scale with horizon: 1d=[-0.15,0.15], 5d=[-0.30,0.30], 21d=[-0.50,0.50]
 - [Phase 47]: _SEGMENT_BARRIER_CONFIG is a dict lookup — adding new segments requires only a new entry, no if/else logic
 - [Phase 47]: MOEX uplift applied in _get_barrier_params() not in the config dict — keeps pre-uplift values readable
+- [Phase 48]: Gate order: _MIN_HISTORY_DAYS check before min_candles (semantic quality gate precedes technical window requirement)
+- [Phase 48]: Test fixture candle counts bumped from 200/300 to 500 to satisfy the new _MIN_HISTORY_DAYS gate
 
 ### Pending Todos
 
@@ -72,6 +74,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-14T11:48:11.738Z
-Stopped at: Completed 47-02-PLAN.md
+Last session: 2026-04-14T13:15:29.545Z
+Stopped at: Completed 48-01-PLAN.md
 Resume file: None

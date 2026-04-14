@@ -412,7 +412,7 @@ Plans:
   4. Barrier asymmetry multipliers are configurable per segment via an auto_ml_research config dict — changing ru_energy barrier parameters does not require code changes
 **Plans**: 2 plans
 Plans:
-- [ ] 48-01-PLAN.md — SBERP removal, min-history gate (SEGM-01, SEGM-02, SEGM-03)
+- [x] 48-01-PLAN.md — SBERP removal, min-history gate (SEGM-01, SEGM-02, SEGM-03)
 - [ ] 48-02-PLAN.md — MOEX segment validation checkpoint (SEGM-03)
 
 ### Phase 48: Segment Restructuring & Validation
@@ -465,4 +465,4 @@ v9.1: 45 -> 46 -> 47 -> 48
 | 45. Model Complexity & Ensemble Consistency | v9.1 | 2/2 | Complete    | 2026-04-14 |
 | 46. Feature Selection Stability | v9.1 | 1/1 | Complete    | 2026-04-14 |
 | 47. Cross-Asset Features & Asymmetric Barriers | v9.1 | 2/2 | Complete    | 2026-04-14 |
-| 48. Segment Restructuring & Validation | v9.1 | 0/2 | Not started | - |
+| 48. Segment Restructuring & Validation | v9.1 | 1/2 | In Progress|  |

@@ -27,9 +27,9 @@
 
 ### Segment Restructuring
 
-- [ ] **SEGM-01**: SBERP removed from ru_finance segment (rho > 0.95 with SBER adds noise without signal)
-- [ ] **SEGM-02**: Minimum history check (500 trading days) gates ML eligibility per symbol in autoresearch
-- [ ] **SEGM-03**: ru_tech segment has defined ML policy (disabled, merged, or min-history filtered)
+- [x] **SEGM-01**: SBERP removed from ru_finance segment (rho > 0.95 with SBER adds noise without signal)
+- [x] **SEGM-02**: Minimum history check (500 trading days) gates ML eligibility per symbol in autoresearch
+- [x] **SEGM-03**: ru_tech segment has defined ML policy (disabled, merged, or min-history filtered)
 
 ### Asymmetric Barriers
 
@@ -67,9 +67,9 @@
 | FEAT-02 | Phase 47 | Complete |
 | BARR-01 | Phase 47 | Complete |
 | BARR-02 | Phase 47 | Complete |
-| SEGM-01 | Phase 48 | Pending |
-| SEGM-02 | Phase 48 | Pending |
-| SEGM-03 | Phase 48 | Pending |
+| SEGM-01 | Phase 48 | Complete |
+| SEGM-02 | Phase 48 | Complete |
+| SEGM-03 | Phase 48 | Complete |
 
 **Coverage:**
 - v9.1 requirements: 13 total
