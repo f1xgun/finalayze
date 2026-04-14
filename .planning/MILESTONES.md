@@ -1,5 +1,20 @@
 # Milestones
 
+## v9.1 MOEX ML Model Quality (Shipped: 2026-04-14)
+
+**Phases completed:** 4 phases, 7 plans, 4 tasks
+
+**Key accomplishments:**
+
+- One-liner:
+- One-liner:
+- One-liner:
+- Extended _compute_brent_return_features to return brent_ret_5d and brent_ret_21d alongside existing brent_return, with independent per-feature fallback logic and horizon-scaled clip bounds
+- One-liner:
+- 1. [Rule 1 - Bug] Existing test fixtures used 200/300 candles — below new 500-day gate
+
+---
+
 ## v9.0 ML AutoResearch & MOEX Adaptation (Shipped: 2026-04-13)
 
 **Phases completed:** 5 phases, 7 plans, 4 tasks
