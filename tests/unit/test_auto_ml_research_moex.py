@@ -26,7 +26,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 # Constants (no magic numbers — ruff PLR2004)
-_MOEX_LOOKBACK_DAYS_EXPECTED = 730
+_MOEX_LOOKBACK_DAYS_EXPECTED = 1095
 _US_LOOKBACK_DAYS_EXPECTED = 1825
 _MOEX_MAX_FEATURES_EXPECTED = 10
 _US_MAX_FEATURES_EXPECTED = 15
@@ -116,14 +116,14 @@ class TestSegmentSymbols:
 class TestGetLookbackDays:
     """Test _get_lookback_days returns segment-appropriate values."""
 
-    def test_ru_blue_chips_returns_730(self) -> None:
-        """_get_lookback_days('ru_blue_chips') returns 730."""
+    def test_ru_blue_chips_returns_1095(self) -> None:
+        """_get_lookback_days('ru_blue_chips') returns 1095."""
         from scripts.auto_ml_research import _get_lookback_days
 
         assert _get_lookback_days("ru_blue_chips") == _MOEX_LOOKBACK_DAYS_EXPECTED
 
-    def test_ru_energy_returns_730(self) -> None:
-        """_get_lookback_days('ru_energy') returns 730."""
+    def test_ru_energy_returns_1095(self) -> None:
+        """_get_lookback_days('ru_energy') returns 1095."""
         from scripts.auto_ml_research import _get_lookback_days
 
         assert _get_lookback_days("ru_energy") == _MOEX_LOOKBACK_DAYS_EXPECTED
