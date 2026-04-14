@@ -410,7 +410,10 @@ Plans:
   2. Brent return features are derived from the existing `_fetch_moex_macro_data()` Brent price series — no new data fetch is introduced; the computation is a transformation of already-available data
   3. When `--segment ru_energy` is passed, the triple barrier lower multiplier is wider than the upper multiplier (e.g., lower=2.0, upper=1.5 ATR) — asymmetry is confirmed by inspecting barrier parameters logged at run start
   4. Barrier asymmetry multipliers are configurable per segment via an auto_ml_research config dict — changing ru_energy barrier parameters does not require code changes
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 47-01-PLAN.md — Multi-period Brent crude return features (brent_ret_5d, brent_ret_21d)
+- [ ] 47-02-PLAN.md — Per-segment asymmetric triple barrier configuration
 
 ### Phase 48: Segment Restructuring & Validation
 **Goal**: SBERP is removed from ru_finance to eliminate near-zero-independent-signal redundancy, symbols with insufficient history are gated out of ML training, and all three previously-failing segments produce at least one ACCEPT verdict
@@ -420,7 +423,10 @@ Plans:
   1. SBERP does not appear in the ru_finance symbol list in config/segments.py or in the auto_ml_research segment symbol mapping — running `--segment ru_finance` trains without SBERP
   2. A symbol with fewer than 500 trading days of history is skipped with a logged warning during auto_ml_research data loading — no model is trained on a symbol that fails the minimum history check
   3. At least one experiment run on ru_energy, ru_finance, and ru_tech each produces an ACCEPT or INCONCLUSIVE verdict (not REJECT) after applying all v9.1 improvements — quality gates are no longer all-REJECT for the three previously-failing segments
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 47-01-PLAN.md — Multi-period Brent crude return features (brent_ret_5d, brent_ret_21d)
+- [ ] 47-02-PLAN.md — Per-segment asymmetric triple barrier configuration
 
 ## Progress
 
