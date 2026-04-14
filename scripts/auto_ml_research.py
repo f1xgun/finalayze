@@ -192,6 +192,22 @@ _DEFAULT_HPARAMS = {
     "cat_learning_rate": 0.05,
 }
 
+# Reduced-complexity hyperparameters for MOEX segments (~850 training samples).
+# depth=5 causes severe overfitting on small datasets — leaves with <5 samples.
+# Reducing depth=3, n_estimators=100, min_child_weight=20 prevents overfitting.
+_MOEX_HPARAMS = {
+    "xgb_max_depth": 3,
+    "xgb_n_estimators": 100,
+    "xgb_learning_rate": 0.05,
+    "xgb_min_child_weight": 20,
+    "lgbm_n_estimators": 100,
+    "lgbm_learning_rate": 0.05,
+    "lgbm_num_leaves": 15,
+    "cat_depth": 3,
+    "cat_iterations": 100,
+    "cat_learning_rate": 0.05,
+}
+
 
 # ---------------------------------------------------------------------------
 # Segment helpers
@@ -211,6 +227,11 @@ def _get_lookback_days(segment_id: str) -> int:
 def _get_max_features(segment_id: str) -> int:
     """Return max MI-selected features: 10 for MOEX, 15 for US."""
     return _MOEX_MAX_FEATURES if _is_moex_segment(segment_id) else _US_MAX_FEATURES
+
+
+def _get_hparams(segment_id: str) -> dict[str, float | int]:
+    """Return hyperparameters: reduced complexity for MOEX, standard for US."""
+    return dict(_MOEX_HPARAMS) if _is_moex_segment(segment_id) else dict(_DEFAULT_HPARAMS)
 
 
 # ---------------------------------------------------------------------------
@@ -660,11 +681,18 @@ def _run_fold(
     xgb_model = XGBoostModel(
         segment_id=segment_id,
         max_depth=int(hp.get("xgb_max_depth", 5)),
+        n_estimators=int(hp.get("xgb_n_estimators", 200)),
+        min_child_weight=int(hp.get("xgb_min_child_weight", 5)),
     )
-    lgbm_model = LightGBMModel(segment_id=segment_id)
+    lgbm_model = LightGBMModel(
+        segment_id=segment_id,
+        n_estimators=int(hp.get("lgbm_n_estimators", 200)),
+        num_leaves=int(hp.get("lgbm_num_leaves", 15)),
+    )
     cat_model = CatBoostModel(
         segment_id=segment_id,
         depth=int(hp.get("cat_depth", 4)),
+        iterations=int(hp.get("cat_iterations", 200)),
     )
     xgb_model.fit(train_f, train_l, sample_weight=sw)
     lgbm_model.fit(train_f, train_l, sample_weight=sw)
@@ -1351,6 +1379,17 @@ def _generate_experiments(
     return experiments[:max_experiments]
 
 
+def _log_complexity_profile(segment_id: str, hparams: dict[str, float | int]) -> None:
+    """Emit a structured log line confirming the complexity profile in use."""
+    if _is_moex_segment(segment_id):
+        logger.info(
+            "Using MOEX complexity profile",
+            segment=segment_id,
+            max_depth=hparams.get("xgb_max_depth"),
+            n_estimators=hparams.get("xgb_n_estimators"),
+        )
+
+
 def _print_summary(
     log_path: Path,
     n_experiments: int,
@@ -1488,7 +1527,9 @@ def run_research_loop(
         description="Baseline with standard MI feature selection",
         strategy="baseline",
         max_features=_get_max_features(segment_id),
+        hparams=_get_hparams(segment_id),
     )
+    _log_complexity_profile(segment_id, baseline_config.hparams)
     baseline_result = run_experiment(
         baseline_config,
         features,
