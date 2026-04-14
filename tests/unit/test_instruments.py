@@ -26,7 +26,7 @@ UNKNOWN_MARKET = "unknown"
 
 EXPECTED_DEFAULT_SYMBOLS = {"AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "SPY", "QQQ"}
 EXPECTED_DEFAULT_US_COUNT = 7
-EXPECTED_DEFAULT_COUNT = 68  # 7 US + 49 MOEX stocks + 12 OFZ bonds
+EXPECTED_DEFAULT_COUNT = 70  # 7 US + 51 MOEX stocks + 12 OFZ bonds
 EXPECTED_COUNT_AFTER_TWO = 2
 
 
@@ -113,11 +113,11 @@ def test_len() -> None:
     assert len(registry) == EXPECTED_COUNT_AFTER_TWO
 
 
-EXPECTED_MOEX_STOCK_COUNT = 49
+EXPECTED_MOEX_STOCK_COUNT = 51
 EXPECTED_MOEX_OFZ_COUNT = 12
-EXPECTED_MOEX_INSTRUMENT_COUNT = 61  # 49 stocks + 12 OFZ bonds
+EXPECTED_MOEX_INSTRUMENT_COUNT = 63  # 51 stocks + 12 OFZ bonds
 # Number of statically-defined instruments with hardcoded FIGIs
-EXPECTED_MOEX_WITH_FIGI = 31  # 19 stocks with FIGI + 12 OFZ bonds
+EXPECTED_MOEX_WITH_FIGI = 37  # 25 stocks with FIGI + 12 OFZ bonds
 EXPECTED_MOEX_SYMBOLS = {
     # Original blue chips
     "SBER",
@@ -145,6 +145,8 @@ EXPECTED_MOEX_SYMBOLS = {
     "BSPB",
     "HHRU",
     "POSI",
+    "YDEX",
+    "HEAD",
     "SNGSP",
     "SIBN",
     "TATNP",
