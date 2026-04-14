@@ -25,11 +25,18 @@ def render(api: ApiClient) -> None:
         params["symbol"] = symbol_filter
 
     try:
-        trades_resp = api.get("/api/v1/trades", params=params).json()
-        analytics = api.get("/api/v1/trades/analytics").json()
+        trades_raw = api.get("/api/v1/trades", params=params)
+        analytics_raw = api.get("/api/v1/trades/analytics")
     except Exception:
         st.error("Cannot reach API server")
         return
+
+    if trades_raw.status_code == 501:  # noqa: PLR2004
+        st.info("Trades endpoint not yet implemented. Data will appear after trades are persisted.")
+        return
+
+    trades_resp = trades_raw.json()
+    analytics = analytics_raw.json() if analytics_raw.status_code == 200 else {}  # noqa: PLR2004
 
     trade_list = trades_resp.get("trades", [])
     total = trades_resp.get("total", 0)

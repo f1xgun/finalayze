@@ -22,9 +22,16 @@ def render(api: ApiClient) -> None:
         st.error("Cannot reach API server")
         return
 
-    # Summary metrics row
+    # Summary metrics row — detect currency from markets
+    markets = portfolio.get("markets", [])
+    has_moex = any(m.get("market_id") == "moex" for m in markets) if markets else False
+    currency_label = "RUB" if has_moex and not any(
+        m.get("market_id") == "us" for m in markets
+    ) else "USD"
+    currency_sym = "\u20bd" if currency_label == "RUB" else "$"
+
     total_equity = float(portfolio.get("total_equity_usd") or 0.0)
-    daily_pnl_usd = float(portfolio.get("daily_pnl_usd") or 0.0)
+    daily_pnl = float(portfolio.get("daily_pnl_usd") or 0.0)
     daily_pnl_pct = float(portfolio.get("daily_pnl_pct") or 0.0)
     sharpe = perf.get("sharpe_30d")
     max_dd = perf.get("max_drawdown_pct")
@@ -32,8 +39,9 @@ def render(api: ApiClient) -> None:
     cash_pct = (total_cash / total_equity * 100) if total_equity > 0 else 0.0
 
     col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Total Equity (USD)", f"${total_equity:,.2f}")
-    col2.metric("Daily P&L (USD)", f"${daily_pnl_usd:,.2f}", f"{daily_pnl_pct:.2f}%")
+    col1.metric(f"Total Equity ({currency_label})", f"{currency_sym}{total_equity:,.2f}")
+    pnl_label = f"{currency_sym}{daily_pnl:,.2f}"
+    col2.metric(f"Daily P&L ({currency_label})", pnl_label, f"{daily_pnl_pct:.2f}%")
     col3.metric("Cash %", f"{cash_pct:.1f}%")
     col4.metric("Sharpe (30d)", f"{sharpe:.2f}" if sharpe is not None else "N/A")
     col5.metric("Max Drawdown", f"{(float(max_dd) if max_dd else 0.0) * 100:.1f}%")

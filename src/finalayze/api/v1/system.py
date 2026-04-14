@@ -32,7 +32,17 @@ _log = structlog.get_logger()
 router = APIRouter(tags=["system"])
 
 # Application-scoped singleton (overridden in tests via dependency overrides)
-_default_mode_manager = ModeManager()
+def _init_mode_manager() -> ModeManager:
+    """Create ModeManager from Settings, falling back to DEBUG on import errors."""
+    try:
+        from config.settings import Settings  # noqa: PLC0415
+
+        return ModeManager(initial_mode=Settings().mode)
+    except Exception:
+        return ModeManager()
+
+
+_default_mode_manager = _init_mode_manager()
 
 APP_VERSION = "0.1.0"
 _start_time = datetime.now(UTC)
