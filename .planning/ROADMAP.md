@@ -425,8 +425,8 @@ Plans:
   3. At least one experiment run on ru_energy, ru_finance, and ru_tech each produces an ACCEPT or INCONCLUSIVE verdict (not REJECT) after applying all v9.1 improvements — quality gates are no longer all-REJECT for the three previously-failing segments
 **Plans**: 2 plans
 Plans:
-- [ ] 47-01-PLAN.md — Multi-period Brent crude return features (brent_ret_5d, brent_ret_21d)
-- [ ] 47-02-PLAN.md — Per-segment asymmetric triple barrier configuration
+- [x] 47-01-PLAN.md — Multi-period Brent crude return features (brent_ret_5d, brent_ret_21d)
+- [x] 47-02-PLAN.md — Per-segment asymmetric triple barrier configuration
 
 ## Progress
 

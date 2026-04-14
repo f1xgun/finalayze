@@ -33,8 +33,8 @@
 
 ### Asymmetric Barriers
 
-- [ ] **BARR-01**: Energy stocks use asymmetric triple barrier (wider lower ATR multiplier for commodity-linked volatility)
-- [ ] **BARR-02**: Barrier asymmetry configurable per segment in autoresearch
+- [x] **BARR-01**: Energy stocks use asymmetric triple barrier (wider lower ATR multiplier for commodity-linked volatility)
+- [x] **BARR-02**: Barrier asymmetry configurable per segment in autoresearch
 
 ## Future Requirements
 
@@ -65,8 +65,8 @@
 | FSEL-02 | Phase 46 | Complete |
 | FEAT-01 | Phase 47 | Complete |
 | FEAT-02 | Phase 47 | Complete |
-| BARR-01 | Phase 47 | Pending |
-| BARR-02 | Phase 47 | Pending |
+| BARR-01 | Phase 47 | Complete |
+| BARR-02 | Phase 47 | Complete |
 | SEGM-01 | Phase 48 | Pending |
 | SEGM-02 | Phase 48 | Pending |
 | SEGM-03 | Phase 48 | Pending |

@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v9.1
 milestone_name: MOEX ML Model Quality
 status: Phase complete — ready for verification
-stopped_at: Completed 47-01-PLAN.md
-last_updated: "2026-04-14T11:48:05.229Z"
+stopped_at: Completed 47-02-PLAN.md
+last_updated: "2026-04-14T11:48:11.741Z"
 progress:
   total_phases: 21
   completed_phases: 3
@@ -59,6 +59,8 @@ Plan: 2 of 2
 - [Phase 46]: New ExperimentConfig created with feature_subset set — caller's config not mutated (T-46-02 mitigation)
 - [Phase 47]: Independent per-feature fallback: each Brent feature computes in its own if-block; partial data yields partial features
 - [Phase 47]: Clip bounds scale with horizon: 1d=[-0.15,0.15], 5d=[-0.30,0.30], 21d=[-0.50,0.50]
+- [Phase 47]: _SEGMENT_BARRIER_CONFIG is a dict lookup — adding new segments requires only a new entry, no if/else logic
+- [Phase 47]: MOEX uplift applied in _get_barrier_params() not in the config dict — keeps pre-uplift values readable
 
 ### Pending Todos
 
@@ -70,6 +72,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-14T11:47:57.914Z
-Stopped at: Completed 47-01-PLAN.md
+Last session: 2026-04-14T11:48:11.738Z
+Stopped at: Completed 47-02-PLAN.md
 Resume file: None
