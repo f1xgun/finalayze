@@ -1,235 +1,351 @@
 # Pitfalls Research
 
-**Domain:** MOEX ML AutoResearch & Adaptation — adding autonomous ML experiment capabilities with MOEX data support to an existing trading system (v9.0)
-**Researched:** 2026-04-13
-**Confidence:** HIGH (grounded in codebase inspection of auto_ml_research.py, quality_gates.py, tinkoff_data.py, and known constraints in PROJECT.md and MEMORY.md)
+**Domain:** Runtime LLM agents in a live Python trading system (MOEX focus)
+**Researched:** 2026-04-14
+**Confidence:** HIGH — based on direct codebase inspection + verified external sources
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Calling TinkoffFetcher from a Sync Script Without InstrumentRegistry
+### Pitfall 1: threading.Lock Held Across Async LLM Call Boundary
 
 **What goes wrong:**
-`auto_ml_research.py` is a synchronous script that currently creates `YFinanceFetcher` directly (no dependencies). `TinkoffFetcher` requires `InstrumentRegistry` to perform FIGI lookups before each gRPC fetch call. If `InstrumentRegistry` is not initialized (it reads instrument configs and potentially the DB), every `fetch_candles()` call raises `InstrumentNotFoundError` and silently falls through the `except Exception` handler — returning empty candles for every MOEX symbol. The research loop continues with zero data and produces a "no valid folds" abort with no clear error about the root cause.
+`_apply_impact_result` acquires `_sentiment_lock` (a `threading.Lock`) while running
+on `_async_loop`. If any code path that holds the lock then awaits an LLM call,
+the lock is held across the await yield point. A second coroutine on the same event loop
+cannot acquire it — it tries `_lock.acquire()`, which is a blocking call that deadlocks
+the entire `_async_loop`.
 
 **Why it happens:**
-The script was built for US markets where `YFinanceFetcher(market_id=market_id)` is the entire instantiation. Swapping the fetcher without understanding the `InstrumentRegistry` dependency creates a silent failure: the `_fetch_us_candles()` function swallows exceptions with `print(f"  Failed to fetch {sym}: {exc}")` rather than raising. With 15 symbols all returning empty, the absence of data looks identical to a network timeout rather than a configuration error.
+The TradingLoop uses `threading.Lock` for `_sentiment_cache` because the outer
+`_news_cycle` / `_strategy_cycle` methods run on APScheduler `ThreadPoolExecutor` threads.
+When batch analysis runs inside `_analyze_impact_batch` (which is an async method on
+`_async_loop`), the mixing of `threading.Lock` with `await` expressions is not safe.
+The existing code in `_apply_impact_result` actually acquires `_sentiment_lock` with
+`with self._sentiment_lock:` and then does Redis/DB awaits. This is a latent deadlock:
+if any LLM call were inserted inside that `with` block, it would freeze the loop.
 
 **How to avoid:**
-Create a dedicated `_fetch_moex_candles()` function that: (1) asserts `FINALAYZE_TINKOFF_TOKEN` is set and non-empty before constructing anything, (2) builds a minimal `InstrumentRegistry` from the static YAML instrument map (not from DB — this avoids needing a running database for training scripts), (3) instantiates `TinkoffFetcher` with `sandbox=False` (sandbox has no historical candles), (4) logs a prominent error and exits if candles_by_sym is empty after fetching. Add a guard: if `len(candles_by_sym) == 0`, raise `RuntimeError("No candles fetched — check FINALAYZE_TINKOFF_TOKEN and instrument registry")` rather than returning `None` quietly.
+Never hold `threading.Lock` across an `await`. Extract all LLM calls and async
+operations to happen either before or after the `with self._sentiment_lock:` block.
+The pattern is: compute new scores async (outside lock), then acquire lock, write, release.
+For new agents that run exclusively on `_async_loop`, use `asyncio.Lock` for any shared
+state accessed only from that loop.
 
 **Warning signs:**
-- `fetch_candles()` returns `[]` for known symbols like `SBER` with no exception raised
-- All 15 symbols print `"Failed to fetch {sym}: InstrumentNotFoundError"` in sequence
-- Script reaches "No data fetched, aborting." after spending 0 seconds on fetching (no network calls made)
-- `InstrumentNotFoundError` in logs — registry was not populated
+- News cycle hangs indefinitely and `_run_async` timeout fires (30s default)
+- `concurrent.futures.TimeoutError` in `_news_cycle` logs
+- `_strategy_cycle` shows no sentiment updates despite articles being processed
 
 **Phase to address:**
-Phase 1 (MOEX data adapter). Write a smoke test that calls the MOEX fetch path with the real token (skipped in CI without token) before any other phase work.
+Phase 1 (News Pipeline) — verify lock acquisition pattern before adding any new
+`await` inside `_apply_impact_result` or downstream handlers.
 
 ---
 
-### Pitfall 2: Look-Ahead Bias When Joining Macro Features to the Feature Vector
+### Pitfall 2: LLM Timeout Blocking the News Cycle, Starving Strategy Execution
 
 **What goes wrong:**
-MOEX macro features — CBR key rate, USDRUB close, IMOEX close, Brent close — are indexed by date. Joining them to the candle feature vector with `merge(on='date', how='left')` gives the macro value for the same trading day as the bar being labeled. At open-of-day decision time, today's USDRUB close does not yet exist; yesterday's is the only available value. This is classic look-ahead bias: the model appears to know where USDRUB closed before the market session ends.
-
-CBR rate is even worse: the CBR announces rate changes at ~13:30 Moscow time. A model trained on `cbr_rate[t]` has seen information that was not available at the open-of-day entry decision for `t`, causing it to pick up rate-announcement effects that cannot be exploited live.
+`_news_cycle` is scheduled on the APScheduler `"news"` executor (separate
+`ThreadPoolExecutor`). But `_run_async(coro, timeout=1800)` is a blocking call from
+that thread. If the LLM batch takes longer than the strategy cycle interval, the news
+cycle job occupies its executor slot. With `max_workers=1` on the `"news"` executor,
+the next news cycle job queues and grows unbounded. Worse: if the batch timeout is
+extended and an article's LLM call hangs, the entire batch waits.
 
 **Why it happens:**
-pandas `merge(on='date')` is the natural operation and it "works" — no error, full join, no NaN. The look-ahead is invisible in the merged dataframe. `build_triple_barrier_dataset()` in `labeling.py` accepts `benchmark_candles` and `vix_candles` as pre-aligned lists — any alignment shift must be done by the caller, which is easy to forget when adding new macro series.
+OpenRouter free-tier models have unpredictable latency (sometimes 30-120 seconds per
+call). The existing semaphore caps at 5 concurrent articles, but with 30+ articles per
+cycle and a per-call timeout not set at the HTTP client level, the batch can exceed
+the scheduler interval.
 
 **How to avoid:**
-Always `shift(1)` all macro series before joining: `macro_df['cbr_rate'] = macro_df['cbr_rate'].shift(1)`. Do this inside the macro feature builder, not at the call site. Add an explicit assertion in the feature builder: after computing features for bar at timestamp `t`, verify that the CBR rate used was announced before `t`. Write a unit test: feed a synthetic macro series with a known event at day `d`, verify that the feature vector for day `d` uses the value from day `d-1`, not day `d`.
+Set a hard per-call timeout on the LLM HTTP client (httpx `timeout=` parameter or
+OpenAI `timeout=`). The recommended value for news analysis is 15 seconds per article.
+Add an article-level circuit breaker (already exists at 5 consecutive failures) and
+cap total batch size at 20 articles to bound worst-case duration. Log batch duration
+as a metric so alerts fire when news_cycle_duration > 80% of the cycle interval.
 
 **Warning signs:**
-- Walk-forward in-sample accuracy substantially higher than out-of-sample (look-ahead inflates in-sample)
-- Macro feature importance ranks `cbr_rate` or `usdrub_close` at the top — plausible but suspicious without the shift test
-- Backtest profit factor > 2.5 on MOEX but sandbox shows profit factor near 1.0
+- Log line `news_processing_circuit_opened` firing every cycle
+- APScheduler job queue depth > 1 for `"news"` executor
+- Strategy cycle logs showing `sentiment_score=0.0` for all tickers consistently
 
 **Phase to address:**
-Phase 2 (MOEX macro features). Add the shift test as a mandatory unit test before merging macro feature code.
+Phase 1 (News Pipeline) — add per-request timeout to LLM client constructor.
 
 ---
 
-### Pitfall 3: Walk-Forward Folds Produce Zero or One Valid Folds for MOEX
+### Pitfall 3: LLM Hallucinated Ticker Extraction Creates Ghost Signals
 
 **What goes wrong:**
-`generate_folds()` uses `_WF_TRAIN_MONTHS=12`, `_WF_CAL_MONTHS=2`, `_WF_TEST_MONTHS=4`, `_WF_STEP_MONTHS=3`, `_PURGE_GAP=100` (days). One fold requires approximately `12*30 + 100 + 2*30 + 100 + 4*30 = 740` days of data. With `_MOEX_LOOKBACK_DAYS=730`, the first fold barely fits (if at all) and the step of 3 months immediately pushes the second fold beyond the end of data. Result: 0 or 1 folds.
-
-With 1 fold, `evaluate_walk_forward()` computes `passes/1 = 1.0` for any gate that passes on that single fold — trivially meeting the `min_passing_folds_ratio=0.60` threshold. The model is declared "overall passed" on essentially zero cross-validation, producing confident but meaningless verdicts.
+The entity extractor maps free-text Russian news to MOEX tickers. LLMs regularly
+hallucinate plausible but non-existent tickers (e.g., "GAZPM" instead of "GAZP",
+or entirely invented symbols for companies not on MOEX). When
+`EventDrivenStrategy.generate_signal()` receives a hallucinated ticker, it produces
+a `Signal` with that symbol. If the symbol is not in `InstrumentRegistry`, the
+pre-trade check rejects it — but only if the registry lookup is strictly enforced.
+Any gap in the pre-trade gate lets a hallucinated ticker reach the broker.
 
 **Why it happens:**
-The fold constants were tuned for US data (5 years = ~60 months, producing 10–12 folds). Nobody adjusted them for the 24-month MOEX window. The code path `if not folds: print("No valid folds, aborting.")` correctly aborts on 0 folds, but silently proceeds with 1 fold — the dangerous case.
+LLMs have no authoritative MOEX symbol list in context. The model knows Russian
+companies by legal name, not their exchange ticker. Mapping ambiguous company names
+to exact MOEX tickers is a known LLM failure mode, especially for subsidiaries,
+preferred share classes (SBERP vs SBER), and companies with recent renames
+(YNDX -> YDEX, FIVE removed, HHRU -> HEAD).
 
 **How to avoid:**
-Define MOEX-specific fold constants: `MOEX_WF_TRAIN_MONTHS=8`, `MOEX_WF_CAL_MONTHS=1`, `MOEX_WF_TEST_MONTHS=3`, `MOEX_WF_STEP_MONTHS=2`, `MOEX_PURGE_GAP=21` (21 trading days ~= 1 calendar month). This yields 3–4 folds on 730 days. Parameterize `generate_folds()` to accept these via a `FoldConfig` dataclass instead of module-level globals. Add a guard: `if len(folds) < 3: raise RuntimeError(f"Insufficient folds ({len(folds)}) for robust walk-forward validation")`.
+Post-process entity extraction output with a whitelist filter: only tickers present
+in `InstrumentRegistry` are passed to `EventDrivenStrategy`. Reject anything not in
+the registry before touching the sentiment cache. Log rejected tickers with reason
+`entity_not_in_registry` to detect extraction drift over time.
 
 **Warning signs:**
-- `generate_folds()` returns `[1 fold]` for any `ru_*` segment
-- `evaluate_walk_forward()` logs `n_folds=1` with `overall_passed=True`
-- Walk-forward Sharpe computed from a single 3-month test window (extremely high variance)
-- Experiment score of ~0.85 for a MOEX segment that the quality team knows should score ~0.55
+- Log entries for symbols that never appear in strategy cycle instrument lists
+- `entity_extracted` log events with symbols absent from `InstrumentRegistry.list_all()`
+- Increasing rate of `instrument_not_found` errors in execution layer
 
 **Phase to address:**
-Phase 1 (MOEX data adapter) to establish what volume is available, and Phase 3 (adaptive quality gates) to tune fold constants for that volume.
+Phase 1 (News Pipeline) — add registry whitelist validation in the entity extraction
+post-processing step before updating `_sentiment_cache`.
 
 ---
 
-### Pitfall 4: Adaptive Quality Gate Relaxation Enabling Degenerate Predictors
+### Pitfall 4: EventDriven Signal Duplicating cbr_calendar / Dividend Gap Signals
 
 **What goes wrong:**
-`check_accuracy_gate()` caps the threshold at `0.55` for `n_eff < 20`. On a MOEX test fold with 60 samples and `avg_hold_bars=4.0`, `n_eff = 60/4 = 15`. A model that predicts all-BUY on a 60%-positive class achieves 0.60 accuracy and clears the capped 0.55 gate — not because it has skill but because it learned class imbalance. `check_class_balance_gate()` exists to catch this (`_MIN_CLASS_RATIO=0.30`), but gate ordering matters: if accuracy is evaluated before class balance, the result can be misleadingly `gate_pass_rates = {accuracy: 1.0, class_balance: 0.0}` with `overall_passed=False` — correct outcome but confusing diagnostic.
+CBR rate decision news is covered by both the `EventDrivenStrategy` (via sentiment
+analysis of news articles) and the `cbr_calendar` strategy (deterministic rule using
+the yield curve slope). On CBR announcement days, both strategies fire in the same
+direction. The `StrategyCombiner` aggregates weighted signals, so the combined
+confidence exceeds threshold twice as easily, leading to oversized entries on the exact
+day when everyone in the market is already positioned.
 
-The deeper issue: when the cap at 0.55 is further relaxed to handle even smaller MOEX datasets, the gap between "model has skill" and "model predicts majority class" narrows to zero. The quality gate system can no longer distinguish.
+Similarly, dividend announcement news triggers `EventDrivenStrategy` BUY signals
+at the same time as `dividend_gap` strategy's pre-event positioning. Double-weight
+on the same underlying cause is not alpha — it is leverage disguised as diversification.
 
 **Why it happens:**
-Adaptive gate relaxation is the correct direction for small samples. But the existing implementation relaxes the accuracy gate without adding a compensating signal-quality check. The Brier gate with `_dynamic_brier_threshold` (floor at 0.15, tighter for small `n_eff`) is the intended compensator — but a degenerate all-BUY predictor also achieves a low Brier score on an imbalanced class (if positive class probability is ~0.6, always predicting 1 gives Brier of `(1-0.6)^2 * 0.4 + (0-0.6)^2 * 0.6 ≈ 0.22`, which passes the 0.25 cap but fails the 0.15 floor for `n_eff=15`). So the Brier gate does protect — verify this path is actually firing.
+Each strategy was designed independently without a deduplication layer for correlated
+catalysts. The combiner sums weighted signals without checking whether multiple
+strategies fired on the same fundamental cause.
 
 **How to avoid:**
-Do not raise `_MAX_ACCURACY_THRESHOLD` beyond 0.57 for any `n_eff` value. Add a fold-level variance check as a new gate: if accuracy standard deviation across folds exceeds 0.15, flag as high-variance and require all 4+ folds to be present before declaring PASS. Add an explicit unit test: feed an all-BUY predictor on a 60%-positive class, verify class_balance gate fails, verify overall_passed=False regardless of accuracy value.
+Implement a catalyst deduplication tag: when `EventDrivenStrategy` classifies an
+event as `"cbr_rate"` or `"dividend"`, suppress or halve its weight in the combiner
+if `cbr_calendar` or `dividend_gap` has already fired in the same direction for the
+same symbol within the last 2 bars. This is achievable via a combiner hook
+(`_on_strategy_signal`) that checks active strategy signals before adding weight.
 
 **Warning signs:**
-- `buy_ratio` consistently above 0.75 across folds (degenerate predictor signature)
-- Sensitivity near 1.0, specificity near 0.0
-- `gate_pass_rates = {accuracy: 1.0, class_balance: 0.0, ...}` with `overall_passed=False` — correct but check that class_balance fires reliably
-- `avg_profit_factor` near 1.0 despite high `avg_accuracy` (degenerate predictor has no edge on profitable trades specifically)
+- Abnormally large combined confidence on CBR decision dates
+- `event_driven` and `cbr_calendar` both appearing in `reasoning` field of same Signal
+- Position sizes spiking 2x on SBER/MOEX financials on CBR meeting dates
 
 **Phase to address:**
-Phase 3 (adaptive quality gates).
+Phase 2 (EventDrivenStrategy activation) — add signal correlation guard in combiner
+before enabling event_driven at 15% weight on ru_* segments.
 
 ---
 
-### Pitfall 5: ExperimentManager Integration Creating ID Conflicts Across Parallel Segment Runs
+### Pitfall 5: Portfolio Review Agent Suggestions Interpreted as Executable Orders
 
 **What goes wrong:**
-`auto_ml_research.py` generates experiment config names like `ablate-rsi`, `hp-xgb_max_depth=3`, `random-1-n8`. If the research loop creates an `ExperimentManager` markdown file for each of these 100+ configs (one `.md` per config), running the loop for two segments concurrently — e.g., `ru_blue_chips` and `us_tech` — produces ID collisions: both try to write `.planning/experiments/ablate-rsi.md`. `ExperimentManager._write_file()` uses `path.write_text()` (non-atomic), so concurrent writes corrupt the YAML frontmatter.
-
-Even without concurrency, re-running the same segment wipes previous results because the experiment ID is not namespaced by segment or run timestamp.
+The Portfolio Review Agent produces a structured Pydantic output containing
+recommendations such as `{"action": "REDUCE", "symbol": "LKOH", "pct": 20}`. If
+any downstream code iterates these recommendations and passes them to `BrokerRouter`
+or `PreTradeChecker`, it bypasses the strategy combiner entirely. The recommendations
+have no circuit-breaker gate, no ADX regime check, no stop-loss state check. A single
+misconfigured handler can cause the agent to autonomously liquidate positions.
 
 **Why it happens:**
-The research loop's experiment naming convention was designed for internal logging, not for the ExperimentManager's flat file namespace. The ExperimentManager expects unique, stable experiment IDs per hypothesis — the research loop generates hundreds of disposable config names per run.
+Structured output from an LLM agent looks identical to a trade instruction from a
+strategy — both are Python objects with action fields. Developers adding a handler
+for agent output often copy the pattern from `_process_signal()` without realizing
+the agent output is advisory.
 
 **How to avoid:**
-Map the two concepts to their correct abstraction levels. Use `ExperimentManager` for the top-level research hypothesis (one experiment per `run_research_loop()` invocation): ID = `{segment}_{strategy}_{YYYYMMDD_HHMM}`. Use the existing JSONL log (`results/experiments/{segment}_experiment_log.jsonl`) for per-config sub-results. Only promote the single best result (winner of the internal competition) to an ExperimentManager hypothesis with a meaningful description. This keeps ExperimentManager's namespace clean and human-readable.
+The Portfolio Review Agent output type must be named `PortfolioReviewSuggestion` (not
+`Signal`, `Order`, or `Recommendation`). It must contain no `direction`, `confidence`,
+or `symbol`+`market_id` fields that match `Signal` or `OrderRequest` schemas.
+The handler that processes it must write to a separate Telegram alert channel, not to
+`BrokerRouter`. Add a type assertion at the handler entry point:
+`assert not isinstance(output, Signal), "PortfolioReviewSuggestion must not reach broker"`
 
 **Warning signs:**
-- `.planning/experiments/` contains files named `ablate-rsi.md` or `hp-xgb_max_depth=3.md` with no segment context
-- Concurrent runs produce corrupt YAML frontmatter (YAML parse error when loading experiment state)
-- `experiment_manager.list_experiments()` returns experiments whose IDs do not correspond to meaningful hypotheses
+- `order_submitted` log entries with `strategy=portfolio_review`
+- Portfolio review output objects appearing in `_cycle_exited_symbols` or signal logs
+- Any code path from `_portfolio_review_cycle` touching `self._broker_router`
 
 **Phase to address:**
-Phase 4 (ExperimentManager integration). Define the ID schema before writing any integration code.
+Phase 3 (Portfolio Review Agent) — enforce at schema design time, not just code review.
 
 ---
 
-### Pitfall 6: Ensemble Weight Optimization Overfitting to Small MOEX Validation Sets
+### Pitfall 6: Anomaly Interpreter LLM Call Blocking Alert Delivery
 
 **What goes wrong:**
-Optimizing XGBoost/LightGBM/CatBoost ensemble weights via grid search or Optuna on a MOEX validation set of 30–80 samples finds spurious optima. A weight vector [0.7, 0.2, 0.1] that scores well on one 3-month window will perform like random weighting on the next window because the optimization signal is dominated by noise at this sample size. The parameter space has 2 degrees of freedom (3 weights summing to 1), and with 30 samples and a noisy binary target, the expected improvement over equal weights is statistically near zero — but in-sample observed improvement can be 5–8%.
+`AnomalyDetector.check()` fires synchronously from the strategy cycle. If the anomaly
+interpretation requires an LLM call and that call is blocking (or times out in 30s),
+the anomaly alert is delayed by the LLM latency. During that window, the drawdown may
+deepen further without operator awareness. The primary purpose of the anomaly alert
+is speed; adding LLM interpretation before the alert inverts the priority.
 
 **Why it happens:**
-Weight optimization is conceptually attractive: each model has different strengths. But the validation set is too small to distinguish model-specific skill from random correlation with the class distribution of that window. This is the same overfitting problem as hyperparameter search on small datasets, but disguised as "ensemble calibration."
+The intuitive design is: detect anomaly → get LLM explanation → send alert with
+explanation. But this makes the most time-sensitive path (the alert) dependent on
+the slowest path (LLM API call).
 
 **How to avoid:**
-Default to equal weights (1/3 each) for MOEX segments unless the optimization is validated across 4+ independent folds. Use bootstrap confidence intervals: if the 95% CI on any weight includes 1/3, do not deviate from equal weighting. Constrain the weight search space so no single model weight exceeds 0.5 (simplex constraint). Log the weight-optimization gain separately so it can be audited: if optimized weights show accuracy improvement < 0.01 on OOS folds, revert to equal weights.
+Fire the raw anomaly alert immediately, then schedule the LLM interpretation as a
+fire-and-forget task on `_async_loop`. The operator sees the alert within seconds;
+the enriched explanation arrives as a follow-up message 10-30 seconds later. Use
+`asyncio.create_task` or `asyncio.run_coroutine_threadsafe` with no blocking wait.
+Never `await` the LLM call from inside `AnomalyDetector.check()`.
 
 **Warning signs:**
-- Optimized weights differ dramatically fold-to-fold: [0.8,0.1,0.1] then [0.1,0.8,0.1]
-- Average optimized-weight accuracy lower than average equal-weight accuracy across held-out folds
-- Score improvement from weight optimization > 3% on MOEX (suspicious at this sample size — would be extraordinary if real)
+- Alert latency exceeds 10 seconds from anomaly detection to Telegram message
+- `_strategy_cycle` duration increases on anomaly cycles
+- `consecutive_equity_errors` counter incrementing without operator awareness
 
 **Phase to address:**
-Phase 5 (ensemble weight optimization strategy).
+Phase 4 (Anomaly Interpreter Agent) — architecture diagram must show the two-step
+pattern (immediate alert + async enrichment) before implementation begins.
 
 ---
 
-### Pitfall 7: Cross-Segment Feature Transfer Breaking on MOEX Distribution Shift
+### Pitfall 7: NewsAnalyzer Using json.loads() Instead of parse_structured()
 
 **What goes wrong:**
-Feature names are shared across segments (same keys in `dict[str, float]`), creating an illusion of compatibility. A feature importance ranking trained on `us_tech` (AAPL, MSFT, NVDA) reflects US market dynamics: Amihud illiquidity rank, momentum z-scores, and VIX-based volatility regime. Transferring the same selected feature list to `ru_blue_chips` (SBER, LKOH, GAZP) creates a feature set that is identical in name but different in statistical properties:
-- MOEX Amihud values are orders of magnitude larger (thinner market)
-- MOEX momentum decays faster due to thinner order books
-- Calendar features have Russian holidays (not NYSE calendar) — the existing `moex_calendar.trading_days_gap` handles this, but features using `timedelta` directly do not
-- VIX is replaced by IMOEX volatility regime on MOEX — the US VIX feature has no MOEX analog
+`NewsAnalyzer.analyze()` calls `self._llm.complete()` and then parses the response
+with `json.loads(raw)`. When the LLM returns a response with a code fence
+(triple-backtick json blocks), trailing whitespace, or explanatory text before the JSON,
+`json.loads` raises `JSONDecodeError`. The fallback returns `SentimentResult(0.0, 0.0)`,
+silently converting a potentially high-confidence article into neutral sentiment.
+This is already present in the codebase and will affect all real news once the
+pipeline is activated.
 
 **Why it happens:**
-The feature pipeline computes whatever is in `compute_features()` regardless of market. Cross-segment transfer naively uses "same feature name = same feature meaning." The distribution shift is only visible at model evaluation time when MOEX accuracy is below 0.52.
+`NewsAnalyzer` predates the `parse_structured()` method on `LLMClient`. It was written
+before v8.0 when structured output was standardized. The fallback to neutral is safe
+from an execution standpoint but represents silent signal loss — the system appears
+to work while generating no sentiment signal.
 
 **How to avoid:**
-Before applying US-selected features to MOEX, run a distribution shift check: compute Jensen-Shannon divergence between US and MOEX feature distributions for each selected feature. Flag features with JS divergence > 0.3 as "potentially invalid transfers" — log them and consider excluding. When adding MOEX macro features (CBR rate, USDRUB, IMOEX), give them priority over US-derived features: if the feature budget is 10, fill 4 slots with MOEX macro features first before drawing from US-derived feature rankings. Do not transfer hyperparameter configurations without re-tuning: MOEX's noisier labels benefit from shallower trees (max_depth 3–4 vs 5–6 for US).
+Migrate `NewsAnalyzer.analyze()` to use `self._llm.parse_structured(prompt, system, SentimentResult)`.
+This routes through the provider-specific structured output implementation (OpenAI
+`beta.chat.completions.parse`, Anthropic `messages.parse`) which guarantees valid
+schema adherence. Remove the manual `json.loads` block. Keep the fallback only as
+a last resort for `LLMError`.
 
 **Warning signs:**
-- Walk-forward accuracy on MOEX with US-selected features consistently below 0.52 (noise floor)
-- Feature importance on MOEX shows VIX-based features with near-zero importance (VIX irrelevant for MOEX)
-- MOEX macro features added in Phase 2 appear at the bottom of importance rankings (wrong feature set inherited from US selection)
+- `sentiment_score=0.0` for >50% of articles in logs despite clear market-moving news
+- `json_decode_error` log events in news_analyzer
+- `processed_fail` counter in `news_cycle_complete` log consistently non-zero
 
 **Phase to address:**
-Phase 6 (cross-segment transfer strategy).
+Phase 1 (News Pipeline) — fix NewsAnalyzer before activating the live feed, not after.
 
 ---
 
-### Pitfall 8: Brent Fetch via yfinance Causing Non-Deterministic Training
+### Pitfall 8: Sentiment Cache Decay Causing Stale Signals During Low-News Periods
 
 **What goes wrong:**
-`PROJECT.md` §Data Sources confirms Brent crude (`BZ=F`) is fetched via yfinance. If MOEX macro features include Brent as a predictor and it is fetched at training time via yfinance, the feature values depend on yfinance availability at that moment. In CI environments without network access, yfinance returns empty data — Brent feature is NaN or missing — and training silently proceeds on incomplete features. Two training runs on the same code at different times produce different models because Brent data differs.
+`_SENTIMENT_HALF_LIFE_HOURS = 4.0` applies exponential decay to sentiment scores.
+On weekends, holidays, and MOEX low-news windows, the sentiment cache decays to zero
+over 12-16 hours. When a new article arrives after this quiet period, the EWM
+combination formula `existing * 0.7 + new_score * 0.3` starts from near-zero,
+causing the first article to have outsized impact relative to its actual significance.
+A single article from a low-credibility source after a weekend can spike sentiment
+to 0.3 * credibility on tickers that had no prior signal.
 
 **Why it happens:**
-yfinance is an unofficial API with no SLA, rate limits, and schema changes without notice. It is already excluded from MOEX candle fetching by policy, but Brent as a CME commodity has no T-Invest equivalent. The macro feature builder may use a conditional fallback — which hides the failure mode in production.
+The decay lambda was tuned for continuous intraday news flow. MOEX operates on
+10:00-18:45 MSK; on weekdays after close and during weekends there is no data to
+sustain the cache. The first article of the trading day starts from an artificially
+deflated baseline.
 
 **How to avoid:**
-Cache Brent candles to disk using `CachingFetcher` with a 24-hour TTL immediately after fetching. Store fixture Brent data in `tests/fixtures/brent_candles.json` for use in CI. Make the Brent fetch a graceful degradation: if yfinance fails, use the cached file; if no cache exists, use a neutral value (zero-mean, unit-variance normalized to 0.5) and log a `WARNING`. Never fail training because Brent is unavailable — degrade, not crash.
+Apply sentiment decay only during market hours. Check `is_market_open_now()` before
+decaying scores; freeze the decay clock outside market hours. Alternatively, increase
+the half-life to 24h to cover overnight gaps. The strategy-level `min_sentiment`
+threshold (0.5) provides a secondary guard, but the first article of the day can
+still produce a sub-threshold spike that warps the EWM.
 
 **Warning signs:**
-- `pytest` passes locally but fails in CI with `KeyError: 'brent_return'` or empty Brent series
-- Two training runs on identical code produce different feature importance rankings (Brent present vs absent)
-- MOEX macro feature importances vary dramatically between runs
+- `event_driven` signals firing exclusively on the first news article each morning
+- Sentiment score jumping from 0.01 to 0.28 on single article
+- Strategy firing on Monday morning news that pre-dates Friday market close
 
 **Phase to address:**
-Phase 2 (MOEX macro features). Write the Brent fixture and caching before writing macro feature code — not after.
+Phase 2 (EventDrivenStrategy activation) — validate decay behavior on a week of
+simulated intraday data including overnight gaps before enabling event_driven on
+live segments.
 
 ---
 
-### Pitfall 9: T-Bank Sandbox Endpoint Has No Historical Candles
+### Pitfall 9: LLM API Downtime During Trading Hours Silently Disables News Signal
 
 **What goes wrong:**
-`TinkoffFetcher` defaults to `sandbox=True` for development safety. The sandbox gRPC endpoint (`sandbox-invest-public-api.tbank.ru:443`) is a paper-trading environment — it has no historical candle data. Calling `fetch_candles(symbol, start, end)` on the sandbox returns an empty list for any historical date range. The research script fetches zero candles, the dataset is empty, and the script aborts with "Empty dataset, aborting." — with no indication that the issue is the sandbox flag, not the symbol or date range.
+OpenRouter (the current provider) has had outages. During an outage, `_news_cycle`
+catches `LLMError` and logs a warning, but `_sentiment_cache` is not updated.
+The strategy cycle continues running with stale (decayed to zero) sentiment. The
+system does not alert operators that the LLM pipeline is down; it silently degrades
+to technical-signal-only mode. This is acceptable behavior but must be observable.
 
 **Why it happens:**
-The sandbox-vs-live distinction is correct for the live trading loop (sandbox prevents accidental real orders). For historical data training scripts, sandbox=True is always wrong. The default is set in `TinkoffFetcher.__init__` for safety, but training scripts must override it explicitly.
+The `FallbackLLMClient` handles rate limits but falls through both primary and
+fallback on a full outage. The `_analyze_impact_batch` inline circuit breaker
+suppresses retries after 5 consecutive failures, which is correct, but does not
+surface the degradation to the health monitor or Telegram alerter.
 
 **How to avoid:**
-In `_fetch_moex_candles()`, always construct `TinkoffFetcher` with `sandbox=False`. Add a startup assertion: `assert not fetcher._sandbox, "TinkoffFetcher for training must use sandbox=False (historical data not available in sandbox)"`. Document this in the function docstring and in the script's `--help` output. In tests, use a mock fetcher that returns pre-seeded candles rather than connecting to any endpoint.
+Wire `HealthMonitor` to track `last_successful_llm_call` timestamp. When the LLM
+pipeline has been down for more than one strategy cycle interval, `HealthMonitor`
+should fire a Telegram alert: "News sentiment pipeline degraded — LLM unavailable
+for Xm. Running on technical signals only." This converts silent failure into
+observable degradation. The trading system continues; operators are aware.
 
 **Warning signs:**
-- All symbols return 0 candles despite valid token and correct symbol names
-- No gRPC error logs — the call succeeds but returns empty (sandbox has no data, not an error)
-- Script aborts at "Empty dataset, aborting." on first run but not after changing to `sandbox=False`
+- `news_processing_circuit_opened` in logs without corresponding Telegram alert
+- `_sentiment_cache` entries all at zero despite strategy cycle running
+- `HealthMonitor.feed_timestamps["llm"]` not updated for > 30 minutes
 
 **Phase to address:**
-Phase 1 (MOEX data adapter). This is a one-line fix but a common trap for anyone unfamiliar with the dual-endpoint design.
+Phase 1 (News Pipeline) — add LLM liveness tracking to HealthMonitor at the same
+time as the news pipeline goes live.
 
 ---
 
-### Pitfall 10: Combinatorial Feature Engineering Explosion on Small Datasets
+### Pitfall 10: Per-Article LLM Cost Explosion on High-Volume News Days
 
 **What goes wrong:**
-One of the v9.0 research strategies is "automatic feature engineering" — generating candidate features by combining existing ones (ratios, products, lags, differences). On a 730-day MOEX dataset with 10 base features, generating all pairwise ratios and lagged versions yields hundreds of candidate features. Feature selection then runs on a dataset where `n_samples` (730) << `n_features` (300+), making any selection method statistically unreliable. The selected features are almost certainly overfit to the specific 730-day window.
+On MOEX-relevant macro events (CBR rate decisions, geopolitical escalations, sanctions
+announcements), RSS feeds and Telegram channels produce 50-200 articles per cycle.
+With OpenRouter free tier having daily request caps (~50 RPD for some models), hitting
+the cap mid-day silences the sentiment pipeline for the remainder of the trading day.
+Upgrading to paid tier at $0.03/1k tokens means 200 articles * ~500 tokens = 100k
+tokens per cycle * 12 cycles/day = $36/day, exceeding operational cost budgets.
 
 **Why it happens:**
-Combinatorial feature generation works well when `n_samples >> n_features` (e.g., US tech with 1825 days and 15 features → ratio ~120:1). On MOEX, the ratio inverts: 730 days and 300 candidate features → ratio ~2.4:1. Standard feature selection methods (mutual information, LASSO) cannot distinguish signal from noise at this ratio.
+Per-article LLM calls scale linearly with news volume. High-volatility days produce
+the most news and the highest LLM costs, exactly when accurate sentiment matters most.
 
 **How to avoid:**
-Cap the candidate feature set hard: no more than `n_samples / 20` candidate features before selection. For MOEX with 730 days, the cap is ~36 features. Do not generate all pairwise combinations — generate only domain-motivated combinations (e.g., `return / volatility`, `momentum / liquidity`), not statistical fishing. Run a permutation test on any generated feature: if the feature's mutual information with the label is not significantly above the mutual information after label shuffling (p > 0.05), discard it before selection.
+Implement article prioritization: score articles by title keywords before sending to
+LLM (regex match for CBR, sanctions, earnings tickers). Only send top-N articles
+(N=10 recommended) to the LLM per cycle; deprioritize routine earnings and
+boilerplate agency reports. Use the `_ARTICLE_DEDUP_MAX_SIZE` cap aggressively.
+Log `llm_calls_skipped_budget` as a metric for cost tracking.
 
 **Warning signs:**
-- Feature selection step takes > 5 minutes (hundreds of candidates being evaluated)
-- Selected features include `feature_a_times_feature_b` type combinations without domain motivation
-- Ablation experiments show no consistent winner — every subset scores within noise of every other subset
+- Daily LLM request counter reaching provider limit before market close
+- `LLMRateLimitError` appearing after previously-successful batches
+- Processed article count per cycle unexpectedly high on volatility events
 
 **Phase to address:**
-Phase 6 (automatic feature engineering strategy). This phase needs the constraint built in from the start, not discovered after running a 300-feature experiment.
+Phase 1 (News Pipeline) — add article scoring/prioritization layer before LLM batch.
 
 ---
 
@@ -237,14 +353,12 @@ Phase 6 (automatic feature engineering strategy). This phase needs the constrain
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Reuse US fold constants for MOEX | No code change needed | 0–1 valid folds, misleadingly high gate pass rates | Never — constants must be parameterized |
-| Skip `InstrumentRegistry` init, use mock in production scripts | Fast to code | Missing FIGI → all fetches fail silently in production | Never in production; test mocks only |
-| Use `shift(0)` (no shift) for macro series join | Simplest pandas join | Look-ahead bias corrupts all trained models | Never |
-| Raise accuracy cap to 0.60 for MOEX | Models pass gates more easily | Enables degenerate predictors on 50–80 sample folds | Never |
-| Store all 100+ experiment configs as ExperimentManager files | Full traceability | Namespace pollution, file conflicts, slow list_experiments() | Never — promote only the research run winner |
-| Use `sandbox=True` for historical data fetches | Safe default | Returns empty data, training aborts silently | Never for training scripts |
-| Generate all pairwise feature combinations | Explores more space | n_features > n_samples → selection is noise | Never without permutation test and hard cap |
-| Equal weights always for ensemble (skip optimization) | No overfitting risk | May leave 2–5% accuracy on the table | Acceptable for MVP when n_folds < 4 |
+| `json.loads()` in NewsAnalyzer (existing) | Simple, works for compliant LLMs | Silent signal loss on any format variation | Never — migrate to `parse_structured()` in Phase 1 |
+| No hit/miss rate tracking on `_CachingLLMClient` | Less code | Cannot detect cache thrashing or cache-miss spikes causing cost explosions | Never for production — add cache metrics in Phase 1 |
+| `_event_driven_active` cached once at startup | Avoids YAML re-reads | Does not reflect runtime preset changes via `PresetApplicator` | Acceptable for MVP; fix when dynamic preset updates are added |
+| Hardcoded `_SENTIMENT_HALF_LIFE_HOURS = 4.0` | Simple | Wrong for 18h overnight gaps; first-article-of-day distortion | Acceptable until Phase 2 validation confirms or refutes |
+| No LLM liveness in HealthMonitor | Simpler health monitor | Silent degradation during LLM outages goes unnoticed | Never for production — add in Phase 1 alongside news pipeline |
+| Article credibility hardcoded to 1.0 on RSS | Simpler ingestion | All sources treated equal; Interfax press releases weighted same as TASS emergency alerts | Acceptable for MVP; tune per-source credibility in Phase 2 |
 
 ---
 
@@ -252,15 +366,13 @@ Phase 6 (automatic feature engineering strategy). This phase needs the constrain
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| TinkoffFetcher in sync script | Instantiating without `InstrumentRegistry` | Build minimal registry from static YAML map; assert token present before constructing |
-| TinkoffFetcher gRPC | Forgetting `GRPC_DNS_RESOLVER=native` before SDK import | `tinkoff_data.py` sets it at module level — import that module before any `t_tech.invest` usage |
-| TinkoffFetcher endpoint | Using default SDK target (`invest-public-api.tinkoff.ru`) that no longer resolves | Always pass `target=_TBANK_GRPC_TARGET` from `tinkoff_data.py` |
-| TinkoffFetcher for training | Using `sandbox=True` (default) | Explicitly set `sandbox=False`; sandbox endpoint has no historical candles |
-| CBR rate as macro feature | Fetching rate for "today" and using as same-day feature | `shift(1)`: CBR announces at ~13:30 Moscow time, unavailable at open-of-day |
-| MOEX ISS IMOEX | Using same-day IMOEX close as open-of-day feature | `shift(1)`: yesterday's close is the only available value at today's open |
-| Brent via yfinance | No caching, fails offline/CI | `CachingFetcher` with 24h TTL; fixture data in tests |
-| ExperimentManager | One file per internal research config (100+ files) | One experiment per research loop run; use JSONL for sub-results |
-| Feature engineering | All pairwise combinations without cap | Hard cap at `n_samples / 20`; permutation test before selection |
+| OpenRouter free tier | Treating free tier as production-grade SLA | Set `llm_fallback_provider` to Groq (also free, different infrastructure) for resiliency |
+| APScheduler + async LLM | Running `await llm.complete()` directly inside APScheduler job | Bridge via `_run_async()` — APScheduler jobs are sync; async work must go through the background loop |
+| `_sentiment_lock` (threading.Lock) in async context | Acquiring the lock inside an async coroutine, then awaiting | Compute values outside lock, then acquire lock only for the dict write (no `await` inside `with _sentiment_lock`) |
+| `_analyze_impact_batch` on `_async_loop` | Calling `_run_async()` from inside a coroutine running on `_async_loop` | Use `await` directly or `asyncio.create_task` — `_run_async` submits to the same loop, causing deadlock |
+| Telegram channel reader (Telethon) | Sharing Telethon session across multiple event loops | Telethon client must be created and used on the same event loop; use `_async_loop` consistently |
+| HealthMonitor feed freshness | Not wiring LLM pipeline to HealthMonitor timestamp tracking | Register `"llm"` as a feed in `HealthMonitor.update_feed_timestamp()` after each successful news batch |
+| `InstrumentRegistry` symbol validation | Skipping registry check for LLM-extracted tickers | All entity extractor outputs must be validated against `InstrumentRegistry` before touching sentiment cache |
 
 ---
 
@@ -268,10 +380,11 @@ Phase 6 (automatic feature engineering strategy). This phase needs the constrain
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Fetching all MOEX candles in single gRPC call | `grpc_timeout` exceeded; fetch returns empty | Batch by 30-day windows (T-Invest API limit); retry on `UNAVAILABLE` | Any symbol with > 1 year of daily candles |
-| Re-training 3 models per fold per experiment without data caching | 2–4 hour runtime for one MOEX segment research run | Pre-cache feature matrices to disk after first build; add `--skip-data-fetch` flag | Any run beyond 20 experiment configs |
-| `select_features_efficient()` called independently per fold | Feature sets differ fold-to-fold, adding noise to fold comparison | Fix feature set after first baseline fold; reuse across subsequent folds of same experiment | Every multi-fold experiment — already partially avoided by `config.feature_subset` |
-| Combinatorial feature generation without cap | Feature selection takes > 5 min; hundreds of pointless candidates | Hard cap at `n_samples / 20` candidates; generate domain-motivated pairs only | Any MOEX segment with < 1000 samples |
+| Per-article LLM call with no prioritization | LLM cost spike on high-news days, rate limit hit | Pre-score articles, cap batch at N=10 | At 30+ articles per cycle (~50+ on macro events) |
+| `parse_structured()` bypass in NewsAnalyzer | 40-60% of articles return 0.0 sentiment silently | Migrate to `parse_structured()` | Immediately on live deployment with any LLM non-compliance |
+| `asyncio.Semaphore(5)` for batch concurrency | Queue depth grows if per-call latency > 3s; 30 articles * 6s = 3min batch | Add per-call timeout at HTTP level; reduce semaphore for free-tier models | At LLM latency > 5s per call (free tier: common) |
+| `_CachingLLMClient` LRU cache with no TTL | Stale cached responses for articles that recur (e.g. recurring agency wire) | Cache key includes full content hash — body changes break cache naturally; acceptable | Cache hit rate misleadingly high if headlines repeat |
+| Portfolio Review Agent running during market hours | Competes with strategy cycle for `_async_loop` execution | Schedule portfolio review only after market close (18:45 MSK) | If scheduled during trading hours on busy news days |
 
 ---
 
@@ -279,23 +392,25 @@ Phase 6 (automatic feature engineering strategy). This phase needs the constrain
 
 | Mistake | Risk | Prevention |
 |---------|------|------------|
-| Logging `FINALAYZE_TINKOFF_TOKEN` in experiment JSONL | Token in plaintext file that may be committed to git | Never include env vars in `ExperimentResult`; scrub config dict before logging |
-| Storing trained model pickle files in `results/experiments/` | Pickle deserialization vulnerability if results dir is shared | Keep model files in `models/<segment>/` only; reference by path in experiment log |
-| ExperimentManager writing verdicts without snapshot_sha | Stale claim applied to wrong codebase version | Reuse `snapshot_sha` mechanism from `AgentOrchestrator` when integrating |
+| Prompt injection via RSS article content | Malicious article content overrides system prompt, causes agent to emit invalid signals or dump credentials | Sanitize article content: strip HTML, cap at 2000 chars, never inject raw content into system prompt |
+| LLM output containing executable Python or eval() targets | Agent output used as dynamic config or eval'd | All agent output typed as Pydantic models; never `eval()` or `exec()` LLM responses |
+| API key leakage in structured LLM prompts | System prompt logging exposes provider keys | Never include `settings.llm_api_key` in logged prompts; log prompt hash only |
+| Portfolio Review Agent with write access to PresetApplicator | Agent suggestions trigger automatic strategy parameter changes | `PortfolioReviewSuggestion` must not contain fields that match `PresetApplicator` input schema |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **MOEX data adapter:** `_fetch_moex_candles()` returns non-empty candles for `SBER` — verify by running against live API, not just a unit test with a mock
-- [ ] **Sandbox=False for training:** `TinkoffFetcher` instantiated with `sandbox=False` in training path — check the constructor call, not just docs
-- [ ] **Macro features shift:** `cbr_rate` in feature vector uses yesterday's rate, not today's — inspect first 3 rows of feature matrix manually for a known CBR announcement date
-- [ ] **Walk-forward folds count:** `generate_folds()` for `ru_blue_chips` returns >= 3 folds — log fold count before proceeding; abort if < 3
-- [ ] **Degenerate predictor rejection:** All-BUY predictor fails `class_balance` gate before accuracy is evaluated — add unit test for this exact scenario
-- [ ] **ExperimentManager ID uniqueness:** Running the script twice for the same segment produces experiment IDs with different timestamps — no file collisions, no overwrites
-- [ ] **Ensemble weight confidence interval:** Weight optimization uses OOS folds for fitting — inspect weight fitting code for any use of training data
-- [ ] **Cross-segment distribution shift:** JS divergence check executed and logged before applying US feature list to MOEX — look for `feature_distribution_shift` log entry
-- [ ] **Brent fixture in CI:** `pytest` passes without network access using fixture Brent candles — run with `FINALAYZE_TINKOFF_TOKEN=` unset to simulate CI
+- [ ] **NewsAnalyzer**: Uses `parse_structured()`, not `json.loads()` — verify `news_analyzer.py` does not call `json.loads(raw)` on LLM response
+- [ ] **Ticker validation**: Entity extractor output filtered against `InstrumentRegistry` before sentiment cache update — verify `_apply_impact_result` rejects unknown tickers
+- [ ] **LLM liveness**: `HealthMonitor` tracks `last_llm_success` and fires Telegram alert on silence > 30min — verify feed registered in HealthMonitor
+- [ ] **Portfolio Review advisory-only**: No code path from portfolio review output reaches `BrokerRouter` — verify with type assertions + integration test
+- [ ] **Anomaly Interpreter non-blocking**: Alert fired before LLM interpretation, not after — verify Telegram message timestamp vs LLM call start timestamp in tests
+- [ ] **Sentiment lock safety**: No `await` expression inside any `with self._sentiment_lock:` block — verify with grep `"with self._sentiment_lock"` in trading_loop.py
+- [ ] **Per-call LLM timeout**: HTTP client has request-level timeout <= 15s — verify in LLM client constructor or httpx settings
+- [ ] **Duplicate signal guard**: CBR/dividend event_driven signals suppressed when cbr_calendar/dividend_gap active in same direction — verify combiner hook logic
+- [ ] **Decay clock frozen off-hours**: Sentiment decay only runs during MOEX market hours — verify `_SENTIMENT_DECAY_LAMBDA` application is gated on market hours check
+- [ ] **Article budget cap**: LLM batch capped at N=10 articles per cycle — verify `_analyze_impact_batch` has explicit article count limit
 
 ---
 
@@ -303,14 +418,13 @@ Phase 6 (automatic feature engineering strategy). This phase needs the constrain
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Look-ahead bias in macro features | HIGH | Fix shift; retrain all MOEX models from scratch; invalidate all saved `ru_*` model files in `models/` |
-| TinkoffFetcher returns empty candles | LOW | Check token present, `sandbox=False`, registry initialized; add debug logging to `_run_async`; test manually |
-| Zero valid folds for MOEX | MEDIUM | Adjust fold constants per MOEX-specific values; may need to reduce `_PURGE_GAP` proportionally to MOEX trading days (~250/yr) |
-| ExperimentManager file conflicts | LOW | Delete conflicting `.md` files; add segment prefix + timestamp to all IDs going forward |
-| Ensemble weights overfit | MEDIUM | Reset to equal weights; re-run quality gate evaluation; document that weight optimization requires >= 4 folds |
-| Cross-segment transfer fails | MEDIUM | Discard US feature list; run MOEX-native feature selection from scratch on MOEX data only |
-| Combinatorial feature explosion | LOW | Delete generated candidates; cap at `n_samples / 20`; add permutation test before selection |
-| Brent non-determinism in CI | LOW | Add fixture file; wrap Brent fetch in `CachingFetcher` with 24h TTL |
+| threading.Lock deadlock in async | HIGH | Requires trading loop restart; if in production, trigger kill switch, fix lock pattern, redeploy |
+| LLM timeout blocking news cycle | LOW | Reduce per-call timeout; reduce semaphore concurrency; deploy config change without restart |
+| Hallucinated ticker in signal | LOW | Existing `InstrumentRegistry` check prevents execution; add registry validation in entity extractor post-processing |
+| Portfolio review executing orders | HIGH | Requires immediate kill switch, position audit, manual unwinding of any orphan positions |
+| NewsAnalyzer json.loads failure | LOW | Fix: migrate to `parse_structured()` in single file; deploy; no data migration needed |
+| LLM API downtime | LOW | `FallbackLLMClient` handles rate limits; for full outage, system degrades gracefully to technical signals only |
+| Cost explosion on news spike | LOW | Reduce `_analyze_impact_batch` article cap to 5; monitor `processed_ok` count in logs |
 
 ---
 
@@ -318,32 +432,30 @@ Phase 6 (automatic feature engineering strategy). This phase needs the constrain
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| TinkoffFetcher sync integration (Pitfall 1) | Phase 1: MOEX data adapter | pytest with real or mock fetcher returns candles for 3+ MOEX symbols; 0-candle result fails loudly |
-| Sandbox endpoint for training (Pitfall 9) | Phase 1: MOEX data adapter | `sandbox=False` assertion in training code; unit test verifies correct endpoint used |
-| Look-ahead bias in macro features (Pitfall 2) | Phase 2: MOEX macro features | Unit test: synthetic macro with known lag, assert feature uses t-1 value |
-| Brent yfinance non-determinism (Pitfall 8) | Phase 2: MOEX macro features | pytest passes without network access using fixture data |
-| Zero valid folds for MOEX (Pitfall 3) | Phase 1 + Phase 3 | `generate_folds()` returns >= 3 folds for `ru_blue_chips`; script aborts if fewer |
-| Degenerate predictor bypass (Pitfall 4) | Phase 3: Adaptive quality gates | Unit test: all-BUY predictor on 60%-positive class fails class_balance gate; overall_passed=False |
-| ExperimentManager ID conflicts (Pitfall 5) | Phase 4: ExperimentManager integration | Two parallel segment runs produce non-overlapping `.md` files |
-| Ensemble weight overfitting (Pitfall 6) | Phase 5: Ensemble weight optimization | CI check: equal weights used when n_folds < 4; weight CI includes 1/3 → no deviation |
-| Cross-segment distribution shift (Pitfall 7) | Phase 6: Cross-segment transfer | Distribution shift log present; US-only features excluded from MOEX feature set |
-| Combinatorial feature explosion (Pitfall 10) | Phase 6: Automatic feature engineering | Feature candidate count logged; always <= n_samples/20 before selection |
+| threading.Lock across await | Phase 1: News Pipeline | No `with _sentiment_lock:` block contains any `await`; static analysis check |
+| LLM timeout blocking cycle | Phase 1: News Pipeline | Per-call timeout test: mock slow LLM returning after 20s; verify cycle completes in < 35s |
+| Hallucinated ticker extraction | Phase 1: News Pipeline | Integration test: entity extractor output for unknown tickers rejected at sentiment cache boundary |
+| cbr_calendar duplicate signal | Phase 2: EventDrivenStrategy activation | Backtest CBR announcement dates; confirm combined confidence does not exceed 2x individual strategy |
+| Portfolio review autonomous execution | Phase 3: Portfolio Review Agent | Architecture review + type assertion test proving no `Signal`/`OrderRequest` produced |
+| Anomaly interpreter blocking alert | Phase 4: Anomaly Interpreter Agent | Latency test: anomaly detected to Telegram message < 3s; LLM enrichment arrives asynchronously |
+| NewsAnalyzer json.loads | Phase 1: News Pipeline | Unit test: mock LLM returning code-fence-wrapped response; verify `SentimentResult` parsed correctly |
+| Sentiment decay first-article distortion | Phase 2: EventDrivenStrategy activation | Simulation: run news cycle at 09:00 MSK after 16h gap; verify first article confidence <= min_sentiment threshold |
+| LLM API downtime silent failure | Phase 1: News Pipeline | HealthMonitor test: simulate LLM failure for 35min; verify Telegram alert fired |
+| Per-article cost explosion | Phase 1: News Pipeline | Stress test: inject 100 articles; verify only N=10 reach LLM; verify LLM call counter |
 
 ---
 
 ## Sources
 
-- Codebase inspection: `scripts/auto_ml_research.py` (sync data fetch pattern, fold generation constants, experiment config naming)
-- Codebase inspection: `src/finalayze/ml/training/quality_gates.py` (accuracy cap at 0.55, `_SMALL_SAMPLE_CUTOFF=20`, Brier dynamic threshold, gate evaluation order)
-- Codebase inspection: `src/finalayze/data/fetchers/tinkoff_data.py` (gRPC event loop pattern, sandbox vs live endpoint, `GRPC_DNS_RESOLVER=native`)
-- Codebase inspection: `src/finalayze/core/experiment_manager.py` (file-based CRUD, flat namespace, `write_text()` non-atomicity)
-- Codebase inspection: `src/finalayze/ml/features/technical.py` (feature naming, `_MIN_CANDLES=80`, `MoexMarketData` usage)
-- `.planning/PROJECT.md` §Data Sources (Brent via yfinance, CBR XML, MOEX ISS), §Known Issues (ML quality gates fail for small MOEX datasets), §Constraints
-- `MEMORY.md` (gRPC C-ares resolver fix, SDK target override, sandbox vs live endpoint distinction, `FINALAYZE_TINKOFF_TOKEN` env var)
-- Known constraint: T-Invest sandbox endpoint has no historical candles (verified in prior v6.0 development)
-- Known constraint: MOEX history ~730 days vs US ~1825 days (documented in `auto_ml_research.py` constants `_MOEX_LOOKBACK_DAYS=730`)
-- Known constraint: `_MOEX_MAX_FEATURES=10` vs `_US_MAX_FEATURES=15` (documented in `auto_ml_research.py`)
+- Direct codebase inspection: `src/finalayze/orchestration/trading_loop.py`, `src/finalayze/analysis/news_analyzer.py`, `src/finalayze/analysis/llm_client.py`, `src/finalayze/strategies/event_driven.py`, `src/finalayze/risk/position_sizing_pipeline.py`, `src/finalayze/monitoring/anomaly_detector.py`
+- Expert debate findings (v10.0 milestone, 2 rounds, 5 agents): documented in `.planning/PROJECT.md` milestone context
+- [TradeTrap: Are LLM-based Trading Agents Truly Reliable and Faithful?](https://arxiv.org/html/2512.02261v1) — LLM trading agent robustness under adversarial conditions
+- [Auditing LLM Agents in Finance Must Prioritize Risk](https://arxiv.org/pdf/2502.15865) — hallucination, systemic bias, error propagation in multi-step agent chains
+- [LLM Hallucinations: Implications for Financial Institutions](https://biztechmagazine.com/article/2025/08/llm-hallucinations-what-are-implications-financial-institutions) — $250M+ annual losses from hallucination-related incidents
+- [Using a Threading Lock in Asyncio Results in a Deadlock](https://superfastpython.com/asyncio-use-threading-lock/) — technical explanation of threading.Lock + asyncio deadlock pattern
+- [Limitations of News Sentiment Analysis in Stock Return Prediction](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5086825) — signal quality, stale news overreaction, decay dynamics
+- [Sentiment trading with large language models](https://arxiv.org/abs/2412.19245) — LLM sentiment signals: accuracy, latency sensitivity, signal degradation
 
 ---
-*Pitfalls research for: MOEX ML AutoResearch & Adaptation (v9.0 milestone)*
-*Researched: 2026-04-13*
+*Pitfalls research for: Runtime LLM agents in live MOEX trading system (v10.0)*
+*Researched: 2026-04-14*

@@ -1,185 +1,178 @@
-# Technology Stack — v9.0 ML AutoResearch & MOEX Adaptation
+# Technology Stack — v10.0 Runtime LLM Trading Agents
 
-**Project:** Finalayze v9.0
-**Researched:** 2026-04-13
-**Confidence:** HIGH (derived from direct codebase reads; no new library introductions)
+**Project:** Finalayze v10.0
+**Researched:** 2026-04-14
+**Confidence:** HIGH (codebase direct reads + verified web research)
 
 ---
 
 ## Premise: What Already Exists (Do Not Re-Research)
 
-These capabilities are shipped and verified. v9.0 extends them without rewrites.
+These capabilities are shipped and verified. v10.0 extends them without rewrites.
 
 | Already Exists | Location |
 |----------------|----------|
-| `TinkoffFetcher` — async gRPC client with self-managed background event loop | `src/finalayze/data/fetchers/tinkoff_data.py` |
-| `CBRFetcher` — sync XML client for key rate + FX rates | `src/finalayze/data/fetchers/cbr.py` |
-| `MoexMarketData` schema — `fx_rates`, `key_rates`, `commodity_candles`, `index_candles` | `src/finalayze/core/schemas.py:453` |
-| MOEX macro features — `_compute_cbr_features()`, `_compute_brent_return_features()`, `_compute_brent_zscore()`, `_compute_macro_features()` (10 features) | `src/finalayze/ml/features/technical.py` |
-| `select_features_efficient()` — MI + complexity-weighted greedy selection | `src/finalayze/ml/training/feature_selection.py` |
-| `check_accuracy_gate()` — n_eff-scaled threshold with `_MAX_ACCURACY_THRESHOLD = 0.55` cap | `src/finalayze/ml/training/quality_gates.py` |
-| `_dynamic_brier_threshold()` — threshold relaxes with n_eff via sqrt scaling | `src/finalayze/ml/training/quality_gates.py` |
-| `ExperimentManager` — CRUD + automated verdict (ACCEPT/REJECT/INCONCLUSIVE) | `src/finalayze/core/experiment_manager.py` |
-| `InstrumentRegistry` — symbol → FIGI + market metadata | `src/finalayze/markets/instruments.py` |
-| XGBoost + LightGBM + CatBoost + meta-learner ensemble | `src/finalayze/ml/models/` |
-| Walk-forward folds with purge gaps | `scripts/auto_ml_research.py:generate_folds()` |
-| Existing `_MOEX_LOOKBACK_DAYS = 730`, `_MOEX_MAX_FEATURES = 10`, `_MOEX_ATR_UPLIFT = 1.2` constants | `scripts/auto_ml_research.py` |
-| Segments `ru_blue_chips`, `ru_energy`, `ru_tech`, `ru_finance` with symbols defined | `config/segments.py` |
+| `LLMClient` ABC with 5 providers + `FallbackLLMClient` | `src/finalayze/analysis/llm_client.py` |
+| `_CachingLLMClient` — SHA-256 LRU cache (1000 entries), rate limiter, retry with backoff | `src/finalayze/analysis/llm_client.py` |
+| `parse_structured(prompt, system, response_model)` — typed Pydantic output on all clients | `src/finalayze/analysis/llm_client.py` |
+| `NewsAnalyzer`, `EntityExtractor`, `EventClassifier`, `ImpactEstimator`, `NewsImpactAnalyzer` | `src/finalayze/analysis/` |
+| `RssNewsFetcher` — feedparser-based, URL dedup, LRU seen-set | `src/finalayze/data/fetchers/rss_fetcher.py` |
+| `TelegramChannelReader` — httpx + BeautifulSoup, t.me/s/ scraping, no auth required | `src/finalayze/data/fetchers/telegram_reader.py` |
+| `TradingLoop._news_cycle()` — APScheduler interval job, RSS + Telegram + NewsAPI pipeline | `src/finalayze/orchestration/trading_loop.py` |
+| `EventDrivenStrategy` — credibility-gated signal from `sentiment_score` | `src/finalayze/strategies/event_driven.py` |
+| `SentimentScoreModel` — TimescaleDB hypertable (symbol, market_id, timestamp, news_sentiment, composite_sentiment) | `src/finalayze/core/models.py` |
+| `NewsArticleModel` — DB persistence with LLM analysis JSONB | `src/finalayze/core/models.py` |
+| `AnomalyDetector` — z-score + threshold anomaly detection with per-metric cooldown | `src/finalayze/monitoring/anomaly_detector.py` |
+| `EventBus` — Redis Streams with consumer groups | `src/finalayze/core/events.py` |
+| `APScheduler` `BackgroundScheduler` with `ThreadPoolExecutor` | `src/finalayze/orchestration/trading_loop.py` |
+| `structlog`, `Prometheus`, Streamlit dashboard | Throughout |
+| `feedparser>=6.0.12`, `beautifulsoup4>=4.14.3`, `httpx>=0.28.0` | `pyproject.toml` |
+| RSS URLs: RBC, Interfax, TASS, banki.ru, Vedomosti, Kommersant | `config/settings.py:news_rss_urls` |
+| Telegram channels: @markettwits, @AK47pfl, @cbrstocks, @investorbiz, @raborynok | `config/settings.py:telegram_channels` |
 
 ---
 
-## What v9.0 Needs: Gap Analysis
+## v10.0 Gap Analysis
 
 | Requirement | Gap | Solution |
 |-------------|-----|---------|
-| MOEX data adapter for `auto_ml_research` | `_prepare_data()` calls `_fetch_us_candles()` (yfinance) only; no MOEX branch | Add `_fetch_moex_candles()` using `TinkoffFetcher._run_async()` bridge pattern; gated by `segment_id.startswith("ru_")` |
-| MOEX macro features in autoresearch | `build_full_dataset()` passes `benchmark_candles` + `vix_candles` but no `MoexMarketData`; `build_triple_barrier_dataset()` would skip MOEX features | Pass `MoexMarketData` to `build_full_dataset()` for MOEX segments; fetch CBR/IMOEX/Brent via existing fetchers |
-| Adaptive quality gates (already partially done) | `check_signal_count_gate()` uses `_MIN_SIGNALS = 50` — MOEX daily data gives ~500 bars over 2 years across 3-5 symbols; 50 signals is feasible but needs verification | Existing n_eff scaling in accuracy/brier gates covers the main concern; `signal_count` gate may need MOEX-specific floor |
-| ExperimentManager integration | `auto_ml_research.py` logs to `results/experiments/*.jsonl` (flat files) but never creates `ExperimentState` objects or calls `ExperimentManager` | Add `ExperimentManager.create()` call at experiment start, `record_verdict()` at completion, linking to `DebateManager` when score delta is significant |
-| Ensemble weight optimization strategy | Only per-model hyperparameters perturbed; no strategy for optimizing XGBoost:LightGBM:CatBoost relative weights | New `generate_ensemble_weight_experiments()` — grid over weight combinations in the `EnsembleModel._weights` space |
-| Automatic feature engineering strategy | No cross-feature polynomial or interaction generation | Use existing `pandas-ta` to generate new indicators programmatically within experiment loop — no new library needed |
-| Cross-segment transfer strategy | No mechanism to initialize MOEX model from US model weights or feature subsets | Transfer selected feature names from best US experiment run as initial feature_subset for MOEX baseline; no model weight transfer (tree models don't support it) |
-
-**Zero new packages required.** All gaps close with existing dependencies and stdlib.
+| MOEX news sources — real-time RSS | Existing RSS list has 8 feeds but `MOEX ISS /sitenews` feed not included; no dedicated MOEX official exchange news | Add `https://www.moex.com/export/news.aspx?cat=200` (all MOEX news) and `https://www.moex.com/export/news.aspx?cat=202` (listing news) to `news_rss_urls` in config — zero new libraries, pure config change |
+| T-Pulse (Tinkoff social feed) | T-Pulse API (`https://www.tinkoff.ru/api/invest-gw/social/v1/post/instrument/{ticker}`) is a public REST endpoint (no auth required, cursor pagination). `tpulse-py` wrapper exists but last committed December 2021 and is unmaintained. | Use `httpx` (already installed) directly against the T-Pulse REST endpoint. No new library needed. Implement thin `TPulseFetcher` class in `data/fetchers/tpulse.py` following the `TelegramChannelReader` pattern (httpx + Pydantic parse + dedup). HIGH RISK: T-Pulse API is unofficial, undocumented, authentication changed in June 2024, and may be blocked or require session cookies. Treat as BEST-EFFORT source with broad exception handling. |
+| Portfolio Review Agent — daily LLM analysis | No agent exists. `parse_structured()` is available on all LLM clients. `PortfolioSnapshotModel` exists but is sparsely populated. | New `PortfolioReviewAgent` class in `analysis/portfolio_review.py` (Layer 3). Uses existing `parse_structured()` with a new `PortfolioReviewOutput` Pydantic model. Scheduled via APScheduler daily job in `TradingLoop`. No new libraries. |
+| Anomaly Interpreter Agent — LLM explanation | `AnomalyDetector.check()` returns `list[str]` of triggered metric names and fires Telegram alerts. No LLM explanation step. | New `AnomalyInterpreterAgent` in `analysis/anomaly_interpreter.py` (Layer 3). Called from `SandboxMonitorService` as fire-and-forget via `asyncio.create_task()` (stored in a set to prevent GC). Uses `parse_structured()` for structured explanation output. No new libraries. |
+| Sentiment persistence for ML features | `SentimentScoreModel` hypertable exists with correct schema (symbol, timestamp, news_sentiment, composite_sentiment). `_persist_sentiment_scores_async()` already writes to it in `TradingLoop`. | Gap is rolling aggregation views for ML feature extraction (1d, 7d, 30d windows). Implement via TimescaleDB `CREATE MATERIALIZED VIEW` with `time_bucket()` — pure SQL migration, no new Python library. |
+| Rolling sentiment aggregation for ML | No materialized view or query helper for rolling sentiment features. ML feature pipeline (`technical.py`) has no sentiment features yet. | New Alembic migration (004) adds `sentiment_rolling` continuous aggregate view. New helper `fetch_rolling_sentiment()` in `data/fetchers/` queries the view and returns a DataFrame. This feeds into `technical.py` as new features in a future phase. |
+| EventDrivenStrategy on live feed | `EventDrivenStrategy` is already enabled on ru_* segments (15% weight per CLAUDE.md). `_news_cycle()` skips if `not self._any_event_driven_enabled()`. | Gap is latency SLA verification and credibility cap. `_any_event_driven_enabled()` check exists. The 0.7 credibility cap must be added to `EventDrivenStrategy.generate_signal()` (currently uses `confidence = min(1.0, abs(sentiment) * credibility)` — cap the credibility input). Config change + small code edit, no new library. |
 
 ---
 
 ## Recommended Stack
 
-### Core Technologies (no new packages)
+### Core Technologies — No New Packages Required
 
 | Technology | Version (installed) | Purpose | Why |
 |------------|--------------------|---------|----|
-| `t-tech-investments` (T-Bank SDK) | installed (custom index) | gRPC candle/dividend fetch for all MOEX symbols in autoresearch | Already wired in `TinkoffFetcher`; self-managed background loop (`_run_async`) works from sync scripts — this is the existing pattern used in standalone scripts today |
-| `asyncio` + `threading` | Python 3.12 stdlib | Bridge sync autoresearch script to async `TinkoffFetcher` | `TinkoffFetcher._run_async()` already handles this via `run_coroutine_threadsafe()` on a daemon thread; no `nest_asyncio` or `asyncio.run()` needed — just construct `TinkoffFetcher` with no `grpc_loop` injected (self-managed fallback path) |
-| `httpx` | >=0.28.0 (installed) | CBR key rate + MOEX ISS IMOEX fetch in autoresearch context | Already used by `CBRFetcher` (sync) and `MoexISSFetcher` (sync) — both work from sync scripts without async wrapping |
-| `scikit-learn` | >=1.5.0 (installed) | MI-based feature selection + quality gate metrics (`accuracy_score`, `brier_score_loss`) | Already the engine behind `select_features_efficient()`; no changes needed |
-| `XGBoost` | >=2.1.0 (installed) | Ensemble member + feature importance | No changes needed |
-| `LightGBM` | >=4.5.0 (installed) | Ensemble member | No changes needed |
-| `CatBoost` | >=1.2.0 (installed) | Ensemble member — especially effective for small tabular MOEX datasets (native categorical support) | No changes needed |
-| `pandas-ta` | >=0.3.14b1 (installed) | Automatic feature engineering strategy: generate new indicator combinations from candle data within experiment loop | Already the feature engineering library; new strategy generates feature dicts by varying indicator parameters |
-| `PyYAML` | >=6.0.2 (installed) | `ExperimentManager` reads/writes YAML frontmatter | Already the pattern; no new usage |
-| `structlog` | >=24.4.0 (installed) | Structured experiment logging | Already used; bind `segment_id`, `strategy`, `experiment_id` to all log events |
+| `anthropic` / `openai` / OpenRouter clients | `>=0.42.0` / `>=1.50.0` | LLM backbone for Portfolio Review Agent and Anomaly Interpreter Agent | Already abstracted behind `LLMClient` ABC with `parse_structured()`. New agents call `parse_structured()` — no provider change needed. |
+| `pydantic` v2 | `>=2.10.0` | `PortfolioReviewOutput`, `AnomalyExplanationOutput` Pydantic models for structured agent outputs | Already the standard for all typed outputs in the codebase. `parse_structured()` enforces type safety at LLM response parse time. |
+| `feedparser` | `>=6.0.12` | RSS ingestion for MOEX ISS news feeds and existing financial news sources | Already installed. Adding MOEX ISS feeds is a config-only change (`news_rss_urls`). |
+| `httpx` | `>=0.28.0` | T-Pulse REST API calls (thin `TPulseFetcher`), existing Telegram web scraping | Already installed. `TelegramChannelReader` is the reference pattern for httpx-based news fetching. |
+| `beautifulsoup4` | `>=4.14.3` | HTML parsing for t.me/s/ Telegram channel previews | Already installed. No change. |
+| `apscheduler` | `>=3.10.4` | Scheduling `PortfolioReviewAgent` daily job, existing `news_cycle` | Already installed. New agents register additional jobs in `TradingLoop.start()`. |
+| `SQLAlchemy` 2.0 async | `>=2.0.36` | Writing/reading `sentiment_scores` hypertable, rolling aggregation queries | Already installed. Rolling sentiment queries use `session.execute(text(...))` pattern already used for raw SQL in the codebase. |
+| `asyncpg` | `>=0.30.0` | Async PostgreSQL driver for TimescaleDB | Already installed. No change. |
+| `redis` | `>=5.2.0` | EventBus for news article events | Already installed. No change. |
+| `structlog` | `>=24.4.0` | Structured logging for agent decisions and news pipeline events | Already installed. Bind `agent_name`, `anomaly_type`, `portfolio_value` to log events. |
 
-### Supporting Libraries (no new packages)
-
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `numpy` | >=1.26.0 (installed) | Walk-forward fold arrays, n_eff calculation | No changes |
-| `pandas` | >=2.2.0 (installed) | Feature DataFrame construction for `select_features_efficient()` | No changes |
-| `optuna` | >=4.7.0 (installed) | Already in stack for backtest hyperparameter tuning — NOT used in autoresearch loop directly; hyperparameter strategy uses coordinate descent instead | Avoid adding Optuna to autoresearch; existing coordinate-descent perturbation is faster for the hypothesis loop |
-| `pathlib` | Python 3.12 stdlib | Experiment log path construction, results directory | No changes |
-
-### New Modules to Create (no new packages)
+### New Modules to Create (Zero New Package Dependencies)
 
 | Module | Location | Layer | Responsibility |
 |--------|----------|-------|---------------|
-| MOEX data fetch functions | `scripts/auto_ml_research.py` | Script | `_fetch_moex_candles()`, `_fetch_moex_benchmark()`, `_fetch_moex_macro()` — construct `TinkoffFetcher` without injected loop, call `fetch_candles()` for each symbol; construct `CBRFetcher` for key rates; `MoexISSFetcher` for IMOEX |
-| MOEX segment symbol map | `scripts/auto_ml_research.py` | Script | Extend `_SEGMENT_SYMBOLS` dict with `ru_blue_chips`, `ru_energy`, `ru_tech`, `ru_finance` entries mirroring `config/segments.py` |
-| `generate_ensemble_weight_experiments()` | `scripts/auto_ml_research.py` | Script | Grid search over XGB:LGBM:CAT relative weights `[0.2,0.5,0.3]`, `[0.33,0.33,0.33]`, etc.; pass weight vector as `hparams` key `ensemble_weights` |
-| `generate_feature_engineering_experiments()` | `scripts/auto_ml_research.py` | Script | Use `pandas-ta` to generate new derived features (RSI with periods 7/21, MACD fast/slow variations) from existing candle data; wrap as feature_subset experiments |
-| `generate_transfer_experiments()` | `scripts/auto_ml_research.py` | Script | Load best US experiment's `features_used` list from `results/experiments/us_tech_experiment_log.jsonl`; use as initial `feature_subset` for MOEX baseline run |
-| ExperimentManager integration | `scripts/auto_ml_research.py` | Script | Call `ExperimentManager.create()` at research start; `record_verdict()` per experiment; use score delta threshold (0.02) to decide if verdict warrants debate linkage |
+| `PortfolioReviewAgent` | `src/finalayze/analysis/portfolio_review.py` | Layer 3 | Accepts `PortfolioState`, calls `LLMClient.parse_structured()` with `PortfolioReviewOutput` model. Advisory only — no trades. Logs to structlog, sends Telegram summary. |
+| `AnomalyInterpreterAgent` | `src/finalayze/analysis/anomaly_interpreter.py` | Layer 3 | Accepts `list[str]` of triggered anomaly names + `CycleMetrics`. Calls `parse_structured()` with `AnomalyExplanationOutput`. Fire-and-forget — uses `asyncio.create_task()` with strong reference set. |
+| `TPulseFetcher` | `src/finalayze/data/fetchers/tpulse.py` | Layer 2 | Thin httpx wrapper for `https://www.tinkoff.ru/api/invest-gw/social/v1/post/instrument/{ticker}`. Returns `list[NewsArticle]`. Broad exception handling — BEST-EFFORT only. Dedup via LRU set (same pattern as `TelegramChannelReader`). |
+| `fetch_rolling_sentiment()` | `src/finalayze/data/fetchers/sentiment_queries.py` | Layer 2 | Queries `sentiment_rolling` continuous aggregate view. Returns `pd.DataFrame` with columns `(symbol, date, sentiment_1d, sentiment_7d, sentiment_30d)`. Used by ML feature pipeline. |
+| Alembic migration 004 | `alembic/versions/004_sentiment_rolling.py` | DB | `CREATE MATERIALIZED VIEW sentiment_rolling` with TimescaleDB `time_bucket()` for 1d, 7d, 30d rolling averages. Auto-refresh policy via `add_continuous_aggregate_policy`. |
+| `PortfolioReviewOutput` Pydantic model | `src/finalayze/core/schemas.py` | Layer 0 | Typed output for LLM portfolio review: `overall_assessment`, `risk_flags: list[str]`, `recommended_actions: list[str]`, `confidence: float`. |
+| `AnomalyExplanationOutput` Pydantic model | `src/finalayze/core/schemas.py` | Layer 0 | Typed output for LLM anomaly explanation: `explanation: str`, `likely_cause: str`, `severity: Literal["low", "medium", "high"]`, `suggested_response: str`. |
 
 ---
 
-## Integration Architecture
+## T-Pulse Integration: Risk Assessment
 
-### TinkoffFetcher in Sync Script
+T-Pulse is Tinkoff's investor social network. Research findings:
 
-The key design decision: `TinkoffFetcher` already supports sync usage via its self-managed background event loop fallback. When constructed without `grpc_loop=...` injected, it creates its own daemon thread running an event loop. `_run_async()` calls `run_coroutine_threadsafe()`.
+- **API endpoint:** `https://www.tinkoff.ru/api/invest-gw/social/v1/post/instrument/{ticker}?limit=50&appName=invest&platform=web&cursor={cursor}` (confirmed from community sources, 2021-era docs)
+- **Authentication:** Historically public (no auth required), cursor-based pagination returning JSON
+- **Risk:** The endpoint is undocumented and unofficial. Authentication changed in June 2024 (SMS auth for full access broke). The endpoint may return empty results, require session cookies, or be geo-blocked. The `tpulse-py` library (last commit: Dec 2021) is unmaintained and should NOT be used as a dependency.
+- **Confidence:** LOW — verified from artydev.ru blog posts and community GitHub repos, not official T-Bank docs
+- **Implementation strategy:** Implement `TPulseFetcher` with broad exception handling, a `is_available()` health check, and disable flag in settings (`tpulse_enabled: bool = False` default). Enable only after manual verification in sandbox environment. Never block the news cycle on T-Pulse failure.
 
-```python
-# In scripts/auto_ml_research.py — no new imports needed
-from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
-from finalayze.markets.instruments import InstrumentRegistry, DEFAULT_MOEX_INSTRUMENTS
-
-def _fetch_moex_candles(segment_id: str, symbols: list[str]) -> dict[str, list[Candle]]:
-    token = os.environ.get("FINALAYZE_TINKOFF_TOKEN", "")
-    registry = InstrumentRegistry(DEFAULT_MOEX_INSTRUMENTS)
-    fetcher = TinkoffFetcher(token=token, registry=registry, sandbox=False)
-    # No grpc_loop= -> self-managed background loop activates automatically
-    end = datetime.now(tz=UTC)
-    start = end - timedelta(days=_MOEX_LOOKBACK_DAYS)
-    candles_by_sym: dict[str, list[Candle]] = {}
-    for sym in symbols:
-        try:
-            candles = fetcher.fetch_candles(sym, start, end)
-            if candles:
-                candles_by_sym[sym] = candles
-        except Exception as exc:
-            print(f"  Failed to fetch {sym}: {exc}")
-    fetcher.close()
-    return candles_by_sym
-```
-
-**Why this works:** `TinkoffFetcher._run_async()` checks `self._grpc_loop` first; if None, spins up the self-managed loop. This is the documented fallback path for "tests, standalone scripts" (see the existing docstring). No `asyncio.run()` nesting, no `nest_asyncio`, no new event loop handling.
-
-### MOEX Macro Data for Feature Pipeline
-
-`build_triple_barrier_dataset()` accepts `market_context: MarketContext` which contains an optional `moex_data: MoexMarketData`. The MOEX feature functions in `technical.py` only activate when `moex_data` is populated. The fetch pattern for autoresearch:
-
-```python
-from finalayze.data.fetchers.cbr import CBRFetcher
-from finalayze.data.fetchers.moex_iss import MoexISSFetcher
-from finalayze.core.schemas import MoexMarketData
-
-def _fetch_moex_macro() -> MoexMarketData:
-    cbr = CBRFetcher()
-    end = datetime.now(tz=UTC)
-    start = end - timedelta(days=_MOEX_LOOKBACK_DAYS)
-    key_rates = tuple(cbr.fetch_key_rate(start.date(), end.date()))
-    fx_rates = tuple(cbr.fetch_fx_rates("USD", start.date(), end.date()))
-    # IMOEX via MoexISSFetcher, Brent via yfinance (already installed)
-    ...
-    return MoexMarketData(fx_rates=fx_rates, key_rates=key_rates, ...)
-```
-
-All three fetchers (`CBRFetcher`, `MoexISSFetcher`, `YFinanceFetcher` for Brent `BZ=F`) are sync and safe in a script context.
-
-### ExperimentManager Integration
-
-`ExperimentManager` lives at Layer 0. Scripts can import it directly (no layer violation). Integration is additive — existing flat JSONL log is kept for backward compat; ExperimentManager creates parallel `.md` files:
-
-```python
-from finalayze.core.experiment_manager import ExperimentManager
-
-em = ExperimentManager()  # defaults to .planning/experiments/
-
-# At research start:
-exp_id = f"automl-{segment_id}-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
-em.create(exp_id, hypothesis=f"Autoresearch {strategy} on {segment_id}", ...)
-
-# Per-experiment result:
-em.record_verdict(exp_id, metrics={"score": result.score, "accuracy": result.avg_accuracy, ...})
-```
+**Decision:** Implement but default-disabled. Cost = ~100 lines of httpx code. Risk of wasting time is low.
 
 ---
 
-## Adaptive Quality Gates: Current State Assessment
+## TimescaleDB Rolling Sentiment: Implementation Pattern
 
-The quality gate code already has the primary MOEX adaptations:
+TimescaleDB continuous aggregates support rolling 1d/7d/30d windows natively via `time_bucket()` + `avg()`. The `sentiment_scores` table is already a hypertable (TimescaleDB extension applied at migration 002).
 
-1. `check_accuracy_gate()` caps threshold at 0.55 when `n_effective < 20` — this handles small MOEX datasets
-2. `check_brier_gate()` uses `_dynamic_brier_threshold()` that relaxes toward 0.25 as n_eff grows
-3. `check_signal_count_gate()` uses fixed `_MIN_SIGNALS = 50`
+Rolling aggregation approach — SQL-only, no new Python library:
 
-**Gap:** `_MIN_SIGNALS = 50` is the one gate that may block MOEX experiments. With 730 days × 3-5 symbols and triple-barrier labeling at a 20-bar horizon, total samples are ~200-500 after purging. A 4-month test fold produces ~50-80 signals. Gate passes at the margin.
+```sql
+-- Migration 004: sentiment rolling continuous aggregate
+CREATE MATERIALIZED VIEW sentiment_rolling
+WITH (timescaledb.continuous) AS
+SELECT
+    symbol,
+    market_id,
+    time_bucket('1 day', timestamp) AS bucket,
+    avg(news_sentiment) FILTER (WHERE timestamp >= time_bucket('1 day', timestamp) - INTERVAL '1 day')  AS sentiment_1d,
+    avg(news_sentiment) FILTER (WHERE timestamp >= time_bucket('1 day', timestamp) - INTERVAL '7 days') AS sentiment_7d,
+    avg(news_sentiment) FILTER (WHERE timestamp >= time_bucket('1 day', timestamp) - INTERVAL '30 days') AS sentiment_30d,
+    count(*) AS article_count_7d
+FROM sentiment_scores
+GROUP BY symbol, market_id, time_bucket('1 day', timestamp)
+WITH NO DATA;
 
-**Recommendation:** No code change needed for the gate threshold; verify empirically on first MOEX run. If signal_count gate fails consistently, add a `moex_min_signals` parameter (default 30) rather than changing the shared constant. This is a configuration change, not an architecture change.
+SELECT add_continuous_aggregate_policy('sentiment_rolling',
+    start_offset => INTERVAL '35 days',
+    end_offset   => INTERVAL '1 hour',
+    schedule_interval => INTERVAL '1 hour');
+```
+
+The Python query helper reads from this view using the existing `session.execute(text(...))` pattern. Window functions in continuous aggregates require `timescaledb.enable_cagg_window_functions = 'on'` (set per-session or in postgresql.conf).
+
+**Alternative considered:** Python-side rolling with `pandas.rolling()` on raw data pulled from DB. Rejected because: pulls all raw rows from DB every ML training run (expensive for 730 days × 20 symbols), re-computes on every call, loses TimescaleDB's incremental refresh optimization.
 
 ---
 
-## Cross-Segment Transfer: Exact Mechanism
+## Fire-and-Forget Async Pattern: Implementation Note
 
-Tree models (XGBoost, LightGBM, CatBoost) do not support weight initialization from pre-trained models — transfer learning in the neural network sense is not applicable. The meaningful transfer is **feature subset transfer**:
+`AnomalyInterpreterAgent` runs as fire-and-forget — anomaly detection happens in APScheduler thread, LLM call is async. The correct pattern for Python 3.12+ (prevents silent task GC):
 
-1. Load the top-scoring US experiment's `features_used` list from `results/experiments/us_tech_experiment_log.jsonl`
-2. Filter to features that are market-neutral (no US-specific: remove `vix_*`, `spy_*`; keep: `rsi_14`, `macd_*`, `atr_*`, `obv_*`, `ret_*d`, `calendar_*`)
-3. Use filtered list as `feature_subset` for the MOEX baseline experiment
-4. MOEX-specific features (`cbr_rate_level`, `usdrub_zscore`, `brent_zscore_60d`, etc.) are added on top
+```python
+# In SandboxMonitorService or AnomalyDetector callback:
+_background_tasks: set[asyncio.Task] = set()
 
-This requires zero new infrastructure — `generate_transfer_experiments()` reads the JSONL log (already written by `_log_result()`) and constructs `ExperimentConfig` with the filtered feature_subset.
+def _fire_and_forget(coro: Coroutine) -> None:
+    """Schedule async coroutine without blocking; keep strong reference."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+```
+
+This is the documented fix for Python 3.12+ task GC silently killing fire-and-forget tasks. The pattern is used in `TradingLoop._persist_sentiment_scores()` (fire-and-forget DB writes) — extend the same set to cover agent invocations.
+
+---
+
+## MOEX News Sources: Verified RSS Feed Catalog
+
+Based on research of currently active feeds (confidence: MEDIUM — verified URLs via web research, availability subject to change):
+
+| Source | URL | Category | Why |
+|--------|-----|----------|-----|
+| MOEX All News | `https://www.moex.com/export/news.aspx?cat=200` | Exchange official | Listing decisions, trading halts, circuit breaker activations — high-impact for MOEX trading |
+| MOEX Listing News | `https://www.moex.com/export/news.aspx?cat=202` | Exchange official | Symbol additions/removals, delistings — critical for instrument registry |
+| RBC Finance | `https://rssexport.rbc.ru/rbcnews/news/30/full.rss` | Business media | Already in config |
+| Interfax | `https://www.interfax.ru/rss.asp` | Business media | Already in config |
+| TASS | `https://tass.com/rss/v2.xml` | State news agency | Already in config |
+| Vedomosti | `https://www.vedomosti.ru/rss/news` | Business media | Already in config |
+| Kommersant | `https://www.kommersant.ru/RSS/news.xml` | Business media | Already in config |
+
+**New additions for v10.0:** MOEX cat=200 and cat=202 feeds. These are official exchange feeds and much more reliable than social sources for trading-relevant events.
+
+---
+
+## Portfolio Review Agent: Design Constraints
+
+Expert validation (v10.0 planning) rejected Pre-Trade Reasoning Agent — LLM modifiers in the sizing pipeline break determinism, calibration, and backtestability. The Portfolio Review Agent is **advisory only**:
+
+- Input: `PortfolioState` snapshot (positions, equity, drawdown, recent signals)
+- Output: `PortfolioReviewOutput` Pydantic model — no code paths that modify strategy or risk parameters
+- Delivery: Telegram daily summary message only (human reads it, no automated action)
+- Scheduling: APScheduler cron job at `daily_reset_hour_utc` (same slot as existing daily reset)
+- LLM call: `parse_structured()` with 2000-token max, Russian-language prompt, OpenRouter free model
+
+The advisory constraint means the agent is safe to add incrementally without breaking backtestability guarantees.
 
 ---
 
@@ -187,12 +180,13 @@ This requires zero new infrastructure — `generate_transfer_experiments()` read
 
 | Recommended | Alternative | Why Not |
 |-------------|-------------|---------|
-| `TinkoffFetcher` self-managed loop (no `grpc_loop` injection) in autoresearch script | `asyncio.run()` wrapping all MOEX fetches | `asyncio.run()` creates a new event loop per call — gRPC channels are destroyed between calls, causing 1-3s reconnect overhead per symbol. The `_run_async()` pattern was specifically designed to reuse channels |
-| `nest_asyncio` for running async inside sync script | Not needed | TinkoffFetcher already handles sync-from-sync via `run_coroutine_threadsafe()` on a background daemon thread — nest_asyncio is only needed when an event loop is already running (e.g., Jupyter) |
-| Transfer feature names only (no model weights) | PyTorch-style `state_dict()` transfer to tree models | XGBoost/LightGBM/CatBoost have no weight initialization API compatible with cross-domain transfer. Feature name transfer is the correct analog for tree ensembles |
-| `pandas-ta` for automatic feature engineering | `tsfresh` or `featuretools` | `tsfresh` generates 700+ features, far beyond the 10-15 budget; `featuretools` requires entity/relationship modeling overkill for OHLCV. `pandas-ta` is already installed and generates exactly the indicator types the existing feature pipeline uses |
-| Coordinate descent hyperparameter perturbation (existing) | Optuna for autoresearch hyperparameters | Optuna is already used for backtest tuning; adding it to the autoresearch inner loop creates nested optimization that obscures the experiment signal. Coordinate descent is simpler and auditable |
-| Flat `_MIN_SIGNALS` gate verified empirically first | Immediate MOEX-specific threshold | MOEX datasets may actually hit 50+ signals per fold; premature optimization of the gate threshold adds complexity before we know it's needed |
+| `httpx` for T-Pulse (existing) | `tpulse-py` library (pip) | Last commit Dec 2021, unmaintained, adds a fragile dependency for an unofficial API. Direct httpx is 50 lines and fully under our control. |
+| TimescaleDB continuous aggregate (SQL migration) | Python `pandas.rolling()` on raw DB data | Pulls all raw rows per ML training run — expensive at 730 days × 20 symbols. TimescaleDB incremental refresh is O(new data only). |
+| `asyncio.create_task()` with strong reference set | `asyncio.ensure_future()` or `threading.Thread` | `ensure_future` deprecated in 3.10+. Threading loses the async context of the LLM client. Strong-reference set pattern is documented Python 3.12+ fix for fire-and-forget task GC. |
+| New `PortfolioReviewAgent` in `analysis/` (Layer 3) | Pydantic AI framework | Pydantic AI is a full agent framework (16K GitHub stars, stable 1.x since late 2025). Overkill for two advisory agents — adds external dependency and new abstraction layer over existing `parse_structured()` which already handles structured output idiomatically. |
+| MOEX ISS `/sitenews` via `feedparser` (RSS) | `aiomoex` library for `/sitenews` endpoint | `aiomoex` (v2.2.0, May 2025) focuses only on price/OHLCV data — no news functions. The MOEX RSS feed at `export/news.aspx` is the correct, supported news channel. `feedparser` already handles it. |
+| Telethon (MTProto) for Telegram | Current httpx + BeautifulSoup scraping of t.me/s/ | Telethon 1.42.0 (late 2025) is the better long-term choice for authenticated reading of private channels. However, current `TelegramChannelReader` works for all configured public channels without credentials. Telethon requires phone number registration (credentials management overhead). Defer to a future phase if private channels are needed. |
+| Default-disabled T-Pulse (`tpulse_enabled: bool = False`) | Skip T-Pulse entirely | Costs ~100 lines. If the API still works, T-Pulse posts from retail investors provide social sentiment signal unavailable in mainstream RSS. Low implementation cost justifies opportunistic inclusion. |
 
 ---
 
@@ -200,60 +194,71 @@ This requires zero new infrastructure — `generate_transfer_experiments()` read
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `tsfresh` | Generates ~700 features, completely incompatible with 10-15 feature budget; 2-5 min per symbol to compute | `pandas-ta` variations within the existing feature pipeline |
-| `featuretools` | Entity-relationship modeling for OHLCV is architectural mismatch; 50MB+ dependency | Direct `pandas-ta` indicator parameter grid |
-| `ray` or `dask` for parallel experiments | autoresearch is I/O-bound (model training), not CPU-bound at this scale; 4-8 symbols × 3 folds = ~24 train calls per experiment | Sequential loop with accurate timing is sufficient; add only if experiment wall time exceeds 2 hours |
-| PyTorch transfer learning | Tree models have no weight initialization API; adds 500MB CUDA dependency for a feature that cannot work | Feature name transfer only |
-| `nest_asyncio` | Not needed — `TinkoffFetcher` self-managed loop handles the sync→async bridge without an already-running event loop | Existing `_run_async()` pattern |
-| New MLflow / experiment tracking DB | Adds infra dependency; `ExperimentManager` + JSONL log covers all tracking needs | Existing `.planning/experiments/*.md` + `results/experiments/*.jsonl` |
-| Separate process or subprocess for MOEX fetch | Overcomplicated; gRPC works fine on a background thread in the same process | `TinkoffFetcher` daemon thread pattern |
+| `tpulse-py` (PyPI) | Unmaintained since Dec 2021; unofficial API. Adds fragile third-party dependency for undocumented endpoint | Direct `httpx` implementation in `TPulseFetcher` |
+| `pydantic-ai` framework | Overkill for 2 advisory agents; adds abstraction over existing `parse_structured()` | Existing `LLMClient.parse_structured()` |
+| `aiomoex` | Only OHLCV data, no news endpoint | MOEX ISS RSS feed via `feedparser` |
+| `Telethon` (MTProto) | Requires phone number registration, session file management; current httpx scraping is sufficient for public channels | Keep existing `TelegramChannelReader`; defer Telethon if private channels needed |
+| Separate news microservice / Celery workers | Architecture overkill; APScheduler `news_cycle` already handles polling reliably | Extend `TradingLoop._news_cycle()` with T-Pulse source |
+| PostgreSQL window functions on raw `sentiment_scores` table | Expensive full-table scan per ML training run | TimescaleDB continuous aggregate materialized view |
+| OpenAI Structured Outputs beta (`anthropic-beta: structured-outputs-2025-11-13`) | Existing `parse_structured()` uses JSON mode + Pydantic validation which already works reliably across all 5 providers | Existing `_CachingLLMClient.parse_structured()` implementation |
+| LLM modifiers in sizing pipeline | Unanimously rejected by expert panel — breaks backtestability, determinism, and calibration | Portfolio Review Agent is advisory-only (Telegram output, no strategy modification) |
 
 ---
 
 ## Installation
 
-No new packages. Verify MOEX token is set:
+**No new packages.** Zero additions to `pyproject.toml`.
+
+Verify environment:
 
 ```bash
-echo $FINALAYZE_TINKOFF_TOKEN  # must be non-empty for MOEX segments
-```
+# All imports must succeed:
+uv run python -c "from finalayze.analysis.llm_client import LLMClient; print('LLMClient OK')"
+uv run python -c "from finalayze.data.fetchers.rss_fetcher import RssNewsFetcher; print('RSS OK')"
+uv run python -c "from finalayze.core.models import SentimentScoreModel; print('SentimentScore schema OK')"
+uv run python -c "import httpx; print('httpx OK')"
+uv run python -c "import feedparser; print('feedparser OK')"
 
-Verify existing libraries are importable in script context:
-
-```bash
-cd /Users/f1xgun/finalayze
-uv run python -c "from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher; print('OK')"
-uv run python -c "from finalayze.data.fetchers.cbr import CBRFetcher; print('OK')"
-uv run python -c "from finalayze.core.experiment_manager import ExperimentManager; print('OK')"
+# Verify MOEX news feeds are reachable:
+curl -s "https://www.moex.com/export/news.aspx?cat=200" | head -5
 ```
 
 ---
 
 ## Version Compatibility
 
-| Package | Installed | Feature Used | v9.0 Constraint |
+| Package | Installed | Feature Used | v10.0 Constraint |
 |---------|-----------|-------------|-----------------|
-| `t-tech-investments` | custom index | `AsyncClient`, `CandleInterval` | Requires `target="invest-public-api.tbank.ru:443"` — already set in `TinkoffFetcher._make_client()` |
-| `scikit-learn` | >=1.5.0 | `mutual_info_classif`, `accuracy_score` | No changes |
-| `xgboost` | >=2.1.0 | Training + feature importance | No changes |
-| `lightgbm` | >=4.5.0 | Training | No changes |
-| `catboost` | >=1.2.0 | Training | No changes |
-| `pandas-ta` | >=0.3.14b1 | Feature engineering experiments | Existing import pattern; same `ta.rsi()` etc. calls |
-| `httpx` | >=0.28.0 | `CBRFetcher` sync client | No changes |
+| `feedparser` | `>=6.0.12` | MOEX ISS RSS feeds (new cat=200, cat=202) | No change; existing `RssNewsFetcher` handles all RSS feeds identically |
+| `httpx` | `>=0.28.0` | `TPulseFetcher` REST calls | Existing sync client pattern from `TelegramChannelReader`; no version bump needed |
+| `beautifulsoup4` | `>=4.14.3` | Existing Telegram scraping | No change |
+| `anthropic` | `>=0.42.0` | `PortfolioReviewAgent`, `AnomalyInterpreterAgent` via `parse_structured()` | No change; `parse_structured()` already works with Anthropic provider |
+| `openai` | `>=1.50.0` | Same agents via OpenRouter / OpenAI provider | No change |
+| `SQLAlchemy` | `>=2.0.36` | `fetch_rolling_sentiment()` raw SQL query against new continuous aggregate | Use `session.execute(text(...))` — existing pattern already in codebase |
+| `asyncpg` | `>=0.30.0` | DB driver for TimescaleDB continuous aggregate | No change |
+| `apscheduler` | `>=3.10.4` | Portfolio review daily job | Extend `TradingLoop.start()` with new `add_job()` call — no scheduler version change |
+| `pydantic` v2 | `>=2.10.0` | `PortfolioReviewOutput`, `AnomalyExplanationOutput` | Standard `BaseModel` with `model_config = ConfigDict(frozen=True)` — no version constraint |
 
 ---
 
 ## Sources
 
-- `src/finalayze/data/fetchers/tinkoff_data.py` — `_run_async()` docstring confirms "tests, standalone scripts" fallback path with self-managed loop (HIGH confidence, direct read)
-- `src/finalayze/ml/training/quality_gates.py` — `check_accuracy_gate()` n_eff scaling and `_MAX_ACCURACY_THRESHOLD = 0.55` cap confirmed (HIGH confidence, direct read)
-- `src/finalayze/ml/features/technical.py` — 10 MOEX macro features exist in `_compute_cbr_features()`, `_compute_brent_*()`, `_compute_macro_features()` (HIGH confidence, direct read)
-- `scripts/auto_ml_research.py` — `_MOEX_LOOKBACK_DAYS = 730`, `_MOEX_MAX_FEATURES = 10`, `_MOEX_ATR_UPLIFT = 1.2` already stubbed (HIGH confidence, direct read)
-- `src/finalayze/core/experiment_manager.py` — `create()`, `record_verdict()` public API confirmed (HIGH confidence, direct read)
-- `config/segments.py` — `ru_blue_chips`, `ru_energy`, `ru_tech`, `ru_finance` symbols confirmed (HIGH confidence, direct read)
-- `pyproject.toml` — all library versions confirmed (HIGH confidence, direct read)
+- `src/finalayze/analysis/llm_client.py` — `parse_structured()` signature and `_CachingLLMClient` confirmed (HIGH confidence, direct read)
+- `src/finalayze/data/fetchers/rss_fetcher.py` — `RssNewsFetcher` pattern confirmed (HIGH confidence, direct read)
+- `src/finalayze/data/fetchers/telegram_reader.py` — httpx + BeautifulSoup pattern confirmed (HIGH confidence, direct read)
+- `src/finalayze/orchestration/trading_loop.py` — `_news_cycle()` structure, APScheduler integration, fire-and-forget sentiment persistence confirmed (HIGH confidence, direct read)
+- `src/finalayze/core/models.py` — `SentimentScoreModel` hypertable schema confirmed (HIGH confidence, direct read)
+- `src/finalayze/monitoring/anomaly_detector.py` — `check()` returns `list[str]` of triggered metrics confirmed (HIGH confidence, direct read)
+- `config/settings.py` — existing RSS URLs and telegram channels confirmed (HIGH confidence, direct read)
+- `pyproject.toml` — all installed library versions confirmed (HIGH confidence, direct read)
+- `https://www.moex.com/s355` — MOEX official RSS feed catalog, cat=200 and cat=202 URLs verified (MEDIUM confidence, WebFetch)
+- artydev.ru/posts/pulse-parser/ — T-Pulse REST API endpoint structure `https://www.tinkoff.ru/api/invest-gw/social/v1/post/instrument/{ticker}` (LOW confidence — community blog, unofficial, authentication changes noted in June 2024)
+- github.com/meanother/tpulse-py — last commit Dec 2021, confirms unmaintained status (MEDIUM confidence, direct GitHub read)
+- Python asyncio docs + mkennedy.codes fire-and-forget article — `asyncio.create_task()` + strong reference set pattern for Python 3.12+ (HIGH confidence, official docs + verified community source)
+- TimescaleDB continuous aggregates docs — `time_bucket()` + `add_continuous_aggregate_policy()` pattern (MEDIUM confidence, WebSearch-verified official docs)
+- WebSearch (Anthropic structured outputs, Nov 2025) — confirmed `parse_structured()` approach is equivalent to new beta API; existing implementation adequate (MEDIUM confidence)
 
 ---
 
-*Stack research for: Finalayze v9.0 ML AutoResearch & MOEX Adaptation*
-*Researched: 2026-04-13*
+*Stack research for: Finalayze v10.0 Runtime LLM Trading Agents*
+*Researched: 2026-04-14*

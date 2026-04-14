@@ -1,172 +1,207 @@
 # Project Research Summary
 
-**Project:** Finalayze v9.0 — ML AutoResearch & MOEX Adaptation
-**Domain:** ML experiment automation + multi-market data integration (equity trading)
-**Researched:** 2026-04-13
+**Project:** Finalayze v10.0 — Runtime LLM Trading Agents
+**Domain:** Live MOEX equities trading system with LLM-powered news analysis agents
+**Researched:** 2026-04-14
 **Confidence:** HIGH
 
 ## Executive Summary
 
-Finalayze v9.0 extends an existing, battle-tested ML autoresearch pipeline (`auto_ml_research.py`) to support Russian equity segments (MOEX) and adds three new search strategies (ensemble weight optimization, automatic feature engineering, cross-segment transfer). The recommended approach is purely additive: zero new packages, all gaps close by wiring existing infrastructure components (`TinkoffFetcher`, `CBRFetcher`, `MoexISSFetcher`, `ExperimentManager`) into the research script. The existing codebase already ships MOEX macro features in `technical.py`, MOEX segment definitions in `config/segments.py`, adaptive quality gates in `quality_gates.py`, and a sync-safe gRPC bridge in `TinkoffFetcher._run_async()` — none of these need to be built, only wired.
+Finalayze v10.0 is an incremental milestone that activates and extends a largely-built LLM news analysis subsystem. The core infrastructure — `LLMClient` with 5 providers, `NewsImpactAnalyzer`, `EventDrivenStrategy`, `RssNewsFetcher`, `TelegramChannelReader`, and the `sentiment_scores` TimescaleDB hypertable — already exists and is verified. The milestone's central challenge is not building new infrastructure but closing specific activation gaps: the `EventDrivenStrategy` has never fired a live signal because `_news_cycle()` is gated behind `_any_event_driven_enabled()` which always returns false, and the news pipeline calls LLM analysis with a hardcoded 1800-second timeout that stalls on free-tier OpenRouter latency. The recommended approach is surgical, additive-only work: config flips, parameter injection, two new L3 agent classes, one new L2 accessor, and one DB migration — with zero new package dependencies.
 
-The critical dependency ordering is strict: MOEX segment symbols -> data adapter -> macro features -> adaptive quality gates -> ExperimentManager integration -> new search strategies. The three new strategies (ensemble weights, feature engineering, cross-segment transfer) cannot be meaningfully evaluated until MOEX data flows end-to-end and quality gates produce reliable verdicts on 3+ walk-forward folds. Phases 1-4 are a sequential prerequisite chain; phases 5-6 can be parallelized after that chain is stable.
+The two new agents follow a clear pattern from research. The `PortfolioReviewAgent` must be advisory-only (Telegram output, no trade directives) because the expert panel unanimously rejected LLM modifiers in the sizing pipeline as they break backtestability and determinism. The `AnomalyInterpreterAgent` must use fire-and-forget dispatch so the primary anomaly alert is never delayed by LLM latency. Academic literature (TrustTrade 2025, LLM Multi-Agent Anomaly Detection 2024) confirms both patterns are production-validated approaches. T-Pulse integration was investigated and must be deferred: the T-Invest gRPC SDK exposes no news or pulse service, and the undocumented REST endpoint changed authentication in June 2024 with unclear current status.
 
-The primary risks are data-integrity and statistical validity: look-ahead bias when joining macro series (always shift by 1 day), the T-Bank sandbox endpoint returning empty historical candles (always use `sandbox=False` for training), and walk-forward fold collapse on 730-day MOEX history (MOEX-specific fold constants required — current US constants produce 0-1 folds). Ensemble weight optimization and combinatorial feature engineering carry secondary overfitting risk on small MOEX datasets and must be gated behind hard constraints (weight simplex cap at 0.5, candidate feature cap at `n_samples / 20`).
+The critical risks cluster in Phase 1 (news pipeline activation). Three latent bugs exist in the current codebase that will manifest the moment the live pipeline is enabled: `NewsAnalyzer.analyze()` uses `json.loads()` instead of `parse_structured()` causing silent signal loss on any LLM format variation; the `threading.Lock` over `_sentiment_cache` is acquired inside an async coroutine that can deadlock if an `await` is ever inserted inside the lock block; and the 1800-second batch timeout causes APScheduler thread starvation. All three must be fixed before activating `event_driven` on any live segment. The sentiment decay clock also requires a market-hours gate to prevent the first article of the trading day from producing outsized signals after the overnight quiet period.
 
 ## Key Findings
 
 ### Recommended Stack
 
-The stack for v9.0 is entirely the existing tech stack — no new packages are introduced. The key insight from STACK.md is that `TinkoffFetcher` already solves the sync-from-script problem via a self-managed background event loop (`_run_async()` + `run_coroutine_threadsafe()`). Callers in sync scripts construct `TinkoffFetcher` without a `grpc_loop` argument and the daemon thread fallback activates automatically. `CBRFetcher` and `MoexISSFetcher` are synchronous HTTP clients (httpx-based) and require no bridging. `ExperimentManager` is fully synchronous file I/O.
+v10.0 requires zero new package dependencies. Every technology needed is already installed and verified in `pyproject.toml`. The implementation surface is entirely new Python modules and configuration changes on top of the existing stack.
 
 **Core technologies:**
-- `t-tech-investments` (T-Bank gRPC SDK): MOEX candle fetch — already handles sync-async bridge via `_run_async()`
-- `pandas-ta`: Automatic feature engineering experiments — existing indicator library, no tsfresh/featuretools needed
-- `XGBoost + LightGBM + CatBoost + meta-learner`: Ensemble; CatBoost especially valuable for small MOEX tabular datasets
-- `scikit-learn`: MI-based feature selection (`select_features_efficient()`) and quality gate metrics
-- `ExperimentManager` (internal): Experiment persistence and verdict lifecycle — file-based CRUD at Layer 0
-- `CBRFetcher` + `MoexISSFetcher`: Sync HTTP clients for macro data (CBR key rate, IMOEX index, FX rates)
-
-**Explicitly avoided:** `tsfresh` (700+ features vs 10-15 budget), `featuretools` (entity modeling overkill), `nest_asyncio` (not needed — `_run_async()` handles it), Optuna in autoresearch loop (nested optimization obscures signal), separate MLflow/experiment-tracking DB (ExperimentManager + JSONL covers all needs).
+- `anthropic` / `openai` via `LLMClient` ABC: LLM backbone for new agents — `parse_structured()` already handles typed Pydantic output across all 5 providers; new agents call it directly
+- `httpx` (>=0.28.0): T-Pulse REST calls if implemented — `TelegramChannelReader` is the reference pattern; implement as `TPulseFetcher` default-disabled
+- `feedparser` (>=6.0.12): MOEX ISS official news feeds — add `moex.com/export/news.aspx?cat=200` and `cat=202` as config-only change to `news_rss_urls`
+- `APScheduler` (>=3.10.4): Portfolio review daily cron registration — extend `TradingLoop.start()` with one new `add_job()` call
+- `SQLAlchemy` 2.0 async + `asyncpg`: Rolling sentiment aggregation — `session.execute(text(...))` pattern already used for raw SQL; new `SentimentStore` queries continuous aggregate view
+- `asyncio.run_coroutine_threadsafe` + strong reference set: Fire-and-forget pattern for `AnomalyInterpreterAgent` — documented Python 3.12+ fix for task GC; already used in `TradingLoop._persist_sentiment_scores()`
+- TimescaleDB continuous aggregates: `sentiment_7d_avg` materialized view via Alembic migration 004 — pure SQL, incremental O(new data only) refresh, no Python library change
 
 ### Expected Features
 
 **Must have (table stakes):**
-- MOEX segment symbols in `_SEGMENT_SYMBOLS` — prerequisite for any MOEX run; currently absent
-- MOEX data adapter (TinkoffFetcher path in `_prepare_data()`) — pipeline is US-only without this
-- MOEX macro features wired into `build_full_dataset()` — already computed in `technical.py`, gap is fetch-and-wire
-- Adaptive signal_count quality gate — fixed `_MIN_SIGNALS=50` blocks all MOEX folds (15-30 signals per fold is normal)
-- MOEX-tuned walk-forward fold parameters — current constants yield 0-1 folds on 730-day history
-- MOEX-tuned default hyperparameters — `max_depth=3` (not 5) to prevent overfitting
-- ExperimentManager integration — hypothesis tracking, lifecycle verdict (ACCEPTED/REJECTED/INCONCLUSIVE)
+- RSS + Telegram sources enabled on `ru_blue_chips` / `ru_diversified` with `event_driven.enabled: true` — closes the "EventDrivenStrategy never fires" gap; all code exists, YAML flip only
+- Per-source credibility weights (RBC=0.8, Interfax=0.8, TASS=0.7, Telegram=0.5) with hard cap at 0.7 — `EventDrivenStrategy.generate_signal(credibility=)` already accepts float; inject per-source map in `_news_cycle`
+- Per-article LLM timeout (5s) + per-cycle timeout (30s) replacing the existing 1800s no-op — `asyncio.wait_for` wrapper; prevents APScheduler thread starvation
+- Deduplication gate moved before `NewsImpactAnalyzer` — eliminates wasted LLM tokens on repeated articles; current check runs after the LLM call
+- `AnomalyInterpreterAgent`: fire-and-forget async task after `AnomalyDetector.check()` fires; Haiku-tier LLM; appends explanation to Telegram alert; never blocks raw alert
+- `PortfolioReviewAgent`: daily Pydantic-structured report; Sonnet tier; runs in `daily_reset` job outside market hours; Telegram digest only
 
-**Should have (differentiators):**
-- Ensemble weight optimization strategy — XGB:LGBM:CatBoost simplex search (~9-12 candidate configs)
-- Hypothesis-linked verdicts with per-strategy experiment IDs — surgical comparison across strategy types
-- Cross-segment transfer strategy — validates US-learned features on MOEX, avoids redundant search
+**Should have (competitive):**
+- Sentiment rolling aggregation: TimescaleDB `time_bucket()` continuous aggregate on `sentiment_scores`; `SentimentStore` L2 class for future ML feature extraction — wire now so data accumulates; ML use is v11+
+- FIGI-resolved sentiment routing: map `EntityExtractor` output through `InstrumentRegistry` before `sentiment_scores` write — improves ML feature quality; low implementation cost after Phase 1
 
-**Defer (post-MVP):**
-- Automatic feature engineering strategy — high complexity, high overfitting risk on 730-day MOEX data; defer until MOEX baseline is stable and feature vocabulary is established
-- LSTM in autoresearch — 10-50x slower per fold; train separately via `train_models.py` after tree ensembles are validated
+**Defer (v2+):**
+- XGBoost sentiment features — requires 30+ days of accumulated `sentiment_scores` data; full ML experiment cycle; v11+
+- T-Pulse integration — T-Invest gRPC SDK has no news service; undocumented REST endpoint with authentication changes in June 2024; defer until programmatic API confirmed
+- Multi-source consensus scoring (TrustTrade-style cross-agent agreement) — meaningful complexity; reserve until baseline sentiment features show ML lift
+- Streaming news (WebSocket/Kafka) — RSS polling every 5 min sufficient for MOEX daily-bar strategies; streaming adds operational complexity with no measurable edge at daily timeframes
 
 ### Architecture Approach
 
-All changes are concentrated in two files: `scripts/auto_ml_research.py` (~280 lines added) and `src/finalayze/ml/training/quality_gates.py` (parametrized `min_signals` + `_MOEX_MIN_SIGNALS=15` constant). No new source modules, no new layers, no new processes. The data flow branches on segment prefix (`us_` vs `ru_`): MOEX segments route to `TinkoffFetcher` for candles and a new `_fetch_moex_macro()` function that constructs `MoexMarketData` and passes it through `build_full_dataset()` -> `build_triple_barrier_dataset()` -> `compute_features()` where the 10 existing MOEX macro features activate. ExperimentManager integration is opt-in via `--experiment-id` CLI flag, keeping the script non-breaking for existing invocations.
+The architecture is strictly additive: two new L3 agent files, one new L2 accessor, one Alembic migration, modifications to `TradingLoop` (L5), `AnomalyDetector` and `SandboxMonitorService` (L6). The layered dependency model (L0→L6) is maintained throughout. The key structural constraint is the two async loop separation: `_async_loop` (HTTP/DB/Telegram) and `_grpc_loop` (Tinkoff gRPC). New agents must use `_run_async()` from APScheduler threads, never call it from within `_async_loop`, and use `asyncio.run_coroutine_threadsafe()` for the fire-and-forget cross-thread pattern.
 
 **Major components:**
-1. `_fetch_moex_candles()` / `_fetch_moex_macro()` — new functions in autoresearch script; sync-safe via existing fetcher patterns
-2. `_prepare_data()` routing branch — dispatches `us_` to yfinance path, `ru_` to TinkoffFetcher path
-3. `evaluate_fold(min_signals=...)` — parametrized quality gate that preserves US thresholds while accommodating MOEX dataset sizes
-4. `generate_ensemble_weight_experiments()` / `generate_transfer_experiments()` — new strategy generators
-5. ExperimentManager opt-in wiring — one experiment per `run_research_loop()` invocation; JSONL log retained as parallel audit trail
+1. `PortfolioReviewAgent` (L3, new) — accepts `PortfolioState`, calls `parse_structured()` with `PortfolioReviewResult` Pydantic schema; advisory only; scheduled as daily cron in `TradingLoop._portfolio_review_cycle()`
+2. `AnomalyInterpreterAgent` (L3, new) — accepts triggered metric names + z-scores from `AnomalyDetector._fire_alert()`; dispatched via `asyncio.run_coroutine_threadsafe`; follow-up Telegram message only; raw alert fires first unconditionally
+3. `SentimentStore` (L2, new) — read-only accessor for `sentiment_7d_avg` continuous aggregate view; used by future ML feature pipeline; write path unchanged
+4. `TradingLoop` modifications (L5, additive) — source credibility map, latency SLA gate in `_news_cycle`, new `_portfolio_review_cycle()` cron job, Portfolio Review Agent constructor injection
+5. `AnomalyDetector` / `SandboxMonitorService` modifications (L6, additive) — optional `anomaly_interpreter` and `async_loop` constructor params; fire-and-forget dispatch in `_fire_alert()`
 
 ### Critical Pitfalls
 
-1. **TinkoffFetcher requires InstrumentRegistry** — constructing without properly initialized registry causes silent empty-candle returns for all MOEX symbols. Use `build_default_registry()`; assert token present; raise loudly if 0 candles returned after fetch loop.
+1. **`threading.Lock` held across async LLM call boundary (deadlock)** — never place any `await` expression inside `with self._sentiment_lock:`; compute values async outside the lock, acquire lock only for the dict write; this is a latent bug if new `await` is added to `_apply_impact_result`
 
-2. **sandbox=False mandatory for training** — `TinkoffFetcher` defaults to `sandbox=True` which has no historical candle data. All training scripts must explicitly set `sandbox=False`. Add `assert not fetcher._sandbox` as defensive check.
+2. **LLM timeout blocking news cycle, starving strategy execution** — replace `_run_async(coro, timeout=1800)` with per-article 5s timeout via `asyncio.wait_for`; cap batch at 20 articles maximum; log `news_cycle_duration` as metric; fix in Phase 1 before any live activation
 
-3. **Look-ahead bias in macro feature join** — CBR key rate (announced ~13:30 Moscow time) and same-day USDRUB/IMOEX closes must be `shift(1)` before joining to feature vectors. Write unit test with synthetic macro series before merging any macro feature code.
+3. **`NewsAnalyzer.analyze()` uses `json.loads()` instead of `parse_structured()`** — silent signal loss on any LLM format variation (code fences, trailing whitespace, explanatory text); migrate to `parse_structured(SentimentResult)` before activating live pipeline; this is the single highest-priority code fix
 
-4. **Walk-forward fold collapse on 730-day MOEX history** — current US fold constants (`_WF_TRAIN_MONTHS=12`, `_WF_STEP_MONTHS=3`) produce 0-1 folds. MOEX-specific constants (`MOEX_WF_TRAIN_MONTHS=8`, `MOEX_WF_TEST_MONTHS=3`, `MOEX_WF_STEP_MONTHS=2`, `MOEX_PURGE_GAP=21`) yield 3-4 folds. Add guard: abort if `len(folds) < 3`.
+4. **Portfolio Review Agent suggestions interpreted as executable orders** — `PortfolioReviewResult` schema must contain no `direction`, `confidence`, or `symbol`+`market_id` fields matching `Signal`/`OrderRequest`; named distinctly; handler must write to Telegram only, never to `BrokerRouter`; add type assertion at handler entry
 
-5. **ExperimentManager ID conflicts from per-config file creation** — do not create one `.md` file per internal research config (100+ names like `ablate-rsi`). Create one experiment per `run_research_loop()` invocation with ID pattern `{segment}_{strategy}_{YYYYMMDD_HHMM}`; sub-results go to JSONL.
+5. **Sentiment cache decay distorting first-article-of-day signal** — `_SENTIMENT_HALF_LIFE_HOURS = 4.0` was tuned for continuous intraday flow; apply decay only during MOEX market hours (10:00-18:45 MSK); freeze the decay clock overnight to prevent first morning article from spiking from near-zero baseline
 
-6. **Ensemble weight overfitting on small MOEX folds** — 30-80 sample validation sets cannot distinguish optimization signal from noise. Default to equal weights (1/3 each) unless 4+ independent folds available. Constrain any single model weight to <= 0.5.
-
-7. **Combinatorial feature engineering explosion** — hard cap at `n_samples / 20` candidates (~36 for MOEX). Generate only domain-motivated combinations; run permutation test before selection.
+6. **LLM hallucinated ticker extraction creating ghost signals** — all `EntityExtractor` output must be validated against `InstrumentRegistry` whitelist before touching `_sentiment_cache`; log rejected tickers with `entity_not_in_registry` reason
 
 ## Implications for Roadmap
 
-Based on research, the critical path is sequential for phases 1-4 (each depends on the prior), then phases 5-6 can proceed in parallel.
+Based on research, the build order is dictated by two principles: fix latent bugs before activation, and validate fire-and-forget async pattern on the least risky component first.
 
-### Phase 1: MOEX Data Adapter
-**Rationale:** Nothing runs on MOEX without this. Prerequisite for all subsequent phases. Also catches the two most common silent-failure pitfalls (no InstrumentRegistry, sandbox endpoint) before they contaminate later work.
-**Delivers:** `--segment ru_blue_chips` loads data without error; candle counts printed; TinkoffFetcher constructs correctly with `build_default_registry()`; `sandbox=False` assertion in place.
-**Addresses:** MOEX segment symbols in `_SEGMENT_SYMBOLS`; `_fetch_moex_candles()` function; `_prepare_data()` routing branch; MOEX-specific walk-forward fold constants.
-**Avoids:** Pitfall 1 (InstrumentRegistry), Pitfall 9 (sandbox endpoint), Pitfall 3 (fold collapse — verify empirically here).
+### Phase 1: News Pipeline Activation and Hardening
 
-### Phase 2: MOEX Macro Features
-**Rationale:** 10 MOEX macro features already exist in `technical.py` — this phase only wires the fetch-and-pass-through. Must come before quality gate tuning because macro features affect the feature distribution that quality gates evaluate. The look-ahead bias pitfall must be resolved here or it silently corrupts all future models.
-**Delivers:** `usdrub_zscore_60d`, `brent_zscore_60d`, `cbr_rate_level`, etc. are non-zero in MOEX feature dicts; unit test verifies `shift(1)` alignment; Brent fixture in `tests/fixtures/` for CI determinism.
-**Uses:** `CBRFetcher`, `MoexISSFetcher`, `YFinanceFetcher` (for Brent `BZ=F`); `MoexMarketData` schema; `MarketDataLoader` reuse pattern.
-**Avoids:** Pitfall 2 (look-ahead bias), Pitfall 8 (Brent non-determinism in CI).
+**Rationale:** Three latent bugs (`json.loads`, 1800s timeout, lock/async mixing risk) will cause immediate silent failure or deadlock when the news pipeline goes live. These must be fixed before any live segment activation. This phase also adds the safeguards (ticker whitelist, LLM liveness alerting, article budget cap, dedup gate reordering) that prevent cost explosions and ghost signals.
 
-### Phase 3: Adaptive Quality Gates
-**Rationale:** Fixed `_MIN_SIGNALS=50` blocks all MOEX experiments. Must be fixed before any experiment results can be trusted. Independent of Phase 2 at the code level but validated with real MOEX data from Phase 1.
-**Delivers:** MOEX experiments produce 3+ valid folds; signal_count gate parametrized with `_MOEX_MIN_SIGNALS=15`; degenerate predictor unit test (all-BUY on 60%-positive class fails class_balance gate); fold guard in place.
-**Avoids:** Pitfall 3 (zero valid folds), Pitfall 4 (degenerate predictor bypass).
+**Delivers:** A production-safe news ingestion pipeline that activates `EventDrivenStrategy` on `ru_*` segments for the first time; credibility-weighted sentiment scores written to DB; HealthMonitor tracking LLM liveness
 
-### Phase 4: ExperimentManager Integration
-**Rationale:** Research tracking needed before adding new strategies — otherwise ensemble weight and cross-segment experiments have no persistent hypothesis record. Integration is opt-in and non-breaking for existing JSONL workflows.
-**Delivers:** `--experiment-id {segment}_{strategy}_{timestamp}` creates experiment file with metrics and verdict; two concurrent segment runs produce non-overlapping files; JSONL log retained in parallel.
-**Avoids:** Pitfall 5 (ExperimentManager ID conflicts).
+**Addresses features:** Real MOEX news sources wired to EventDrivenStrategy; credibility cap; LLM timeout; deduplication gate; MOEX ISS official feeds (config-only); LLM liveness alerting
 
-### Phase 5: Ensemble Weight Optimization Strategy
-**Rationale:** Medium value, medium complexity; depends on working MOEX baseline with reliable fold counts (Phases 1-3). Simpler than feature engineering and has bounded search space.
-**Delivers:** `--strategy ensemble_weights` searches XGB:LGBM:CatBoost simplex (~9-12 configs); equal weights enforced when n_folds < 4; optimization gain logged separately for auditability.
-**Avoids:** Pitfall 6 (ensemble weight overfitting).
+**Avoids pitfalls:** `json.loads` silent signal loss; LLM timeout starvation; hallucinated ticker ghost signals; `threading.Lock` deadlock; LLM API downtime silent failure; per-article cost explosion
 
-### Phase 6: New Search Strategies (Feature Engineering + Cross-Segment Transfer)
-**Rationale:** Both strategies are high-complexity and depend on stable MOEX baselines from Phases 1-4. They can be developed in parallel with each other. Feature engineering carries highest overfitting risk and needs the hardest constraints from the start. Cross-segment transfer requires validated US experiment history in JSONL.
-**Delivers:** `--strategy feature_engineering` with candidate cap at `n_samples / 20` and permutation test; `--strategy cross_segment_transfer` with JS divergence check excluding VIX features from MOEX transfer set.
-**Avoids:** Pitfall 7 (cross-segment distribution shift), Pitfall 10 (combinatorial feature explosion).
+**Research flag:** Standard patterns — newsparser + APScheduler wiring is well-documented. No phase research needed. Codebase inspection provides complete implementation context.
+
+### Phase 2: EventDrivenStrategy Activation and Signal Quality
+
+**Rationale:** After Phase 1 hardens the pipeline, the event_driven strategy can be safely enabled on ru_* segment presets. Phase 2 validates the sentiment decay behavior, adds the CBR/dividend duplicate signal guard in the combiner, and runs a backtest on CBR announcement dates to verify combined confidence does not double-count correlated catalysts.
+
+**Delivers:** `event_driven` strategy enabled at 15% weight on `ru_blue_chips` and `ru_diversified`; combiner hook preventing CBR/dividend signal amplification; sentiment decay gated on market hours; sandbox validation week with live news data
+
+**Addresses features:** EventDrivenStrategy live on MOEX segments; sentiment decay market-hours gate; per-source credibility tuning after observing real signal distribution
+
+**Avoids pitfalls:** CBR/dividend duplicate signal (EventDriven + cbr_calendar amplification); sentiment decay first-article-of-day distortion; Telegram low-credibility source overweighting
+
+**Research flag:** Needs shallow validation research during planning — specifically, review the `StrategyCombiner` hook system to confirm `_on_strategy_signal` hook can suppress correlated catalyst signals without architectural changes.
+
+### Phase 3: Portfolio Review Agent
+
+**Rationale:** No dependency on news pipeline activation. All dependencies (LLMClient, PortfolioState, TelegramAlerter, daily cron pattern) already exist. Can be built in parallel with Phase 2 but scheduled after Phase 1 completes to reuse async patterns validated there.
+
+**Delivers:** Daily advisory Pydantic-structured LLM analysis of portfolio; `PortfolioReviewAgent` L3 class; `PortfolioReviewResult` Pydantic schema in `core/schemas.py`; daily Telegram digest
+
+**Addresses features:** Portfolio Review Agent; structured daily advisory report
+
+**Avoids pitfalls:** Agent output interpreted as executable orders (type schema design enforced at this phase); Portfolio Review running during market hours (off-hours scheduling gate)
+
+**Research flag:** Standard patterns — LLM structured output with `parse_structured()` is well-established in codebase. No phase research needed.
+
+### Phase 4: Anomaly Interpreter Agent
+
+**Rationale:** Builds on the fire-and-forget async pattern from Phase 1 and the async loop integration validated in Phase 3. Self-contained L3 addition that threads through `AnomalyDetector` and `SandboxMonitorService` via optional constructor params. Lowest-risk phase since the raw alert path is unchanged.
+
+**Delivers:** `AnomalyInterpreterAgent` L3 class; follow-up LLM explanation appended to anomaly Telegram alerts; two-step alert pattern (immediate raw alert + async enrichment)
+
+**Addresses features:** Anomaly Interpreter Agent; human-readable anomaly diagnosis
+
+**Avoids pitfalls:** LLM interpretation blocking raw alert delivery (two-step pattern enforced); `asyncio.run_coroutine_threadsafe` correctness (validated in Phase 1)
+
+**Research flag:** Standard patterns — fire-and-forget async is established from Phase 1. No phase research needed.
+
+### Phase 5: Sentiment Rolling Aggregation Infrastructure
+
+**Rationale:** The write path is already working. This phase adds only the read accessor and DB migration — no trading-critical path changes. Must be done before v11 ML work but can be deferred until 2+ weeks of `sentiment_scores` data confirms the table is populating correctly after Phase 1 activation.
+
+**Delivers:** `SentimentStore` L2 accessor; `sentiment_7d_avg` TimescaleDB continuous aggregate with auto-refresh policy; `SentimentFeatureProvider` stub in Layer 3 for v11 ML integration
+
+**Addresses features:** Sentiment rolling aggregation infrastructure; FIGI-resolved sentiment routing
+
+**Avoids pitfalls:** Python-side rolling aggregation on full raw table (TimescaleDB incremental refresh is O(new data only)); ML pipeline crashing on empty/minimal data (query handles sparse data)
+
+**Research flag:** Needs confirmation of TimescaleDB continuous aggregate window function syntax (`timescaledb.enable_cagg_window_functions` setting) during planning. One config flag, low risk.
 
 ### Phase Ordering Rationale
 
-- Phases 1->2->3->4 are a strict dependency chain: data adapter -> macro features -> quality gates -> experiment tracking. No later phase produces trustworthy results without all prior phases stable.
-- Phase 3 modifies `quality_gates.py` which is shared infrastructure; must be completed before phases 5-6 produce gate-dependent verdicts.
-- Phases 5 and 6 depend on the same Phases 1-4 foundation but are independent of each other and can be parallelized.
-- Automatic feature engineering is explicitly lower priority within Phase 6 because its overfitting risk on 730-day MOEX data is high and expected signal quality is low until a MOEX-specific feature vocabulary is established.
+- Phase 1 must be first: latent bugs (`json.loads`, 1800s timeout) cause immediate failure on live activation; fixing before enabling prevents silent degradation
+- Phase 2 depends on Phase 1: EventDrivenStrategy activation only makes sense after the pipeline is production-safe
+- Phase 3 is independent of news pipeline but benefits from Phase 1's async pattern validation; schedule after Phase 1 completes
+- Phase 4 is independent but applies fire-and-forget pattern from Phase 1; schedule after Phase 1 and 3 for pattern reuse
+- Phase 5 is least urgent: write path works; read accessor and DB migration needed only when ML feature work begins in v11
 
 ### Research Flags
 
-Phases needing attention during planning:
-- **Phase 3:** MOEX-specific walk-forward fold parameters need empirical calibration — recommended constants are analytically derived but must be verified against actual candle volumes per `ru_*` segment.
-- **Phase 6 (feature engineering):** Domain-motivated combination rules and permutation test threshold need explicit design decisions before implementation begins.
+Phases likely needing deeper research during planning:
+- **Phase 2:** Review `StrategyCombiner._on_strategy_signal` hook capability for correlated catalyst suppression — confirm hook has access to other active strategy signals in the same cycle
+- **Phase 5:** Verify `timescaledb.enable_cagg_window_functions` is enabled in Docker Compose PostgreSQL config; confirm continuous aggregate refresh policy syntax for current TimescaleDB version
 
-Phases with standard patterns (low planning uncertainty):
-- **Phase 1:** Follows established `train_models.py` MOEX branch pattern exactly — replicate, do not reinvent.
-- **Phase 2:** Two-line wire-up in `build_full_dataset()`; macro fetch pattern mirrors existing `MarketDataLoader._load_moex()`.
-- **Phase 4:** ExperimentManager API already defined and tested; integration is additive with opt-in flag.
-- **Phase 5:** Ensemble weight grid is bounded and well-defined; straightforward implementation.
+Phases with standard patterns (skip research-phase):
+- **Phase 1:** All patterns are codebase-native; `RssNewsFetcher`, `TelegramChannelReader`, `asyncio.wait_for` are well-understood
+- **Phase 3:** `parse_structured()` + Pydantic + APScheduler cron — established patterns throughout codebase
+- **Phase 4:** Fire-and-forget with `asyncio.run_coroutine_threadsafe` — documented pattern, validated in Phase 1
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All findings from direct codebase reads; zero new packages; all components already installed and tested |
-| Features | HIGH | Gap analysis grounded in diff between `train_models.py` (has MOEX) and `auto_ml_research.py` (lacks MOEX) |
-| Architecture | HIGH | Component boundaries, integration points, and data flow verified by direct file inspection of all affected modules |
-| Pitfalls | HIGH | All 10 pitfalls grounded in known codebase constraints, prior v6.0/v7.0 lessons, and MEMORY.md |
+| Stack | HIGH | All findings from direct `pyproject.toml` and source file inspection; zero new packages needed; all version constraints verified |
+| Features | HIGH | Cross-validated against codebase, `.planning/PROJECT.md` expert debate outcomes, and 4 academic papers; anti-features (Pre-Trade Reasoning) explicitly rejected by expert panel |
+| Architecture | HIGH | All integration points verified by direct inspection of `trading_loop.py` (2062+ LOC), `anomaly_detector.py`, `sandbox_monitor.py`, `llm_client.py`, T-Invest SDK `services.py`; no inference required |
+| Pitfalls | HIGH | Three pitfalls (`json.loads`, 1800s timeout, `threading.Lock` across await) confirmed as latent bugs by direct code inspection; academic sources validate hallucination and advisory-only patterns |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **CBRFetcher / MoexISSFetcher sync confirmation:** STACK.md notes these are httpx-based but it is not confirmed whether they expose sync wrappers or require `asyncio.run()`. Verify at Phase 2 implementation start; `asyncio.run()` is acceptable for a CLI script not inside an existing event loop.
-- **Brent fixture for CI:** Phase 2 must create `tests/fixtures/brent_candles.json` before any macro feature code reaches CI — currently absent.
-- **Actual MOEX candle volume per segment:** Fold parameter recommendations assume ~730 trading days for `ru_blue_chips`. Actual count may differ by segment (e.g., `ru_tech` symbols with shorter listing history). Verify empirically on first Phase 1 run.
-- **MarketDataLoader DB dependency:** ARCHITECTURE.md recommends reusing `MarketDataLoader.load()` for macro fetch. Confirm it can be instantiated in a script context without a running database connection (file-cached paths may avoid DB, but not confirmed).
+- **T-Pulse API availability**: REST endpoint `https://www.tinkoff.ru/api/invest-gw/social/v1/post/instrument/{ticker}` has uncertain authentication status post-June 2024. If T-Pulse is desired in v10.x, validate in sandbox environment before implementing. For v10.0, T-Pulse is excluded.
+
+- **OpenRouter free tier RPD cap**: Exact daily request limit for free-tier models varies by model and is not publicly documented. The article-budget cap (N=10 per cycle) and `FallbackLLMClient` provide mitigation, but actual production cost/limit behavior needs one week of live observation after Phase 1 activation to tune appropriately.
+
+- **Sentiment decay clock freeze implementation**: `is_market_open_now()` helper exists in `market_schedule`; verify it handles MOEX holiday calendar correctly before the decay gate depends on it in Phase 2.
+
+- **MOEX ISS RSS feed stability**: `moex.com/export/news.aspx?cat=200` and `cat=202` URLs verified via web research (MEDIUM confidence); availability should be confirmed with a live HTTP check during Phase 1 implementation.
 
 ## Sources
 
 ### Primary (HIGH confidence)
+- `src/finalayze/orchestration/trading_loop.py` — full async architecture, APScheduler jobs, sentiment pipeline, fire-and-forget pattern
+- `src/finalayze/analysis/llm_client.py` — `LLMClient` ABC, `parse_structured()`, `_CachingLLMClient` confirmed
+- `src/finalayze/analysis/news_analyzer.py` — `json.loads()` latent bug confirmed
+- `src/finalayze/monitoring/anomaly_detector.py` — `check()` returns `list[str]`, `_fire_alert()` synchronous path confirmed
+- `src/finalayze/strategies/event_driven.py` — `generate_signal(credibility=)` parameter confirmed
+- `src/finalayze/core/models.py` — `SentimentScoreModel` hypertable schema confirmed
+- `.venv/.../t_tech/invest/services.py` — T-Invest gRPC SDK exposes 10 services; no news/pulse service confirmed
+- `pyproject.toml` — all installed package versions confirmed
+- Python asyncio docs + Python 3.12 task GC documentation — `create_task()` + strong reference set pattern
 
-- `scripts/auto_ml_research.py` — current baseline; US-only; 4 existing strategies; fold constants; MOEX stubs already present
-- `scripts/train_models.py` — MOEX-aware pattern to replicate: `_is_moex_segment()`, `_get_lookback_days()`, MOEX-tuned hyperparameters
-- `src/finalayze/data/fetchers/tinkoff_data.py` — `_run_async()` self-managed loop; `sandbox=True` default; `GRPC_DNS_RESOLVER=native` at module level
-- `src/finalayze/ml/training/quality_gates.py` — `_MIN_SIGNALS=50`; `_MAX_ACCURACY_THRESHOLD=0.55`; `_dynamic_brier_threshold(n_eff)`
-- `src/finalayze/ml/features/technical.py` — 10 MOEX macro features (usdrub_zscore_60d, brent_zscore_60d, real_rate_zscore, cbr_rate_level, cbr_rate_delta, etc.)
-- `src/finalayze/core/experiment_manager.py` — `create_experiment()`, `link_result()`, `record_verdict()` public API; flat file namespace
-- `src/finalayze/core/schemas.py` — `MoexMarketData`, `MarketContext`, `ExperimentState`, `SuccessCriteria` schemas
-- `src/finalayze/ml/models/ensemble.py` — `model_weights: dict[str, float]` parameter; `_get_model_weight()` resolver
-- `config/segments.py` — `ru_blue_chips`, `ru_energy`, `ru_tech`, `ru_finance` symbols
-- `src/finalayze/data/loader.py` — `MarketDataLoader._load_moex()` as macro data reuse reference
-- `pyproject.toml` — all library versions confirmed installed
-- `MEMORY.md` — gRPC C-ares resolver fix, SDK target override, sandbox vs live endpoint distinction
-- `.planning/PROJECT.md` — v9.0 active requirements, Data Sources, Known Issues
+### Secondary (MEDIUM confidence)
+- [TrustTrade: Selective Consensus in LLM Trading Agents (2025)](https://arxiv.org/html/2603.22567) — per-source credibility weighting rationale
+- [LLM Multi-Agent Framework for Anomaly Detection in Finance (2024)](https://arxiv.org/html/2403.19735v1) — advisory-only anomaly explanation pattern validated
+- [LLM Architectures for Financial Document Processing (2025)](https://arxiv.org/html/2603.22651) — latency/hierarchy tradeoffs; hierarchical at 97.7% of reflexive accuracy at 60.9% cost
+- [Large Language Models in equity markets (Frontiers, 2025)](https://www.frontiersin.org/journals/artificial-intelligence/articles/10.3389/frai.2025.1608365/full) — advisory-vs-execution boundary in production
+- TimescaleDB continuous aggregates official docs — `time_bucket()` + `add_continuous_aggregate_policy()` verified
+- `https://www.moex.com/s355` — MOEX RSS feed catalog; cat=200 and cat=202 URLs
+
+### Tertiary (LOW confidence)
+- artydev.ru/posts/pulse-parser/ — T-Pulse REST endpoint structure (community blog, unofficial, authentication changes noted June 2024)
+- github.com/meanother/tpulse-py — T-Pulse library last commit Dec 2021, confirms unmaintained status
 
 ---
-*Research completed: 2026-04-13*
+*Research completed: 2026-04-14*
 *Ready for roadmap: yes*
