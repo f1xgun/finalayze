@@ -412,8 +412,8 @@ Plans:
   4. Barrier asymmetry multipliers are configurable per segment via an auto_ml_research config dict — changing ru_energy barrier parameters does not require code changes
 **Plans**: 2 plans
 Plans:
-- [x] 47-01-PLAN.md — Multi-period Brent crude return features (brent_ret_5d, brent_ret_21d)
-- [x] 47-02-PLAN.md — Per-segment asymmetric triple barrier configuration
+- [ ] 48-01-PLAN.md — SBERP removal, min-history gate (SEGM-01, SEGM-02, SEGM-03)
+- [ ] 48-02-PLAN.md — MOEX segment validation checkpoint (SEGM-03)
 
 ### Phase 48: Segment Restructuring & Validation
 **Goal**: SBERP is removed from ru_finance to eliminate near-zero-independent-signal redundancy, symbols with insufficient history are gated out of ML training, and all three previously-failing segments produce at least one ACCEPT verdict
@@ -425,8 +425,8 @@ Plans:
   3. At least one experiment run on ru_energy, ru_finance, and ru_tech each produces an ACCEPT or INCONCLUSIVE verdict (not REJECT) after applying all v9.1 improvements — quality gates are no longer all-REJECT for the three previously-failing segments
 **Plans**: 2 plans
 Plans:
-- [x] 47-01-PLAN.md — Multi-period Brent crude return features (brent_ret_5d, brent_ret_21d)
-- [x] 47-02-PLAN.md — Per-segment asymmetric triple barrier configuration
+- [ ] 48-01-PLAN.md — SBERP removal, min-history gate (SEGM-01, SEGM-02, SEGM-03)
+- [ ] 48-02-PLAN.md — MOEX segment validation checkpoint (SEGM-03)
 
 ## Progress
 
@@ -464,5 +464,5 @@ v9.1: 45 -> 46 -> 47 -> 48
 | 44. New Search Strategies | v9.0 | 1/1 | Complete | 2026-04-13 |
 | 45. Model Complexity & Ensemble Consistency | v9.1 | 2/2 | Complete    | 2026-04-14 |
 | 46. Feature Selection Stability | v9.1 | 1/1 | Complete    | 2026-04-14 |
-| 47. Cross-Asset Features & Asymmetric Barriers | v9.1 | 2/2 | Complete   | 2026-04-14 |
-| 48. Segment Restructuring & Validation | v9.1 | 0/TBD | Not started | - |
+| 47. Cross-Asset Features & Asymmetric Barriers | v9.1 | 2/2 | Complete    | 2026-04-14 |
+| 48. Segment Restructuring & Validation | v9.1 | 0/2 | Not started | - |
