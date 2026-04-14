@@ -77,8 +77,8 @@ class TestTrainModelsScript:
     def test_script_creates_output_files_triple_barrier_mode(self, tmp_path: Path) -> None:
         """train_one_segment() produces model files with triple barrier labels."""
         mod = _load_script_module()
-        # Need more candles for triple barrier (window_size + max_hold + margin)
-        candles = _make_candles(n=300)
+        # Need >= _MIN_HISTORY_DAYS=500 candles to pass the history gate
+        candles = _make_candles(n=500)
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
             mod.train_one_segment(  # type: ignore[union-attr]
@@ -172,7 +172,8 @@ class TestTrainModelsScript:
     def test_build_dataset_triple_barrier_returns_weights(self) -> None:
         """Triple barrier mode returns non-None barrier_weights array."""
         mod = _load_script_module()
-        candles = _make_candles(n=300)
+        # Need >= _MIN_HISTORY_DAYS=500 candles to pass the history gate
+        candles = _make_candles(n=500)
 
         with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
             features, _labels, weights, hold_bars = mod._build_dataset(  # type: ignore[union-attr]

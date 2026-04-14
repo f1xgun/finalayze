@@ -256,8 +256,8 @@ class TestArgparseChoices:
 # ---------------------------------------------------------------------------
 
 # Constants for macro tests (no magic numbers — ruff PLR2004)
-_CANDLE_COUNT = 200  # random-walk series; enough for _WINDOW_SIZE=80 + _TB_MAX_HOLD=20 + warmup
-_MACRO_COUNT = 200  # one record per day matching candle count
+_CANDLE_COUNT = 500  # must meet _MIN_HISTORY_DAYS=500 gate; also covers _WINDOW_SIZE=80 + _TB_MAX_HOLD=20
+_MACRO_COUNT = 500  # one record per day matching candle count
 _STABLE_FX_RATE = Decimal(80)
 _SPIKE_FX_RATE = Decimal(200)  # large spike injected into the last 2 records
 _SPIKE_ABS_ZSCORE_LIMIT = 3.0  # spike must NOT produce extreme z-score
@@ -386,12 +386,12 @@ class TestMoexMacroFeaturesNonZero:
 
         from finalayze.core.schemas import FXRate, KeyRateRecord, MoexMarketData, TurnoverRecord
 
-        _N = 200
+        _N = 500  # must meet _MIN_HISTORY_DAYS=500 gate
         base_ts = datetime(2022, 1, 1, tzinfo=UTC)
 
         candles = _make_candles(_N, base_ts)
 
-        # Realistic FX: slight upward drift 80..82
+        # Realistic FX: slight upward drift 80..85
         fx_rates = [
             FXRate(
                 timestamp=base_ts + timedelta(days=i),
