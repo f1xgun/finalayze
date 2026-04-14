@@ -95,6 +95,10 @@ class CatBoostModel(BaseMLModel):
         y_train, y_val = y_arr[:-n_val], y_arr[-n_val:]
         sw_train = sample_weight[:-n_val] if sample_weight is not None else None
 
+        # When sample_weight is provided, it already handles class balance;
+        # applying auto_class_weights on top would double-count the reweighting.
+        acw = None if sample_weight is not None else "Balanced"
+
         self._model = CatBoostClassifier(
             iterations=self._iterations,
             depth=self._depth,
@@ -103,7 +107,7 @@ class CatBoostModel(BaseMLModel):
             random_strength=self._random_strength,
             bagging_temperature=self._bagging_temperature,
             boosting_type="Ordered",
-            auto_class_weights="Balanced",
+            auto_class_weights=acw,
             eval_metric="Logloss",
             early_stopping_rounds=25,
             verbose=0,

@@ -60,6 +60,32 @@ class TestXGBoostScalePosWeight:
         )
 
 
+class TestCatBoostAutoClassWeights:
+    """CatBoost auto_class_weights must be None when sample_weight provided."""
+
+    def test_catboost_acw_with_sample_weight(self) -> None:
+        """CatBoostModel.fit() with sample_weight → auto_class_weights is None."""
+        model = CatBoostModel(segment_id="test")
+        model.fit(_X_RAW, _Y, sample_weight=_SW)
+        assert model._model is not None
+        params = model._model.get_params()
+        assert params.get("auto_class_weights") is None, (
+            f"Expected auto_class_weights=None when sample_weight provided, "
+            f"got {params.get('auto_class_weights')!r}"
+        )
+
+    def test_catboost_acw_without_sample_weight(self) -> None:
+        """CatBoostModel.fit() without sample_weight → auto_class_weights == 'Balanced'."""
+        model = CatBoostModel(segment_id="test")
+        model.fit(_X_RAW, _Y, sample_weight=None)
+        assert model._model is not None
+        params = model._model.get_params()
+        assert params.get("auto_class_weights") == "Balanced", (
+            f"Expected auto_class_weights='Balanced' when no sample_weight, "
+            f"got {params.get('auto_class_weights')!r}"
+        )
+
+
 class TestLightGBMScalePosWeight:
     """LightGBM scale_pos_weight must be 1.0 when sample_weight provided (already correct)."""
 
