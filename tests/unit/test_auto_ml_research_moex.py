@@ -38,6 +38,51 @@ _BOND_SEGMENTS = ["ru_ofz_pd", "ru_ofz_pk"]
 _RU_BLUE_CHIPS_SYMBOLS = ["SBER", "LKOH", "GMKN"]
 
 
+class TestBarrierConfig:
+    """Tests for _SEGMENT_BARRIER_CONFIG and _get_barrier_params."""
+
+    def test_ru_energy_asymmetric(self) -> None:
+        from scripts.auto_ml_research import _get_barrier_params
+
+        upper, lower = _get_barrier_params("ru_energy")
+        assert upper == pytest.approx(1.8)   # 1.5 * 1.2
+        assert lower == pytest.approx(2.4)   # 2.0 * 1.2
+
+    def test_ru_energy_lower_wider_than_upper(self) -> None:
+        from scripts.auto_ml_research import _get_barrier_params
+
+        upper, lower = _get_barrier_params("ru_energy")
+        assert lower > upper
+
+    def test_ru_finance_symmetric(self) -> None:
+        from scripts.auto_ml_research import _get_barrier_params
+
+        upper, lower = _get_barrier_params("ru_finance")
+        assert upper == pytest.approx(2.4)   # 2.0 * 1.2
+        assert lower == pytest.approx(2.4)   # 2.0 * 1.2
+
+    def test_us_tech_no_uplift(self) -> None:
+        from scripts.auto_ml_research import _get_barrier_params
+
+        upper, lower = _get_barrier_params("us_tech")
+        assert upper == pytest.approx(2.0)
+        assert lower == pytest.approx(2.0)
+
+    def test_config_driven(self) -> None:
+        """Changing _SEGMENT_BARRIER_CONFIG affects output."""
+        from scripts.auto_ml_research import _SEGMENT_BARRIER_CONFIG, _get_barrier_params
+
+        original = _SEGMENT_BARRIER_CONFIG.get("ru_energy")
+        try:
+            _SEGMENT_BARRIER_CONFIG["ru_energy"] = (1.0, 3.0)
+            upper, lower = _get_barrier_params("ru_energy")
+            assert upper == pytest.approx(1.2)   # 1.0 * 1.2
+            assert lower == pytest.approx(3.6)   # 3.0 * 1.2
+        finally:
+            if original is not None:
+                _SEGMENT_BARRIER_CONFIG["ru_energy"] = original
+
+
 class TestIsModexSegment:
     """Test _is_moex_segment helper function."""
 

@@ -96,6 +96,11 @@ _TB_LOWER_ATR_MULT = 2.0
 _TB_MAX_HOLD = 20
 _TB_ATR_PERIOD = 14
 _MOEX_ATR_UPLIFT = 1.2
+# Pre-uplift barrier multipliers per segment. MOEX uplift applied in _get_barrier_params().
+# Segments not listed fall back to symmetric (_TB_UPPER_ATR_MULT, _TB_LOWER_ATR_MULT).
+_SEGMENT_BARRIER_CONFIG: dict[str, tuple[float, float]] = {
+    "ru_energy": (1.5, 2.0),  # (upper, lower) — wider downside for commodity-linked volatility
+}
 _LOOKBACK_DAYS = 1825
 _MOEX_LOOKBACK_DAYS = 1095
 _US_MAX_FEATURES = 15
@@ -233,6 +238,16 @@ def _get_max_features(segment_id: str) -> int:
 def _get_hparams(segment_id: str) -> dict[str, float | int]:
     """Return hyperparameters: reduced complexity for MOEX, standard for US."""
     return dict(_MOEX_HPARAMS) if _is_moex_segment(segment_id) else dict(_DEFAULT_HPARAMS)
+
+
+def _get_barrier_params(segment_id: str) -> tuple[float, float]:
+    """Return (upper_atr_mult, lower_atr_mult) with MOEX uplift applied."""
+    base_upper, base_lower = _SEGMENT_BARRIER_CONFIG.get(
+        segment_id, (_TB_UPPER_ATR_MULT, _TB_LOWER_ATR_MULT)
+    )
+    if _is_moex_segment(segment_id):
+        return base_upper * _MOEX_ATR_UPLIFT, base_lower * _MOEX_ATR_UPLIFT
+    return base_upper, base_lower
 
 
 # ---------------------------------------------------------------------------
@@ -485,10 +500,8 @@ def build_full_dataset(
     min_candles = _WINDOW_SIZE + _TB_MAX_HOLD + 1
     rows: list[tuple[datetime, dict[str, float], int, float, int]] = []
 
-    # Apply ATR uplift for MOEX segments (wider barriers for higher volatility)
-    is_moex = _segment_id.startswith("ru_")
-    upper_mult = _TB_UPPER_ATR_MULT * (_MOEX_ATR_UPLIFT if is_moex else 1.0)
-    lower_mult = _TB_LOWER_ATR_MULT * (_MOEX_ATR_UPLIFT if is_moex else 1.0)
+    # Apply per-segment barrier config (with MOEX uplift)
+    upper_mult, lower_mult = _get_barrier_params(_segment_id)
 
     for candles in candles_by_sym.values():
         if len(candles) < min_candles:
