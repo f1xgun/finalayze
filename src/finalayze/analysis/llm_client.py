@@ -10,15 +10,18 @@ import asyncio
 import hashlib
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 import anthropic
 import openai
+from pydantic import BaseModel
 
 from finalayze.core.exceptions import ConfigurationError, LLMError, LLMRateLimitError
 
 if TYPE_CHECKING:
     from config.settings import Settings
+
+T = TypeVar("T", bound=BaseModel)
 
 # ── Retry configuration ─────────────────────────────────────────────────────
 _MAX_RETRIES = 3
@@ -47,6 +50,37 @@ class LLMClient(ABC):
             LLMError: On any other LLM API failure.
         """
         ...
+
+    async def parse_structured(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,  # noqa: ARG002
+    ) -> T:
+        """Parse LLM response into a typed Pydantic model.
+
+        Default implementation calls ``complete()`` and validates the raw JSON
+        response via ``model_validate_json()``.  Subclasses may override to use
+        provider-specific structured output APIs.
+
+        Args:
+            prompt: The user message / question.
+            system: The system instruction for the model.
+            response_model: Pydantic model class to validate against.
+            max_tokens: Optional max tokens for the LLM call.  Reserved for
+                subclass implementations that pass it to the provider API.
+
+        Returns:
+            Validated instance of *response_model*.
+
+        Raises:
+            pydantic.ValidationError: When the response fails schema validation.
+            LLMError: On LLM API failure.
+        """
+        raw = await self.complete(prompt, system)
+        return response_model.model_validate_json(raw)
 
 
 class _CachingLLMClient(LLMClient, ABC):

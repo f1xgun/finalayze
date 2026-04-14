@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-import json
+import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
-from finalayze.analysis.event_classifier import EventClassifier, EventType
+from finalayze.analysis.event_classifier import (
+    EventClassifier,
+    EventClassifierResult,
+    EventType,
+)
 from finalayze.core.schemas import NewsArticle
 
 _ARTICLE = NewsArticle(
@@ -37,119 +41,96 @@ class TestEventType:
 
 class TestEventClassifier:
     @pytest.mark.asyncio
-    async def test_classify_known_event_type(self) -> None:
+    async def test_classify_calls_parse_structured(self) -> None:
+        """classify must call parse_structured with EventClassifierResult."""
         mock_llm = AsyncMock()
-        mock_llm.complete.return_value = "macro"
+        mock_llm.parse_structured.return_value = EventClassifierResult(
+            event_types=["macro"],
+        )
         classifier = EventClassifier(llm_client=mock_llm)
         result = await classifier.classify(_ARTICLE)
+        mock_llm.parse_structured.assert_awaited_once()
         assert result == EventType.MACRO
 
     @pytest.mark.asyncio
-    async def test_unknown_response_returns_other(self) -> None:
+    async def test_classify_empty_event_types_returns_other(self) -> None:
         mock_llm = AsyncMock()
-        mock_llm.complete.return_value = "random_unknown_value"
+        mock_llm.parse_structured.return_value = EventClassifierResult(
+            event_types=[],
+        )
         classifier = EventClassifier(llm_client=mock_llm)
         result = await classifier.classify(_ARTICLE)
         assert result == EventType.OTHER
 
     @pytest.mark.asyncio
-    async def test_whitespace_stripped_from_response(self) -> None:
+    async def test_classify_unknown_event_type_returns_other(self) -> None:
         mock_llm = AsyncMock()
-        mock_llm.complete.return_value = "  earnings  \n"
-        classifier = EventClassifier(llm_client=mock_llm)
-        result = await classifier.classify(_ARTICLE)
-        assert result == EventType.EARNINGS
-
-    # ── #143: JSON response parsing ─────────────────────────────────────────
-
-    @pytest.mark.asyncio
-    async def test_classify_parses_json_event_types_list(self) -> None:
-        """Classifier must parse the rich JSON returned by classify_event.txt (#143)."""
-        mock_llm = AsyncMock()
-        response = json.dumps(
-            {
-                "event_types": ["macro"],
-                "scope": "us",
-                "affected_sectors": ["financials"],
-                "affected_tickers": [],
-                "impact_magnitude": 0.8,
-                "reasoning": "Fed raised rates.",
-            }
+        mock_llm.parse_structured.return_value = EventClassifierResult(
+            event_types=["definitely_not_a_real_event"],
         )
-        mock_llm.complete.return_value = response
-        classifier = EventClassifier(llm_client=mock_llm)
-        result = await classifier.classify(_ARTICLE)
-        assert result == EventType.MACRO
-
-    @pytest.mark.asyncio
-    async def test_classify_parses_json_earnings_type(self) -> None:
-        mock_llm = AsyncMock()
-        response = json.dumps(
-            {
-                "event_types": ["earnings"],
-                "scope": "us",
-                "affected_sectors": ["tech"],
-                "affected_tickers": ["AAPL"],
-                "impact_magnitude": 0.9,
-                "reasoning": "Q1 earnings beat.",
-            }
-        )
-        mock_llm.complete.return_value = response
-        classifier = EventClassifier(llm_client=mock_llm)
-        result = await classifier.classify(_ARTICLE)
-        assert result == EventType.EARNINGS
-
-    @pytest.mark.asyncio
-    async def test_classify_json_unknown_event_type_returns_other(self) -> None:
-        mock_llm = AsyncMock()
-        response = json.dumps(
-            {
-                "event_types": ["definitely_not_a_real_event"],
-                "scope": "global",
-                "affected_sectors": [],
-                "affected_tickers": [],
-                "impact_magnitude": 0.1,
-                "reasoning": "Unknown event.",
-            }
-        )
-        mock_llm.complete.return_value = response
         classifier = EventClassifier(llm_client=mock_llm)
         result = await classifier.classify(_ARTICLE)
         assert result == EventType.OTHER
 
     @pytest.mark.asyncio
-    async def test_classify_json_empty_event_types_returns_other(self) -> None:
-        mock_llm = AsyncMock()
-        response = json.dumps(
-            {
-                "event_types": [],
-                "scope": "global",
-                "affected_sectors": [],
-                "affected_tickers": [],
-                "impact_magnitude": 0.0,
-                "reasoning": "Nothing.",
-            }
-        )
-        mock_llm.complete.return_value = response
-        classifier = EventClassifier(llm_client=mock_llm)
-        result = await classifier.classify(_ARTICLE)
-        assert result == EventType.OTHER
-
-    @pytest.mark.asyncio
-    async def test_classify_json_fda_via_clinical_trial_maps_correctly(self) -> None:
+    async def test_classify_fda_via_clinical_trial(self) -> None:
         """'clinical_trial' in prompt vocabulary should map to EventType.FDA."""
         mock_llm = AsyncMock()
-        response = json.dumps(
-            {
-                "event_types": ["clinical_trial"],
-                "scope": "us",
-                "affected_sectors": ["healthcare"],
-                "affected_tickers": [],
-                "impact_magnitude": 0.7,
-                "reasoning": "Phase 3 trial results.",
-            }
+        mock_llm.parse_structured.return_value = EventClassifierResult(
+            event_types=["clinical_trial"],
         )
-        mock_llm.complete.return_value = response
         classifier = EventClassifier(llm_client=mock_llm)
         result = await classifier.classify(_ARTICLE)
         assert result == EventType.FDA
+
+    @pytest.mark.asyncio
+    async def test_classify_earnings_type(self) -> None:
+        mock_llm = AsyncMock()
+        mock_llm.parse_structured.return_value = EventClassifierResult(
+            event_types=["earnings"],
+        )
+        classifier = EventClassifier(llm_client=mock_llm)
+        result = await classifier.classify(_ARTICLE)
+        assert result == EventType.EARNINGS
+
+    @pytest.mark.asyncio
+    async def test_parse_error_returns_other(self) -> None:
+        """When parse_structured raises, return EventType.OTHER."""
+        mock_llm = AsyncMock()
+        mock_llm.parse_structured.side_effect = Exception("parse failed")
+        classifier = EventClassifier(llm_client=mock_llm)
+        result = await classifier.classify(_ARTICLE)
+        assert result == EventType.OTHER
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_other(self) -> None:
+        """When LLM call times out, return EventType.OTHER fallback."""
+        mock_llm = AsyncMock()
+        mock_llm.parse_structured.side_effect = TimeoutError()
+        classifier = EventClassifier(llm_client=mock_llm)
+        result = await classifier.classify(_ARTICLE)
+        assert result == EventType.OTHER
+
+    @pytest.mark.asyncio
+    async def test_classify_wraps_with_wait_for_timeout(self) -> None:
+        """Verify that classify uses asyncio.wait_for with 5s timeout."""
+        mock_llm = AsyncMock()
+
+        async def slow_parse(*args, **kwargs):  # type: ignore[no-untyped-def]
+            await asyncio.sleep(10)
+            return EventClassifierResult(event_types=["macro"])
+
+        mock_llm.parse_structured = slow_parse
+        classifier = EventClassifier(llm_client=mock_llm)
+        result = await classifier.classify(_ARTICLE)
+        assert result == EventType.OTHER
+
+    @pytest.mark.asyncio
+    async def test_no_json_loads_used(self) -> None:
+        """Ensure json.loads is not used in event_classifier module."""
+        import inspect
+
+        from finalayze.analysis import event_classifier as mod
+
+        source = inspect.getsource(mod)
+        assert "json.loads" not in source
