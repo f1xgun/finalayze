@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v9.1
 milestone_name: MOEX ML Model Quality
-status: Ready to execute
-stopped_at: Completed 45-02-PLAN.md
-last_updated: "2026-04-14T10:48:57.377Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 45-01-PLAN.md
+last_updated: "2026-04-14T10:50:37.540Z"
 progress:
   total_phases: 21
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
-  percent: 50
+  completed_plans: 2
+  percent: 100
 ---
 
 # Project State
@@ -54,6 +54,7 @@ Plan: 2 of 2
 - SBERP removal goes in Phase 48 (segment config), not Phase 45 (model config)
 - [Phase 45]: XGBoost scale_pos_weight=1.0 when sample_weight provided — prevents double-rebalancing with class ratio
 - [Phase 45]: CatBoost auto_class_weights=None when sample_weight provided — same consistency pattern as XGBoost/LightGBM
+- [Phase 45]: MOEX segments use reduced hyperparameters (depth=3, n_estimators=100, min_child_weight=20) via _get_hparams() helper routing; _DEFAULT_HPARAMS unchanged for US segments
 
 ### Pending Todos
 
@@ -65,6 +66,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-14T10:48:57.374Z
-Stopped at: Completed 45-02-PLAN.md
+Last session: 2026-04-14T10:50:37.537Z
+Stopped at: Completed 45-01-PLAN.md
 Resume file: None

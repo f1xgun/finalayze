@@ -129,7 +129,7 @@ Full details in Phase Details section below (collapsed milestone).
 
 **Milestone Goal:** Raise ML model quality on failing MOEX segments (ru_energy, ru_tech, ru_finance) to pass quality gates, by fixing model complexity, ensemble consistency, feature selection stability, cross-asset features, asymmetric barriers, and segment configuration.
 
-- [ ] **Phase 45: Model Complexity & Ensemble Consistency** - Reduce MOEX model complexity and fix XGB/LGBM/CatBoost class rebalancing inconsistency
+- [x] **Phase 45: Model Complexity & Ensemble Consistency** - Reduce MOEX model complexity and fix XGB/LGBM/CatBoost class rebalancing inconsistency (completed 2026-04-14)
 - [ ] **Phase 46: Feature Selection Stability** - Run feature selection once on full pre-test data instead of per-fold to eliminate fold-to-fold instability
 - [ ] **Phase 47: Cross-Asset Features & Asymmetric Barriers** - Wire Brent return features and introduce asymmetric triple barrier for energy stocks
 - [ ] **Phase 48: Segment Restructuring & Validation** - Remove SBERP from ru_finance, add minimum history gate, validate all three failing segments pass quality gates
@@ -384,9 +384,9 @@ Plans:
   2. MOEX hyperparameter defaults are defined in a separate config block from US defaults — changing US model depth does not affect MOEX model depth
   3. When sample_weight is provided, XGBoost sets scale_pos_weight=1.0 (matching LightGBM) — a unit test confirms XGB and LGBM receive identical effective class weights under the same sample_weight input
   4. All three ensemble members (XGB, LGBM, CatBoost) apply class rebalancing exclusively through sample_weight — no member applies both sample_weight and an internal pos_weight multiplier simultaneously
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
-- [ ] 45-01-PLAN.md — MOEX-specific hyperparameters and routing in autoresearch (MCPX-01, MCPX-02)
+- [x] 45-01-PLAN.md — MOEX-specific hyperparameters and routing in autoresearch (MCPX-01, MCPX-02)
 - [x] 45-02-PLAN.md — Ensemble consistency: fix XGBoost and CatBoost double-rebalancing (ENSM-01, ENSM-02)
 
 ### Phase 46: Feature Selection Stability
@@ -454,7 +454,7 @@ v9.1: 45 -> 46 -> 47 -> 48
 | 42. ExperimentManager Integration | v9.0 | 1/1 | Complete | 2026-04-13 |
 | 43. Ensemble Weight Optimization | v9.0 | 1/1 | Complete | 2026-04-13 |
 | 44. New Search Strategies | v9.0 | 1/1 | Complete | 2026-04-13 |
-| 45. Model Complexity & Ensemble Consistency | v9.1 | 1/2 | In Progress|  |
+| 45. Model Complexity & Ensemble Consistency | v9.1 | 2/2 | Complete   | 2026-04-14 |
 | 46. Feature Selection Stability | v9.1 | 0/TBD | Not started | - |
 | 47. Cross-Asset Features & Asymmetric Barriers | v9.1 | 0/TBD | Not started | - |
 | 48. Segment Restructuring & Validation | v9.1 | 0/TBD | Not started | - |
