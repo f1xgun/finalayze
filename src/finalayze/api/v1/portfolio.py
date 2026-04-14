@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from finalayze.api.v1.auth import api_key_auth
+from finalayze.markets.instruments import build_default_registry
 from finalayze.markets.registry import default_registry
 
 _log = structlog.get_logger()
@@ -138,18 +139,26 @@ async def get_positions(request: Request) -> PositionsResponse:
     if broker_router is None:
         return PositionsResponse(positions=[])
 
-    registry = default_registry()
+    market_registry = default_registry()
+    instrument_registry = build_default_registry()
     positions: list[PositionDetail] = []
-    for market_def in registry.list_markets():
+    for market_def in market_registry.list_markets():
         market_id = market_def.id
         try:
             broker = broker_router.route(market_id)
             raw = broker.get_positions()
-            for symbol, qty in raw.items():
+            for key, qty in raw.items():
                 if qty > Decimal(0):
+                    # Resolve FIGI to ticker if possible
+                    display_symbol = key
+                    try:
+                        inst = instrument_registry.get_by_figi(key)
+                        display_symbol = inst.symbol
+                    except Exception:  # noqa: S110
+                        pass  # keep FIGI as fallback
                     positions.append(
                         PositionDetail(
-                            symbol=symbol,
+                            symbol=display_symbol,
                             market_id=market_id,
                             segment_id="",
                             quantity=float(qty),
@@ -177,8 +186,38 @@ async def get_position(symbol: str, request: Request) -> PositionDetail:
 
 @router.get("/history", response_model=HistoryResponse)
 async def get_portfolio_history() -> HistoryResponse:
-    """Equity curve from portfolio_snapshots table (last 30 days). Stub."""
-    return HistoryResponse(snapshots=[])
+    """Equity curve from sandbox_metrics table (last 30 days)."""
+    try:
+        from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+
+        from sqlalchemy import select, text  # noqa: PLC0415
+
+        from finalayze.core.db import async_session_factory  # noqa: PLC0415
+        from finalayze.core.models import SandboxMetricRow  # noqa: PLC0415
+
+        cutoff = datetime.now(UTC) - timedelta(days=30)
+        async with async_session_factory()() as session:
+            stmt = (
+                select(SandboxMetricRow)
+                .where(SandboxMetricRow.timestamp >= cutoff)
+                .order_by(text("timestamp asc"))
+            )
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+
+        snapshots = [
+            SnapshotEntry(
+                timestamp=r.timestamp.isoformat(),
+                market_id=r.market_id,
+                equity=float(r.equity_rub),
+                drawdown_pct=float(r.drawdown_pct) if r.drawdown_pct is not None else 0.0,
+            )
+            for r in rows
+        ]
+        return HistoryResponse(snapshots=snapshots)
+    except Exception as exc:
+        _log.warning("portfolio_history_failed", error=str(exc))
+        return HistoryResponse(snapshots=[])
 
 
 @router.get("/performance", response_model=PerformanceResponse)
