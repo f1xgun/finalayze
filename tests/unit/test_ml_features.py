@@ -17,7 +17,7 @@ from finalayze.ml.features.technical import (
 )
 
 _EXPECTED_MIN_FEATURES = 25
-_EXPECTED_TOTAL_FEATURES = 56  # 45 + 4 MOEX + 7 macro features (cbr_*, usdrub_*, brent_*)
+_EXPECTED_TOTAL_FEATURES = 58  # 45 + 4 MOEX + 9 macro features (cbr_*, usdrub_*, brent_*+ret)
 _NEW_MIN_CANDLES = 80
 
 

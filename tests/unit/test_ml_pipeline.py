@@ -85,6 +85,8 @@ _FEATURE_NAMES = {
     "usdrub_return",
     "usdrub_vol",
     "brent_return",
+    "brent_ret_5d",
+    "brent_ret_21d",
 }
 _N_FEATURES = len(_FEATURE_NAMES)
 

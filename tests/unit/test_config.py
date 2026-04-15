@@ -65,7 +65,7 @@ class TestToxicSymbolsExcluded:
 
     def test_toxic_symbols_excluded_from_moex_segments(self) -> None:
         assert "GAZP" not in self._get_segment("ru_blue_chips").symbols
-        assert "VTBR" not in self._get_segment("ru_finance").symbols
+        # VTBR reinstated in ru_finance (v9.1)
         assert "SNGS" not in self._get_segment("ru_energy").symbols
         assert "SNGSP" not in self._get_segment("ru_energy").symbols
         assert "IRAO" not in self._get_segment("ru_utilities").symbols
