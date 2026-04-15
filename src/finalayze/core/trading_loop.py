@@ -492,7 +492,7 @@ class TradingLoop:
         if self._cache is None:
             return 0.0
         try:
-            code: float | None = self._run_async(self._cache.get_event_type(f"{seg_id}:{ticker}"))
+            code: float | None = self._run_async(self._cache.get_event_type(seg_id))
             return code if code is not None else 0.0
         except Exception:
             _log.debug("Failed to read event_type from Redis cache")
