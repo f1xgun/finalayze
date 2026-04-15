@@ -27,7 +27,8 @@ from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMa
 from finalayze.risk.rollout import ROLLOUT_LIMITS, RolloutLimits
 
 # Use FULL phase limits for integration tests
-_TEST_LIMITS = ROLLOUT_LIMITS[__import__("finalayze.core.modes", fromlist=["RolloutPhase"]).RolloutPhase.FULL]
+_rp = __import__("finalayze.core.modes", fromlist=["RolloutPhase"]).RolloutPhase
+_TEST_LIMITS = ROLLOUT_LIMITS[_rp.FULL]
 
 # ── Constants ──────────────────────────────────────────────────────────────
 # A Monday during US market hours (14:30-21:00 UTC)
