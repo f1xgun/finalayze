@@ -17,13 +17,19 @@ import structlog
 
 @pytest.fixture(autouse=True)
 def _reset_structlog() -> None:
-    """Reset structlog config before each test so capture_logs() works.
+    """Reset structlog config so capture_logs() works even after setup_logging().
 
     Other tests (API) may call setup_logging() which sets
-    cache_logger_on_first_use=True and installs JSONRenderer,
-    preventing capture_logs from intercepting events.
+    cache_logger_on_first_use=True and installs JSONRenderer.
+    Module-level loggers (trading_loop._log) get cached with that config
+    and won't route through capture_logs. We must swap the module-level
+    _log with a fresh proxy.
     """
     structlog.reset_defaults()
+    # Replace the module-level cached _log with a fresh proxy
+    import finalayze.orchestration.trading_loop as tl_mod  # noqa: PLC0415
+
+    tl_mod._log = structlog.get_logger()
 
 from finalayze.analysis.portfolio_review_agent import (
     PORTFOLIO_REVIEW_SYSTEM_PROMPT,
