@@ -173,4 +173,6 @@ def _make_loop_stub() -> MagicMock:
     loop._circuit_breakers = {}
     loop._fx = MagicMock()
     loop._cycle_portfolio_cache = {}
+    loop._anomaly_detector = MagicMock()
+    loop._anomaly_detector.check.return_value = None
     return loop

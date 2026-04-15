@@ -541,7 +541,7 @@ class TradingLoop:
         with self._sentiment_lock:
             return self._sentiment_cache.get(seg_id, _DEFAULT_SENTIMENT)
 
-    def _get_event_type_code(self, seg_id: str, ticker: str) -> float:
+    def _get_event_type_code(self, seg_id: str, ticker: str) -> float:  # noqa: ARG002
         """Read event_type_code from Redis cache for combiner dedup (EVNT-02).
 
         Returns 0.0 (no event) on cache miss or error.
