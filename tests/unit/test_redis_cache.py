@@ -140,9 +140,7 @@ class TestSentimentTTLFreeze:
         # Saturday 14:00 MSK = Saturday 11:00 UTC
         saturday_msk = datetime(2026, 4, 18, 11, 0, 0, tzinfo=UTC)  # Saturday
         with (
-            patch(
-                "finalayze.data.cache.MOEX_MARKET_SCHEDULE.is_market_open", return_value=False
-            ),
+            patch("finalayze.data.cache.MOEX_MARKET_SCHEDULE.is_market_open", return_value=False),
             patch(
                 "finalayze.data.cache.MOEX_MARKET_SCHEDULE.next_open",
                 return_value=datetime(2026, 4, 20, 7, 0, 0, tzinfo=UTC),  # Monday 10:00 MSK
@@ -158,9 +156,7 @@ class TestSentimentTTLFreeze:
     def test_sentiment_ttl_normal_when_market_open(self) -> None:
         """When MOEX is open (Wednesday 12:00 MSK), TTL = 1800."""
         wednesday_utc = datetime(2026, 4, 15, 9, 0, 0, tzinfo=UTC)  # Wed 12:00 MSK
-        with patch(
-            "finalayze.data.cache.MOEX_MARKET_SCHEDULE.is_market_open", return_value=True
-        ):
+        with patch("finalayze.data.cache.MOEX_MARKET_SCHEDULE.is_market_open", return_value=True):
             ttl = _compute_sentiment_ttl(wednesday_utc)
             assert ttl == _SENTIMENT_TTL_DEFAULT
 
@@ -169,9 +165,7 @@ class TestSentimentTTLFreeze:
         # Market closed but next open is only 60 seconds away
         now = datetime(2026, 4, 15, 6, 59, 0, tzinfo=UTC)
         with (
-            patch(
-                "finalayze.data.cache.MOEX_MARKET_SCHEDULE.is_market_open", return_value=False
-            ),
+            patch("finalayze.data.cache.MOEX_MARKET_SCHEDULE.is_market_open", return_value=False),
             patch(
                 "finalayze.data.cache.MOEX_MARKET_SCHEDULE.next_open",
                 return_value=now + timedelta(seconds=60),

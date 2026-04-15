@@ -29,6 +29,7 @@ import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from finalayze.core.schemas import NewsArticle, SignalDirection
+from finalayze.data.cache import _compute_sentiment_ttl
 from finalayze.markets.currency import CurrencyConverter
 
 if TYPE_CHECKING:
@@ -63,6 +64,18 @@ _MIN_CONFIDENCE_BOOST = 1.2  # raise required confidence 20% at CAUTION
 _DEFAULT_SENTIMENT = 0.0
 _MAX_ARTICLES_PER_CYCLE = 20  # budget cap: prevent LLM cost explosion on busy news days
 _ZERO = Decimal(0)
+
+# ── Event type codes for Redis cache (combiner dedup) ─────────────────────
+# Maps EventType string values to numeric codes for downstream consumption.
+# Only significant event types get a non-zero code; "other" events are not cached.
+_EVENT_TYPE_FLOAT_MAP: dict[str, float] = {
+    "cbr_rate": 1.0,
+    "earnings": 2.0,
+    "sanctions": 3.0,
+    "oil_price": 4.0,
+    "macro": 5.0,
+    "geopolitical": 6.0,
+}
 
 # ── Source credibility ────────────────────────────────────────────────────
 SOURCE_CREDIBILITY: dict[str, float] = {
@@ -426,13 +439,24 @@ class TradingLoop:
                 self._sentiment_cache[impact.segment_id] = new_score
                 redis_updates.append((impact.segment_id, new_score))
 
-        # Write to Redis outside the lock
+        # Write to Redis outside the lock (dynamic TTL based on MOEX hours)
         if self._cache is not None:
+            now = self._now()
+            ttl = _compute_sentiment_ttl(now)
             for segment_id, score in redis_updates:
                 try:
-                    self._run_async(self._cache.set_sentiment(segment_id, score))
+                    self._run_async(self._cache.set_sentiment(segment_id, score, ttl=ttl))
                 except Exception:
                     _log.debug("Failed to write sentiment to Redis cache")
+
+            # Cache event_type_code for combiner dedup (EVNT-02 prep)
+            event_code = _EVENT_TYPE_FLOAT_MAP.get(event.value, 0.0)
+            if event_code > 0.0:
+                for segment_id, _score in redis_updates:
+                    try:
+                        self._run_async(self._cache.set_event_type(segment_id, event_code, ttl=ttl))
+                    except Exception:
+                        _log.debug("Failed to write event_type to Redis cache")
 
         return not sentiment.is_fallback
 
