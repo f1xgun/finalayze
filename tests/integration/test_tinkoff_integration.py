@@ -107,7 +107,8 @@ class TestReconnection:
 
         with (
             patch.object(
-                broker_with_retry, "_run_async",
+                broker_with_retry,
+                "_run_async",
                 side_effect=[ConnectionError("gRPC down"), mock_result],
             ),
             patch("finalayze.execution.retry.time.sleep"),
@@ -153,7 +154,8 @@ class TestPortfolio:
 
         with (
             patch.object(
-                broker_with_retry, "_run_async",
+                broker_with_retry,
+                "_run_async",
                 side_effect=[ConnectionError("timeout"), mock_portfolio],
             ),
             patch("finalayze.execution.retry.time.sleep"),

@@ -21,8 +21,21 @@ def fetcher() -> MoexISSFetcher:
 
 # Sample ISS history response (new /history/ endpoint format)
 _ISS_HISTORY_COLUMNS = [
-    "BOARDID", "SECID", "SHORTNAME", "TRADEDATE", "OPEN", "HIGH", "LOW", "CLOSE",
-    "VALUE", "VOLUME", "DURATION", "YIELD", "DECIMALS", "CAPITALIZATION", "CURRENCYID",
+    "BOARDID",
+    "SECID",
+    "SHORTNAME",
+    "TRADEDATE",
+    "OPEN",
+    "HIGH",
+    "LOW",
+    "CLOSE",
+    "VALUE",
+    "VOLUME",
+    "DURATION",
+    "YIELD",
+    "DECIMALS",
+    "CAPITALIZATION",
+    "CURRENCYID",
     "DIVISOR",
 ]
 
@@ -30,10 +43,42 @@ _ISS_CANDLES_RESPONSE = {
     "history": {
         "columns": _ISS_HISTORY_COLUMNS,
         "data": [
-            ["SNDX", "IMOEX", "Индекс МосБиржи", "2024-01-15",
-             3200.0, 3215.0, 3195.0, 3210.5, 1e8, 0, 0, 0, 2, 0, "SUR", 0],
-            ["SNDX", "IMOEX", "Индекс МосБиржи", "2024-01-16",
-             3210.5, 3225.0, 3200.0, 3220.0, 1.1e8, 0, 0, 0, 2, 0, "SUR", 0],
+            [
+                "SNDX",
+                "IMOEX",
+                "Индекс МосБиржи",
+                "2024-01-15",
+                3200.0,
+                3215.0,
+                3195.0,
+                3210.5,
+                1e8,
+                0,
+                0,
+                0,
+                2,
+                0,
+                "SUR",
+                0,
+            ],
+            [
+                "SNDX",
+                "IMOEX",
+                "Индекс МосБиржи",
+                "2024-01-16",
+                3210.5,
+                3225.0,
+                3200.0,
+                3220.0,
+                1.1e8,
+                0,
+                0,
+                0,
+                2,
+                0,
+                "SUR",
+                0,
+            ],
         ],
     },
 }
@@ -97,8 +142,24 @@ class TestMoexISSFetcherCandles:
             "history": {
                 "columns": _ISS_HISTORY_COLUMNS,
                 "data": [
-                    ["SNDX", "IMOEX", "Индекс МосБиржи", "2013-06-15",
-                     1500.0, 1515.0, 1495.0, 1510.0, 5e7, 0, 0, 0, 2, 0, "SUR", 0],
+                    [
+                        "SNDX",
+                        "IMOEX",
+                        "Индекс МосБиржи",
+                        "2013-06-15",
+                        1500.0,
+                        1515.0,
+                        1495.0,
+                        1510.0,
+                        5e7,
+                        0,
+                        0,
+                        0,
+                        2,
+                        0,
+                        "SUR",
+                        0,
+                    ],
                 ],
             },
         }
@@ -255,10 +316,24 @@ class TestMoexISSFetcherPagination:
         """Verify pagination loop: 100 rows → fetch next page; <100 → stop."""
         # Page 1: exactly 100 rows (triggers pagination continue)
         page1_data = [
-            ["SNDX", "IMOEX", "Индекс МосБиржи",
-             f"2024-{1 + (15 + i) // 32:02d}-{(15 + i) % 28 + 1:02d}",
-             3200.0 + i, 3215.0 + i, 3195.0 + i, 3210.0 + i, 1e8, 0,
-             0, 0, 2, 0, "SUR", 0]
+            [
+                "SNDX",
+                "IMOEX",
+                "Индекс МосБиржи",
+                f"2024-{1 + (15 + i) // 32:02d}-{(15 + i) % 28 + 1:02d}",
+                3200.0 + i,
+                3215.0 + i,
+                3195.0 + i,
+                3210.0 + i,
+                1e8,
+                0,
+                0,
+                0,
+                2,
+                0,
+                "SUR",
+                0,
+            ]
             for i in range(100)
         ]
         page1 = {
@@ -269,8 +344,24 @@ class TestMoexISSFetcherPagination:
         }
         # Page 2: fewer than 100 rows (stops pagination)
         page2_data = [
-            ["SNDX", "IMOEX", "Индекс МосБиржи", "2024-05-25",
-             3300.0, 3315.0, 3295.0, 3310.0, 1e8, 0, 0, 0, 2, 0, "SUR", 0]
+            [
+                "SNDX",
+                "IMOEX",
+                "Индекс МосБиржи",
+                "2024-05-25",
+                3300.0,
+                3315.0,
+                3295.0,
+                3310.0,
+                1e8,
+                0,
+                0,
+                0,
+                2,
+                0,
+                "SUR",
+                0,
+            ]
         ]
         page2 = {
             "history": {

@@ -31,6 +31,7 @@ def _reset_structlog() -> None:
 
     tl_mod._log = structlog.get_logger()
 
+
 from finalayze.analysis.portfolio_review_agent import (  # noqa: E402
     PORTFOLIO_REVIEW_SYSTEM_PROMPT,
     PortfolioReviewResult,
