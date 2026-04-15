@@ -240,7 +240,7 @@ def test_t10_small_fold_guard_overrides_weights() -> None:
         hold_bars: Any,
         config: Any,
         segment_id: Any,
-        min_signals: Any = None,
+        **kwargs: Any,
     ) -> None:
         captured_configs.append(config)
 
@@ -286,7 +286,7 @@ def test_t11_sufficient_folds_preserve_weights() -> None:
         hold_bars: Any,
         config: Any,
         segment_id: Any,
-        min_signals: Any = None,
+        **kwargs: Any,
     ) -> None:
         captured_configs.append(config)
 
@@ -332,7 +332,7 @@ def test_t12_non_ensemble_strategy_unaffected_by_small_fold_guard() -> None:
         hold_bars: Any,
         config: Any,
         segment_id: Any,
-        min_signals: Any = None,
+        **kwargs: Any,
     ) -> None:
         captured_configs.append(config)
 
