@@ -12,29 +12,33 @@ and executes real trades in stocks and OFZ bonds — fully autonomously.
 The system must autonomously execute profitable trades on MOEX with acceptable risk limits,
 operating 24/7 without human intervention beyond initial configuration and monitoring.
 
-## Current Milestone: v10.0 Runtime LLM Trading Agents
+## Current State: v10.0 shipped
 
-**Goal:** Add runtime LLM agents to the live trading pipeline — news ingestion, portfolio review, anomaly interpretation, and sentiment data collection for future ML features.
+v10.0 Runtime LLM Trading Agents shipped 2026-04-15. 5 phases, 11 plans.
+News pipeline hardened with parse_structured, 5s timeout, 20-article budget cap, source credibility, ticker validation, LLM liveness monitoring.
+EventDrivenStrategy live on all 4 ru_* segments (weight 0.15) with CBR/dividend dedup guard and sentiment decay frozen during MOEX close.
+AnomalyDetector with LLM interpretation: raw alert fires immediately, fire-and-forget LLM enrichment follows.
+PortfolioReviewAgent: daily advisory LLM portfolio analysis at 19:00 MSK, structured Telegram output, advisory-only schema enforcement.
+SentimentStore: TimescaleDB continuous aggregate (sentiment_7d_avg) with SentimentStore.get_rolling() accessor for v11 ML features.
 
-**Target features:**
-- News Pipeline: real MOEX news sources (RSS/Telegram) feeding existing analysis pipeline
-- EventDrivenStrategy activation on live news feed with credibility cap and latency SLA
-- Portfolio Review Agent: daily LLM portfolio analysis, advisory only, structured Pydantic output
-- Anomaly Interpreter Agent: LLM explanation of detected anomalies, fire-and-forget
-- Sentiment ML features infrastructure: DB persistence + rolling aggregation for future XGBoost integration
+Tech debt: credibility=1.0 hardcoded (article credibility pipeline built but not wired to signal path).
 
-**Expert validation:** 2 rounds of 5-agent debates (Quant, Risk, Architect, Portfolio, ML Engineer). Pre-Trade Reasoning Agent unanimously rejected — LLM modifiers in sizing pipeline break determinism, calibration, and backtestability.
+<details>
+<summary>v9.1 MOEX ML Model Quality (2026-04-14)</summary>
 
-## Current State: v9.1 shipped
+v9.1 shipped 2026-04-14. 4 phases, 7 plans.
+</details>
 
-v9.0 ML AutoResearch & MOEX Adaptation shipped 2026-04-13. 5 phases, 7 plans.
+<details>
+<summary>v9.0 ML AutoResearch & MOEX Adaptation (2026-04-13)</summary>
+
+v9.0 shipped 2026-04-13. 5 phases, 7 plans.
 auto_ml_research.py now runs on all MOEX equity segments via TinkoffFetcher with macro features
 (CBR rate, USDRUB, IMOEX, Brent) and 2-bar look-ahead bias prevention.
-Adaptive quality gates: min_signals=15 for MOEX, degenerate predictor guard (0.15-0.85 bounds),
-MOEX walk-forward fold constants (8/1/3/21/2mo) producing 3+ folds on 730-day data.
+Adaptive quality gates: min_signals=15 for MOEX, degenerate predictor guard (0.15-0.85 bounds).
 ExperimentManager integration via --experiment-id with ACCEPT/REJECT/INCONCLUSIVE verdict lifecycle.
-3 new search strategies: ensemble_weights (33 simplex configs), cross_segment_transfer (US→MOEX),
-feature_engineering (domain-motivated combos + permutation importance filter).
+3 new search strategies: ensemble_weights, cross_segment_transfer, feature_engineering.
+</details>
 
 <details>
 <summary>v8.0 Agent Integration & Autonomous Decision Loop (2026-04-12)</summary>

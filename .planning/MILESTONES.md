@@ -1,5 +1,23 @@
 # Milestones
 
+## v10.0 Runtime LLM Trading Agents (Shipped: 2026-04-15)
+
+**Phases completed:** 5 phases, 11 plans, 15 tasks
+
+**Key accomplishments:**
+
+- 1. [Rule 3 - Blocking] Files referenced in plan do not exist
+- 1. [Rule 3 - Blocking] _persist_sentiment_batch_async does not exist
+- 1. [Rule 2 - Missing Critical] Enabled event_driven on ru_blue_chips, ru_energy, ru_finance presets
+- CBR/dividend duplicate-signal guard in StrategyCombiner with credibility threading and event_type_code in Signal.features
+- Statistical anomaly detector with rolling 20-bar z-score for >3-sigma price moves and >2x volume spikes, TDD-driven with 8 unit tests
+- Wire AnomalyDetector into TradingLoop._process_instrument with raw Telegram alert + fire-and-forget LLM enrichment via run_coroutine_threadsafe, verified by 8 integration tests
+- 1. [Rule 1 - Bug] Docstring contained code-grep target strings
+- Alembic migration 006 converting sentiment_scores to hypertable with sentiment_7d_avg continuous aggregate and hourly refresh policy
+- SentimentStore Layer 2 accessor with get_rolling() querying sentiment_7d_avg view via text() named param bindings, with window allowlist validation and empty-list safety
+
+---
+
 ## v9.1 MOEX ML Model Quality (Shipped: 2026-04-14)
 
 **Phases completed:** 4 phases, 7 plans, 4 tasks
