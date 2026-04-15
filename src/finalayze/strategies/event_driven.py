@@ -84,6 +84,7 @@ class EventDrivenStrategy(BaseStrategy):
         sentiment_score: float = 0.0,
         has_open_position: bool = False,  # noqa: ARG002
         credibility: float = 1.0,
+        event_type_code: float = 0.0,
     ) -> Signal | None:
         """Generate a trading signal based on news sentiment score.
 
@@ -133,6 +134,10 @@ class EventDrivenStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={"sentiment": sentiment_score, "credibility": credibility},
+            features={
+                "sentiment": sentiment_score,
+                "credibility": credibility,
+                "event_type_code": event_type_code,
+            },
             reasoning=f"News sentiment {sentiment_score:+.2f} (credibility={credibility:.2f})",
         )

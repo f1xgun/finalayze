@@ -484,6 +484,20 @@ class TradingLoop:
         with self._sentiment_lock:
             return self._sentiment_cache.get(seg_id, _DEFAULT_SENTIMENT)
 
+    def _get_event_type_code(self, seg_id: str, ticker: str) -> float:
+        """Read event_type_code from Redis cache for combiner dedup (EVNT-02).
+
+        Returns 0.0 (no event) on cache miss or error.
+        """
+        if self._cache is None:
+            return 0.0
+        try:
+            code: float | None = self._run_async(self._cache.get_event_type(f"{seg_id}:{ticker}"))
+            return code if code is not None else 0.0
+        except Exception:
+            _log.debug("Failed to read event_type from Redis cache")
+            return 0.0
+
     def _now(self) -> datetime:
         """Return current UTC datetime. Extracted for testability."""
         return datetime.now(UTC)
@@ -684,9 +698,15 @@ class TradingLoop:
             self._check_stop_losses(market_id, instrument.symbol, current_price)
 
         sentiment_score = self._get_sentiment(seg_id)
+        event_type_code = self._get_event_type_code(seg_id, instrument.symbol)
 
         signal = self._strategy.generate_signal(
-            instrument.symbol, candles, seg_id, sentiment_score=sentiment_score
+            instrument.symbol,
+            candles,
+            seg_id,
+            sentiment_score=sentiment_score,
+            credibility=1.0,  # TODO: wire from article credibility cache in future
+            event_type_code=event_type_code,
         )
         if signal is None:
             return

@@ -82,12 +82,16 @@ class StrategyCombiner:
         sentiment_score: float = 0.0,
         has_open_position: bool = False,
         weight_overrides: dict[str, Decimal] | None = None,
+        credibility: float = 1.0,
+        event_type_code: float = 0.0,
     ) -> Signal | None:
         """Generate a combined signal by weighting enabled strategy signals.
 
         Args:
             weight_overrides: When provided, these weights are used instead of
                 the YAML-configured weights for each named strategy.
+            credibility: Source credibility [0.0, 1.0], threaded to event_driven only.
+            event_type_code: Numeric event code for CBR/dividend dedup (0.0 = none).
         """
         config = self._load_config(segment_id)
         strategies_cfg_raw = config.get("strategies", {})
@@ -121,9 +125,20 @@ class StrategyCombiner:
                 continue
             total_enabled_weight += weight
 
-            signal = strategy.generate_signal(
-                symbol, candles, segment_id, sentiment_score=sentiment_score
-            )
+            if strategy_name == "event_driven":
+                signal = strategy.generate_signal(
+                    symbol,
+                    candles,
+                    segment_id,
+                    sentiment_score=sentiment_score,
+                    has_open_position=has_open_position,
+                    credibility=credibility,
+                    event_type_code=event_type_code,
+                )
+            else:
+                signal = strategy.generate_signal(
+                    symbol, candles, segment_id, sentiment_score=sentiment_score
+                )
             if signal is None:
                 continue
 
