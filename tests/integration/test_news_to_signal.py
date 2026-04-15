@@ -4,18 +4,17 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
 
-from finalayze.analysis.event_classifier import EventClassifier, EventType
+from finalayze.analysis.event_classifier import EventClassifier, EventClassifierResult, EventType
 from finalayze.analysis.impact_estimator import ImpactEstimator
 from finalayze.analysis.llm_client import LLMClient
 from finalayze.analysis.news_analyzer import NewsAnalyzer
-from finalayze.core.schemas import Candle, NewsArticle, SignalDirection
+from finalayze.core.schemas import Candle, NewsArticle, SentimentResult, SignalDirection
 from finalayze.strategies.event_driven import EventDrivenStrategy
 
 # ── Constants ──────────────────────────────────────────────────────────────
@@ -78,13 +77,14 @@ class TestNewsToSignalPipeline:
         sentiment: float = SENTIMENT_BULLISH,
         event_type: str = "earnings",
     ) -> LLMClient:
-        """Create a mock LLM client that returns canned sentiment and event responses."""
+        """Create a mock LLM client that returns canned structured responses."""
         client = AsyncMock(spec=LLMClient)
-        sentiment_response = json.dumps(
-            {"sentiment": sentiment, "confidence": CONFIDENCE_HIGH, "reasoning": "strong earnings"}
+        sentiment_result = SentimentResult(
+            sentiment=sentiment, confidence=CONFIDENCE_HIGH, reasoning="strong earnings"
         )
-        # First call -> sentiment JSON, second call -> event type string
-        client.complete = AsyncMock(side_effect=[sentiment_response, event_type])
+        event_result = EventClassifierResult(event_types=[event_type])
+        # parse_structured returns SentimentResult first, EventClassifierResult second
+        client.parse_structured = AsyncMock(side_effect=[sentiment_result, event_result])
         return client
 
     @pytest.mark.asyncio
@@ -178,9 +178,9 @@ class TestNewsToSignalPipeline:
 
     @pytest.mark.asyncio
     async def test_llm_parse_error_falls_back_to_neutral(self) -> None:
-        """If the LLM returns invalid JSON, NewsAnalyzer returns neutral (0.0) sentiment."""
+        """If the LLM returns invalid response, NewsAnalyzer returns neutral (0.0) sentiment."""
         llm = AsyncMock(spec=LLMClient)
-        llm.complete = AsyncMock(return_value="not valid json {{ }}")
+        llm.parse_structured = AsyncMock(side_effect=ValueError("invalid LLM response"))
         news_analyzer = NewsAnalyzer(llm_client=llm)
 
         article = _make_us_article()
@@ -193,7 +193,9 @@ class TestNewsToSignalPipeline:
     async def test_unknown_event_type_falls_back_to_other(self) -> None:
         """If the LLM returns an unknown event label, classifier returns EventType.OTHER."""
         llm = AsyncMock(spec=LLMClient)
-        llm.complete = AsyncMock(return_value="alien_invasion")
+        llm.parse_structured = AsyncMock(
+            return_value=EventClassifierResult(event_types=["alien_invasion"])
+        )
         event_classifier = EventClassifier(llm_client=llm)
 
         article = _make_us_article()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -24,6 +24,10 @@ from finalayze.execution.broker_base import OrderResult
 from finalayze.execution.broker_router import BrokerRouter
 from finalayze.markets.instruments import Instrument, InstrumentRegistry
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
+from finalayze.risk.rollout import ROLLOUT_LIMITS, RolloutLimits
+
+# Use FULL phase limits for integration tests
+_TEST_LIMITS = ROLLOUT_LIMITS[__import__("finalayze.core.modes", fromlist=["RolloutPhase"]).RolloutPhase.FULL]
 
 # ── Constants ──────────────────────────────────────────────────────────────
 # A Monday during US market hours (14:30-21:00 UTC)
@@ -52,13 +56,13 @@ class TestStrategyIntegration:
         circuit_level: CircuitLevel = CircuitLevel.NORMAL,
         fill: bool = True,
     ) -> TradingLoop:
-        settings = MagicMock()
+        from config.settings import Settings
+
+        settings = Settings(mode="sandbox")
+        # Override time parameters for deterministic tests
         settings.news_cycle_minutes = NEWS_CYCLE_MINUTES
         settings.strategy_cycle_minutes = STRATEGY_CYCLE_MINUTES
         settings.daily_reset_hour_utc = DAILY_RESET_HOUR
-        settings.max_position_pct = 0.20
-        settings.kelly_fraction = 0.5
-        settings.max_positions_per_market = 10
 
         # Real instrument registry
         registry = InstrumentRegistry()
@@ -68,11 +72,12 @@ class TestStrategyIntegration:
                 market_id=MARKET_US,
                 name="Apple Inc.",
                 segment_id=SEGMENT_US_TECH,
+                figi="BBG000B9XRY4",
             )
         )
 
-        # Mock fetcher
-        base_ts = datetime(2025, 1, 1, 14, 30, tzinfo=UTC)
+        # Mock fetcher — candles must be recent to pass staleness check
+        base_ts = datetime.now(tz=UTC) - timedelta(days=NUM_CANDLES)
         candles = [
             Candle(
                 symbol=SYMBOL_AAPL,
@@ -133,6 +138,7 @@ class TestStrategyIntegration:
             reason="" if fill else "insufficient funds",
         )
         mock_broker.submit_order = MagicMock(return_value=fill_result)
+        mock_broker.has_position = MagicMock(return_value=False)
         broker_router = MagicMock(spec=BrokerRouter)
         broker_router.route = MagicMock(return_value=mock_broker)
         broker_router.submit = MagicMock(return_value=fill_result)
@@ -169,27 +175,41 @@ class TestStrategyIntegration:
         loop._now = MagicMock(return_value=MARKET_OPEN_DT)  # type: ignore[method-assign]
         return loop
 
+    def _patch_market_open(self) -> object:
+        """Patch SCHEDULES so market is always open during tests."""
+        mock_schedule = MagicMock()
+        mock_schedule.is_market_open = MagicMock(return_value=True)
+        return patch(
+            "finalayze.orchestration.trading_loop.SCHEDULES",
+            {MARKET_US: mock_schedule},
+        )
+
     def test_signal_flows_through_to_order_submit(self) -> None:
         loop = self._build_system(circuit_level=CircuitLevel.NORMAL, fill=True)
-        loop._strategy_cycle()
+        with self._patch_market_open():
+            loop._strategy_cycle()
         loop._broker_router.submit.assert_called_once()
 
     def test_filled_order_fires_alert(self) -> None:
         loop = self._build_system(circuit_level=CircuitLevel.NORMAL, fill=True)
-        loop._strategy_cycle()
+        with self._patch_market_open():
+            loop._strategy_cycle()
         loop._alerter.on_trade_filled.assert_called_once()
 
     def test_rejected_order_fires_reject_alert(self) -> None:
         loop = self._build_system(circuit_level=CircuitLevel.NORMAL, fill=False)
-        loop._strategy_cycle()
+        with self._patch_market_open():
+            loop._strategy_cycle()
         loop._alerter.on_trade_rejected.assert_called_once()
 
     def test_halted_circuit_blocks_all_orders(self) -> None:
         loop = self._build_system(circuit_level=CircuitLevel.HALTED)
-        loop._strategy_cycle()
+        with self._patch_market_open():
+            loop._strategy_cycle()
         loop._broker_router.submit.assert_not_called()
 
     def test_caution_circuit_allows_reduced_orders(self) -> None:
         loop = self._build_system(circuit_level=CircuitLevel.CAUTION, fill=True)
-        loop._strategy_cycle()
+        with self._patch_market_open():
+            loop._strategy_cycle()
         loop._broker_router.submit.assert_called()
