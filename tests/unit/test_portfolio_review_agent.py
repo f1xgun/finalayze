@@ -230,3 +230,179 @@ class TestCodeGrepSafety:
     def test_no_generate_signal_reference(self) -> None:
         source = self._read_agent_source()
         assert "generate_signal" not in source, "Found generate_signal in portfolio_review_agent.py"
+
+
+# ── Prompt Builder Tests ───────────────────────────────────────────────────
+
+
+class TestBuildReviewPrompt:
+    """build_review_prompt() constructs an LLM prompt from portfolio data dict."""
+
+    def test_contains_position_tickers(self) -> None:
+        from finalayze.analysis.portfolio_review_agent import build_review_prompt
+
+        data: dict[str, object] = {
+            "moex": {
+                "equity": Decimal(500000),
+                "cash": Decimal(50000),
+                "positions": {"SBER": Decimal(100), "GAZP": Decimal(50)},
+            },
+        }
+        prompt = build_review_prompt(data)
+        assert "SBER" in prompt
+        assert "GAZP" in prompt
+
+    def test_contains_equity(self) -> None:
+        from finalayze.analysis.portfolio_review_agent import build_review_prompt
+
+        data: dict[str, object] = {
+            "moex": {
+                "equity": Decimal(500000),
+                "cash": Decimal(50000),
+                "positions": {"SBER": Decimal(100)},
+            },
+        }
+        prompt = build_review_prompt(data)
+        assert "500000" in prompt
+
+    def test_empty_portfolio(self) -> None:
+        from finalayze.analysis.portfolio_review_agent import build_review_prompt
+
+        prompt = build_review_prompt({})
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0  # Should still produce a valid prompt
+
+    def test_multiple_markets(self) -> None:
+        from finalayze.analysis.portfolio_review_agent import build_review_prompt
+
+        data: dict[str, object] = {
+            "moex": {
+                "equity": Decimal(500000),
+                "cash": Decimal(50000),
+                "positions": {"SBER": Decimal(100)},
+            },
+            "us": {
+                "equity": Decimal(10000),
+                "cash": Decimal(2000),
+                "positions": {"AAPL": Decimal(10)},
+            },
+        }
+        prompt = build_review_prompt(data)
+        assert "moex" in prompt
+        assert "us" in prompt
+        assert "SBER" in prompt
+        assert "AAPL" in prompt
+
+
+# ── Telegram Formatter Tests ──────────────────────────────────────────────
+
+
+class TestFormatReviewTelegram:
+    """format_review_telegram() produces structured Telegram messages."""
+
+    def _make_result(
+        self,
+        *,
+        positions: list[PositionSummary] | None = None,
+        warnings: list[ConcentrationWarning] | None = None,
+        catalysts: list[CatalystEvent] | None = None,
+        assessment: str = "Portfolio looks healthy.",
+        risk: float = 0.3,
+    ) -> PortfolioReviewResult:
+        return PortfolioReviewResult(
+            reviewed_at=datetime(2026, 4, 14, 16, 0, tzinfo=UTC),
+            positions=positions or [],
+            concentration_warnings=warnings or [],
+            catalyst_events=catalysts or [],
+            overall_assessment=assessment,
+            risk_score=risk,
+        )
+
+    def test_contains_header(self) -> None:
+        from finalayze.analysis.portfolio_review_agent import format_review_telegram
+
+        result = self._make_result()
+        msg = format_review_telegram(result)
+        assert "Portfolio Review" in msg
+
+    def test_contains_position_tickers(self) -> None:
+        from finalayze.analysis.portfolio_review_agent import format_review_telegram
+
+        result = self._make_result(
+            positions=[
+                PositionSummary(
+                    ticker="SBER",
+                    market="moex",
+                    quantity=Decimal(100),
+                    unrealized_pnl=Decimal(2340),
+                    pct_of_portfolio=0.22,
+                ),
+                PositionSummary(
+                    ticker="GAZP",
+                    market="moex",
+                    quantity=Decimal(50),
+                    unrealized_pnl=Decimal(-850),
+                    pct_of_portfolio=0.18,
+                ),
+            ],
+        )
+        msg = format_review_telegram(result)
+        assert "SBER" in msg
+        assert "GAZP" in msg
+
+    def test_contains_concentration_warnings(self) -> None:
+        from finalayze.analysis.portfolio_review_agent import format_review_telegram
+
+        result = self._make_result(
+            warnings=[
+                ConcentrationWarning(
+                    ticker="SBER",
+                    market="moex",
+                    concentration_pct=0.22,
+                    warning_level="HIGH",
+                ),
+            ],
+        )
+        msg = format_review_telegram(result)
+        assert "Concentration" in msg
+        assert "SBER" in msg
+        assert "HIGH" in msg
+
+    def test_contains_catalyst_events(self) -> None:
+        from finalayze.analysis.portfolio_review_agent import format_review_telegram
+
+        result = self._make_result(
+            catalysts=[
+                CatalystEvent(
+                    ticker="SBER",
+                    event_type="cbr_meeting",
+                    expected_date="2026-04-25",
+                ),
+            ],
+        )
+        msg = format_review_telegram(result)
+        assert "Catalyst" in msg
+        assert "SBER" in msg
+        assert "cbr_meeting" in msg
+
+    def test_contains_assessment_and_risk(self) -> None:
+        from finalayze.analysis.portfolio_review_agent import format_review_telegram
+
+        result = self._make_result(
+            assessment="Moderately concentrated in financials.",
+            risk=0.52,
+        )
+        msg = format_review_telegram(result)
+        assert "Moderately concentrated" in msg
+        assert "0.52" in msg
+
+    def test_empty_lists_graceful(self) -> None:
+        from finalayze.analysis.portfolio_review_agent import format_review_telegram
+
+        result = self._make_result()
+        msg = format_review_telegram(result)
+        assert isinstance(msg, str)
+        assert len(msg) > 0
+        # Should have some indication of no positions
+        lower_msg = msg.lower()
+        assert "no open positions" in lower_msg or "no positions" in lower_msg or "0" in msg
