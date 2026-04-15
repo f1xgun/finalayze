@@ -425,7 +425,7 @@ Plans:
   3. Between 18:50 MSK (MOEX close) and 09:50 MSK (MOEX open) the sentiment decay clock is frozen — the first article of the trading day produces a signal score within ±10% of the last signal from the previous session rather than spiking from a near-zero decayed baseline
 **Plans**: 2 plans
 Plans:
-- [ ] 50-01-PLAN.md — Dynamic sentiment TTL + event_type caching + ru_tech preset activation
+- [x] 50-01-PLAN.md — Dynamic sentiment TTL + event_type caching + ru_tech preset activation
 - [ ] 50-02-PLAN.md — Credibility threading + CBR/dividend dedup guard in combiner
 
 ### Phase 51: Anomaly Interpreter Agent
@@ -492,7 +492,7 @@ v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 | 40-44 | v9.0 | 7/7 | Complete | 2026-04-13 |
 | 45-48 | v9.1 | 7/7 | Complete | 2026-04-14 |
 | 49. News Pipeline Hardening | v10.0 | 3/3 | Complete    | 2026-04-15 |
-| 50. EventDriven Activation | v10.0 | 0/TBD | Not started | - |
+| 50. EventDriven Activation | v10.0 | 1/2 | In Progress|  |
 | 51. Anomaly Interpreter Agent | v10.0 | 0/TBD | Not started | - |
 | 52. Portfolio Review Agent | v10.0 | 0/TBD | Not started | - |
 | 53. Sentiment ML Infrastructure | v10.0 | 0/TBD | Not started | - |

@@ -18,9 +18,9 @@ Requirements for runtime LLM trading agents milestone. Each maps to roadmap phas
 
 ### EventDriven Activation
 
-- [ ] **EVNT-01**: EventDrivenStrategy enabled on all ru_* segments with weight 0.15
+- [x] **EVNT-01**: EventDrivenStrategy enabled on all ru_* segments with weight 0.15
 - [ ] **EVNT-02**: CBR/dividend duplicate signal guard prevents double-weight with cbr_calendar strategy
-- [ ] **EVNT-03**: Sentiment decay respects market hours (freeze during MOEX close, resume on open)
+- [x] **EVNT-03**: Sentiment decay respects market hours (freeze during MOEX close, resume on open)
 
 ### Portfolio Review Agent
 
@@ -73,9 +73,9 @@ Deferred to future release. Tracked but not in current roadmap.
 | NEWS-04 | Phase 49 | Complete |
 | NEWS-05 | Phase 49 | Complete |
 | NEWS-06 | Phase 49 | Complete |
-| EVNT-01 | Phase 50 | Pending |
+| EVNT-01 | Phase 50 | Complete |
 | EVNT-02 | Phase 50 | Pending |
-| EVNT-03 | Phase 50 | Pending |
+| EVNT-03 | Phase 50 | Complete |
 | ANMI-01 | Phase 51 | Pending |
 | ANMI-02 | Phase 51 | Pending |
 | ANMI-03 | Phase 51 | Pending |
