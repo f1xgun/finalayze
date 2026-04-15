@@ -303,6 +303,7 @@ class TestWalkForwardUsesLastFold:
             test_labels: list[int],
             mean_uniqueness: float = 1.0,
             avg_hold_bars: float = 1.0,
+            **kwargs: object,
         ) -> FoldMetrics:
             idx = eval_call_count["idx"]
             eval_call_count["idx"] += 1
