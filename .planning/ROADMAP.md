@@ -438,7 +438,7 @@ Plans:
   3. When the LLM call times out or raises an exception, the raw alert is still delivered and a `anomaly_llm_failure` structlog entry is emitted — suppressing the raw alert on LLM failure is impossible by design
 **Plans**: 2 plans
 Plans:
-- [ ] 51-01-PLAN.md — AnomalyDetector class + AnomalyResult schema with TDD
+- [x] 51-01-PLAN.md — AnomalyDetector class + AnomalyResult schema with TDD
 - [ ] 51-02-PLAN.md — Wire anomaly detection into TradingLoop with LLM enrichment
 
 ### Phase 52: Portfolio Review Agent
@@ -493,6 +493,6 @@ v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 | 45-48 | v9.1 | 7/7 | Complete | 2026-04-14 |
 | 49. News Pipeline Hardening | v10.0 | 3/3 | Complete    | 2026-04-15 |
 | 50. EventDriven Activation | v10.0 | 2/2 | Complete    | 2026-04-15 |
-| 51. Anomaly Interpreter Agent | v10.0 | 0/TBD | Not started | - |
+| 51. Anomaly Interpreter Agent | v10.0 | 1/2 | In Progress|  |
 | 52. Portfolio Review Agent | v10.0 | 0/TBD | Not started | - |
 | 53. Sentiment ML Infrastructure | v10.0 | 0/TBD | Not started | - |
