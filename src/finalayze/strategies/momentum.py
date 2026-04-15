@@ -132,6 +132,7 @@ class MomentumStrategy(BaseStrategy):
         segment_id: str,
         sentiment_score: float = 0.0,
         has_open_position: bool = False,  # noqa: ARG002
+        **kwargs: object,
     ) -> Signal | None:
         """Generate a momentum signal from RSI and MACD indicators."""
         params = self.get_parameters(segment_id)

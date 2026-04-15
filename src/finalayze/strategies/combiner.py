@@ -330,6 +330,7 @@ class StrategyCombiner:
         weight_overrides: dict[str, Decimal] | None = None,
         credibility: float = 1.0,
         event_type_code: float = 0.0,
+        **kwargs: object,
     ) -> Signal | None:
         """Generate a combined signal by weighting enabled strategy signals.
 

@@ -404,6 +404,17 @@ def _build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
             ) -> str:
                 return '{"sentiment": 0.0, "confidence": 0.0, "reasoning": "stub"}'
 
+            async def parse_structured(  # type: ignore[override]
+                self,
+                prompt: str,  # noqa: ARG002
+                system: str,  # noqa: ARG002
+                response_model: type,  # noqa: ARG002
+                *,
+                max_tokens: int | None = None,  # noqa: ARG002
+            ) -> object:
+                msg = "Stub LLM client does not support parse_structured"
+                raise NotImplementedError(msg)
+
         _has_llm = bool(
             getattr(settings, "llm_api_key", "") or getattr(settings, "anthropic_api_key", "")
         )

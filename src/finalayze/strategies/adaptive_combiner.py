@@ -203,6 +203,9 @@ class AdaptiveStrategyCombiner(StrategyCombiner):
         sentiment_score: float = 0.0,
         has_open_position: bool = False,
         weight_overrides: dict[str, Decimal] | None = None,
+        credibility: float = 1.0,
+        event_type_code: float = 0.0,
+        **kwargs: object,
     ) -> Signal | None:
         """Override to use dynamic weights instead of YAML weights."""
         self._bars_since_rebalance += 1
@@ -225,4 +228,6 @@ class AdaptiveStrategyCombiner(StrategyCombiner):
             sentiment_score=sentiment_score,
             has_open_position=has_open_position,
             weight_overrides=effective_overrides,
+            credibility=credibility,
+            event_type_code=event_type_code,
         )
