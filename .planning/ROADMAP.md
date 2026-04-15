@@ -142,7 +142,7 @@ Full details in Phase Details section below (collapsed milestone).
 
 - [x] **Phase 49: News Pipeline Hardening** (2/3 plans) - Fix latent bugs and add production safeguards before live news activation (completed 2026-04-15)
 - [x] **Phase 50: EventDriven Activation** - Enable event_driven strategy on all ru_* segments with signal quality guards (completed 2026-04-15)
-- [ ] **Phase 51: Anomaly Interpreter Agent** - LLM enrichment for anomaly alerts via fire-and-forget async dispatch
+- [x] **Phase 51: Anomaly Interpreter Agent** - LLM enrichment for anomaly alerts via fire-and-forget async dispatch (completed 2026-04-15)
 - [ ] **Phase 52: Portfolio Review Agent** - Daily advisory LLM portfolio analysis with structured Pydantic output
 - [ ] **Phase 53: Sentiment ML Infrastructure** - TimescaleDB continuous aggregates and SentimentStore reader for future ML features
 
@@ -439,7 +439,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 51-01-PLAN.md — AnomalyDetector class + AnomalyResult schema with TDD
-- [ ] 51-02-PLAN.md — Wire anomaly detection into TradingLoop with LLM enrichment
+- [x] 51-02-PLAN.md — Wire anomaly detection into TradingLoop with LLM enrichment
 
 ### Phase 52: Portfolio Review Agent
 **Goal**: A daily LLM portfolio analysis runs outside market hours, delivers a structured advisory report via Telegram, and has no write path to the order pipeline
@@ -493,6 +493,6 @@ v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 | 45-48 | v9.1 | 7/7 | Complete | 2026-04-14 |
 | 49. News Pipeline Hardening | v10.0 | 3/3 | Complete    | 2026-04-15 |
 | 50. EventDriven Activation | v10.0 | 2/2 | Complete    | 2026-04-15 |
-| 51. Anomaly Interpreter Agent | v10.0 | 1/2 | In Progress|  |
+| 51. Anomaly Interpreter Agent | v10.0 | 2/2 | Complete   | 2026-04-15 |
 | 52. Portfolio Review Agent | v10.0 | 0/TBD | Not started | - |
 | 53. Sentiment ML Infrastructure | v10.0 | 0/TBD | Not started | - |

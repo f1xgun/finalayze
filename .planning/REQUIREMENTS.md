@@ -31,7 +31,7 @@ Requirements for runtime LLM trading agents milestone. Each maps to roadmap phas
 ### Anomaly Interpreter
 
 - [x] **ANMI-01**: AnomalyDetector fires raw alert immediately, then async LLM enrichment follows
-- [ ] **ANMI-02**: LLM explanation appended to Telegram alert labeled "AI interpretation (unverified)"
+- [x] **ANMI-02**: LLM explanation appended to Telegram alert labeled "AI interpretation (unverified)"
 - [x] **ANMI-03**: Graceful degradation — LLM timeout/failure does not suppress or delay raw statistical alert
 
 ### Sentiment ML Infrastructure
@@ -77,7 +77,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | EVNT-02 | Phase 50 | Complete |
 | EVNT-03 | Phase 50 | Complete |
 | ANMI-01 | Phase 51 | Complete |
-| ANMI-02 | Phase 51 | Pending |
+| ANMI-02 | Phase 51 | Complete |
 | ANMI-03 | Phase 51 | Complete |
 | PFRA-01 | Phase 52 | Pending |
 | PFRA-02 | Phase 52 | Pending |
