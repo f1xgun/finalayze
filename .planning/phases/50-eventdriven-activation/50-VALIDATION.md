@@ -40,7 +40,7 @@ created: 2026-04-15
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
 | 50-01-01 | 01 | 1 | EVNT-01 | unit | `uv run pytest tests/unit/test_event_driven_strategy.py -x` | Wave 0 | pending |
 | 50-01-02 | 01 | 1 | EVNT-02 | unit | `uv run pytest tests/unit/test_strategy_combiner.py -k "dedup" -x` | Wave 0 | pending |
-| 50-01-03 | 01 | 1 | EVNT-03 | unit | `uv run pytest tests/unit/test_news_pipeline.py -k "ttl" -x` | Wave 0 | pending |
+| 50-01-03 | 01 | 1 | EVNT-03 | unit | `uv run pytest tests/unit/test_redis_cache.py -k "ttl_freeze" -x` | Wave 0 | pending |
 
 *Status: pending / green / red / flaky*
 
@@ -50,7 +50,7 @@ created: 2026-04-15
 
 - [ ] Update `tests/unit/test_event_driven_strategy.py` — add credibility and preset tests
 - [ ] Update `tests/unit/test_strategy_combiner.py` — add dedup tests
-- [ ] Update `tests/unit/test_news_pipeline.py` — add TTL freeze tests
+- [ ] Update `tests/unit/test_redis_cache.py` — add TTL freeze tests
 
 ---
 

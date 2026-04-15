@@ -369,17 +369,13 @@ if signal and "event_driven_confidence" in signal.features:
 
 **A3 is LOW risk:** all four ru_* presets explicitly set `normalize_mode: "total"`. [VERIFIED: direct file inspection]
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Signal persistence scope**
-   - What we know: No code path currently writes to `signals` table in live trading loop.
-   - What's unclear: Should only EventDriven-contributing combined signals be persisted, or ALL combined signals? The success criterion says "at least one EventDrivenStrategy signal entry" which implies only when EventDriven fires, but the signals table may be intended for all signals.
-   - Recommendation: Persist ALL combined signals to the table (not just EventDriven ones) — this is architecturally cleaner and satisfies EVNT-01 as a subset.
+   - RESOLVED: `_persist_signal_async()` already exists and is called at `trading_loop.py:1677` — persist ALL combined signals. EVNT-01 is satisfied as a subset.
 
 2. **Event type code source**
-   - What we know: `EventClassifier` produces `EventType` enum values. `ImpactEstimator` uses them for routing. Neither stores the event type in Redis.
-   - What's unclear: Where exactly to inject the Redis write for event type — in `_process_news_article()` alongside the sentiment update, or in `ImpactEstimator.estimate()`.
-   - Recommendation: Add `event_type_code` write in `_process_news_article()` after the `_analyze_article()` call, same pattern as the sentiment cache update loop.
+   - RESOLVED: Inject `event_type_code` write in `_apply_impact_result()` alongside the sentiment cache write loop, per Plan 50-01 Task 1.
 
 ## Environment Availability
 
