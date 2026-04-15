@@ -226,7 +226,11 @@ class TestPresetApplicatorCircuitBreaker:
     @pytest.mark.asyncio
     async def test_apply_blocked_by_circuit_breaker(self, tmp_path: Path) -> None:
         """CircuitLevel.CAUTION -> raises PresetApplyBlockedError, no file I/O."""
-        from finalayze.orchestration.preset_applicator import PresetApplicator, PresetApplyBlockedError, SandboxGate
+        from finalayze.orchestration.preset_applicator import (
+            PresetApplicator,
+            PresetApplyBlockedError,
+            SandboxGate,
+        )
 
         mock_cb = MagicMock()
         mock_cb.level = "caution"
@@ -256,7 +260,11 @@ class TestPresetApplicatorCircuitBreaker:
     @pytest.mark.asyncio
     async def test_apply_blocked_by_circuit_breaker_halted(self, tmp_path: Path) -> None:
         """CircuitLevel.HALTED -> raises PresetApplyBlockedError."""
-        from finalayze.orchestration.preset_applicator import PresetApplicator, PresetApplyBlockedError, SandboxGate
+        from finalayze.orchestration.preset_applicator import (
+            PresetApplicator,
+            PresetApplyBlockedError,
+            SandboxGate,
+        )
 
         mock_cb = MagicMock()
         mock_cb.level = "halted"

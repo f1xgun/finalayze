@@ -224,8 +224,8 @@ def _build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
         from finalayze.analysis.impact_estimator import ImpactEstimator  # noqa: PLC0415
         from finalayze.analysis.news_analyzer import NewsAnalyzer  # noqa: PLC0415
         from finalayze.api.alerts import TelegramAlerter  # noqa: PLC0415
-        from finalayze.data.fetchers.newsapi import NewsApiFetcher  # noqa: PLC0415
         from finalayze.data.fetchers.caching import CachingFetcher  # noqa: PLC0415
+        from finalayze.data.fetchers.newsapi import NewsApiFetcher  # noqa: PLC0415
         from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
         from finalayze.data.rate_limiter import RateLimiter  # noqa: PLC0415
         from finalayze.execution.broker_router import BrokerRouter  # noqa: PLC0415

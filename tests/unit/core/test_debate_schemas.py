@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -23,7 +23,7 @@ from finalayze.core.schemas import (
     MetricSource,
 )
 
-_DT = datetime(2026, 4, 7, tzinfo=timezone.utc)
+_DT = datetime(2026, 4, 7, tzinfo=UTC)
 
 _FILE_SOURCE = FileLineSource(
     kind="file",

@@ -179,17 +179,16 @@ class AgentOrchestrator:
                 experiment_id=experiment_id,
             )
             return experiment_id
-        else:
-            # No contradictions — resolve debate
-            self._dm.resolve_debate(
-                debate_id,
-                "No contradictions — claims verified by arbiter",
-            )
-            _log.info(
-                "orchestrator.debate_resolved",
-                debate_id=debate_id[:16],
-            )
-            return None
+        # No contradictions — resolve debate
+        self._dm.resolve_debate(
+            debate_id,
+            "No contradictions — claims verified by arbiter",
+        )
+        _log.info(
+            "orchestrator.debate_resolved",
+            debate_id=debate_id[:16],
+        )
+        return None
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

@@ -109,7 +109,7 @@ class EventDrivenStrategy(BaseStrategy):
         has_open_position: bool = False,  # noqa: ARG002
         credibility: float = 1.0,
         event_type_code: float = 0.0,
-        **kwargs: object,
+        **kwargs: object,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a trading signal based on news sentiment score.
 

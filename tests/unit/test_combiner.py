@@ -37,7 +37,7 @@ class _MinimalStrategy(BaseStrategy):
         return None
 
 
-@pytest.fixture()
+@pytest.fixture
 def combiner() -> StrategyCombiner:
     """Return a minimal StrategyCombiner instance."""
     return StrategyCombiner([_MinimalStrategy()])

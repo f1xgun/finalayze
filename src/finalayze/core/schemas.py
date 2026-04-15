@@ -828,4 +828,4 @@ def compute_file_sha(path: str) -> str:
         FileNotFoundError: if the file does not exist.
         OSError: if the file cannot be read.
     """
-    return hashlib.sha256(open(path, "rb").read()).hexdigest()  # noqa: PTH123, SIM115
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()

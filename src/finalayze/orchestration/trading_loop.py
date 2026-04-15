@@ -392,7 +392,7 @@ class TradingLoop:
         check_date = latest_ts.date() + timedelta(days=1)
         end_date = now.date()
         while check_date <= end_date:
-            if check_date.weekday() >= 5 or is_moex_holiday(check_date):
+            if check_date.weekday() >= 5 or is_moex_holiday(check_date):  # noqa: PLR2004
                 non_trading_days += 1
             check_date += timedelta(days=1)
         # Subtract non-trading days from the age
@@ -2219,7 +2219,7 @@ class TradingLoop:
         """
         return dict(self._entry_strategy)
 
-    def _submit_order(
+    def _submit_order(  # noqa: PLR0912
         self,
         order: OrderRequest,
         market_id: str,

@@ -12,9 +12,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finalayze.ml.models.xgboost_model import XGBoostModel
-from finalayze.ml.models.lightgbm_model import LightGBMModel
 from finalayze.ml.models.catboost_model import CatBoostModel
+from finalayze.ml.models.lightgbm_model import LightGBMModel
+from finalayze.ml.models.xgboost_model import XGBoostModel
 
 # Minimal synthetic dataset: 10 samples, 3 features, imbalanced classes (7 neg, 3 pos)
 _N_SAMPLES = 20

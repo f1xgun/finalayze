@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -18,7 +18,7 @@ from finalayze.core.schemas import (
     FileLineSource,
 )
 
-_DT = datetime(2026, 4, 7, tzinfo=timezone.utc)
+_DT = datetime(2026, 4, 7, tzinfo=UTC)
 
 _FILE_SOURCE = FileLineSource(
     kind="file",
