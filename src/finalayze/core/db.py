@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AsyncSession",
+    "async_session_factory",
     "async_sessionmaker",
     "create_async_engine",
     "get_async_session_factory",
@@ -67,6 +68,10 @@ def get_async_session_factory() -> async_sessionmaker[AsyncSession]:
         )
 
     return _factory_cache[url]
+
+
+# Backward-compatible alias used by dashboard endpoints (portfolio, trades, signals).
+async_session_factory = get_async_session_factory
 
 
 def reset_engine() -> None:
