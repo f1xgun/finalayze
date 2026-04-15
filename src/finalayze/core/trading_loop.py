@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from finalayze.analysis.anomaly_detector import AnomalyDetector, AnomalyResult
 from finalayze.core.schemas import NewsArticle, SignalDirection
 from finalayze.data.cache import _compute_sentiment_ttl
 from finalayze.markets.currency import CurrencyConverter
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
 
     from finalayze.analysis.event_classifier import EventClassifier, EventType
     from finalayze.analysis.impact_estimator import ImpactEstimator
+    from finalayze.analysis.llm_client import LLMClient
     from finalayze.analysis.news_analyzer import NewsAnalyzer
     from finalayze.core.alerts import TelegramAlerter
     from finalayze.core.events import EventBus
@@ -64,6 +66,15 @@ _MIN_CONFIDENCE_BOOST = 1.2  # raise required confidence 20% at CAUTION
 _DEFAULT_SENTIMENT = 0.0
 _MAX_ARTICLES_PER_CYCLE = 20  # budget cap: prevent LLM cost explosion on busy news days
 _ZERO = Decimal(0)
+
+# ── Anomaly interpreter agent ────────────────────────────────────────────
+_ANOMALY_SYSTEM_PROMPT = (
+    "You are a financial market analyst. Explain the likely cause of "
+    "the following statistical anomaly in 2-3 sentences. Be specific "
+    "about potential catalysts (earnings, macro events, sector rotation). "
+    "Do not give trading advice."
+)
+_ANOMALY_LLM_TIMEOUT = 30.0
 
 # ── Event type codes for Redis cache (combiner dedup) ─────────────────────
 # Maps EventType string values to numeric codes for downstream consumption.
@@ -152,6 +163,7 @@ class TradingLoop:
         ml_registry: MLModelRegistry | None = None,
         event_bus: EventBus | None = None,
         fx_service: FXRateService | None = None,
+        llm_client: LLMClient | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
@@ -178,6 +190,8 @@ class TradingLoop:
         self._cache = cache
         self._event_bus = event_bus
         self._fx_service = fx_service
+        self._llm_client = llm_client
+        self._anomaly_detector = AnomalyDetector()
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -244,6 +258,36 @@ class TradingLoop:
             self._async_thread = thread
         future = asyncio.run_coroutine_threadsafe(coro, self._async_loop)
         return future.result(timeout=_async_timeout)
+
+    async def _enrich_anomaly_async(
+        self,
+        symbol: str,
+        market_id: str,
+        anomaly: AnomalyResult,
+    ) -> None:
+        """Fire-and-forget LLM enrichment -- never raises, never blocks raw alert."""
+        _log = structlog.get_logger()
+        try:
+            prompt = (
+                f"Ticker: {symbol} ({market_id})\n"
+                f"Price move: {anomaly.price_move_pct:+.1f}%\n"
+                f"Sigma: {anomaly.sigma:.1f}\n"
+                f"Volume ratio: {anomaly.volume_ratio:.1f}x average\n"
+                f"Anomaly type: {anomaly.anomaly_type}"
+            )
+            assert self._llm_client is not None  # guarded by caller
+            explanation = await asyncio.wait_for(
+                self._llm_client.complete(prompt, _ANOMALY_SYSTEM_PROMPT),
+                timeout=_ANOMALY_LLM_TIMEOUT,
+            )
+            follow_up = f"AI interpretation (unverified): {explanation}"
+            await self._alerter._send(follow_up)
+        except Exception:
+            _log.warning(
+                "anomaly_llm_failure",
+                symbol=symbol,
+                market_id=market_id,
+            )
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -672,7 +716,7 @@ class TradingLoop:
         broker = self._broker_router.route(market_id)
         return side == "SELL" and broker.has_position(symbol)
 
-    def _process_instrument(  # noqa: PLR0915
+    def _process_instrument(  # noqa: PLR0912, PLR0915
         self,
         instrument: Instrument,
         market_id: str,
@@ -696,6 +740,28 @@ class TradingLoop:
         if candles:
             current_price = candles[-1].close
             self._check_stop_losses(market_id, instrument.symbol, current_price)
+
+        # Anomaly detection: raw alert first, then fire-and-forget LLM enrichment
+        anomaly = self._anomaly_detector.check(candles, instrument.symbol, market_id)
+        if anomaly is not None:
+            raw_text = (
+                f"\u26a1 ANOMALY {instrument.symbol} [{market_id.upper()}]: "
+                f"{anomaly.price_move_pct:+.1f}% price move "
+                f"({anomaly.sigma:.1f}\u03c3), vol {anomaly.volume_ratio:.1f}x avg"
+            )
+            # STEP 1: Raw alert -- synchronous, fire-and-forget via send_alert()
+            self._alerter.send_alert(raw_text)
+
+            # STEP 2: LLM enrichment -- pure fire-and-forget, no .result() call
+            if (
+                self._llm_client is not None
+                and self._async_loop is not None
+                and not self._async_loop.is_closed()
+            ):
+                asyncio.run_coroutine_threadsafe(
+                    self._enrich_anomaly_async(instrument.symbol, market_id, anomaly),
+                    self._async_loop,
+                )
 
         sentiment_score = self._get_sentiment(seg_id)
         event_type_code = self._get_event_type_code(seg_id, instrument.symbol)
