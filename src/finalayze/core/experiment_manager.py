@@ -74,9 +74,7 @@ class ExperimentManager:
 
         return frontmatter, body
 
-    def _write_file(
-        self, experiment_id: str, frontmatter: dict[str, Any], body: str
-    ) -> None:
+    def _write_file(self, experiment_id: str, frontmatter: dict[str, Any], body: str) -> None:
         """Write experiment file with YAML frontmatter + body."""
         path = self._experiment_path(experiment_id)
         yaml_text = yaml.dump(
@@ -191,11 +189,13 @@ class ExperimentManager:
         """
         frontmatter, body = self._read_file(experiment_id)
         results = frontmatter.get("results") or []
-        results.append({
-            "run_name": result.run_name,
-            "iteration_name": result.iteration_name,
-            "metrics": dict(result.metrics),
-        })
+        results.append(
+            {
+                "run_name": result.run_name,
+                "iteration_name": result.iteration_name,
+                "metrics": dict(result.metrics),
+            }
+        )
         frontmatter["results"] = results
         self._write_file(experiment_id, frontmatter, body)
 
@@ -255,9 +255,7 @@ class ExperimentManager:
         return None
 
 
-def _compute_verdict(
-    criteria: SuccessCriteria, metric_value: float
-) -> tuple[str, str]:
+def _compute_verdict(criteria: SuccessCriteria, metric_value: float) -> tuple[str, str]:
     """Compute experiment verdict from criteria and observed metric value.
 
     Args:
@@ -278,14 +276,11 @@ def _compute_verdict(
             f"{criteria.operator} {criteria.threshold}",
         )
 
-    relative_miss = abs(metric_value - criteria.threshold) / max(
-        abs(criteria.threshold), 1e-9
-    )
+    relative_miss = abs(metric_value - criteria.threshold) / max(abs(criteria.threshold), 1e-9)
     if relative_miss <= _INCONCLUSIVE_BAND:
         return (
             "INCONCLUSIVE",
-            f"{criteria.metric}={metric_value:.4f} within 10% of "
-            f"threshold {criteria.threshold}",
+            f"{criteria.metric}={metric_value:.4f} within 10% of threshold {criteria.threshold}",
         )
 
     return (

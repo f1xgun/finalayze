@@ -199,9 +199,7 @@ class TestEventTypeCode:
     def test_event_type_code_default_zero(self) -> None:
         """When no event_type_code kwarg passed, Signal.features has 0.0."""
         strategy = EventDrivenStrategy()
-        signal = strategy.generate_signal(
-            "SBER", _CANDLES, _SEGMENT, sentiment_score=0.8
-        )
+        signal = strategy.generate_signal("SBER", _CANDLES, _SEGMENT, sentiment_score=0.8)
         assert signal is not None
         assert signal.features["event_type_code"] == 0.0
 

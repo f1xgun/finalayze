@@ -402,7 +402,10 @@ class TestKillSwitchStartupGuard:
         # After the kill switch check, start() creates a BackgroundScheduler;
         # we just verify the kill switch check passes (no RuntimeError).
         mock_sched = MagicMock()
-        with patch("finalayze.orchestration.trading_loop.BackgroundScheduler", return_value=mock_sched):
+        with patch(
+            "finalayze.orchestration.trading_loop.BackgroundScheduler",
+            return_value=mock_sched,
+        ):
             # start() blocks on _stop_event.wait(); simulate immediate stop
             loop._stop_event.set()  # type: ignore[attr-defined]
             loop.start()  # type: ignore[attr-defined]
@@ -416,7 +419,10 @@ class TestKillSwitchStartupGuard:
         loop._kill_switch = mock_ks  # type: ignore[attr-defined]
 
         mock_sched = MagicMock()
-        with patch("finalayze.orchestration.trading_loop.BackgroundScheduler", return_value=mock_sched):
+        with patch(
+            "finalayze.orchestration.trading_loop.BackgroundScheduler",
+            return_value=mock_sched,
+        ):
             loop._stop_event.set()  # type: ignore[attr-defined]
             loop.start()  # type: ignore[attr-defined]
         # If we got here, no RuntimeError was raised -- test passes
@@ -456,7 +462,7 @@ class TestStalenessThreshold:
 
         # Friday 15:00 UTC → Monday 07:00 UTC = 64 hours
         # 64h < 72h threshold → quick path returns False (not stale)
-        friday = datetime(2026, 4, 3, 15, 0, tzinfo=UTC)
+        _friday = datetime(2026, 4, 3, 15, 0, tzinfo=UTC)
         age_hours = 64
         latest = datetime.now(UTC) - timedelta(hours=age_hours)
         # 64h < 72h → quick path, not stale
@@ -469,12 +475,12 @@ class TestStalenessThreshold:
         # Dec 30 to Jan 9 = 10 calendar days = 240 hours
         # Non-trading: Dec 31 (holiday), Jan 1-8 (holidays), plus any weekends in range
         # With enough holidays subtracted, adjusted age should be < 72h
-        dec_30 = datetime(2025, 12, 30, 15, 0, tzinfo=UTC)
+        _dec_30 = datetime(2025, 12, 30, 15, 0, tzinfo=UTC)
         jan_9 = datetime(2026, 1, 9, 7, 0, tzinfo=UTC)
 
         with patch("finalayze.orchestration.trading_loop.datetime") as mock_dt:
             mock_dt.now.return_value = jan_9
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, tzinfo=UTC, **kw)
 
         # The actual function uses datetime.now(UTC), so we test the logic directly
         # by calling with known timestamps. We need to verify the holiday subtraction

@@ -572,7 +572,7 @@ class TradingLoop:
 
     def start(self) -> None:
         """Start the APScheduler and block until stop() is called."""
-        if self._kill_switch is not None and self._kill_switch.is_killed:
+        if self._kill_switch is not None and self._kill_switch.is_killed:  # type: ignore[attr-defined]
             raise RuntimeError("Kill switch active -- clear flag before restarting")
 
         from apscheduler.executors.pool import (  # noqa: PLC0415

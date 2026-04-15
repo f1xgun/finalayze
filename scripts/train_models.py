@@ -1077,7 +1077,7 @@ def _evaluate_fold_metrics(
     # Compute Brier score: use calibrated probabilities if calibrator available
     if calibrator is not None and hasattr(calibrator, "predict_proba"):
         try:
-            import numpy as np
+            import numpy as np  # noqa: PLC0415
 
             calibrated_probas = calibrator.predict_proba(
                 np.array(probas_all, dtype=np.float64)

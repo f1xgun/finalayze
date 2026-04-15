@@ -148,10 +148,19 @@ def test_feature_selection_runs_once_before_folds(module, synthetic_data, three_
         p_cat,
         patch.object(module, "compute_decay_weights", return_value=np.ones(100)),
         patch.object(module, "evaluate_fold", return_value=[True] * 5),
-        patch.object(module, "_evaluate_models", return_value=MagicMock(
-            accuracy=0.6, brier_score=0.22, profit_factor=1.2,
-            n_test=25, sensitivity=0.5, signal_count=10, avg_hold_bars=1.0,
-        )),
+        patch.object(
+            module,
+            "_evaluate_models",
+            return_value=MagicMock(
+                accuracy=0.6,
+                brier_score=0.22,
+                profit_factor=1.2,
+                n_test=25,
+                sensitivity=0.5,
+                signal_count=10,
+                avg_hold_bars=1.0,
+            ),
+        ),
     ):
         result = module.run_experiment(
             config=config,
@@ -195,10 +204,19 @@ def test_explicit_feature_subset_skips_selection(module, synthetic_data, two_fol
         p_cat,
         patch.object(module, "compute_decay_weights", return_value=np.ones(150)),
         patch.object(module, "evaluate_fold", return_value=[True] * 5),
-        patch.object(module, "_evaluate_models", return_value=MagicMock(
-            accuracy=0.6, brier_score=0.22, profit_factor=1.2,
-            n_test=25, sensitivity=0.5, signal_count=10, avg_hold_bars=1.0,
-        )),
+        patch.object(
+            module,
+            "_evaluate_models",
+            return_value=MagicMock(
+                accuracy=0.6,
+                brier_score=0.22,
+                profit_factor=1.2,
+                n_test=25,
+                sensitivity=0.5,
+                signal_count=10,
+                avg_hold_bars=1.0,
+            ),
+        ),
     ):
         module.run_experiment(
             config=config,
@@ -250,10 +268,19 @@ def test_selection_uses_all_train_data(module, synthetic_data, three_folds):
         p_cat,
         patch.object(module, "compute_decay_weights", return_value=np.ones(200)),
         patch.object(module, "evaluate_fold", return_value=[True] * 5),
-        patch.object(module, "_evaluate_models", return_value=MagicMock(
-            accuracy=0.6, brier_score=0.22, profit_factor=1.2,
-            n_test=25, sensitivity=0.5, signal_count=10, avg_hold_bars=1.0,
-        )),
+        patch.object(
+            module,
+            "_evaluate_models",
+            return_value=MagicMock(
+                accuracy=0.6,
+                brier_score=0.22,
+                profit_factor=1.2,
+                n_test=25,
+                sensitivity=0.5,
+                signal_count=10,
+                avg_hold_bars=1.0,
+            ),
+        ),
     ):
         module.run_experiment(
             config=config,
@@ -286,7 +313,7 @@ def test_selected_features_logged_once(module, synthetic_data, three_folds):
         return _FIXED_SELECTED
 
     # Capture structlog events by patching the logger
-    original_logger = module.logger
+    _original_logger = module.logger
 
     class CapturingLogger:
         def info(self, event, **kwargs):
@@ -311,10 +338,19 @@ def test_selected_features_logged_once(module, synthetic_data, three_folds):
         p_cat,
         patch.object(module, "compute_decay_weights", return_value=np.ones(200)),
         patch.object(module, "evaluate_fold", return_value=[True] * 5),
-        patch.object(module, "_evaluate_models", return_value=MagicMock(
-            accuracy=0.6, brier_score=0.22, profit_factor=1.2,
-            n_test=25, sensitivity=0.5, signal_count=10, avg_hold_bars=1.0,
-        )),
+        patch.object(
+            module,
+            "_evaluate_models",
+            return_value=MagicMock(
+                accuracy=0.6,
+                brier_score=0.22,
+                profit_factor=1.2,
+                n_test=25,
+                sensitivity=0.5,
+                signal_count=10,
+                avg_hold_bars=1.0,
+            ),
+        ),
     ):
         module.run_experiment(
             config=config,

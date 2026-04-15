@@ -406,11 +406,11 @@ def _build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
 
             async def parse_structured(  # type: ignore[override]
                 self,
-                prompt: str,  # noqa: ARG002
-                system: str,  # noqa: ARG002
-                response_model: type,  # noqa: ARG002
+                prompt: str,
+                system: str,
+                response_model: type,
                 *,
-                max_tokens: int | None = None,  # noqa: ARG002
+                max_tokens: int | None = None,
             ) -> object:
                 msg = "Stub LLM client does not support parse_structured"
                 raise NotImplementedError(msg)
@@ -509,7 +509,7 @@ def _build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
             return None
 
         # Store kill_switch on loop for access from lifespan
-        loop._kill_switch = kill_switch  # type: ignore[attr-defined]
+        loop._kill_switch = kill_switch
         loop._circuit_breakers = circuit_breakers
         loop._alerter_ref = alerter  # type: ignore[attr-defined]
 

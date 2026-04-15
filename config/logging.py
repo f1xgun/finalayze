@@ -50,7 +50,7 @@ def setup_logging(mode: WorkMode) -> None:
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
-            _drop_grpc_poller_noise,
+            _drop_grpc_poller_noise,  # type: ignore[list-item]
             structlog.processors.StackInfoRenderer(),
             structlog.dev.set_exc_info,
             structlog.processors.format_exc_info,

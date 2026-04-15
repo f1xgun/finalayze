@@ -93,8 +93,8 @@ class TestBudgetCap:
         analyzer = MagicMock()
         loop._news_impact_analyzer = analyzer
 
-        batch_sizes: list[int] = []
-        original_analyze_batch = loop.__class__._analyze_impact_batch
+        _batch_sizes: list[int] = []
+        _original_analyze_batch = loop.__class__._analyze_impact_batch
 
         # Mock _run_async to capture what _analyze_impact_batch receives
         def mock_run_async(coro, *, timeout: int = 30) -> tuple[int, int, str]:
@@ -212,7 +212,7 @@ class TestTickerValidation:
         analyzer = MagicMock()
         loop._news_impact_analyzer = analyzer
 
-        captured_articles: list[NewsArticle] = []
+        _captured_articles: list[NewsArticle] = []
 
         def mock_run_async(coro, *, timeout: int = 30) -> tuple[int, int, str]:
             # Cannot inspect coroutine args directly, but credibility was already
@@ -243,9 +243,7 @@ class TestLLMLiveness:
     whether processed_ok == 0 when there were articles to process.
     """
 
-    def _run_cycle_with_result(
-        self, loop: Any, *, ok: int = 0, fail: int = 0
-    ) -> None:
+    def _run_cycle_with_result(self, loop: Any, *, ok: int = 0, fail: int = 0) -> None:
         """Run a news cycle with a specific ok/fail count from _analyze_impact_batch."""
         article = _make_article()
         loop._news_fetcher.fetch_news.return_value = [article]

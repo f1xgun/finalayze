@@ -195,9 +195,7 @@ class ConflictDetector:
 
             # Dedup
             topics = [claim_a.source.metric_name, claim_a.source.iteration]
-            dedup_key = self._dedup_key(
-                [a.agent_name, b.agent_name], topics, ConflictType.METRIC
-            )
+            dedup_key = self._dedup_key([a.agent_name, b.agent_name], topics, ConflictType.METRIC)
             if dedup_key in self._seen_conflicts:
                 continue
             self._seen_conflicts.add(dedup_key)
@@ -250,9 +248,7 @@ class ConflictDetector:
 
         for claim_a in a.claims:
             for claim_b in b.claims:
-                ratio = difflib.SequenceMatcher(
-                    None, claim_a.statement, claim_b.statement
-                ).ratio()
+                ratio = difflib.SequenceMatcher(None, claim_a.statement, claim_b.statement).ratio()
                 if ratio <= _STATEMENT_SIMILARITY_THRESHOLD:
                     continue
 

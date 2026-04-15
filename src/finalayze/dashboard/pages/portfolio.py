@@ -25,9 +25,9 @@ def render(api: ApiClient) -> None:
     # Summary metrics row — detect currency from markets
     markets = portfolio.get("markets", [])
     has_moex = any(m.get("market_id") == "moex" for m in markets) if markets else False
-    currency_label = "RUB" if has_moex and not any(
-        m.get("market_id") == "us" for m in markets
-    ) else "USD"
+    currency_label = (
+        "RUB" if has_moex and not any(m.get("market_id") == "us" for m in markets) else "USD"
+    )
     currency_sym = "\u20bd" if currency_label == "RUB" else "$"
 
     total_equity = float(portfolio.get("total_equity_usd") or 0.0)

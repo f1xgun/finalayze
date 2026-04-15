@@ -31,6 +31,7 @@ def _get_segment_for_symbol(symbol: str) -> str:
             pass  # segments config unavailable
     return _symbol_to_segment.get(symbol, "")
 
+
 _log = structlog.get_logger()
 
 router = APIRouter(

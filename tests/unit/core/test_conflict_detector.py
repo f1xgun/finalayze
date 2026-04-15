@@ -282,11 +282,21 @@ class TestStatementConflict:
 
         Confidence delta = abs(0.90 - 0.65) = 0.25 > 0.15 => not filtered.
         """
-        common_text = "dual_momentum strategy has profit factor above 1.20 in the us_tech segment backtest"
+        common_text = (
+            "dual_momentum strategy has profit factor above 1.20 in the us_tech segment backtest"
+        )
         output_a = _make_agent_output(
             "quant-analyst",
             "ENABLE dual_momentum on us_tech -- metrics confirm outperformance",
-            [_make_file_claim(common_text, "src/strategies/momentum.py", 42, "pf=1.29", _CONF_HIGH)],
+            [
+                _make_file_claim(
+                    common_text,
+                    "src/strategies/momentum.py",
+                    42,
+                    "pf=1.29",
+                    _CONF_HIGH,
+                )
+            ],
         )
         output_b = _make_agent_output(
             "risk-officer",

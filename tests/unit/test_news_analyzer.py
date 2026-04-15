@@ -22,11 +22,19 @@ _ARTICLE_EN_KWARGS = {
     "published_at": datetime(2024, 1, 3, tzinfo=UTC),
 }
 
+_RU_TITLE = (
+    "\u0426\u0411 \u043f\u043e\u0432\u044b\u0441\u0438\u043b \u0441\u0442\u0430\u0432\u043a\u0443"
+)
+_RU_CONTENT = (
+    "\u0426\u0411 \u043f\u043e\u0432\u044b\u0441\u0438\u043b"
+    " \u043a\u043b\u044e\u0447\u0435\u0432\u0443\u044e"
+    " \u0441\u0442\u0430\u0432\u043a\u0443 \u0434\u043e 16%."
+)
 _ARTICLE_RU_KWARGS = {
     "id": uuid4(),
     "source": "interfax",
-    "title": "\u0426\u0411 \u043f\u043e\u0432\u044b\u0441\u0438\u043b \u0441\u0442\u0430\u0432\u043a\u0443",
-    "content": "\u0426\u0435\u043d\u0442\u0440\u0430\u043b\u044c\u043d\u044b\u0439 \u0431\u0430\u043d\u043a \u043f\u043e\u0432\u044b\u0441\u0438\u043b \u043a\u043b\u044e\u0447\u0435\u0432\u0443\u044e \u0441\u0442\u0430\u0432\u043a\u0443 \u0434\u043e 16%.",
+    "title": _RU_TITLE,
+    "content": _RU_CONTENT,
     "url": "https://interfax.ru/1",
     "language": "ru",
     "published_at": datetime(2024, 1, 3, tzinfo=UTC),
@@ -61,7 +69,9 @@ class TestNewsAnalyzer:
         mock_llm.parse_structured.assert_awaited_once()
         call_args = mock_llm.parse_structured.call_args
         # Third positional arg or response_model kwarg should be SentimentResult
-        assert SentimentResult in call_args[0] or call_args[1].get("response_model") is SentimentResult
+        assert (
+            SentimentResult in call_args[0] or call_args[1].get("response_model") is SentimentResult
+        )
         assert isinstance(result, SentimentResult)
         assert result.sentiment == pytest.approx(_SENTIMENT_VALUE)
         assert result.confidence == pytest.approx(_CONFIDENCE_VALUE)
@@ -72,7 +82,11 @@ class TestNewsAnalyzer:
         mock_llm.parse_structured.return_value = SentimentResult(
             sentiment=_SENTIMENT_RU_VALUE,
             confidence=_CONFIDENCE_RU_VALUE,
-            reasoning="\u0421\u0442\u0430\u0432\u043a\u0430 \u043f\u043e\u0432\u044b\u0448\u0435\u043d\u0430 \u2014 \u043d\u0435\u0433\u0430\u0442\u0438\u0432",
+            reasoning=(
+                "\u0421\u0442\u0430\u0432\u043a\u0430"
+                " \u043f\u043e\u0432\u044b\u0448\u0435\u043d\u0430"
+                " \u2014 \u043d\u0435\u0433\u0430\u0442\u0438\u0432"
+            ),
         )
         analyzer = NewsAnalyzer(llm_client=mock_llm)
         article = _make_article(**_ARTICLE_RU_KWARGS)
@@ -80,7 +94,10 @@ class TestNewsAnalyzer:
 
         call_args = mock_llm.parse_structured.call_args
         system_arg = call_args[0][1]  # second positional arg is system prompt
-        assert "\u0426\u0411" in system_arg or "\u0444\u0438\u043d\u0430\u043d\u0441\u043e\u0432\u044b\u0445" in system_arg
+        assert (
+            "\u0426\u0411" in system_arg
+            or "\u0444\u0438\u043d\u0430\u043d\u0441\u043e\u0432\u044b\u0445" in system_arg
+        )
         assert result.sentiment == pytest.approx(_SENTIMENT_RU_VALUE)
 
     @pytest.mark.asyncio

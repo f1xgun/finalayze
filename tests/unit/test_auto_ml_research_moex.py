@@ -45,8 +45,8 @@ class TestBarrierConfig:
         from scripts.auto_ml_research import _get_barrier_params
 
         upper, lower = _get_barrier_params("ru_energy")
-        assert upper == pytest.approx(1.8)   # 1.5 * 1.2
-        assert lower == pytest.approx(2.4)   # 2.0 * 1.2
+        assert upper == pytest.approx(1.8)  # 1.5 * 1.2
+        assert lower == pytest.approx(2.4)  # 2.0 * 1.2
 
     def test_ru_energy_lower_wider_than_upper(self) -> None:
         from scripts.auto_ml_research import _get_barrier_params
@@ -58,8 +58,8 @@ class TestBarrierConfig:
         from scripts.auto_ml_research import _get_barrier_params
 
         upper, lower = _get_barrier_params("ru_finance")
-        assert upper == pytest.approx(2.4)   # 2.0 * 1.2
-        assert lower == pytest.approx(2.4)   # 2.0 * 1.2
+        assert upper == pytest.approx(2.4)  # 2.0 * 1.2
+        assert lower == pytest.approx(2.4)  # 2.0 * 1.2
 
     def test_us_tech_no_uplift(self) -> None:
         from scripts.auto_ml_research import _get_barrier_params
@@ -76,8 +76,8 @@ class TestBarrierConfig:
         try:
             _SEGMENT_BARRIER_CONFIG["ru_energy"] = (1.0, 3.0)
             upper, lower = _get_barrier_params("ru_energy")
-            assert upper == pytest.approx(1.2)   # 1.0 * 1.2
-            assert lower == pytest.approx(3.6)   # 3.0 * 1.2
+            assert upper == pytest.approx(1.2)  # 1.0 * 1.2
+            assert lower == pytest.approx(3.6)  # 3.0 * 1.2
         finally:
             if original is not None:
                 _SEGMENT_BARRIER_CONFIG["ru_energy"] = original
@@ -256,7 +256,7 @@ class TestArgparseChoices:
 # ---------------------------------------------------------------------------
 
 # Constants for macro tests (no magic numbers — ruff PLR2004)
-_CANDLE_COUNT = 500  # must meet _MIN_HISTORY_DAYS=500 gate; also covers _WINDOW_SIZE=80 + _TB_MAX_HOLD=20
+_CANDLE_COUNT = 500  # must meet _MIN_HISTORY_DAYS=500 gate; covers _WINDOW_SIZE=80
 _MACRO_COUNT = 500  # one record per day matching candle count
 _STABLE_FX_RATE = Decimal(80)
 _SPIKE_FX_RATE = Decimal(200)  # large spike injected into the last 2 records

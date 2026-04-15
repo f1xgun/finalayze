@@ -241,13 +241,13 @@ class EnsembleCalibrator:
 
         if self._use_isotonic and self._isotonic is not None:
             calibrated = self._isotonic.predict(raw_probas)
-            return np.clip(calibrated, 0.0, 1.0)
+            return np.clip(calibrated, 0.0, 1.0)  # type: ignore[no-any-return]
 
         if self._calibrator is None:
             return raw_probas.copy()
 
         calibrated = self._calibrator.predict_proba(raw_probas.reshape(-1, 1))[:, 1]
-        return np.clip(calibrated, 0.0, 1.0)
+        return np.clip(calibrated, 0.0, 1.0)  # type: ignore[no-any-return]
 
     def get_prediction_set(self, raw_prob: float) -> set[int]:
         """Get conformal prediction set for a raw probability.

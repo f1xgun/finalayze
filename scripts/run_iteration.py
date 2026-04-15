@@ -996,9 +996,7 @@ def _parse_args() -> argparse.Namespace:
         "--wf-test-months", type=int, default=6, help="Walk-forward test window in months"
     )
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument(
-        "--hypothesis", default=None, help="Experiment ID to link backtest results"
-    )
+    parser.add_argument("--hypothesis", default=None, help="Experiment ID to link backtest results")
     parser.add_argument(
         "--run-name", default="main", help="Label for interaction test run (A-only, B-only, AB)"
     )

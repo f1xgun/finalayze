@@ -213,15 +213,11 @@ class TestFactCheckReport:
         )
 
     def test_fact_check_report_has_contradictions_true(self) -> None:
-        report = self._make_report(
-            [ClaimVerdict.VERIFIED, ClaimVerdict.CONTRADICTED]
-        )
+        report = self._make_report([ClaimVerdict.VERIFIED, ClaimVerdict.CONTRADICTED])
         assert report.has_contradictions is True
 
     def test_fact_check_report_has_contradictions_false(self) -> None:
-        report = self._make_report(
-            [ClaimVerdict.VERIFIED, ClaimVerdict.VERIFIED]
-        )
+        report = self._make_report([ClaimVerdict.VERIFIED, ClaimVerdict.VERIFIED])
         assert report.has_contradictions is False
 
     def test_fact_check_report_to_markdown(self) -> None:
@@ -358,7 +354,7 @@ class TestConflictReport:
 
     def test_conflict_report_is_frozen(self) -> None:
         report = self._make_report()
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(Exception, match=r".*"):  # noqa: B017, PT011
             report.conflict_id = "mutated"  # type: ignore[misc]
 
 

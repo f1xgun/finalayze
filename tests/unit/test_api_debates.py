@@ -340,7 +340,9 @@ class TestFinalizeDebate:
                             "confidence": 0.8,
                         },
                         "verdict": "contradicted" if with_contradiction else "verified",
-                        "evidence": "Contradicted by risk-officer" if with_contradiction else "Verified",
+                        "evidence": (
+                            "Contradicted by risk-officer" if with_contradiction else "Verified"
+                        ),
                     }
                 ],
             }

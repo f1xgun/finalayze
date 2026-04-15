@@ -73,8 +73,8 @@ async def list_trades(
             rows = result.scalars().all()
 
             # Total count
-            count_stmt = select(func.count()).select_from(OrderModel).where(
-                OrderModel.status == "filled"
+            count_stmt = (
+                select(func.count()).select_from(OrderModel).where(OrderModel.status == "filled")
             )
             total = (await session.execute(count_stmt)).scalar() or 0
 
@@ -87,7 +87,7 @@ async def list_trades(
                 quantity=float(r.filled_quantity),
                 fill_price=float(r.filled_avg_price) if r.filled_avg_price else None,
                 slippage_bps=None,
-                timestamp=(r.filled_at or r.submitted_at or "").isoformat()
+                timestamp=(r.filled_at or r.submitted_at or "").isoformat()  # type: ignore[union-attr]
                 if hasattr(r.filled_at or r.submitted_at, "isoformat")
                 else "",
             )
@@ -115,9 +115,13 @@ async def trade_analytics(
 
         cutoff = datetime.now(UTC) - timedelta(days=period)
         async with async_session_factory()() as session:
-            stmt = select(func.count()).select_from(OrderModel).where(
-                OrderModel.status == "filled",
-                OrderModel.submitted_at >= cutoff,
+            stmt = (
+                select(func.count())
+                .select_from(OrderModel)
+                .where(
+                    OrderModel.status == "filled",
+                    OrderModel.submitted_at >= cutoff,
+                )
             )
             if market:
                 stmt = stmt.where(OrderModel.market_id == market)
@@ -168,7 +172,7 @@ async def get_trade(trade_id: str) -> TradeEntry:
             quantity=float(r.filled_quantity),
             fill_price=float(r.filled_avg_price) if r.filled_avg_price else None,
             slippage_bps=None,
-            timestamp=(r.filled_at or r.submitted_at or "").isoformat()
+            timestamp=(r.filled_at or r.submitted_at or "").isoformat()  # type: ignore[union-attr]
             if hasattr(r.filled_at or r.submitted_at, "isoformat")
             else "",
         )

@@ -92,13 +92,9 @@ def _format_comparison_table(
         da = vab - va
         db = vab - vb
         if key == "trade_count":
-            lines.append(
-                f"| {label} | {va:d} | {vb:d} | {vab:d} | {da:+d} | {db:+d} |"
-            )
+            lines.append(f"| {label} | {va:d} | {vb:d} | {vab:d} | {da:+d} | {db:+d} |")
         else:
-            lines.append(
-                f"| {label} | {va:.4f} | {vb:.4f} | {vab:.4f} | {da:+.4f} | {db:+.4f} |"
-            )
+            lines.append(f"| {label} | {va:.4f} | {vb:.4f} | {vab:.4f} | {da:+.4f} | {db:+.4f} |")
     return "\n".join(lines)
 
 
@@ -172,8 +168,7 @@ def main() -> None:
 
     # Save comparison
     comp_path = (
-        Path("results/experiments")
-        / f"comparison-{args.experiment_a}-{args.experiment_b}.md"
+        Path("results/experiments") / f"comparison-{args.experiment_a}-{args.experiment_b}.md"
     )
     comp_path.parent.mkdir(parents=True, exist_ok=True)
     comp_path.write_text(
