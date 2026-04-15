@@ -28,8 +28,17 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from finalayze.analysis.anomaly_detector import AnomalyDetector, AnomalyResult
+from finalayze.analysis.portfolio_review_agent import (
+    PORTFOLIO_REVIEW_SYSTEM_PROMPT,
+    REVIEW_LLM_TIMEOUT,
+    PortfolioReviewResult,
+    build_review_prompt,
+    format_review_telegram,
+)
 from finalayze.core.schemas import NewsArticle, SignalDirection
 from finalayze.core.validation_logger import CycleLogEntry, ValidationLogger
+from finalayze.data.cache import _compute_sentiment_ttl
 
 try:
     from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -46,6 +55,7 @@ if TYPE_CHECKING:
 
     from finalayze.analysis.event_classifier import EventClassifier
     from finalayze.analysis.impact_estimator import ImpactEstimator
+    from finalayze.analysis.llm_client import LLMClient
     from finalayze.analysis.news_analyzer import NewsAnalyzer
     from finalayze.analysis.news_impact_analyzer import NewsImpactAnalyzer, NewsImpactResult
     from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
@@ -92,6 +102,39 @@ _ATR_MULTIPLIER_MOEX = Decimal("2.5")
 _MARKET_CURRENCY: dict[str, str] = {"us": "USD", "moex": "RUB"}
 _ARTICLE_DEDUP_MAX_SIZE = 5000  # max hashes to track
 _ARTICLE_DEDUP_TTL_HOURS = 24  # skip articles seen within this window
+_MAX_ARTICLES_PER_CYCLE = 20  # budget cap: prevent LLM cost explosion on busy news days
+_LLM_FAILURE_THRESHOLD = 3  # consecutive all-fail news cycles before alerting
+
+# ── Anomaly interpreter agent ────────────────────────────────────────────
+_ANOMALY_SYSTEM_PROMPT = (
+    "You are a financial market analyst. Explain the likely cause of "
+    "the following statistical anomaly in 2-3 sentences. Be specific "
+    "about potential catalysts (earnings, macro events, sector rotation). "
+    "Do not give trading advice."
+)
+_ANOMALY_LLM_TIMEOUT = 30.0
+
+# ── Event type codes for Redis cache (combiner dedup) ─────────────────────
+# Maps EventType string values to numeric codes for downstream consumption.
+# Only significant event types get a non-zero code; "other" events are not cached.
+_EVENT_TYPE_FLOAT_MAP: dict[str, float] = {
+    "cbr_rate": 1.0,
+    "earnings": 2.0,
+    "sanctions": 3.0,
+    "oil_price": 4.0,
+    "macro": 5.0,
+    "geopolitical": 6.0,
+}
+
+# ── Source credibility ────────────────────────────────────────────────────
+SOURCE_CREDIBILITY: dict[str, float] = {
+    "rbc": 0.8,
+    "interfax": 0.8,
+    "tass": 0.8,
+    "moex_iss": 0.8,
+    "reuters": 0.8,
+    "telegram": 0.7,
+}
 
 # US market hours in UTC: 9:30-16:00 ET = 14:30-21:00 UTC
 _US_OPEN_UTC = (14, 30)
@@ -101,6 +144,29 @@ _MOEX_OPEN_UTC = (7, 0)
 _MOEX_CLOSE_UTC = (15, 45)
 
 _log = structlog.get_logger()
+
+
+def get_credibility(source: str) -> float:
+    """Return credibility score for a news source. Default 0.5 for unknown."""
+    return SOURCE_CREDIBILITY.get(source.lower(), 0.5)
+
+
+def validate_tickers(
+    tickers: list[str],
+    registry: InstrumentRegistry,
+    market_id: str,
+) -> list[str]:
+    """Filter tickers to only those in the instrument registry."""
+    from finalayze.core.exceptions import InstrumentNotFoundError  # noqa: PLC0415
+
+    valid: list[str] = []
+    for ticker in tickers:
+        try:
+            registry.get(ticker, market_id)
+            valid.append(ticker)
+        except InstrumentNotFoundError:
+            _log.warning("entity_not_in_registry", ticker=ticker, market_id=market_id)
+    return valid
 
 
 class TradingLoop:
@@ -138,6 +204,7 @@ class TradingLoop:
         metrics_collector: type[MetricsCollector] | None = None,
         grpc_loop: asyncio.AbstractEventLoop | None = None,
         kill_switch: object | None = None,
+        llm_client: LLMClient | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.execution.simulated_broker import StopLossState  # noqa: PLC0415
@@ -176,6 +243,8 @@ class TradingLoop:
         self._health_monitor = health_monitor
         self._metrics = metrics_collector
         self._kill_switch = kill_switch
+        self._llm_client = llm_client
+        self._anomaly_detector = AnomalyDetector()
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -185,6 +254,9 @@ class TradingLoop:
 
         # Cached check: any segment has event_driven strategy enabled?
         self._event_driven_active: bool | None = None
+
+        # LLM liveness tracking: consecutive all-fail news cycles
+        self._llm_consecutive_failures: int = 0
 
         # Article dedup: SHA-256(url|title) -> monotonic timestamp (OPS-03)
         self._seen_article_hashes: OrderedDict[str, float] = OrderedDict()
@@ -560,6 +632,14 @@ class TradingLoop:
             id="daily_reset",
             replace_existing=True,
         )
+        self._scheduler.add_job(
+            self._portfolio_review_cycle,
+            "cron",
+            hour=16,  # 19:00 MSK = 16:00 UTC (MSK is UTC+3, no DST)
+            minute=0,
+            id="portfolio_review",
+            replace_existing=True,
+        )
         if self._ml_registry is not None and getattr(self._settings, "ml_enabled", False):
             self._scheduler.add_job(
                 self._retrain_cycle,
@@ -888,7 +968,7 @@ class TradingLoop:
 
                 MetricsCollector.set_usd_rub_rate(float(rate))
 
-    def _news_cycle(self) -> None:
+    def _news_cycle(self) -> None:  # noqa: PLR0912
         """Fetch news from RSS, Telegram, and legacy NewsAPI; analyze and update sentiment."""
         if not self._any_event_driven_enabled():
             _log.debug("news_cycle_skipped_no_event_driven")
@@ -936,6 +1016,26 @@ class TradingLoop:
                 _log.warning("news_legacy_fetch_failed", exc_info=True)
                 return
 
+        # v10.0: Budget cap: limit articles to prevent LLM cost explosion
+        if len(articles) > _MAX_ARTICLES_PER_CYCLE:
+            _log.warning(
+                "news_budget_cap_hit",
+                total=len(articles),
+                cap=_MAX_ARTICLES_PER_CYCLE,
+            )
+            from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
+            MetricsCollector.inc_news_budget_cap_hit()
+            articles = articles[:_MAX_ARTICLES_PER_CYCLE]
+
+        # v10.0: Attach source credibility scores
+        articles = [
+            art.model_copy(update={"credibility_score": get_credibility(art.source)})
+            if hasattr(art, "model_copy")
+            else art
+            for art in articles
+        ]
+
         # Analyze articles via NewsImpactAnalyzer (single LLM call per article)
         # Large timeout: with rate-limited LLM, batches may take minutes.
         _batch_timeout = 1800
@@ -945,6 +1045,21 @@ class TradingLoop:
             processed_ok, processed_fail, _ = self._run_async(
                 self._analyze_impact_batch(articles), timeout=_batch_timeout
             )
+
+        # v10.0: LLM liveness tracking (cycle level)
+        if articles:
+            if processed_ok == 0 and (processed_ok + processed_fail) > 0:
+                self._llm_consecutive_failures += 1
+                from finalayze.api.metrics import MetricsCollector as _Metrics  # noqa: PLC0415
+
+                _Metrics.inc_llm_liveness_failure()
+                if self._llm_consecutive_failures >= _LLM_FAILURE_THRESHOLD:
+                    self._alerter.on_error(
+                        "LLMLiveness",
+                        f"LLM failed {self._llm_consecutive_failures} consecutive news cycles",
+                    )
+            else:
+                self._llm_consecutive_failures = 0
 
         # Single summary line for the entire news cycle
         log_fn = _log.info if processed_fail == 0 else _log.warning
@@ -1066,7 +1181,7 @@ class TradingLoop:
                 fail_count += 1
         return ok_count, fail_count, last_error
 
-    async def _apply_impact_result(self, result: NewsImpactResult) -> None:
+    async def _apply_impact_result(self, result: NewsImpactResult) -> None:  # noqa: PLR0912
         """Apply NewsImpactResult to per-ticker sentiment cache.
 
         Must be async because it is called from _process_one which runs on
@@ -1121,11 +1236,22 @@ class TradingLoop:
 
         # Redis write — already on _async_loop, just await directly
         if self._cache is not None:
+            now = self._now()
+            ttl = _compute_sentiment_ttl(now)
             for seg_id, ticker, score in redis_updates:
                 try:
-                    await self._cache.set_sentiment(f"{seg_id}:{ticker}", score)
+                    await self._cache.set_sentiment(f"{seg_id}:{ticker}", score, ttl=ttl)
                 except Exception:
                     _log.debug("Failed to write sentiment to Redis cache")
+
+            # v10.0: Cache event_type_code for combiner dedup (EVNT-02 prep)
+            event_code = _EVENT_TYPE_FLOAT_MAP.get(result.event_type, 0.0)
+            if event_code > 0.0:
+                for seg_id, _ticker, _score in redis_updates:
+                    try:
+                        await self._cache.set_event_type(seg_id, event_code, ttl=ttl)
+                    except Exception:
+                        _log.debug("Failed to write event_type to Redis cache")
 
     def _persist_sentiment_scores(
         self,
@@ -1640,12 +1766,36 @@ class TradingLoop:
             current_price = candles[-1].close
             self._check_stop_losses(market_id, instrument.symbol, current_price)
 
+        # Anomaly detection: raw alert first, then fire-and-forget LLM enrichment
+        if candles:
+            anomaly = self._anomaly_detector.check(candles, instrument.symbol, market_id)
+            if anomaly is not None:
+                raw_text = (
+                    f"\u26a1 ANOMALY {instrument.symbol} [{market_id.upper()}]: "
+                    f"{anomaly.price_move_pct:+.1f}% price move "
+                    f"({anomaly.sigma:.1f}\u03c3), vol {anomaly.volume_ratio:.1f}x avg"
+                )
+                # STEP 1: Raw alert -- synchronous, fire-and-forget via send_alert()
+                self._alerter.send_alert(raw_text)
+
+                # STEP 2: LLM enrichment -- pure fire-and-forget, no .result() call
+                if (
+                    self._llm_client is not None
+                    and self._async_loop is not None
+                    and not self._async_loop.is_closed()
+                ):
+                    asyncio.run_coroutine_threadsafe(
+                        self._enrich_anomaly_async(instrument.symbol, market_id, anomaly),
+                        self._async_loop,
+                    )
+
         # PARITY-04: Skip signal generation for symbols stopped out this cycle
         if instrument.symbol in self._cycle_exited_symbols:
             _log.debug("skip_reentry_guard", symbol=instrument.symbol)
             return
 
         sentiment_score = self._get_sentiment(seg_id, instrument.symbol)
+        event_type_code = self._get_event_type_code(seg_id, instrument.symbol)
 
         broker = self._broker_router.route(market_id)
         has_open_position = broker.has_position(instrument.symbol)
@@ -1656,6 +1806,8 @@ class TradingLoop:
             seg_id,
             sentiment_score=sentiment_score,
             has_open_position=has_open_position,
+            credibility=1.0,  # TODO: wire from article credibility cache in future
+            event_type_code=event_type_code,
         )
         if signal is None:
             _log.info("signal_dropped_below_threshold", symbol=instrument.symbol, segment=seg_id)
@@ -2381,6 +2533,114 @@ class TradingLoop:
             save_ensemble_fn(model_dir, segment_id, ensemble)  # type: ignore[operator]
         except Exception:
             _log.exception("_retrain: failed to save ensemble for %s", segment_id)
+
+    # ── v10.0: Event type code helper ────────────────────────────────────────
+
+    def _get_event_type_code(self, seg_id: str, ticker: str) -> float:  # noqa: ARG002
+        """Read event_type_code from Redis cache for combiner dedup (EVNT-02).
+
+        Returns 0.0 (no event) on cache miss or error.
+        """
+        if self._cache is None:
+            return 0.0
+        try:
+            code: float | None = self._run_async(self._cache.get_event_type(seg_id))
+            return code if code is not None else 0.0
+        except Exception:
+            _log.debug("Failed to read event_type from Redis cache")
+            return 0.0
+
+    # ── v10.0: Anomaly LLM enrichment ────────────────────────────────────────
+
+    async def _enrich_anomaly_async(
+        self,
+        symbol: str,
+        market_id: str,
+        anomaly: AnomalyResult,
+    ) -> None:
+        """Fire-and-forget LLM enrichment -- never raises, never blocks raw alert."""
+        try:
+            prompt = (
+                f"Ticker: {symbol} ({market_id})\n"
+                f"Price move: {anomaly.price_move_pct:+.1f}%\n"
+                f"Sigma: {anomaly.sigma:.1f}\n"
+                f"Volume ratio: {anomaly.volume_ratio:.1f}x average\n"
+                f"Anomaly type: {anomaly.anomaly_type}"
+            )
+            assert self._llm_client is not None  # guarded by caller
+            explanation = await asyncio.wait_for(
+                self._llm_client.complete(prompt, _ANOMALY_SYSTEM_PROMPT),
+                timeout=_ANOMALY_LLM_TIMEOUT,
+            )
+            follow_up = f"AI interpretation (unverified): {explanation}"
+            await self._alerter._send(follow_up)
+        except Exception:
+            _log.warning(
+                "anomaly_llm_failure",
+                symbol=symbol,
+                market_id=market_id,
+            )
+
+    # ── v10.0: Portfolio review agent ────────────────────────────────────────
+
+    def _portfolio_review_cycle(self) -> None:
+        """APScheduler callback -- dispatches async review without blocking.
+
+        Fires at 16:00 UTC = 19:00 MSK daily (after MOEX close at 18:40 MSK).
+        """
+        if self._llm_client is None:
+            _log.info("portfolio_review_skipped", reason="no LLM client configured")
+            return
+        if self._async_loop is None or self._async_loop.is_closed():
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._run_portfolio_review_async(),
+            self._async_loop,
+        )
+        # No .result() -- fire-and-forget (same pattern as anomaly enrichment)
+
+    async def _run_portfolio_review_async(self) -> None:
+        """Fire-and-forget async portfolio review -- never raises, never blocks."""
+        try:
+            portfolio_data = self._gather_portfolio_data()
+            prompt = build_review_prompt(portfolio_data)
+            assert self._llm_client is not None  # guarded by _portfolio_review_cycle
+            result = await asyncio.wait_for(
+                self._llm_client.parse_structured(
+                    prompt=prompt,
+                    system=PORTFOLIO_REVIEW_SYSTEM_PROMPT,
+                    response_model=PortfolioReviewResult,
+                ),
+                timeout=REVIEW_LLM_TIMEOUT,
+            )
+            message = format_review_telegram(result)
+            await self._alerter._send(message)
+        except Exception:
+            _log.warning("portfolio_review_llm_failure")
+
+    def _gather_portfolio_data(self) -> dict[str, object]:
+        """Collect portfolio state from all configured markets.
+
+        Returns dict keyed by market_id with equity, cash, positions data.
+        Broker errors are caught per-market to avoid one failure blocking others.
+        """
+        data: dict[str, object] = {}
+        for market_id in self._circuit_breakers:
+            try:
+                broker = self._broker_router.route(market_id)
+                portfolio = broker.get_portfolio()
+                positions = broker.get_positions()
+                data[market_id] = {
+                    "equity": portfolio.equity,
+                    "cash": portfolio.cash,
+                    "positions": positions,
+                }
+            except Exception:
+                _log.warning(
+                    "portfolio_review_broker_error",
+                    market_id=market_id,
+                )
+        return data
 
     def _daily_reset(self) -> None:
         """Reset circuit breakers and send daily P&L summary.

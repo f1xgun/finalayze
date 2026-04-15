@@ -117,6 +117,16 @@ news_feed_last_article_timestamp = Gauge(
 )
 
 # ── Currency ──────────────────────────────────────────────────────────────────
+# ── News pipeline ─────────────────────────────────────────────────────────
+news_budget_cap_total = Counter(
+    "finalayze_news_budget_cap_total",
+    "Number of news cycles where article count exceeded budget cap",
+)
+llm_liveness_failures = Counter(
+    "finalayze_llm_liveness_failures_total",
+    "Count of all-fail LLM news cycles (each individual failure cycle)",
+)
+
 usd_rub_rate = Gauge(
     "finalayze_usd_rub_rate",
     "USD/RUB exchange rate",
@@ -218,6 +228,16 @@ class MetricsCollector:
     def set_news_feed_timestamp(scope: str, ts: float) -> None:
         """Set the Unix timestamp of the last processed news article."""
         news_feed_last_article_timestamp.labels(scope=scope).set(ts)
+
+    @staticmethod
+    def inc_news_budget_cap_hit() -> None:
+        """Increment news budget cap hit counter."""
+        news_budget_cap_total.inc()
+
+    @staticmethod
+    def inc_llm_liveness_failure() -> None:
+        """Increment LLM liveness failure counter."""
+        llm_liveness_failures.inc()
 
     @staticmethod
     def set_usd_rub_rate(rate: float) -> None:

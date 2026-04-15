@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-import json
+import asyncio
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import structlog
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from finalayze.analysis.llm_client import LLMClient
     from finalayze.core.schemas import NewsArticle
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
+_LLM_TIMEOUT_SECONDS = 5.0
+
+_log = structlog.get_logger()
 
 
 class EventType(StrEnum):
@@ -51,6 +57,14 @@ _PROMPT_TO_EVENT_TYPE: dict[str, EventType] = {
 }
 
 
+class EventClassifierResult(BaseModel):
+    """Structured LLM response for event classification."""
+
+    model_config = ConfigDict(frozen=True)
+
+    event_types: list[str] = []
+
+
 class EventClassifier:
     """Classifies news articles into EventType categories using an LLM."""
 
@@ -63,40 +77,14 @@ class EventClassifier:
             self._system = (_PROMPTS_DIR / "classify_event.txt").read_text(encoding="utf-8").strip()
         return self._system
 
-    def _parse_response(self, raw: str) -> EventType:
-        """Parse the LLM response — handles both JSON and plain-text formats.
-
-        The classify_event.txt prompt instructs the model to return a JSON object
-        with an ``event_types`` list.  This method extracts the first recognised
-        event type from that list.  If the response cannot be parsed as JSON, it
-        falls back to treating the raw string as a bare event-type label (backwards
-        compatibility).  (#143)
-        """
-        stripped = raw.strip()
-        # Try JSON parsing first (expected format from the prompt)
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict):
-                event_types_raw = data.get("event_types", [])
-                if isinstance(event_types_raw, list):
-                    for et in event_types_raw:
-                        candidate = str(et).strip().lower()
-                        if candidate in _PROMPT_TO_EVENT_TYPE:
-                            return _PROMPT_TO_EVENT_TYPE[candidate]
-                # Fallback: try "event_type" single-value field
-                single = data.get("event_type", "")
-                candidate = str(single).strip().lower()
-                if candidate in _PROMPT_TO_EVENT_TYPE:
-                    return _PROMPT_TO_EVENT_TYPE[candidate]
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-        # Fallback: treat the raw response as a plain event-type string
-        value = stripped.lower()
-        try:
-            return EventType(value)
-        except ValueError:
-            return _PROMPT_TO_EVENT_TYPE.get(value, EventType.OTHER)
+    @staticmethod
+    def _resolve_event_type(result: EventClassifierResult) -> EventType:
+        """Extract the first recognised EventType from a parsed result."""
+        for et in result.event_types:
+            candidate = str(et).strip().lower()
+            if candidate in _PROMPT_TO_EVENT_TYPE:
+                return _PROMPT_TO_EVENT_TYPE[candidate]
+        return EventType.OTHER
 
     async def classify(self, article: NewsArticle) -> EventType:
         """Classify a news article into an EventType.
@@ -105,9 +93,20 @@ class EventClassifier:
             article: The news article to classify.
 
         Returns:
-            EventType value. Returns ``EventType.OTHER`` for unrecognised responses.
+            EventType value. Returns ``EventType.OTHER`` on timeouts or parse errors.
         """
         system = self._load_system()
         user_prompt = f"Title: {article.title}\n\nContent: {article.content}"
-        raw = await self._llm.complete(user_prompt, system)
-        return self._parse_response(raw)
+
+        try:
+            result = await asyncio.wait_for(
+                self._llm.parse_structured(user_prompt, system, EventClassifierResult),
+                timeout=_LLM_TIMEOUT_SECONDS,
+            )
+            return self._resolve_event_type(result)
+        except TimeoutError:
+            _log.warning("llm_timeout", analyzer="EventClassifier", article_url=article.url)
+            return EventType.OTHER
+        except Exception:
+            _log.warning("llm_parse_error", analyzer="EventClassifier", article_url=article.url)
+            return EventType.OTHER

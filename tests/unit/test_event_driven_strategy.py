@@ -180,3 +180,34 @@ class TestSanctionsProximityScoring:
         assert signal.confidence == base_confidence
         # sanctions_proximity should NOT be in features
         assert "sanctions_proximity" not in signal.features
+
+
+class TestEventTypeCode:
+    """Tests for event_type_code embedding in Signal.features (EVNT-01)."""
+
+    def test_event_type_code_cbr_in_features(self) -> None:
+        """When event_type_code=1.0 (CBR), Signal.features contains it."""
+        strategy = EventDrivenStrategy()
+        signal = strategy.generate_signal(
+            "SBER", _CANDLES, _SEGMENT, sentiment_score=0.8, event_type_code=1.0
+        )
+        assert signal is not None
+        assert signal.features["event_type_code"] == 1.0
+
+    def test_event_type_code_default_zero(self) -> None:
+        """When no event_type_code kwarg passed, Signal.features has 0.0."""
+        strategy = EventDrivenStrategy()
+        signal = strategy.generate_signal(
+            "SBER", _CANDLES, _SEGMENT, sentiment_score=0.8
+        )
+        assert signal is not None
+        assert signal.features["event_type_code"] == 0.0
+
+    def test_credibility_scales_confidence(self) -> None:
+        """With credibility=0.7 and sentiment=0.8, confidence = min(1.0, 0.8 * 0.7) = 0.56."""
+        strategy = EventDrivenStrategy()
+        signal = strategy.generate_signal(
+            "SBER", _CANDLES, _SEGMENT, sentiment_score=0.8, credibility=0.7
+        )
+        assert signal is not None
+        assert signal.confidence == pytest.approx(0.56, abs=0.01)

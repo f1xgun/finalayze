@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from finalayze.core.schemas import Candle
-from finalayze.data.cache import RedisCache
+from finalayze.data.cache import RedisCache, _compute_sentiment_ttl
+
+_SENTIMENT_TTL_DEFAULT = 1800  # must match cache._SENTIMENT_TTL_SECONDS
+_SENTIMENT_TTL_BUFFER = 1800  # must match cache._SENTIMENT_TTL_BUFFER_SECONDS
 
 
 @pytest.fixture
@@ -126,6 +130,81 @@ class TestSentimentCache:
         call_kwargs = mock_redis.set.call_args.kwargs
         expected_ttl = 1800  # _SENTIMENT_TTL_SECONDS
         assert call_kwargs["ex"] == expected_ttl
+
+
+class TestSentimentTTLFreeze:
+    """Tests for _compute_sentiment_ttl() dynamic TTL based on MOEX market hours."""
+
+    def test_sentiment_ttl_extended_when_market_closed(self) -> None:
+        """When MOEX is closed (Saturday 14:00 MSK), TTL = seconds_to_next_open + 1800."""
+        # Saturday 14:00 MSK = Saturday 11:00 UTC
+        saturday_msk = datetime(2026, 4, 18, 11, 0, 0, tzinfo=UTC)  # Saturday
+        with (
+            patch("finalayze.data.cache.MOEX_MARKET_SCHEDULE.is_market_open", return_value=False),
+            patch(
+                "finalayze.data.cache.MOEX_MARKET_SCHEDULE.next_open",
+                return_value=datetime(2026, 4, 20, 7, 0, 0, tzinfo=UTC),  # Monday 10:00 MSK
+            ),
+        ):
+            ttl = _compute_sentiment_ttl(saturday_msk)
+            seconds_to_open = int(
+                (datetime(2026, 4, 20, 7, 0, 0, tzinfo=UTC) - saturday_msk).total_seconds()
+            )
+            expected = seconds_to_open + _SENTIMENT_TTL_BUFFER
+            assert ttl == expected
+
+    def test_sentiment_ttl_normal_when_market_open(self) -> None:
+        """When MOEX is open (Wednesday 12:00 MSK), TTL = 1800."""
+        wednesday_utc = datetime(2026, 4, 15, 9, 0, 0, tzinfo=UTC)  # Wed 12:00 MSK
+        with patch("finalayze.data.cache.MOEX_MARKET_SCHEDULE.is_market_open", return_value=True):
+            ttl = _compute_sentiment_ttl(wednesday_utc)
+            assert ttl == _SENTIMENT_TTL_DEFAULT
+
+    def test_sentiment_ttl_minimum_is_1800(self) -> None:
+        """TTL never goes below 1800s even if next_open is very close."""
+        # Market closed but next open is only 60 seconds away
+        now = datetime(2026, 4, 15, 6, 59, 0, tzinfo=UTC)
+        with (
+            patch("finalayze.data.cache.MOEX_MARKET_SCHEDULE.is_market_open", return_value=False),
+            patch(
+                "finalayze.data.cache.MOEX_MARKET_SCHEDULE.next_open",
+                return_value=now + timedelta(seconds=60),
+            ),
+        ):
+            ttl = _compute_sentiment_ttl(now)
+            # 60 + 1800 = 1860, which is > 1800, but the max() guard ensures >= 1800
+            assert ttl >= _SENTIMENT_TTL_DEFAULT
+
+
+class TestEventTypeCache:
+    """Tests for set_event_type() / get_event_type() on RedisCache."""
+
+    @pytest.mark.asyncio
+    async def test_set_event_type_stores_in_redis(
+        self, cache: RedisCache, mock_redis: AsyncMock
+    ) -> None:
+        """set_event_type(segment, code, ttl) stores float under event_type:{segment} key."""
+        await cache.set_event_type("ru_blue_chips:SBER", 1.0, ttl=3600)
+        mock_redis.set.assert_called_once_with("event_type:ru_blue_chips:SBER", "1.0", ex=3600)
+
+    @pytest.mark.asyncio
+    async def test_get_event_type_returns_float(
+        self, cache: RedisCache, mock_redis: AsyncMock
+    ) -> None:
+        """get_event_type(segment) returns cached float."""
+        mock_redis.get.return_value = "2.0"
+        result = await cache.get_event_type("ru_blue_chips:SBER")
+        assert result == 2.0
+        mock_redis.get.assert_called_once_with("event_type:ru_blue_chips:SBER")
+
+    @pytest.mark.asyncio
+    async def test_get_event_type_returns_none_on_miss(
+        self, cache: RedisCache, mock_redis: AsyncMock
+    ) -> None:
+        """Returns None when key not in Redis."""
+        mock_redis.get.return_value = None
+        result = await cache.get_event_type("ru_tech:YDEX")
+        assert result is None
 
 
 class TestClose:

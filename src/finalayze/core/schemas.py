@@ -200,6 +200,8 @@ class SentimentResult(BaseModel):
     sentiment: float  # -1.0 to +1.0
     confidence: float  # 0.0 to 1.0
     reasoning: str
+    tickers: list[str] = []  # LLM-extracted ticker symbols from the article
+    is_fallback: bool = False  # True when this result is a fallback (LLM failed)
 
     @field_validator("sentiment")
     @classmethod
