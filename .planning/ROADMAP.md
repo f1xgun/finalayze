@@ -465,8 +465,10 @@ Plans:
   3. Querying `SentimentStore` on a ticker with no sentiment history returns an empty list without error — the v11 feature pipeline can call the accessor safely before data accumulates
 **Plans**: 2 plans
 Plans:
-- [ ] 50-01-PLAN.md — Dynamic sentiment TTL + event_type caching + ru_tech preset activation
-- [ ] 50-02-PLAN.md — Credibility threading + CBR/dividend dedup guard in combiner
+- [ ] 53-01-PLAN.md — Alembic migration: hypertable conversion + continuous aggregate + refresh policy
+- [ ] 53-02-PLAN.md — SentimentStore Layer 2 accessor with TDD (get_rolling + unit tests)
+
+
 
 ## Progress
 
@@ -494,5 +496,5 @@ v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 | 49. News Pipeline Hardening | v10.0 | 3/3 | Complete    | 2026-04-15 |
 | 50. EventDriven Activation | v10.0 | 2/2 | Complete    | 2026-04-15 |
 | 51. Anomaly Interpreter Agent | v10.0 | 2/2 | Complete    | 2026-04-15 |
-| 52. Portfolio Review Agent | v10.0 | 2/2 | Complete   | 2026-04-15 |
+| 52. Portfolio Review Agent | v10.0 | 2/2 | Complete    | 2026-04-15 |
 | 53. Sentiment ML Infrastructure | v10.0 | 0/TBD | Not started | - |
