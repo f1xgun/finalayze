@@ -14,6 +14,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import structlog
 
+
+@pytest.fixture(autouse=True)
+def _reset_structlog() -> None:
+    """Reset structlog config before each test so capture_logs() works.
+
+    Other tests (API) may call setup_logging() which sets
+    cache_logger_on_first_use=True and installs JSONRenderer,
+    preventing capture_logs from intercepting events.
+    """
+    structlog.reset_defaults()
+
 from finalayze.analysis.portfolio_review_agent import (
     PORTFOLIO_REVIEW_SYSTEM_PROMPT,
     PortfolioReviewResult,
