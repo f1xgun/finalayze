@@ -141,7 +141,7 @@ Full details in Phase Details section below (collapsed milestone).
 **Milestone Goal:** Add runtime LLM agents to the live trading pipeline — news ingestion hardened and activated, EventDrivenStrategy firing live signals, portfolio review and anomaly interpretation agents deployed, and sentiment data accumulating for future ML use.
 
 - [x] **Phase 49: News Pipeline Hardening** (2/3 plans) - Fix latent bugs and add production safeguards before live news activation (completed 2026-04-15)
-- [ ] **Phase 50: EventDriven Activation** - Enable event_driven strategy on all ru_* segments with signal quality guards
+- [x] **Phase 50: EventDriven Activation** - Enable event_driven strategy on all ru_* segments with signal quality guards (completed 2026-04-15)
 - [ ] **Phase 51: Anomaly Interpreter Agent** - LLM enrichment for anomaly alerts via fire-and-forget async dispatch
 - [ ] **Phase 52: Portfolio Review Agent** - Daily advisory LLM portfolio analysis with structured Pydantic output
 - [ ] **Phase 53: Sentiment ML Infrastructure** - TimescaleDB continuous aggregates and SentimentStore reader for future ML features
@@ -426,7 +426,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 50-01-PLAN.md — Dynamic sentiment TTL + event_type caching + ru_tech preset activation
-- [ ] 50-02-PLAN.md — Credibility threading + CBR/dividend dedup guard in combiner
+- [x] 50-02-PLAN.md — Credibility threading + CBR/dividend dedup guard in combiner
 
 ### Phase 51: Anomaly Interpreter Agent
 **Goal**: Detected anomalies receive an LLM explanation appended to the Telegram alert without ever delaying the raw statistical alert
@@ -438,7 +438,7 @@ Plans:
   3. When the LLM call times out or raises an exception, the raw alert is still delivered and a `anomaly_llm_failure` structlog entry is emitted — suppressing the raw alert on LLM failure is impossible by design
 **Plans**: 2 plans
 Plans:
-- [ ] 50-01-PLAN.md — Dynamic sentiment TTL + event_type caching + ru_tech preset activation
+- [x] 50-01-PLAN.md — Dynamic sentiment TTL + event_type caching + ru_tech preset activation
 - [ ] 50-02-PLAN.md — Credibility threading + CBR/dividend dedup guard in combiner
 
 ### Phase 52: Portfolio Review Agent
@@ -492,7 +492,7 @@ v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 | 40-44 | v9.0 | 7/7 | Complete | 2026-04-13 |
 | 45-48 | v9.1 | 7/7 | Complete | 2026-04-14 |
 | 49. News Pipeline Hardening | v10.0 | 3/3 | Complete    | 2026-04-15 |
-| 50. EventDriven Activation | v10.0 | 1/2 | In Progress|  |
+| 50. EventDriven Activation | v10.0 | 2/2 | Complete   | 2026-04-15 |
 | 51. Anomaly Interpreter Agent | v10.0 | 0/TBD | Not started | - |
 | 52. Portfolio Review Agent | v10.0 | 0/TBD | Not started | - |
 | 53. Sentiment ML Infrastructure | v10.0 | 0/TBD | Not started | - |
