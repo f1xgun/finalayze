@@ -1,7 +1,7 @@
 """Tests for event_driven strategy configuration on MOEX presets.
 
-Validates that event_driven is present (disabled, no real-time feed) on all
-ru_* segments, has weight 0.15 reserved, and enabled weights are consistent.
+Validates that event_driven is enabled on all ru_* segments (v10.0 EVNT-01),
+has weight 0.15, and enabled weights are consistent.
 """
 
 from __future__ import annotations
@@ -14,10 +14,7 @@ import yaml
 _PRESETS_DIR = Path(__file__).resolve().parents[2] / "src" / "finalayze" / "strategies" / "presets"
 
 _RU_PRESETS = ["ru_blue_chips", "ru_energy", "ru_finance", "ru_tech"]
-# ru_blue_chips has event_driven enabled; the rest are disabled
-_RU_PRESETS_DISABLED = ["ru_energy", "ru_finance", "ru_tech"]
 
-# event_driven is disabled (no real-time news feed), weight reserved at 0.15
 _EVENT_DRIVEN_RESERVED_WEIGHT = 0.15
 
 
@@ -29,12 +26,12 @@ def _load_preset(name: str) -> dict:
 class TestEventDrivenPresets:
     """Validate event_driven configuration on all ru_* YAML presets."""
 
-    @pytest.mark.parametrize("preset_name", _RU_PRESETS_DISABLED)
-    def test_event_driven_disabled(self, preset_name: str) -> None:
-        """event_driven strategy is disabled on ru_* presets without news feed."""
+    @pytest.mark.parametrize("preset_name", _RU_PRESETS)
+    def test_event_driven_enabled(self, preset_name: str) -> None:
+        """event_driven strategy is enabled on all ru_* presets (EVNT-01)."""
         preset = _load_preset(preset_name)
         ed = preset["strategies"]["event_driven"]
-        assert ed["enabled"] is False, f"{preset_name}: event_driven should be disabled"
+        assert ed["enabled"] is True, f"{preset_name}: event_driven should be enabled"
 
     @pytest.mark.parametrize("preset_name", _RU_PRESETS)
     def test_event_driven_weight(self, preset_name: str) -> None:
