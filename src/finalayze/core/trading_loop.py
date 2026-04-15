@@ -29,6 +29,13 @@ import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from finalayze.analysis.anomaly_detector import AnomalyDetector, AnomalyResult
+from finalayze.analysis.portfolio_review_agent import (
+    PORTFOLIO_REVIEW_SYSTEM_PROMPT,
+    REVIEW_LLM_TIMEOUT,
+    PortfolioReviewResult,
+    build_review_prompt,
+    format_review_telegram,
+)
 from finalayze.core.schemas import NewsArticle, SignalDirection
 from finalayze.data.cache import _compute_sentiment_ttl
 from finalayze.markets.currency import CurrencyConverter
@@ -316,6 +323,12 @@ class TradingLoop:
             self._daily_reset,
             "cron",
             hour=self._settings.daily_reset_hour_utc,
+            minute=0,
+        )
+        self._scheduler.add_job(
+            self._portfolio_review_cycle,
+            "cron",
+            hour=16,  # 19:00 MSK = 16:00 UTC (MSK is UTC+3, no DST)
             minute=0,
         )
         if self._ml_registry is not None and getattr(self._settings, "ml_enabled", False):
@@ -1140,6 +1153,67 @@ class TradingLoop:
             save_ensemble_fn(model_dir, segment_id, ensemble)  # type: ignore[operator]
         except Exception:
             _log.exception("_retrain: failed to save ensemble for %s", segment_id)
+
+    # ── Portfolio review agent ────────────────────────────────────────────────
+
+    def _portfolio_review_cycle(self) -> None:
+        """APScheduler callback -- dispatches async review without blocking.
+
+        Fires at 16:00 UTC = 19:00 MSK daily (after MOEX close at 18:40 MSK).
+        """
+        if self._llm_client is None:
+            _log.info("portfolio_review_skipped", reason="no LLM client configured")
+            return
+        if self._async_loop is None or self._async_loop.is_closed():
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._run_portfolio_review_async(),
+            self._async_loop,
+        )
+        # No .result() -- fire-and-forget (same pattern as anomaly enrichment)
+
+    async def _run_portfolio_review_async(self) -> None:
+        """Fire-and-forget async portfolio review -- never raises, never blocks."""
+        try:
+            portfolio_data = self._gather_portfolio_data()
+            prompt = build_review_prompt(portfolio_data)
+            assert self._llm_client is not None  # guarded by _portfolio_review_cycle
+            result = await asyncio.wait_for(
+                self._llm_client.parse_structured(
+                    prompt=prompt,
+                    system=PORTFOLIO_REVIEW_SYSTEM_PROMPT,
+                    response_model=PortfolioReviewResult,
+                ),
+                timeout=REVIEW_LLM_TIMEOUT,
+            )
+            message = format_review_telegram(result)
+            await self._alerter._send(message)
+        except Exception:
+            _log.warning("portfolio_review_llm_failure")
+
+    def _gather_portfolio_data(self) -> dict[str, object]:
+        """Collect portfolio state from all configured markets.
+
+        Returns dict keyed by market_id with equity, cash, positions data.
+        Broker errors are caught per-market to avoid one failure blocking others.
+        """
+        data: dict[str, object] = {}
+        for market_id in self._circuit_breakers:
+            try:
+                broker = self._broker_router.route(market_id)
+                portfolio = broker.get_portfolio()
+                positions = broker.get_positions()
+                data[market_id] = {
+                    "equity": portfolio.equity,
+                    "cash": portfolio.cash,
+                    "positions": positions,
+                }
+            except Exception:
+                _log.warning(
+                    "portfolio_review_broker_error",
+                    market_id=market_id,
+                )
+        return data
 
     def _daily_reset(self) -> None:
         """Reset circuit breakers and send daily P&L summary."""
