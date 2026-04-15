@@ -144,7 +144,7 @@ Full details in Phase Details section below (collapsed milestone).
 - [x] **Phase 50: EventDriven Activation** - Enable event_driven strategy on all ru_* segments with signal quality guards (completed 2026-04-15)
 - [x] **Phase 51: Anomaly Interpreter Agent** - LLM enrichment for anomaly alerts via fire-and-forget async dispatch (completed 2026-04-15)
 - [x] **Phase 52: Portfolio Review Agent** - Daily advisory LLM portfolio analysis with structured Pydantic output (completed 2026-04-15)
-- [ ] **Phase 53: Sentiment ML Infrastructure** - TimescaleDB continuous aggregates and SentimentStore reader for future ML features
+- [x] **Phase 53: Sentiment ML Infrastructure** - TimescaleDB continuous aggregates and SentimentStore reader for future ML features (completed 2026-04-15)
 
 ## Phase Details
 
@@ -465,8 +465,8 @@ Plans:
   3. Querying `SentimentStore` on a ticker with no sentiment history returns an empty list without error — the v11 feature pipeline can call the accessor safely before data accumulates
 **Plans**: 2 plans
 Plans:
-- [ ] 53-01-PLAN.md — Alembic migration: hypertable conversion + continuous aggregate + refresh policy
-- [ ] 53-02-PLAN.md — SentimentStore Layer 2 accessor with TDD (get_rolling + unit tests)
+- [x] 53-01-PLAN.md — Alembic migration: hypertable conversion + continuous aggregate + refresh policy
+- [x] 53-02-PLAN.md — SentimentStore Layer 2 accessor with TDD (get_rolling + unit tests)
 
 
 
@@ -497,4 +497,4 @@ v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 | 50. EventDriven Activation | v10.0 | 2/2 | Complete    | 2026-04-15 |
 | 51. Anomaly Interpreter Agent | v10.0 | 2/2 | Complete    | 2026-04-15 |
 | 52. Portfolio Review Agent | v10.0 | 2/2 | Complete    | 2026-04-15 |
-| 53. Sentiment ML Infrastructure | v10.0 | 0/TBD | Not started | - |
+| 53. Sentiment ML Infrastructure | v10.0 | 2/2 | Complete   | 2026-04-15 |

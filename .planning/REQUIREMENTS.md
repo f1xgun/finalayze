@@ -36,7 +36,7 @@ Requirements for runtime LLM trading agents milestone. Each maps to roadmap phas
 
 ### Sentiment ML Infrastructure
 
-- [ ] **STML-01**: TimescaleDB continuous aggregate for rolling sentiment (1d/7d/30d buckets)
+- [x] **STML-01**: TimescaleDB continuous aggregate for rolling sentiment (1d/7d/30d buckets)
 - [ ] **STML-02**: SentimentStore reader (Layer 2) provides rolling aggregation query for future ML feature extraction
 
 ## v11.0 Requirements
@@ -82,7 +82,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | PFRA-01 | Phase 52 | Complete |
 | PFRA-02 | Phase 52 | Complete |
 | PFRA-03 | Phase 52 | Complete |
-| STML-01 | Phase 53 | Pending |
+| STML-01 | Phase 53 | Complete |
 | STML-02 | Phase 53 | Pending |
 
 **Coverage:**
