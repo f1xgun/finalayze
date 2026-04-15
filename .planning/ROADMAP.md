@@ -140,7 +140,7 @@ Full details in Phase Details section below (collapsed milestone).
 
 **Milestone Goal:** Add runtime LLM agents to the live trading pipeline — news ingestion hardened and activated, EventDrivenStrategy firing live signals, portfolio review and anomaly interpretation agents deployed, and sentiment data accumulating for future ML use.
 
-- [x] **Phase 49: News Pipeline Hardening** (0/2 plans) - Fix latent bugs and add production safeguards before live news activation (completed 2026-04-14)
+- [ ] **Phase 49: News Pipeline Hardening** (2/3 plans) - Fix latent bugs and add production safeguards before live news activation
 - [ ] **Phase 50: EventDriven Activation** - Enable event_driven strategy on all ru_* segments with signal quality guards
 - [ ] **Phase 51: Anomaly Interpreter Agent** - LLM enrichment for anomaly alerts via fire-and-forget async dispatch
 - [ ] **Phase 52: Portfolio Review Agent** - Daily advisory LLM portfolio analysis with structured Pydantic output
@@ -152,11 +152,12 @@ Full details in Phase Details section below (collapsed milestone).
 **Goal**: News pipeline bugs fixed and production safeguards active before Phase 50 activates EventDrivenStrategy
 **Depends on**: Nothing (fixes existing code)
 **Requirements**: NEWS-01, NEWS-02, NEWS-03, NEWS-04, NEWS-05, NEWS-06
-**Plans:** 2/2 plans complete
+**Plans:** 3 plans (2 complete, 1 gap closure)
 
 Plans:
 - [x] 49-01-PLAN.md -- Bug fixes: parse_structured migration, per-article 5s timeout, threading.Lock fix, article budget cap
 - [x] 49-02-PLAN.md -- Production safeguards: source credibility map, ticker validation, LLM liveness monitoring
+- [ ] 49-03-PLAN.md -- Gap closure: wire validate_tickers into production path, fix LLM liveness blind spot (NEWS-04, NEWS-05)
 
 ### Phase 28: Operational Hygiene
 **Goal**: Strategy cycles only fire during MOEX market hours with correct ticker symbols, LLM quota is not wasted on duplicate articles, and Telegram alerter failures do not block trading
@@ -407,7 +408,12 @@ Plans:
   3. An LLM-extracted ticker that does not appear in InstrumentRegistry is rejected with a structured log entry containing `entity_not_in_registry` and the rejected ticker — no ghost-ticker sentiment scores accumulate in the DB
   4. When the LLM API fails for 3 consecutive cycles, a Telegram alert fires and `llm_liveness_failures` Prometheus counter increments — LLM downtime is observable from the monitoring dashboard
   5. Calling `NewsAnalyzer.analyze()` on a news article returns a structured `SentimentResult` Pydantic object via `parse_structured()` — no `json.loads()` call remains in the news analysis path
-**Plans**: TBD
+**Plans**: 3 plans (2 complete, 1 gap closure)
+
+Plans:
+- [x] 49-01-PLAN.md -- Bug fixes: parse_structured migration, per-article 5s timeout, article budget cap
+- [x] 49-02-PLAN.md -- Production safeguards: source credibility map, ticker validation, LLM liveness monitoring
+- [ ] 49-03-PLAN.md -- Gap closure: wire validate_tickers into production path, fix LLM liveness blind spot (NEWS-04, NEWS-05)
 
 ### Phase 50: EventDriven Activation
 **Goal**: The event_driven strategy fires live signals on all ru_* segments with CBR/dividend duplicate-signal protection and sentiment decay gated on market hours
