@@ -24,9 +24,9 @@ Requirements for runtime LLM trading agents milestone. Each maps to roadmap phas
 
 ### Portfolio Review Agent
 
-- [ ] **PFRA-01**: Daily LLM portfolio review runs outside market hours with structured PortfolioReviewResult output
-- [ ] **PFRA-02**: Review results delivered via Telegram with concentration risk and upcoming catalyst analysis
-- [ ] **PFRA-03**: Advisory-only enforcement — schema has no trade-directive fields, no write access to order pipeline
+- [x] **PFRA-01**: Daily LLM portfolio review runs outside market hours with structured PortfolioReviewResult output
+- [x] **PFRA-02**: Review results delivered via Telegram with concentration risk and upcoming catalyst analysis
+- [x] **PFRA-03**: Advisory-only enforcement — schema has no trade-directive fields, no write access to order pipeline
 
 ### Anomaly Interpreter
 
@@ -79,9 +79,9 @@ Deferred to future release. Tracked but not in current roadmap.
 | ANMI-01 | Phase 51 | Complete |
 | ANMI-02 | Phase 51 | Complete |
 | ANMI-03 | Phase 51 | Complete |
-| PFRA-01 | Phase 52 | Pending |
-| PFRA-02 | Phase 52 | Pending |
-| PFRA-03 | Phase 52 | Pending |
+| PFRA-01 | Phase 52 | Complete |
+| PFRA-02 | Phase 52 | Complete |
+| PFRA-03 | Phase 52 | Complete |
 | STML-01 | Phase 53 | Pending |
 | STML-02 | Phase 53 | Pending |
 
