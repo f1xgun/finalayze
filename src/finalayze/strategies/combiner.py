@@ -22,6 +22,37 @@ _MAX_CONFIDENCE = Decimal("1.0")
 _ZERO = Decimal(0)
 _DEFAULT_WEIGHT = Decimal("1.0")
 
+# Event type codes that trigger duplicate-signal suppression (EVNT-02).
+# cbr_rate=1.0, earnings/dividend=2.0 — see _EVENT_TYPE_FLOAT_MAP in trading_loop.py.
+_DEDUP_EVENT_CODES: frozenset[float] = frozenset({1.0, 2.0})
+
+
+def _dedup_event_signals(
+    signals_by_strategy: dict[str, tuple[Signal, Decimal]],
+) -> set[str]:
+    """Find strategy names to zero when duplicate CBR/dividend events detected.
+
+    Returns set of strategy names whose weight should be zeroed.
+    Per CONTEXT.md: same ticker + same cycle + same event_type_code -> zero lower-weight.
+    """
+    zeroed: set[str] = set()
+    # Group by event_type_code (only non-zero codes in _DEDUP_EVENT_CODES)
+    by_code: dict[float, list[tuple[str, Decimal]]] = {}
+    for name, (sig, weight) in signals_by_strategy.items():
+        code = sig.features.get("event_type_code", 0.0)
+        if code in _DEDUP_EVENT_CODES:
+            by_code.setdefault(code, []).append((name, weight))
+
+    for entries in by_code.values():
+        if len(entries) < 2:  # noqa: PLR2004
+            continue
+        # Sort by weight descending, zero all except highest
+        sorted_entries = sorted(entries, key=lambda e: e[1], reverse=True)
+        for name, _ in sorted_entries[1:]:
+            zeroed.add(name)
+
+    return zeroed
+
 
 class StrategyCombiner:
     """Combines multiple strategy signals using per-segment YAML weights."""
@@ -74,7 +105,7 @@ class StrategyCombiner:
             ),
         )
 
-    def generate_signal(
+    def generate_signal(  # noqa: PLR0912, PLR0915
         self,
         symbol: str,
         candles: list[Candle],
@@ -112,6 +143,7 @@ class StrategyCombiner:
         total_weight = _ZERO
         total_enabled_weight = _ZERO
         feature_contributions: dict[str, float] = {}
+        collected: dict[str, tuple[Signal, Decimal]] = {}
 
         for strategy_name, strategy_cfg in strategies_cfg.items():
             if not isinstance(strategy_cfg, dict):
@@ -150,6 +182,20 @@ class StrategyCombiner:
             feature_contributions[f"{strategy_name}_direction"] = (
                 1.0 if signal.direction == SignalDirection.BUY else -1.0
             )
+            collected[strategy_name] = (signal, weight)
+
+        # CBR/dividend duplicate signal guard (EVNT-02)
+        zeroed_names = _dedup_event_signals(collected)
+        if zeroed_names:
+            # Recompute scores excluding zeroed strategies
+            weighted_score = _ZERO
+            total_weight = _ZERO
+            for name, (sig, w) in collected.items():
+                if name in zeroed_names:
+                    continue
+                s = _BUY_SCORE if sig.direction == SignalDirection.BUY else _SELL_SCORE
+                weighted_score += s * Decimal(str(sig.confidence)) * w
+                total_weight += w
 
         if total_weight == _ZERO:
             return None
