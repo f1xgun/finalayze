@@ -448,3 +448,141 @@ class TestCombinerNormalizationMode:
         # total enabled weight = 0.5 + 0.5 = 1.0 (pairs disabled, not counted)
         # net = 0.9 * 0.5 / 1.0 = 0.45 -> below threshold -> None
         assert signal is None
+
+
+# ── Dedup event signal constants ────────────────────────────────────────
+CBR_CODE = 1.0
+DIVIDEND_CODE = 2.0
+NO_EVENT_CODE = 0.0
+WEIGHT_HIGH = Decimal("0.6")
+WEIGHT_LOW = Decimal("0.4")
+
+
+def _make_signal_with_event_code(
+    direction: SignalDirection,
+    confidence: float,
+    strategy_name: str,
+    event_type_code: float = 0.0,
+) -> Signal:
+    """Create a Signal with event_type_code in features."""
+    return Signal(
+        strategy_name=strategy_name,
+        symbol="SBER",
+        market_id="ru",
+        segment_id="ru_blue_chips",
+        direction=direction,
+        confidence=confidence,
+        features={"mock_feature": confidence, "event_type_code": event_type_code},
+        reasoning=f"Mock signal: {direction} at {confidence}",
+    )
+
+
+class TestCombinerDedup:
+    """Tests for CBR/dividend duplicate signal guard (EVNT-02)."""
+
+    def test_dedup_zeroes_lower_weight_cbr_signal(self) -> None:
+        """Two strategies fire with event_type_code=1.0 (CBR). Lower-weight zeroed."""
+        from finalayze.strategies.combiner import _dedup_event_signals
+
+        sig_high = _make_signal_with_event_code(
+            SignalDirection.BUY, HIGH_CONFIDENCE, "event_driven", CBR_CODE
+        )
+        sig_low = _make_signal_with_event_code(
+            SignalDirection.BUY, HIGH_CONFIDENCE, "cbr_calendar", CBR_CODE
+        )
+        collected = {
+            "event_driven": (sig_high, WEIGHT_HIGH),
+            "cbr_calendar": (sig_low, WEIGHT_LOW),
+        }
+        zeroed = _dedup_event_signals(collected)
+        assert "cbr_calendar" in zeroed
+        assert "event_driven" not in zeroed
+
+    def test_dedup_no_effect_when_different_event_types(self) -> None:
+        """One strategy with CBR code, another with code 0.0. No dedup."""
+        from finalayze.strategies.combiner import _dedup_event_signals
+
+        sig_cbr = _make_signal_with_event_code(
+            SignalDirection.BUY, HIGH_CONFIDENCE, "event_driven", CBR_CODE
+        )
+        sig_none = _make_signal_with_event_code(
+            SignalDirection.BUY, HIGH_CONFIDENCE, "momentum", NO_EVENT_CODE
+        )
+        collected = {
+            "event_driven": (sig_cbr, WEIGHT_HIGH),
+            "momentum": (sig_none, WEIGHT_LOW),
+        }
+        zeroed = _dedup_event_signals(collected)
+        assert len(zeroed) == 0
+
+    def test_dedup_handles_dividend_code(self) -> None:
+        """Two strategies fire with event_type_code=2.0 (dividend). Lower-weight zeroed."""
+        from finalayze.strategies.combiner import _dedup_event_signals
+
+        sig_high = _make_signal_with_event_code(
+            SignalDirection.BUY, 0.8, "event_driven", DIVIDEND_CODE
+        )
+        sig_low = _make_signal_with_event_code(
+            SignalDirection.BUY, 0.7, "dividend_gap", DIVIDEND_CODE
+        )
+        collected = {
+            "event_driven": (sig_high, WEIGHT_HIGH),
+            "dividend_gap": (sig_low, WEIGHT_LOW),
+        }
+        zeroed = _dedup_event_signals(collected)
+        assert "dividend_gap" in zeroed
+        assert "event_driven" not in zeroed
+
+    def test_dedup_preserves_feature_contributions(self) -> None:
+        """After dedup, feature_contributions still contain entries from both strategies."""
+        sig_ed = _make_signal_with_event_code(
+            SignalDirection.BUY, HIGH_CONFIDENCE, "event_driven", CBR_CODE
+        )
+        sig_cbr = _make_signal_with_event_code(
+            SignalDirection.BUY, 0.7, "cbr_calendar", CBR_CODE
+        )
+        ed_strategy = MockStrategy("event_driven", sig_ed)
+        cbr_strategy = MockStrategy("cbr_calendar", sig_cbr)
+        combiner = StrategyCombiner([ed_strategy, cbr_strategy])
+        candles = _make_candles()
+        config: dict[str, Any] = {
+            "strategies": {
+                "event_driven": {"enabled": True, "weight": 0.6},
+                "cbr_calendar": {"enabled": True, "weight": 0.4},
+            }
+        }
+        with patch.object(combiner, "_load_config", return_value=config):
+            signal = combiner.generate_signal("SBER", candles, "ru_blue_chips")
+        # Signal should reflect only event_driven's weight in score,
+        # but features from both should be visible for observability
+        assert signal is not None
+        assert "event_driven_confidence" in signal.features
+        assert "cbr_calendar_confidence" in signal.features
+
+    def test_no_dedup_when_event_type_code_zero(self) -> None:
+        """Both strategies have event_type_code=0.0. No dedup."""
+        from finalayze.strategies.combiner import _dedup_event_signals
+
+        sig1 = _make_signal_with_event_code(
+            SignalDirection.BUY, HIGH_CONFIDENCE, "momentum", NO_EVENT_CODE
+        )
+        sig2 = _make_signal_with_event_code(
+            SignalDirection.BUY, 0.8, "mean_reversion", NO_EVENT_CODE
+        )
+        collected = {
+            "momentum": (sig1, WEIGHT_HIGH),
+            "mean_reversion": (sig2, WEIGHT_LOW),
+        }
+        zeroed = _dedup_event_signals(collected)
+        assert len(zeroed) == 0
+
+    def test_dedup_single_strategy_no_effect(self) -> None:
+        """Only one strategy fires with CBR code. No dedup needed."""
+        from finalayze.strategies.combiner import _dedup_event_signals
+
+        sig = _make_signal_with_event_code(
+            SignalDirection.BUY, HIGH_CONFIDENCE, "event_driven", CBR_CODE
+        )
+        collected = {"event_driven": (sig, WEIGHT_HIGH)}
+        zeroed = _dedup_event_signals(collected)
+        assert len(zeroed) == 0
