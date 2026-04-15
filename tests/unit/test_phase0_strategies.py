@@ -24,6 +24,8 @@ _RSI_OVERBOUGHT_70 = 70
 _PRESETS_DIR = Path(__file__).resolve().parents[2] / "src" / "finalayze" / "strategies" / "presets"
 
 _RU_SEGMENTS = ["ru_blue_chips", "ru_energy", "ru_tech", "ru_finance"]
+# ru_tech uses its own calibration (normalize_mode=total, wider RSI, no rsi2_connors)
+_RU_SEGMENTS_COMMON = ["ru_blue_chips", "ru_energy", "ru_finance"]
 
 
 def _load_preset(segment_id: str) -> dict:
@@ -132,23 +134,28 @@ class TestMOEXPresetRecalibration:
         _expected_weight = 0.17
         assert momentum_cfg["weight"] == _expected_weight
 
-    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
+    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS_COMMON)
     def test_ru_normalize_firing(self, segment_id: str) -> None:
-        """All RU presets should use 'firing' normalize mode (match US presets)."""
+        """Common RU presets should use 'firing' normalize mode."""
         data = _load_preset(segment_id)
         assert data["normalize_mode"] == "firing", f"{segment_id} normalize_mode should be 'firing'"
 
-    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
+    def test_ru_tech_normalize_total(self) -> None:
+        """ru_tech uses 'total' normalize mode (ML-heavy, different calibration)."""
+        data = _load_preset("ru_tech")
+        assert data["normalize_mode"] == "total"
+
+    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS_COMMON)
     def test_ru_rsi_oversold_mr(self, segment_id: str) -> None:
-        """All RU presets should have rsi_oversold_mr = 25 (tighter gate for MOEX noise)."""
+        """Common RU presets should have rsi_oversold_mr = 25 (tighter gate for MOEX noise)."""
         data = _load_preset(segment_id)
         mr_params = data["strategies"]["mean_reversion"]["params"]
         rsi_expected = 25
         assert mr_params["rsi_oversold_mr"] == rsi_expected
 
-    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
+    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS_COMMON)
     def test_ru_rsi_overbought_mr(self, segment_id: str) -> None:
-        """All RU presets should have rsi_overbought_mr = 75 (tighter gate for MOEX noise)."""
+        """Common RU presets should have rsi_overbought_mr = 75 (tighter gate for MOEX noise)."""
         data = _load_preset(segment_id)
         mr_params = data["strategies"]["mean_reversion"]["params"]
         rsi_expected = 75
@@ -170,23 +177,29 @@ class TestMOEXPresetRecalibration:
         _expected_mr_weight = 0.10
         assert data["strategies"]["mean_reversion"]["weight"] == _expected_mr_weight
 
-    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
+    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS_COMMON)
     def test_ru_min_combined_confidence(self, segment_id: str) -> None:
-        """All RU presets: min_combined_confidence=0.38 (tuned for ADX routing)."""
+        """Common RU presets: min_combined_confidence=0.38 (tuned for ADX routing)."""
         data = _load_preset(segment_id)
         _expected_confidence = 0.38
         assert data["min_combined_confidence"] == _expected_confidence
 
-    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
+    def test_ru_tech_min_combined_confidence(self) -> None:
+        """ru_tech uses min_combined_confidence=0.40."""
+        data = _load_preset("ru_tech")
+        _expected_confidence = 0.40
+        assert data["min_combined_confidence"] == _expected_confidence
+
+    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS_COMMON)
     def test_ru_trend_filter_enabled(self, segment_id: str) -> None:
-        """All RU presets should have trend_filter enabled on mean_reversion."""
+        """Common RU presets should have trend_filter enabled on mean_reversion."""
         data = _load_preset(segment_id)
         mr_params = data["strategies"]["mean_reversion"]["params"]
         assert mr_params.get("trend_filter") is True
 
-    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS)
+    @pytest.mark.parametrize("segment_id", _RU_SEGMENTS_COMMON)
     def test_ru_has_rsi2_connors(self, segment_id: str) -> None:
-        """All RU presets should have rsi2_connors strategy configured."""
+        """Common RU presets should have rsi2_connors strategy configured."""
         data = _load_preset(segment_id)
         rsi2 = data["strategies"].get("rsi2_connors", {})
         assert rsi2.get("enabled") is True
