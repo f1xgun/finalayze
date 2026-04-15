@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import httpx
+import structlog
 from pydantic import ValidationError
 
 from finalayze.core.exceptions import DataFetchError, RateLimitError
@@ -17,8 +18,11 @@ if TYPE_CHECKING:
 
 _BASE_URL = "https://newsapi.org/v2/everything"
 _HTTP_OK = 200
+_HTTP_UNAUTHORIZED = 401
 _HTTP_RATE_LIMIT = 429
 _STATUS_OK = "ok"
+
+_log = structlog.get_logger(__name__)
 
 
 class NewsApiFetcher:
@@ -37,6 +41,7 @@ class NewsApiFetcher:
         self._api_key = api_key
         self._language = language
         self._rate_limiter = rate_limiter
+        self._auth_failed = False
 
     def fetch_news(
         self,
@@ -60,6 +65,9 @@ class NewsApiFetcher:
             RateLimitError: When the API returns HTTP 429.
             DataFetchError: On HTTP errors or API-level error responses.
         """
+        if self._auth_failed:
+            return []
+
         params: dict[str, str | int] = {
             "q": query,
             "from": from_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -79,6 +87,14 @@ class NewsApiFetcher:
             except httpx.HTTPError as exc:
                 msg = f"NewsAPI HTTP request failed: {exc}"
                 raise DataFetchError(msg) from exc
+
+        if response.status_code == _HTTP_UNAUTHORIZED:
+            self._auth_failed = True
+            _log.error(
+                "newsapi_auth_failed",
+                hint="Invalid or missing NEWSAPI_API_KEY — NewsAPI disabled for this session",
+            )
+            return []
 
         if response.status_code == _HTTP_RATE_LIMIT:
             msg = "NewsAPI rate limit exceeded"

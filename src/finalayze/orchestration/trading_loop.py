@@ -438,6 +438,16 @@ class TradingLoop:
 
     # ── Async helper ────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _blocking_io_exception_handler(
+        loop: asyncio.AbstractEventLoop, context: dict[str, Any]
+    ) -> None:
+        """Suppress benign BlockingIOError from gRPC PollerCompletionQueue."""
+        exc = context.get("exception")
+        if isinstance(exc, BlockingIOError):
+            return
+        loop.default_exception_handler(context)
+
     def _run_async(self, coro: Any, *, timeout: int = 30) -> Any:
         """Run an async coroutine on a persistent background event loop.
 
@@ -446,6 +456,7 @@ class TradingLoop:
         """
         if self._async_loop is None or self._async_loop.is_closed():
             loop = asyncio.new_event_loop()
+            loop.set_exception_handler(self._blocking_io_exception_handler)
             self._async_loop = loop
             thread = threading.Thread(target=loop.run_forever, daemon=True)
             thread.start()
@@ -462,17 +473,7 @@ class TradingLoop:
         from starving HTTP/DB/Telegram coroutines and causing strategy cycle drift.
         """
         loop = asyncio.new_event_loop()
-
-        # Suppress benign BlockingIOError from gRPC PollerCompletionQueue
-        def _grpc_exception_handler(
-            loop: asyncio.AbstractEventLoop, context: dict[str, Any]
-        ) -> None:
-            exc = context.get("exception")
-            if isinstance(exc, BlockingIOError):
-                return  # benign EAGAIN from PollerCompletionQueue
-            loop.default_exception_handler(context)
-
-        loop.set_exception_handler(_grpc_exception_handler)
+        loop.set_exception_handler(self._blocking_io_exception_handler)
         thread = threading.Thread(target=loop.run_forever, daemon=True, name="grpc-loop")
         thread.start()
         self._grpc_loop = loop

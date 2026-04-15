@@ -25,6 +25,10 @@ _TITLE_MAX_LENGTH = 100
 _USER_AGENT = "Mozilla/5.0 (compatible; Finalayze/1.0)"
 _REQUEST_TIMEOUT = 15
 
+# Per-channel backoff: after this many consecutive failures, skip for cooldown
+_FAILURE_THRESHOLD = 3
+_BACKOFF_SECONDS = 600  # 10 minutes
+
 
 class TelegramChannelReader:
     """Reads financial news from public Telegram channels via web preview.
@@ -32,11 +36,18 @@ class TelegramChannelReader:
     Parses ``https://t.me/s/<channel>`` HTML pages — no Telegram API
     credentials needed.  When ``channels`` list is empty, all fetch
     operations return an empty list without error.
+
+    Channels that fail ``_FAILURE_THRESHOLD`` times in a row are backed off
+    for ``_BACKOFF_SECONDS`` to avoid log spam when t.me is unreachable.
     """
 
     def __init__(self, *, channels: list[str] | None = None) -> None:
         self._channels = channels or []
         self._seen_urls: OrderedDict[str, None] = OrderedDict()
+        # Per-channel failure tracking: channel -> consecutive failure count
+        self._fail_counts: dict[str, int] = {}
+        # Per-channel backoff: channel -> datetime when backoff expires
+        self._backoff_until: dict[str, datetime] = {}
 
     @property
     def configured(self) -> bool:
@@ -65,21 +76,43 @@ class TelegramChannelReader:
         cutoff = datetime.now(UTC) - timedelta(minutes=since_minutes)
         articles: list[NewsArticle] = []
 
+        now = datetime.now(UTC)
+
         async with httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=_REQUEST_TIMEOUT,
             follow_redirects=True,
         ) as client:
             for channel in target_channels:
+                # Skip channels in backoff period
+                backoff_end = self._backoff_until.get(channel)
+                if backoff_end and now < backoff_end:
+                    continue
+
                 try:
                     channel_articles = await self._fetch_channel(client, channel, cutoff)
                     articles.extend(channel_articles)
+                    # Reset failure count on success
+                    self._fail_counts.pop(channel, None)
+                    self._backoff_until.pop(channel, None)
                 except Exception:
-                    logger.warning(
-                        "telegram_channel_fetch_failed",
-                        channel=channel,
-                        exc_info=True,
-                    )
+                    fails = self._fail_counts.get(channel, 0) + 1
+                    self._fail_counts[channel] = fails
+                    if fails >= _FAILURE_THRESHOLD:
+                        self._backoff_until[channel] = now + timedelta(seconds=_BACKOFF_SECONDS)
+                        logger.warning(
+                            "telegram_channel_backed_off",
+                            channel=channel,
+                            consecutive_failures=fails,
+                            backoff_seconds=_BACKOFF_SECONDS,
+                        )
+                    else:
+                        logger.warning(
+                            "telegram_channel_fetch_failed",
+                            channel=channel,
+                            consecutive_failures=fails,
+                            exc_info=True,
+                        )
                     continue
 
         return articles
