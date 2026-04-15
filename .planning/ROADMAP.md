@@ -140,7 +140,7 @@ Full details in Phase Details section below (collapsed milestone).
 
 **Milestone Goal:** Add runtime LLM agents to the live trading pipeline — news ingestion hardened and activated, EventDrivenStrategy firing live signals, portfolio review and anomaly interpretation agents deployed, and sentiment data accumulating for future ML use.
 
-- [ ] **Phase 49: News Pipeline Hardening** (2/3 plans) - Fix latent bugs and add production safeguards before live news activation
+- [x] **Phase 49: News Pipeline Hardening** (2/3 plans) - Fix latent bugs and add production safeguards before live news activation (completed 2026-04-15)
 - [ ] **Phase 50: EventDriven Activation** - Enable event_driven strategy on all ru_* segments with signal quality guards
 - [ ] **Phase 51: Anomaly Interpreter Agent** - LLM enrichment for anomaly alerts via fire-and-forget async dispatch
 - [ ] **Phase 52: Portfolio Review Agent** - Daily advisory LLM portfolio analysis with structured Pydantic output
@@ -152,12 +152,12 @@ Full details in Phase Details section below (collapsed milestone).
 **Goal**: News pipeline bugs fixed and production safeguards active before Phase 50 activates EventDrivenStrategy
 **Depends on**: Nothing (fixes existing code)
 **Requirements**: NEWS-01, NEWS-02, NEWS-03, NEWS-04, NEWS-05, NEWS-06
-**Plans:** 3 plans (2 complete, 1 gap closure)
+**Plans:** 3/3 plans complete
 
 Plans:
 - [x] 49-01-PLAN.md -- Bug fixes: parse_structured migration, per-article 5s timeout, threading.Lock fix, article budget cap
 - [x] 49-02-PLAN.md -- Production safeguards: source credibility map, ticker validation, LLM liveness monitoring
-- [ ] 49-03-PLAN.md -- Gap closure: wire validate_tickers into production path, fix LLM liveness blind spot (NEWS-04, NEWS-05)
+- [x] 49-03-PLAN.md -- Gap closure: wire validate_tickers into production path, fix LLM liveness blind spot (NEWS-04, NEWS-05)
 
 ### Phase 28: Operational Hygiene
 **Goal**: Strategy cycles only fire during MOEX market hours with correct ticker symbols, LLM quota is not wasted on duplicate articles, and Telegram alerter failures do not block trading
@@ -479,7 +479,7 @@ v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 | 36-39 | v8.0 | 7/7 | Complete | 2026-04-12 |
 | 40-44 | v9.0 | 7/7 | Complete | 2026-04-13 |
 | 45-48 | v9.1 | 7/7 | Complete | 2026-04-14 |
-| 49. News Pipeline Hardening | v10.0 | 2/2 | Complete   | 2026-04-14 |
+| 49. News Pipeline Hardening | v10.0 | 3/3 | Complete   | 2026-04-15 |
 | 50. EventDriven Activation | v10.0 | 0/TBD | Not started | - |
 | 51. Anomaly Interpreter Agent | v10.0 | 0/TBD | Not started | - |
 | 52. Portfolio Review Agent | v10.0 | 0/TBD | Not started | - |
