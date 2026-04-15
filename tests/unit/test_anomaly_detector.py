@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from finalayze.analysis.anomaly_detector import AnomalyDetector, AnomalyResult
 from finalayze.core.schemas import Candle
@@ -26,9 +27,7 @@ def _make_candle(close: float, volume: int, offset_minutes: int = 0) -> Candle:
     )
 
 
-def _make_normal_candles(
-    n: int, base_close: float = 100.0, base_vol: int = 1000
-) -> list[Candle]:
+def _make_normal_candles(n: int, base_close: float = 100.0, base_vol: int = 1000) -> list[Candle]:
     """Create n candles with small random-ish variation around base values."""
     candles = []
     for i in range(n):
@@ -108,10 +107,7 @@ class TestEdgeCases:
     def test_zero_std_does_not_crash(self) -> None:
         """When all closes are identical, std=0 -- must not ZeroDivisionError."""
         detector = AnomalyDetector()
-        candles = [
-            _make_candle(close=100.0, volume=1000, offset_minutes=i * 60)
-            for i in range(25)
-        ]
+        candles = [_make_candle(close=100.0, volume=1000, offset_minutes=i * 60) for i in range(25)]
         result = detector.check(candles, _SYMBOL, _MARKET_ID)
         # No crash; result is None because sigma=0 < 3.0
         assert result is None
@@ -125,5 +121,5 @@ class TestEdgeCases:
             volume_ratio=3.0,
             anomaly_type="price",
         )
-        with pytest.raises(Exception):  # ValidationError for frozen model
+        with pytest.raises(ValidationError):
             result.sigma = 1.0  # type: ignore[misc]
