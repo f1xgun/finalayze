@@ -423,7 +423,10 @@ Plans:
   1. All ru_* segment presets have `event_driven.enabled: true` with weight 0.15 — a sandbox strategy cycle that processes a news article generates at least one EventDrivenStrategy signal entry in the `signals` table
   2. When an article classified as a CBR announcement arrives and `cbr_calendar` strategy also has a pending signal for the same ticker, the combiner suppresses the double-weight — the final combined confidence for that tick does not exceed what a single strategy would contribute
   3. Between 18:50 MSK (MOEX close) and 09:50 MSK (MOEX open) the sentiment decay clock is frozen — the first article of the trading day produces a signal score within ±10% of the last signal from the previous session rather than spiking from a near-zero decayed baseline
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 50-01-PLAN.md — Dynamic sentiment TTL + event_type caching + ru_tech preset activation
+- [ ] 50-02-PLAN.md — Credibility threading + CBR/dividend dedup guard in combiner
 
 ### Phase 51: Anomaly Interpreter Agent
 **Goal**: Detected anomalies receive an LLM explanation appended to the Telegram alert without ever delaying the raw statistical alert
@@ -433,7 +436,10 @@ Plans:
   1. When AnomalyDetector fires an alert, the raw statistical alert message is sent to Telegram immediately — a unit test asserting that `TelegramAlerter.send()` is called before any LLM await passes
   2. Within 30 seconds of the raw alert, a follow-up Telegram message arrives containing the LLM explanation labeled "AI interpretation (unverified)" — the enrichment is visible in the Telegram chat as a separate message after the original
   3. When the LLM call times out or raises an exception, the raw alert is still delivered and a `anomaly_llm_failure` structlog entry is emitted — suppressing the raw alert on LLM failure is impossible by design
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 50-01-PLAN.md — Dynamic sentiment TTL + event_type caching + ru_tech preset activation
+- [ ] 50-02-PLAN.md — Credibility threading + CBR/dividend dedup guard in combiner
 
 ### Phase 52: Portfolio Review Agent
 **Goal**: A daily LLM portfolio analysis runs outside market hours, delivers a structured advisory report via Telegram, and has no write path to the order pipeline
@@ -443,7 +449,10 @@ Plans:
   1. A `PortfolioReviewResult` Pydantic schema exists in `core/schemas.py` with no `direction`, `confidence`, `symbol`+`market_id` combination that matches `Signal` or `OrderRequest` — a type-checker assertion at handler entry prevents accidental trade directive fields from being added
   2. Daily at 19:00 MSK (after MOEX close), a Telegram message arrives summarizing open positions, concentration risk, and any upcoming catalyst events — the message is structured, not free-form prose, and references specific ticker names
   3. The `PortfolioReviewAgent` handler writes only to `TelegramAlerter` — a code search for `BrokerRouter`, `place_order`, or `generate_signal` inside the agent handler returns zero results
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 50-01-PLAN.md — Dynamic sentiment TTL + event_type caching + ru_tech preset activation
+- [ ] 50-02-PLAN.md — Credibility threading + CBR/dividend dedup guard in combiner
 **UI hint**: yes
 
 ### Phase 53: Sentiment ML Infrastructure
@@ -454,7 +463,10 @@ Plans:
   1. A TimescaleDB continuous aggregate view `sentiment_7d_avg` exists and auto-refreshes — `SELECT * FROM sentiment_7d_avg WHERE ticker = 'SBER' ORDER BY bucket DESC LIMIT 5` returns rows after one week of live sentiment data accumulation
   2. `SentimentStore.get_rolling(ticker, window='7d')` (Layer 2) returns a list of `(bucket, avg_score, article_count)` rows — a unit test with seeded `sentiment_scores` fixture data verifies the query returns correct aggregates without Python-side computation
   3. Querying `SentimentStore` on a ticker with no sentiment history returns an empty list without error — the v11 feature pipeline can call the accessor safely before data accumulates
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 50-01-PLAN.md — Dynamic sentiment TTL + event_type caching + ru_tech preset activation
+- [ ] 50-02-PLAN.md — Credibility threading + CBR/dividend dedup guard in combiner
 
 ## Progress
 
@@ -479,7 +491,7 @@ v10.0: 49 -> 50 -> 51 -> 52 -> 53 (in progress)
 | 36-39 | v8.0 | 7/7 | Complete | 2026-04-12 |
 | 40-44 | v9.0 | 7/7 | Complete | 2026-04-13 |
 | 45-48 | v9.1 | 7/7 | Complete | 2026-04-14 |
-| 49. News Pipeline Hardening | v10.0 | 3/3 | Complete   | 2026-04-15 |
+| 49. News Pipeline Hardening | v10.0 | 3/3 | Complete    | 2026-04-15 |
 | 50. EventDriven Activation | v10.0 | 0/TBD | Not started | - |
 | 51. Anomaly Interpreter Agent | v10.0 | 0/TBD | Not started | - |
 | 52. Portfolio Review Agent | v10.0 | 0/TBD | Not started | - |
