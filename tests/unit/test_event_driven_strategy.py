@@ -7,6 +7,8 @@ from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 from finalayze.core.schemas import Candle, SignalDirection
 from finalayze.strategies.event_driven import EventDrivenStrategy
 
