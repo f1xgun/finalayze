@@ -13,8 +13,8 @@ strategies:
       rsi_oversold_mr: 30
       rsi_overbought_mr: 70
   event_driven:
-    enabled: false
-    weight: 0.10
+    enabled: true
+    weight: 0.15
     params:
       min_sentiment: 0.6
       event_types: [cbr_rate, regulatory, sanctions, earnings, macro]

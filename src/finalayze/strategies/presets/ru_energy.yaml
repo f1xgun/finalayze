@@ -27,8 +27,8 @@ strategies:
       volume_min_ratio: 0.8
       neutral_reset_bars: 8
   event_driven:
-    enabled: false
-    weight: 0.10
+    enabled: true
+    weight: 0.15
     params:
       min_sentiment: 0.6
       event_types: [opec, oil_price, sanctions, commodity_price, geopolitical]
