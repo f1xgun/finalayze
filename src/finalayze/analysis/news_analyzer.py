@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from finalayze.analysis.llm_client import LLMClient
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
-_FALLBACK = SentimentResult(sentiment=0.0, confidence=0.0, reasoning="parse_error")
+_FALLBACK = SentimentResult(
+    sentiment=0.0, confidence=0.0, reasoning="parse_error", is_fallback=True
+)
 _LLM_TIMEOUT_SECONDS = 5.0
 
 _log = structlog.get_logger()

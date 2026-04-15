@@ -187,6 +187,42 @@ class TestTickerValidation:
         result = validate_tickers([], registry, "moex")
         assert result == []
 
+    def test_validate_tickers_called_in_process_article(self) -> None:
+        """_process_news_article calls validate_tickers when sentiment has tickers."""
+        loop = _make_trading_loop()
+        loop._fetchers = {"moex": MagicMock()}  # provide market_id
+
+        article = _make_article()
+        # Mock _run_async to return sentiment with tickers + event
+        from finalayze.analysis.event_classifier import EventType
+
+        sentiment_with_tickers = SentimentResult(
+            sentiment=0.3, confidence=0.7, reasoning="test", tickers=["SBER", "FAKE"]
+        )
+        loop._run_async = MagicMock(return_value=(sentiment_with_tickers, EventType.OTHER))
+
+        with patch(
+            "finalayze.core.trading_loop.validate_tickers", return_value=["SBER"]
+        ) as mock_vt:
+            loop._process_news_article(article)
+            mock_vt.assert_called_once_with(["SBER", "FAKE"], loop._registry, "moex")
+
+    def test_empty_tickers_skips_validation(self) -> None:
+        """_process_news_article does not call validate_tickers when tickers is empty."""
+        loop = _make_trading_loop()
+
+        article = _make_article()
+        from finalayze.analysis.event_classifier import EventType
+
+        sentiment_no_tickers = SentimentResult(
+            sentiment=0.3, confidence=0.7, reasoning="test", tickers=[]
+        )
+        loop._run_async = MagicMock(return_value=(sentiment_no_tickers, EventType.OTHER))
+
+        with patch("finalayze.core.trading_loop.validate_tickers") as mock_vt:
+            loop._process_news_article(article)
+            mock_vt.assert_not_called()
+
     def test_credibility_set_on_articles_in_news_cycle(self) -> None:
         """_news_cycle sets credibility_score on articles before processing."""
         loop = _make_trading_loop()

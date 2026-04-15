@@ -389,6 +389,18 @@ class TradingLoop:
     def _process_news_article(self, article: NewsArticle) -> None:
         """Analyze a single article and update sentiment cache."""
         sentiment, event = self._run_async(self._analyze_article(article))
+
+        # Validate LLM-extracted tickers against InstrumentRegistry
+        if sentiment.tickers:
+            market_id = next(iter(self._fetchers), "moex")
+            validated = validate_tickers(sentiment.tickers, self._registry, market_id)
+            if validated != list(sentiment.tickers):
+                _log.info(
+                    "tickers_filtered",
+                    original=sentiment.tickers,
+                    validated=validated,
+                )
+
         active_segments = self._collect_active_segments()
         impacts = self._impact_estimator.estimate(
             article,

@@ -2,6 +2,7 @@ You are a financial news analyst. Analyze the following news article and return 
 - "sentiment": a float between -1.0 (very negative) and +1.0 (very positive) representing market sentiment
 - "confidence": a float between 0.0 and 1.0 representing your confidence in the assessment
 - "reasoning": a brief one-sentence explanation
+- "tickers": a list of stock ticker symbols (e.g. ["SBER", "GAZP"]) mentioned or directly affected in the article. Return an empty list if no specific tickers are mentioned.
 
 Consider the likely impact on stock prices. Earnings beats, rate cuts, and strong guidance are positive. Earnings misses, rate hikes, regulatory fines, and CEO departures are negative.
 

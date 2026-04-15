@@ -128,3 +128,28 @@ class TestNewsAnalyzer:
 
         source = inspect.getsource(mod)
         assert "json.loads" not in source
+
+
+class TestSentimentResultFields:
+    def test_fallback_has_is_fallback_true(self) -> None:
+        """_FALLBACK in news_analyzer.py must have is_fallback=True."""
+        from finalayze.analysis.news_analyzer import _FALLBACK
+
+        assert _FALLBACK.is_fallback is True
+
+    def test_normal_result_has_is_fallback_false(self) -> None:
+        """A normal SentimentResult defaults to is_fallback=False."""
+        result = SentimentResult(sentiment=0.5, confidence=0.8, reasoning="test")
+        assert result.is_fallback is False
+
+    def test_sentiment_result_tickers_default_empty(self) -> None:
+        """SentimentResult.tickers defaults to empty list."""
+        result = SentimentResult(sentiment=0.5, confidence=0.8, reasoning="test")
+        assert result.tickers == []
+
+    def test_sentiment_result_accepts_tickers(self) -> None:
+        """SentimentResult accepts a tickers list."""
+        result = SentimentResult(
+            sentiment=0.5, confidence=0.8, reasoning="test", tickers=["SBER", "GAZP"]
+        )
+        assert result.tickers == ["SBER", "GAZP"]
