@@ -54,6 +54,7 @@ def _make_trading_loop(**overrides: Any) -> Any:
     loop._fetchers = {}
     loop._cache = None
     loop._sentiment_cache = {}
+    loop._llm_consecutive_failures = 0
 
     import threading
 
@@ -76,8 +77,9 @@ class TestBudgetCap:
 
         process_calls: list[NewsArticle] = []
 
-        def track_process(article: NewsArticle) -> None:
+        def track_process(article: NewsArticle) -> bool:
             process_calls.append(article)
+            return True
 
         loop._process_news_article = track_process
         loop._news_cycle()
@@ -92,7 +94,7 @@ class TestBudgetCap:
         articles = [_make_article(i) for i in range(25)]
         loop = _make_trading_loop()
         loop._news_fetcher.fetch_news.return_value = articles
-        loop._process_news_article = MagicMock()
+        loop._process_news_article = MagicMock(return_value=True)
 
         with patch("finalayze.api.metrics.MetricsCollector") as mock_metrics:
             loop._news_cycle()
@@ -107,8 +109,9 @@ class TestBudgetCap:
 
         process_calls: list[NewsArticle] = []
 
-        def track_process(article: NewsArticle) -> None:
+        def track_process(article: NewsArticle) -> bool:
             process_calls.append(article)
+            return True
 
         loop._process_news_article = track_process
 
@@ -231,8 +234,9 @@ class TestTickerValidation:
 
         processed_articles: list[NewsArticle] = []
 
-        def track(art: NewsArticle) -> None:
+        def track(art: NewsArticle) -> bool:
             processed_articles.append(art)
+            return True
 
         loop._process_news_article = track
         loop._news_cycle()
@@ -250,15 +254,24 @@ class TestSentimentScoreModelCredibility:
 
 
 class TestLLMLiveness:
-    def _run_cycle_with_failure(self, loop: Any, *, fail: bool) -> None:
-        """Run a news cycle where all articles either fail or succeed."""
+    def _run_cycle_with_failure(
+        self, loop: Any, *, fail: bool = False, soft_fail: bool = False
+    ) -> None:
+        """Run a news cycle where all articles either fail or succeed.
+
+        Args:
+            fail: Hard failure (exception from _process_news_article).
+            soft_fail: Soft failure (_process_news_article returns False = fallback used).
+        """
         article = _make_article()
         loop._news_fetcher.fetch_news.return_value = [article]
 
         if fail:
             loop._process_news_article = MagicMock(side_effect=Exception("LLM fail"))
+        elif soft_fail:
+            loop._process_news_article = MagicMock(return_value=False)
         else:
-            loop._process_news_article = MagicMock()
+            loop._process_news_article = MagicMock(return_value=True)
 
         loop._news_cycle()
 
@@ -330,6 +343,60 @@ class TestLLMLiveness:
         for _ in range(3):
             self._run_cycle_with_failure(loop, fail=True)
         assert loop._alerter.on_error.call_count >= 2  # noqa: PLR2004
+
+    def test_llm_liveness_soft_failure_increments(self) -> None:
+        """3 cycles where all articles use fallback triggers alert."""
+        loop = _make_trading_loop()
+        loop._llm_consecutive_failures = 0
+
+        self._run_cycle_with_failure(loop, soft_fail=True)
+        self._run_cycle_with_failure(loop, soft_fail=True)
+        self._run_cycle_with_failure(loop, soft_fail=True)
+
+        loop._alerter.on_error.assert_called()
+        call_args = loop._alerter.on_error.call_args
+        assert call_args[0][0] == "LLMLiveness"
+
+    def test_llm_liveness_soft_failure_reset_on_real_success(self) -> None:
+        """2 soft fail cycles then 1 real success resets counter."""
+        loop = _make_trading_loop()
+        loop._llm_consecutive_failures = 0
+
+        self._run_cycle_with_failure(loop, soft_fail=True)
+        self._run_cycle_with_failure(loop, soft_fail=True)
+        # Real LLM success resets counter
+        self._run_cycle_with_failure(loop)
+        # 2 more soft fails should not trigger alert
+        self._run_cycle_with_failure(loop, soft_fail=True)
+        self._run_cycle_with_failure(loop, soft_fail=True)
+
+        loop._alerter.on_error.assert_not_called()
+
+    def test_llm_liveness_mixed_soft_and_hard(self) -> None:
+        """1 hard + 2 soft failures in consecutive cycles reaches threshold."""
+        loop = _make_trading_loop()
+        loop._llm_consecutive_failures = 0
+
+        self._run_cycle_with_failure(loop, fail=True)
+        self._run_cycle_with_failure(loop, soft_fail=True)
+        self._run_cycle_with_failure(loop, soft_fail=True)
+
+        loop._alerter.on_error.assert_called()
+        call_args = loop._alerter.on_error.call_args
+        assert call_args[0][0] == "LLMLiveness"
+
+    def test_llm_liveness_mixed_cycle_resets_counter(self) -> None:
+        """A cycle with at least one real LLM success resets the counter."""
+        loop = _make_trading_loop()
+        loop._llm_consecutive_failures = 0
+        articles = [_make_article(0), _make_article(1)]
+        loop._news_fetcher.fetch_news.return_value = articles
+
+        # First article returns False (fallback), second returns True (real)
+        loop._process_news_article = MagicMock(side_effect=[False, True])
+        loop._news_cycle()
+
+        assert loop._llm_consecutive_failures == 0
 
 
 class TestSentimentLockSafety:

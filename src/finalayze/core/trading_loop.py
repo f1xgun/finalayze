@@ -357,17 +357,22 @@ class TradingLoop:
 
         ok_count = 0
         fail_count = 0
+        llm_ok_count = 0  # tracks real LLM successes (not fallbacks)
         for article in articles:
             try:
-                self._process_news_article(article)
+                llm_succeeded = self._process_news_article(article)
                 ok_count += 1
+                if llm_succeeded:
+                    llm_ok_count += 1
             except Exception:
                 fail_count += 1
                 _log.exception("_news_cycle: error processing article %s", article.id)
 
         # LLM liveness tracking (cycle level)
+        # Use llm_ok_count: detects both hard failures (exceptions) and
+        # soft failures (LLM timeouts/parse errors returned as fallbacks)
         if articles:
-            if ok_count == 0 and fail_count > 0:
+            if llm_ok_count == 0 and (ok_count + fail_count) > 0:
                 self._llm_consecutive_failures += 1
                 MetricsCollector.inc_llm_liveness_failure()
                 if self._llm_consecutive_failures >= _LLM_FAILURE_THRESHOLD:
@@ -386,8 +391,12 @@ class TradingLoop:
         )
         return sentiment, event
 
-    def _process_news_article(self, article: NewsArticle) -> None:
-        """Analyze a single article and update sentiment cache."""
+    def _process_news_article(self, article: NewsArticle) -> bool:
+        """Analyze a single article and update sentiment cache.
+
+        Returns:
+            True if LLM produced a real result, False if fallback was used.
+        """
         sentiment, event = self._run_async(self._analyze_article(article))
 
         # Validate LLM-extracted tickers against InstrumentRegistry
@@ -424,6 +433,8 @@ class TradingLoop:
                     self._run_async(self._cache.set_sentiment(segment_id, score))
                 except Exception:
                     _log.debug("Failed to write sentiment to Redis cache")
+
+        return not sentiment.is_fallback
 
     def _collect_active_segments(self) -> list[str]:
         """Collect distinct segment IDs across all markets."""
