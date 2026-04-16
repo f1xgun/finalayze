@@ -784,6 +784,7 @@ class TestSandboxMonitorIntegration:
         loop = _make_trading_loop(signal=signal, fill=True)
         monitor = MagicMock()
         loop._sandbox_monitor = monitor  # type: ignore[attr-defined]
+        loop._signal_executor._sandbox_monitor = monitor  # type: ignore[attr-defined]
 
         candles = _make_candles()
         order = loop._OrderRequest(symbol=SYMBOL_AAPL, side="BUY", quantity=ORDER_QTY)  # type: ignore[attr-defined]
