@@ -61,7 +61,7 @@ class TestTrainModelsScript:
         mod = _load_script_module()
         candles = _make_candles()
 
-        with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
+        with patch("scripts.training.dataset_builder.fetch_symbol_candles", return_value=candles):
             mod.train_one_segment(  # type: ignore[union-attr]
                 segment_id="us_tech",
                 symbols=["AAPL"],
@@ -80,7 +80,7 @@ class TestTrainModelsScript:
         # Need >= _MIN_HISTORY_DAYS=500 candles to pass the history gate
         candles = _make_candles(n=500)
 
-        with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
+        with patch("scripts.training.dataset_builder.fetch_symbol_candles", return_value=candles):
             mod.train_one_segment(  # type: ignore[union-attr]
                 segment_id="us_tech",
                 symbols=["AAPL"],
@@ -98,7 +98,10 @@ class TestTrainModelsScript:
         mod = _load_script_module()
         short_candles = _make_candles(n=30)  # too few for 80-candle windows
 
-        with patch.object(mod, "_fetch_symbol_candles", return_value=short_candles):  # type: ignore[union-attr]
+        with patch(
+            "scripts.training.dataset_builder.fetch_symbol_candles",
+            return_value=short_candles,
+        ):
             # Should complete without raising
             mod.train_one_segment(  # type: ignore[union-attr]
                 segment_id="us_tech",
@@ -159,7 +162,7 @@ class TestTrainModelsScript:
         mod = _load_script_module()
         candles = _make_candles()
 
-        with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
+        with patch("scripts.training.dataset_builder.fetch_symbol_candles", return_value=candles):
             features, _labels, weights, hold_bars = mod._build_dataset(  # type: ignore[union-attr]
                 "us_tech",
                 ["AAPL"],
@@ -175,7 +178,7 @@ class TestTrainModelsScript:
         # Need >= _MIN_HISTORY_DAYS=500 candles to pass the history gate
         candles = _make_candles(n=500)
 
-        with patch.object(mod, "_fetch_symbol_candles", return_value=candles):  # type: ignore[union-attr]
+        with patch("scripts.training.dataset_builder.fetch_symbol_candles", return_value=candles):
             features, _labels, weights, hold_bars = mod._build_dataset(  # type: ignore[union-attr]
                 "us_tech",
                 ["AAPL"],
@@ -303,6 +306,7 @@ class TestWalkForwardUsesLastFold:
             test_labels: list[int],
             mean_uniqueness: float = 1.0,
             avg_hold_bars: float = 1.0,
+            calibrator: object | None = None,
         ) -> FoldMetrics:
             idx = eval_call_count["idx"]
             eval_call_count["idx"] += 1
@@ -314,22 +318,28 @@ class TestWalkForwardUsesLastFold:
         )
 
         with (
-            patch.object(
-                mod,  # type: ignore[union-attr]
-                "_build_dataset_with_timestamps",
+            patch(
+                "scripts.training.walk_forward.build_dataset_with_timestamps",
                 return_value=(features, labels, None, None, timestamps),
             ),
-            patch.object(
-                mod,  # type: ignore[union-attr]
-                "_generate_walk_forward_folds",
+            patch(
+                "scripts.training.walk_forward.generate_walk_forward_folds",
                 return_value=folds,
             ),
-            patch.object(mod, "XGBoostModel", side_effect=make_xgb_factory(fold_model_sets)),  # type: ignore[union-attr]
-            patch.object(mod, "LightGBMModel", side_effect=make_lgbm_factory(fold_model_sets)),  # type: ignore[union-attr]
-            patch.object(mod, "CatBoostModel", side_effect=make_cat_factory(fold_model_sets)),  # type: ignore[union-attr]
-            patch.object(
-                mod,  # type: ignore[union-attr]
-                "_evaluate_fold_metrics",
+            patch(
+                "scripts.training.walk_forward.XGBoostModel",
+                side_effect=make_xgb_factory(fold_model_sets),
+            ),
+            patch(
+                "scripts.training.walk_forward.LightGBMModel",
+                side_effect=make_lgbm_factory(fold_model_sets),
+            ),
+            patch(
+                "scripts.training.walk_forward.CatBoostModel",
+                side_effect=make_cat_factory(fold_model_sets),
+            ),
+            patch(
+                "scripts.training.walk_forward.evaluate_fold_metrics",
                 side_effect=mock_evaluate_fold_metrics,
             ),
             patch(
@@ -340,7 +350,7 @@ class TestWalkForwardUsesLastFold:
                 "finalayze.ml.training.quality_gates.evaluate_walk_forward",
                 return_value=(True, {"accuracy": 1.0}),
             ),
-            patch.object(mod, "select_features_mi", return_value=[]),  # type: ignore[union-attr]
+            patch("scripts.training.walk_forward.select_features", return_value=[]),
         ):
             result = mod.train_walk_forward(  # type: ignore[union-attr]
                 segment_id="us_tech",
