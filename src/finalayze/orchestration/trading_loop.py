@@ -15,11 +15,8 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import math
 import threading
-import time
-from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -28,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from finalayze.core.schemas import NewsArticle, SignalDirection
+from finalayze.core.schemas import SignalDirection
 from finalayze.core.validation_logger import CycleLogEntry, ValidationLogger
 
 try:
@@ -39,9 +36,10 @@ from finalayze.data.moex_calendar import is_moex_holiday
 from finalayze.data.normalizer import DataNormalizer
 from finalayze.markets.currency import CurrencyConverter
 from finalayze.markets.schedule import SCHEDULES
-from finalayze.orchestration.db_persistence import TradingPersistence
 from finalayze.orchestration.daily_reporting import DailyReportingService
+from finalayze.orchestration.db_persistence import TradingPersistence
 from finalayze.orchestration.ml_retraining import MLRetrainingService
+from finalayze.orchestration.news_pipeline import NewsPipeline
 from finalayze.orchestration.sentiment_manager import SentimentManager
 
 if TYPE_CHECKING:
@@ -50,7 +48,7 @@ if TYPE_CHECKING:
     from finalayze.analysis.event_classifier import EventClassifier
     from finalayze.analysis.impact_estimator import ImpactEstimator
     from finalayze.analysis.news_analyzer import NewsAnalyzer
-    from finalayze.analysis.news_impact_analyzer import NewsImpactAnalyzer, NewsImpactResult
+    from finalayze.analysis.news_impact_analyzer import NewsImpactAnalyzer
     from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
     from finalayze.api.alerts import TelegramAlerter
     from finalayze.api.metrics import MetricsCollector
@@ -61,7 +59,7 @@ if TYPE_CHECKING:
     from finalayze.data.fetchers.rss_fetcher import RssNewsFetcher
     from finalayze.data.fetchers.telegram_reader import TelegramChannelReader
     from finalayze.data.macro_cache import MacroCacheService
-    from finalayze.execution.broker_base import BrokerBase, OrderRequest
+    from finalayze.execution.broker_base import OrderRequest
     from finalayze.execution.broker_router import BrokerRouter
     from finalayze.markets.fx_service import FXRateService
     from finalayze.markets.instruments import Instrument, InstrumentRegistry
@@ -79,8 +77,6 @@ if TYPE_CHECKING:
     from finalayze.strategies.combiner import StrategyCombiner
 
 # ── Constants ──────────────────────────────────────────────────────────────
-_NEWS_QUERY = "stock market finance"
-_NEWS_LOOKBACK_HOURS = 2
 _CANDLE_LOOKBACK = 210  # SMA-200 needs 200 bars + buffer; dual_momentum needs 126
 _CAUTION_SIZE_FACTOR = Decimal("0.5")  # halve position size at CAUTION
 _MIN_CONFIDENCE_BOOST = 1.2  # raise required confidence 20% at CAUTION
@@ -93,8 +89,6 @@ _STALENESS_THRESHOLD_HOURS: float = 72.0  # 3x daily; covers weekends + calendar
 _ATR_MULTIPLIER_US = Decimal("2.0")
 _ATR_MULTIPLIER_MOEX = Decimal("2.5")
 _MARKET_CURRENCY: dict[str, str] = {"us": "USD", "moex": "RUB"}
-_ARTICLE_DEDUP_MAX_SIZE = 5000  # max hashes to track
-_ARTICLE_DEDUP_TTL_HOURS = 24  # skip articles seen within this window
 
 # US market hours in UTC: 9:30-16:00 ET = 14:30-21:00 UTC
 _US_OPEN_UTC = (14, 30)
@@ -189,8 +183,6 @@ class TradingLoop:
             cache=cache,
         )
 
-        self._seen_article_hashes: OrderedDict[str, float] = OrderedDict()
-
         # Daily baseline equities: market_id -> equity at start of trading day
         self._baseline_equities: dict[str, Decimal] = {}
 
@@ -270,6 +262,22 @@ class TradingLoop:
             metrics_collector=metrics_collector,
             settings=settings,
             now_fn=self._now,
+        )
+
+        # News pipeline service (extracted Phase 1.5)
+        self._news_pipeline = NewsPipeline(
+            rss_fetcher=rss_fetcher,
+            telegram_reader=telegram_reader,
+            news_fetcher=news_fetcher,
+            news_impact_analyzer=news_impact_analyzer,
+            sector_ticker_mapper=sector_ticker_mapper,
+            sentiment_mgr=self._sentiment_mgr,
+            persistence=self._persistence,
+            registry=instrument_registry,
+            cache=cache,
+            settings=settings,
+            alerter=alerter,
+            async_loop_fn=self._run_async,
         )
 
         # Dedicated gRPC event loop -- isolates PollerCompletionQueue from general
@@ -560,7 +568,7 @@ class TradingLoop:
             else self._settings.news_cycle_minutes
         )
         self._scheduler.add_job(
-            self._news_cycle,
+            self._news_pipeline.run_news_cycle,
             "interval",
             minutes=news_interval,
             id="news_cycle",
@@ -913,269 +921,6 @@ class TradingLoop:
                 from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
 
                 MetricsCollector.set_usd_rub_rate(float(rate))
-
-    def _news_cycle(self) -> None:
-        """Fetch news from RSS, Telegram, and legacy NewsAPI; analyze and update sentiment."""
-        if not self._sentiment_mgr.is_event_driven_active():
-            _log.debug("news_cycle_skipped_no_event_driven")
-            return
-
-        articles: list[NewsArticle] = []
-
-        # RSS feeds (sync -- runs in APScheduler thread)
-        if self._rss_fetcher is not None:
-            try:
-                rss_articles = self._rss_fetcher.fetch_news()
-                articles.extend(rss_articles)
-                _log.info("news_rss_fetched", count=len(rss_articles))
-            except Exception:
-                _log.warning("news_rss_fetch_failed", exc_info=True)
-
-        # Telegram channels (async -- bridge via _run_async)
-        if self._telegram_reader is not None:
-            try:
-                tg_channels = self._settings.telegram_channels
-                if tg_channels:
-                    tg_articles = self._run_async(
-                        self._telegram_reader.fetch_recent_messages(
-                            channels=tg_channels,
-                            since_minutes=self._settings.news_poll_interval_minutes,
-                        )
-                    )
-                    articles.extend(tg_articles)
-                    _log.info("news_telegram_fetched", count=len(tg_articles))
-            except Exception:
-                _log.warning("news_telegram_fetch_failed", exc_info=True)
-
-        # Legacy NewsAPI fallback (unchanged behavior)
-        if not articles and self._news_fetcher is not None:
-            now = datetime.now(UTC)
-            from_date = now - timedelta(hours=_NEWS_LOOKBACK_HOURS)
-            try:
-                articles = self._news_fetcher.fetch_news(
-                    query=_NEWS_QUERY,
-                    from_date=from_date,
-                    to_date=now,
-                )
-                _log.info("news_legacy_fetched", count=len(articles))
-            except Exception:
-                _log.warning("news_legacy_fetch_failed", exc_info=True)
-                return
-
-        # Analyze articles via NewsImpactAnalyzer (single LLM call per article)
-        # Large timeout: with rate-limited LLM, batches may take minutes.
-        _batch_timeout = 1800
-        processed_ok = 0
-        processed_fail = 0
-        if self._news_impact_analyzer is not None and articles:
-            processed_ok, processed_fail, _ = self._run_async(
-                self._analyze_impact_batch(articles), timeout=_batch_timeout
-            )
-
-        # Single summary line for the entire news cycle
-        log_fn = _log.info if processed_fail == 0 else _log.warning
-        log_fn(
-            "news_cycle_complete",
-            articles=len(articles),
-            processed_ok=processed_ok,
-            processed_fail=processed_fail,
-        )
-
-    def _is_article_duplicate(self, article: NewsArticle) -> bool:
-        """Check if article was already processed within the TTL window.
-
-        Uses SHA-256 of (url + title) as the dedup key. Evicts entries
-        older than _ARTICLE_DEDUP_TTL_HOURS and caps at _ARTICLE_DEDUP_MAX_SIZE.
-        """
-        key = hashlib.sha256(f"{article.url}|{article.title}".encode()).hexdigest()
-        now = time.monotonic()
-
-        # Evict expired entries (oldest first, since OrderedDict preserves insertion order)
-        cutoff = now - _ARTICLE_DEDUP_TTL_HOURS * 3600
-        while self._seen_article_hashes:
-            oldest_key, oldest_ts = next(iter(self._seen_article_hashes.items()))
-            if oldest_ts < cutoff:
-                del self._seen_article_hashes[oldest_key]
-            else:
-                break
-
-        if key in self._seen_article_hashes:
-            return True
-
-        self._seen_article_hashes[key] = now
-        # Cap size
-        while len(self._seen_article_hashes) > _ARTICLE_DEDUP_MAX_SIZE:
-            self._seen_article_hashes.popitem(last=False)
-
-        return False
-
-    async def _analyze_impact_batch(self, articles: list[NewsArticle]) -> tuple[int, int, str]:
-        """Analyze all articles via NewsImpactAnalyzer with bounded concurrency.
-
-        Uses an inline circuit breaker: after 5 consecutive LLM failures,
-        remaining articles are skipped to avoid wasting minutes on retries.
-
-        Returns:
-            (ok_count, fail_count, last_error_type) for summary logging.
-        """
-        # Deduplicate articles already seen within TTL window (OPS-03)
-        unique_articles = [a for a in articles if not self._is_article_duplicate(a)]
-        skipped_count = len(articles) - len(unique_articles)
-        if skipped_count > 0:
-            _log.info(
-                "news_articles_deduplicated",
-                skipped=skipped_count,
-                remaining=len(unique_articles),
-            )
-        articles = unique_articles
-        if not articles:
-            return 0, 0, ""
-
-        sem = asyncio.Semaphore(5)
-        ok_count = 0
-        fail_count = 0
-        last_error = ""
-        consecutive_failures = 0
-        _fail_threshold = 5
-        analyzer = self._news_impact_analyzer
-        assert analyzer is not None
-
-        async def _process_one(article: NewsArticle) -> bool:
-            nonlocal consecutive_failures, last_error
-            if consecutive_failures >= _fail_threshold:
-                return False
-            async with sem:
-                try:
-                    result = await analyzer.analyze(article)
-                    _log.info(
-                        "news_article_analyzed",
-                        article_title=article.title[:80],
-                        article_url=article.url,
-                        event_type=result.event_type,
-                        sentiment=round(result.sentiment, 3),
-                        confidence=round(result.confidence, 3),
-                        sectors=[s.sector for s in result.affected_sectors],
-                        direct_tickers=result.direct_tickers,
-                    )
-                    # Fire-and-forget news article persistence (PERSIST-03)
-                    await self._persistence.persist_news_article_async(article, result)
-                    await self._apply_impact_result(result)
-                    consecutive_failures = 0
-                    return True
-                except Exception as exc:
-                    consecutive_failures += 1
-                    last_error = type(exc).__name__
-                    _log.debug(
-                        "news_article_analysis_failed",
-                        article_title=article.title[:80],
-                        error_type=last_error,
-                        error=str(exc)[:200],
-                    )
-                    if consecutive_failures == _fail_threshold:
-                        _log.warning(
-                            "news_processing_circuit_opened",
-                            error=last_error,
-                            consecutive_failures=consecutive_failures,
-                        )
-                    return False
-
-        results = await asyncio.gather(*[_process_one(a) for a in articles])
-        for success in results:
-            if success:
-                ok_count += 1
-            else:
-                fail_count += 1
-        return ok_count, fail_count, last_error
-
-    async def _apply_impact_result(self, result: NewsImpactResult) -> None:
-        """Apply NewsImpactResult to per-ticker sentiment cache.
-
-        Must be async because it is called from _process_one which runs on
-        _async_loop.  Using sync _run_async / _persist_to_db from within
-        _async_loop would deadlock (submit + block on the same loop).
-        """
-        active_segments = self._sentiment_mgr.collect_active_segments()
-        mapper = self._sector_ticker_mapper
-        if mapper is None:
-            return
-
-        # Build ticker -> score mapping from sectors
-        ticker_scores: dict[str, float] = {}
-        for sector_impact in result.affected_sectors:
-            tickers = mapper.map_sectors([sector_impact.sector])
-            score = sector_impact.magnitude * sector_impact.direction * result.sentiment
-            for ticker in tickers:
-                # Take the strongest impact if ticker appears in multiple sectors
-                if ticker not in ticker_scores or abs(score) > abs(ticker_scores[ticker]):
-                    ticker_scores[ticker] = score
-
-        # Direct tickers get the raw sentiment * confidence
-        for ticker in result.direct_tickers:
-            direct_score = result.sentiment * result.confidence
-            if ticker not in ticker_scores or abs(direct_score) > abs(ticker_scores[ticker]):
-                ticker_scores[ticker] = direct_score
-
-        # Update cache for all active segments containing these tickers
-        redis_updates: list[tuple[str, str, float]] = []
-        for seg_id in active_segments:
-            seg_tickers = self._sentiment_mgr.get_segment_tickers(seg_id)
-            for ticker in seg_tickers:
-                if ticker in ticker_scores:
-                    # Read existing decayed sentiment (with lock held internally)
-                    existing = self._sentiment_mgr.read_decayed_sentiment(seg_id, ticker)
-                    new_score = existing * 0.7 + ticker_scores[ticker] * 0.3
-                    # Update cache (with lock held internally)
-                    self._sentiment_mgr.update_sentiment(seg_id, ticker, new_score)
-                    redis_updates.append((seg_id, ticker, new_score))
-
-        # Fire-and-forget sentiment persistence (PERSIST-04) — async path
-        await self._persist_sentiment_scores_async(
-            ticker_scores, active_segments, result.confidence
-        )
-
-        _log.info(
-            "news_impact_applied",
-            tickers_updated=len(ticker_scores),
-            segments_affected=len(active_segments),
-            cache_entries_written=len(redis_updates),
-        )
-
-        # Redis write — already on _async_loop, just await directly
-        if self._cache is not None:
-            for seg_id, ticker, score in redis_updates:
-                try:
-                    await self._cache.set_sentiment(f"{seg_id}:{ticker}", score)
-                except Exception:
-                    _log.debug("Failed to write sentiment to Redis cache")
-
-    def _persist_sentiment_scores(
-        self,
-        ticker_scores: dict[str, float],
-        active_segments: list[str],
-        confidence: float,
-    ) -> None:
-        """Fire-and-forget sentiment persistence to DB (PERSIST-04).
-
-        Sync variant — safe to call from APScheduler threads (NOT from _async_loop).
-        """
-        if not ticker_scores:
-            return
-        has_non_ru = any(not s.startswith("ru_") for s in active_segments)
-        market_id = "us" if has_non_ru else "moex"
-        self._persistence.persist_sentiment_batch(ticker_scores, market_id, confidence)
-
-    async def _persist_sentiment_scores_async(
-        self,
-        ticker_scores: dict[str, float],
-        active_segments: list[str],
-        confidence: float,
-    ) -> None:
-        """Async variant of _persist_sentiment_scores for use on _async_loop."""
-        if not ticker_scores:
-            return
-        has_non_ru = any(not s.startswith("ru_") for s in active_segments)
-        market_id = "us" if has_non_ru else "moex"
-        await self._persistence.persist_sentiment_batch_async(ticker_scores, market_id, confidence)
 
     def _now(self) -> datetime:
         """Return current UTC datetime. Extracted for testability."""
@@ -2153,115 +1898,20 @@ class TradingLoop:
     def _daily_reset(self) -> None:
         """Reset circuit breakers and send daily P&L summary.
 
-        Computes separate P&L for US equity, MOEX equity, and MOEX bonds.
-        Persists equity snapshots to DB. Includes top 3 movers and dual
-        currency totals.
+        Delegates to DailyReportingService.daily_reset().
         """
-        market_pnl: dict[str, Decimal] = {}
-        new_baselines: dict[str, Decimal] = {}
-
-        now = self._now()
-        for market_id, cb in self._circuit_breakers.items():
-            try:
-                broker = self._broker_router.route(market_id)
-                portfolio = broker.get_portfolio()
-                equity = portfolio.equity
-                new_baselines[market_id] = equity
-
-                # Compute P&L BEFORE updating baseline
-                baseline = self._baseline_equities.get(market_id, equity)
-                market_pnl[market_id] = equity - baseline
-
-                # Now update baseline for next trading day
-                self._baseline_equities[market_id] = equity
-                cb.reset_daily(new_baseline=equity)
-            except Exception:
-                _log.exception(
-                    "_daily_reset: failed to reset for market %s",
-                    market_id,
-                )
-
-        # Bond P&L from LayerLedger (not broker portfolio)
-        if self._bond_processor is not None:
-            try:
-                bond_equity: Decimal = sum(
-                    (
-                        ledger.current_equity
-                        for ledger in self._bond_processor._layer_ledgers.values()
-                    ),
-                    _ZERO,
-                )
-                bond_baseline = self._baseline_equities.get(
-                    "moex_bonds",
-                    bond_equity,
-                )
-                market_pnl["moex_bonds"] = bond_equity - bond_baseline
-                self._baseline_equities["moex_bonds"] = bond_equity
-                new_baselines["moex_bonds"] = bond_equity
-            except Exception:
-                _log.exception("_daily_reset: failed to compute bond P&L")
-
-        self._cross_market_breaker.reset_daily(new_baselines)
-        total_equity = sum(new_baselines.values(), _ZERO)
-
-        # Reset loss limit tracker daily baseline
-        self._loss_limit_tracker.reset_day(now, total_equity)
-
-        # 6A.10: Reset weekly baseline on Monday (weekday 0)
-        monday = 0
-        if now.weekday() == monday:
-            self._loss_limit_tracker.reset_week(now, total_equity)
-
-        # Update Prometheus metrics
-        if self._metrics:
-            for market_id, equity in new_baselines.items():
-                pnl_val = market_pnl.get(market_id, _ZERO)
-                self._metrics.set_daily_pnl(market_id, float(pnl_val))
-                self._metrics.set_portfolio_equity(market_id, float(equity))
-
-        # Top 3 movers by absolute P&L %
-        top_movers = self._compute_top_movers()
-
-        # Dual currency total
-        total_equity_rub: Decimal | None = None
-        if self._fx_service is not None:
-            try:
-                usdrub = self._fx_service._last_rate
-                if usdrub and usdrub > _ZERO:
-                    total_equity_rub = total_equity  # already mixed RUB+USD
-            except Exception:
-                _log.debug("_daily_reset: FX unavailable for dual currency")
-
-        # Persist equity snapshots to DB
-        self._persistence.persist_equity_snapshots(new_baselines, now)
-
-        self._alerter.on_daily_summary(
-            market_pnl,
-            total_equity,
-            top_movers,
-            total_equity_rub,
-        )
-        _log.info("Daily reset complete. Total equity: %s", total_equity)
+        # Sync metrics reference and _now method (for test compatibility and consistency)
+        self._daily_reporter._metrics = self._metrics
+        self._daily_reporter._now = self._now
+        updated_baselines = self._daily_reporter.daily_reset(self._baseline_equities)
+        self._baseline_equities.update(updated_baselines)
 
     def _compute_top_movers(self) -> list[tuple[str, float]]:
-        """Compute top 3 movers by absolute P&L % across all markets."""
-        movers: list[tuple[str, float]] = []
-        for market_id in self._circuit_breakers:
-            try:
-                broker = self._broker_router.route(market_id)
-                portfolio = broker.get_portfolio()
-                for sym, qty in portfolio.positions.items():
-                    if qty > _ZERO:
-                        baseline = self._baseline_equities.get(market_id, _ZERO)
-                        if baseline > _ZERO:
-                            # Approximate % using position weight
-                            pct = float(qty) * 0.01  # placeholder
-                            movers.append((sym, pct))
-            except Exception:
-                _log.debug("_compute_top_movers: failed for %s", market_id)
-                continue
-        movers.sort(key=lambda x: abs(x[1]), reverse=True)
-        return movers[:3]
+        """Compute top 3 movers by absolute P&L % across all markets.
+
+        Delegates to DailyReportingService._compute_top_movers().
+        """
+        return self._daily_reporter._compute_top_movers(self._baseline_equities)
 
     def _load_baseline_from_db(self) -> None:
         """Load latest equity snapshots from DB on startup.
@@ -2269,69 +1919,11 @@ class TradingLoop:
         If snapshots exist for today, use them as baselines.
         Otherwise current broker equity becomes the baseline and is
         persisted so subsequent restarts within the same day find it.
+
+        Delegates to DailyReportingService.load_baselines_from_db().
         """
-        try:
-            self._run_async(self._load_baseline_async())
-        except Exception:
-            _log.info(
-                "baseline_from_broker",
-                reason="no DB snapshots for today, persisting current equity",
-            )
-            # Persist current broker equity so next restart finds it
-            baselines: dict[str, Decimal] = {}
-            for market_id in self._fetchers:
-                equity = self._get_market_equity(market_id)
-                if equity is not None:
-                    baselines[market_id] = equity
-                    self._baseline_equities[market_id] = equity
-            if baselines:
-                now = datetime.now(UTC)
-                self._persistence.persist_equity_snapshots(baselines, now)
-
-    async def _load_baseline_async(self) -> None:
-        """Async helper to query today's equity snapshots from TimescaleDB.
-
-        Fetches all DailyEquitySnapshot rows for today, groups by market_id,
-        and takes the latest equity per market. Updates _baseline_equities
-        for each market_id found.
-        """
-        from sqlalchemy import func, select  # noqa: PLC0415
-
-        from finalayze.core.models import DailyEquitySnapshot  # noqa: PLC0415
-
-        factory = self._persistence._get_bg_session_factory()
-        async with factory() as session:
-            today_start = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-            # Subquery: latest timestamp per market_id for today
-            subq = (
-                select(
-                    DailyEquitySnapshot.market_id,
-                    func.max(DailyEquitySnapshot.timestamp).label("max_ts"),
-                )
-                .where(DailyEquitySnapshot.timestamp >= today_start)
-                .group_by(DailyEquitySnapshot.market_id)
-                .subquery()
-            )
-            stmt = select(DailyEquitySnapshot.market_id, DailyEquitySnapshot.equity).join(
-                subq,
-                (DailyEquitySnapshot.market_id == subq.c.market_id)
-                & (DailyEquitySnapshot.timestamp == subq.c.max_ts),
-            )
-            result = await session.execute(stmt)
-            rows = result.all()
-
-        loaded = 0
-        for row in rows:
-            self._baseline_equities[row.market_id] = row.equity
-            loaded += 1
-        if loaded == 0:
-            msg = "no snapshots for today"
-            raise ValueError(msg)
-
-        if loaded:
-            _log.info("baselines_loaded_from_db", count=loaded)
-        else:
-            _log.debug("no_baselines_in_db_for_today")
+        loaded = self._daily_reporter.load_baselines_from_db(list(self._fetchers.keys()))
+        self._baseline_equities.update(loaded)
 
     def _weekly_digest(self) -> None:
         """Send weekly performance digest on Sunday evening.
@@ -2352,19 +1944,3 @@ class TradingLoop:
         Delegates to DailyReportingService.liquidate_market().
         """
         self._daily_reporter.liquidate_market(market_id, self._baseline_equities)
-
-    def _close_positions(self, broker: BrokerBase, positions: dict[str, Decimal]) -> None:
-        """Submit SELL orders for all non-zero positions.
-
-        Uses market orders without fill_candle (#129: no look-ahead bias).
-        """
-        for symbol, qty in positions.items():
-            if qty <= _ZERO:
-                continue
-            # #129: Do NOT pass fill_candle — live market orders have no look-ahead
-            order = self._OrderRequest(symbol=symbol, side="SELL", quantity=qty)
-            try:
-                broker.submit_order(order)
-            except Exception as exc:
-                _log.error("liquidation_order_failed", symbol=symbol, error=str(exc))
-                self._alerter.on_error("TradingLoop", f"Liquidation failed for {symbol}: {exc}")
