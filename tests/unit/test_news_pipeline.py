@@ -65,6 +65,9 @@ def _wire_subcomponents(loop: Any) -> None:
     pipeline._sentiment_mgr = sentiment_mgr
     pipeline._persistence = MagicMock()
     pipeline._async_loop_fn = getattr(loop, "_run_async", lambda coro, **kw: None)
+    pipeline._LLM_FAILURE_ALERT_THRESHOLD = 3
+    pipeline._sector_ticker_mapper = None
+    pipeline._cache = getattr(loop, "_cache", None)
     loop._news_pipeline = pipeline
 
 
@@ -285,6 +288,8 @@ class TestLLMLiveness:
 
         # Wire up analyzer so _news_cycle enters the processing path
         loop._news_impact_analyzer = MagicMock()
+        loop._news_pipeline._news_impact_analyzer = MagicMock()
+        loop._news_pipeline._async_loop_fn = MagicMock(return_value=(ok, fail, ""))
         loop._run_async = MagicMock(return_value=(ok, fail, ""))
 
         loop._news_cycle()

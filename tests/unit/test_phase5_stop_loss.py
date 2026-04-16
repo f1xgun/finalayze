@@ -32,32 +32,35 @@ def _make_candles(n: int, base_price: float = 100.0, symbol: str = "AAPL") -> li
 
 
 def _make_trading_loop() -> MagicMock:
-    """Create a minimal TradingLoop-like object for testing _submit_order."""
-    import threading
-
-    from finalayze.core.trading_loop import TradingLoop
+    """Create a minimal SignalExecutor-like object for testing _submit_order."""
     from finalayze.execution.simulated_broker import StopLossState
+    from finalayze.orchestration.position_manager import PositionTracker
+    from finalayze.orchestration.signal_executor import SignalExecutor
 
-    loop = MagicMock(spec=TradingLoop)
-    loop._stop_states = {}
-    loop._stop_loss_lock = threading.Lock()
-    loop._entry_prices = {}
-    loop._entry_strategy = {}
-    loop._broker_router = MagicMock()
-    loop._alerter = MagicMock()
-    loop._sandbox_monitor = None
-    loop._metrics = None
-    loop._cycle_orders_filled = 0
-    loop._cycle_errors_caught = 0
-    loop._update_kelly = MagicMock()
-    loop._submit_order = TradingLoop._submit_order.__get__(loop)
+    # Use a real PositionTracker so register_entry/register_exit actually work
+    tracker = PositionTracker(
+        kelly_sizer=MagicMock(),
+        broker_router=MagicMock(),
+        alerter=MagicMock(),
+    )
+
+    executor = MagicMock()
+    executor._position_tracker = tracker
+    executor._broker_router = MagicMock()
+    executor._alerter = MagicMock()
+    executor._sandbox_monitor = None
+    executor._metrics = None
+    executor._persistence = MagicMock()
+    executor._health_monitor = None
+    executor._submit_order = SignalExecutor._submit_order.__get__(executor)
 
     # Store class references for the method
     from finalayze.execution.broker_base import OrderRequest
 
-    loop._OrderRequest = OrderRequest
-    loop._StopLossState = StopLossState
-    return loop
+    executor._OrderRequest = OrderRequest
+    executor._StopLossState = StopLossState
+
+    return executor
 
 
 class TestStopLossWiring:
@@ -79,8 +82,8 @@ class TestStopLossWiring:
 
         loop._submit_order(order, "us", candles=candles)
 
-        assert "AAPL" in loop._stop_states
-        state = loop._stop_states["AAPL"]
+        assert "AAPL" in loop._position_tracker._stop_states
+        state = loop._position_tracker._stop_states["AAPL"]
         assert state.current_stop > Decimal(0)
         assert state.current_stop < Decimal("110.0")
         assert state.entry_price == Decimal("110.0")
@@ -90,7 +93,7 @@ class TestStopLossWiring:
         loop = _make_trading_loop()
         from finalayze.execution.simulated_broker import StopLossState
 
-        loop._stop_states["AAPL"] = StopLossState(
+        loop._position_tracker._stop_states["AAPL"] = StopLossState(
             initial_stop=Decimal("95.0"),
             current_stop=Decimal("95.0"),
             highest_price=Decimal("110.0"),
@@ -115,7 +118,7 @@ class TestStopLossWiring:
 
         loop._submit_order(order, "us", candles=_make_candles(20))
 
-        assert "AAPL" not in loop._stop_states
+        assert "AAPL" not in loop._position_tracker._stop_states
 
     def test_rejected_order_no_stop(self) -> None:
         """A rejected order should not set any stop-loss."""
@@ -135,7 +138,7 @@ class TestStopLossWiring:
 
         loop._submit_order(order, "us", candles=_make_candles(20))
 
-        assert "AAPL" not in loop._stop_states
+        assert "AAPL" not in loop._position_tracker._stop_states
 
     def test_moex_uses_higher_multiplier(self) -> None:
         """MOEX BUY fills should use the 2.5x ATR multiplier (wider stop)."""
@@ -180,4 +183,4 @@ class TestStopLossWiring:
 
         loop._submit_order(order, "us", candles=None)
 
-        assert "AAPL" not in loop._stop_states
+        assert "AAPL" not in loop._position_tracker._stop_states

@@ -161,6 +161,8 @@ class TestWeeklyDigest:
         assert "sun" in source.lower() or "day_of_week" in source
 
     def test_weekly_digest_sends_alert(self) -> None:
-        """_weekly_digest sends alert via alerter.send_alert."""
-        source = inspect.getsource(TradingLoop._weekly_digest)
+        """weekly_digest sends alert via alerter.send_alert."""
+        from finalayze.orchestration.daily_reporting import DailyReportingService
+
+        source = inspect.getsource(DailyReportingService.weekly_digest)
         assert "send_alert" in source or "_send" in source

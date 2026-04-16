@@ -37,6 +37,7 @@ _NEWS_QUERY = "stock market finance"
 _NEWS_LOOKBACK_HOURS = 2
 _ARTICLE_DEDUP_MAX_SIZE = 5000  # max hashes to track
 _ARTICLE_DEDUP_TTL_HOURS = 24  # skip articles seen within this window
+_MAX_ARTICLES_PER_CYCLE = 20  # budget cap: prevent LLM cost explosion on busy news days
 
 _log = structlog.get_logger()
 
@@ -100,6 +101,11 @@ class NewsPipeline:
         # Deduplication window: SHA-256 hash of (url + title) with TTL
         self._seen_article_hashes: OrderedDict[str, float] = OrderedDict()
 
+        # LLM liveness tracking: consecutive failures → alert at threshold
+        self._llm_consecutive_failures: int = 0
+        _LLM_FAILURE_ALERT_THRESHOLD = 3  # noqa: N806
+        self._LLM_FAILURE_ALERT_THRESHOLD = _LLM_FAILURE_ALERT_THRESHOLD
+
     def run_news_cycle(self) -> None:
         """Fetch news from RSS, Telegram, and legacy NewsAPI; analyze and update sentiment.
 
@@ -151,6 +157,16 @@ class NewsPipeline:
                 _log.warning("news_legacy_fetch_failed", exc_info=True)
                 return
 
+        # Budget cap: prevent LLM cost explosion on busy news days
+        if len(articles) > _MAX_ARTICLES_PER_CYCLE:
+            try:
+                from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
+
+                MetricsCollector.inc_news_budget_cap_hit()
+            except Exception:
+                pass  # Metrics optional
+            articles = articles[:_MAX_ARTICLES_PER_CYCLE]
+
         # Analyze articles via NewsImpactAnalyzer (single LLM call per article)
         # Large timeout: with rate-limited LLM, batches may take minutes.
         _batch_timeout = 1800
@@ -169,6 +185,26 @@ class NewsPipeline:
             processed_ok=processed_ok,
             processed_fail=processed_fail,
         )
+
+        # LLM liveness tracking
+        if articles and processed_ok == 0 and processed_fail > 0:
+            self._llm_consecutive_failures += 1
+            try:
+                from finalayze.api.metrics import llm_liveness_failures  # noqa: PLC0415
+
+                llm_liveness_failures.inc()
+            except Exception:
+                pass  # Metrics optional
+            if (
+                self._llm_consecutive_failures % self._LLM_FAILURE_ALERT_THRESHOLD == 0
+                and self._alerter is not None
+            ):
+                self._alerter.on_error(
+                    "LLMLiveness",
+                    f"{self._llm_consecutive_failures} consecutive all-fail news cycles",
+                )
+        elif processed_ok > 0:
+            self._llm_consecutive_failures = 0
 
     def _is_article_duplicate(self, article: NewsArticle) -> bool:
         """Check if article was already processed within the TTL window.

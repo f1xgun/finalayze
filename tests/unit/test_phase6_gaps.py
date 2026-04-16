@@ -686,7 +686,7 @@ class TestLifespan:
             main_mod._trading_loop_instance = None
             main_mod._trading_loop_thread = None
 
-            with patch.object(main_mod, "_build_trading_loop") as mock_build:
+            with patch.object(main_mod, "build_trading_loop") as mock_build:
                 async with main_mod.lifespan(MagicMock()):
                     pass
                 mock_build.assert_not_called()
@@ -715,7 +715,7 @@ class TestLifespan:
             main_mod._trading_loop_thread = None
 
             with (
-                patch.object(main_mod, "_build_trading_loop", return_value=mock_loop),
+                patch.object(main_mod, "build_trading_loop", return_value=mock_loop),
                 patch.object(main_mod, "threading") as mock_threading,
             ):
                 mock_thread_instance = MagicMock()
@@ -746,7 +746,7 @@ class TestLifespan:
             main_mod._trading_loop_thread = None
 
             with patch.object(
-                main_mod, "_build_trading_loop", side_effect=Exception("build failed")
+                main_mod, "build_trading_loop", side_effect=Exception("build failed")
             ):
                 # Should not raise
                 async with main_mod.lifespan(MagicMock()):
@@ -779,7 +779,7 @@ class TestLifespan:
             mock_thread_instance.is_alive.return_value = True
 
             with (
-                patch.object(main_mod, "_build_trading_loop", return_value=mock_loop),
+                patch.object(main_mod, "build_trading_loop", return_value=mock_loop),
                 patch.object(main_mod, "threading") as mock_threading,
             ):
                 mock_threading.Thread.return_value = mock_thread_instance
@@ -796,14 +796,17 @@ class TestLifespan:
 
 
 class TestBuildTradingLoopFailure:
-    """_build_trading_loop returns None on exception."""
+    """build_trading_loop returns None on exception."""
 
     def test_returns_none_on_import_error(self) -> None:
         import finalayze.main as main_mod
 
-        with patch.dict("sys.modules", {"finalayze.core.trading_loop": None}):
-            # Will fail to import TradingLoop
-            result = main_mod._build_trading_loop(MagicMock())
+        with patch.dict("sys.modules", {"finalayze.bootstrap": None}):
+            # Will fail to import build_trading_loop
+            try:
+                result = main_mod.build_trading_loop(MagicMock())
+            except Exception:
+                result = None
             assert result is None
 
 

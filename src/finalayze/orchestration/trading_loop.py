@@ -386,10 +386,14 @@ class TradingLoop:
         "_stop_loss_lock": ("_position_tracker", None),
         "_check_stop_losses": ("_position_tracker", "check_stop_losses"),
         # SignalExecutor attributes
-        "_cycle_exited_symbols": ("_signal_executor", None),
+        "_cycle_exited_symbols": ("_position_tracker", None),
         "_build_sizing_pipeline": ("_signal_executor", None),
         "_has_pending_order": ("_signal_executor", None),
         "_sizing_pipeline": ("_signal_executor", None),
+        "_get_last_price": ("_signal_executor", None),
+        "_last_prices": ("_signal_executor", None),
+        "_get_regime_state": ("_signal_executor", None),
+        "_get_segment_min_confidence": ("_signal_executor", None),
         # NewsPipeline attributes
         "_news_cycle": ("_news_pipeline", "run_news_cycle"),
         "_analyze_impact_batch": ("_news_pipeline", None),
@@ -1455,7 +1459,22 @@ class TradingLoop:
     # ---- Process instrument delegation (test compat) ----
 
     def _process_instrument(self, *args: object, **kwargs: object) -> object:
-        """Delegate to SignalExecutor.process_instrument (test compat)."""
+        """Delegate to SignalExecutor.process_instrument (test compat).
+
+        Provides default values for equity/cash/portfolio when not supplied,
+        so callers using the old 5-arg signature still work.
+        """
+        # If called with old 5-arg signature (instrument, market_id, level, fetcher, now),
+        # provide defaults for the new equity/cash/portfolio params
+        if "equity" not in kwargs and len(args) <= 5:
+            # Try to get real portfolio from cache
+            market_id = args[1] if len(args) > 1 else kwargs.get("market_id", "")
+            portfolio = self._get_cached_portfolio(str(market_id))
+            equity = getattr(portfolio, "equity", _ZERO) if portfolio else _ZERO
+            cash = getattr(portfolio, "cash", _ZERO) if portfolio else _ZERO
+            kwargs.setdefault("equity", equity)
+            kwargs.setdefault("cash", cash)
+            kwargs.setdefault("portfolio", portfolio)
         return self._signal_executor.process_instrument(*args, **kwargs)
 
     # ---- Portfolio review (re-added after decomposition) ----

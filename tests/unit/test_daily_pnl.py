@@ -203,58 +203,37 @@ class TestEquitySnapshotPersistence:
             else:
                 assert obj.currency == "USD"
 
-    @pytest.mark.asyncio
-    async def test_load_baseline_async_populates_baselines(self) -> None:
-        """_load_baseline_async queries DB and updates _baseline_equities."""
-        from finalayze.core.trading_loop import TradingLoop
+    def test_load_baseline_async_populates_baselines(self) -> None:
+        """_load_baseline_async queries DB and updates baselines dict."""
+        from finalayze.orchestration.daily_reporting import DailyReportingService
 
-        loop = MagicMock(spec=TradingLoop)
-        loop._baseline_equities = {}
+        reporter = MagicMock(spec=DailyReportingService)
 
-        # Mock DB results
-        row_us = MagicMock()
-        row_us.market_id = "us"
-        row_us.equity = Decimal(50000)
-        row_moex = MagicMock()
-        row_moex.market_id = "moex"
-        row_moex.equity = Decimal(3000000)
+        # Mock _query_snapshots_sync to return baselines directly
+        reporter._query_snapshots_sync = MagicMock(
+            return_value={"us": Decimal(50000), "moex": Decimal(3000000)}
+        )
+        reporter._persistence = MagicMock()
+        reporter._persistence._get_bg_session_factory = MagicMock()
 
-        mock_result = MagicMock()
-        mock_result.all.return_value = [row_us, row_moex]
+        result = DailyReportingService._load_baseline_async(reporter, [])
 
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_factory = MagicMock()
-        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        assert result["us"] == Decimal(50000)
+        assert result["moex"] == Decimal(3000000)
 
-        loop._get_bg_session_factory = MagicMock(return_value=mock_factory)
-        await TradingLoop._load_baseline_async(loop)
-
-        assert loop._baseline_equities["us"] == Decimal(50000)
-        assert loop._baseline_equities["moex"] == Decimal(3000000)
-
-    @pytest.mark.asyncio
-    async def test_load_baseline_async_no_rows_raises_value_error(self) -> None:
+    def test_load_baseline_async_no_rows_raises_value_error(self) -> None:
         """_load_baseline_async with no rows for today raises ValueError."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.daily_reporting import DailyReportingService
 
-        loop = MagicMock(spec=TradingLoop)
-        original = {"us": Decimal(40000)}
-        loop._baseline_equities = original.copy()
+        reporter = MagicMock(spec=DailyReportingService)
 
-        mock_result = MagicMock()
-        mock_result.all.return_value = []
+        # Mock _query_snapshots_sync to return empty dict
+        reporter._query_snapshots_sync = MagicMock(return_value={})
+        reporter._persistence = MagicMock()
+        reporter._persistence._get_bg_session_factory = MagicMock()
 
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_factory = MagicMock()
-        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        loop._get_bg_session_factory = MagicMock(return_value=mock_factory)
         with pytest.raises(ValueError, match="no snapshots for today"):
-            await TradingLoop._load_baseline_async(loop)
+            DailyReportingService._load_baseline_async(reporter, [])
 
     def test_load_baseline_from_db_called_in_start(self) -> None:
         """_load_baseline_from_db is called during start() before scheduler begins."""

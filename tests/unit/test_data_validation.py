@@ -92,42 +92,40 @@ class TestImoexVolumeColumn:
 
 
 class TestDataNormalizerWiring:
-    """Verify DataNormalizer is wired into _process_instrument."""
+    """Verify DataNormalizer is wired into process_instrument (SignalExecutor)."""
 
-    def _make_loop_and_deps(self) -> tuple:
-        """Create a minimal TradingLoop with mocked deps for _process_instrument."""
+    def _make_executor_and_deps(self) -> tuple:
+        """Create a minimal SignalExecutor with mocked deps for process_instrument."""
         import threading
 
-        from finalayze.orchestration.trading_loop import TradingLoop
+        from finalayze.orchestration.position_manager import PositionTracker
+        from finalayze.orchestration.sentiment_manager import SentimentManager
+        from finalayze.orchestration.signal_executor import SignalExecutor
 
-        loop = TradingLoop.__new__(TradingLoop)
-        # Minimal state needed by _process_instrument
-        loop._last_prices = {}
-        loop._cycle_errors_caught = 0
-        loop._cycle_signals_generated = 0
-        loop._cycle_orders_submitted = 0
-        loop._cycle_orders_filled = 0
-        loop._cycle_exited_symbols = set()
-        loop._health_monitor = None
-        loop._metrics = None
-        loop._broker_router = MagicMock()
-        loop._strategy = MagicMock()
-        loop._strategy.generate_signal.return_value = None
-        loop._validation_logger = MagicMock(spec_set=["log_cycle"])
-        loop._settings = MagicMock()
-        loop._settings.mode = "sandbox"
-        loop._stop_loss_lock = threading.Lock()
-        loop._stop_states = {}
-        loop._sentiment_cache = {}
-        loop._sentiment_lock = threading.Lock()
-        loop._cache = None
-        loop._anomaly_detector = MagicMock()
-        loop._anomaly_detector.check.return_value = None
-        loop._async_loop = None
-        loop._cycle_dropped_no_bars = 0
-        loop._cycle_dropped_below_threshold = 0
-        loop._cycle_dropped_pre_trade = 0
-        loop._cycle_instruments_processed = 0
+        executor = SignalExecutor.__new__(SignalExecutor)
+        # Minimal state needed by process_instrument
+        executor._last_prices = {}
+        executor._health_monitor = None
+        executor._metrics = None
+        executor._broker_router = MagicMock()
+        executor._strategy = MagicMock()
+        executor._strategy.generate_signal.return_value = None
+        executor._settings = MagicMock()
+        executor._settings.mode = "sandbox"
+        executor._position_tracker = MagicMock(spec=PositionTracker)
+        executor._position_tracker._stop_states = {}
+        executor._position_tracker._stop_loss_lock = threading.Lock()
+        executor._position_tracker._cycle_exited_symbols = set()
+        executor._sentiment_mgr = MagicMock(spec=SentimentManager)
+        executor._persistence = MagicMock()
+        executor._pre_trade_checker = MagicMock()
+        executor._loss_limit_tracker = MagicMock()
+        executor._macro_cache = None
+        executor._sandbox_monitor = None
+        executor._alerter = MagicMock()
+        executor._registry = MagicMock()
+        executor._ml_registry = None
+        executor._segment_min_confidence = {}
 
         instrument = MagicMock()
         instrument.symbol = "SBER"
@@ -138,82 +136,91 @@ class TestDataNormalizerWiring:
         candles = [_make_candle("SBER")]
         fetcher.fetch_candles.return_value = candles
 
-        return loop, instrument, fetcher, candles
+        return executor, instrument, fetcher, candles
 
-    @patch("finalayze.orchestration.trading_loop.DataNormalizer")
+    @patch("finalayze.data.normalizer.DataNormalizer")
     def test_normalize_batch_called_before_generate_signal(
         self, mock_normalizer_cls: MagicMock
     ) -> None:
         """normalize_batch must be called on fetched candles before generate_signal."""
-        loop, instrument, fetcher, candles = self._make_loop_and_deps()
+        executor, instrument, fetcher, candles = self._make_executor_and_deps()
 
         mock_normalizer = MagicMock()
         mock_normalizer.normalize_batch.return_value = candles
         mock_normalizer_cls.return_value = mock_normalizer
 
         now = datetime.now(UTC)
-        loop._process_instrument(instrument, "moex", MagicMock(), fetcher, now)
+        executor.process_instrument(
+            instrument, "moex", MagicMock(), fetcher, now,
+            equity=Decimal("100000"), cash=Decimal("50000"), portfolio=MagicMock(),
+        )
 
         mock_normalizer.normalize_batch.assert_called_once_with(candles)
-        loop._strategy.generate_signal.assert_called_once()
+        executor._strategy.generate_signal.assert_called_once()
 
-    @patch("finalayze.orchestration.trading_loop.DataNormalizer")
+    @patch("finalayze.data.normalizer.DataNormalizer")
     def test_empty_after_normalization_skips_generate_signal(
         self, mock_normalizer_cls: MagicMock
     ) -> None:
         """If normalize_batch filters out all candles, generate_signal must not be called."""
-        loop, instrument, fetcher, _candles = self._make_loop_and_deps()
+        executor, instrument, fetcher, _candles = self._make_executor_and_deps()
 
         mock_normalizer = MagicMock()
         mock_normalizer.normalize_batch.return_value = []  # all invalid
         mock_normalizer_cls.return_value = mock_normalizer
 
         now = datetime.now(UTC)
-        loop._process_instrument(instrument, "moex", MagicMock(), fetcher, now)
+        executor.process_instrument(
+            instrument, "moex", MagicMock(), fetcher, now,
+            equity=Decimal("100000"), cash=Decimal("50000"), portfolio=MagicMock(),
+        )
 
-        loop._strategy.generate_signal.assert_not_called()
+        executor._strategy.generate_signal.assert_not_called()
 
 
 # ── DATA-02: _is_candle_stale called in _process_instrument ──
 
 
 class TestStalenessCheck:
-    """Verify stale candle detection in _process_instrument."""
+    """Verify stale candle detection in process_instrument (SignalExecutor)."""
 
-    @patch("finalayze.orchestration.trading_loop.DataNormalizer")
-    def test_stale_candles_skip_generate_signal(self, mock_normalizer_cls: MagicMock) -> None:
-        """When latest candle is older than threshold, generate_signal must not be called."""
+    def _make_executor(self) -> object:
+        """Create a minimal SignalExecutor for staleness tests."""
         import threading
 
-        from finalayze.orchestration.trading_loop import TradingLoop
+        from finalayze.orchestration.position_manager import PositionTracker
+        from finalayze.orchestration.sentiment_manager import SentimentManager
+        from finalayze.orchestration.signal_executor import SignalExecutor
 
-        loop = TradingLoop.__new__(TradingLoop)
-        loop._last_prices = {}
-        loop._cycle_errors_caught = 0
-        loop._cycle_signals_generated = 0
-        loop._cycle_orders_submitted = 0
-        loop._cycle_orders_filled = 0
-        loop._cycle_exited_symbols = set()
-        loop._health_monitor = None
-        loop._metrics = None
-        loop._broker_router = MagicMock()
-        loop._strategy = MagicMock()
-        loop._strategy.generate_signal.return_value = None
-        loop._validation_logger = MagicMock(spec_set=["log_cycle"])
-        loop._settings = MagicMock()
-        loop._settings.mode = "sandbox"
-        loop._stop_loss_lock = threading.Lock()
-        loop._stop_states = {}
-        loop._sentiment_cache = {}
-        loop._sentiment_lock = threading.Lock()
-        loop._cache = None
-        loop._anomaly_detector = MagicMock()
-        loop._anomaly_detector.check.return_value = None
-        loop._async_loop = None
-        loop._cycle_dropped_no_bars = 0
-        loop._cycle_dropped_below_threshold = 0
-        loop._cycle_dropped_pre_trade = 0
-        loop._cycle_instruments_processed = 0
+        executor = SignalExecutor.__new__(SignalExecutor)
+        executor._last_prices = {}
+        executor._health_monitor = None
+        executor._metrics = None
+        executor._broker_router = MagicMock()
+        executor._strategy = MagicMock()
+        executor._strategy.generate_signal.return_value = None
+        executor._settings = MagicMock()
+        executor._settings.mode = "sandbox"
+        executor._position_tracker = MagicMock(spec=PositionTracker)
+        executor._position_tracker._stop_states = {}
+        executor._position_tracker._stop_loss_lock = threading.Lock()
+        executor._position_tracker._cycle_exited_symbols = set()
+        executor._sentiment_mgr = MagicMock(spec=SentimentManager)
+        executor._persistence = MagicMock()
+        executor._pre_trade_checker = MagicMock()
+        executor._loss_limit_tracker = MagicMock()
+        executor._macro_cache = None
+        executor._sandbox_monitor = None
+        executor._alerter = MagicMock()
+        executor._registry = MagicMock()
+        executor._ml_registry = None
+        executor._segment_min_confidence = {}
+        return executor
+
+    @patch("finalayze.data.normalizer.DataNormalizer")
+    def test_stale_candles_skip_generate_signal(self, mock_normalizer_cls: MagicMock) -> None:
+        """When latest candle is older than threshold, generate_signal must not be called."""
+        executor = self._make_executor()
 
         instrument = MagicMock()
         instrument.symbol = "SBER"
@@ -232,44 +239,17 @@ class TestStalenessCheck:
         mock_normalizer_cls.return_value = mock_normalizer
 
         now = datetime.now(UTC)
-        loop._process_instrument(instrument, "moex", MagicMock(), fetcher, now)
+        executor.process_instrument(
+            instrument, "moex", MagicMock(), fetcher, now,
+            equity=Decimal("100000"), cash=Decimal("50000"), portfolio=MagicMock(),
+        )
 
-        loop._strategy.generate_signal.assert_not_called()
+        executor._strategy.generate_signal.assert_not_called()
 
-    @patch("finalayze.orchestration.trading_loop.DataNormalizer")
+    @patch("finalayze.data.normalizer.DataNormalizer")
     def test_fresh_candles_proceed_to_generate_signal(self, mock_normalizer_cls: MagicMock) -> None:
         """When candles are fresh (within threshold), generate_signal must be called."""
-        import threading
-
-        from finalayze.orchestration.trading_loop import TradingLoop
-
-        loop = TradingLoop.__new__(TradingLoop)
-        loop._last_prices = {}
-        loop._cycle_errors_caught = 0
-        loop._cycle_signals_generated = 0
-        loop._cycle_orders_submitted = 0
-        loop._cycle_orders_filled = 0
-        loop._cycle_exited_symbols = set()
-        loop._health_monitor = None
-        loop._metrics = None
-        loop._broker_router = MagicMock()
-        loop._strategy = MagicMock()
-        loop._strategy.generate_signal.return_value = None
-        loop._validation_logger = MagicMock(spec_set=["log_cycle"])
-        loop._settings = MagicMock()
-        loop._settings.mode = "sandbox"
-        loop._stop_loss_lock = threading.Lock()
-        loop._stop_states = {}
-        loop._sentiment_cache = {}
-        loop._sentiment_lock = threading.Lock()
-        loop._cache = None
-        loop._anomaly_detector = MagicMock()
-        loop._anomaly_detector.check.return_value = None
-        loop._async_loop = None
-        loop._cycle_dropped_no_bars = 0
-        loop._cycle_dropped_below_threshold = 0
-        loop._cycle_dropped_pre_trade = 0
-        loop._cycle_instruments_processed = 0
+        executor = self._make_executor()
 
         instrument = MagicMock()
         instrument.symbol = "SBER"
@@ -288,6 +268,9 @@ class TestStalenessCheck:
         mock_normalizer_cls.return_value = mock_normalizer
 
         now = datetime.now(UTC)
-        loop._process_instrument(instrument, "moex", MagicMock(), fetcher, now)
+        executor.process_instrument(
+            instrument, "moex", MagicMock(), fetcher, now,
+            equity=Decimal("100000"), cash=Decimal("50000"), portfolio=MagicMock(),
+        )
 
-        loop._strategy.generate_signal.assert_called_once()
+        executor._strategy.generate_signal.assert_called_once()

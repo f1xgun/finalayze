@@ -99,12 +99,15 @@ class TestSentimentLockScope:
 
         mapper = SectorTickerMapper()
         loop = _make_trading_loop(cache=mock_cache, sector_ticker_mapper=mapper)
+        # Ensure news pipeline also has the cache for Redis writes
+        loop._news_pipeline._cache = mock_cache
 
         # Set up instruments for segment
         instr = MagicMock()
         instr.symbol = "SBER"
         instr.segment_id = "ru_blue_chips"
         loop._fetchers = {"moex": MagicMock()}
+        loop._sentiment_mgr._market_ids = ["moex"]
         loop._registry.list_by_market.return_value = [instr]
 
         result = NewsImpactResult(
@@ -120,7 +123,7 @@ class TestSentimentLockScope:
         import asyncio as _aio
 
         # Mock DB persistence to avoid real PostgreSQL connection
-        loop._persist_sentiment_scores_async = AsyncMock()
+        loop._news_pipeline._persist_sentiment_scores_async = AsyncMock()
 
         _aio.run(loop._apply_impact_result(result))
 
