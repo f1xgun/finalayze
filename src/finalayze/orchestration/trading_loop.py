@@ -40,7 +40,9 @@ from finalayze.data.normalizer import DataNormalizer
 from finalayze.markets.currency import CurrencyConverter
 from finalayze.markets.schedule import SCHEDULES
 from finalayze.orchestration.db_persistence import TradingPersistence
+from finalayze.orchestration.daily_reporting import DailyReportingService
 from finalayze.orchestration.ml_retraining import MLRetrainingService
+from finalayze.orchestration.sentiment_manager import SentimentManager
 
 if TYPE_CHECKING:
     from config.settings import Settings
@@ -180,14 +182,13 @@ class TradingLoop:
 
         self._fx = CurrencyConverter(base_currency="USD")
 
-        # Per-ticker sentiment: (segment_id, ticker) -> (score, monotonic_timestamp)
-        self._sentiment_cache: dict[tuple[str, str], tuple[float, float]] = {}
-        self._sentiment_lock = threading.Lock()
+        # Sentiment management (thread-safe via SentimentManager)
+        self._sentiment_mgr = SentimentManager(
+            registry=instrument_registry,
+            market_ids=list(fetchers.keys()),
+            cache=cache,
+        )
 
-        # Cached check: any segment has event_driven strategy enabled?
-        self._event_driven_active: bool | None = None
-
-        # Article dedup: SHA-256(url|title) -> monotonic timestamp (OPS-03)
         self._seen_article_hashes: OrderedDict[str, float] = OrderedDict()
 
         # Daily baseline equities: market_id -> equity at start of trading day
@@ -234,7 +235,7 @@ class TradingLoop:
             ml_registry=ml_registry,
             settings=settings,
             alerter=alerter,
-            collect_segments_fn=self._collect_active_segments,
+            collect_segments_fn=self._sentiment_mgr.collect_active_segments,
             now_fn=self._now,
         )
         self._scheduler: BackgroundScheduler | None = None
@@ -255,6 +256,21 @@ class TradingLoop:
         # Initialize with settings.database_url if available
         db_url = getattr(settings, "database_url", None)
         self._persistence = TradingPersistence(db_url, self._async_loop, settings)
+
+        # Daily reporting service (extracted Phase 1.4)
+        self._daily_reporter = DailyReportingService(
+            broker_router=broker_router,
+            circuit_breakers=circuit_breakers,
+            cross_market_breaker=cross_market_breaker,
+            loss_limit_tracker=self._loss_limit_tracker,
+            alerter=alerter,
+            persistence=self._persistence,
+            bond_processor=bond_cycle_processor,
+            fx_service=fx_service,
+            metrics_collector=metrics_collector,
+            settings=settings,
+            now_fn=self._now,
+        )
 
         # Dedicated gRPC event loop -- isolates PollerCompletionQueue from general
         # async work. Prevents BlockingIOError contention causing 60-min cycle drift.
@@ -900,7 +916,7 @@ class TradingLoop:
 
     def _news_cycle(self) -> None:
         """Fetch news from RSS, Telegram, and legacy NewsAPI; analyze and update sentiment."""
-        if not self._any_event_driven_enabled():
+        if not self._sentiment_mgr.is_event_driven_active():
             _log.debug("news_cycle_skipped_no_event_driven")
             return
 
@@ -1078,7 +1094,7 @@ class TradingLoop:
         _async_loop.  Using sync _run_async / _persist_to_db from within
         _async_loop would deadlock (submit + block on the same loop).
         """
-        active_segments = self._collect_active_segments()
+        active_segments = self._sentiment_mgr.collect_active_segments()
         mapper = self._sector_ticker_mapper
         if mapper is None:
             return
@@ -1101,16 +1117,16 @@ class TradingLoop:
 
         # Update cache for all active segments containing these tickers
         redis_updates: list[tuple[str, str, float]] = []
-        with self._sentiment_lock:
-            for seg_id in active_segments:
-                seg_tickers = self._get_segment_tickers(seg_id)
-                for ticker in seg_tickers:
-                    if ticker in ticker_scores:
-                        cache_key = (seg_id, ticker)
-                        existing = self._read_decayed_sentiment(seg_id, ticker)
-                        new_score = existing * 0.7 + ticker_scores[ticker] * 0.3
-                        self._sentiment_cache[cache_key] = (new_score, time.monotonic())
-                        redis_updates.append((seg_id, ticker, new_score))
+        for seg_id in active_segments:
+            seg_tickers = self._sentiment_mgr.get_segment_tickers(seg_id)
+            for ticker in seg_tickers:
+                if ticker in ticker_scores:
+                    # Read existing decayed sentiment (with lock held internally)
+                    existing = self._sentiment_mgr.read_decayed_sentiment(seg_id, ticker)
+                    new_score = existing * 0.7 + ticker_scores[ticker] * 0.3
+                    # Update cache (with lock held internally)
+                    self._sentiment_mgr.update_sentiment(seg_id, ticker, new_score)
+                    redis_updates.append((seg_id, ticker, new_score))
 
         # Fire-and-forget sentiment persistence (PERSIST-04) — async path
         await self._persist_sentiment_scores_async(
@@ -1160,103 +1176,6 @@ class TradingLoop:
         has_non_ru = any(not s.startswith("ru_") for s in active_segments)
         market_id = "us" if has_non_ru else "moex"
         await self._persistence.persist_sentiment_batch_async(ticker_scores, market_id, confidence)
-
-    def _get_segment_tickers(self, seg_id: str) -> list[str]:
-        """Get ticker symbols for instruments in this segment."""
-        return [
-            instr.symbol
-            for market_id in self._fetchers
-            for instr in self._registry.list_by_market(market_id)
-            if hasattr(instr, "segment_id") and instr.segment_id == seg_id
-        ]
-
-    def _collect_active_segments(self) -> list[str]:
-        """Collect distinct segment IDs across all markets."""
-        return list(
-            {
-                seg
-                for market_id in self._fetchers
-                for instr in self._registry.list_by_market(market_id)
-                if hasattr(instr, "segment_id") and instr.segment_id
-                for seg in [instr.segment_id]
-            }
-        )
-
-    def _read_decayed_sentiment(self, seg_id: str, ticker: str | None = None) -> float:
-        """Read sentiment with exponential time-decay applied.
-
-        If ticker is provided, reads per-ticker score.
-        Falls back to segment average if no per-ticker entry.
-        Must be called while holding _sentiment_lock.
-        """
-        if ticker is not None:
-            entry = self._sentiment_cache.get((seg_id, ticker))
-            if entry is not None:
-                score, ts = entry
-                hours_elapsed = (time.monotonic() - ts) / 3600.0
-                return score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed)
-            # Fallback: average of all per-ticker scores for this segment
-            seg_scores = []
-            for (s, _t), (score, ts) in self._sentiment_cache.items():
-                if s == seg_id:
-                    hours_elapsed = (time.monotonic() - ts) / 3600.0
-                    seg_scores.append(score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed))
-            if seg_scores:
-                return sum(seg_scores) / len(seg_scores)
-            return _DEFAULT_SENTIMENT
-        # Legacy: no ticker -- average all scores for segment
-        seg_scores = []
-        for (s, _t), (score, ts) in self._sentiment_cache.items():
-            if s == seg_id:
-                hours_elapsed = (time.monotonic() - ts) / 3600.0
-                seg_scores.append(score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed))
-        if seg_scores:
-            return sum(seg_scores) / len(seg_scores)
-        return _DEFAULT_SENTIMENT
-
-    def _get_sentiment(self, seg_id: str, ticker: str | None = None) -> float:
-        """Read sentiment from Redis cache (if available) or in-memory fallback."""
-        if self._cache is not None:
-            cache_key = f"{seg_id}:{ticker}" if ticker else seg_id
-            try:
-                cached: float | None = self._run_async(self._cache.get_sentiment(cache_key))
-                if cached is not None:
-                    return cached
-            except Exception:
-                _log.debug("Failed to read sentiment from Redis cache")
-        with self._sentiment_lock:
-            return self._read_decayed_sentiment(seg_id, ticker)
-
-    def _any_event_driven_enabled(self) -> bool:
-        """Check if any segment preset has event_driven strategy enabled.
-
-        Caches result in self._event_driven_active to avoid re-reading
-        YAML files on every news cycle.
-        """
-        if self._event_driven_active is not None:
-            return self._event_driven_active
-
-        import yaml  # noqa: PLC0415
-
-        presets_dir = Path(__file__).parent.parent / "strategies" / "presets"
-        result = False
-        try:
-            for path in presets_dir.glob("*.yaml"):
-                try:
-                    with path.open() as f:
-                        config = yaml.safe_load(f)
-                    if isinstance(config, dict) and config.get("strategies", {}).get(
-                        "event_driven", {}
-                    ).get("enabled", False):
-                        result = True
-                        break
-                except (OSError, yaml.YAMLError):
-                    _log.warning("preset_read_failed", path=str(path))
-        except OSError:
-            _log.warning("presets_dir_not_found", path=str(presets_dir))
-
-        self._event_driven_active = result
-        return result
 
     def _now(self) -> datetime:
         """Return current UTC datetime. Extracted for testability."""
@@ -1640,7 +1559,7 @@ class TradingLoop:
             _log.debug("skip_reentry_guard", symbol=instrument.symbol)
             return
 
-        sentiment_score = self._get_sentiment(seg_id, instrument.symbol)
+        sentiment_score = self._sentiment_mgr.get_sentiment(seg_id, instrument.symbol)
 
         broker = self._broker_router.route(market_id)
         has_open_position = broker.has_position(instrument.symbol)
@@ -2423,89 +2342,16 @@ class TradingLoop:
 
         Runs even after restart because it reads from persisted snapshots.
         """
-        from finalayze.api.alerts import AlertPriority  # noqa: PLC0415
-
-        now = self._now()
-        week_start = now - timedelta(days=7)
-
-        # Compute week P&L from current baselines (DB query deferred)
-        week_pnl: dict[str, Decimal] = {}
-        total_equity = _ZERO
-        for market_id in self._circuit_breakers:
-            try:
-                broker = self._broker_router.route(market_id)
-                portfolio = broker.get_portfolio()
-                equity = portfolio.equity
-                baseline = self._baseline_equities.get(market_id, equity)
-                week_pnl[market_id] = equity - baseline
-                total_equity += equity
-            except Exception:
-                _log.debug("_weekly_digest: failed for %s", market_id)
-
-        # Bond layer P&L
-        if self._bond_processor is not None:
-            try:
-                bond_equity_w: Decimal = sum(
-                    (
-                        ledger.current_equity
-                        for ledger in self._bond_processor._layer_ledgers.values()
-                    ),
-                    _ZERO,
-                )
-                bond_baseline = self._baseline_equities.get("moex_bonds", bond_equity_w)
-                week_pnl["moex_bonds"] = bond_equity_w - bond_baseline
-                total_equity += bond_equity_w
-            except Exception:
-                _log.debug("_weekly_digest: bond P&L failed")
-
-        # Format message
-        lines: list[str] = ["\U0001f4ca <b>Weekly Digest</b>\n"]
-        ws = week_start.strftime("%Y-%m-%d")
-        ne = now.strftime("%Y-%m-%d")
-        lines.append(f"Period: {ws} \u2014 {ne}\n")
-
-        total_week_pnl = sum(week_pnl.values(), _ZERO)
-        sign = "+" if total_week_pnl >= _ZERO else ""
-        lines.append(f"<b>Week P&L:</b> <code>{sign}{total_week_pnl:,.2f}</code>")
-
-        for market_id, pnl in sorted(week_pnl.items()):
-            ms = "+" if pnl >= _ZERO else ""
-            label = market_id.upper().replace("MOEX_BONDS", "BONDS")
-            lines.append(f"  {label}: <code>{ms}{pnl:,.2f}</code>")
-
-        lines.append(f"\n<b>Total Equity:</b> <code>{total_equity:,.2f}</code>")
-
-        # Top movers
-        top_movers = self._compute_top_movers()
-        if top_movers:
-            movers_str = ", ".join(f"<b>{sym}</b> {pct:+.1f}%" for sym, pct in top_movers[:3])
-            lines.append(f"\n<b>Top Movers:</b> {movers_str}")
-
-        self._alerter.send_alert(
-            "\n".join(lines),
-            priority=AlertPriority.INFO,
-        )
-        _log.info("weekly_digest_sent", total_pnl=str(total_week_pnl))
+        """Delegates to DailyReportingService.weekly_digest().
+        """
+        self._daily_reporter.weekly_digest(self._baseline_equities)
 
     def _liquidate_market(self, market_id: str) -> None:
-        """Close all open positions in a market (L3 circuit breaker response)."""
-        try:
-            broker = self._broker_router.route(market_id)
-            positions = broker.get_positions()
-            portfolio = broker.get_portfolio()
-            equity = portfolio.equity
+        """Close all open positions in a market (L3 circuit breaker response).
 
-            # #174: Correct drawdown = (baseline - current) / baseline
-            baseline = self._baseline_equities.get(market_id, equity)
-            drawdown = float((baseline - equity) / baseline if baseline > _ZERO else _ZERO)
-
-            # #129: No look-ahead bias — submit market orders without fill_candle
-            self._close_positions(broker, positions)
-
-            self._alerter.on_circuit_breaker_trip(market_id, self._CircuitLevel.LIQUIDATE, drawdown)
-        except Exception:
-            _log.exception("_liquidate_market: failed for market %s", market_id)
-            self._alerter.on_error("TradingLoop", f"liquidation failed for {market_id}")
+        Delegates to DailyReportingService.liquidate_market().
+        """
+        self._daily_reporter.liquidate_market(market_id, self._baseline_equities)
 
     def _close_positions(self, broker: BrokerBase, positions: dict[str, Decimal]) -> None:
         """Submit SELL orders for all non-zero positions.
