@@ -658,7 +658,7 @@ class TestEntryStrategy:
     def test_entry_strategy_initialized_empty(self) -> None:
         """_entry_strategy is an empty dict on TradingLoop construction."""
         loop = _make_loop_with_broker()
-        assert loop._entry_strategy == {}  # type: ignore[attr-defined]
+        assert loop.get_entry_strategies() == {}
 
     def test_entry_strategy_set_on_buy_fill(self) -> None:
         """After a BUY order fills, _entry_strategy[symbol] == strategy_name passed in."""
@@ -682,7 +682,7 @@ class TestEntryStrategy:
 
         loop._submit_order(order, "moex", strategy_name="dual_momentum")  # type: ignore[attr-defined]
 
-        assert loop._entry_strategy.get("SBER") == "dual_momentum"  # type: ignore[attr-defined]
+        assert loop.get_entry_strategies().get("SBER") == "dual_momentum"
 
     def test_entry_strategy_cleared_on_sell_fill(self) -> None:
         """After a SELL order fills, symbol is no longer in _entry_strategy."""
@@ -691,8 +691,9 @@ class TestEntryStrategy:
         from finalayze.execution.broker_base import OrderRequest, OrderResult
 
         loop = _make_loop_with_broker()
-        loop._entry_strategy["SBER"] = "dual_momentum"  # type: ignore[attr-defined]
-        loop._entry_prices["SBER"] = Decimal("100")  # type: ignore[attr-defined]
+        # Use position tracker's register_entry instead of direct access
+        loop._position_tracker._entry_strategy["SBER"] = "dual_momentum"
+        loop._position_tracker._entry_prices["SBER"] = Decimal("100")
         loop._persist_to_db = MagicMock()  # type: ignore[attr-defined]
 
         sell_result = OrderResult(
@@ -707,11 +708,13 @@ class TestEntryStrategy:
         order = OrderRequest(symbol="SBER", side="SELL", quantity=Decimal("1"))
         loop._submit_order(order, "moex")  # type: ignore[attr-defined]
 
-        assert "SBER" not in loop._entry_strategy  # type: ignore[attr-defined]
+        assert "SBER" not in loop.get_entry_strategies()
 
     def test_entry_strategy_cleared_on_stop_loss(self) -> None:
         """After stop-loss triggers, symbol is no longer in _entry_strategy."""
         from decimal import Decimal
+
+        from finalayze.execution.simulated_broker import StopLossState
 
         loop = _make_loop_with_broker()
 
@@ -719,11 +722,8 @@ class TestEntryStrategy:
         stop_price = Decimal("95")
         current_price = Decimal("90")  # Below stop
 
-        loop._entry_strategy["SBER"] = "dual_momentum"  # type: ignore[attr-defined]
-        loop._entry_prices["SBER"] = entry_price  # type: ignore[attr-defined]
-
         # Set up stop state
-        stop_state = loop._StopLossState(  # type: ignore[attr-defined]
+        stop_state = StopLossState(
             initial_stop=stop_price,
             current_stop=stop_price,
             highest_price=entry_price,
@@ -733,17 +733,16 @@ class TestEntryStrategy:
             entry_price=entry_price,
             atr_value=Decimal("5"),
         )
-        with loop._stop_loss_lock:  # type: ignore[attr-defined]
-            loop._stop_states["SBER"] = stop_state  # type: ignore[attr-defined]
+        loop._position_tracker.register_entry("SBER", entry_price, "dual_momentum", stop_state)
 
         # Mock broker to return a position
         broker_mock = MagicMock()
         broker_mock.get_positions.return_value = {"SBER": Decimal("1")}
         loop._broker_router.route.return_value = broker_mock  # type: ignore[attr-defined]
 
-        loop._check_stop_losses("moex", "SBER", current_price)  # type: ignore[attr-defined]
+        loop._position_tracker.check_stop_losses("moex", "SBER", current_price)
 
-        assert "SBER" not in loop._entry_strategy  # type: ignore[attr-defined]
+        assert "SBER" not in loop.get_entry_strategies()
 
     def test_entry_strategy_not_set_on_rejected_order(self) -> None:
         """If BUY order is rejected (filled=False), _entry_strategy is unchanged."""
@@ -766,16 +765,16 @@ class TestEntryStrategy:
         order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal("1"))
         loop._submit_order(order, "moex", strategy_name="dual_momentum")  # type: ignore[attr-defined]
 
-        assert "SBER" not in loop._entry_strategy  # type: ignore[attr-defined]
+        assert "SBER" not in loop.get_entry_strategies()
 
     def test_entry_strategy_getter_returns_copy(self) -> None:
         """get_entry_strategies() returns a copy, not a reference to the internal dict."""
         loop = _make_loop_with_broker()
-        loop._entry_strategy["SBER"] = "dual_momentum"  # type: ignore[attr-defined]
+        loop._position_tracker._entry_strategy["SBER"] = "dual_momentum"
 
-        result = loop.get_entry_strategies()  # type: ignore[attr-defined]
+        result = loop.get_entry_strategies()
 
         assert result == {"SBER": "dual_momentum"}
         # Mutating the returned dict does not affect internal state
         result["SBER"] = "mutated"
-        assert loop._entry_strategy["SBER"] == "dual_momentum"  # type: ignore[attr-defined]
+        assert loop.get_entry_strategies()["SBER"] == "dual_momentum"

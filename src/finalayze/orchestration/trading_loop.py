@@ -40,6 +40,7 @@ from finalayze.orchestration.daily_reporting import DailyReportingService
 from finalayze.orchestration.db_persistence import TradingPersistence
 from finalayze.orchestration.ml_retraining import MLRetrainingService
 from finalayze.orchestration.news_pipeline import NewsPipeline
+from finalayze.orchestration.position_manager import PositionTracker
 from finalayze.orchestration.sentiment_manager import SentimentManager
 
 if TYPE_CHECKING:
@@ -137,7 +138,6 @@ class TradingLoop:
         kill_switch: object | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
-        from finalayze.execution.simulated_broker import StopLossState  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
         from finalayze.risk.kelly import RollingKelly  # noqa: PLC0415
         from finalayze.risk.loss_limits import LossLimitTracker  # noqa: PLC0415
@@ -146,7 +146,6 @@ class TradingLoop:
         # Store class references for runtime use without module-level imports
         self._OrderRequest = OrderRequest
         self._CircuitLevel = CircuitLevel
-        self._StopLossState = StopLossState
 
         self._settings = settings
         self._fetchers = fetchers
@@ -186,13 +185,7 @@ class TradingLoop:
         # Daily baseline equities: market_id -> equity at start of trading day
         self._baseline_equities: dict[str, Decimal] = {}
 
-        # Stop-loss tracking: symbol -> StopLossState (trailing, thread-safe via lock)
-        self._stop_states: dict[str, StopLossState] = {}
-        self._stop_loss_lock = threading.Lock()
-
-        # Per-cycle re-entry guard: symbols stopped out this cycle skip signal gen
-        self._cycle_exited_symbols: set[str] = set()
-
+        # Position tracking extracted to PositionTracker (Phase 1.6)
         # Risk management components
         # 6A.7: Wire PDTTracker into PreTradeChecker
         self._pdt_tracker = PDTTracker()
@@ -211,14 +204,12 @@ class TradingLoop:
             fraction=getattr(settings, "kelly_fraction", 0.5),
         )
 
-        # Entry price tracking for Kelly P&L computation
-        self._entry_prices: dict[str, Decimal] = {}
-
-        # Position ownership tracking: symbol -> strategy_name that opened the position
-        # Set on BUY fill, cleared on SELL fill and stop-loss trigger.
-        # Used by PresetApplicator (Plan 38-01) to check for open positions before
-        # disabling a strategy via auto-apply.
-        self._entry_strategy: dict[str, str] = {}
+        # Position tracker (Phase 1.6): stop-loss, entry prices, strategy ownership
+        self._position_tracker = PositionTracker(
+            kelly_sizer=self._kelly_sizer,
+            broker_router=broker_router,
+            alerter=alerter,
+        )
 
         self._ml_registry = ml_registry
         self._ml_retrainer = MLRetrainingService(
@@ -321,7 +312,7 @@ class TradingLoop:
         self._cycle_orders_submitted = 0
         self._cycle_orders_filled = 0
         self._cycle_errors_caught = 0
-        self._cycle_exited_symbols = set()
+        self._position_tracker.reset_cycle_exits()
         self._cycle_dropped_no_bars = 0
         self._cycle_dropped_below_threshold = 0
         self._cycle_dropped_pre_trade = 0
@@ -1297,10 +1288,10 @@ class TradingLoop:
         # #157/#182: Check stop-losses against latest candle price
         if candles:
             current_price = candles[-1].close
-            self._check_stop_losses(market_id, instrument.symbol, current_price)
+            self._position_tracker.check_stop_losses(market_id, instrument.symbol, current_price)
 
         # PARITY-04: Skip signal generation for symbols stopped out this cycle
-        if instrument.symbol in self._cycle_exited_symbols:
+        if instrument.symbol in self._position_tracker.exited_symbols:
             _log.debug("skip_reentry_guard", symbol=instrument.symbol)
             return
 
@@ -1433,9 +1424,7 @@ class TradingLoop:
 
         # PARITY-03: Gather all pre-trade check parameters
         # Check 9: stop_loss_price from trailing stop state (Plan 01)
-        with self._stop_loss_lock:
-            _stop_st = self._stop_states.get(instrument.symbol)
-            stop_loss_price = _stop_st.current_stop if _stop_st is not None else None
+        stop_loss_price = self._position_tracker.get_stop_loss_price(instrument.symbol)
 
         # Check 10: has_pending_order via broker
         has_pending = self._has_pending_order(instrument.symbol, market_id)
@@ -1461,7 +1450,7 @@ class TradingLoop:
             if market_id in self._circuit_breakers
             else None,
             stop_loss_price=stop_loss_price,
-            require_stop_loss=(instrument.symbol in self._stop_states),
+            require_stop_loss=self._position_tracker.has_stop(instrument.symbol),
             has_pending_order=has_pending,
             symbol=instrument.symbol,
             cross_market_exposure_pct=cross_exposure,
@@ -1718,7 +1707,7 @@ class TradingLoop:
         Used by PresetApplicator to check position ownership before disabling a
         strategy via auto-apply.  Returns a copy so callers cannot mutate internal state.
         """
-        return dict(self._entry_strategy)
+        return self._position_tracker.get_entry_strategies()
 
     def _submit_order(
         self,
@@ -1772,19 +1761,22 @@ class TradingLoop:
                     )
                 # Track position ownership for PresetApplicator (APPLY-03)
                 if order.side == "BUY":
-                    self._entry_strategy[order.symbol] = strategy_name
-                # Wire stop-loss on BUY fill + track entry price for Kelly
-                if order.side == "BUY" and candles and result.fill_price is not None:
-                    self._entry_prices[order.symbol] = result.fill_price
-                    multiplier = _ATR_MULTIPLIER_MOEX if market_id == "moex" else _ATR_MULTIPLIER_US
-                    stop = compute_atr_stop_loss(
-                        result.fill_price, candles, atr_multiplier=multiplier
-                    )
-                    if stop is not None and multiplier > _ZERO:
-                        # Derive ATR: stop = entry - mult * atr => atr = (entry - stop) / mult
-                        atr_val = (result.fill_price - stop) / multiplier
-                        with self._stop_loss_lock:
-                            self._stop_states[order.symbol] = self._StopLossState(
+                    self._position_tracker._entry_strategy[order.symbol] = strategy_name
+                    # Wire stop-loss on BUY fill + track entry price for Kelly
+                    if candles and result.fill_price is not None:
+                        from finalayze.execution.simulated_broker import (  # noqa: PLC0415
+                            StopLossState,
+                        )
+
+                        is_moex = market_id == "moex"
+                        multiplier = _ATR_MULTIPLIER_MOEX if is_moex else _ATR_MULTIPLIER_US
+                        stop = compute_atr_stop_loss(
+                            result.fill_price, candles, atr_multiplier=multiplier
+                        )
+                        if stop is not None and multiplier > _ZERO:
+                            # Derive ATR: stop = entry - mult * atr => atr = (entry - stop) / mult
+                            atr_val = (result.fill_price - stop) / multiplier
+                            stop_state = StopLossState(
                                 initial_stop=stop,
                                 current_stop=stop,
                                 highest_price=result.fill_price,
@@ -1794,13 +1786,17 @@ class TradingLoop:
                                 entry_price=result.fill_price,
                                 atr_value=atr_val,
                             )
+                            self._position_tracker.register_entry(
+                                order.symbol, result.fill_price, strategy_name, stop_state
+                            )
+                        else:
+                            # If stop-loss computation failed, still track entry price
+                            self._position_tracker._entry_prices[order.symbol] = result.fill_price
                 # Update Kelly on SELL fill + clear stop-loss
                 elif order.side == "SELL":
                     if result.fill_price is not None:
-                        self._update_kelly(order.symbol, result.fill_price)
-                    with self._stop_loss_lock:
-                        self._stop_states.pop(order.symbol, None)
-                    self._entry_strategy.pop(order.symbol, None)
+                        self._position_tracker._update_kelly(order.symbol, result.fill_price)
+                    self._position_tracker.register_exit(order.symbol)
             else:
                 _log.warning(
                     "order_rejected",
@@ -1817,83 +1813,6 @@ class TradingLoop:
         except Exception:
             _log.exception("_strategy_cycle: order submission failed for %s", order.symbol)
             self._cycle_errors_caught += 1
-
-    def _check_stop_losses(
-        self,
-        market_id: str,
-        symbol: str,
-        current_price: Decimal,
-    ) -> None:
-        """Check trailing stop-loss state and trigger SELL if breached.
-
-        Implements the same 5-step trailing logic as SimulatedBroker:
-        1. Update high-water mark
-        2. Check activation threshold
-        3. Ratchet trail stop upward (never down)
-        4. Check trigger condition
-        5. Submit SELL and record in _cycle_exited_symbols (PARITY-04)
-
-        The entire check-sell-remove is atomic under _stop_loss_lock to prevent
-        double-sell from concurrent threads (CONC-01).
-        """
-        with self._stop_loss_lock:
-            state = self._stop_states.get(symbol)
-            if state is None:
-                return
-
-            # Step 1: Update high-water mark
-            state.highest_price = max(state.highest_price, current_price)
-
-            # Step 2: Check activation
-            if not state.trail_activated:
-                activation_threshold = state.entry_price + state.activation_atr * state.atr_value
-                if state.highest_price >= activation_threshold:
-                    state.trail_activated = True
-
-            # Step 3: Ratchet trail stop (only moves up)
-            if state.trail_activated:
-                trail_stop = state.highest_price - state.trail_atr * state.atr_value
-                state.current_stop = max(state.current_stop, trail_stop)
-
-            # Step 4: Trigger check
-            if current_price > state.current_stop:
-                return
-
-            # Step 5: Stop triggered
-            _log.warning(
-                "stop_triggered",
-                symbol=symbol,
-                price=float(current_price),
-                stop=float(state.current_stop),
-                trailing=state.trail_activated,
-            )
-            broker = self._broker_router.route(market_id)
-            positions = broker.get_positions()
-            qty = positions.get(symbol, _ZERO)
-            if qty > _ZERO:
-                order = self._OrderRequest(symbol=symbol, side="SELL", quantity=qty)
-                try:
-                    broker.submit_order(order)
-                except Exception:
-                    _log.exception("_check_stop_losses: failed to submit stop-loss for %s", symbol)
-                    return  # Don't clear stop state -- retry next cycle
-                # Update Kelly with stop-loss exit
-                self._update_kelly(symbol, current_price)
-            # Clear stop state after successful trigger (or zero position)
-            del self._stop_states[symbol]
-            self._entry_strategy.pop(symbol, None)
-            self._cycle_exited_symbols.add(symbol)  # PARITY-04
-
-    def _update_kelly(self, symbol: str, fill_price: Decimal) -> None:
-        """Compute P&L from entry price and feed a TradeRecord to RollingKelly."""
-        from finalayze.risk.kelly import TradeRecord  # noqa: PLC0415
-
-        entry = self._entry_prices.pop(symbol, None)
-        if entry is None or entry <= _ZERO:
-            return
-        pnl = fill_price - entry
-        pnl_pct = pnl / entry
-        self._kelly_sizer.update(TradeRecord(pnl=pnl, pnl_pct=pnl_pct))
 
     def _daily_reset(self) -> None:
         """Reset circuit breakers and send daily P&L summary.
