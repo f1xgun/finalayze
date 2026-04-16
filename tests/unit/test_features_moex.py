@@ -16,17 +16,19 @@ from finalayze.core.schemas import (
     MoexMarketData,
     TurnoverRecord,
 )
-from finalayze.ml.features.technical import (
-    _EXTERNAL_DATA_LAG_BARS,
-    _compute_brent_return_features,
-    _compute_cbr_features,
-    _compute_commodity_features,
-    _compute_fx_features,
-    _compute_fx_return_features,
-    _compute_macro_features,
-    _compute_turnover_features,
-    compute_features,
+from finalayze.ml.features.macro import (
+    EXTERNAL_DATA_LAG_BARS as _EXTERNAL_DATA_LAG_BARS,
+    compute_cbr_features as _compute_cbr_features,
+    compute_macro_features as _compute_macro_features,
 )
+from finalayze.ml.features.moex_external import (
+    compute_brent_return_features as _compute_brent_return_features,
+    compute_commodity_features as _compute_commodity_features,
+    compute_fx_features as _compute_fx_features,
+    compute_fx_return_features as _compute_fx_return_features,
+    compute_turnover_features as _compute_turnover_features,
+)
+from finalayze.ml.features.technical import compute_features
 
 
 def _make_candles(n: int = 100, symbol: str = "SBER") -> list[Candle]:

@@ -15,7 +15,11 @@ from finalayze.core.exceptions import InsufficientDataError
 from finalayze.core.schemas import MarketContext
 from finalayze.ml.features.calendar import compute_calendar_features
 from finalayze.ml.features.cross_asset import compute_cross_asset_features
-from finalayze.ml.features.macro import compute_cbr_features, compute_macro_features
+from finalayze.ml.features.macro import (
+    EXTERNAL_DATA_LAG_BARS as _EXTERNAL_DATA_LAG_BARS,  # noqa: F401  # re-export
+    compute_cbr_features,
+    compute_macro_features,
+)
 from finalayze.ml.features.microstructure import (
     compute_microstructure_features,
     garman_klass_vol,
