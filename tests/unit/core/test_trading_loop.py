@@ -76,7 +76,7 @@ class TestNewsCycleSkipGuard:
         # Force is_event_driven_active to return False
         loop._sentiment_mgr.is_event_driven_active = MagicMock(return_value=False)  # type: ignore[attr-defined]
 
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
 
         # RSS fetcher should NOT have been called
         rss.fetch_news.assert_not_called()
@@ -90,7 +90,7 @@ class TestNewsCycleSkipGuard:
         # Force is_event_driven_active to return True
         loop._sentiment_mgr.is_event_driven_active = MagicMock(return_value=True)  # type: ignore[attr-defined]
 
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
 
         # RSS fetcher SHOULD have been called
         rss.fetch_news.assert_called_once()
@@ -267,8 +267,8 @@ class TestArticleDedup:
         loop = _make_loop()
         article = _make_article()
 
-        first = loop._is_article_duplicate(article)  # type: ignore[attr-defined]
-        second = loop._is_article_duplicate(article)  # type: ignore[attr-defined]
+        first = loop._news_pipeline._is_article_duplicate(article)  # type: ignore[attr-defined]
+        second = loop._news_pipeline._is_article_duplicate(article)  # type: ignore[attr-defined]
 
         assert first is False
         assert second is True
@@ -279,16 +279,16 @@ class TestArticleDedup:
         article = _make_article()
 
         # First call: mark as seen
-        assert loop._is_article_duplicate(article) is False  # type: ignore[attr-defined]
+        assert loop._news_pipeline._is_article_duplicate(article) is False  # type: ignore[attr-defined]
 
         # Manually backdate the stored timestamp beyond TTL (24h)
-        key = next(iter(loop._seen_article_hashes.keys()))  # type: ignore[attr-defined]
-        loop._seen_article_hashes[key] = time.monotonic() - 25 * 3600  # type: ignore[attr-defined]
+        key = next(iter(loop._news_pipeline._seen_article_hashes.keys()))  # type: ignore[attr-defined]
+        loop._news_pipeline._seen_article_hashes[key] = time.monotonic() - 25 * 3600  # type: ignore[attr-defined]
         # Move to front so eviction can find it
-        loop._seen_article_hashes.move_to_end(key, last=False)  # type: ignore[attr-defined]
+        loop._news_pipeline._seen_article_hashes.move_to_end(key, last=False)  # type: ignore[attr-defined]
 
         # Should NOT be duplicate anymore (TTL expired, entry evicted)
-        assert loop._is_article_duplicate(article) is False  # type: ignore[attr-defined]
+        assert loop._news_pipeline._is_article_duplicate(article) is False  # type: ignore[attr-defined]
 
     def test_article_dedup_different_articles_pass(self) -> None:
         """Two articles with different URLs are both not duplicates."""
@@ -296,8 +296,8 @@ class TestArticleDedup:
         a1 = _make_article(url="https://example.com/1")
         a2 = _make_article(url="https://example.com/2")
 
-        assert loop._is_article_duplicate(a1) is False  # type: ignore[attr-defined]
-        assert loop._is_article_duplicate(a2) is False  # type: ignore[attr-defined]
+        assert loop._news_pipeline._is_article_duplicate(a1) is False  # type: ignore[attr-defined]
+        assert loop._news_pipeline._is_article_duplicate(a2) is False  # type: ignore[attr-defined]
 
 
 class TestMarketHoursGate:
