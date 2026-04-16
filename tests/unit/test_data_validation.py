@@ -121,6 +121,13 @@ class TestDataNormalizerWiring:
         loop._sentiment_cache = {}
         loop._sentiment_lock = threading.Lock()
         loop._cache = None
+        loop._anomaly_detector = MagicMock()
+        loop._anomaly_detector.check.return_value = None
+        loop._async_loop = None
+        loop._cycle_dropped_no_bars = 0
+        loop._cycle_dropped_below_threshold = 0
+        loop._cycle_dropped_pre_trade = 0
+        loop._cycle_instruments_processed = 0
 
         instrument = MagicMock()
         instrument.symbol = "SBER"
@@ -200,6 +207,13 @@ class TestStalenessCheck:
         loop._sentiment_cache = {}
         loop._sentiment_lock = threading.Lock()
         loop._cache = None
+        loop._anomaly_detector = MagicMock()
+        loop._anomaly_detector.check.return_value = None
+        loop._async_loop = None
+        loop._cycle_dropped_no_bars = 0
+        loop._cycle_dropped_below_threshold = 0
+        loop._cycle_dropped_pre_trade = 0
+        loop._cycle_instruments_processed = 0
 
         instrument = MagicMock()
         instrument.symbol = "SBER"
@@ -249,6 +263,13 @@ class TestStalenessCheck:
         loop._sentiment_cache = {}
         loop._sentiment_lock = threading.Lock()
         loop._cache = None
+        loop._anomaly_detector = MagicMock()
+        loop._anomaly_detector.check.return_value = None
+        loop._async_loop = None
+        loop._cycle_dropped_no_bars = 0
+        loop._cycle_dropped_below_threshold = 0
+        loop._cycle_dropped_pre_trade = 0
+        loop._cycle_instruments_processed = 0
 
         instrument = MagicMock()
         instrument.symbol = "SBER"

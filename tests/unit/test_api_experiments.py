@@ -207,16 +207,22 @@ class TestApplyExperiment:
         mock_instance = MagicMock()
         mock_instance.apply_verdict = AsyncMock(side_effect=FileNotFoundError("not found"))
 
-        with patch(
-            "finalayze.orchestration.preset_applicator.PresetApplicator",
-            return_value=mock_instance,
-        ), patch(
-            "finalayze.api.v1.experiments.PresetApplicator",
-            return_value=mock_instance,
-        ) if False else patch(
-            "finalayze.core.db.get_async_session_factory",
-        ) as mock_factory, patch(
-            "finalayze.api.v1.experiments.ExperimentManager",
+        with (
+            patch(
+                "finalayze.orchestration.preset_applicator.PresetApplicator",
+                return_value=mock_instance,
+            ),
+            patch(
+                "finalayze.api.v1.experiments.PresetApplicator",
+                return_value=mock_instance,
+            )
+            if False
+            else patch(
+                "finalayze.core.db.get_async_session_factory",
+            ) as mock_factory,
+            patch(
+                "finalayze.api.v1.experiments.ExperimentManager",
+            ),
         ):
             mock_factory.return_value.return_value = self._make_mock_session_ctx()
             # The deferred import in apply_experiment uses the real PresetApplicator;
@@ -250,13 +256,17 @@ class TestApplyExperiment:
         mock_instance = MagicMock(spec=PresetApplicator)
         mock_instance.apply_verdict = AsyncMock(return_value=mock_apply_result)
 
-        with patch(
-            "finalayze.orchestration.preset_applicator.PresetApplicator",
-            return_value=mock_instance,
-        ), patch(
-            "finalayze.core.db.get_async_session_factory",
-        ) as mock_factory, patch(
-            "finalayze.api.v1.experiments.ExperimentManager",
+        with (
+            patch(
+                "finalayze.orchestration.preset_applicator.PresetApplicator",
+                return_value=mock_instance,
+            ),
+            patch(
+                "finalayze.core.db.get_async_session_factory",
+            ) as mock_factory,
+            patch(
+                "finalayze.api.v1.experiments.ExperimentManager",
+            ),
         ):
             mock_factory.return_value.return_value = self._make_mock_session_ctx()
             resp = client.post(
@@ -288,13 +298,17 @@ class TestApplyExperiment:
         mock_instance = MagicMock(spec=PresetApplicator)
         mock_instance.apply_verdict = AsyncMock(return_value=mock_apply_result)
 
-        with patch(
-            "finalayze.orchestration.preset_applicator.PresetApplicator",
-            return_value=mock_instance,
-        ), patch(
-            "finalayze.core.db.get_async_session_factory",
-        ) as mock_factory, patch(
-            "finalayze.api.v1.experiments.ExperimentManager",
+        with (
+            patch(
+                "finalayze.orchestration.preset_applicator.PresetApplicator",
+                return_value=mock_instance,
+            ),
+            patch(
+                "finalayze.core.db.get_async_session_factory",
+            ) as mock_factory,
+            patch(
+                "finalayze.api.v1.experiments.ExperimentManager",
+            ),
         ):
             mock_factory.return_value.return_value = self._make_mock_session_ctx()
             resp = client.post(
@@ -325,16 +339,19 @@ class TestApplyExperiment:
         mock_instance = MagicMock(spec=PresetApplicator)
         mock_instance.apply_verdict = AsyncMock(return_value=mock_apply_result)
 
-        with patch(
-            "finalayze.orchestration.preset_applicator.PresetApplicator",
-            return_value=mock_instance,
-        ), patch(
-            "finalayze.core.db.get_async_session_factory",
-        ) as mock_factory, patch(
-            "finalayze.api.v1.experiments.ExperimentManager",
-        ), patch(
-            "finalayze.api.v1.experiments.TelegramAlerter"
-        ) as mock_telegram_cls:
+        with (
+            patch(
+                "finalayze.orchestration.preset_applicator.PresetApplicator",
+                return_value=mock_instance,
+            ),
+            patch(
+                "finalayze.core.db.get_async_session_factory",
+            ) as mock_factory,
+            patch(
+                "finalayze.api.v1.experiments.ExperimentManager",
+            ),
+            patch("finalayze.api.v1.experiments.TelegramAlerter") as mock_telegram_cls,
+        ):
             mock_factory.return_value.return_value = self._make_mock_session_ctx()
             mock_settings = MagicMock()
             mock_settings.telegram_bot_token = "my-bot-token"
@@ -371,16 +388,21 @@ class TestApplyExperiment:
         real_cb = CircuitBreaker("moex")
         real_cb_dict = {"moex": real_cb}
 
-        with patch(
-            "finalayze.api.v1.experiments._get_circuit_breakers",
-            return_value=real_cb_dict,
-        ) as mock_get_cb, patch(
-            "finalayze.orchestration.preset_applicator.PresetApplicator",
-            return_value=mock_instance,
-        ), patch(
-            "finalayze.core.db.get_async_session_factory",
-        ) as mock_factory, patch(
-            "finalayze.api.v1.experiments.ExperimentManager",
+        with (
+            patch(
+                "finalayze.api.v1.experiments._get_circuit_breakers",
+                return_value=real_cb_dict,
+            ) as mock_get_cb,
+            patch(
+                "finalayze.orchestration.preset_applicator.PresetApplicator",
+                return_value=mock_instance,
+            ),
+            patch(
+                "finalayze.core.db.get_async_session_factory",
+            ) as mock_factory,
+            patch(
+                "finalayze.api.v1.experiments.ExperimentManager",
+            ),
         ):
             mock_factory.return_value.return_value = self._make_mock_session_ctx()
             resp = client.post(

@@ -244,6 +244,7 @@ class SentimentScoreModel(Base):
     social_sentiment: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
     composite_sentiment: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    credibility: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
 
 
 class MacroSnapshotModel(Base):

@@ -100,7 +100,7 @@ class EventDrivenStrategy(BaseStrategy):
         except (FileNotFoundError, OSError, yaml.YAMLError):
             return {}
 
-    def generate_signal(
+    def generate_signal(  # type: ignore[override]
         self,
         symbol: str,
         candles: list[Candle],
@@ -108,6 +108,8 @@ class EventDrivenStrategy(BaseStrategy):
         sentiment_score: float = 0.0,
         has_open_position: bool = False,  # noqa: ARG002
         credibility: float = 1.0,
+        event_type_code: float = 0.0,
+        **kwargs: object,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a trading signal based on news sentiment score.
 
@@ -153,6 +155,7 @@ class EventDrivenStrategy(BaseStrategy):
         features: dict[str, float] = {
             "sentiment": sentiment_score,
             "credibility": credibility,
+            "event_type_code": event_type_code,
         }
 
         # Apply sanctions proximity scaling for segments with sanctions/geopolitical events.

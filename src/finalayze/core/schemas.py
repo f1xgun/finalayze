@@ -200,6 +200,8 @@ class SentimentResult(BaseModel):
     sentiment: float  # -1.0 to +1.0
     confidence: float  # 0.0 to 1.0
     reasoning: str
+    tickers: list[str] = []  # LLM-extracted ticker symbols from the article
+    is_fallback: bool = False  # True when this result is a fallback (LLM failed)
 
     @field_validator("sentiment")
     @classmethod
@@ -826,4 +828,4 @@ def compute_file_sha(path: str) -> str:
         FileNotFoundError: if the file does not exist.
         OSError: if the file cannot be read.
     """
-    return hashlib.sha256(open(path, "rb").read()).hexdigest()  # noqa: PTH123, SIM115
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()

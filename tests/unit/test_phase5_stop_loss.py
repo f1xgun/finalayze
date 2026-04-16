@@ -42,12 +42,14 @@ def _make_trading_loop() -> MagicMock:
     loop._stop_states = {}
     loop._stop_loss_lock = threading.Lock()
     loop._entry_prices = {}
+    loop._entry_strategy = {}
     loop._broker_router = MagicMock()
     loop._alerter = MagicMock()
     loop._sandbox_monitor = None
     loop._metrics = None
     loop._cycle_orders_filled = 0
     loop._cycle_errors_caught = 0
+    loop._update_kelly = MagicMock()
     loop._submit_order = TradingLoop._submit_order.__get__(loop)
 
     # Store class references for the method

@@ -18,5 +18,6 @@ Return ONLY a valid JSON object with exactly these fields:
 - "sentiment": a float between -1.0 (very negative) and +1.0 (very positive)
 - "confidence": a float between 0.0 and 1.0
 - "reasoning": a brief explanation covering your key findings from Steps 1-3
+- "tickers": a list of stock ticker symbols (e.g. ["SBER", "GAZP"]) mentioned or directly affected in the article. Return an empty list if no specific tickers are mentioned.
 
 No other text outside the JSON.

@@ -108,7 +108,7 @@ class AnomalyDetector:
         if z_score is not None:
             msg = (
                 f"Sandbox anomaly: {metric} = {value:.4f} "
-                f"(z-score: {z_score:.2f}, threshold: {threshold:.1f}σ)"
+                f"(z-score: {z_score:.2f}, threshold: {threshold:.1f}\u03c3)"
             )
         else:
             msg = f"Sandbox anomaly: {metric} = {value:.2f} (threshold: {threshold:.2f})"

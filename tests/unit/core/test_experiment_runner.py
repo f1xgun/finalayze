@@ -59,10 +59,14 @@ class TestHypothesisArgs:
     def test_hypothesis_args_parsed(self) -> None:
         test_argv = [
             "run_iteration.py",
-            "--name", "test-iter",
-            "--description", "test desc",
-            "--hypothesis", "test-001",
-            "--run-name", "A-only",
+            "--name",
+            "test-iter",
+            "--description",
+            "test desc",
+            "--hypothesis",
+            "test-001",
+            "--run-name",
+            "A-only",
         ]
         with patch("sys.argv", test_argv):
             args = _parse_args()
@@ -72,8 +76,10 @@ class TestHypothesisArgs:
     def test_hypothesis_not_set_backward_compat(self) -> None:
         test_argv = [
             "run_iteration.py",
-            "--name", "test-iter",
-            "--description", "test desc",
+            "--name",
+            "test-iter",
+            "--description",
+            "test desc",
         ]
         with patch("sys.argv", test_argv):
             args = _parse_args()
@@ -86,16 +92,22 @@ class TestComparisonTable:
 
     def test_comparison_table_format(self) -> None:
         a = {
-            "wf_sharpe": 0.1000, "profit_factor": 1.20,
-            "wf_max_drawdown": 0.0500, "trade_count": 100,
+            "wf_sharpe": 0.1000,
+            "profit_factor": 1.20,
+            "wf_max_drawdown": 0.0500,
+            "trade_count": 100,
         }
         b = {
-            "wf_sharpe": 0.0800, "profit_factor": 1.10,
-            "wf_max_drawdown": 0.0600, "trade_count": 80,
+            "wf_sharpe": 0.0800,
+            "profit_factor": 1.10,
+            "wf_max_drawdown": 0.0600,
+            "trade_count": 80,
         }
         ab = {
-            "wf_sharpe": 0.1500, "profit_factor": 1.30,
-            "wf_max_drawdown": 0.0400, "trade_count": 120,
+            "wf_sharpe": 0.1500,
+            "profit_factor": 1.30,
+            "wf_max_drawdown": 0.0400,
+            "trade_count": 120,
         }
 
         table = _format_comparison_table(a, b, ab)
@@ -126,9 +138,12 @@ class TestInteractionArgs:
     def test_interaction_args_parsed(self) -> None:
         test_argv = [
             "run_interaction_test.py",
-            "--experiment-a", "exp-001",
-            "--experiment-b", "exp-002",
-            "--segments", "us_tech",
+            "--experiment-a",
+            "exp-001",
+            "--experiment-b",
+            "exp-002",
+            "--segments",
+            "us_tech",
         ]
         with patch("sys.argv", test_argv):
             args = _parse_interaction_args()

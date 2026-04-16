@@ -55,6 +55,35 @@ _TOM_BUY_BOOST = Decimal("0.05")
 # HRP allocation constants
 _HRP_MIN_HISTORY = 20
 
+# Event type codes that trigger duplicate-signal suppression (EVNT-02).
+# cbr_rate=1.0, earnings/dividend=2.0 — see _EVENT_TYPE_FLOAT_MAP in trading_loop.py.
+_DEDUP_EVENT_CODES: frozenset[float] = frozenset({1.0, 2.0})
+
+
+def _dedup_event_signals(
+    signals_by_strategy: dict[str, tuple[Signal, Decimal]],
+) -> set[str]:
+    """Find strategy names to zero when duplicate CBR/dividend events detected.
+
+    Returns set of strategy names whose weight should be zeroed.
+    Per CONTEXT.md: same ticker + same cycle + same event_type_code -> zero lower-weight.
+    """
+    zeroed: set[str] = set()
+    by_code: dict[float, list[tuple[str, Decimal]]] = {}
+    for name, (sig, weight) in signals_by_strategy.items():
+        code = sig.features.get("event_type_code", 0.0)
+        if code in _DEDUP_EVENT_CODES:
+            by_code.setdefault(code, []).append((name, weight))
+
+    for entries in by_code.values():
+        if len(entries) < 2:  # noqa: PLR2004
+            continue
+        sorted_entries = sorted(entries, key=lambda e: e[1], reverse=True)
+        for name, _ in sorted_entries[1:]:
+            zeroed.add(name)
+
+    return zeroed
+
 
 class StrategyCombiner:
     """Combines multiple strategy signals using per-segment YAML weights."""
@@ -299,6 +328,9 @@ class StrategyCombiner:
         sentiment_score: float = 0.0,
         has_open_position: bool = False,
         weight_overrides: dict[str, Decimal] | None = None,
+        credibility: float = 1.0,
+        event_type_code: float = 0.0,
+        **kwargs: object,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a combined signal by weighting enabled strategy signals.
 
@@ -310,6 +342,8 @@ class StrategyCombiner:
         Args:
             weight_overrides: When provided, these weights are used instead of
                 the YAML-configured weights for each named strategy.
+            credibility: Source credibility [0.0, 1.0], threaded to event_driven only.
+            event_type_code: Numeric event code for CBR/dividend dedup (0.0 = none).
         """
         self._on_generate_start(symbol, segment_id)
 
@@ -324,6 +358,7 @@ class StrategyCombiner:
         feature_contributions: dict[str, float] = {}
         dominant_strategy_name = "combined"
         dominant_contribution = _ZERO
+        collected: dict[str, tuple[Signal, Decimal]] = {}
 
         # ADX regime routing
         adx_value, regime = self._compute_adx_regime(symbol, candles, config)
@@ -365,13 +400,24 @@ class StrategyCombiner:
                 self._on_strategy_signal(strategy_name, strategy, None, weight)
                 continue  # skip trend strategies in range-bound market
 
-            signal = strategy.generate_signal(
-                symbol,
-                candles,
-                segment_id,
-                sentiment_score=sentiment_score,
-                has_open_position=has_open_position,
-            )
+            if strategy_name == "event_driven":
+                signal = strategy.generate_signal(
+                    symbol,
+                    candles,
+                    segment_id,
+                    sentiment_score=sentiment_score,
+                    has_open_position=has_open_position,
+                    credibility=credibility,
+                    event_type_code=event_type_code,
+                )
+            else:
+                signal = strategy.generate_signal(
+                    symbol,
+                    candles,
+                    segment_id,
+                    sentiment_score=sentiment_score,
+                    has_open_position=has_open_position,
+                )
             self._on_strategy_signal(strategy_name, strategy, signal, weight)
             if signal is None:
                 continue
@@ -401,6 +447,17 @@ class StrategyCombiner:
             feature_contributions[f"{strategy_name}_direction"] = (
                 1.0 if signal.direction == SignalDirection.BUY else -1.0
             )
+            collected[strategy_name] = (signal, weight)
+
+        # EVNT-02: CBR/dividend duplicate-signal suppression
+        zeroed = _dedup_event_signals(collected)
+        if zeroed:
+            for zname in zeroed:
+                zsig, zweight = collected[zname]
+                zscore = _BUY_SCORE if zsig.direction == SignalDirection.BUY else _SELL_SCORE
+                zcontrib = zscore * Decimal(str(zsig.confidence)) * zweight
+                weighted_score -= zcontrib
+                total_weight -= zweight
 
         # Ambiguous regime: dominant pool wins when both pools fired
         if regime == "ambiguous" and trend_pool_fired and mr_pool_fired:

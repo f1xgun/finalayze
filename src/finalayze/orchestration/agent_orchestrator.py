@@ -6,7 +6,7 @@ Coordinates the full conflict-to-debate pipeline:
   3. Group conflicts by agent pair and create debates via DebateManager
   4. On finalize: add arbiter report, create experiment if contradictions found
 
-Layer 5 — Orchestration. Imports from Layers 0–5.
+Layer 5 - Orchestration. Imports from Layers 0-5.
 See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 ORCH-01: Full conflict-to-debate pipeline without manual intervention.
@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -28,6 +27,8 @@ from finalayze.core.schemas import FactCheckReport, SuccessCriteria
 from finalayze.orchestration.conflict_detector import ConflictDetector
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from finalayze.core.schemas import AgentOutput, ConflictReport
 
 _log = structlog.get_logger(__name__)
@@ -135,9 +136,7 @@ class AgentOrchestrator:
             # Step 6: Record each involved agent's position
             for agent_name in agent_names:
                 if agent_name in output_by_agent:
-                    self._dm.add_agent_position(
-                        debate_id, agent_name, output_by_agent[agent_name]
-                    )
+                    self._dm.add_agent_position(debate_id, agent_name, output_by_agent[agent_name])
 
             debate_ids.append(debate_id)
 
@@ -179,17 +178,16 @@ class AgentOrchestrator:
                 experiment_id=experiment_id,
             )
             return experiment_id
-        else:
-            # No contradictions — resolve debate
-            self._dm.resolve_debate(
-                debate_id,
-                "No contradictions — claims verified by arbiter",
-            )
-            _log.info(
-                "orchestrator.debate_resolved",
-                debate_id=debate_id[:16],
-            )
-            return None
+        # No contradictions — resolve debate
+        self._dm.resolve_debate(
+            debate_id,
+            "No contradictions — claims verified by arbiter",
+        )
+        _log.info(
+            "orchestrator.debate_resolved",
+            debate_id=debate_id[:16],
+        )
+        return None
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -261,9 +259,7 @@ class AgentOrchestrator:
         from finalayze.core.schemas import ClaimVerdict  # noqa: PLC0415
 
         contradicted = [
-            r.claim.statement
-            for r in report.results
-            if r.verdict == ClaimVerdict.CONTRADICTED
+            r.claim.statement for r in report.results if r.verdict == ClaimVerdict.CONTRADICTED
         ]
         if contradicted:
             return f"Verify contradicted claims: {'; '.join(contradicted[:3])}"

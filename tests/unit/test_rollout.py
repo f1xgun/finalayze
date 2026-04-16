@@ -92,11 +92,12 @@ class TestSettingsRolloutIntegration:
     """Tests for Settings.rollout_phase and effective_risk_limits()."""
 
     def test_settings_rollout_phase_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Default rollout_phase is FULL (backward compatible)."""
+        """Default rollout_phase is FULL (backward compatible, non-sandbox mode)."""
         monkeypatch.delenv("FINALAYZE_ROLLOUT_PHASE", raising=False)
+        monkeypatch.setenv("FINALAYZE_MODE", "test")
         from config.settings import Settings
 
-        s = Settings()
+        s = Settings(mode="test")
         assert s.rollout_phase == RolloutPhase.FULL
 
     def test_settings_rollout_phase_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,9 +109,10 @@ class TestSettingsRolloutIntegration:
 
     def test_effective_risk_limits_full(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("FINALAYZE_ROLLOUT_PHASE", raising=False)
+        monkeypatch.setenv("FINALAYZE_MODE", "test")
         from config.settings import Settings
 
-        s = Settings()
+        s = Settings(mode="test")
         limits = s.effective_risk_limits()
         assert limits == ROLLOUT_LIMITS[RolloutPhase.FULL]
 

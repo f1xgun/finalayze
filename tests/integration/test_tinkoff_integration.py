@@ -60,7 +60,7 @@ class TestOrderLifecycle:
         mock_result = MagicMock()
         mock_result.executed_order_price = _make_quotation(250, 500_000_000)
 
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run", return_value=mock_result):
+        with patch.object(broker, "_run_async", return_value=mock_result):
             order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(15))
             result = broker.submit_order(order)
 
@@ -79,7 +79,7 @@ class TestOrderLifecycle:
         mock_result = MagicMock()
         mock_result.executed_order_price = _make_quotation(260, 0)
 
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run", return_value=mock_result):
+        with patch.object(broker, "_run_async", return_value=mock_result):
             order = OrderRequest(symbol="SBER", side="SELL", quantity=Decimal(20))
             result = broker.submit_order(order)
 
@@ -106,8 +106,9 @@ class TestReconnection:
         mock_result.executed_order_price = _make_quotation(100, 0)
 
         with (
-            patch(
-                "finalayze.execution.tinkoff_broker.asyncio.run",
+            patch.object(
+                broker_with_retry,
+                "_run_async",
                 side_effect=[ConnectionError("gRPC down"), mock_result],
             ),
             patch("finalayze.execution.retry.time.sleep"),
@@ -140,7 +141,7 @@ class TestPortfolio:
         mock_pos.quantity = _make_quotation(50, 0)
         mock_portfolio.positions = [mock_pos]
 
-        with patch("finalayze.execution.tinkoff_broker.asyncio.run", return_value=mock_portfolio):
+        with patch.object(broker, "_run_async", return_value=mock_portfolio):
             portfolio = broker.get_portfolio()
 
         assert portfolio.equity == Decimal(100000)
@@ -152,8 +153,9 @@ class TestPortfolio:
         mock_portfolio.positions = []
 
         with (
-            patch(
-                "finalayze.execution.tinkoff_broker.asyncio.run",
+            patch.object(
+                broker_with_retry,
+                "_run_async",
                 side_effect=[ConnectionError("timeout"), mock_portfolio],
             ),
             patch("finalayze.execution.retry.time.sleep"),

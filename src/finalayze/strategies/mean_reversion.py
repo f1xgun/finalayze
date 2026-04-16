@@ -98,6 +98,7 @@ class MeanReversionStrategy(BaseStrategy):
         segment_id: str,
         sentiment_score: float = 0.0,  # noqa: ARG002
         has_open_position: bool = False,  # noqa: ARG002
+        **kwargs: object,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a mean reversion signal using Bollinger Bands."""
         params = self.get_parameters(segment_id)

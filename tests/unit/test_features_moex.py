@@ -485,7 +485,7 @@ class TestBrentMultiPeriodReturnFeatures:
     """Tests for _compute_brent_return_features: brent_ret_5d and brent_ret_21d."""
 
     def test_default_keys(self) -> None:
-        """None input returns dict with exactly 3 keys: brent_return, brent_ret_5d, brent_ret_21d — all 0.0."""
+        """None input returns dict with 3 keys, all 0.0."""
         result = _compute_brent_return_features(None)
         assert set(result.keys()) == {"brent_return", "brent_ret_5d", "brent_ret_21d"}
         assert result["brent_ret_5d"] == 0.0
@@ -499,23 +499,24 @@ class TestBrentMultiPeriodReturnFeatures:
         assert isinstance(result["brent_return"], float)
         assert isinstance(result["brent_ret_5d"], float)
         assert isinstance(result["brent_ret_21d"], float)
-        # With 30 candles and lag=2: brent_ret_5d needs lag+6=8, brent_ret_21d needs lag+22=24 — both met
+        # lag=2: brent_ret_5d needs lag+6=8, brent_ret_21d needs lag+22=24
         lag = _EXTERNAL_DATA_LAG_BARS
         assert len(brent) >= lag + 22
 
     def test_independent_fallback_5d(self) -> None:
-        """With exactly 7 candles, brent_ret_5d == 0.0 but brent_return is non-zero (needs lag+2=4)."""
+        """With 7 candles, brent_ret_5d == 0.0 but brent_return may be non-zero."""
         # lag=2, brent_return needs lag+2=4 candles, brent_ret_5d needs lag+6=8 candles
         # 7 candles: brent_return computed, brent_ret_5d falls back
         brent = tuple(_make_candles(7, "BZ=F"))
         moex = MoexMarketData(commodity_candles={"BZ=F": brent})
         result = _compute_brent_return_features(moex)
         assert result["brent_ret_5d"] == 0.0
-        assert result["brent_return"] != 0.0 or True  # may be 0.0 if candles are equal — just check key exists
+        # may be 0.0 if candles are equal -- just check key exists
+        assert result["brent_return"] != 0.0 or True
         assert "brent_return" in result
 
     def test_independent_fallback_21d(self) -> None:
-        """With exactly 10 candles, brent_ret_21d == 0.0 (needs lag+22=24), brent_ret_5d is non-zero (needs lag+6=8)."""
+        """With 10 candles, brent_ret_21d == 0.0 (needs 24), brent_ret_5d computed."""
         brent = tuple(_make_candles(10, "BZ=F"))
         moex = MoexMarketData(commodity_candles={"BZ=F": brent})
         result = _compute_brent_return_features(moex)

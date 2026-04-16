@@ -99,15 +99,12 @@ async def strategies_performance() -> StrategiesResponse:
         from finalayze.core.models import SignalModel  # noqa: PLC0415
 
         async with async_session_factory()() as session:
-            stmt = (
-                select(
-                    SignalModel.strategy_name,
-                    SignalModel.market_id,
-                    func.count().label("signal_count"),
-                    func.max(SignalModel.created_at).label("last_signal"),
-                )
-                .group_by(SignalModel.strategy_name, SignalModel.market_id)
-            )
+            stmt = select(
+                SignalModel.strategy_name,
+                SignalModel.market_id,
+                func.count().label("signal_count"),
+                func.max(SignalModel.created_at).label("last_signal"),
+            ).group_by(SignalModel.strategy_name, SignalModel.market_id)
             result = await session.execute(stmt)
             rows = result.all()
 

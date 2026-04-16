@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # Ensure scripts/ is importable
@@ -12,7 +12,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from auto_ml_research import (
+from auto_ml_research import (  # noqa: E402
     _MOEX_PURGE_GAP,
     _MOEX_WF_CAL_MONTHS,
     _MOEX_WF_STEP_MONTHS,
@@ -33,7 +33,7 @@ def _make_daily_timestamps(n_days: int, start_year: int = 2023) -> list[datetime
     Using calendar days so that n_days directly corresponds to the date span used
     by generate_folds() when computing fold boundaries (which uses timedelta(days=N*30)).
     """
-    start = datetime(start_year, 1, 2)
+    start = datetime(start_year, 1, 2, tzinfo=UTC)
     return [start + timedelta(days=i) for i in range(n_days)]
 
 
@@ -65,9 +65,7 @@ class TestMoexFoldGeneration:
         """1825-day US dataset with US constants produces 3+ folds."""
         timestamps = _make_daily_timestamps(_US_DATASET_DAYS)
         folds = generate_folds(timestamps)  # US defaults
-        assert len(folds) >= _MIN_US_FOLDS, (
-            f"Expected >= {_MIN_US_FOLDS} folds, got {len(folds)}"
-        )
+        assert len(folds) >= _MIN_US_FOLDS, f"Expected >= {_MIN_US_FOLDS} folds, got {len(folds)}"
 
     def test_default_kwargs_backward_compatible(self) -> None:
         """generate_folds() with no kwargs behaves identically to old code."""

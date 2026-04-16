@@ -13,16 +13,16 @@ def _h() -> dict[str, str]:
     return {"X-API-Key": Settings().api_key}
 
 
-def test_signals_list_501() -> None:
+def test_signals_list_returns_empty_without_db() -> None:
     resp = TestClient(create_app()).get("/api/v1/signals", headers=_h())
-    assert resp.status_code == 501
-    assert resp.json()["detail"] == "Not yet implemented"
+    assert resp.status_code == 200
+    assert resp.json()["signals"] == []
 
 
-def test_strategies_performance_501() -> None:
+def test_strategies_performance_returns_empty_without_db() -> None:
     resp = TestClient(create_app()).get("/api/v1/strategies/performance", headers=_h())
-    assert resp.status_code == 501
-    assert resp.json()["detail"] == "Not yet implemented"
+    assert resp.status_code == 200
+    assert resp.json()["strategies"] == []
 
 
 def test_risk_status_200() -> None:

@@ -238,8 +238,10 @@ def _render_detail(experiments: list[ExperimentState]) -> None:
     # Backtest results
     st.markdown("#### 📈 Backtest Results")
     if not exp.results:
-        st.info("No backtest results yet. Run `scripts/run_iteration.py --hypothesis "
-                f"{exp.experiment_id}` to generate.")
+        st.info(
+            "No backtest results yet. Run `scripts/run_iteration.py --hypothesis "
+            f"{exp.experiment_id}` to generate."
+        )
         return
 
     # A/B/AB comparison chart
@@ -255,12 +257,14 @@ def _render_detail(experiments: list[ExperimentState]) -> None:
     colors = ["#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A"]
     for i, result in enumerate(exp.results):
         vals = [float(result.metrics.get(m, 0)) for m in chart_metrics]
-        fig.add_trace(go.Bar(
-            name=result.run_name,
-            x=chart_metrics,
-            y=vals,
-            marker_color=colors[i % len(colors)],
-        ))
+        fig.add_trace(
+            go.Bar(
+                name=result.run_name,
+                x=chart_metrics,
+                y=vals,
+                marker_color=colors[i % len(colors)],
+            )
+        )
 
     fig.update_layout(
         barmode="group",
@@ -284,7 +288,7 @@ def _render_detail(experiments: list[ExperimentState]) -> None:
     df = pd.DataFrame(rows)
 
     # Add delta row if multiple runs
-    if len(exp.results) >= 2:
+    if len(exp.results) >= 2:  # noqa: PLR2004
         first = rows[0]
         last = rows[-1]
         delta_row: dict[str, object] = {"Run": "Δ (last - first)"}
@@ -314,8 +318,10 @@ def _render_history(experiments: list[ExperimentState]) -> None:
     decided.sort(key=lambda e: e.created, reverse=True)
 
     if not decided:
-        st.info("No decisions recorded yet. Experiments must reach "
-                "ACCEPTED, REJECTED, or INCONCLUSIVE status.")
+        st.info(
+            "No decisions recorded yet. Experiments must reach "
+            "ACCEPTED, REJECTED, or INCONCLUSIVE status."
+        )
         return
 
     # Summary
@@ -333,13 +339,15 @@ def _render_history(experiments: list[ExperimentState]) -> None:
     for exp in decided:
         emoji = _STATUS_EMOJI.get(exp.status.value, "")
         color = _STATUS_COLORS.get(exp.status.value, "#6c757d")
-        header = (
+        _header = (
             f"{emoji} **{exp.experiment_id}** — "
             f"<span style='color:{color}'>{exp.status.value.upper()}</span> "
             f"({exp.created})"
         )
 
-        with st.expander(f"{emoji} {exp.experiment_id} — {exp.status.value.upper()} ({exp.created})"):
+        with st.expander(
+            f"{emoji} {exp.experiment_id} — {exp.status.value.upper()} ({exp.created})"
+        ):
             st.markdown(f"**Hypothesis:** {exp.hypothesis}")
             st.markdown(f"**Criteria:** {_fmt_criteria(exp)}")
             st.divider()

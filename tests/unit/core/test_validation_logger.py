@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 from finalayze.core.validation_logger import CycleLogEntry, ValidationLogger
 
 
 def _make_entry(**overrides: object) -> CycleLogEntry:
     defaults = {
-        "timestamp": datetime(2026, 4, 7, 12, 0, 0, tzinfo=timezone.utc),
+        "timestamp": datetime(2026, 4, 7, 12, 0, 0, tzinfo=UTC),
         "cycle_type": "equity",
         "duration_ms": 1500,
         "instruments_processed": 10,

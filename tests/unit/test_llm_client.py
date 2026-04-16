@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import anthropic
@@ -249,7 +249,7 @@ class TestCreateLLMClientFactory:
 
 # ── parse_structured() helpers ───────────────────────────────────────────────
 
-_DT = datetime(2026, 4, 12, tzinfo=timezone.utc)
+_DT = datetime(2026, 4, 12, tzinfo=UTC)
 
 _AGENT_OUTPUT = AgentOutput(
     agent_name="quant-analyst",

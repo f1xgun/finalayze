@@ -192,9 +192,7 @@ class BondDiscoveryService:
                 else:
                     from_date = today - timedelta(days=lookback_days)
 
-                candle_dicts = self._fetcher.fetch_bond_candles(
-                    bond_info.figi, from_date, today
-                )
+                candle_dicts = self._fetcher.fetch_bond_candles(bond_info.figi, from_date, today)
 
                 if not candle_dicts:
                     continue
@@ -204,9 +202,7 @@ class BondDiscoveryService:
                 for cd in candle_dicts:
                     candle_dt = cd["date"]
                     if isinstance(candle_dt, date) and not isinstance(candle_dt, datetime):
-                        candle_dt = datetime.combine(
-                            candle_dt, datetime.min.time(), tzinfo=UTC
-                        )
+                        candle_dt = datetime.combine(candle_dt, datetime.min.time(), tzinfo=UTC)
                     models.append(
                         BondCandleModel(
                             bond_figi=bond_info.figi,
@@ -293,9 +289,7 @@ class BondDiscoveryService:
         return emitted
 
 
-def register_discovered_bonds(
-    result: DiscoveryResult, registry: InstrumentRegistry
-) -> int:
+def register_discovered_bonds(result: DiscoveryResult, registry: InstrumentRegistry) -> int:
     """Register discovered bonds in InstrumentRegistry.
 
     Args:

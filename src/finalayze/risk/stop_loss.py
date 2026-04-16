@@ -30,8 +30,7 @@ def filter_candles_by_exclusion(
         return candles
 
     parsed_ranges = [
-        (date.fromisoformat(start), date.fromisoformat(end))
-        for start, end in exclude_periods
+        (date.fromisoformat(start), date.fromisoformat(end)) for start, end in exclude_periods
     ]
 
     result: list[Candle] = []

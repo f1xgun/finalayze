@@ -64,6 +64,7 @@ class CBRStrategyWrapper(BaseStrategy):
         segment_id: str,  # noqa: ARG002
         sentiment_score: float = 0.0,  # noqa: ARG002
         has_open_position: bool = False,  # noqa: ARG002
+        **kwargs: object,  # noqa: ARG002
     ) -> Signal | None:
         """Find the most recent CBR event within the lookback window and return its signal."""
         if not candles:

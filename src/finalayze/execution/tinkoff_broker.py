@@ -143,7 +143,7 @@ class TinkoffBroker(BrokerBase):
                 self._client = None
                 if old_client is not None:
                     with contextlib.suppress(Exception):
-                        await old_client.__aexit__(None, None, None)
+                        await old_client.__aexit__(None, None, None)  # type: ignore[no-untyped-call]
             raise
 
     @staticmethod

@@ -90,6 +90,7 @@ class MockStrategy(BaseStrategy):
         segment_id: str,
         sentiment_score: float = 0.0,
         has_open_position: bool = False,
+        **kwargs: object,
     ) -> Signal | None:
         return self._return_signal
 
@@ -1273,3 +1274,59 @@ class TestEventStrategyBypass:
         # confidence 0.45 >= event floor 0.40, so signal should pass
         assert result is not None
         assert result.confidence >= _EVENT_MIN_CONFIDENCE
+
+
+class TestDedupEventSignals:
+    """Tests for CBR/dividend duplicate-signal suppression (EVNT-02)."""
+
+    def test_dedup_zeroes_lower_weight_on_same_event_code(self) -> None:
+        """Two strategies with same event_type_code: lower weight is zeroed."""
+        from finalayze.strategies.combiner import _dedup_event_signals
+
+        sig1 = _make_signal(SignalDirection.BUY, 0.8, "event_driven")
+        sig1 = Signal(
+            **{**sig1.model_dump(), "features": {"event_type_code": 1.0}},
+        )
+        sig2 = _make_signal(SignalDirection.BUY, 0.8, "cbr_calendar")
+        sig2 = Signal(
+            **{**sig2.model_dump(), "features": {"event_type_code": 1.0}},
+        )
+        collected = {
+            "event_driven": (sig1, Decimal("0.15")),
+            "cbr_calendar": (sig2, Decimal("0.05")),
+        }
+        zeroed = _dedup_event_signals(collected)
+        assert "cbr_calendar" in zeroed
+        assert "event_driven" not in zeroed
+
+    def test_dedup_no_action_for_different_event_codes(self) -> None:
+        """Two strategies with different event_type_codes: no dedup."""
+        from finalayze.strategies.combiner import _dedup_event_signals
+
+        sig1 = _make_signal(SignalDirection.BUY, 0.8, "event_driven")
+        sig1 = Signal(
+            **{**sig1.model_dump(), "features": {"event_type_code": 1.0}},
+        )
+        sig2 = _make_signal(SignalDirection.BUY, 0.8, "cbr_calendar")
+        sig2 = Signal(
+            **{**sig2.model_dump(), "features": {"event_type_code": 2.0}},
+        )
+        collected = {
+            "event_driven": (sig1, Decimal("0.15")),
+            "cbr_calendar": (sig2, Decimal("0.05")),
+        }
+        zeroed = _dedup_event_signals(collected)
+        assert len(zeroed) == 0
+
+    def test_dedup_ignores_zero_event_code(self) -> None:
+        """Strategies with event_type_code=0.0 are never deduped."""
+        from finalayze.strategies.combiner import _dedup_event_signals
+
+        sig1 = _make_signal(SignalDirection.BUY, 0.8, "momentum")
+        sig2 = _make_signal(SignalDirection.BUY, 0.8, "mean_reversion")
+        collected = {
+            "momentum": (sig1, Decimal("0.30")),
+            "mean_reversion": (sig2, Decimal("0.30")),
+        }
+        zeroed = _dedup_event_signals(collected)
+        assert len(zeroed) == 0

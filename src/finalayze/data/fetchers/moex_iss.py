@@ -209,10 +209,7 @@ class MoexISSFetcher(BaseFetcher):
         OHLCV rows for index tickers like IMOEX and RTSI.  The older
         ``/candles.json`` sub-path returns empty data for these instruments.
         """
-        url = (
-            f"{_BASE_URL}/history/engines/stock/markets/index"
-            f"/securities/{symbol}.json"
-        )
+        url = f"{_BASE_URL}/history/engines/stock/markets/index/securities/{symbol}.json"
         # §19-M1: ISS `till` is INCLUSIVE — subtract 1 day from the exclusive `end`
         from_str = start.strftime("%Y-%m-%d")
         till_str = (end - timedelta(days=1)).strftime("%Y-%m-%d")

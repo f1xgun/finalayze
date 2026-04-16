@@ -17,7 +17,7 @@ import yaml
 
 _HIGH_DRAWDOWN = 0.10  # SandboxGate blocks if drawdown_pct >= 0.10
 _SAFE_FILL_RATE = 0.80  # A fill_rate > 0 that counts as an active day
-_ZERO_FILL_RATE = 0.0   # fill_rate = 0 → day does NOT count
+_ZERO_FILL_RATE = 0.0  # fill_rate = 0 → day does NOT count
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -204,7 +204,11 @@ class TestSandboxGate:
 
         rows = [
             _make_metric_row(datetime(2026, 4, 1, 10, 0, tzinfo=UTC), _SAFE_FILL_RATE, 0.02),
-            _make_metric_row(datetime(2026, 4, 2, 10, 0, tzinfo=UTC), _SAFE_FILL_RATE, _HIGH_DRAWDOWN),
+            _make_metric_row(
+                datetime(2026, 4, 2, 10, 0, tzinfo=UTC),
+                _SAFE_FILL_RATE,
+                _HIGH_DRAWDOWN,
+            ),
             _make_metric_row(datetime(2026, 4, 3, 10, 0, tzinfo=UTC), _SAFE_FILL_RATE, 0.03),
         ]
         mock_session = AsyncMock()
@@ -226,7 +230,11 @@ class TestPresetApplicatorCircuitBreaker:
     @pytest.mark.asyncio
     async def test_apply_blocked_by_circuit_breaker(self, tmp_path: Path) -> None:
         """CircuitLevel.CAUTION -> raises PresetApplyBlockedError, no file I/O."""
-        from finalayze.orchestration.preset_applicator import PresetApplicator, PresetApplyBlockedError, SandboxGate
+        from finalayze.orchestration.preset_applicator import (
+            PresetApplicator,
+            PresetApplyBlockedError,
+            SandboxGate,
+        )
 
         mock_cb = MagicMock()
         mock_cb.level = "caution"
@@ -256,7 +264,11 @@ class TestPresetApplicatorCircuitBreaker:
     @pytest.mark.asyncio
     async def test_apply_blocked_by_circuit_breaker_halted(self, tmp_path: Path) -> None:
         """CircuitLevel.HALTED -> raises PresetApplyBlockedError."""
-        from finalayze.orchestration.preset_applicator import PresetApplicator, PresetApplyBlockedError, SandboxGate
+        from finalayze.orchestration.preset_applicator import (
+            PresetApplicator,
+            PresetApplyBlockedError,
+            SandboxGate,
+        )
 
         mock_cb = MagicMock()
         mock_cb.level = "halted"
@@ -372,7 +384,7 @@ class TestPresetApplicatorAtomicWrite:
 
     @pytest.mark.asyncio
     async def test_apply_writes_yaml_atomically(self, tmp_path: Path) -> None:
-        """After successful apply, target YAML contains merged overrides, no .pending file remains."""
+        """After successful apply, target YAML contains merged overrides."""
         _write_preset_yaml(tmp_path, "us_tech")
 
         applicator, mock_session = _make_applicator(

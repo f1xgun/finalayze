@@ -19,29 +19,73 @@ def fetcher() -> MoexISSFetcher:
     return MoexISSFetcher()
 
 
-# Sample ISS candle response (single page)
+# Sample ISS history response (new /history/ endpoint format)
+_ISS_HISTORY_COLUMNS = [
+    "BOARDID",
+    "SECID",
+    "SHORTNAME",
+    "TRADEDATE",
+    "OPEN",
+    "HIGH",
+    "LOW",
+    "CLOSE",
+    "VALUE",
+    "VOLUME",
+    "DURATION",
+    "YIELD",
+    "DECIMALS",
+    "CAPITALIZATION",
+    "CURRENCYID",
+    "DIVISOR",
+]
+
 _ISS_CANDLES_RESPONSE = {
-    "candles": {
-        "columns": ["open", "close", "high", "low", "value", "volume", "begin", "end"],
+    "history": {
+        "columns": _ISS_HISTORY_COLUMNS,
         "data": [
-            [3200.0, 3210.5, 3215.0, 3195.0, 1e8, 0, "2024-01-15 10:00:00", "2024-01-15 23:49:59"],
             [
+                "SNDX",
+                "IMOEX",
+                "Индекс МосБиржи",
+                "2024-01-15",
+                3200.0,
+                3215.0,
+                3195.0,
                 3210.5,
-                3220.0,
+                1e8,
+                0,
+                0,
+                0,
+                2,
+                0,
+                "SUR",
+                0,
+            ],
+            [
+                "SNDX",
+                "IMOEX",
+                "Индекс МосБиржи",
+                "2024-01-16",
+                3210.5,
                 3225.0,
                 3200.0,
+                3220.0,
                 1.1e8,
                 0,
-                "2024-01-16 10:00:00",
-                "2024-01-16 23:49:59",
+                0,
+                0,
+                2,
+                0,
+                "SUR",
+                0,
             ],
         ],
     },
 }
 
 _ISS_CANDLES_EMPTY = {
-    "candles": {
-        "columns": ["open", "close", "high", "low", "value", "volume", "begin", "end"],
+    "history": {
+        "columns": _ISS_HISTORY_COLUMNS,
         "data": [],
     },
 }
@@ -85,27 +129,36 @@ class TestMoexISSFetcherCandles:
         assert candles[0].market_id == "moex"
         assert candles[0].source == "moex_iss"
         assert candles[0].timestamp.tzinfo is not None
-        # MSK 10:00 (UTC+3) = UTC 07:00
-        assert candles[0].timestamp.hour == 7
+        # History endpoint uses TRADEDATE (date-only, midnight MSK).
+        # MSK 00:00 (UTC+3) = UTC 21:00 previous day
+        assert candles[0].timestamp.hour == 21
 
     @patch("time.sleep")
     def test_fetch_candles_pre2014_timezone(
         self, _sleep: MagicMock, fetcher: MoexISSFetcher
     ) -> None:
-        """Pre-2014 Russia was UTC+4 (no DST since 2011). MSK 10:00 = UTC 06:00."""
+        """Pre-2014 Russia was UTC+4 (no DST since 2011). Midnight MSK = UTC 20:00."""
         response_2013 = {
-            "candles": {
-                "columns": ["open", "close", "high", "low", "value", "volume", "begin", "end"],
+            "history": {
+                "columns": _ISS_HISTORY_COLUMNS,
                 "data": [
                     [
+                        "SNDX",
+                        "IMOEX",
+                        "Индекс МосБиржи",
+                        "2013-06-15",
                         1500.0,
-                        1510.0,
                         1515.0,
                         1495.0,
+                        1510.0,
                         5e7,
                         0,
-                        "2013-06-15 10:00:00",
-                        "2013-06-15 23:49:59",
+                        0,
+                        0,
+                        2,
+                        0,
+                        "SUR",
+                        0,
                     ],
                 ],
             },
@@ -126,8 +179,8 @@ class TestMoexISSFetcherCandles:
             )
 
         assert len(candles) == 1
-        # 2013: Russia UTC+4. MSK 10:00 = UTC 06:00
-        assert candles[0].timestamp.hour == 6
+        # 2013: Russia UTC+4. Midnight MSK = UTC 20:00 previous day
+        assert candles[0].timestamp.hour == 20
 
     @patch("time.sleep")
     def test_fetch_candles_empty(self, _sleep: MagicMock, fetcher: MoexISSFetcher) -> None:
@@ -264,30 +317,55 @@ class TestMoexISSFetcherPagination:
         # Page 1: exactly 100 rows (triggers pagination continue)
         page1_data = [
             [
+                "SNDX",
+                "IMOEX",
+                "Индекс МосБиржи",
+                f"2024-{1 + (15 + i) // 32:02d}-{(15 + i) % 28 + 1:02d}",
                 3200.0 + i,
-                3210.0 + i,
                 3215.0 + i,
                 3195.0 + i,
+                3210.0 + i,
                 1e8,
                 0,
-                f"2024-01-{15 + i // 10:02d} 10:00:00",
-                f"2024-01-{15 + i // 10:02d} 23:49:59",
+                0,
+                0,
+                2,
+                0,
+                "SUR",
+                0,
             ]
             for i in range(100)
         ]
         page1 = {
-            "candles": {
-                "columns": ["open", "close", "high", "low", "value", "volume", "begin", "end"],
+            "history": {
+                "columns": _ISS_HISTORY_COLUMNS,
                 "data": page1_data,
             }
         }
         # Page 2: fewer than 100 rows (stops pagination)
         page2_data = [
-            [3300.0, 3310.0, 3315.0, 3295.0, 1e8, 0, "2024-01-25 10:00:00", "2024-01-25 23:49:59"]
+            [
+                "SNDX",
+                "IMOEX",
+                "Индекс МосБиржи",
+                "2024-05-25",
+                3300.0,
+                3315.0,
+                3295.0,
+                3310.0,
+                1e8,
+                0,
+                0,
+                0,
+                2,
+                0,
+                "SUR",
+                0,
+            ]
         ]
         page2 = {
-            "candles": {
-                "columns": ["open", "close", "high", "low", "value", "volume", "begin", "end"],
+            "history": {
+                "columns": _ISS_HISTORY_COLUMNS,
                 "data": page2_data,
             }
         }

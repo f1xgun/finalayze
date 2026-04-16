@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     import pytest
 
 # ── Constants (ruff PLR2004: no magic numbers) ──────────────────────────────
-DEFAULT_NEWS_CYCLE_MINUTES = 30
+DEFAULT_NEWS_CYCLE_MINUTES = 2  # changed from 30 for faster sandbox iterations
 DEFAULT_STRATEGY_CYCLE_MINUTES = 60
 DEFAULT_DAILY_RESET_HOUR_UTC = 0
 DEFAULT_TELEGRAM_BOT_TOKEN = ""
@@ -27,15 +27,15 @@ TELEGRAM_TEST_CHAT_ID = "-1001234567890"
 
 class TestPhase3Settings:
     def test_news_cycle_minutes_default(self) -> None:
-        s = Settings()
+        s = Settings(_env_file=None)  # type: ignore[call-arg]
         assert s.news_cycle_minutes == DEFAULT_NEWS_CYCLE_MINUTES
 
     def test_strategy_cycle_minutes_default(self) -> None:
-        s = Settings()
+        s = Settings(_env_file=None)  # type: ignore[call-arg]
         assert s.strategy_cycle_minutes == DEFAULT_STRATEGY_CYCLE_MINUTES
 
     def test_daily_reset_hour_utc_default(self) -> None:
-        s = Settings()
+        s = Settings(_env_file=None)  # type: ignore[call-arg]
         assert s.daily_reset_hour_utc == DEFAULT_DAILY_RESET_HOUR_UTC
 
     def test_telegram_bot_token_is_string(self) -> None:

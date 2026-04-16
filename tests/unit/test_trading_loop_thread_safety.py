@@ -91,7 +91,7 @@ class TestSentimentLockScope:
         # Create an async mock cache whose set_sentiment tracks lock state
         mock_cache = AsyncMock()
 
-        async def tracking_set_sentiment(key: str, value: float) -> None:
+        async def tracking_set_sentiment(key: str, value: float, **kwargs: object) -> None:
             locked = loop._sentiment_lock.locked()
             lock_held_during_redis_write.append(locked)
 
@@ -118,6 +118,9 @@ class TestSentimentLockScope:
             direct_tickers=[],
         )
         import asyncio as _aio
+
+        # Mock DB persistence to avoid real PostgreSQL connection
+        loop._persist_sentiment_scores_async = AsyncMock()
 
         _aio.run(loop._apply_impact_result(result))
 

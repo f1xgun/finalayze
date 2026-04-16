@@ -258,7 +258,7 @@ class _CachingLLMClient(LLMClient, ABC):
         if parsed is None:
             msg = f"{type(self).__name__} structured output returned None — model refused"
             raise LLMError(msg)
-        return parsed
+        return parsed  # type: ignore[no-any-return]
 
 
 class OpenRouterClient(_CachingLLMClient):

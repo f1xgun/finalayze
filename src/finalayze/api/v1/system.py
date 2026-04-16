@@ -31,6 +31,7 @@ _log = structlog.get_logger()
 
 router = APIRouter(tags=["system"])
 
+
 # Application-scoped singleton (overridden in tests via dependency overrides)
 def _init_mode_manager() -> ModeManager:
     """Create ModeManager from Settings, falling back to DEBUG on import errors."""

@@ -197,4 +197,6 @@ def _make_loop_stub(*, metrics: MagicMock | None = None) -> MagicMock:
     loop._cycle_orders_filled = 0
     loop._cycle_errors_caught = 0
     loop._cycle_exited_symbols = set()
+    loop._anomaly_detector = MagicMock()
+    loop._anomaly_detector.check.return_value = None
     return loop

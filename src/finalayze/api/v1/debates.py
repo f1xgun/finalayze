@@ -125,9 +125,7 @@ async def get_debate(debate_id: str) -> DebateDetailResponse:
     try:
         state = dm.read_debate(debate_id)
     except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=404, detail=f"Debate not found: {debate_id!r}"
-        ) from exc
+        raise HTTPException(status_code=404, detail=f"Debate not found: {debate_id!r}") from exc
 
     return DebateDetailResponse(
         debate_id=state.debate_id,
@@ -167,9 +165,7 @@ async def finalize_debate(
     try:
         experiment_id = orch.finalize_debate(debate_id, req.report)
     except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=404, detail=f"Debate not found: {debate_id!r}"
-        ) from exc
+        raise HTTPException(status_code=404, detail=f"Debate not found: {debate_id!r}") from exc
 
     return FinalizeDebateResponse(
         debate_id=debate_id,

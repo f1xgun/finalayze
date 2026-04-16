@@ -114,18 +114,14 @@ class TestEvaluateFoldMetricsProfitFactor:
 
         calibrator = MagicMock()
         calibrator.is_fitted = True
-        calibrator.predict_proba = MagicMock(
-            return_value=np.array([0.9, 0.9, 0.1, 0.1])
-        )
+        calibrator.predict_proba = MagicMock(return_value=np.array([0.9, 0.9, 0.1, 0.1]))
 
         result_with_cal = _evaluate_fold_metrics(
             models, test_features, test_labels, calibrator=calibrator
         )
 
         # Without calibrator
-        result_without_cal = _evaluate_fold_metrics(
-            models, test_features, test_labels
-        )
+        result_without_cal = _evaluate_fold_metrics(models, test_features, test_labels)
 
         # Calibrated should have better (lower) Brier score
         assert result_with_cal.brier_score < result_without_cal.brier_score
@@ -244,9 +240,7 @@ class TestWalkForwardCalibratorWiring:
         test_labels = [1, 1, 0, 0]
 
         # Should not raise - calibrator has predict_proba
-        result = _evaluate_fold_metrics(
-            models, test_features, test_labels, calibrator=calibrator
-        )
+        result = _evaluate_fold_metrics(models, test_features, test_labels, calibrator=calibrator)
         assert result.brier_score >= 0.0
 
 
