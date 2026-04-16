@@ -39,10 +39,10 @@ from finalayze.data.moex_calendar import is_moex_holiday
 from finalayze.data.normalizer import DataNormalizer
 from finalayze.markets.currency import CurrencyConverter
 from finalayze.markets.schedule import SCHEDULES
+from finalayze.orchestration.db_persistence import TradingPersistence
 
 if TYPE_CHECKING:
     from config.settings import Settings
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from finalayze.analysis.event_classifier import EventClassifier
     from finalayze.analysis.impact_estimator import ImpactEstimator
@@ -241,10 +241,10 @@ class TradingLoop:
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._async_thread: threading.Thread | None = None
 
-        # Separate DB engine/session factory for background loop.
-        # asyncpg binds connections to the event loop where they were created,
-        # so we cannot share the FastAPI (uvicorn) engine with our bg loop.
-        self._bg_session_factory: async_sessionmaker[AsyncSession] | None = None
+        # Database persistence (fire-and-forget writes to avoid crashing trading loop)
+        # Initialize with settings.database_url if available
+        db_url = getattr(settings, "database_url", None)
+        self._persistence = TradingPersistence(db_url, self._async_loop, settings)
 
         # Dedicated gRPC event loop -- isolates PollerCompletionQueue from general
         # async work. Prevents BlockingIOError contention causing 60-min cycle drift.
@@ -447,6 +447,7 @@ class TradingLoop:
         if self._async_loop is None or self._async_loop.is_closed():
             loop = asyncio.new_event_loop()
             self._async_loop = loop
+            self._persistence._async_loop = loop  # Update persistence's loop reference
             thread = threading.Thread(target=loop.run_forever, daemon=True)
             thread.start()
             self._async_thread = thread
@@ -1031,12 +1032,7 @@ class TradingLoop:
                         direct_tickers=result.direct_tickers,
                     )
                     # Fire-and-forget news article persistence (PERSIST-03)
-                    await self._persist_to_db_async(
-                        self._persist_news_article_async(article, result),
-                        table="news_articles",
-                        article_url=article.url,
-                        article_title=article.title[:80],
-                    )
+                    await self._persistence.persist_news_article_async(article, result)
                     await self._apply_impact_result(result)
                     consecutive_failures = 0
                     return True
@@ -1140,12 +1136,7 @@ class TradingLoop:
             return
         has_non_ru = any(not s.startswith("ru_") for s in active_segments)
         market_id = "us" if has_non_ru else "moex"
-        self._persist_to_db(
-            self._persist_sentiment_batch_async(ticker_scores, market_id, confidence),
-            table="sentiment_scores",
-            market=market_id,
-            tickers=len(ticker_scores),
-        )
+        self._persistence.persist_sentiment_batch(ticker_scores, market_id, confidence)
 
     async def _persist_sentiment_scores_async(
         self,
@@ -1158,12 +1149,7 @@ class TradingLoop:
             return
         has_non_ru = any(not s.startswith("ru_") for s in active_segments)
         market_id = "us" if has_non_ru else "moex"
-        await self._persist_to_db_async(
-            self._persist_sentiment_batch_async(ticker_scores, market_id, confidence),
-            table="sentiment_scores",
-            market=market_id,
-            tickers=len(ticker_scores),
-        )
+        await self._persistence.persist_sentiment_batch_async(ticker_scores, market_id, confidence)
 
     def _get_segment_tickers(self, seg_id: str) -> list[str]:
         """Get ticker symbols for instruments in this segment."""
@@ -1673,13 +1659,7 @@ class TradingLoop:
         self._cycle_signals_generated += 1
 
         # Fire-and-forget signal persistence (PERSIST-02)
-        self._persist_to_db(
-            self._persist_signal_async(signal),
-            table="signals",
-            symbol=signal.symbol,
-            strategy=signal.strategy_name,
-            direction=signal.direction.value,
-        )
+        self._persistence.persist_signal(signal)
 
         if self._metrics:
             self._metrics.record_signal(
@@ -2091,13 +2071,7 @@ class TradingLoop:
                 self._alerter.on_trade_filled(result, market_id, broker=market_id)
 
                 # Fire-and-forget order persistence (PERSIST-01)
-                self._persist_to_db(
-                    self._persist_order_async(order, result, market_id),
-                    table="orders",
-                    symbol=order.symbol,
-                    side=order.side,
-                    market=market_id,
-                )
+                self._persistence.persist_order(order, result, market_id)
 
                 # Compute slippage in bps
                 expected_price = candles[-1].close if candles else None
@@ -2464,7 +2438,7 @@ class TradingLoop:
                 _log.debug("_daily_reset: FX unavailable for dual currency")
 
         # Persist equity snapshots to DB
-        self._persist_equity_snapshots(new_baselines, now)
+        self._persistence.persist_equity_snapshots(new_baselines, now)
 
         self._alerter.on_daily_summary(
             market_pnl,
@@ -2494,215 +2468,6 @@ class TradingLoop:
         movers.sort(key=lambda x: abs(x[1]), reverse=True)
         return movers[:3]
 
-    _DB_PERSIST_TIMEOUT = 120  # seconds — generous for fire-and-forget writes
-
-    def _get_bg_session_factory(self) -> async_sessionmaker[AsyncSession]:
-        """Return a session factory bound to the background event loop.
-
-        asyncpg connections are pinned to the event loop where they were first
-        used.  The global ``get_async_session_factory()`` creates its engine on
-        the FastAPI (uvicorn) loop, so using it from the background loop that
-        ``_run_async`` manages causes ``RuntimeError: Future attached to a
-        different loop``.  This method lazily creates a *separate* engine for
-        the background loop, avoiding the cross-loop conflict.
-        """
-        if self._bg_session_factory is None:
-            from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession  # noqa: PLC0415, I001
-            from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker  # noqa: PLC0415
-            from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine  # noqa: PLC0415
-            from config.settings import get_settings  # noqa: PLC0415
-
-            settings = get_settings()
-            engine = _create_async_engine(
-                settings.database_url,
-                echo=False,
-                pool_pre_ping=True,
-                pool_size=5,
-                max_overflow=2,
-                pool_timeout=30,
-                pool_recycle=1800,
-            )
-            self._bg_session_factory = _async_sessionmaker(
-                engine, class_=_AsyncSession, expire_on_commit=False
-            )
-        return self._bg_session_factory
-
-    def _persist_to_db(self, coro: Any, *, table: str, **ctx: Any) -> None:
-        """Fire-and-forget DB write. Never crashes the trading loop (PERSIST-05)."""
-        try:
-            self._run_async(coro, timeout=self._DB_PERSIST_TIMEOUT)
-            _log.debug("db_persist_ok", table=table, **ctx)
-        except Exception:
-            from finalayze.api.metrics import db_write_failures  # noqa: PLC0415
-
-            db_write_failures.labels(table=table).inc()
-            _log.warning("db_persist_failed", table=table, **ctx, exc_info=True)
-
-    async def _persist_to_db_async(self, coro: Any, *, table: str, **ctx: Any) -> None:
-        """Async variant of _persist_to_db for use in async contexts (PERSIST-05)."""
-        try:
-            await coro
-            _log.debug("db_persist_ok", table=table, **ctx)
-        except Exception:
-            from finalayze.api.metrics import db_write_failures  # noqa: PLC0415
-
-            db_write_failures.labels(table=table).inc()
-            _log.warning("db_persist_failed", table=table, **ctx, exc_info=True)
-
-    async def _persist_news_article_async(
-        self,
-        article: NewsArticle,
-        impact_result: NewsImpactResult | None,
-    ) -> None:
-        """Persist a news article to the news_articles table (PERSIST-03)."""
-        from finalayze.core.models import NewsArticleModel  # noqa: PLC0415
-
-        content_hash = hashlib.sha256(article.content.encode()).hexdigest()[:32]
-        factory = self._get_bg_session_factory()
-        async with factory() as session:
-            row = NewsArticleModel(
-                source=article.source[:50],
-                title=article.title,
-                summary=article.content[:500] if article.content else None,
-                content=content_hash,
-                url=article.url or None,
-                language=getattr(article, "language", "en"),
-                published_at=article.published_at,
-                symbols=list(impact_result.direct_tickers) if impact_result else [],
-                affected_segments=(
-                    [s.sector for s in impact_result.affected_sectors] if impact_result else []
-                ),
-                raw_sentiment=(
-                    Decimal(str(round(impact_result.sentiment, 4))) if impact_result else None
-                ),
-                credibility_score=(
-                    Decimal(str(round(impact_result.confidence, 4))) if impact_result else None
-                ),
-                is_processed=impact_result is not None,
-            )
-            session.add(row)
-            await session.commit()
-
-    async def _persist_sentiment_batch_async(
-        self,
-        ticker_scores: dict[str, float],
-        market_id: str,
-        confidence: float,
-    ) -> None:
-        """Persist sentiment scores for a batch of tickers (PERSIST-04)."""
-        from finalayze.core.models import SentimentScoreModel  # noqa: PLC0415
-
-        now = self._now()
-        factory = self._get_bg_session_factory()
-        async with factory() as session:
-            for ticker, score in ticker_scores.items():
-                row = SentimentScoreModel(
-                    symbol=ticker,
-                    market_id=market_id,
-                    timestamp=now,
-                    news_sentiment=Decimal(str(round(score, 4))),
-                    composite_sentiment=Decimal(str(round(score, 4))),
-                    confidence=Decimal(str(round(confidence, 4))),
-                )
-                session.add(row)
-            await session.commit()
-
-    async def _persist_order_async(
-        self,
-        order: OrderRequest,
-        result: Any,
-        market_id: str,
-    ) -> None:
-        """Persist a filled/rejected order to the orders table."""
-        from finalayze.core.models import OrderModel  # noqa: PLC0415
-
-        factory = self._get_bg_session_factory()
-        async with factory() as session:
-            row = OrderModel(
-                broker=market_id,
-                broker_order_id=result.order_id or None,
-                symbol=order.symbol,
-                market_id=market_id,
-                side=order.side,
-                order_type="market",
-                quantity=order.quantity,
-                currency="RUB" if market_id.startswith(("moex", "ru_")) else "USD",
-                status="filled" if result.filled else "rejected",
-                filled_quantity=result.quantity if result.filled else Decimal(0),
-                filled_avg_price=result.fill_price,
-                filled_at=self._now() if result.filled else None,
-                submitted_at=self._now(),
-                mode=self._settings.mode.value,
-            )
-            session.add(row)
-            await session.commit()
-
-    async def _persist_signal_async(self, signal: Any) -> None:
-        """Persist a generated signal to the signals table."""
-        from finalayze.core.models import SignalModel  # noqa: PLC0415
-
-        factory = self._get_bg_session_factory()
-        async with factory() as session:
-            row = SignalModel(
-                strategy_name=signal.strategy_name,
-                symbol=signal.symbol,
-                market_id=signal.market_id,
-                segment_id=signal.segment_id,
-                direction=signal.direction.value,
-                confidence=Decimal(str(round(signal.confidence, 4))),
-                features=signal.features or None,
-                reasoning=signal.reasoning,
-                created_at=self._now(),
-                mode=self._settings.mode.value,
-            )
-            session.add(row)
-            await session.commit()
-
-    def _persist_equity_snapshots(
-        self,
-        baselines: dict[str, Decimal],
-        now: datetime,
-    ) -> None:
-        """Persist equity snapshots to DB asynchronously."""
-        try:
-            self._run_async(
-                self._persist_snapshots_async(baselines, now),
-            )
-        except Exception:
-            _log.warning("equity_snapshot_persist_failed", exc_info=True)
-
-    async def _persist_snapshots_async(
-        self,
-        baselines: dict[str, Decimal],
-        now: datetime,
-    ) -> None:
-        """Async helper to persist equity snapshots to TimescaleDB.
-
-        Creates one DailyEquitySnapshot row per market_id. Currency is
-        determined from market_id prefix (moex/ru_ -> RUB, else USD).
-        """
-        from finalayze.core.models import DailyEquitySnapshot  # noqa: PLC0415
-
-        factory = self._get_bg_session_factory()
-        async with factory() as session:
-            for market_id, equity in baselines.items():
-                currency = (
-                    "RUB" if market_id.startswith("moex") or market_id.startswith("ru_") else "USD"
-                )
-                snapshot = DailyEquitySnapshot(
-                    timestamp=now,
-                    market_id=market_id,
-                    equity=equity,
-                    currency=currency,
-                )
-                session.add(snapshot)
-            await session.commit()
-        _log.info(
-            "equity_snapshots_persisted",
-            markets=list(baselines.keys()),
-            count=len(baselines),
-        )
-
     def _load_baseline_from_db(self) -> None:
         """Load latest equity snapshots from DB on startup.
 
@@ -2726,7 +2491,7 @@ class TradingLoop:
                     self._baseline_equities[market_id] = equity
             if baselines:
                 now = datetime.now(UTC)
-                self._persist_equity_snapshots(baselines, now)
+                self._persistence.persist_equity_snapshots(baselines, now)
 
     async def _load_baseline_async(self) -> None:
         """Async helper to query today's equity snapshots from TimescaleDB.
@@ -2739,7 +2504,7 @@ class TradingLoop:
 
         from finalayze.core.models import DailyEquitySnapshot  # noqa: PLC0415
 
-        factory = self._get_bg_session_factory()
+        factory = self._persistence._get_bg_session_factory()
         async with factory() as session:
             today_start = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
             # Subquery: latest timestamp per market_id for today
