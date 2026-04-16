@@ -324,7 +324,9 @@ class TestPipelineSizing:
         mock_pipeline = MagicMock(spec=PositionSizingPipeline)
         mock_pipeline.compute.return_value = Decimal(10000)
 
-        with patch.object(loop._signal_executor, "_build_sizing_pipeline", return_value=mock_pipeline):
+        with patch.object(
+            loop._signal_executor, "_build_sizing_pipeline", return_value=mock_pipeline
+        ):
             order = loop._build_order(
                 signal,
                 CircuitLevel.NORMAL,
@@ -364,7 +366,9 @@ class TestPipelineSizing:
         mock_pipeline = MagicMock(spec=PositionSizingPipeline)
         mock_pipeline.compute.return_value = Decimal(0)
 
-        with patch.object(loop._signal_executor, "_build_sizing_pipeline", return_value=mock_pipeline):
+        with patch.object(
+            loop._signal_executor, "_build_sizing_pipeline", return_value=mock_pipeline
+        ):
             order = loop._build_order(
                 signal,
                 CircuitLevel.NORMAL,
@@ -392,7 +396,9 @@ class TestPipelineSizing:
 
         # Patch _get_segment_min_confidence to return low threshold
         with (
-            patch.object(loop._signal_executor, "_build_sizing_pipeline", return_value=mock_pipeline),
+            patch.object(
+                loop._signal_executor, "_build_sizing_pipeline", return_value=mock_pipeline
+            ),
             patch.object(loop._signal_executor, "_get_segment_min_confidence", return_value=0.3),
         ):
             order_normal = loop._build_order(

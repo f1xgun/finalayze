@@ -1466,7 +1466,8 @@ class TradingLoop:
         """
         # If called with old 5-arg signature (instrument, market_id, level, fetcher, now),
         # provide defaults for the new equity/cash/portfolio params
-        if "equity" not in kwargs and len(args) <= 5:
+        _old_sig_max = 5
+        if "equity" not in kwargs and len(args) <= _old_sig_max:
             # Try to get real portfolio from cache
             market_id = args[1] if len(args) > 1 else kwargs.get("market_id", "")
             portfolio = self._get_cached_portfolio(str(market_id))

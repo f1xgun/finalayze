@@ -106,7 +106,7 @@ class NewsPipeline:
         _LLM_FAILURE_ALERT_THRESHOLD = 3  # noqa: N806
         self._LLM_FAILURE_ALERT_THRESHOLD = _LLM_FAILURE_ALERT_THRESHOLD
 
-    def run_news_cycle(self) -> None:
+    def run_news_cycle(self) -> None:  # noqa: PLR0912, PLR0915
         """Fetch news from RSS, Telegram, and legacy NewsAPI; analyze and update sentiment.
 
         Called by APScheduler every news_cycle_minutes.
@@ -163,7 +163,7 @@ class NewsPipeline:
                 from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
 
                 MetricsCollector.inc_news_budget_cap_hit()
-            except Exception:
+            except Exception:  # noqa: S110
                 pass  # Metrics optional
             articles = articles[:_MAX_ARTICLES_PER_CYCLE]
 
@@ -193,7 +193,7 @@ class NewsPipeline:
                 from finalayze.api.metrics import llm_liveness_failures  # noqa: PLC0415
 
                 llm_liveness_failures.inc()
-            except Exception:
+            except Exception:  # noqa: S110
                 pass  # Metrics optional
             if (
                 self._llm_consecutive_failures % self._LLM_FAILURE_ALERT_THRESHOLD == 0

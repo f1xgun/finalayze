@@ -114,8 +114,15 @@ class TestProcessInstrumentMetrics:
         loop._get_market_equity = MagicMock(return_value=Decimal(10000))
 
         SignalExecutor.process_instrument(
-            loop, instrument, "us", CircuitLevel.NORMAL, fetcher, MagicMock(),
-            equity=Decimal(10000), cash=Decimal(10000), portfolio=portfolio,
+            loop,
+            instrument,
+            "us",
+            CircuitLevel.NORMAL,
+            fetcher,
+            MagicMock(),
+            equity=Decimal(10000),
+            cash=Decimal(10000),
+            portfolio=portfolio,
         )
 
         mc.record_signal.assert_called_once()

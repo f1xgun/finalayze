@@ -151,8 +151,14 @@ class TestDataNormalizerWiring:
 
         now = datetime.now(UTC)
         executor.process_instrument(
-            instrument, "moex", MagicMock(), fetcher, now,
-            equity=Decimal("100000"), cash=Decimal("50000"), portfolio=MagicMock(),
+            instrument,
+            "moex",
+            MagicMock(),
+            fetcher,
+            now,
+            equity=Decimal(100000),
+            cash=Decimal(50000),
+            portfolio=MagicMock(),
         )
 
         mock_normalizer.normalize_batch.assert_called_once_with(candles)
@@ -171,8 +177,14 @@ class TestDataNormalizerWiring:
 
         now = datetime.now(UTC)
         executor.process_instrument(
-            instrument, "moex", MagicMock(), fetcher, now,
-            equity=Decimal("100000"), cash=Decimal("50000"), portfolio=MagicMock(),
+            instrument,
+            "moex",
+            MagicMock(),
+            fetcher,
+            now,
+            equity=Decimal(100000),
+            cash=Decimal(50000),
+            portfolio=MagicMock(),
         )
 
         executor._strategy.generate_signal.assert_not_called()
@@ -240,8 +252,14 @@ class TestStalenessCheck:
 
         now = datetime.now(UTC)
         executor.process_instrument(
-            instrument, "moex", MagicMock(), fetcher, now,
-            equity=Decimal("100000"), cash=Decimal("50000"), portfolio=MagicMock(),
+            instrument,
+            "moex",
+            MagicMock(),
+            fetcher,
+            now,
+            equity=Decimal(100000),
+            cash=Decimal(50000),
+            portfolio=MagicMock(),
         )
 
         executor._strategy.generate_signal.assert_not_called()
@@ -269,8 +287,14 @@ class TestStalenessCheck:
 
         now = datetime.now(UTC)
         executor.process_instrument(
-            instrument, "moex", MagicMock(), fetcher, now,
-            equity=Decimal("100000"), cash=Decimal("50000"), portfolio=MagicMock(),
+            instrument,
+            "moex",
+            MagicMock(),
+            fetcher,
+            now,
+            equity=Decimal(100000),
+            cash=Decimal(50000),
+            portfolio=MagicMock(),
         )
 
         executor._strategy.generate_signal.assert_called_once()
