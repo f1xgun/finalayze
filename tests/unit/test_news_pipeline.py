@@ -26,11 +26,50 @@ def _make_article(i: int = 0) -> NewsArticle:
     )
 
 
-def _make_trading_loop(**overrides: Any) -> Any:
-    """Create a TradingLoop with minimal mocks for news cycle testing.
+def _wire_subcomponents(loop: Any) -> None:
+    """Wire NewsPipeline and SentimentManager onto a TradingLoop instance."""
+    from finalayze.orchestration.news_pipeline import NewsPipeline
+    from finalayze.orchestration.sentiment_manager import SentimentManager
 
-    Matches the attribute set expected by orchestration/trading_loop.py _news_cycle.
-    """
+    sentiment_mgr = SentimentManager.__new__(SentimentManager)
+    sentiment_mgr._sentiment_cache = loop._sentiment_cache
+    sentiment_mgr._sentiment_lock = loop._sentiment_lock
+    sentiment_mgr._cache = loop._cache
+    sentiment_mgr._event_driven_active = True
+    sentiment_mgr._registry = loop._registry
+    sentiment_mgr._market_ids = list(loop._fetchers.keys()) if loop._fetchers else []
+    loop._sentiment_mgr = sentiment_mgr
+
+    _PIPELINE_ATTRS = (
+        "_news_fetcher",
+        "_news_analyzer",
+        "_event_classifier",
+        "_impact_estimator",
+        "_alerter",
+        "_registry",
+        "_fetchers",
+        "_settings",
+        "_event_driven_active",
+        "_rss_fetcher",
+        "_telegram_reader",
+        "_news_impact_analyzer",
+        "_seen_article_hashes",
+        "_health_monitor",
+        "_metrics",
+        "_llm_consecutive_failures",
+    )
+    pipeline = NewsPipeline.__new__(NewsPipeline)
+    for attr in _PIPELINE_ATTRS:
+        if hasattr(loop, attr):
+            setattr(pipeline, attr, getattr(loop, attr))
+    pipeline._sentiment_mgr = sentiment_mgr
+    pipeline._persistence = MagicMock()
+    pipeline._async_loop_fn = getattr(loop, "_run_async", lambda coro, **kw: None)
+    loop._news_pipeline = pipeline
+
+
+def _make_trading_loop(**overrides: Any) -> Any:
+    """Create a TradingLoop with minimal mocks for news cycle testing."""
     from finalayze.core.trading_loop import TradingLoop
 
     settings = MagicMock()
@@ -65,18 +104,18 @@ def _make_trading_loop(**overrides: Any) -> Any:
     loop._sentiment_lock = threading.Lock()
     loop._async_loop = None
     loop._async_thread = None
-
-    # Attributes required by orchestration/trading_loop.py (main branch)
-    loop._event_driven_active = True  # bypass YAML check, assume enabled
+    loop._event_driven_active = True
     loop._rss_fetcher = None
     loop._telegram_reader = None
-    loop._news_impact_analyzer = None  # default: no analyzer (skip processing)
+    loop._news_impact_analyzer = None
     loop._seen_article_hashes = OrderedDict()
     loop._health_monitor = None
     loop._metrics = None
 
     for key, val in overrides.items():
         setattr(loop, f"_{key}", val)
+
+    _wire_subcomponents(loop)
 
     return loop
 
@@ -87,22 +126,18 @@ class TestBudgetCap:
         articles = [_make_article(i) for i in range(30)]
         loop = _make_trading_loop()
         loop._news_fetcher.fetch_news.return_value = articles
+        loop._news_pipeline._news_fetcher = loop._news_fetcher
 
         # Wire up _news_impact_analyzer so _analyze_impact_batch is called.
-        # We mock _run_async to capture the batch size.
         analyzer = MagicMock()
         loop._news_impact_analyzer = analyzer
+        loop._news_pipeline._news_impact_analyzer = analyzer
 
-        _batch_sizes: list[int] = []
-        _original_analyze_batch = loop.__class__._analyze_impact_batch
-
-        # Mock _run_async to capture what _analyze_impact_batch receives
-        def mock_run_async(coro, *, timeout: int = 30) -> tuple[int, int, str]:
-            # The coroutine was already created; we need to count articles.
-            # Instead, return ok count = cap to indicate all processed.
+        # Mock _async_loop_fn on the pipeline to capture batch size
+        def mock_run_async(coro: object, *, timeout: int = 30) -> tuple[int, int, str]:
             return (20, 0, "")
 
-        loop._run_async = mock_run_async
+        loop._news_pipeline._async_loop_fn = mock_run_async
         loop._news_cycle()
 
         from finalayze.core.trading_loop import _MAX_ARTICLES_PER_CYCLE

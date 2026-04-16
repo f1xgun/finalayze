@@ -18,14 +18,26 @@ from finalayze.core.schemas import (
 )
 from finalayze.ml.features.macro import (
     EXTERNAL_DATA_LAG_BARS as _EXTERNAL_DATA_LAG_BARS,
+)
+from finalayze.ml.features.macro import (
     compute_cbr_features as _compute_cbr_features,
+)
+from finalayze.ml.features.macro import (
     compute_macro_features as _compute_macro_features,
 )
 from finalayze.ml.features.moex_external import (
     compute_brent_return_features as _compute_brent_return_features,
+)
+from finalayze.ml.features.moex_external import (
     compute_commodity_features as _compute_commodity_features,
+)
+from finalayze.ml.features.moex_external import (
     compute_fx_features as _compute_fx_features,
+)
+from finalayze.ml.features.moex_external import (
     compute_fx_return_features as _compute_fx_return_features,
+)
+from finalayze.ml.features.moex_external import (
     compute_turnover_features as _compute_turnover_features,
 )
 from finalayze.ml.features.technical import compute_features

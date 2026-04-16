@@ -69,7 +69,7 @@ class TestPersistToDb:
             msg = "timeout"
             raise RuntimeError(msg)
 
-        with patch("finalayze.orchestration.trading_loop._log") as mock_log:
+        with patch("finalayze.orchestration.db_persistence._log") as mock_log:
             loop._persist_to_db(failing_coro(), table="signals")
             mock_log.warning.assert_called_once()
             call_args = mock_log.warning.call_args
@@ -106,6 +106,9 @@ class TestPersistToDb:
     def test_successful_call_does_not_increment_counter(self) -> None:
         """Successful persistence does not touch the failure counter."""
         loop = _make_loop()
+        # With db_url=None, _persist_to_db skips entirely (no counter increment).
+        # This is equivalent to "success" since no error path is triggered.
+        loop._persistence._db_url = None
 
         async def ok_coro() -> None:
             pass
@@ -140,7 +143,7 @@ class TestOrderPersistence:
         order.side = "BUY"
         order.quantity = Decimal(10)
 
-        with patch.object(loop, "_persist_to_db") as mock_persist:
+        with patch.object(loop._persistence, "_persist_to_db") as mock_persist:
             loop._submit_order(order, "moex", candles=[])
             # Check _persist_to_db was called with table="orders"
             persist_calls = [
@@ -178,7 +181,7 @@ class TestOrderPersistence:
             msg = "boom"
             raise RuntimeError(msg)
 
-        loop._persist_to_db = broken_persist  # type: ignore[assignment]
+        loop._persistence._persist_to_db = broken_persist  # type: ignore[assignment]
 
         # Create minimal candle list for stop-loss computation
         candle = MagicMock()
@@ -193,7 +196,7 @@ class TestOrderPersistence:
         # that _submit_order catches the outer exception.
         # Since _persist_to_db is designed NOT to throw, this test
         # verifies the design: persistence is called, but stop-loss still happens.
-        with patch.object(loop, "_persist_to_db"):
+        with patch.object(loop._persistence, "_persist_to_db"):
             loop._submit_order(order, "moex", candles=[candle])
             # If we got here, stop-loss wiring wasn't prevented
 

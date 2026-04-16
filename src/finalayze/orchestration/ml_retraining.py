@@ -110,7 +110,7 @@ class MLRetrainingService:
             try:
                 retrain_end = self._now()
                 retrain_start = retrain_end - timedelta(days=500 * 2)
-                candles = fetcher.fetch_candles(  # type: ignore[attr-defined]
+                candles = fetcher.fetch_candles(
                     symbol=instrument.symbol,
                     start=retrain_start,
                     end=retrain_end,

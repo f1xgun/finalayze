@@ -88,6 +88,24 @@ def _make_trading_loop_mock(
     # Metrics collector (needed by _daily_reset)
     loop._metrics = MagicMock()
 
+    # DailyReportingService (needed after decomposition)
+    from finalayze.orchestration.daily_reporting import DailyReportingService
+
+    daily_reporter = DailyReportingService(
+        broker_router=loop._broker_router,
+        circuit_breakers=loop._circuit_breakers,
+        cross_market_breaker=loop._cross_market_breaker,
+        loss_limit_tracker=loop._loss_limit_tracker,
+        alerter=loop._alerter,
+        persistence=MagicMock(),
+        bond_processor=loop._bond_processor,
+        fx_service=loop._fx_service,
+        metrics_collector=loop._metrics,
+        settings=loop._settings,
+        now_fn=loop._now,
+    )
+    loop._daily_reporter = daily_reporter
+
     return loop
 
 
@@ -127,13 +145,13 @@ class TestEquitySnapshotPersistence:
     """Equity snapshots persisted to DB via DailyEquitySnapshot model."""
 
     def test_snapshots_persisted(self) -> None:
-        """After _daily_reset, _persist_equity_snapshots is called."""
+        """After _daily_reset, persist_equity_snapshots is called."""
         from finalayze.core.trading_loop import TradingLoop
 
         loop = _make_trading_loop_mock()
         TradingLoop._daily_reset(loop)
-        # _persist_equity_snapshots should have been called
-        loop._persist_equity_snapshots.assert_called_once()
+        # persist_equity_snapshots should have been called on daily_reporter._persistence
+        loop._daily_reporter._persistence.persist_equity_snapshots.assert_called_once()
 
     def test_no_snapshot_uses_current_equity(self) -> None:
         """If no snapshot exists for today, current equity used as baseline."""
@@ -148,9 +166,9 @@ class TestEquitySnapshotPersistence:
     @pytest.mark.asyncio
     async def test_persist_snapshots_async_creates_rows(self) -> None:
         """_persist_snapshots_async creates DailyEquitySnapshot rows via session.add + commit."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.db_persistence import TradingPersistence
 
-        loop = MagicMock(spec=TradingLoop)
+        persistence = MagicMock(spec=TradingPersistence)
         baselines = {
             "us": Decimal(50000),
             "moex": Decimal(3000000),
@@ -165,8 +183,8 @@ class TestEquitySnapshotPersistence:
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        loop._get_bg_session_factory = MagicMock(return_value=mock_factory)
-        await TradingLoop._persist_snapshots_async(loop, baselines, now)
+        persistence._get_bg_session_factory = MagicMock(return_value=mock_factory)
+        await TradingPersistence._persist_snapshots_async(persistence, baselines, now)
 
         # Should have called session.add 3 times (one per market)
         assert mock_session.add.call_count == 3

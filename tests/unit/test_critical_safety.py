@@ -438,7 +438,10 @@ class TestStrategyCycleCallsPreTradeChecker:
 
         with (
             _market_open_ctx(loop),
-            patch.object(loop, "_pre_trade_checker") as mock_checker,  # type: ignore[arg-type]
+            patch.object(
+                loop._signal_executor,  # type: ignore[attr-defined]
+                "_pre_trade_checker",
+            ) as mock_checker,
         ):
             mock_result = MagicMock()
             mock_result.passed = True
@@ -458,7 +461,9 @@ class TestStrategyCycleCallsPreTradeChecker:
         with (
             _market_open_ctx(loop),
             patch.object(  # type: ignore[attr-defined]
-                loop._pre_trade_checker, "check", return_value=fail_result
+                loop._signal_executor._pre_trade_checker,
+                "check",
+                return_value=fail_result,
             ),
         ):
             loop._strategy_cycle()  # type: ignore[attr-defined]
@@ -480,13 +485,20 @@ class TestStrategyCycleUsesRollingKelly:
         loop = _make_trading_loop(signal=signal)
         assert isinstance(loop, TradingLoop)
 
-        # Verify loop has a kelly sizer
-        assert hasattr(loop, "_kelly_sizer")
+        # Verify loop has a kelly sizer (may be on loop or position tracker)
+        kelly_sizer = getattr(
+            loop,
+            "_kelly_sizer",
+            getattr(loop._position_tracker, "_kelly_sizer", None),  # type: ignore[attr-defined]
+        )
+        assert kelly_sizer is not None
 
         with (
             _market_open_ctx(loop),
             patch.object(  # type: ignore[attr-defined]
-                loop._kelly_sizer, "optimal_fraction", return_value=Decimal("0.01")
+                loop._position_tracker._kelly_sizer,  # type: ignore[attr-defined]
+                "optimal_fraction",
+                return_value=Decimal("0.01"),
             ) as mock_kelly,
         ):
             loop._strategy_cycle()  # type: ignore[attr-defined]
@@ -598,8 +610,8 @@ class TestStopLossMonitoring:
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
-        # Loop must track open positions and their stop-loss states
-        assert hasattr(loop, "_stop_states")
+        # Stop states are tracked in position_tracker after decomposition
+        assert hasattr(loop._position_tracker, "_stop_states")  # type: ignore[attr-defined]
 
     def test_check_stop_losses_submits_sell_when_price_at_stop(self) -> None:
         from finalayze.core.trading_loop import TradingLoop
@@ -607,9 +619,10 @@ class TestStopLossMonitoring:
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
+        pt = loop._position_tracker  # type: ignore[attr-defined]
 
         # Set up a position with stop loss at 160.00, current price 150.00 (below stop)
-        loop._stop_states[SYMBOL_AAPL] = StopLossState(  # type: ignore[attr-defined]
+        pt._stop_states[SYMBOL_AAPL] = StopLossState(
             initial_stop=Decimal("160.00"),
             current_stop=Decimal("160.00"),
             highest_price=Decimal("170.00"),
@@ -625,7 +638,7 @@ class TestStopLossMonitoring:
         broker.get_positions = MagicMock(return_value={SYMBOL_AAPL: Decimal(10)})
 
         current_price = Decimal("150.00")  # at/below stop
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, current_price)  # type: ignore[attr-defined]
+        pt.check_stop_losses(MARKET_US, SYMBOL_AAPL, current_price)
 
         broker.submit_order.assert_called_once()
         call_args = broker.submit_order.call_args[0][0]
@@ -638,9 +651,10 @@ class TestStopLossMonitoring:
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
+        pt = loop._position_tracker  # type: ignore[attr-defined]
 
         # Stop at 140.00, current price 150.00 (above stop -> hold)
-        loop._stop_states[SYMBOL_AAPL] = StopLossState(  # type: ignore[attr-defined]
+        pt._stop_states[SYMBOL_AAPL] = StopLossState(
             initial_stop=Decimal("140.00"),
             current_stop=Decimal("140.00"),
             highest_price=Decimal("150.00"),
@@ -651,7 +665,7 @@ class TestStopLossMonitoring:
             atr_value=Decimal("5.0"),
         )
         current_price = Decimal("150.00")
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, current_price)  # type: ignore[attr-defined]
+        pt.check_stop_losses(MARKET_US, SYMBOL_AAPL, current_price)
 
         broker = loop._broker_router.route(MARKET_US)  # type: ignore[attr-defined]
         broker.submit_order.assert_not_called()

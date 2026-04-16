@@ -18,7 +18,7 @@ import asyncio
 import threading
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -39,9 +39,9 @@ from finalayze.orchestration.news_pipeline import NewsPipeline
 from finalayze.orchestration.position_manager import PositionTracker
 from finalayze.orchestration.sentiment_manager import SentimentManager
 from finalayze.orchestration.signal_executor import (
-    SignalExecutor,
     _CANDLE_LOOKBACK,  # noqa: F401  # re-export for tests
     _STALENESS_THRESHOLD_HOURS,  # noqa: F401  # re-export for tests
+    SignalExecutor,
 )
 
 if TYPE_CHECKING:
@@ -86,7 +86,48 @@ _US_CLOSE_UTC = (21, 0)
 _MOEX_OPEN_UTC = (7, 0)
 _MOEX_CLOSE_UTC = (15, 45)
 
+_ANOMALY_SYSTEM_PROMPT = (
+    "You are a financial market analyst. Explain the likely cause of "
+    "the following statistical anomaly in 2-3 sentences. Be specific "
+    "about potential catalysts (earnings, macro events, sector rotation). "
+    "Do not give trading advice."
+)
+_ANOMALY_LLM_TIMEOUT = 30.0
+_MAX_ARTICLES_PER_CYCLE = 20  # budget cap: prevent LLM cost explosion on busy news days
+
+SOURCE_CREDIBILITY: dict[str, float] = {
+    "rbc": 0.8,
+    "interfax": 0.8,
+    "tass": 0.8,
+    "moex_iss": 0.8,
+    "reuters": 0.8,
+    "telegram": 0.7,
+}
+
 _log = structlog.get_logger()
+
+
+def get_credibility(source: str) -> float:
+    """Return credibility score for a news source. Default 0.5 for unknown."""
+    return SOURCE_CREDIBILITY.get(source.lower(), 0.5)
+
+
+def validate_tickers(
+    tickers: list[str],
+    registry: object,
+    market_id: str,
+) -> list[str]:
+    """Filter tickers to only those in the instrument registry."""
+    from finalayze.core.exceptions import InstrumentNotFoundError  # noqa: PLC0415
+
+    valid: list[str] = []
+    for ticker in tickers:
+        try:
+            registry.get(ticker, market_id)  # type: ignore[attr-defined]
+            valid.append(ticker)
+        except InstrumentNotFoundError:
+            _log.warning("entity_not_in_registry", ticker=ticker, market_id=market_id)
+    return valid
 
 
 class TradingLoop:
@@ -94,6 +135,21 @@ class TradingLoop:
 
     Designed for TEST / SANDBOX modes. Will gate on WorkMode in real mode.
     """
+
+    # Class-level defaults so MagicMock(spec=TradingLoop) recognizes these attrs.
+    # All are overridden in __init__.
+    _news_pipeline: Any = None
+    _signal_executor: Any = None
+    _position_tracker: Any = None
+    _daily_reporter: Any = None
+    _ml_retraining: Any = None
+    _sentiment_mgr: Any = None
+    _persistence: Any = None
+    _llm_client: Any = None
+    _async_loop: Any = None
+    _async_thread: Any = None
+    _grpc_loop: Any = None
+    _grpc_thread: Any = None
 
     def __init__(  # noqa: PLR0915
         self,
@@ -315,6 +371,78 @@ class TradingLoop:
         self._consecutive_bond_errors: int = 0
         self._MAX_CONSECUTIVE_ERRORS: int = 3
 
+    # ── Backward-compat delegation ──────────────────────────────────────────
+    # After decomposition, many attributes moved to sub-components. This
+    # __getattr__ transparently delegates access so existing tests and code
+    # that reference loop._stop_states, loop._news_cycle, etc. still work.
+
+    # Maps attribute names to (subcomponent_attr, target_attr_name).
+    # If target_attr_name is None, use the same name as the key.
+    _ATTR_DELEGATES: ClassVar[dict[str, tuple[str, str | None]]] = {
+        # PositionTracker attributes
+        "_stop_states": ("_position_tracker", None),
+        "_entry_strategy": ("_position_tracker", None),
+        "_entry_prices": ("_position_tracker", None),
+        "_stop_loss_lock": ("_position_tracker", None),
+        "_check_stop_losses": ("_position_tracker", "check_stop_losses"),
+        # SignalExecutor attributes
+        "_cycle_exited_symbols": ("_signal_executor", None),
+        "_build_sizing_pipeline": ("_signal_executor", None),
+        "_has_pending_order": ("_signal_executor", None),
+        "_sizing_pipeline": ("_signal_executor", None),
+        # NewsPipeline attributes
+        "_news_cycle": ("_news_pipeline", "run_news_cycle"),
+        "_analyze_impact_batch": ("_news_pipeline", None),
+        "_apply_impact_result": ("_news_pipeline", None),
+        # SentimentManager attributes
+        "_sentiment_lock": ("_sentiment_mgr", None),
+        "_sentiment_cache": ("_sentiment_mgr", None),
+        "_read_decayed_sentiment": ("_sentiment_mgr", "read_decayed_sentiment"),
+        "_get_sentiment": ("_sentiment_mgr", "get_sentiment"),
+        "_event_driven_active": ("_sentiment_mgr", None),
+        # MLRetrainingService attributes
+        "_retrain_cycle": ("_ml_retraining", "retrain_all"),
+        # DailyReportingService attributes
+        "_persist_equity_snapshots": ("_persistence", None),
+        "_persist_snapshots_async": ("_persistence", None),
+        "_load_baseline_async": ("_daily_reporter", None),
+        # TradingPersistence attributes
+        "_get_bg_session_factory": ("_persistence", None),
+    }
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate attribute access to sub-components for backward compatibility."""
+        delegates = type(self)._ATTR_DELEGATES
+        if name in delegates:
+            target_name, attr_name = delegates[name]
+            try:
+                target = object.__getattribute__(self, target_name)
+            except AttributeError:
+                raise AttributeError(  # noqa: B904
+                    f"'{type(self).__name__}' object has no attribute {name!r}"
+                )
+            return getattr(target, attr_name if attr_name is not None else name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute {name!r}")
+
+    # Attributes that should be written through to subcomponents
+    _ATTR_SETTERS: ClassVar[dict[str, tuple[str, str | None]]] = {
+        "_event_driven_active": ("_sentiment_mgr", None),
+        "_sentiment_cache": ("_sentiment_mgr", None),
+    }
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Write through delegated attributes to sub-components."""
+        setters = type(self)._ATTR_SETTERS
+        if name in setters:
+            target_name, attr_name = setters[name]
+            try:
+                target = object.__getattribute__(self, target_name)
+                setattr(target, attr_name if attr_name is not None else name, value)
+                return
+            except AttributeError:
+                pass  # Fall through to default if subcomponent not yet initialized
+        object.__setattr__(self, name, value)
+
     def _reset_cycle_counters(self) -> None:
         """Reset per-cycle counters for CycleLogEntry tracking."""
         self._cycle_instruments_processed = 0
@@ -482,7 +610,8 @@ class TradingLoop:
         if self._async_loop is None or self._async_loop.is_closed():
             loop = asyncio.new_event_loop()
             self._async_loop = loop
-            self._persistence._async_loop = loop  # Update persistence's loop reference
+            if hasattr(self, "_persistence") and self._persistence is not None:
+                self._persistence._async_loop = loop  # Update persistence's loop reference
             thread = threading.Thread(target=loop.run_forever, daemon=True)
             thread.start()
             self._async_thread = thread
@@ -523,7 +652,7 @@ class TradingLoop:
         """
         if self._grpc_loop is None or self._grpc_loop.is_closed():
             self._init_grpc_loop()
-        future = asyncio.run_coroutine_threadsafe(coro, self._grpc_loop)  # type: ignore[arg-type]
+        future = asyncio.run_coroutine_threadsafe(coro, self._grpc_loop)
         return future.result(timeout=timeout)
 
     @property
@@ -535,7 +664,11 @@ class TradingLoop:
 
     def start(self) -> None:
         """Start the APScheduler and block until stop() is called."""
-        if self._kill_switch is not None and hasattr(self._kill_switch, "is_killed") and self._kill_switch.is_killed:
+        if (
+            self._kill_switch is not None
+            and hasattr(self._kill_switch, "is_killed")
+            and self._kill_switch.is_killed
+        ):
             raise RuntimeError("Kill switch active -- clear flag before restarting")
 
         from apscheduler.executors.pool import (  # noqa: PLC0415
@@ -1254,16 +1387,150 @@ class TradingLoop:
 
     def get_entry_strategies(self) -> dict[str, str]:
         """Return a snapshot of {symbol: strategy_name} for currently open positions."""
-        return self._signal_executor.get_entry_strategies()
+        result: dict[str, str] = self._signal_executor.get_entry_strategies()
+        return result
 
     # ── Delegation shims for backward-compat with tests ──────────────────
     def _build_order(self, *args: object, **kwargs: object) -> object:
         """Delegate to SignalExecutor._build_order (test compat)."""
-        return self._signal_executor._build_order(*args, **kwargs)  # type: ignore[arg-type]
+        return self._signal_executor._build_order(*args, **kwargs)
 
     def _submit_order(self, *args: object, **kwargs: object) -> object:
         """Delegate to SignalExecutor._submit_order (test compat)."""
-        return self._signal_executor._submit_order(*args, **kwargs)  # type: ignore[arg-type]
+        return self._signal_executor._submit_order(*args, **kwargs)
+
+    # ---- Persistence delegation shims (test compat) ----
+
+    def _persist_to_db(self, *args: object, **kwargs: object) -> None:
+        """Delegate to TradingPersistence._persist_to_db (test compat)."""
+        self._persistence._persist_to_db(*args, **kwargs)
+
+    async def _persist_signal_async(self, *args: object, **kwargs: object) -> None:
+        """Delegate to TradingPersistence._persist_signal_async (test compat)."""
+        await self._persistence._persist_signal_async(*args, **kwargs)
+
+    async def _persist_order_async(self, *args: object, **kwargs: object) -> None:
+        """Delegate to TradingPersistence._persist_order_async (test compat)."""
+        await self._persistence._persist_order_async(*args, **kwargs)
+
+    async def _persist_news_article_async(self, article: object, impact_result: object) -> None:
+        """Delegate to TradingPersistence._persist_news_article_async (test compat)."""
+        await self._persistence._persist_news_article_async(article, impact_result)
+
+    async def _persist_sentiment_batch_async(self, *args: object, **kwargs: object) -> None:
+        """Delegate to TradingPersistence._persist_sentiment_batch_async (test compat)."""
+        await self._persistence._persist_sentiment_batch_async(*args, **kwargs)
+
+    # ---- Anomaly enrichment (test compat) ----
+
+    async def _enrich_anomaly_async(
+        self,
+        symbol: str,
+        market_id: str,
+        anomaly: object,
+    ) -> None:
+        """Fire-and-forget LLM enrichment -- never raises, never blocks raw alert."""
+        try:
+            prompt = (
+                f"Ticker: {symbol} ({market_id})\n"
+                f"Price move: {anomaly.price_move_pct:+.1f}%\n"  # type: ignore[attr-defined]
+                f"Sigma: {anomaly.sigma:.1f}\n"  # type: ignore[attr-defined]
+                f"Volume ratio: {anomaly.volume_ratio:.1f}x average\n"  # type: ignore[attr-defined]
+                f"Anomaly type: {anomaly.anomaly_type}"  # type: ignore[attr-defined]
+            )
+            assert self._llm_client is not None  # guarded by caller
+            explanation = await asyncio.wait_for(
+                self._llm_client.complete(prompt, _ANOMALY_SYSTEM_PROMPT),
+                timeout=_ANOMALY_LLM_TIMEOUT,
+            )
+            follow_up = f"AI interpretation (unverified): {explanation}"
+            await self._alerter._send(follow_up)
+        except Exception:
+            _log.warning(
+                "anomaly_llm_failure",
+                symbol=symbol,
+                market_id=market_id,
+            )
+
+    # ---- Process instrument delegation (test compat) ----
+
+    def _process_instrument(self, *args: object, **kwargs: object) -> object:
+        """Delegate to SignalExecutor.process_instrument (test compat)."""
+        return self._signal_executor.process_instrument(*args, **kwargs)
+
+    # ---- Portfolio review (re-added after decomposition) ----
+
+    def _portfolio_review_cycle(self) -> None:
+        """APScheduler callback -- dispatches async review without blocking."""
+        if not hasattr(self, "_llm_client") or self._llm_client is None:
+            _log.info("portfolio_review_skipped", reason="no LLM client configured")
+            return
+        if self._async_loop is None or self._async_loop.is_closed():
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._run_portfolio_review_async(),
+            self._async_loop,
+        )
+
+    async def _run_portfolio_review_async(self) -> None:
+        """Fire-and-forget async portfolio review -- never raises, never blocks."""
+        try:
+            from finalayze.analysis.portfolio_review_agent import (  # noqa: PLC0415
+                PORTFOLIO_REVIEW_SYSTEM_PROMPT,
+                REVIEW_LLM_TIMEOUT,
+                PortfolioReviewResult,
+                build_review_prompt,
+                format_review_telegram,
+            )
+
+            portfolio_data = self._gather_portfolio_data()
+            prompt = build_review_prompt(portfolio_data)
+            assert self._llm_client is not None
+            result = await asyncio.wait_for(
+                self._llm_client.parse_structured(
+                    prompt=prompt,
+                    system=PORTFOLIO_REVIEW_SYSTEM_PROMPT,
+                    response_model=PortfolioReviewResult,
+                ),
+                timeout=REVIEW_LLM_TIMEOUT,
+            )
+            message = format_review_telegram(result)
+            await self._alerter._send(message)
+        except Exception:
+            _log.warning("portfolio_review_llm_failure")
+
+    def _gather_portfolio_data(self) -> dict[str, object]:
+        """Collect portfolio state from all configured markets."""
+        data: dict[str, object] = {}
+        for market_id in self._circuit_breakers:
+            try:
+                broker = self._broker_router.route(market_id)
+                portfolio = broker.get_portfolio()
+                positions = broker.get_positions()
+                data[market_id] = {
+                    "equity": portfolio.equity,
+                    "cash": portfolio.cash,
+                    "positions": positions,
+                }
+            except Exception:
+                _log.warning("portfolio_review_broker_error", market_id=market_id)
+        return data
+
+    # ---- ML retraining delegation (test compat) ----
+
+    def _retrain_cycle(self) -> None:
+        """Delegate to MLRetrainingService.retrain_all (test compat)."""
+        self._ml_retraining.retrain_all()
+
+    def _retrain_segment(self, *args: object, **kwargs: object) -> None:
+        """Delegate to MLRetrainingService._retrain_segment (test compat)."""
+        self._ml_retraining._retrain_segment(*args, **kwargs)
+
+    # ---- News cycle delegation (test compat) ----
+
+    def _news_cycle(self) -> None:
+        """Delegate to NewsPipeline.run_news_cycle (test compat)."""
+        self._news_pipeline.run_news_cycle()
 
     def _daily_reset(self) -> None:
         """Reset circuit breakers and send daily P&L summary.
@@ -1281,7 +1548,10 @@ class TradingLoop:
 
         Delegates to DailyReportingService._compute_top_movers().
         """
-        return self._daily_reporter._compute_top_movers(self._baseline_equities)
+        result: list[tuple[str, float]] = self._daily_reporter._compute_top_movers(
+            self._baseline_equities
+        )
+        return result
 
     def _load_baseline_from_db(self) -> None:
         """Load latest equity snapshots from DB on startup.

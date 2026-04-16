@@ -83,9 +83,7 @@ class SentimentManager:
             }
         )
 
-    def read_decayed_sentiment_unlocked(
-        self, seg_id: str, ticker: str | None = None
-    ) -> float:
+    def read_decayed_sentiment_unlocked(self, seg_id: str, ticker: str | None = None) -> float:
         """Read sentiment with exponential time-decay applied (internal, unlocked).
 
         If ticker is provided, reads per-ticker score.
@@ -110,9 +108,7 @@ class SentimentManager:
             for (s, _t), (score, ts) in self._sentiment_cache.items():
                 if s == seg_id:
                     hours_elapsed = (time.monotonic() - ts) / 3600.0
-                    seg_scores.append(
-                        score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed)
-                    )
+                    seg_scores.append(score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed))
             if seg_scores:
                 return sum(seg_scores) / len(seg_scores)
             return _DEFAULT_SENTIMENT
@@ -121,16 +117,12 @@ class SentimentManager:
         for (s, _t), (score, ts) in self._sentiment_cache.items():
             if s == seg_id:
                 hours_elapsed = (time.monotonic() - ts) / 3600.0
-                seg_scores.append(
-                    score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed)
-                )
+                seg_scores.append(score * math.exp(-_SENTIMENT_DECAY_LAMBDA * hours_elapsed))
         if seg_scores:
             return sum(seg_scores) / len(seg_scores)
         return _DEFAULT_SENTIMENT
 
-    def read_decayed_sentiment(
-        self, seg_id: str, ticker: str | None = None
-    ) -> float:
+    def read_decayed_sentiment(self, seg_id: str, ticker: str | None = None) -> float:
         """Read sentiment with exponential time-decay applied (thread-safe).
 
         If ticker is provided, reads per-ticker score.

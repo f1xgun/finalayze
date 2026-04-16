@@ -361,9 +361,11 @@ class SignalExecutor:
         fx = CurrencyConverter(base_currency="USD")
         total_equity = self._compute_total_equity_base(fx)
         total_invested = _ZERO
-        for m_id in self._pre_trade_checker._symbol_limits.keys() if hasattr(
-            self._pre_trade_checker, "_symbol_limits"
-        ) else []:
+        for m_id in (
+            self._pre_trade_checker._symbol_limits.keys()
+            if hasattr(self._pre_trade_checker, "_symbol_limits")
+            else []
+        ):
             m_equity = self._get_market_equity(m_id)
             if m_equity is None:
                 continue

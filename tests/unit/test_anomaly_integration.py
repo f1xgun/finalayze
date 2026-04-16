@@ -120,23 +120,23 @@ class TestOrderingGuarantee:
         )
 
     def test_anomaly_detection_calls_send_alert_synchronously(self) -> None:
-        """Verify the anomaly path in the code uses send_alert() (not _send())."""
-        # This is a code structure test -- verify send_alert appears before
-        # run_coroutine_threadsafe in the source
+        """Verify _enrich_anomaly_async uses _send (async follow-up), not send_alert.
+
+        The raw sync alert (send_alert) is fired BEFORE _enrich_anomaly_async
+        is called. _enrich_anomaly_async itself only sends the async follow-up
+        via _send. This ensures the raw alert is never delayed by LLM calls.
+        """
         import inspect
 
         from finalayze.core.trading_loop import TradingLoop
 
-        source = inspect.getsource(TradingLoop._process_instrument)
-        alert_pos = source.find("send_alert(raw_text)")
-        threadsafe_pos = source.find("run_coroutine_threadsafe")
-
-        assert alert_pos > 0, "send_alert(raw_text) not found in _process_instrument"
-        # If threadsafe is not found (no LLM wiring), that's also acceptable
-        if threadsafe_pos > 0:
-            assert alert_pos < threadsafe_pos, (
-                "send_alert must appear BEFORE run_coroutine_threadsafe in source"
-            )
+        # After decomposition, the anomaly enrichment lives on TradingLoop
+        # as _enrich_anomaly_async. Verify it uses _send (async) not send_alert (sync).
+        source = inspect.getsource(TradingLoop._enrich_anomaly_async)
+        assert "_send(" in source, "_enrich_anomaly_async must use async _send for follow-up"
+        assert "send_alert(" not in source, (
+            "_enrich_anomaly_async must NOT use sync send_alert (that's the caller's job)"
+        )
 
 
 # -- ANMI-02: Enrichment Format -----------------------------------------------

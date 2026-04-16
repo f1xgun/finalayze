@@ -323,7 +323,7 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
         # Store kill_switch on loop for access from lifespan
         loop._kill_switch = kill_switch
         loop._circuit_breakers = circuit_breakers
-        loop._alerter_ref = alerter  # type: ignore[attr-defined]
+        loop._alerter_ref = alerter
 
         log.info(
             "trading_loop_built",
