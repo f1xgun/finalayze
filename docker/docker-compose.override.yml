@@ -1,0 +1,12 @@
+# Override ports to avoid conflicts with existing services
+services:
+  postgres:
+    ports:
+      - "5433:5432"
+  redis:
+    ports:
+      - "6380:6379"
+  app:
+    environment:
+      FINALAYZE_DATABASE_URL: "postgresql+asyncpg://finalayze:${POSTGRES_PASSWORD:-secret}@postgres:5432/finalayze"
+      FINALAYZE_REDIS_URL: "redis://redis:6379/0"
