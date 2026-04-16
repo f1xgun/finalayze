@@ -101,10 +101,10 @@ class TestEngineMinPosIntegration:
     """Verify BacktestEngine source code has equity-scaled min_pos."""
 
     def test_engine_source_has_scaled_min_pos(self) -> None:
-        """Read engine source to confirm min_pos scales with equity for ru_ segments."""
-        from finalayze.backtest import engine as engine_mod  # noqa: PLC0415
+        """Read position executor source to confirm min_pos scales with equity for ru_."""
+        from finalayze.backtest import position_executor as executor_mod  # noqa: PLC0415
 
-        source = inspect.getsource(engine_mod)
+        source = inspect.getsource(executor_mod)
         # MOEX min is capped at 5000 RUB, floors at 1000 RUB
         assert "Decimal(5000)" in source
         assert "Decimal(1000)" in source

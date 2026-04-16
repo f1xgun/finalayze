@@ -306,7 +306,9 @@ class TestClosePositionRecordsTrade:
         entry_prices, entry_bars, entry_strategies, chandelier_stops = _make_state_dicts()
         trades: list[TradeResult] = []
 
-        with patch.object(engine, "_record_trade") as mock_record:
+        with patch(
+            "finalayze.backtest.position_executor.BacktestPositionExecutor.record_trade"
+        ) as mock_record:
             trade = engine._close_position(
                 symbol=SYMBOL,
                 exit_price=EXIT_PRICE,
