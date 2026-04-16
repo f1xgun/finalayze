@@ -118,11 +118,10 @@ class NewsImpactAnalyzer:
             self._consecutive_failures += 1
             if self._consecutive_failures == _CIRCUIT_BREAKER_THRESHOLD:
                 self._circuit_open_until = time.monotonic() + _CIRCUIT_BREAKER_RESET_SECONDS
-                log.warning(
+                log.info(
                     "news_impact_circuit_opened",
                     failures=self._consecutive_failures,
                     cooldown_seconds=_CIRCUIT_BREAKER_RESET_SECONDS,
-                    exc_info=True,
                 )
             else:
                 log.debug("news_impact_llm_failed", article_url=article.url)
@@ -137,7 +136,7 @@ class NewsImpactAnalyzer:
         self._consecutive_failures = 0
         result = self._parse_response(raw)
         if result is _FALLBACK_RESULT:
-            log.warning(
+            log.debug(
                 "news_impact_llm_parse_fallback",
                 article_url=article.url,
             )
@@ -209,11 +208,11 @@ class NewsImpactAnalyzer:
         try:
             data = json.loads(stripped)
         except (json.JSONDecodeError, TypeError):
-            log.warning("news_impact_parse_failed", raw_response=raw[:200])
+            log.debug("news_impact_parse_failed", raw_response=raw[:200])
             return _FALLBACK_RESULT
 
         if not isinstance(data, dict):
-            log.warning("news_impact_parse_failed", raw_response=raw[:200])
+            log.debug("news_impact_parse_failed", raw_response=raw[:200])
             return _FALLBACK_RESULT
 
         # Event type

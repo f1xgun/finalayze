@@ -586,7 +586,7 @@ class FallbackLLMClient(LLMClient):
                 self._fallback_until = now + self._FALLBACK_COOLDOWN_SECONDS
                 if not self._logged_fallback:
                     self._logged_fallback = True
-                    _log.warning(
+                    _log.info(
                         "llm_fallback_activated",
                         reason="rate_limit",
                         cooldown_seconds=self._FALLBACK_COOLDOWN_SECONDS,
@@ -615,7 +615,7 @@ class FallbackLLMClient(LLMClient):
                 self._fallback_until = now + self._FALLBACK_COOLDOWN_SECONDS
                 if not self._logged_fallback:
                     self._logged_fallback = True
-                    _log.warning(
+                    _log.info(
                         "llm_fallback_activated",
                         reason="rate_limit",
                         cooldown_seconds=self._FALLBACK_COOLDOWN_SECONDS,

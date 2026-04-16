@@ -5,6 +5,7 @@ Layer 6 -- API / Dashboard layer.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -40,6 +41,20 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
     global _trading_loop_instance, _trading_loop_thread  # noqa: PLW0603
 
     log.info("finalayze started", mode=_settings.mode.value)
+
+    # Suppress benign gRPC BlockingIOError on uvicorn's event loop.
+    # gRPC PollerCompletionQueue callbacks may leak here from health checks.
+    _main_loop = asyncio.get_running_loop()
+
+    def _grpc_exception_handler(
+        loop: asyncio.AbstractEventLoop, context: dict[str, object]
+    ) -> None:
+        exc = context.get("exception")
+        if isinstance(exc, BlockingIOError):
+            return
+        loop.default_exception_handler(context)
+
+    _main_loop.set_exception_handler(_grpc_exception_handler)
 
     if _settings.mode in (WorkMode.SANDBOX, WorkMode.REAL):
         try:
@@ -217,15 +232,14 @@ def _build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
     can run both API + TradingLoop in one process.
     """
     try:
-        import asyncio  # noqa: PLC0415
         import os  # noqa: PLC0415
 
         from finalayze.analysis.event_classifier import EventClassifier  # noqa: PLC0415
         from finalayze.analysis.impact_estimator import ImpactEstimator  # noqa: PLC0415
         from finalayze.analysis.news_analyzer import NewsAnalyzer  # noqa: PLC0415
         from finalayze.api.alerts import TelegramAlerter  # noqa: PLC0415
-        from finalayze.data.fetchers.newsapi import NewsApiFetcher  # noqa: PLC0415
         from finalayze.data.fetchers.caching import CachingFetcher  # noqa: PLC0415
+        from finalayze.data.fetchers.newsapi import NewsApiFetcher  # noqa: PLC0415
         from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
         from finalayze.data.rate_limiter import RateLimiter  # noqa: PLC0415
         from finalayze.execution.broker_router import BrokerRouter  # noqa: PLC0415

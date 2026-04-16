@@ -153,4 +153,4 @@ class SandboxMonitorService:
             _PERSIST_TIMEOUT_S = 10  # noqa: N806
             future.result(timeout=_PERSIST_TIMEOUT_S)
         except Exception:
-            _log.warning("sandbox_metrics_persist_failed", exc_info=True)
+            _log.debug("sandbox_metrics_persist_failed", exc_info=True)

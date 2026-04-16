@@ -64,6 +64,7 @@ class TelegramChannelReader:
 
         cutoff = datetime.now(UTC) - timedelta(minutes=since_minutes)
         articles: list[NewsArticle] = []
+        failed_channels: list[str] = []
 
         async with httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
@@ -75,12 +76,16 @@ class TelegramChannelReader:
                     channel_articles = await self._fetch_channel(client, channel, cutoff)
                     articles.extend(channel_articles)
                 except Exception:
-                    logger.warning(
-                        "telegram_channel_fetch_failed",
-                        channel=channel,
-                        exc_info=True,
-                    )
+                    failed_channels.append(channel)
                     continue
+
+        if failed_channels:
+            logger.info(
+                "telegram_fetch_summary",
+                failed=len(failed_channels),
+                total=len(target_channels),
+                channels=failed_channels,
+            )
 
         return articles
 

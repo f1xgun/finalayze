@@ -137,7 +137,7 @@ class TinkoffBroker(BrokerBase):
             return await coro  # type: ignore[misc]
         except Exception as exc:
             if self._is_grpc_unavailable(exc):
-                _log.warning("grpc_unavailable_resetting_channel", error=str(exc))
+                _log.info("grpc_unavailable_resetting_channel", error=str(exc))
                 old_client = self._client
                 self._services = None
                 self._client = None
@@ -338,13 +338,15 @@ class TinkoffBroker(BrokerBase):
     ) -> object:
         """Async call to Tinkoff SDK post_order."""
         client = await self._get_services_async()
-        return await self._auto_reconnect(client.orders.post_order(  # type: ignore[attr-defined]
-            figi=figi,
-            quantity=quantity,
-            direction=direction,
-            order_type=OrderType.ORDER_TYPE_MARKET,
-            account_id=self._account_id,
-        ))
+        return await self._auto_reconnect(
+            client.orders.post_order(  # type: ignore[attr-defined]
+                figi=figi,
+                quantity=quantity,
+                direction=direction,
+                order_type=OrderType.ORDER_TYPE_MARKET,
+                account_id=self._account_id,
+            )
+        )
 
     def get_last_prices(self, symbols: list[str]) -> dict[str, Decimal]:
         """Fetch last prices for given symbols via T-Invest GetLastPrices.
@@ -428,10 +430,12 @@ class TinkoffBroker(BrokerBase):
     async def _get_order_state_async(self, order_id: str) -> object:
         """Async call to T-Invest get_order_state."""
         client = await self._get_services_async()
-        return await self._auto_reconnect(client.orders.get_order_state(  # type: ignore[attr-defined]
-            account_id=self._account_id,
-            order_id=order_id,
-        ))
+        return await self._auto_reconnect(
+            client.orders.get_order_state(  # type: ignore[attr-defined]
+                account_id=self._account_id,
+                order_id=order_id,
+            )
+        )
 
     def get_portfolio(self) -> PortfolioState:
         """Return current MOEX portfolio state from Tinkoff.
@@ -569,15 +573,17 @@ class TinkoffBroker(BrokerBase):
             cost_basis = qty * avg_price
             unrealized = market_val - cost_basis
             pnl_pct = float(unrealized / cost_basis * 100) if cost_basis else 0.0
-            result.append({
-                "figi": pos.figi,
-                "quantity": float(qty),
-                "avg_price": float(avg_price),
-                "current_price": float(cur_price),
-                "market_value": float(market_val),
-                "unrealized_pnl": float(unrealized),
-                "unrealized_pnl_pct": pnl_pct,
-            })
+            result.append(
+                {
+                    "figi": pos.figi,
+                    "quantity": float(qty),
+                    "avg_price": float(avg_price),
+                    "current_price": float(cur_price),
+                    "market_value": float(market_val),
+                    "unrealized_pnl": float(unrealized),
+                    "unrealized_pnl_pct": pnl_pct,
+                }
+            )
         return result
 
     def cancel_order(self, order_id: str) -> None:
@@ -593,7 +599,8 @@ class TinkoffBroker(BrokerBase):
         """Async call to Tinkoff SDK cancel_order."""
         client = await self._get_services_async()
         coro = client.orders.cancel_order(  # type: ignore[attr-defined]
-            account_id=self._account_id, order_id=order_id,
+            account_id=self._account_id,
+            order_id=order_id,
         )
         await self._auto_reconnect(coro)
 
