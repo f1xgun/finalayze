@@ -226,27 +226,29 @@ def _make_trading_loop(
 class TestTradingLoopNewsCycle:
     def test_news_cycle_fetches_articles(self) -> None:
         loop = _make_trading_loop()
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
         loop._news_fetcher.fetch_news.assert_called_once()  # type: ignore[attr-defined]
 
     def test_news_cycle_updates_sentiment_cache(self) -> None:
         loop = _make_trading_loop(sentiment_score=SENTIMENT_BUY)
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
         # After running the news cycle, the cache should have SOME entries
         # (keyed by affected segments -> symbols or by scope)
-        cache = loop._sentiment_cache  # type: ignore[attr-defined]
-        assert isinstance(cache, dict)
+        mgr = loop._sentiment_mgr  # type: ignore[attr-defined]
+        assert hasattr(mgr, "_sentiment_cache")
+        assert isinstance(mgr._sentiment_cache, dict)  # type: ignore[attr-defined]
 
     def test_news_cycle_uses_thread_lock(self) -> None:
-        """Verify _sentiment_cache is guarded by _sentiment_lock."""
+        """Verify _sentiment_cache is guarded by _sentiment_lock via SentimentManager."""
         loop = _make_trading_loop()
-        assert hasattr(loop, "_sentiment_lock")
-        assert isinstance(loop._sentiment_lock, type(threading.Lock()))  # type: ignore[attr-defined]
+        mgr = loop._sentiment_mgr  # type: ignore[attr-defined]
+        assert hasattr(mgr, "_sentiment_lock")
+        assert isinstance(mgr._sentiment_lock, type(threading.Lock()))  # type: ignore[attr-defined]
 
     def test_news_cycle_no_error_on_empty_articles(self) -> None:
         loop = _make_trading_loop()
         loop._news_fetcher.fetch_news = MagicMock(return_value=[])  # type: ignore[attr-defined]
-        loop._news_cycle()  # Must not raise
+        loop._news_pipeline.run_news_cycle()  # Must not raise
 
 
 class TestTradingLoopStrategyCycle:
@@ -716,7 +718,7 @@ class TestTradingLoopThreadSafety:
 
         def run_news() -> None:
             try:
-                loop._news_cycle()  # type: ignore[attr-defined]
+                loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
             except Exception as exc:
                 errors.append(exc)
 
@@ -782,6 +784,7 @@ class TestSandboxMonitorIntegration:
         loop = _make_trading_loop(signal=signal, fill=True)
         monitor = MagicMock()
         loop._sandbox_monitor = monitor  # type: ignore[attr-defined]
+        loop._signal_executor._sandbox_monitor = monitor  # type: ignore[attr-defined]
 
         candles = _make_candles()
         order = loop._OrderRequest(symbol=SYMBOL_AAPL, side="BUY", quantity=ORDER_QTY)  # type: ignore[attr-defined]

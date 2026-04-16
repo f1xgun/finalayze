@@ -7,39 +7,28 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, datetime, time
-from decimal import ROUND_DOWN, Decimal
+from decimal import Decimal
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 import structlog
 
 from finalayze.backtest.config import (
     BacktestConfig,
     resolve_max_hold_bars,
-    resolve_stop_atr_multiplier,
 )
-from finalayze.backtest.decision_journal import (
-    CandleSnapshot,
-    DecisionJournal,
-    FinalAction,
-    StrategySignalRecord,
-)
+from finalayze.backtest.journal import BacktestJournal
 from finalayze.backtest.journaling_combiner import JournalingStrategyCombiner
+from finalayze.backtest.position_executor import BacktestPositionExecutor
+from finalayze.backtest.risk_evaluator import BacktestRiskEvaluator
 from finalayze.core.schemas import (
     Candle,
     PortfolioState,
-    Signal,
     SignalDirection,
     TradeResult,
 )
 from finalayze.execution.broker_base import OrderRequest
 from finalayze.execution.simulated_broker import SimulatedBroker
 from finalayze.risk.chandelier_exit import compute_chandelier_stop, get_chandelier_multiplier
-from finalayze.risk.kelly import RollingKelly, TradeRecord
-from finalayze.risk.position_sizer import (
-    compute_position_size,
-    compute_realized_vol,
-)
 from finalayze.risk.position_sizing_pipeline import (
     BrentGateStep,
     CBRRegimeStep,
@@ -52,15 +41,17 @@ from finalayze.risk.position_sizing_pipeline import (
     RegimeStep,
     RubOilRegimeStep,
     SectorAllocationStep,
-    SizingContext,
     VolTargetStep,
 )
 from finalayze.risk.pre_trade_check import PreTradeChecker
-from finalayze.risk.stop_loss import compute_atr_stop_loss, filter_candles_by_exclusion
+from finalayze.risk.stop_loss import filter_candles_by_exclusion
 
 if TYPE_CHECKING:
     from finalayze.backtest.costs import TransactionCosts
+    from finalayze.backtest.decision_journal import DecisionJournal, FinalAction
+    from finalayze.core.schemas import Signal
     from finalayze.risk.circuit_breaker import CircuitBreaker
+    from finalayze.risk.kelly import RollingKelly
     from finalayze.risk.loss_limits import LossLimitTracker
     from finalayze.risk.regime import RegimeProvider
     from finalayze.strategies.base import BaseStrategy
@@ -74,10 +65,6 @@ _NO_ENTRY_BAR = -2
 # 15% intraday drop forces stop even on grace bar.  Quant-validated: 10% is
 # too tight for earnings gaps; 15% corresponds to a 3+ sigma daily move.
 _CATASTROPHIC_DROP_PCT = Decimal("0.15")
-
-# Default Half-Kelly parameters (used when no RollingKelly is provided)
-_DEFAULT_WIN_RATE = Decimal("0.5")
-_DEFAULT_AVG_WIN_RATIO = Decimal("1.5")
 
 # Default market open time (US 9:30 ET = 14:30 UTC) used to adjust daily
 # candle timestamps so the pre-trade market-hours check passes during backtest.
@@ -165,6 +152,12 @@ class BacktestEngine:
         self._portfolio_returns: list[float] = []
         self._last_run_summary: dict[str, object] = {}
 
+        # -- Composed components --
+        self._journal = BacktestJournal(
+            decision_journal=cfg.decision_journal,
+            strategy=strategy,
+        )
+
     @property
     def last_run_summary(self) -> dict[str, object]:
         """Per-symbol strategy activity summary from the most recent run() call."""
@@ -234,6 +227,29 @@ class BacktestEngine:
             max_impact_bps=self._config.max_impact_bps,
         )
 
+    def _build_executor(self) -> BacktestPositionExecutor:
+        """Build a position executor with current engine state."""
+        return BacktestPositionExecutor(
+            journal=self._journal,
+            rolling_kelly=self._rolling_kelly,
+            kelly_fraction=self._kelly_fraction,
+            max_position_pct=self._max_position_pct,
+            max_positions_per_segment=self._max_positions_per_segment,
+            sizing_pipeline=self._sizing_pipeline,
+            transaction_costs=self._transaction_costs,
+            trail_activation_atr=self._trail_activation_atr,
+            trail_distance_atr=self._trail_distance_atr,
+            stop_loss_mode=self._stop_loss_mode,
+            exclude_periods=self._exclude_periods,
+            profit_target_atr=self._profit_target_atr,
+            target_vol=self._target_vol,
+            meta_labeler=self._meta_labeler,
+            correlation_cache=self._correlation_cache,
+            portfolio_returns=self._portfolio_returns,
+            us_market_open_utc=_US_MARKET_OPEN_UTC,
+            moex_market_open_utc=_MOEX_MARKET_OPEN_UTC,
+        )
+
     def run(  # noqa: PLR0912, PLR0915
         self,
         symbol: str,
@@ -257,6 +273,9 @@ class BacktestEngine:
         broker = self._build_broker(symbol, candles)
         # Build sizing pipeline per-run (MOEX steps need segment_id)
         self._sizing_pipeline = self._build_sizing_pipeline(segment_id)
+
+        # Build executor with current state
+        executor = self._build_executor()
 
         trades: list[TradeResult] = []
         snapshots: list[PortfolioState] = []
@@ -346,7 +365,7 @@ class BacktestEngine:
             for sr in stop_results:
                 if sr.filled and sr.fill_price is not None:
                     stop_filled = True
-                    self._close_position(
+                    executor.close_position(
                         symbol=sr.symbol,
                         exit_price=sr.fill_price,
                         quantity=sr.quantity,
@@ -378,7 +397,7 @@ class BacktestEngine:
                         order = OrderRequest(symbol=open_sym, side="SELL", quantity=qty)
                         order_result = broker.submit_order(order, fill_candle)
                         if order_result.filled and order_result.fill_price is not None:
-                            self._close_position(
+                            executor.close_position(
                                 symbol=open_sym,
                                 exit_price=order_result.fill_price,
                                 quantity=order_result.quantity,
@@ -394,7 +413,7 @@ class BacktestEngine:
 
                 # L2+: suppress new entries
                 if cb_level in ("halted", "liquidate"):
-                    self._journal_skip(
+                    self._journal.record_skip(
                         timestamp=candle.timestamp,
                         symbol=symbol,
                         segment_id=segment_id,
@@ -410,7 +429,7 @@ class BacktestEngine:
             if self._loss_limits is not None:
                 portfolio = broker.get_portfolio()
                 if self._loss_limits.is_halted(candle.timestamp, portfolio.equity):
-                    self._journal_skip(
+                    self._journal.record_skip(
                         timestamp=candle.timestamp,
                         symbol=symbol,
                         segment_id=segment_id,
@@ -438,7 +457,7 @@ class BacktestEngine:
                             order = OrderRequest(symbol=symbol, side="SELL", quantity=held)
                             order_result = broker.submit_order(order, fill_candle)
                             if order_result.filled and order_result.fill_price is not None:
-                                self._close_position(
+                                executor.close_position(
                                     symbol=symbol,
                                     exit_price=order_result.fill_price,
                                     quantity=order_result.quantity,
@@ -449,7 +468,7 @@ class BacktestEngine:
                                     bar_index=i,
                                     trades=trades,
                                 )
-                                self._journal_skip(
+                                self._journal.record_skip(
                                     timestamp=candle.timestamp,
                                     symbol=symbol,
                                     segment_id=segment_id,
@@ -476,7 +495,7 @@ class BacktestEngine:
                         order = OrderRequest(symbol=symbol, side="SELL", quantity=held)
                         order_result = broker.submit_order(order, fill_candle)
                         if order_result.filled and order_result.fill_price is not None:
-                            self._close_position(
+                            executor.close_position(
                                 symbol=symbol,
                                 exit_price=order_result.fill_price,
                                 quantity=order_result.quantity,
@@ -487,7 +506,7 @@ class BacktestEngine:
                                 bar_index=i,
                                 trades=trades,
                             )
-                            self._journal_skip(
+                            self._journal.record_skip(
                                 timestamp=candle.timestamp,
                                 symbol=symbol,
                                 segment_id=segment_id,
@@ -528,7 +547,7 @@ class BacktestEngine:
                 if signal.direction == SignalDirection.BUY:
                     # Skip BUY if regime blocks new longs
                     if regime_state is not None and not regime_state.allow_new_longs:
-                        self._journal_skip(
+                        self._journal.record_skip(
                             timestamp=candle.timestamp,
                             symbol=symbol,
                             segment_id=segment_id,
@@ -540,7 +559,7 @@ class BacktestEngine:
                         continue
 
                     trades_opened += 1
-                    self._handle_buy(
+                    executor.handle_buy(
                         broker,
                         checker,
                         fill_candle,
@@ -559,7 +578,7 @@ class BacktestEngine:
                     )
 
                 elif signal.direction == SignalDirection.SELL:
-                    self._handle_sell(
+                    executor.handle_sell(
                         broker,
                         fill_candle,
                         symbol,
@@ -574,7 +593,7 @@ class BacktestEngine:
                         bar_index=i,
                     )
             elif signal is None:
-                self._journal_skip(
+                self._journal.record_skip(
                     timestamp=candle.timestamp,
                     symbol=symbol,
                     segment_id=segment_id,
@@ -598,7 +617,7 @@ class BacktestEngine:
             last_candle = candles[-1]
             _last_bar = len(candles) - 1
             for open_symbol, qty in broker.get_positions().items():
-                self._close_position(
+                executor.close_position(
                     symbol=open_symbol,
                     exit_price=last_candle.close,
                     quantity=qty,
@@ -661,6 +680,9 @@ class BacktestEngine:
         # Build sizing pipeline per-run (MOEX steps need segment_id)
         self._sizing_pipeline = self._build_sizing_pipeline(segment_id)
 
+        # Build executor with current state
+        executor = self._build_executor()
+
         trades: list[TradeResult] = []
         snapshots: list[PortfolioState] = []
         entry_prices: dict[str, Decimal] = {}
@@ -702,7 +724,8 @@ class BacktestEngine:
                     if sym in candle_index and ts in candle_index[sym]:
                         ci = candle_index[sym][ts]
                         recent_candles[sym] = sym_candles_list[: ci + 1]
-                self._correlation_cache = self._compute_correlations(recent_candles)
+                self._correlation_cache = BacktestRiskEvaluator.compute_correlations(recent_candles)
+                executor.set_correlation_cache(self._correlation_cache)
 
             # Update Chandelier stops for all symbols in portfolio mode
             if self._stop_loss_mode == "chandelier":
@@ -751,7 +774,7 @@ class BacktestEngine:
                 for sr in stop_results:
                     if sr.filled and sr.fill_price is not None:
                         stop_filled_symbols.add(sr.symbol)
-                        self._close_position(
+                        executor.close_position(
                             symbol=sr.symbol,
                             exit_price=sr.fill_price,
                             quantity=sr.quantity,
@@ -788,7 +811,7 @@ class BacktestEngine:
                                 order = OrderRequest(symbol=sym, side="SELL", quantity=held)
                                 order_result = broker.submit_order(order, fill_candle)
                                 if order_result.filled and order_result.fill_price is not None:
-                                    self._close_position(
+                                    executor.close_position(
                                         symbol=sym,
                                         exit_price=order_result.fill_price,
                                         quantity=order_result.quantity,
@@ -812,7 +835,7 @@ class BacktestEngine:
                             order = OrderRequest(symbol=sym, side="SELL", quantity=held)
                             order_result = broker.submit_order(order, fill_candle)
                             if order_result.filled and order_result.fill_price is not None:
-                                self._close_position(
+                                executor.close_position(
                                     symbol=sym,
                                     exit_price=order_result.fill_price,
                                     quantity=order_result.quantity,
@@ -856,7 +879,7 @@ class BacktestEngine:
                         if regime_state is not None and not regime_state.allow_new_longs:
                             continue
 
-                        self._handle_buy(
+                        executor.handle_buy(
                             broker,
                             checker,
                             fill_candle,
@@ -876,7 +899,7 @@ class BacktestEngine:
                             chandelier_stops=chandelier_stops,
                         )
                     elif signal.direction == SignalDirection.SELL:
-                        self._handle_sell(
+                        executor.handle_sell(
                             broker,
                             fill_candle,
                             sym,
@@ -903,7 +926,7 @@ class BacktestEngine:
                 qty = broker.get_positions().get(sym, Decimal(0))
                 if qty <= 0:
                     continue
-                self._close_position(
+                executor.close_position(
                     symbol=sym,
                     exit_price=sym_candles[-1].close,
                     quantity=qty,
@@ -932,10 +955,19 @@ class BacktestEngine:
         strategy_name = entry_strategies.get(symbol, "")
         return resolve_max_hold_bars(self._max_hold_bars, strategy_name, segment_id=segment_id)
 
+    # ------------------------------------------------------------------
+    # Backward-compatibility shims -- methods that external code or tests
+    # may reference directly on BacktestEngine.  They now delegate to
+    # the composed components.
+    # ------------------------------------------------------------------
+
     def _record_trade(self, trade: TradeResult) -> None:
-        """Record a completed trade in the Rolling Kelly estimator."""
-        if self._rolling_kelly is not None:
-            self._rolling_kelly.update(TradeRecord(pnl=trade.pnl, pnl_pct=trade.pnl_pct))
+        """Record a completed trade in the Rolling Kelly estimator.
+
+        .. deprecated:: Delegate to ``BacktestPositionExecutor.record_trade``.
+        """
+        executor = self._build_executor()
+        executor.record_trade(trade)
 
     def _close_position(
         self,
@@ -952,52 +984,20 @@ class BacktestEngine:
     ) -> TradeResult:
         """Close a position and record the trade.
 
-        Mutates *entry_prices*, *entry_bars*, *entry_strategies*, and
-        *chandelier_stops* by popping the key for *symbol*.  The resulting
-        ``TradeResult`` is appended to *trades* and recorded in the Rolling
-        Kelly estimator.
-
-        Args:
-            symbol: Ticker being closed.
-            exit_price: Price at which the position is exited.
-            quantity: Number of shares/contracts to close.
-            entry_prices: Mutable map of open-entry prices; symbol is popped.
-            entry_bars: Mutable map of the bar index at which entry occurred;
-                symbol is popped.
-            entry_strategies: Mutable map of the strategy name that opened the
-                position; symbol is popped.
-            chandelier_stops: Mutable map of chandelier stop prices; symbol
-                is popped.
-            bar_index: Current bar index (used to compute hold_bars).
-            trades: Mutable list; the new TradeResult is appended.
-
-        Returns:
-            The created ``TradeResult``.
+        .. deprecated:: Delegate to ``BacktestPositionExecutor.close_position``.
         """
-        entry = entry_prices.pop(symbol, exit_price)
-        entry_bar = entry_bars.pop(symbol, bar_index)
-        entry_strategies.pop(symbol, None)
-        chandelier_stops.pop(symbol, None)
-
-        pnl = (exit_price - entry) * quantity
-        if self._transaction_costs is not None:
-            pnl -= self._transaction_costs.total_cost(exit_price, quantity)
-        pnl_pct = (exit_price - entry) / entry if entry != 0 else Decimal(0)
-
-        trade = TradeResult(
-            signal_id=uuid4(),
+        executor = self._build_executor()
+        return executor.close_position(
             symbol=symbol,
-            side="SELL",
-            quantity=quantity,
-            entry_price=entry,
             exit_price=exit_price,
-            pnl=pnl,
-            pnl_pct=pnl_pct,
-            hold_bars=bar_index - entry_bar,
+            quantity=quantity,
+            entry_prices=entry_prices,
+            entry_bars=entry_bars,
+            entry_strategies=entry_strategies,
+            chandelier_stops=chandelier_stops,
+            bar_index=bar_index,
+            trades=trades,
         )
-        trades.append(trade)
-        self._record_trade(trade)
-        return trade
 
     def _journal_decision(
         self,
@@ -1018,97 +1018,26 @@ class BacktestEngine:
         stop_loss_price: Decimal | None = None,
         cb_level: str = "normal",
     ) -> None:
-        """Record a decision in the journal (no-op if journal is None)."""
-        if self._decision_journal is None:
-            return
+        """Record a decision in the journal.
 
-        portfolio = broker.get_portfolio()
-
-        # Build recent candle snapshots (last 5)
-        recent: list[CandleSnapshot] = [
-            CandleSnapshot(
-                timestamp=c.timestamp,
-                open=c.open,
-                high=c.high,
-                low=c.low,
-                close=c.close,
-                volume=c.volume,
-            )
-            for c in (history[-5:] if history else [])
-        ]
-
-        # Extract per-strategy signals if using JournalingStrategyCombiner
-        strategy_signals: list[StrategySignalRecord] = []
-        net_score: float | None = None
-        if isinstance(self._strategy, JournalingStrategyCombiner):
-            for name, sig in self._strategy.last_signals.items():
-                weight = self._strategy.last_weights.get(name, Decimal("1.0"))
-                if sig is not None:
-                    dir_score = Decimal(1) if sig.direction == SignalDirection.BUY else Decimal(-1)
-                    contribution = dir_score * Decimal(str(sig.confidence)) * weight
-                    strategy_signals.append(
-                        StrategySignalRecord(
-                            strategy_name=name,
-                            direction=sig.direction.value,
-                            confidence=sig.confidence,
-                            weight=weight,
-                            contribution=contribution,
-                        )
-                    )
-                else:
-                    strategy_signals.append(
-                        StrategySignalRecord(
-                            strategy_name=name,
-                            direction=None,
-                            confidence=None,
-                            weight=weight,
-                            contribution=Decimal(0),
-                        )
-                    )
-            net_score = self._strategy.last_net_score
-
-        # Capture enriched features and model probas from combiner
-        strategy_features: dict[str, float] | None = None
-        model_probas: dict[str, float] | None = None
-        if isinstance(self._strategy, JournalingStrategyCombiner):
-            feats = self._strategy.last_features
-            if feats:
-                strategy_features = feats
-            model_probas = self._strategy.last_model_probas
-
-        # Identify the strategy with the highest absolute contribution
-        dominant: str | None = None
-        if strategy_signals:
-            firing = [s for s in strategy_signals if s.direction is not None]
-            if firing:
-                dominant = max(firing, key=lambda s: abs(s.contribution)).strategy_name
-
-        self._decision_journal.record(
-            self._decision_journal.make_record(
-                timestamp=timestamp,
-                symbol=symbol,
-                segment_id=segment_id,
-                final_action=action,
-                skip_reason=skip_reason,
-                strategy_signals=strategy_signals,
-                combined_direction=signal.direction.value if signal else None,
-                combined_confidence=signal.confidence if signal else None,
-                net_weighted_score=net_score,
-                dominant_strategy=dominant,
-                pre_trade_passed=pre_trade_passed,
-                pre_trade_violations=pre_trade_violations or [],
-                position_value=position_value,
-                quantity=quantity,
-                fill_price=fill_price,
-                stop_loss_price=stop_loss_price,
-                circuit_breaker_level=cb_level,
-                portfolio_equity=portfolio.equity,
-                portfolio_cash=portfolio.cash,
-                open_position_count=len(portfolio.positions),
-                recent_candles=recent,
-                strategy_features=strategy_features,
-                model_probas=model_probas,
-            )
+        .. deprecated:: Delegate to ``BacktestJournal.record_decision``.
+        """
+        self._journal.record_decision(
+            action=action,
+            timestamp=timestamp,
+            symbol=symbol,
+            segment_id=segment_id,
+            broker=broker,
+            history=history,
+            signal=signal,
+            skip_reason=skip_reason,
+            pre_trade_passed=pre_trade_passed,
+            pre_trade_violations=pre_trade_violations,
+            position_value=position_value,
+            quantity=quantity,
+            fill_price=fill_price,
+            stop_loss_price=stop_loss_price,
+            cb_level=cb_level,
         )
 
     def _journal_skip(
@@ -1122,11 +1051,11 @@ class BacktestEngine:
         skip_reason: str,
         cb_level: str = "normal",
     ) -> None:
-        """Convenience wrapper for journaling a SKIP decision."""
-        if self._decision_journal is None:
-            return
-        self._journal_decision(
-            action=FinalAction.SKIP,
+        """Convenience wrapper for journaling a SKIP decision.
+
+        .. deprecated:: Delegate to ``BacktestJournal.record_skip``.
+        """
+        self._journal.record_skip(
             timestamp=timestamp,
             symbol=symbol,
             segment_id=segment_id,
@@ -1136,36 +1065,29 @@ class BacktestEngine:
             cb_level=cb_level,
         )
 
+    @staticmethod
     def _compute_segment_exposure(
-        self,
         broker: SimulatedBroker,
-        segment_id: str,  # noqa: ARG002
+        segment_id: str,
     ) -> Decimal:
-        """Compute the total position value for a segment (for concentration check).
+        """Compute the total position value for a segment.
 
-        In single-symbol mode, all positions belong to the same segment.
-        In portfolio mode, the engine only trades one segment at a time.
-        So current equity in positions approximates segment exposure.
+        .. deprecated:: Delegate to ``BacktestRiskEvaluator.compute_segment_exposure``.
         """
-        portfolio = broker.get_portfolio()
-        position_value = portfolio.equity - portfolio.cash
-        return max(position_value, Decimal(0))
+        return BacktestRiskEvaluator.compute_segment_exposure(broker, segment_id)
 
     @staticmethod
     def _compute_correlations(
         candles_by_symbol: dict[str, list[Candle]],
         lookback: int = 60,
     ) -> dict[tuple[str, str], float]:
-        """Compute trailing pairwise correlations for open positions.
+        """Compute trailing pairwise correlations.
 
-        Delegates to :func:`finalayze.risk.correlation.compute_correlation_matrix`
-        which uses pure-Python Pearson correlation (no numpy, no NaN risk).
+        .. deprecated:: Delegate to ``BacktestRiskEvaluator.compute_correlations``.
         """
-        from finalayze.risk.correlation import compute_correlation_matrix  # noqa: PLC0415
+        return BacktestRiskEvaluator.compute_correlations(candles_by_symbol, lookback)
 
-        return compute_correlation_matrix(candles_by_symbol, window=lookback)
-
-    def _handle_buy(  # noqa: PLR0911, PLR0912, PLR0915
+    def _handle_buy(
         self,
         broker: SimulatedBroker,
         checker: PreTradeChecker,
@@ -1181,246 +1103,26 @@ class BacktestEngine:
         entry_strategies: dict[str, str] | None = None,
         chandelier_stops: dict[str, Decimal] | None = None,
     ) -> None:
-        """Process a BUY signal: size, check, fill, stop-loss."""
-        # Skip if a position is already open for this symbol
-        if broker.has_position(symbol):
-            self._journal_skip(
-                timestamp=fill_candle.timestamp,
-                symbol=symbol,
-                segment_id=segment_id,
-                broker=broker,
-                history=history,
-                skip_reason="position_already_open",
-            )
-            return
+        """Process a BUY signal.
 
-        # Check segment position cap
-        segment_count = sum(1 for _s, qty in broker.get_positions().items() if qty > 0)
-        if segment_count >= self._max_positions_per_segment:
-            self._journal_skip(
-                timestamp=fill_candle.timestamp,
-                symbol=symbol,
-                segment_id=segment_id,
-                broker=broker,
-                history=history,
-                skip_reason="segment_position_cap",
-            )
-            return
-
-        portfolio = broker.get_portfolio()
-
-        # Compute position size via the unified sizing pipeline
-        if self._rolling_kelly is not None:
-            kelly_frac = self._rolling_kelly.optimal_fraction()
-            base_position = portfolio.equity * kelly_frac
-        else:
-            base_position = compute_position_size(
-                win_rate=_DEFAULT_WIN_RATE,
-                avg_win_ratio=_DEFAULT_AVG_WIN_RATIO,
-                equity=portfolio.equity,
-                kelly_fraction=self._kelly_fraction,
-                max_position_pct=self._max_position_pct,
-            )
-
-        asset_vol = compute_realized_vol(history) or Decimal("0.20")
-        # Currency-aware min position: original thresholds scaled down for small portfolios
-        if segment_id.startswith("ru_"):
-            min_pos = min(Decimal(5000), max(Decimal(1000), portfolio.equity * Decimal("0.02")))
-        else:
-            min_pos = min(Decimal(500), max(Decimal(100), portfolio.equity * Decimal("0.005")))
-
-        # Compute ML confidence from MetaLabeler if available
-        ml_confidence: float | None = None
-        if self._meta_labeler is not None and signal is not None:
-            ml_confidence = self._meta_labeler.predict(signal, signal.features)
-
-        context = SizingContext(
-            equity=portfolio.equity,
-            base_position=base_position,
-            max_position_pct=self._max_position_pct,
-            min_position_size=min_pos,
-            asset_vol=asset_vol,
-            target_vol=self._target_vol or Decimal("0.15"),
-            regime_scale=Decimal(str(regime_position_scale or 1.0)),
-            correlation_scale=Decimal("1.0"),
-            returns_history=tuple(self._portfolio_returns),
-            ml_confidence=ml_confidence,
+        .. deprecated:: Delegate to ``BacktestPositionExecutor.handle_buy``.
+        """
+        executor = self._build_executor()
+        executor.handle_buy(
+            broker,
+            checker,
+            fill_candle,
+            symbol,
+            history,
+            entry_prices,
+            segment_id=segment_id,
+            signal=signal,
+            entry_bars=entry_bars,
+            bar_index=bar_index,
+            regime_position_scale=regime_position_scale,
+            entry_strategies=entry_strategies,
+            chandelier_stops=chandelier_stops,
         )
-        if self._sizing_pipeline is None:
-            return
-        position_value = self._sizing_pipeline.compute(context)
-
-        # Apply confidence scaling from signal (post-pipeline multiplier)
-        if signal is not None:
-            confidence_scale = Decimal(str(0.5 + signal.confidence * 0.5))  # [0.5x, 1.0x]
-            position_value = position_value * confidence_scale
-
-        if position_value <= 0:
-            self._journal_skip(
-                timestamp=fill_candle.timestamp,
-                symbol=symbol,
-                segment_id=segment_id,
-                broker=broker,
-                history=history,
-                skip_reason="position_value_zero",
-            )
-            return
-
-        # Pre-trade check — adjust daily candle timestamps (midnight UTC) to
-        # market-open time so the market-hours check passes during backtest.
-        check_dt = fill_candle.timestamp
-        if check_dt.hour == 0 and check_dt.minute == 0:
-            if segment_id.startswith("ru_"):
-                check_dt = datetime.combine(check_dt.date(), _MOEX_MARKET_OPEN_UTC)
-            else:
-                check_dt = datetime.combine(check_dt.date(), _US_MARKET_OPEN_UTC)
-        market_id = "moex" if segment_id.startswith("ru_") else "us"
-        result = checker.check(
-            order_value=position_value,
-            portfolio_equity=portfolio.equity,
-            available_cash=portfolio.cash,
-            open_position_count=len(portfolio.positions),
-            dt=check_dt,
-            market_id=market_id,
-            symbol=symbol,
-            open_positions=list(broker.get_positions().keys()),
-            strategy_name=signal.strategy_name if signal is not None else None,
-            sector_id=segment_id,
-            sector_exposure_value=self._compute_segment_exposure(broker, segment_id),
-            correlations=self._correlation_cache or None,
-        )
-        if not result.passed:
-            if self._decision_journal is not None:
-                self._journal_decision(
-                    action=FinalAction.SKIP,
-                    timestamp=fill_candle.timestamp,
-                    symbol=symbol,
-                    segment_id=segment_id,
-                    broker=broker,
-                    history=history,
-                    signal=signal,
-                    skip_reason="pre_trade_check_failed",
-                    pre_trade_passed=False,
-                    pre_trade_violations=result.violations,
-                    position_value=position_value,
-                )
-            return
-
-        # Compute quantity at fill price
-        fill_price = fill_candle.open
-        if fill_price <= 0:
-            self._journal_skip(
-                timestamp=fill_candle.timestamp,
-                symbol=symbol,
-                segment_id=segment_id,
-                broker=broker,
-                history=history,
-                skip_reason="fill_price_zero",
-            )
-            return
-        quantity = (position_value / fill_price).to_integral_value(rounding=ROUND_DOWN)
-        if quantity <= 0:
-            self._journal_skip(
-                timestamp=fill_candle.timestamp,
-                symbol=symbol,
-                segment_id=segment_id,
-                broker=broker,
-                history=history,
-                skip_reason="quantity_zero",
-            )
-            return
-
-        # Pre-compute ATR stop-loss — use strategy-specific multiplier
-        strategy_name = signal.strategy_name if signal is not None else ""
-        stop_atr_mult = resolve_stop_atr_multiplier(strategy_name, segment_id=segment_id)
-        stop_price = compute_atr_stop_loss(
-            entry_price=fill_price,
-            candles=history,
-            atr_multiplier=stop_atr_mult,
-            exclude_periods=self._exclude_periods,
-        )
-        if stop_price is None:
-            self._journal_skip(
-                timestamp=fill_candle.timestamp,
-                symbol=symbol,
-                segment_id=segment_id,
-                broker=broker,
-                history=history,
-                skip_reason="no_stop_loss_data",
-            )
-            return
-
-        order = OrderRequest(symbol=symbol, side="BUY", quantity=quantity)
-        order_result = broker.submit_order(order, fill_candle)
-
-        if order_result.filled and order_result.fill_price is not None:
-            entry_prices[symbol] = order_result.fill_price
-            if entry_bars is not None:
-                entry_bars[symbol] = bar_index
-            if entry_strategies is not None and signal is not None:
-                entry_strategies[symbol] = signal.strategy_name
-
-            # Journal the successful BUY (with stop-loss price)
-            if self._decision_journal is not None:
-                self._journal_decision(
-                    action=FinalAction.BUY,
-                    timestamp=fill_candle.timestamp,
-                    symbol=symbol,
-                    segment_id=segment_id,
-                    broker=broker,
-                    history=history,
-                    signal=signal,
-                    pre_trade_passed=True,
-                    position_value=position_value,
-                    quantity=quantity,
-                    fill_price=order_result.fill_price,
-                    stop_loss_price=stop_price,
-                )
-
-            # Deduct entry transaction costs from cash
-            if self._transaction_costs is not None:
-                cost = self._transaction_costs.total_cost(
-                    order_result.fill_price, order_result.quantity
-                )
-                broker.deduct_fees(cost)
-
-            # Set stop-loss based on mode
-            # Use the strategy-specific multiplier to recover correct ATR value
-            atr_value = (
-                (order_result.fill_price - stop_price) / stop_atr_mult
-                if stop_atr_mult > 0
-                else Decimal(0)
-            )
-
-            if self._stop_loss_mode == "chandelier":
-                # Chandelier mode: use ATR-based stop as initial (guaranteed below
-                # entry price), then let chandelier ratchet take over on subsequent bars.
-                segment_mult = get_chandelier_multiplier(segment_id)
-                initial_stop = compute_atr_stop_loss(
-                    entry_price=order_result.fill_price,
-                    candles=history,
-                    atr_period=22,
-                    atr_multiplier=Decimal(str(segment_mult)),
-                    exclude_periods=self._exclude_periods,
-                )
-                if initial_stop is not None:
-                    if chandelier_stops is not None:
-                        chandelier_stops[symbol] = initial_stop
-                    broker.set_stop_loss(symbol, initial_stop)
-                else:
-                    if chandelier_stops is not None:
-                        chandelier_stops[symbol] = stop_price
-                    broker.set_stop_loss(symbol, stop_price)
-            else:
-                # Default trailing stop mode
-                broker.set_trailing_stop(
-                    symbol=symbol,
-                    entry_price=order_result.fill_price,
-                    initial_stop=stop_price,
-                    atr_value=atr_value,
-                    activation_atr=self._trail_activation_atr,
-                    trail_atr=self._trail_distance_atr,
-                )
 
     def _handle_sell(
         self,
@@ -1437,50 +1139,22 @@ class BacktestEngine:
         chandelier_stops: dict[str, Decimal] | None = None,
         bar_index: int = 0,
     ) -> None:
-        """Process a SELL signal: sell all held quantity."""
-        portfolio = broker.get_portfolio()
-        held = portfolio.positions.get(symbol, Decimal(0))
-        if held <= 0:
-            self._journal_skip(
-                timestamp=fill_candle.timestamp,
-                symbol=symbol,
-                segment_id=segment_id,
-                broker=broker,
-                history=history,
-                skip_reason="no_position_held",
-            )
-            return
+        """Process a SELL signal.
 
-        order = OrderRequest(symbol=symbol, side="SELL", quantity=held)
-        order_result = broker.submit_order(order, fill_candle)
-
-        if order_result.filled and order_result.fill_price is not None:
-            # Use empty dicts as fallback when optional tracking dicts are None
-            _eb = entry_bars if entry_bars is not None else {}
-            _es = entry_strategies if entry_strategies is not None else {}
-            _cs = chandelier_stops if chandelier_stops is not None else {}
-            self._close_position(
-                symbol=symbol,
-                exit_price=order_result.fill_price,
-                quantity=order_result.quantity,
-                entry_prices=entry_prices,
-                entry_bars=_eb,
-                entry_strategies=_es,
-                chandelier_stops=_cs,
-                bar_index=bar_index,
-                trades=trades,
-            )
-
-            # Journal the successful SELL
-            if self._decision_journal is not None:
-                self._journal_decision(
-                    action=FinalAction.SELL,
-                    timestamp=fill_candle.timestamp,
-                    symbol=symbol,
-                    segment_id=segment_id,
-                    broker=broker,
-                    history=history,
-                    signal=signal,
-                    quantity=order_result.quantity,
-                    fill_price=order_result.fill_price,
-                )
+        .. deprecated:: Delegate to ``BacktestPositionExecutor.handle_sell``.
+        """
+        executor = self._build_executor()
+        executor.handle_sell(
+            broker,
+            fill_candle,
+            symbol,
+            entry_prices,
+            trades,
+            segment_id=segment_id,
+            signal=signal,
+            history=history,
+            entry_bars=entry_bars,
+            entry_strategies=entry_strategies,
+            chandelier_stops=chandelier_stops,
+            bar_index=bar_index,
+        )

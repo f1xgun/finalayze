@@ -113,7 +113,7 @@ class TestLifespanBotWiring:
         with (
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", fake_bot),
-            patch.object(main, "_build_trading_loop", return_value=fake_loop),
+            patch.object(main, "build_trading_loop", return_value=fake_loop),
             p1,
             p2,
             p3,
@@ -152,7 +152,7 @@ class TestLifespanBotWiring:
         with (
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", fake_bot),
-            patch.object(main, "_build_trading_loop", return_value=fake_loop),
+            patch.object(main, "build_trading_loop", return_value=fake_loop),
             p1,
             p2,
             p3,
@@ -197,7 +197,7 @@ class TestLifespanBotWiring:
         with (
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", fake_bot),
-            patch.object(main, "_build_trading_loop", return_value=fake_loop),
+            patch.object(main, "build_trading_loop", return_value=fake_loop),
             p1,
             p2,
             p3,
@@ -230,7 +230,7 @@ class TestLifespanBotWiring:
         with (
             patch.object(main, "_settings", mock_settings),
             patch.object(main, "_bot_handler_instance", None),
-            patch.object(main, "_build_trading_loop", return_value=fake_loop),
+            patch.object(main, "build_trading_loop", return_value=fake_loop),
             p1,
             p2,
             p3,

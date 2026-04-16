@@ -17,7 +17,7 @@ class TestSubmitOrderMetrics:
 
     def test_record_trade_on_fill(self) -> None:
         """MetricsCollector.record_trade called when order is filled."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.signal_executor import SignalExecutor
 
         mc = MagicMock()
         loop = _make_loop_stub(metrics=mc)
@@ -30,7 +30,7 @@ class TestSubmitOrderMetrics:
         result.fill_price = Decimal("150.00")
         loop._broker_router.submit.return_value = result
 
-        TradingLoop._submit_order(loop, order, "us", candles=[_fake_candle()])
+        SignalExecutor._submit_order(loop, order, "us", candles=[_fake_candle()])
 
         mc.record_trade.assert_called_once()
         call_kwargs = mc.record_trade.call_args
@@ -38,7 +38,7 @@ class TestSubmitOrderMetrics:
 
     def test_record_rejection_on_unfilled(self) -> None:
         """MetricsCollector.record_rejection called when order is not filled."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.signal_executor import SignalExecutor
 
         mc = MagicMock()
         loop = _make_loop_stub(metrics=mc)
@@ -51,7 +51,7 @@ class TestSubmitOrderMetrics:
         result.reason = "insufficient funds"
         loop._broker_router.submit.return_value = result
 
-        TradingLoop._submit_order(loop, order, "us")
+        SignalExecutor._submit_order(loop, order, "us")
 
         mc.record_rejection.assert_called_once()
 
@@ -61,7 +61,7 @@ class TestProcessInstrumentMetrics:
 
     def test_record_signal_called(self) -> None:
         from finalayze.core.schemas import SignalDirection
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.signal_executor import SignalExecutor
 
         mc = MagicMock()
         loop = _make_loop_stub(metrics=mc)
@@ -87,20 +87,15 @@ class TestProcessInstrumentMetrics:
         pre_result.passed = True
         loop._pre_trade_checker.check.return_value = pre_result
 
-        # Mock portfolio via cache -- bind the real _get_cached_portfolio method
+        # Mock portfolio
         portfolio = MagicMock()
         portfolio.cash = Decimal(10000)
         portfolio.equity = Decimal(10000)
         portfolio.positions = {}
-        loop._cycle_portfolio_cache = {"us": portfolio}
-        loop._get_cached_portfolio = TradingLoop._get_cached_portfolio.__get__(loop)
 
         broker = MagicMock()
         broker.has_position.return_value = False
         loop._broker_router.route.return_value = broker
-
-        # Mock _compute_total_equity_base
-        loop._compute_total_equity_base = MagicMock(return_value=Decimal(10000))
 
         # Mock submit result
         submit_result = MagicMock()
@@ -108,8 +103,26 @@ class TestProcessInstrumentMetrics:
         submit_result.fill_price = Decimal("150.00")
         loop._broker_router.submit.return_value = submit_result
 
-        TradingLoop._process_instrument(
-            loop, instrument, "us", CircuitLevel.NORMAL, fetcher, MagicMock()
+        loop._sentiment_mgr = MagicMock()
+        loop._sentiment_mgr.get_sentiment.return_value = 0.0
+        loop._segment_min_confidence = {}
+        loop._last_prices = {}
+        loop._ml_registry = None
+        loop._loss_limit_tracker = MagicMock()
+        loop._macro_cache = None
+        loop._compute_total_equity_base = MagicMock(return_value=Decimal(10000))
+        loop._get_market_equity = MagicMock(return_value=Decimal(10000))
+
+        SignalExecutor.process_instrument(
+            loop,
+            instrument,
+            "us",
+            CircuitLevel.NORMAL,
+            fetcher,
+            MagicMock(),
+            equity=Decimal(10000),
+            cash=Decimal(10000),
+            portfolio=portfolio,
         )
 
         mc.record_signal.assert_called_once()
@@ -125,6 +138,22 @@ class TestMarketCycleMetrics:
         mc = MagicMock()
         loop = _make_loop_stub(metrics=mc)
         loop._registry.list_by_market.return_value = []  # no instruments
+        loop._signal_executor = MagicMock()
+        loop._is_market_open = MagicMock(return_value=True)
+        loop._get_cached_portfolio = MagicMock(return_value=None)
+        # Mock broker portfolio
+        portfolio_mock = MagicMock()
+        portfolio_mock.cash = Decimal(50000)
+        portfolio_mock.equity = Decimal(50000)
+        loop._broker_router.route.return_value.get_portfolio.return_value = portfolio_mock
+        loop._cycle_instruments_processed = 0
+        loop._cycle_signals_generated = 0
+        loop._cycle_orders_submitted = 0
+        loop._cycle_orders_filled = 0
+        loop._cycle_errors_caught = 0
+        loop._cycle_dropped_no_bars = 0
+        loop._cycle_dropped_below_threshold = 0
+        loop._cycle_dropped_pre_trade = 0
 
         market_equities = {"us": Decimal(50000)}
 
@@ -183,6 +212,7 @@ def _make_loop_stub(*, metrics: MagicMock | None = None) -> MagicMock:
     loop._registry = MagicMock()
     loop._settings = MagicMock()
     loop._settings.max_cross_market_exposure_pct = 0.80
+    loop._settings.kelly_fraction = 0.5
     loop._pre_trade_checker = MagicMock()
     loop._kelly_sizer = MagicMock()
     loop._kelly_sizer.optimal_fraction.return_value = Decimal("0.1")
@@ -190,7 +220,14 @@ def _make_loop_stub(*, metrics: MagicMock | None = None) -> MagicMock:
     loop._fx = MagicMock()
     loop._cycle_portfolio_cache = {}
     loop._is_candle_stale = TradingLoop._is_candle_stale
+    loop._position_tracker = MagicMock()
+    loop._position_tracker._stop_states = {}
+    loop._position_tracker._entry_prices = {}
+    loop._position_tracker._entry_strategy = {}
+    loop._position_tracker._cycle_exited_symbols = set()
+    loop._persistence = MagicMock()
     loop._health_monitor = None
+    loop._sandbox_monitor = None
     loop._cycle_instruments_processed = 0
     loop._cycle_signals_generated = 0
     loop._cycle_orders_submitted = 0

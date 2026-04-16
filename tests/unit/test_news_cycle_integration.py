@@ -113,13 +113,13 @@ class TestNewsCycleRss:
         analyzer.analyze = AsyncMock(return_value=_make_impact_result())
 
         loop = _make_loop(rss_fetcher=rss, news_impact_analyzer=analyzer)
-        loop._analyze_impact_batch = AsyncMock(return_value=(2, 0, ""))  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(2, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         rss.fetch_news.assert_called_once()
-        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
-        processed = loop._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._news_pipeline._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
         assert len(processed) == 2
 
     def test_rss_failure_does_not_block_telegram(self) -> None:
@@ -139,13 +139,13 @@ class TestNewsCycleRss:
             telegram_reader=tg,
             news_impact_analyzer=analyzer,
         )
-        loop._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         # Telegram articles should still be processed
-        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
-        processed = loop._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._news_pipeline._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
         assert len(processed) == 1
 
 
@@ -162,12 +162,12 @@ class TestNewsCycleTelegram:
         analyzer.analyze = AsyncMock(return_value=_make_impact_result())
 
         loop = _make_loop(telegram_reader=tg, news_impact_analyzer=analyzer)
-        loop._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
-        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
-        processed = loop._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._news_pipeline._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
         assert len(processed) == 1
 
     def test_telegram_failure_does_not_block_rss(self) -> None:
@@ -187,13 +187,13 @@ class TestNewsCycleTelegram:
             telegram_reader=tg,
             news_impact_analyzer=analyzer,
         )
-        loop._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         # RSS articles should still be processed
-        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
-        processed = loop._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._news_pipeline._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
         assert len(processed) == 1
 
 
@@ -209,12 +209,12 @@ class TestNewsImpactPipeline:
         analyzer.analyze = AsyncMock(return_value=_make_impact_result())
 
         loop = _make_loop(rss_fetcher=rss, news_impact_analyzer=analyzer)
-        loop._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         # Should call _analyze_impact_batch, not _process_articles_batch
-        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
         assert not hasattr(loop, "_entity_extractor")
         assert not hasattr(loop, "_combined_analyzer")
 
@@ -250,6 +250,7 @@ class TestNewsImpactPipeline:
             instr.segment_id = "ru_blue_chips"
             mock_instruments.append(instr)
         loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
+        loop._sentiment_mgr._market_ids = ["moex"]  # type: ignore[attr-defined]
         loop._registry.list_by_market.return_value = mock_instruments  # type: ignore[attr-defined]
 
         import asyncio as _aio
@@ -287,6 +288,7 @@ class TestNewsImpactPipeline:
             instr.segment_id = "ru_blue_chips"
             mock_instruments.append(instr)
         loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
+        loop._sentiment_mgr._market_ids = ["moex"]  # type: ignore[attr-defined]
         loop._registry.list_by_market.return_value = mock_instruments  # type: ignore[attr-defined]
 
         import asyncio as _aio
@@ -325,6 +327,7 @@ class TestNewsImpactPipeline:
         instr.symbol = "SBER"
         instr.segment_id = "ru_blue_chips"
         loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
+        loop._sentiment_mgr._market_ids = ["moex"]  # type: ignore[attr-defined]
         loop._registry.list_by_market.return_value = [instr]  # type: ignore[attr-defined]
 
         import asyncio as _aio
@@ -415,6 +418,7 @@ class TestPerTickerSentimentRead:
         instr.symbol = "SBER"
         instr.segment_id = "ru_blue_chips"
         loop._fetchers = {"moex": MagicMock()}  # type: ignore[attr-defined]
+        loop._sentiment_mgr._market_ids = ["moex"]  # type: ignore[attr-defined]
         loop._registry.list_by_market.return_value = [instr]  # type: ignore[attr-defined]
 
         import asyncio as _aio
@@ -481,11 +485,11 @@ class TestLegacyFallback:
         analyzer.analyze = AsyncMock(return_value=_make_impact_result())
 
         loop = _make_loop(news_fetcher=legacy, news_impact_analyzer=analyzer)
-        loop._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
         legacy.fetch_news.assert_called_once()
-        loop._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
-        processed = loop._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
+        loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
+        processed = loop._news_pipeline._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
         assert len(processed) == 1

@@ -100,9 +100,9 @@ class TestFeedTimestampWiring:
         """The code must contain direct call to self._health_monitor.update_feed_timestamp."""
         import inspect
 
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.signal_executor import SignalExecutor
 
-        source = inspect.getsource(TradingLoop._process_instrument)
+        source = inspect.getsource(SignalExecutor.process_instrument)
 
         assert "self._health_monitor.update_feed_timestamp(" in source, (
             "Missing direct call: self._health_monitor.update_feed_timestamp(now)"

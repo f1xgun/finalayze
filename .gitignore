@@ -77,3 +77,6 @@ credentials.json
 # Worktrees
 .worktrees/
 catboost_info/
+
+# GSD planning artifacts
+.planning/

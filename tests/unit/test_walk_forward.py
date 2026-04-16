@@ -179,7 +179,10 @@ class TestBuildDatasetWithTimestamps:
             None,
             fake_ts,
         )
-        with patch("scripts.train_models._build_dataset_direction", return_value=fake_return):
+        with patch(
+            "scripts.training.dataset_builder._build_dataset_direction",
+            return_value=fake_return,
+        ):
             result = _build_dataset_with_timestamps("us_tech", ["AAPL"], label_mode="direction")
 
         assert len(result) == 5  # noqa: PLR2004
@@ -278,19 +281,22 @@ class TestQualityGateEnforcement:
 
         with (
             patch(
-                "scripts.train_models._build_dataset_with_timestamps",
+                "scripts.training.walk_forward.build_dataset_with_timestamps",
                 return_value=(features, labels, bw, hb, timestamps),
             ),
             patch(
-                "scripts.train_models._generate_walk_forward_folds",
+                "scripts.training.walk_forward.generate_walk_forward_folds",
                 return_value=[
                     (list(range(100)), list(range(100, 140)), list(range(140, 200))),
                 ],
             ),
-            patch("scripts.train_models.select_features_mi", return_value=["feat_a", "feat_b"]),
-            patch("scripts.train_models.compute_decay_weights") as mock_decay,
             patch(
-                "scripts.train_models._evaluate_fold_metrics",
+                "scripts.training.walk_forward.select_features",
+                return_value=["feat_a", "feat_b"],
+            ),
+            patch("scripts.training.walk_forward.compute_decay_weights") as mock_decay,
+            patch(
+                "scripts.training.walk_forward.evaluate_fold_metrics",
                 return_value=fake_fold_metrics,
             ),
             patch(
@@ -301,9 +307,9 @@ class TestQualityGateEnforcement:
                 "finalayze.ml.training.quality_gates.evaluate_walk_forward",
                 return_value=(False, {"accuracy": 0.3, "brier": 0.4}),
             ),
-            patch("scripts.train_models.XGBoostModel") as mock_xgb_cls,
-            patch("scripts.train_models.LightGBMModel") as mock_lgbm_cls,
-            patch("scripts.train_models.CatBoostModel") as mock_cat_cls,
+            patch("scripts.training.walk_forward.XGBoostModel") as mock_xgb_cls,
+            patch("scripts.training.walk_forward.LightGBMModel") as mock_lgbm_cls,
+            patch("scripts.training.walk_forward.CatBoostModel") as mock_cat_cls,
         ):
             import numpy as np
 
@@ -350,19 +356,22 @@ class TestQualityGateEnforcement:
 
         with (
             patch(
-                "scripts.train_models._build_dataset_with_timestamps",
+                "scripts.training.walk_forward.build_dataset_with_timestamps",
                 return_value=(features, labels, bw, hb, timestamps),
             ),
             patch(
-                "scripts.train_models._generate_walk_forward_folds",
+                "scripts.training.walk_forward.generate_walk_forward_folds",
                 return_value=[
                     (list(range(100)), list(range(100, 140)), list(range(140, 200))),
                 ],
             ),
-            patch("scripts.train_models.select_features_mi", return_value=["feat_a", "feat_b"]),
-            patch("scripts.train_models.compute_decay_weights") as mock_decay,
             patch(
-                "scripts.train_models._evaluate_fold_metrics",
+                "scripts.training.walk_forward.select_features",
+                return_value=["feat_a", "feat_b"],
+            ),
+            patch("scripts.training.walk_forward.compute_decay_weights") as mock_decay,
+            patch(
+                "scripts.training.walk_forward.evaluate_fold_metrics",
                 return_value=fake_fold_metrics,
             ),
             patch(
@@ -373,9 +382,9 @@ class TestQualityGateEnforcement:
                 "finalayze.ml.training.quality_gates.evaluate_walk_forward",
                 return_value=(False, {"accuracy": 0.3, "brier": 0.4}),
             ),
-            patch("scripts.train_models.XGBoostModel") as mock_xgb_cls,
-            patch("scripts.train_models.LightGBMModel") as mock_lgbm_cls,
-            patch("scripts.train_models.CatBoostModel") as mock_cat_cls,
+            patch("scripts.training.walk_forward.XGBoostModel") as mock_xgb_cls,
+            patch("scripts.training.walk_forward.LightGBMModel") as mock_lgbm_cls,
+            patch("scripts.training.walk_forward.CatBoostModel") as mock_cat_cls,
         ):
             import numpy as np
 
@@ -418,19 +427,22 @@ class TestQualityGateEnforcement:
 
         with (
             patch(
-                "scripts.train_models._build_dataset_with_timestamps",
+                "scripts.training.walk_forward.build_dataset_with_timestamps",
                 return_value=(features, labels, bw, hb, timestamps),
             ),
             patch(
-                "scripts.train_models._generate_walk_forward_folds",
+                "scripts.training.walk_forward.generate_walk_forward_folds",
                 return_value=[
                     (list(range(100)), list(range(100, 140)), list(range(140, 200))),
                 ],
             ),
-            patch("scripts.train_models.select_features_mi", return_value=["feat_a", "feat_b"]),
-            patch("scripts.train_models.compute_decay_weights") as mock_decay,
             patch(
-                "scripts.train_models._evaluate_fold_metrics",
+                "scripts.training.walk_forward.select_features",
+                return_value=["feat_a", "feat_b"],
+            ),
+            patch("scripts.training.walk_forward.compute_decay_weights") as mock_decay,
+            patch(
+                "scripts.training.walk_forward.evaluate_fold_metrics",
                 return_value=fake_fold_metrics,
             ),
             patch(
@@ -441,9 +453,9 @@ class TestQualityGateEnforcement:
                 "finalayze.ml.training.quality_gates.evaluate_walk_forward",
                 return_value=(True, {"accuracy": 0.8, "brier": 0.9}),
             ),
-            patch("scripts.train_models.XGBoostModel") as mock_xgb_cls,
-            patch("scripts.train_models.LightGBMModel") as mock_lgbm_cls,
-            patch("scripts.train_models.CatBoostModel") as mock_cat_cls,
+            patch("scripts.training.walk_forward.XGBoostModel") as mock_xgb_cls,
+            patch("scripts.training.walk_forward.LightGBMModel") as mock_lgbm_cls,
+            patch("scripts.training.walk_forward.CatBoostModel") as mock_cat_cls,
         ):
             import numpy as np
 

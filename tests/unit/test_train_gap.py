@@ -133,12 +133,12 @@ class TestTrainGap:
 
         with (
             patch(
-                "scripts.train_models._build_dataset",
+                "scripts.training.model_trainer.build_dataset",
                 return_value=(features, labels, None, None),
             ),
-            patch("scripts.train_models.XGBoostModel", return_value=mock_model),
-            patch("scripts.train_models.LightGBMModel", return_value=mock_model),
-            patch("scripts.train_models.CatBoostModel", return_value=mock_model),
+            patch("scripts.training.model_trainer.XGBoostModel", return_value=mock_model),
+            patch("scripts.training.model_trainer.LightGBMModel", return_value=mock_model),
+            patch("scripts.training.model_trainer.CatBoostModel", return_value=mock_model),
         ):
             train_one_segment("us_tech", ["AAPL"], Path("/tmp/test_models"))
 

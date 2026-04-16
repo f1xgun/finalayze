@@ -475,18 +475,17 @@ class TestComputeTopMovers:
 
     def test_returns_empty_on_exception(self) -> None:
         """Returns empty list when broker.get_portfolio() raises."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.daily_reporting import DailyReportingService
 
-        loop = MagicMock(spec=TradingLoop)
-        loop._circuit_breakers = {"us": MagicMock()}
-        loop._baseline_equities = {}
+        reporter = MagicMock()
+        reporter._circuit_breakers = {"us": MagicMock()}
 
         broker = MagicMock()
         broker.get_portfolio.side_effect = Exception("broker down")
-        loop._broker_router = MagicMock()
-        loop._broker_router.route.return_value = broker
+        reporter._broker_router = MagicMock()
+        reporter._broker_router.route.return_value = broker
 
-        result = TradingLoop._compute_top_movers(loop)
+        result = DailyReportingService._compute_top_movers(reporter, {})
         assert result == []
 
 
@@ -566,8 +565,8 @@ class TestWeeklyDigestExecution:
     """Weekly digest sends formatted alert with market P&L."""
 
     def test_weekly_digest_sends_alert(self) -> None:
-        """_weekly_digest sends an alert with week P&L data."""
-        from finalayze.core.trading_loop import TradingLoop
+        """weekly_digest sends an alert with week P&L data."""
+        from finalayze.orchestration.daily_reporting import DailyReportingService
 
         portfolio = MagicMock()
         portfolio.equity = Decimal(51000)
@@ -576,25 +575,24 @@ class TestWeeklyDigestExecution:
         broker = MagicMock()
         broker.get_portfolio.return_value = portfolio
 
-        loop = MagicMock(spec=TradingLoop)
-        loop._circuit_breakers = {"us": MagicMock()}
-        loop._broker_router = MagicMock()
-        loop._broker_router.route.return_value = broker
-        loop._baseline_equities = {"us": Decimal(50000)}
-        loop._bond_processor = None
-        loop._alerter = MagicMock()
-        loop._now.return_value = datetime(2026, 3, 15, 16, 0, tzinfo=UTC)
-        loop._compute_top_movers = MagicMock(return_value=[])
+        reporter = MagicMock()
+        reporter._circuit_breakers = {"us": MagicMock()}
+        reporter._broker_router = MagicMock()
+        reporter._broker_router.route.return_value = broker
+        reporter._bond_processor = None
+        reporter._alerter = MagicMock()
+        reporter._now.return_value = datetime(2026, 3, 15, 16, 0, tzinfo=UTC)
+        reporter._compute_top_movers = MagicMock(return_value=[])
 
-        TradingLoop._weekly_digest(loop)
-        loop._alerter.send_alert.assert_called_once()
-        text = loop._alerter.send_alert.call_args[0][0]
+        DailyReportingService.weekly_digest(reporter, {"us": Decimal(50000)})
+        reporter._alerter.send_alert.assert_called_once()
+        text = reporter._alerter.send_alert.call_args[0][0]
         assert "Weekly Digest" in text
         assert "US" in text
 
     def test_weekly_digest_includes_bond_pnl(self) -> None:
         """Weekly digest includes bond layer P&L when bond_processor is set."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.daily_reporting import DailyReportingService
 
         portfolio = MagicMock()
         portfolio.equity = Decimal(51000)
@@ -606,19 +604,19 @@ class TestWeeklyDigestExecution:
         bond_ledger = MagicMock()
         bond_ledger.current_equity = Decimal(1005000)
 
-        loop = MagicMock(spec=TradingLoop)
-        loop._circuit_breakers = {"us": MagicMock()}
-        loop._broker_router = MagicMock()
-        loop._broker_router.route.return_value = broker
-        loop._baseline_equities = {"us": Decimal(50000), "moex_bonds": Decimal(1000000)}
-        loop._bond_processor = MagicMock()
-        loop._bond_processor._layer_ledgers = {"core": bond_ledger}
-        loop._alerter = MagicMock()
-        loop._now.return_value = datetime(2026, 3, 15, 16, 0, tzinfo=UTC)
-        loop._compute_top_movers = MagicMock(return_value=[])
+        reporter = MagicMock()
+        reporter._circuit_breakers = {"us": MagicMock()}
+        reporter._broker_router = MagicMock()
+        reporter._broker_router.route.return_value = broker
+        reporter._bond_processor = MagicMock()
+        reporter._bond_processor._layer_ledgers = {"core": bond_ledger}
+        reporter._alerter = MagicMock()
+        reporter._now.return_value = datetime(2026, 3, 15, 16, 0, tzinfo=UTC)
+        reporter._compute_top_movers = MagicMock(return_value=[])
 
-        TradingLoop._weekly_digest(loop)
-        text = loop._alerter.send_alert.call_args[0][0]
+        baselines = {"us": Decimal(50000), "moex_bonds": Decimal(1000000)}
+        DailyReportingService.weekly_digest(reporter, baselines)
+        text = reporter._alerter.send_alert.call_args[0][0]
         assert "BONDS" in text
 
 
@@ -632,54 +630,52 @@ class TestDailyResetEdgeCases:
 
     def test_daily_reset_none_bond_processor(self) -> None:
         """bond_processor=None → no bond P&L in market_pnl."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.daily_reporting import DailyReportingService
 
-        loop = MagicMock(spec=TradingLoop)
-        loop._circuit_breakers = {"us": MagicMock()}
-        loop._bond_processor = None
-        loop._metrics = MagicMock()
+        reporter = MagicMock()
+        reporter._circuit_breakers = {"us": MagicMock()}
+        reporter._bond_processor = None
+        reporter._metrics = MagicMock()
 
         portfolio = MagicMock()
         portfolio.equity = Decimal(50500)
 
         broker = MagicMock()
         broker.get_portfolio.return_value = portfolio
-        loop._broker_router = MagicMock()
-        loop._broker_router.route.return_value = broker
-        loop._baseline_equities = {"us": Decimal(50000)}
-        loop._cross_market_breaker = MagicMock()
-        loop._alerter = MagicMock()
-        loop._loss_limit_tracker = MagicMock()
-        loop._fx_service = None
-        loop._now.return_value = datetime(2026, 3, 14, 0, 0, tzinfo=UTC)
-        loop._persist_equity_snapshots = MagicMock()
-        loop._compute_top_movers = MagicMock(return_value=[])
+        reporter._broker_router = MagicMock()
+        reporter._broker_router.route.return_value = broker
+        reporter._cross_market_breaker = MagicMock()
+        reporter._alerter = MagicMock()
+        reporter._loss_limit_tracker = MagicMock()
+        reporter._fx_service = None
+        reporter._now.return_value = datetime(2026, 3, 14, 0, 0, tzinfo=UTC)
+        reporter._persistence = MagicMock()
+        reporter._compute_top_movers = MagicMock(return_value=[])
 
-        TradingLoop._daily_reset(loop)
-        market_pnl = loop._alerter.on_daily_summary.call_args[0][0]
+        DailyReportingService.daily_reset(reporter, {"us": Decimal(50000)})
+        market_pnl = reporter._alerter.on_daily_summary.call_args[0][0]
         assert "moex_bonds" not in market_pnl
 
     def test_daily_reset_monday_resets_weekly_loss_limit(self) -> None:
         """On Monday (weekday=0), weekly loss limit is also reset."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.daily_reporting import DailyReportingService
 
-        loop = MagicMock(spec=TradingLoop)
-        loop._circuit_breakers = {}
-        loop._bond_processor = None
-        loop._metrics = MagicMock()
+        reporter = MagicMock()
+        reporter._circuit_breakers = {}
+        reporter._bond_processor = None
+        reporter._metrics = MagicMock()
 
-        loop._cross_market_breaker = MagicMock()
-        loop._alerter = MagicMock()
-        loop._loss_limit_tracker = MagicMock()
-        loop._fx_service = None
-        loop._baseline_equities = {}
-        loop._persist_equity_snapshots = MagicMock()
-        loop._compute_top_movers = MagicMock(return_value=[])
+        reporter._cross_market_breaker = MagicMock()
+        reporter._alerter = MagicMock()
+        reporter._loss_limit_tracker = MagicMock()
+        reporter._fx_service = None
+        reporter._persistence = MagicMock()
+        reporter._compute_top_movers = MagicMock(return_value=[])
         # Monday
-        loop._now.return_value = datetime(2026, 3, 16, 0, 0, tzinfo=UTC)  # Monday
+        reporter._now.return_value = datetime(2026, 3, 16, 0, 0, tzinfo=UTC)  # Monday
 
-        TradingLoop._daily_reset(loop)
-        loop._loss_limit_tracker.reset_week.assert_called_once()
+        DailyReportingService.daily_reset(reporter, {})
+        reporter._loss_limit_tracker.reset_week.assert_called_once()
 
     def test_daily_reset_non_monday_no_weekly_reset(self) -> None:
         """On non-Monday, weekly loss limit is NOT reset."""
@@ -705,26 +701,25 @@ class TestDailyResetEdgeCases:
 
     def test_daily_reset_fx_unavailable_no_dual_currency(self) -> None:
         """FX service returning 0 → total_equity_rub is None."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.daily_reporting import DailyReportingService
 
-        loop = MagicMock(spec=TradingLoop)
-        loop._circuit_breakers = {}
-        loop._bond_processor = None
-        loop._metrics = MagicMock()
-        loop._cross_market_breaker = MagicMock()
-        loop._alerter = MagicMock()
-        loop._loss_limit_tracker = MagicMock()
-        loop._baseline_equities = {}
-        loop._persist_equity_snapshots = MagicMock()
-        loop._compute_top_movers = MagicMock(return_value=[])
-        loop._now.return_value = datetime(2026, 3, 14, 0, 0, tzinfo=UTC)
+        reporter = MagicMock()
+        reporter._circuit_breakers = {}
+        reporter._bond_processor = None
+        reporter._metrics = MagicMock()
+        reporter._cross_market_breaker = MagicMock()
+        reporter._alerter = MagicMock()
+        reporter._loss_limit_tracker = MagicMock()
+        reporter._persistence = MagicMock()
+        reporter._compute_top_movers = MagicMock(return_value=[])
+        reporter._now.return_value = datetime(2026, 3, 14, 0, 0, tzinfo=UTC)
 
         fx = MagicMock()
-        fx.get_usdrub.return_value = Decimal(0)
-        loop._fx_service = fx
+        fx._last_rate = Decimal(0)
+        reporter._fx_service = fx
 
-        TradingLoop._daily_reset(loop)
-        call_args = loop._alerter.on_daily_summary.call_args
+        DailyReportingService.daily_reset(reporter, {})
+        call_args = reporter._alerter.on_daily_summary.call_args
         # total_equity_rub should be None (FX rate is 0)
         total_equity_rub = (
             call_args[0][3] if len(call_args[0]) > 3 else call_args[1].get("total_equity_rub")

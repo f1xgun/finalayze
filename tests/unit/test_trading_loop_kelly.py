@@ -108,15 +108,15 @@ class TestTradingLoopKellyUpdate:
 
         loop._submit_order(order, MARKET_US, candles=candles)
 
-        assert SYMBOL in loop._entry_prices
-        assert loop._entry_prices[SYMBOL] == FILL_PRICE_ENTRY
+        assert SYMBOL in loop._position_tracker._entry_prices
+        assert loop._position_tracker._entry_prices[SYMBOL] == FILL_PRICE_ENTRY
 
     def test_sell_fill_updates_kelly(self) -> None:
         """A SELL fill should call kelly.update with PnL."""
         loop = _make_loop()
 
         # Simulate a prior BUY entry
-        loop._entry_prices[SYMBOL] = FILL_PRICE_ENTRY
+        loop._position_tracker._entry_prices[SYMBOL] = FILL_PRICE_ENTRY
 
         order = loop._OrderRequest(symbol=SYMBOL, side="SELL", quantity=Decimal(10))
         result = OrderResult(filled=True, fill_price=FILL_PRICE_EXIT)
@@ -126,7 +126,7 @@ class TestTradingLoopKellyUpdate:
         loop._submit_order(order, MARKET_US)
 
         assert loop._kelly_sizer.trade_count == initial_count + 1
-        assert SYMBOL not in loop._entry_prices
+        assert SYMBOL not in loop._position_tracker._entry_prices
 
     def test_stop_loss_updates_kelly(self) -> None:
         """A stop-loss sell should also update Kelly."""
@@ -135,8 +135,7 @@ class TestTradingLoopKellyUpdate:
         # Setup: position and entry price exist
         from finalayze.execution.simulated_broker import StopLossState
 
-        loop._entry_prices[SYMBOL] = FILL_PRICE_ENTRY
-        loop._stop_states[SYMBOL] = StopLossState(
+        stop_state = StopLossState(
             initial_stop=Decimal("140.00"),
             current_stop=Decimal("140.00"),
             highest_price=FILL_PRICE_ENTRY,
@@ -146,6 +145,7 @@ class TestTradingLoopKellyUpdate:
             entry_price=FILL_PRICE_ENTRY,
             atr_value=Decimal("5.0"),
         )
+        loop._position_tracker.register_entry(SYMBOL, FILL_PRICE_ENTRY, "test", stop_state)
 
         broker = MagicMock()
         broker.get_positions.return_value = {SYMBOL: Decimal(10)}
@@ -153,7 +153,7 @@ class TestTradingLoopKellyUpdate:
 
         initial_count = loop._kelly_sizer.trade_count
         stop_price = Decimal("139.00")
-        loop._check_stop_losses(MARKET_US, SYMBOL, stop_price)
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL, stop_price)
 
         assert loop._kelly_sizer.trade_count == initial_count + 1
-        assert SYMBOL not in loop._entry_prices
+        assert SYMBOL not in loop._position_tracker._entry_prices

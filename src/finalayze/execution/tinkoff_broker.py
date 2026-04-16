@@ -137,7 +137,7 @@ class TinkoffBroker(BrokerBase):
             return await coro  # type: ignore[misc]
         except Exception as exc:
             if self._is_grpc_unavailable(exc):
-                _log.warning("grpc_unavailable_resetting_channel", error=str(exc))
+                _log.info("grpc_unavailable_resetting_channel", error=str(exc))
                 old_client = self._client
                 self._services = None
                 self._client = None

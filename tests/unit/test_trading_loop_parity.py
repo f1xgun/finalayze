@@ -324,7 +324,9 @@ class TestPipelineSizing:
         mock_pipeline = MagicMock(spec=PositionSizingPipeline)
         mock_pipeline.compute.return_value = Decimal(10000)
 
-        with patch.object(loop, "_build_sizing_pipeline", return_value=mock_pipeline):
+        with patch.object(
+            loop._signal_executor, "_build_sizing_pipeline", return_value=mock_pipeline
+        ):
             order = loop._build_order(
                 signal,
                 CircuitLevel.NORMAL,
@@ -364,7 +366,9 @@ class TestPipelineSizing:
         mock_pipeline = MagicMock(spec=PositionSizingPipeline)
         mock_pipeline.compute.return_value = Decimal(0)
 
-        with patch.object(loop, "_build_sizing_pipeline", return_value=mock_pipeline):
+        with patch.object(
+            loop._signal_executor, "_build_sizing_pipeline", return_value=mock_pipeline
+        ):
             order = loop._build_order(
                 signal,
                 CircuitLevel.NORMAL,
@@ -392,8 +396,10 @@ class TestPipelineSizing:
 
         # Patch _get_segment_min_confidence to return low threshold
         with (
-            patch.object(loop, "_build_sizing_pipeline", return_value=mock_pipeline),
-            patch.object(loop, "_get_segment_min_confidence", return_value=0.3),
+            patch.object(
+                loop._signal_executor, "_build_sizing_pipeline", return_value=mock_pipeline
+            ),
+            patch.object(loop._signal_executor, "_get_segment_min_confidence", return_value=0.3),
         ):
             order_normal = loop._build_order(
                 signal,
@@ -444,12 +450,14 @@ class TestPreTradeCheckParams:
         candles = [_make_candle(150.0) for _ in range(NUM_CANDLES)]
         signal = _make_signal()
 
+        executor = loop._signal_executor
+
         # Mock fetcher
         fetcher = MagicMock()
         fetcher.fetch_candles.return_value = candles
 
-        # Mock strategy
-        loop._strategy.generate_signal.return_value = signal
+        # Mock strategy on executor
+        executor._strategy.generate_signal.return_value = signal
 
         # Mock broker
         broker = MagicMock()
@@ -457,23 +465,22 @@ class TestPreTradeCheckParams:
         broker.get_portfolio.return_value = _make_portfolio()
         broker.get_positions.return_value = {}
         loop._broker_router.route.return_value = broker
+        executor._broker_router.route.return_value = broker
 
-        # Mock portfolio cache
+        # Mock portfolio cache on loop for delegation shim
         portfolio = _make_portfolio()
-        loop._get_cached_portfolio = MagicMock(return_value=portfolio)
+        loop._cycle_portfolio_cache = {MARKET_US: portfolio}
 
-        # Mock _build_order to return a valid order
+        # Mock _build_order on executor to return a valid order
         mock_order = MagicMock()
         mock_order.quantity = Decimal(10)
         mock_order.symbol = SYMBOL_AAPL
         mock_order.side = "BUY"
-        loop._build_order = MagicMock(return_value=mock_order)
+        executor._build_order = MagicMock(return_value=mock_order)
 
-        # Mock _compute_total_equity_base
-        loop._compute_total_equity_base = MagicMock(return_value=BASELINE_EQUITY)
-
-        # Mock _get_market_equity
-        loop._get_market_equity = MagicMock(return_value=BASELINE_EQUITY)
+        # Mock _compute_total_equity_base and _get_market_equity on executor
+        executor._compute_total_equity_base = MagicMock(return_value=BASELINE_EQUITY)
+        executor._get_market_equity = MagicMock(return_value=BASELINE_EQUITY)
 
         return candles, signal, fetcher, broker, portfolio
 
@@ -487,7 +494,7 @@ class TestPreTradeCheckParams:
         expected_stop = stop_state.current_stop
 
         # Patch pre_trade_checker.check to capture call
-        loop._pre_trade_checker.check = MagicMock(
+        loop._signal_executor._pre_trade_checker.check = MagicMock(
             return_value=MagicMock(passed=True, violations=[])
         )
 
@@ -503,7 +510,7 @@ class TestPreTradeCheckParams:
             now=datetime.now(UTC),
         )
 
-        call_kwargs = loop._pre_trade_checker.check.call_args
+        call_kwargs = loop._signal_executor._pre_trade_checker.check.call_args
         assert call_kwargs is not None, "pre_trade_checker.check must be called"
         # Check stop_loss_price is passed (keyword argument)
         kw = call_kwargs.kwargs or {}
@@ -515,7 +522,7 @@ class TestPreTradeCheckParams:
         loop = _make_loop()
         self._setup_process_instrument(loop)
 
-        loop._pre_trade_checker.check = MagicMock(
+        loop._signal_executor._pre_trade_checker.check = MagicMock(
             return_value=MagicMock(passed=True, violations=[])
         )
 
@@ -529,7 +536,7 @@ class TestPreTradeCheckParams:
         loop = _make_loop()
         self._setup_process_instrument(loop)
 
-        loop._pre_trade_checker.check = MagicMock(
+        loop._signal_executor._pre_trade_checker.check = MagicMock(
             return_value=MagicMock(passed=True, violations=[])
         )
 
@@ -541,7 +548,7 @@ class TestPreTradeCheckParams:
         loop = _make_loop()
         self._setup_process_instrument(loop)
 
-        loop._pre_trade_checker.check = MagicMock(
+        loop._signal_executor._pre_trade_checker.check = MagicMock(
             return_value=MagicMock(passed=True, violations=[])
         )
 
@@ -557,7 +564,7 @@ class TestPreTradeCheckParams:
             now=datetime.now(UTC),
         )
 
-        call_kwargs = loop._pre_trade_checker.check.call_args
+        call_kwargs = loop._signal_executor._pre_trade_checker.check.call_args
         assert call_kwargs is not None
         kw = call_kwargs.kwargs or {}
         assert "strategy_name" in kw, "strategy_name must be passed to pre-trade check"
@@ -568,7 +575,7 @@ class TestPreTradeCheckParams:
         loop = _make_loop()
         self._setup_process_instrument(loop)
 
-        loop._pre_trade_checker.check = MagicMock(
+        loop._signal_executor._pre_trade_checker.check = MagicMock(
             return_value=MagicMock(passed=True, violations=[])
         )
 
@@ -584,7 +591,7 @@ class TestPreTradeCheckParams:
             now=datetime.now(UTC),
         )
 
-        call_kwargs = loop._pre_trade_checker.check.call_args
+        call_kwargs = loop._signal_executor._pre_trade_checker.check.call_args
         assert call_kwargs is not None
         kw = call_kwargs.kwargs or {}
         assert "open_positions" in kw, "open_positions must be passed"
@@ -597,7 +604,7 @@ class TestPreTradeCheckParams:
         loop = _make_loop()
         self._setup_process_instrument(loop)
 
-        loop._pre_trade_checker.check = MagicMock(
+        loop._signal_executor._pre_trade_checker.check = MagicMock(
             return_value=MagicMock(passed=True, violations=[])
         )
 
@@ -613,7 +620,7 @@ class TestPreTradeCheckParams:
             now=datetime.now(UTC),
         )
 
-        call_kwargs = loop._pre_trade_checker.check.call_args
+        call_kwargs = loop._signal_executor._pre_trade_checker.check.call_args
         assert call_kwargs is not None
         kw = call_kwargs.kwargs or {}
         assert "require_stop_loss" in kw, "require_stop_loss must be passed"
@@ -631,7 +638,7 @@ class TestPreTradeCheckParams:
         # Seed a stop state so the symbol has an existing position with stop
         _seed_stop_state(loop)
 
-        loop._pre_trade_checker.check = MagicMock(
+        loop._signal_executor._pre_trade_checker.check = MagicMock(
             return_value=MagicMock(passed=True, violations=[])
         )
 
@@ -647,7 +654,7 @@ class TestPreTradeCheckParams:
             now=datetime.now(UTC),
         )
 
-        call_kwargs = loop._pre_trade_checker.check.call_args
+        call_kwargs = loop._signal_executor._pre_trade_checker.check.call_args
         assert call_kwargs is not None
         kw = call_kwargs.kwargs or {}
         assert "require_stop_loss" in kw, "require_stop_loss must be passed"

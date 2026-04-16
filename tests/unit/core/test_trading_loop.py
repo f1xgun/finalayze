@@ -73,10 +73,10 @@ class TestNewsCycleSkipGuard:
         rss = MagicMock()
         loop = _make_loop(rss_fetcher=rss)
 
-        # Force _any_event_driven_enabled to return False
-        loop._any_event_driven_enabled = MagicMock(return_value=False)  # type: ignore[attr-defined]
+        # Force is_event_driven_active to return False
+        loop._sentiment_mgr.is_event_driven_active = MagicMock(return_value=False)  # type: ignore[attr-defined]
 
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
 
         # RSS fetcher should NOT have been called
         rss.fetch_news.assert_not_called()
@@ -87,20 +87,19 @@ class TestNewsCycleSkipGuard:
         rss.fetch_news.return_value = []
         loop = _make_loop(rss_fetcher=rss)
 
-        # Force _any_event_driven_enabled to return True
-        loop._any_event_driven_enabled = MagicMock(return_value=True)  # type: ignore[attr-defined]
+        # Force is_event_driven_active to return True
+        loop._sentiment_mgr.is_event_driven_active = MagicMock(return_value=True)  # type: ignore[attr-defined]
 
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
 
         # RSS fetcher SHOULD have been called
         rss.fetch_news.assert_called_once()
 
     def test_any_event_driven_enabled_reads_presets(self, tmp_path) -> None:
-        """_any_event_driven_enabled() reads all segment preset YAMLs and returns True
+        """is_event_driven_active() reads all segment preset YAMLs and returns True
         only if any has strategies.event_driven.enabled=true."""
         import yaml
 
-        # Create two presets: one with event_driven disabled, one enabled
         presets_dir = tmp_path / "presets"
         presets_dir.mkdir()
 
@@ -120,32 +119,15 @@ class TestNewsCycleSkipGuard:
         )
 
         loop = _make_loop()
-        # Patch the presets directory
-        with patch(
-            "finalayze.orchestration.trading_loop.Path.__truediv__",
-        ):
-            # Direct approach: patch the method internals
-            loop._event_driven_active = None  # type: ignore[attr-defined]
-            original_method = type(loop)._any_event_driven_enabled  # type: ignore[attr-defined]
+        mgr = loop._sentiment_mgr
+        mgr._event_driven_active = None  # type: ignore[attr-defined]
 
-            # We test by calling the method with a patched presets_dir
-            with patch.object(
-                type(loop),
-                "_any_event_driven_enabled",
-                wraps=original_method,
-            ):
-                # Simpler: just set the presets_dir and call
-                pass
-
-        # Simpler test: use the actual method with tmp_path presets
-        loop._event_driven_active = None  # type: ignore[attr-defined]
         with patch(
-            "finalayze.orchestration.trading_loop.Path",
+            "finalayze.orchestration.sentiment_manager.Path",
         ) as mock_path_cls:
-            # Make Path(__file__).parent.parent / "strategies" / "presets" -> tmp_path/presets
             mock_parent = mock_path_cls.return_value.parent.parent
             mock_parent.__truediv__.return_value.__truediv__.return_value = presets_dir
-            result = loop._any_event_driven_enabled()  # type: ignore[attr-defined]
+            result = mgr.is_event_driven_active()
 
         assert result is True
 
@@ -172,25 +154,27 @@ class TestNewsCycleSkipGuard:
         )
 
         loop = _make_loop()
-        loop._event_driven_active = None  # type: ignore[attr-defined]
+        mgr = loop._sentiment_mgr
+        mgr._event_driven_active = None  # type: ignore[attr-defined]
 
         with patch(
-            "finalayze.orchestration.trading_loop.Path",
+            "finalayze.orchestration.sentiment_manager.Path",
         ) as mock_path_cls:
             mock_parent = mock_path_cls.return_value.parent.parent
             mock_parent.__truediv__.return_value.__truediv__.return_value = presets_dir
-            result = loop._any_event_driven_enabled()  # type: ignore[attr-defined]
+            result = mgr.is_event_driven_active()
 
         assert result is False
 
     def test_any_event_driven_enabled_caches_result(self, tmp_path) -> None:
-        """_any_event_driven_enabled() caches result (does not re-read YAML every cycle)."""
+        """is_event_driven_active() caches result (does not re-read YAML every cycle)."""
         loop = _make_loop()
+        mgr = loop._sentiment_mgr
         # Pre-set the cached value
-        loop._event_driven_active = False  # type: ignore[attr-defined]
+        mgr._event_driven_active = False  # type: ignore[attr-defined]
 
         # Should return cached value without reading any files
-        result = loop._any_event_driven_enabled()  # type: ignore[attr-defined]
+        result = mgr.is_event_driven_active()
         assert result is False
 
 
@@ -200,57 +184,61 @@ class TestSentimentTimeDecay:
     def test_sentiment_decay_at_zero_hours(self) -> None:
         """Sentiment score stored at time T, read at T=0, returns 100% of original."""
         loop = _make_loop()
+        mgr = loop._sentiment_mgr
         now = time.monotonic()
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, now)  # type: ignore[attr-defined]
+        with mgr._sentiment_lock:
+            mgr._sentiment_cache[("test_seg", "SBER")] = (0.8, now)
 
-        result = loop._read_decayed_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
+        result = mgr.read_decayed_sentiment("test_seg", "SBER")
         assert abs(result - 0.8) < 0.01
 
     def test_sentiment_decay_at_four_hours(self) -> None:
         """Sentiment score stored at time T, read at T+4h, returns ~50% of original."""
         loop = _make_loop()
+        mgr = loop._sentiment_mgr
         four_hours_ago = time.monotonic() - 4 * 3600
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, four_hours_ago)  # type: ignore[attr-defined]
+        with mgr._sentiment_lock:
+            mgr._sentiment_cache[("test_seg", "SBER")] = (0.8, four_hours_ago)
 
-        result = loop._read_decayed_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
+        result = mgr.read_decayed_sentiment("test_seg", "SBER")
         # half-life = 4h -> at 4h, should be ~50% = 0.4
         assert abs(result - 0.4) < 0.05
 
     def test_sentiment_decay_at_eight_hours(self) -> None:
         """Sentiment score stored at time T, read at T+8h, returns ~25% of original."""
         loop = _make_loop()
+        mgr = loop._sentiment_mgr
         eight_hours_ago = time.monotonic() - 8 * 3600
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, eight_hours_ago)  # type: ignore[attr-defined]
+        with mgr._sentiment_lock:
+            mgr._sentiment_cache[("test_seg", "SBER")] = (0.8, eight_hours_ago)
 
-        result = loop._read_decayed_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
+        result = mgr.read_decayed_sentiment("test_seg", "SBER")
         # 2 half-lives -> ~25% = 0.2
         assert abs(result - 0.2) < 0.05
 
     def test_get_sentiment_applies_decay(self) -> None:
-        """_get_sentiment applies decay before returning."""
+        """get_sentiment applies decay before returning."""
         loop = _make_loop()
+        mgr = loop._sentiment_mgr
         four_hours_ago = time.monotonic() - 4 * 3600
 
         # No Redis cache
-        loop._cache = None  # type: ignore[attr-defined]
+        mgr._cache = None  # type: ignore[attr-defined]
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, four_hours_ago)  # type: ignore[attr-defined]
+        with mgr._sentiment_lock:
+            mgr._sentiment_cache[("test_seg", "SBER")] = (0.8, four_hours_ago)
 
-        result = loop._get_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
+        result = mgr.get_sentiment("test_seg", "SBER")
         # Should return decayed value (~0.4), not raw 0.8
         assert abs(result - 0.4) < 0.05
 
     def test_sentiment_default_for_missing_segment(self) -> None:
-        """_read_decayed_sentiment returns default for missing segment."""
+        """read_decayed_sentiment returns default for missing segment."""
         loop = _make_loop()
-        result = loop._read_decayed_sentiment("nonexistent", "SBER")  # type: ignore[attr-defined]
+        result = loop._sentiment_mgr.read_decayed_sentiment("nonexistent", "SBER")
         assert result == 0.0
 
 
@@ -279,8 +267,8 @@ class TestArticleDedup:
         loop = _make_loop()
         article = _make_article()
 
-        first = loop._is_article_duplicate(article)  # type: ignore[attr-defined]
-        second = loop._is_article_duplicate(article)  # type: ignore[attr-defined]
+        first = loop._news_pipeline._is_article_duplicate(article)  # type: ignore[attr-defined]
+        second = loop._news_pipeline._is_article_duplicate(article)  # type: ignore[attr-defined]
 
         assert first is False
         assert second is True
@@ -291,16 +279,16 @@ class TestArticleDedup:
         article = _make_article()
 
         # First call: mark as seen
-        assert loop._is_article_duplicate(article) is False  # type: ignore[attr-defined]
+        assert loop._news_pipeline._is_article_duplicate(article) is False  # type: ignore[attr-defined]
 
         # Manually backdate the stored timestamp beyond TTL (24h)
-        key = next(iter(loop._seen_article_hashes.keys()))  # type: ignore[attr-defined]
-        loop._seen_article_hashes[key] = time.monotonic() - 25 * 3600  # type: ignore[attr-defined]
+        key = next(iter(loop._news_pipeline._seen_article_hashes.keys()))  # type: ignore[attr-defined]
+        loop._news_pipeline._seen_article_hashes[key] = time.monotonic() - 25 * 3600  # type: ignore[attr-defined]
         # Move to front so eviction can find it
-        loop._seen_article_hashes.move_to_end(key, last=False)  # type: ignore[attr-defined]
+        loop._news_pipeline._seen_article_hashes.move_to_end(key, last=False)  # type: ignore[attr-defined]
 
         # Should NOT be duplicate anymore (TTL expired, entry evicted)
-        assert loop._is_article_duplicate(article) is False  # type: ignore[attr-defined]
+        assert loop._news_pipeline._is_article_duplicate(article) is False  # type: ignore[attr-defined]
 
     def test_article_dedup_different_articles_pass(self) -> None:
         """Two articles with different URLs are both not duplicates."""
@@ -308,8 +296,8 @@ class TestArticleDedup:
         a1 = _make_article(url="https://example.com/1")
         a2 = _make_article(url="https://example.com/2")
 
-        assert loop._is_article_duplicate(a1) is False  # type: ignore[attr-defined]
-        assert loop._is_article_duplicate(a2) is False  # type: ignore[attr-defined]
+        assert loop._news_pipeline._is_article_duplicate(a1) is False  # type: ignore[attr-defined]
+        assert loop._news_pipeline._is_article_duplicate(a2) is False  # type: ignore[attr-defined]
 
 
 class TestMarketHoursGate:
@@ -403,8 +391,7 @@ class TestKillSwitchStartupGuard:
         # we just verify the kill switch check passes (no RuntimeError).
         mock_sched = MagicMock()
         with patch(
-            "finalayze.orchestration.trading_loop.BackgroundScheduler",
-            return_value=mock_sched,
+            "finalayze.orchestration.trading_loop.BackgroundScheduler", return_value=mock_sched
         ):
             # start() blocks on _stop_event.wait(); simulate immediate stop
             loop._stop_event.set()  # type: ignore[attr-defined]
@@ -420,8 +407,7 @@ class TestKillSwitchStartupGuard:
 
         mock_sched = MagicMock()
         with patch(
-            "finalayze.orchestration.trading_loop.BackgroundScheduler",
-            return_value=mock_sched,
+            "finalayze.orchestration.trading_loop.BackgroundScheduler", return_value=mock_sched
         ):
             loop._stop_event.set()  # type: ignore[attr-defined]
             loop.start()  # type: ignore[attr-defined]
@@ -462,7 +448,7 @@ class TestStalenessThreshold:
 
         # Friday 15:00 UTC → Monday 07:00 UTC = 64 hours
         # 64h < 72h threshold → quick path returns False (not stale)
-        _friday = datetime(2026, 4, 3, 15, 0, tzinfo=UTC)
+        _friday = datetime(2026, 4, 3, 15, 0, tzinfo=UTC)  # noqa: F841
         age_hours = 64
         latest = datetime.now(UTC) - timedelta(hours=age_hours)
         # 64h < 72h → quick path, not stale
@@ -475,12 +461,12 @@ class TestStalenessThreshold:
         # Dec 30 to Jan 9 = 10 calendar days = 240 hours
         # Non-trading: Dec 31 (holiday), Jan 1-8 (holidays), plus any weekends in range
         # With enough holidays subtracted, adjusted age should be < 72h
-        _dec_30 = datetime(2025, 12, 30, 15, 0, tzinfo=UTC)
+        _dec_30 = datetime(2025, 12, 30, 15, 0, tzinfo=UTC)  # noqa: F841
         jan_9 = datetime(2026, 1, 9, 7, 0, tzinfo=UTC)
 
         with patch("finalayze.orchestration.trading_loop.datetime") as mock_dt:
             mock_dt.now.return_value = jan_9
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, tzinfo=UTC, **kw)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)  # noqa: DTZ001, PLW0108
 
         # The actual function uses datetime.now(UTC), so we test the logic directly
         # by calling with known timestamps. We need to verify the holiday subtraction
@@ -676,7 +662,7 @@ class TestEntryStrategy:
     def test_entry_strategy_initialized_empty(self) -> None:
         """_entry_strategy is an empty dict on TradingLoop construction."""
         loop = _make_loop_with_broker()
-        assert loop._entry_strategy == {}  # type: ignore[attr-defined]
+        assert loop.get_entry_strategies() == {}
 
     def test_entry_strategy_set_on_buy_fill(self) -> None:
         """After a BUY order fills, _entry_strategy[symbol] == strategy_name passed in."""
@@ -700,7 +686,7 @@ class TestEntryStrategy:
 
         loop._submit_order(order, "moex", strategy_name="dual_momentum")  # type: ignore[attr-defined]
 
-        assert loop._entry_strategy.get("SBER") == "dual_momentum"  # type: ignore[attr-defined]
+        assert loop.get_entry_strategies().get("SBER") == "dual_momentum"
 
     def test_entry_strategy_cleared_on_sell_fill(self) -> None:
         """After a SELL order fills, symbol is no longer in _entry_strategy."""
@@ -709,8 +695,9 @@ class TestEntryStrategy:
         from finalayze.execution.broker_base import OrderRequest, OrderResult
 
         loop = _make_loop_with_broker()
-        loop._entry_strategy["SBER"] = "dual_momentum"  # type: ignore[attr-defined]
-        loop._entry_prices["SBER"] = Decimal(100)  # type: ignore[attr-defined]
+        # Use position tracker's register_entry instead of direct access
+        loop._position_tracker._entry_strategy["SBER"] = "dual_momentum"
+        loop._position_tracker._entry_prices["SBER"] = Decimal(100)
         loop._persist_to_db = MagicMock()  # type: ignore[attr-defined]
 
         sell_result = OrderResult(
@@ -725,11 +712,13 @@ class TestEntryStrategy:
         order = OrderRequest(symbol="SBER", side="SELL", quantity=Decimal(1))
         loop._submit_order(order, "moex")  # type: ignore[attr-defined]
 
-        assert "SBER" not in loop._entry_strategy  # type: ignore[attr-defined]
+        assert "SBER" not in loop.get_entry_strategies()
 
     def test_entry_strategy_cleared_on_stop_loss(self) -> None:
         """After stop-loss triggers, symbol is no longer in _entry_strategy."""
         from decimal import Decimal
+
+        from finalayze.execution.simulated_broker import StopLossState
 
         loop = _make_loop_with_broker()
 
@@ -737,11 +726,8 @@ class TestEntryStrategy:
         stop_price = Decimal(95)
         current_price = Decimal(90)  # Below stop
 
-        loop._entry_strategy["SBER"] = "dual_momentum"  # type: ignore[attr-defined]
-        loop._entry_prices["SBER"] = entry_price  # type: ignore[attr-defined]
-
         # Set up stop state
-        stop_state = loop._StopLossState(  # type: ignore[attr-defined]
+        stop_state = StopLossState(
             initial_stop=stop_price,
             current_stop=stop_price,
             highest_price=entry_price,
@@ -751,17 +737,16 @@ class TestEntryStrategy:
             entry_price=entry_price,
             atr_value=Decimal(5),
         )
-        with loop._stop_loss_lock:  # type: ignore[attr-defined]
-            loop._stop_states["SBER"] = stop_state  # type: ignore[attr-defined]
+        loop._position_tracker.register_entry("SBER", entry_price, "dual_momentum", stop_state)
 
         # Mock broker to return a position
         broker_mock = MagicMock()
         broker_mock.get_positions.return_value = {"SBER": Decimal(1)}
         loop._broker_router.route.return_value = broker_mock  # type: ignore[attr-defined]
 
-        loop._check_stop_losses("moex", "SBER", current_price)  # type: ignore[attr-defined]
+        loop._position_tracker.check_stop_losses("moex", "SBER", current_price)
 
-        assert "SBER" not in loop._entry_strategy  # type: ignore[attr-defined]
+        assert "SBER" not in loop.get_entry_strategies()
 
     def test_entry_strategy_not_set_on_rejected_order(self) -> None:
         """If BUY order is rejected (filled=False), _entry_strategy is unchanged."""
@@ -784,16 +769,16 @@ class TestEntryStrategy:
         order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(1))
         loop._submit_order(order, "moex", strategy_name="dual_momentum")  # type: ignore[attr-defined]
 
-        assert "SBER" not in loop._entry_strategy  # type: ignore[attr-defined]
+        assert "SBER" not in loop.get_entry_strategies()
 
     def test_entry_strategy_getter_returns_copy(self) -> None:
         """get_entry_strategies() returns a copy, not a reference to the internal dict."""
         loop = _make_loop_with_broker()
-        loop._entry_strategy["SBER"] = "dual_momentum"  # type: ignore[attr-defined]
+        loop._position_tracker._entry_strategy["SBER"] = "dual_momentum"
 
-        result = loop.get_entry_strategies()  # type: ignore[attr-defined]
+        result = loop.get_entry_strategies()
 
         assert result == {"SBER": "dual_momentum"}
         # Mutating the returned dict does not affect internal state
         result["SBER"] = "mutated"
-        assert loop._entry_strategy["SBER"] == "dual_momentum"  # type: ignore[attr-defined]
+        assert loop.get_entry_strategies()["SBER"] == "dual_momentum"

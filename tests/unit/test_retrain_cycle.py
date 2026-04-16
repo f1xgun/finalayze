@@ -39,22 +39,14 @@ def _make_trading_loop(
     ml_enabled: bool = True,
     ml_min_train_samples: int = 10,
 ) -> MagicMock:
-    """Create a minimal TradingLoop-like object for testing _retrain_segment."""
-    from finalayze.core.trading_loop import TradingLoop
+    """Create a minimal MLRetrainingService-like object for testing retrain_all."""
+    from finalayze.orchestration.ml_retraining import MLRetrainingService
 
     settings = MagicMock()
     settings.ml_enabled = ml_enabled
     settings.ml_min_train_samples = ml_min_train_samples
     settings.ml_model_dir = "models/"
     settings.ml_retrain_interval_hours = 168
-    settings.news_cycle_minutes = 30
-    settings.strategy_cycle_minutes = 60
-    settings.daily_reset_hour_utc = 0
-    settings.mode = "test"
-    settings.max_position_pct = 0.20
-    settings.max_positions_per_market = 10
-    settings.daily_loss_limit_pct = 0.05
-    settings.kelly_fraction = 0.5
 
     # Create mock instrument
     instrument = MagicMock()
@@ -66,19 +58,21 @@ def _make_trading_loop(
 
     fetcher = MagicMock()
 
-    loop = MagicMock(spec=TradingLoop)
-    loop._settings = settings
-    loop._ml_registry = ml_registry
-    loop._registry = instrument_registry
-    loop._fetchers = {"us": fetcher}
-    loop._alerter = MagicMock()
-    loop._collect_active_segments = MagicMock(return_value=["us_tech"])
+    retrainer = MagicMock(spec=MLRetrainingService)
+    retrainer._settings = settings
+    retrainer._ml_registry = ml_registry
+    retrainer._registry = instrument_registry
+    retrainer._fetchers = {"us": fetcher}
+    retrainer._alerter = MagicMock()
+    retrainer._collect_active_segments = MagicMock(return_value=["us_tech"])
+    retrainer._now = MagicMock(return_value=_BASE_DT)
 
     # Bind real methods
-    loop._retrain_cycle = TradingLoop._retrain_cycle.__get__(loop)
-    loop._retrain_segment = TradingLoop._retrain_segment.__get__(loop)
+    retrainer.retrain_all = MLRetrainingService.retrain_all.__get__(retrainer)
+    retrainer._retrain_segment = MLRetrainingService._retrain_segment.__get__(retrainer)
+    retrainer._retrain_cycle = retrainer.retrain_all  # alias for backward compat
 
-    return loop
+    return retrainer
 
 
 # Patch targets: these are imported locally inside _retrain_cycle

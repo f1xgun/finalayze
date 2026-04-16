@@ -9,7 +9,8 @@ import numpy as np
 import pytest
 
 from finalayze.core.schemas import Candle
-from finalayze.ml.features.technical import _compute_wavelet_features, compute_features
+from finalayze.ml.features.technical import compute_features
+from finalayze.ml.features.wavelet import compute_wavelet_features as _compute_wavelet_features
 
 _WAVELET_KEYS = {
     "wavelet_approx_energy",
