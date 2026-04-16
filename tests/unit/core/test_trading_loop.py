@@ -73,8 +73,8 @@ class TestNewsCycleSkipGuard:
         rss = MagicMock()
         loop = _make_loop(rss_fetcher=rss)
 
-        # Force _any_event_driven_enabled to return False
-        loop._any_event_driven_enabled = MagicMock(return_value=False)  # type: ignore[attr-defined]
+        # Force is_event_driven_active to return False
+        loop._sentiment_mgr.is_event_driven_active = MagicMock(return_value=False)  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
@@ -87,8 +87,8 @@ class TestNewsCycleSkipGuard:
         rss.fetch_news.return_value = []
         loop = _make_loop(rss_fetcher=rss)
 
-        # Force _any_event_driven_enabled to return True
-        loop._any_event_driven_enabled = MagicMock(return_value=True)  # type: ignore[attr-defined]
+        # Force is_event_driven_active to return True
+        loop._sentiment_mgr.is_event_driven_active = MagicMock(return_value=True)  # type: ignore[attr-defined]
 
         loop._news_cycle()  # type: ignore[attr-defined]
 
@@ -96,11 +96,10 @@ class TestNewsCycleSkipGuard:
         rss.fetch_news.assert_called_once()
 
     def test_any_event_driven_enabled_reads_presets(self, tmp_path) -> None:
-        """_any_event_driven_enabled() reads all segment preset YAMLs and returns True
+        """is_event_driven_active() reads all segment preset YAMLs and returns True
         only if any has strategies.event_driven.enabled=true."""
         import yaml
 
-        # Create two presets: one with event_driven disabled, one enabled
         presets_dir = tmp_path / "presets"
         presets_dir.mkdir()
 
@@ -120,32 +119,15 @@ class TestNewsCycleSkipGuard:
         )
 
         loop = _make_loop()
-        # Patch the presets directory
-        with patch(
-            "finalayze.orchestration.trading_loop.Path.__truediv__",
-        ):
-            # Direct approach: patch the method internals
-            loop._event_driven_active = None  # type: ignore[attr-defined]
-            original_method = type(loop)._any_event_driven_enabled  # type: ignore[attr-defined]
+        mgr = loop._sentiment_mgr
+        mgr._event_driven_active = None  # type: ignore[attr-defined]
 
-            # We test by calling the method with a patched presets_dir
-            with patch.object(
-                type(loop),
-                "_any_event_driven_enabled",
-                wraps=original_method,
-            ):
-                # Simpler: just set the presets_dir and call
-                pass
-
-        # Simpler test: use the actual method with tmp_path presets
-        loop._event_driven_active = None  # type: ignore[attr-defined]
         with patch(
-            "finalayze.orchestration.trading_loop.Path",
+            "finalayze.orchestration.sentiment_manager.Path",
         ) as mock_path_cls:
-            # Make Path(__file__).parent.parent / "strategies" / "presets" -> tmp_path/presets
             mock_parent = mock_path_cls.return_value.parent.parent
             mock_parent.__truediv__.return_value.__truediv__.return_value = presets_dir
-            result = loop._any_event_driven_enabled()  # type: ignore[attr-defined]
+            result = mgr.is_event_driven_active()
 
         assert result is True
 
@@ -172,25 +154,27 @@ class TestNewsCycleSkipGuard:
         )
 
         loop = _make_loop()
-        loop._event_driven_active = None  # type: ignore[attr-defined]
+        mgr = loop._sentiment_mgr
+        mgr._event_driven_active = None  # type: ignore[attr-defined]
 
         with patch(
-            "finalayze.orchestration.trading_loop.Path",
+            "finalayze.orchestration.sentiment_manager.Path",
         ) as mock_path_cls:
             mock_parent = mock_path_cls.return_value.parent.parent
             mock_parent.__truediv__.return_value.__truediv__.return_value = presets_dir
-            result = loop._any_event_driven_enabled()  # type: ignore[attr-defined]
+            result = mgr.is_event_driven_active()
 
         assert result is False
 
     def test_any_event_driven_enabled_caches_result(self, tmp_path) -> None:
-        """_any_event_driven_enabled() caches result (does not re-read YAML every cycle)."""
+        """is_event_driven_active() caches result (does not re-read YAML every cycle)."""
         loop = _make_loop()
+        mgr = loop._sentiment_mgr
         # Pre-set the cached value
-        loop._event_driven_active = False  # type: ignore[attr-defined]
+        mgr._event_driven_active = False  # type: ignore[attr-defined]
 
         # Should return cached value without reading any files
-        result = loop._any_event_driven_enabled()  # type: ignore[attr-defined]
+        result = mgr.is_event_driven_active()
         assert result is False
 
 
@@ -200,57 +184,61 @@ class TestSentimentTimeDecay:
     def test_sentiment_decay_at_zero_hours(self) -> None:
         """Sentiment score stored at time T, read at T=0, returns 100% of original."""
         loop = _make_loop()
+        mgr = loop._sentiment_mgr
         now = time.monotonic()
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, now)  # type: ignore[attr-defined]
+        with mgr._sentiment_lock:
+            mgr._sentiment_cache[("test_seg", "SBER")] = (0.8, now)
 
-        result = loop._read_decayed_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
+        result = mgr.read_decayed_sentiment("test_seg", "SBER")
         assert abs(result - 0.8) < 0.01
 
     def test_sentiment_decay_at_four_hours(self) -> None:
         """Sentiment score stored at time T, read at T+4h, returns ~50% of original."""
         loop = _make_loop()
+        mgr = loop._sentiment_mgr
         four_hours_ago = time.monotonic() - 4 * 3600
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, four_hours_ago)  # type: ignore[attr-defined]
+        with mgr._sentiment_lock:
+            mgr._sentiment_cache[("test_seg", "SBER")] = (0.8, four_hours_ago)
 
-        result = loop._read_decayed_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
+        result = mgr.read_decayed_sentiment("test_seg", "SBER")
         # half-life = 4h -> at 4h, should be ~50% = 0.4
         assert abs(result - 0.4) < 0.05
 
     def test_sentiment_decay_at_eight_hours(self) -> None:
         """Sentiment score stored at time T, read at T+8h, returns ~25% of original."""
         loop = _make_loop()
+        mgr = loop._sentiment_mgr
         eight_hours_ago = time.monotonic() - 8 * 3600
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, eight_hours_ago)  # type: ignore[attr-defined]
+        with mgr._sentiment_lock:
+            mgr._sentiment_cache[("test_seg", "SBER")] = (0.8, eight_hours_ago)
 
-        result = loop._read_decayed_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
+        result = mgr.read_decayed_sentiment("test_seg", "SBER")
         # 2 half-lives -> ~25% = 0.2
         assert abs(result - 0.2) < 0.05
 
     def test_get_sentiment_applies_decay(self) -> None:
-        """_get_sentiment applies decay before returning."""
+        """get_sentiment applies decay before returning."""
         loop = _make_loop()
+        mgr = loop._sentiment_mgr
         four_hours_ago = time.monotonic() - 4 * 3600
 
         # No Redis cache
-        loop._cache = None  # type: ignore[attr-defined]
+        mgr._cache = None  # type: ignore[attr-defined]
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("test_seg", "SBER")] = (0.8, four_hours_ago)  # type: ignore[attr-defined]
+        with mgr._sentiment_lock:
+            mgr._sentiment_cache[("test_seg", "SBER")] = (0.8, four_hours_ago)
 
-        result = loop._get_sentiment("test_seg", "SBER")  # type: ignore[attr-defined]
+        result = mgr.get_sentiment("test_seg", "SBER")
         # Should return decayed value (~0.4), not raw 0.8
         assert abs(result - 0.4) < 0.05
 
     def test_sentiment_default_for_missing_segment(self) -> None:
-        """_read_decayed_sentiment returns default for missing segment."""
+        """read_decayed_sentiment returns default for missing segment."""
         loop = _make_loop()
-        result = loop._read_decayed_sentiment("nonexistent", "SBER")  # type: ignore[attr-defined]
+        result = loop._sentiment_mgr.read_decayed_sentiment("nonexistent", "SBER")
         assert result == 0.0
 
 

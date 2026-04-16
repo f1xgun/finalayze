@@ -234,14 +234,16 @@ class TestTradingLoopNewsCycle:
         loop._news_cycle()  # type: ignore[attr-defined]
         # After running the news cycle, the cache should have SOME entries
         # (keyed by affected segments -> symbols or by scope)
-        cache = loop._sentiment_cache  # type: ignore[attr-defined]
-        assert isinstance(cache, dict)
+        mgr = loop._sentiment_mgr  # type: ignore[attr-defined]
+        assert hasattr(mgr, "_sentiment_cache")
+        assert isinstance(mgr._sentiment_cache, dict)  # type: ignore[attr-defined]
 
     def test_news_cycle_uses_thread_lock(self) -> None:
-        """Verify _sentiment_cache is guarded by _sentiment_lock."""
+        """Verify _sentiment_cache is guarded by _sentiment_lock via SentimentManager."""
         loop = _make_trading_loop()
-        assert hasattr(loop, "_sentiment_lock")
-        assert isinstance(loop._sentiment_lock, type(threading.Lock()))  # type: ignore[attr-defined]
+        mgr = loop._sentiment_mgr  # type: ignore[attr-defined]
+        assert hasattr(mgr, "_sentiment_lock")
+        assert isinstance(mgr._sentiment_lock, type(threading.Lock()))  # type: ignore[attr-defined]
 
     def test_news_cycle_no_error_on_empty_articles(self) -> None:
         loop = _make_trading_loop()
