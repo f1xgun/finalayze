@@ -32,6 +32,59 @@ def _get_segment_for_symbol(symbol: str) -> str:
     return _symbol_to_segment.get(symbol, "")
 
 
+def _build_stop_fields(
+    symbol: str,
+    current_price: float,
+    position_tracker: Any | None,
+) -> dict[str, Any]:
+    """Build the 8 D-02 stop fields for a position (STOP-01).
+
+    Returns all-null dict when no tracker or no active stop. Uses Decimal
+    arithmetic for activation_threshold to match PositionTracker formula
+    (54-RESEARCH Pitfall 6).
+
+    Return type is ``dict[str, Any]`` because PositionDetail's stop fields
+    are a heterogenous mix of ``float | None`` and ``bool | None``; a narrower
+    union confuses mypy when splatting with ``**`` into the constructor.
+    """
+    empty: dict[str, Any] = {
+        "stop_price": None,
+        "distance_pct": None,
+        "distance_atr": None,
+        "atr_value": None,
+        "entry_price": None,
+        "highest_price": None,
+        "trail_activated": None,
+        "activation_threshold": None,
+    }
+    if position_tracker is None:
+        return empty
+    state = position_tracker.get_stop_state(symbol)
+    if state is None:
+        return empty
+    current_dec = Decimal(str(current_price))
+    dist_pct: float | None
+    dist_atr: float | None
+    if current_dec > 0 and state.atr_value > 0:
+        dist_pct = float((current_dec - state.current_stop) / current_dec)
+        dist_atr = float((current_dec - state.current_stop) / state.atr_value)
+    else:
+        dist_pct = None
+        dist_atr = None
+    # Decimal arithmetic to match PositionTracker (Pitfall 6)
+    activation_threshold_dec = state.entry_price + state.activation_atr * state.atr_value
+    return {
+        "stop_price": float(state.current_stop),
+        "distance_pct": dist_pct,
+        "distance_atr": dist_atr,
+        "atr_value": float(state.atr_value),
+        "entry_price": float(state.entry_price),
+        "highest_price": float(state.highest_price),
+        "trail_activated": bool(state.trail_activated),
+        "activation_threshold": float(activation_threshold_dec),
+    }
+
+
 _log = structlog.get_logger()
 
 router = APIRouter(
@@ -124,6 +177,24 @@ class PositionsResponse(BaseModel):
     positions: list[PositionDetail]
 
 
+class StopEventEntry(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    timestamp: str
+    event_type: str
+    current_stop: float | None
+    entry_price: float | None
+    highest_price: float | None
+    current_price: float | None
+    atr_value: float | None
+    trail_activated: bool | None
+
+
+class StopHistoryResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    symbol: str
+    events: list[StopEventEntry]
+
+
 class SnapshotEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
     timestamp: str
@@ -202,10 +273,13 @@ async def get_portfolio(request: Request) -> PortfolioResponse:
 
 @router.get("/positions", response_model=PositionsResponse)
 async def get_positions(request: Request) -> PositionsResponse:
-    """All open positions with unrealized P&L."""
+    """All open positions with unrealized P&L and trailing stop-loss state (STOP-01)."""
     broker_router = getattr(request.app.state, "broker_router", None)
     if broker_router is None:
         return PositionsResponse(positions=[])
+
+    # STOP-01: PositionTracker provides the stop-loss state (None in TEST/DEBUG modes)
+    position_tracker = getattr(request.app.state, "position_tracker", None)
 
     market_registry = default_registry()
     instrument_registry = build_default_registry()
@@ -228,6 +302,11 @@ async def get_positions(request: Request) -> PositionsResponse:
                         display_symbol = inst.symbol
                     except Exception:  # noqa: S110
                         pass
+                    stop_fields = _build_stop_fields(
+                        display_symbol,
+                        float(p.get("current_price", 0)),
+                        position_tracker,
+                    )
                     positions.append(
                         PositionDetail(
                             symbol=display_symbol,
@@ -239,6 +318,7 @@ async def get_positions(request: Request) -> PositionsResponse:
                             market_value=float(p.get("market_value", 0)),
                             unrealized_pnl=float(p.get("unrealized_pnl", 0)),
                             unrealized_pnl_pct=float(p.get("unrealized_pnl_pct", 0)),
+                            **stop_fields,
                         )
                     )
             else:
@@ -252,6 +332,7 @@ async def get_positions(request: Request) -> PositionsResponse:
                             display_symbol = inst.symbol
                         except Exception:  # noqa: S110
                             pass
+                        stop_fields = _build_stop_fields(display_symbol, 0.0, position_tracker)
                         positions.append(
                             PositionDetail(
                                 symbol=display_symbol,
@@ -263,12 +344,69 @@ async def get_positions(request: Request) -> PositionsResponse:
                                 market_value=0.0,
                                 unrealized_pnl=0.0,
                                 unrealized_pnl_pct=0.0,
+                                **stop_fields,
                             )
                         )
         except Exception as exc:
             _log.warning("Failed to fetch positions for market %s: %s", market_id, exc)
 
     return PositionsResponse(positions=positions)
+
+
+@router.get(
+    "/positions/{symbol}/stop-history",
+    response_model=StopHistoryResponse,
+)
+async def get_stop_history(
+    symbol: str,
+    days: int = 30,
+) -> StopHistoryResponse:
+    """Return stop-loss state history from stop_loss_events for a symbol (last N days).
+
+    Reads from the async session factory bound to the uvicorn event loop
+    (NOT the trading-loop background factory -- Pitfall 2).
+    Empty list if no history exists yet (not a 404).
+    """
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+    from finalayze.core.models import StopLossEventModel  # noqa: PLC0415
+
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    try:
+        factory = get_async_session_factory()
+        async with factory() as session:
+            stmt = (
+                select(StopLossEventModel)
+                .where(
+                    StopLossEventModel.symbol == symbol,
+                    StopLossEventModel.timestamp >= cutoff,
+                )
+                .order_by(StopLossEventModel.timestamp.asc())
+            )
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+    except Exception as exc:
+        # DB unavailable (test mode or infra issue) -> empty list, not 500.
+        # Mirrors get_portfolio_history:397-399 pattern.
+        _log.warning("stop_history_failed", symbol=symbol, error=str(exc))
+        return StopHistoryResponse(symbol=symbol, events=[])
+    events = [
+        StopEventEntry(
+            timestamp=r.timestamp.isoformat(),
+            event_type=r.event_type,
+            current_stop=float(r.current_stop) if r.current_stop is not None else None,
+            entry_price=float(r.entry_price) if r.entry_price is not None else None,
+            highest_price=float(r.highest_price) if r.highest_price is not None else None,
+            current_price=float(r.current_price) if r.current_price is not None else None,
+            atr_value=float(r.atr_value) if r.atr_value is not None else None,
+            trail_activated=r.trail_activated,
+        )
+        for r in rows
+    ]
+    return StopHistoryResponse(symbol=symbol, events=events)
 
 
 @router.get("/positions/{symbol}", response_model=PositionDetail)

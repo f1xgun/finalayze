@@ -252,9 +252,7 @@ def test_build_stop_fields_distance_pct_formula() -> None:
     from finalayze.api.v1.portfolio import _build_stop_fields
 
     tracker = MagicMock()
-    tracker.get_stop_state.return_value = _mock_stop_state(
-        entry=100.0, current_stop=95.0, atr=2.5
-    )
+    tracker.get_stop_state.return_value = _mock_stop_state(entry=100.0, current_stop=95.0, atr=2.5)
     result = _build_stop_fields("SBER", 100.0, tracker)
     # (100 - 95) / 100 = 0.05
     assert result["distance_pct"] is not None
@@ -265,9 +263,7 @@ def test_build_stop_fields_distance_atr_formula() -> None:
     from finalayze.api.v1.portfolio import _build_stop_fields
 
     tracker = MagicMock()
-    tracker.get_stop_state.return_value = _mock_stop_state(
-        entry=100.0, current_stop=95.0, atr=2.5
-    )
+    tracker.get_stop_state.return_value = _mock_stop_state(entry=100.0, current_stop=95.0, atr=2.5)
     result = _build_stop_fields("SBER", 100.0, tracker)
     # (100 - 95) / 2.5 = 2.0
     assert result["distance_atr"] is not None
