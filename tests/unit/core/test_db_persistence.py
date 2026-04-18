@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, call, patch
 
-import pytest
-
 from finalayze.orchestration.trading_loop import TradingLoop
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _make_loop() -> TradingLoop:
@@ -390,13 +392,13 @@ class TestPersistStopSnapshots:
         from finalayze.execution.simulated_broker import StopLossState
 
         return StopLossState(
-            initial_stop=Decimal("95"),
-            current_stop=Decimal("95"),
-            highest_price=Decimal("100"),
+            initial_stop=Decimal(95),
+            current_stop=Decimal(95),
+            highest_price=Decimal(100),
             trail_activated=False,
             activation_atr=Decimal("1.0"),
             trail_atr=Decimal("1.5"),
-            entry_price=Decimal("100"),
+            entry_price=Decimal(100),
             atr_value=Decimal("2.5"),
         )
 
@@ -417,14 +419,12 @@ class TestPersistStopSnapshots:
         persistence.persist_stop_snapshots(
             {"SBER": self._make_state()},
             {"SBER": "moex"},
-            {"SBER": Decimal("100")},
+            {"SBER": Decimal(100)},
             datetime.now(UTC),
         )
         assert run_spy.call_count == 0
 
-    def test_catches_exceptions_and_does_not_reraise(
-        self, mocker: pytest.FixtureRequest
-    ) -> None:
+    def test_catches_exceptions_and_does_not_reraise(self, mocker: pytest.FixtureRequest) -> None:
         from datetime import UTC, datetime
 
         persistence = self._make_persistence()
@@ -437,7 +437,7 @@ class TestPersistStopSnapshots:
         persistence.persist_stop_snapshots(
             {"SBER": self._make_state()},
             {"SBER": "moex"},
-            {"SBER": Decimal("100")},
+            {"SBER": Decimal(100)},
             datetime.now(UTC),
         )
         # Counter incremented for stop_loss_events table
@@ -459,17 +459,17 @@ class TestPersistStopSnapshots:
         persistence.persist_stop_snapshots(
             {"SBER": self._make_state()},
             {"SBER": "moex"},
-            {"SBER": Decimal("100")},
+            {"SBER": Decimal(100)},
             datetime.now(UTC),
             event_type="entry",
         )
         assert captured["table"] == "stop_loss_events"
-        assert captured["event"] == "entry"
+        # event_type is forwarded under 'event_kind' to avoid colliding with
+        # structlog's reserved 'event' positional arg on the debug/warning log lines.
+        assert captured["event_kind"] == "entry"
         assert captured["count"] == 1
 
-    def test_does_not_touch_consecutive_errors(
-        self, mocker: pytest.FixtureRequest
-    ) -> None:
+    def test_does_not_touch_consecutive_errors(self, mocker: pytest.FixtureRequest) -> None:
         """Persistence failures must never affect TradingLoop counters.
 
         ``_consecutive_equity_errors`` lives on TradingLoop
@@ -493,7 +493,7 @@ class TestPersistStopSnapshots:
         persistence.persist_stop_snapshots(
             {"SBER": self._make_state()},
             {"SBER": "moex"},
-            {"SBER": Decimal("100")},
+            {"SBER": Decimal(100)},
             datetime.now(UTC),
         )
         after_attrs = {
@@ -502,12 +502,11 @@ class TestPersistStopSnapshots:
             if not name.startswith("__") and not callable(getattr(persistence, name, None))
         }
         # No new attr appeared, no counter incremented. Ignore mock-injected attrs.
-        for name in before_attrs:
+        for name, value in before_attrs.items():
             if name.startswith("_mock"):
                 continue
-            assert before_attrs[name] == after_attrs.get(name), (
-                f"persistence.{name} changed after failure: "
-                f"{before_attrs[name]!r} -> {after_attrs.get(name)!r}"
+            assert value == after_attrs.get(name), (
+                f"persistence.{name} changed after failure: {value!r} -> {after_attrs.get(name)!r}"
             )
         # Explicitly: no attribute named like the trading-loop counter
         assert not hasattr(persistence, "_consecutive_equity_errors")
@@ -527,22 +526,19 @@ class TestPersistStopSnapshots:
         mocker.patch("finalayze.api.metrics.db_write_failures")  # type: ignore[attr-defined]
         # Capture the structlog-driven 'db_persist_failed' warning.
         log_warning = mocker.patch.object(  # type: ignore[attr-defined]
-            __import__(
-                "finalayze.orchestration.db_persistence", fromlist=["_log"]
-            )._log,
+            __import__("finalayze.orchestration.db_persistence", fromlist=["_log"])._log,
             "warning",
         )
         with caplog.at_level(logging.WARNING):
             persistence.persist_stop_snapshots(
                 {"SBER": self._make_state()},
                 {"SBER": "moex"},
-                {"SBER": Decimal("100")},
+                {"SBER": Decimal(100)},
                 datetime.now(UTC),
             )
         # Assert the warning was called with db_persist_failed event + table kwarg
         call_args_list = log_warning.call_args_list
         assert any(
-            (args and args[0] == "db_persist_failed")
-            and kwargs.get("table") == "stop_loss_events"
+            (args and args[0] == "db_persist_failed") and kwargs.get("table") == "stop_loss_events"
             for args, kwargs in ((c.args, c.kwargs) for c in call_args_list)
         ), f"expected db_persist_failed/table=stop_loss_events, got {call_args_list}"

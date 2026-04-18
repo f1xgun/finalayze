@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from finalayze.analysis.news_impact_analyzer import NewsImpactResult
     from finalayze.core.schemas import NewsArticle
     from finalayze.execution.broker_base import OrderRequest
+    from finalayze.execution.simulated_broker import StopLossState
 
 _log = structlog.get_logger()
 
@@ -357,6 +358,77 @@ class TradingPersistence:
     ) -> None:
         """Fire-and-forget wrapper for equity snapshot persistence."""
         self._persist_equity_snapshots(baselines, now)
+
+    async def _persist_stop_snapshots_async(
+        self,
+        states: dict[str, StopLossState],
+        market_ids: dict[str, str],
+        prices: dict[str, Decimal],
+        now: datetime,
+        event_type: str,
+    ) -> None:
+        """Write one StopLossEventModel row per entry in ``states`` (STOP-03)."""
+        from finalayze.core.models import StopLossEventModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            for sym, state in states.items():
+                row = StopLossEventModel(
+                    timestamp=now,
+                    symbol=sym,
+                    market_id=market_ids.get(sym, ""),
+                    event_type=event_type,
+                    entry_price=state.entry_price,
+                    current_stop=state.current_stop,
+                    highest_price=state.highest_price,
+                    atr_value=state.atr_value,
+                    activation_atr=state.activation_atr,
+                    trail_atr=state.trail_atr,
+                    trail_activated=state.trail_activated,
+                    current_price=prices.get(sym),
+                )
+                session.add(row)
+            await session.commit()
+
+    def persist_stop_snapshots(
+        self,
+        states: dict[str, StopLossState],
+        market_ids: dict[str, str],
+        prices: dict[str, Decimal],
+        now: datetime,
+        event_type: str = "snapshot",
+    ) -> None:
+        """Fire-and-forget write of stop-loss state snapshots (PERSIST-05, STOP-03).
+
+        Mirrors ``persist_equity_snapshots``:
+          - No exception escapes.
+          - ``db_write_failures.labels(table='stop_loss_events')`` increments on
+            error.
+          - Silently skips when ``self._db_url`` is None.
+          - Does NOT affect ``_consecutive_equity_errors`` (lives on TradingLoop,
+            not here).
+
+        Args:
+            states: symbol -> StopLossState snapshot to persist.
+            market_ids: symbol -> market_id ("us" | "moex") for each row.
+            prices: symbol -> current price (for chart overlay); optional per sym.
+            now: Timestamp to write.
+            event_type: One of ``'snapshot' | 'entry' | 'trigger' | 'activation' |
+                'exit'``.
+        """
+        if not states:
+            return
+        # Note: structlog reserves the ``event`` positional arg for the log
+        # message, so we forward the event_type under a different ctx key
+        # (``event_kind``) to avoid ``TypeError: multiple values for 'event'``
+        # in the ``db_persist_skipped`` / ``db_persist_ok`` / ``db_persist_failed``
+        # debug/warning log lines.
+        self._persist_to_db(
+            self._persist_stop_snapshots_async(states, market_ids, prices, now, event_type),
+            table="stop_loss_events",
+            event_kind=event_type,
+            count=len(states),
+        )
 
     async def persist_sentiment_batch_async(
         self,
