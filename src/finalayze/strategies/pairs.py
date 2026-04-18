@@ -347,7 +347,9 @@ class PairsStrategy(BaseStrategy):
         log_b_hist = log_b[:-1]
         hist_length = len(log_a_hist)
 
-        if hist_length < _MIN_CANDLES_FOR_HIST:
+        # Caller guarantees n >= _MIN_CANDLES_FOR_HIST; hist_length can still be
+        # as small as 2 on that boundary. Degenerate cases (< 1) are a hard skip.
+        if hist_length < 1:
             return None
 
         key = (segment_id, sym_a, sym_b)
