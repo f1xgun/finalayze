@@ -145,7 +145,9 @@ class TestTradingLoopKellyUpdate:
             entry_price=FILL_PRICE_ENTRY,
             atr_value=Decimal("5.0"),
         )
-        loop._position_tracker.register_entry(SYMBOL, FILL_PRICE_ENTRY, "test", stop_state)
+        loop._position_tracker.register_entry(
+            SYMBOL, FILL_PRICE_ENTRY, "test", stop_state, market_id=MARKET_US
+        )
 
         broker = MagicMock()
         broker.get_positions.return_value = {SYMBOL: Decimal(10)}
