@@ -45,6 +45,7 @@ dependencies = [
     "finnhub-python>=2.4.20",
     # Dashboard
     "streamlit>=1.41.0",
+    "plotly>=6.6.0",
     # Monitoring
     "prometheus-client>=0.20",
     "prometheus-fastapi-instrumentator>=7.0",

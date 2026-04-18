@@ -7,6 +7,26 @@ import streamlit as st
 
 from finalayze.dashboard.api_client import ApiClient
 
+# D-10 threshold: a position is "at risk" when distance_atr < 0.5 (red bucket)
+_RED_BUCKET_THRESHOLD = 0.5
+
+
+def _count_at_risk(positions: list[dict[str, object]] | None) -> int:
+    """Count positions in the red ATR bucket (D-04 / D-10 / D-11).
+
+    I-07: Defensively reject bool values for distance_atr. In Python,
+    `isinstance(True, (int, float))` is True, so a stray bool would be
+    treated as 0 or 1 and misclassified. Exclude bools explicitly.
+    """
+    if not positions:
+        return 0
+    count = 0
+    for p in positions:
+        da = p.get("distance_atr") if isinstance(p, dict) else None
+        if isinstance(da, (int, float)) and not isinstance(da, bool) and da < _RED_BUCKET_THRESHOLD:
+            count += 1
+    return count
+
 
 def render(api: ApiClient) -> None:
     """Render the Portfolio page."""
@@ -38,13 +58,21 @@ def render(api: ApiClient) -> None:
     total_cash = float(portfolio.get("total_cash_usd") or 0.0)
     cash_pct = (total_cash / total_equity * 100) if total_equity > 0 else 0.0
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric(f"Total Equity ({currency_label})", f"{currency_sym}{total_equity:,.2f}")
     pnl_label = f"{currency_sym}{daily_pnl:,.2f}"
     col2.metric(f"Daily P&L ({currency_label})", pnl_label, f"{daily_pnl_pct:.2f}%")
     col3.metric("Cash %", f"{cash_pct:.1f}%")
     col4.metric("Sharpe (30d)", f"{sharpe:.2f}" if sharpe is not None else "N/A")
     col5.metric("Max Drawdown", f"{(float(max_dd) if max_dd else 0.0) * 100:.1f}%")
+
+    # STOP-04 D-11: mini-badge for positions at risk
+    positions_list = positions_data.get("positions", []) or []
+    at_risk = _count_at_risk(positions_list)
+    total_positions = len(positions_list)
+    dot = "\U0001f534" if at_risk > 0 else "\U0001f7e2"  # red / green circle
+    col6.metric(f"{dot} Positions at risk", f"{at_risk}/{total_positions}")
+    st.page_link("pages/positions.py", label="\u2192 See details")
 
     # Equity curve with drawdown shading
     snapshots = history.get("snapshots", [])

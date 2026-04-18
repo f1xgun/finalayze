@@ -333,6 +333,30 @@ class DailyEquitySnapshot(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
 
 
+class StopLossEventModel(Base):
+    """Append-only stop-loss state event log, persisted to TimescaleDB hypertable.
+
+    One row per (symbol, timestamp) from per-cycle snapshots plus key events
+    (entry, activation, trigger, exit). Used for STOP-03 history chart and
+    post-mortem analysis (ALRT-01 follow-up).
+    """
+
+    __tablename__ = "stop_loss_events"
+
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(30), primary_key=True)
+    market_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    entry_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    current_stop: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    highest_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    atr_value: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    activation_atr: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    trail_atr: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    trail_activated: Mapped[bool | None] = mapped_column(Boolean)
+    current_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+
+
 class PortfolioSnapshot(Base):
     """Portfolio equity snapshot written after each strategy cycle."""
 

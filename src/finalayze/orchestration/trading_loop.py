@@ -248,11 +248,24 @@ class TradingLoop:
             fraction=getattr(settings, "kelly_fraction", 0.5),
         )
 
-        # Position tracker (Phase 1.6): stop-loss, entry prices, strategy ownership
+        # Persistent background event loop for non-gRPC async calls (HTTP, DB, Telegram).
+        # Actual loop is created in start(); None until then.
+        self._async_loop: asyncio.AbstractEventLoop | None = None
+        self._async_thread: threading.Thread | None = None
+
+        # Database persistence (fire-and-forget writes to avoid crashing trading loop).
+        # Must be constructed BEFORE PositionTracker so we can inject it (STOP-03).
+        db_url = getattr(settings, "database_url", None)
+        self._persistence = TradingPersistence(db_url, self._async_loop, settings)
+
+        # Position tracker (Phase 1.6): stop-loss, entry prices, strategy ownership.
+        # Accepts self._persistence so it can fire entry/trigger/snapshot events
+        # into the stop_loss_events table (STOP-03, D-06).
         self._position_tracker = PositionTracker(
             kelly_sizer=self._kelly_sizer,
             broker_router=broker_router,
             alerter=alerter,
+            persistence=self._persistence,
         )
 
         # Signal executor (Phase 1.7): signal generation, order building, submission
@@ -261,7 +274,7 @@ class TradingLoop:
             broker_router=broker_router,
             position_tracker=self._position_tracker,
             sentiment_mgr=self._sentiment_mgr,
-            persistence=None,  # Initialized below after _persistence is created
+            persistence=self._persistence,
             pre_trade_checker=self._pre_trade_checker,
             loss_limit_tracker=self._loss_limit_tracker,
             macro_cache=macro_cache,
@@ -293,18 +306,6 @@ class TradingLoop:
         # Per-cycle portfolio cache: market_id -> PortfolioState
         # Populated at the start of each strategy cycle, cleared at the end.
         self._cycle_portfolio_cache: dict[str, Any] = {}
-
-        # Persistent background event loop for non-gRPC async calls (HTTP, DB, Telegram)
-        self._async_loop: asyncio.AbstractEventLoop | None = None
-        self._async_thread: threading.Thread | None = None
-
-        # Database persistence (fire-and-forget writes to avoid crashing trading loop)
-        # Initialize with settings.database_url if available
-        db_url = getattr(settings, "database_url", None)
-        self._persistence = TradingPersistence(db_url, self._async_loop, settings)
-
-        # Wire persistence into signal executor
-        self._signal_executor._persistence = self._persistence
 
         # Daily reporting service (extracted Phase 1.4)
         self._daily_reporter = DailyReportingService(
@@ -1265,6 +1266,38 @@ class TradingLoop:
         # Phase 3: Process instruments for markets that are NORMAL or CAUTION
         for market_id, level in market_cb_levels.items():
             self._process_market_cycle(market_id, level, market_equities, now)
+
+        # STOP-03: per-cycle snapshot of all active stop-loss states (D-04).
+        # Wrapped in its own try/except so a DB failure here NEVER propagates
+        # to _strategy_cycle's outer catch — that would inflate
+        # _consecutive_equity_errors (see 54-RESEARCH.md §Open Questions #3).
+        try:
+            self._position_tracker.snapshot_all_stops_to_db(
+                market_ids=self._build_symbol_to_market_map(),
+                prices=dict(self._last_prices),
+                now=now,
+            )
+        except Exception:
+            # PERSIST-05: must NEVER affect _consecutive_equity_errors.
+            _log.warning("stop_snapshot_write_failed", exc_info=True)
+
+    def _build_symbol_to_market_map(self) -> dict[str, str]:
+        """Resolve each open-position symbol to its market_id via ``broker_router``.
+
+        Runs once per strategy cycle (~5-15 min), not per fill — O(markets x
+        positions) is acceptable here. If cycle latency becomes a concern, we
+        can cache ``symbol -> market_id`` in ``PositionTracker`` at
+        ``register_entry`` time (the relation is 1:1).
+        """
+        result: dict[str, str] = {}
+        try:
+            for mid in self._broker_router.registered_markets:
+                broker = self._broker_router.route(mid)
+                for sym in broker.get_positions():
+                    result[sym] = mid
+        except Exception:
+            _log.debug("symbol_to_market_map_failed", exc_info=True)
+        return result
 
     def _process_market_cycle(
         self,

@@ -74,6 +74,11 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
                 if broker_router is not None:
                     # Expose to portfolio/positions API endpoints
                     _application.state.broker_router = broker_router
+                    # STOP-01: expose PositionTracker so /portfolio/positions can
+                    # read stop-loss state off-lock via get_stop_state.
+                    position_tracker = getattr(_trading_loop_instance, "_position_tracker", None)
+                    if position_tracker is not None:
+                        _application.state.position_tracker = position_tracker
                     try:
                         moex_broker = broker_router.route("moex")
                         if isinstance(moex_broker, TinkoffBroker):

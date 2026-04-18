@@ -737,7 +737,9 @@ class TestEntryStrategy:
             entry_price=entry_price,
             atr_value=Decimal(5),
         )
-        loop._position_tracker.register_entry("SBER", entry_price, "dual_momentum", stop_state)
+        loop._position_tracker.register_entry(
+            "SBER", entry_price, "dual_momentum", stop_state, market_id="moex"
+        )
 
         # Mock broker to return a position
         broker_mock = MagicMock()

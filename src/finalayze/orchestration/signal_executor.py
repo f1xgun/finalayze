@@ -791,7 +791,11 @@ class SignalExecutor:
                                 atr_value=atr_val,
                             )
                             self._position_tracker.register_entry(
-                                order.symbol, result.fill_price, strategy_name, stop_state
+                                order.symbol,
+                                result.fill_price,
+                                strategy_name,
+                                stop_state,
+                                market_id=market_id,
                             )
                         else:
                             # If stop-loss computation failed, still track entry price
