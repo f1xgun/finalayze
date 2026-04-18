@@ -8,7 +8,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from finalayze.api.v1.auth import api_key_auth
 from finalayze.markets.instruments import build_default_registry
@@ -71,7 +71,52 @@ class PositionDetail(BaseModel):
     market_value: float
     unrealized_pnl: float
     unrealized_pnl_pct: float
-    stop_distance_atr: float | None
+    # --- STOP-01 D-02 stop-loss state (all nullable; null when no active stop, D-03) ---
+    stop_price: float | None = Field(
+        default=None,
+        description="Current trailing stop-loss price. Null if no active stop.",
+    )
+    distance_pct: float | None = Field(
+        default=None,
+        description=(
+            "Distance from current price to stop, as fraction of current price: "
+            "(current_price - stop_price) / current_price. Positive when price is "
+            "above stop (normal long position). Null if no active stop."
+        ),
+    )
+    distance_atr: float | None = Field(
+        default=None,
+        description=(
+            "ATR-normalized distance: (current_price - stop_price) / atr_value. "
+            "Used by the risk heatmap (D-10): green > 1.5, yellow 0.5-1.5, red < 0.5. "
+            "Null if no active stop."
+        ),
+    )
+    atr_value: float | None = Field(
+        default=None,
+        description=(
+            "ATR at entry time, cached in PositionTracker (constant for position lifetime)."
+        ),
+    )
+    entry_price: float | None = Field(
+        default=None,
+        description="Fill price when position was opened.",
+    )
+    highest_price: float | None = Field(
+        default=None,
+        description="High-water mark since entry, used for trailing activation.",
+    )
+    trail_activated: bool | None = Field(
+        default=None,
+        description="True once highest_price reached entry + activation_atr * atr_value.",
+    )
+    activation_threshold: float | None = Field(
+        default=None,
+        description=(
+            "Price level that activates trailing: entry_price + activation_atr * atr_value. "
+            "Once highest_price crosses this, trail_activated becomes True."
+        ),
+    )
 
 
 class PositionsResponse(BaseModel):
@@ -194,7 +239,6 @@ async def get_positions(request: Request) -> PositionsResponse:
                             market_value=float(p.get("market_value", 0)),
                             unrealized_pnl=float(p.get("unrealized_pnl", 0)),
                             unrealized_pnl_pct=float(p.get("unrealized_pnl_pct", 0)),
-                            stop_distance_atr=None,
                         )
                     )
             else:
@@ -219,7 +263,6 @@ async def get_positions(request: Request) -> PositionsResponse:
                                 market_value=0.0,
                                 unrealized_pnl=0.0,
                                 unrealized_pnl_pct=0.0,
-                                stop_distance_atr=None,
                             )
                         )
         except Exception as exc:
