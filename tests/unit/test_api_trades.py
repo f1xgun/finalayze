@@ -343,3 +343,61 @@ def test_analytics_profit_factor_none_when_no_losses(monkeypatch: pytest.MonkeyP
     assert data["profit_factor"] is None  # no losses
 
 
+# ── Phase 55-03 Task 2b: list_trades + get_trade populate slippage_bps ──
+
+
+def test_list_trades_populates_slippage_bps_when_signal_price_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TRAD-01 read path: BUY filled above signal_price yields positive bps (D-08)."""
+    now = datetime.now(UTC)
+    rows = [
+        _mk_row(
+            "BUY",
+            "100",
+            "281",
+            now - timedelta(hours=1),
+            signal_price=Decimal(280),
+        ),
+    ]
+    _patch_session_for_rows(monkeypatch, rows)
+    resp = TestClient(create_app()).get("/api/v1/trades", headers=_auth())
+    assert resp.status_code == 200
+    trades = resp.json()["trades"]
+    assert len(trades) == 1
+    assert trades[0]["slippage_bps"] is not None
+    assert trades[0]["slippage_bps"] > 0  # BUY filled above reference = adverse (D-08)
+
+
+def test_list_trades_slippage_null_when_no_signal_price(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TRAD-01 read path: legacy signal with signal_price=None → slippage_bps null (D-07)."""
+    now = datetime.now(UTC)
+    rows = [
+        # signal_price=None → SimpleNamespace(signal=None) per _mk_row helper
+        _mk_row("BUY", "50", "190", now - timedelta(hours=1), signal_price=None),
+    ]
+    _patch_session_for_rows(monkeypatch, rows)
+    resp = TestClient(create_app()).get("/api/v1/trades", headers=_auth())
+    trades = resp.json()["trades"]
+    assert len(trades) == 1
+    assert trades[0]["slippage_bps"] is None
+
+
+def test_get_trade_populates_slippage_bps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRAD-01 read path: single-trade fetch returns the same slippage as the list endpoint."""
+    now = datetime.now(UTC)
+    row = _mk_row(
+        "BUY",
+        "100",
+        "281",
+        now - timedelta(hours=1),
+        signal_price=Decimal(280),
+    )
+    _patch_session_for_rows(monkeypatch, [row])
+    resp = TestClient(create_app()).get(f"/api/v1/trades/{row.id}", headers=_auth())
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["slippage_bps"] is not None
+    assert data["slippage_bps"] > 0

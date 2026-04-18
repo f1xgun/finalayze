@@ -88,9 +88,14 @@ async def list_trades(
     symbol: str | None = None,
     limit: int = 100,
 ) -> TradesResponse:
-    """Trade history from orders table (filled orders)."""
+    """Trade history from orders table (filled orders).
+
+    Eagerly loads ``OrderModel.signal`` and populates ``slippage_bps`` per
+    row via ``_slippage.compute_slippage_bps`` (TRAD-01 read path).
+    """
     try:
         from sqlalchemy import func, select, text  # noqa: PLC0415
+        from sqlalchemy.orm import selectinload  # noqa: PLC0415
 
         from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import OrderModel  # noqa: PLC0415
@@ -98,6 +103,7 @@ async def list_trades(
         async with get_async_session_factory()() as session:
             stmt = (
                 select(OrderModel)
+                .options(selectinload(OrderModel.signal))
                 .where(OrderModel.status == "filled")
                 .order_by(text("filled_at desc nulls last"))
                 .limit(limit)
@@ -124,7 +130,7 @@ async def list_trades(
                 side=r.side,
                 quantity=float(r.filled_quantity),
                 fill_price=float(r.filled_avg_price) if r.filled_avg_price else None,
-                slippage_bps=None,
+                slippage_bps=_slippage_for(r),
                 timestamp=(r.filled_at or r.submitted_at or "").isoformat()  # type: ignore[union-attr]
                 if hasattr(r.filled_at or r.submitted_at, "isoformat")
                 else "",
@@ -174,7 +180,10 @@ async def trade_analytics(  # noqa: PLR0915  # end-to-end FIFO+analytics handler
 
         settings = Settings()
         cutoff = (datetime.now(UTC) - timedelta(days=period)).replace(
-            hour=0, minute=0, second=0, microsecond=0,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
         )
 
         async with get_async_session_factory()() as session:
@@ -247,9 +256,7 @@ async def trade_analytics(  # noqa: PLR0915  # end-to-end FIFO+analytics handler
             s = _slippage_for(r)
             if s is not None:
                 slippage_values.append(s)
-        avg_slippage = (
-            sum(slippage_values) / len(slippage_values) if slippage_values else None
-        )
+        avg_slippage = sum(slippage_values) / len(slippage_values) if slippage_values else None
 
         return TradeAnalytics(
             period_days=period,
@@ -279,17 +286,26 @@ async def trade_analytics(  # noqa: PLR0915  # end-to-end FIFO+analytics handler
 
 @router.get("/{trade_id}", response_model=TradeEntry)
 async def get_trade(trade_id: str) -> TradeEntry:
-    """Single trade detail."""
+    """Single trade detail.
+
+    Eagerly loads ``OrderModel.signal`` so ``slippage_bps`` is populated
+    consistently with ``list_trades`` (TRAD-01 read path).
+    """
     try:
+        import uuid  # noqa: PLC0415
+
         from sqlalchemy import select  # noqa: PLC0415
+        from sqlalchemy.orm import selectinload  # noqa: PLC0415
 
         from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import OrderModel  # noqa: PLC0415
 
         async with get_async_session_factory()() as session:
-            import uuid  # noqa: PLC0415
-
-            stmt = select(OrderModel).where(OrderModel.id == uuid.UUID(trade_id))
+            stmt = (
+                select(OrderModel)
+                .options(selectinload(OrderModel.signal))
+                .where(OrderModel.id == uuid.UUID(trade_id))
+            )
             result = await session.execute(stmt)
             r = result.scalar_one_or_none()
 
@@ -303,7 +319,7 @@ async def get_trade(trade_id: str) -> TradeEntry:
             side=r.side,
             quantity=float(r.filled_quantity),
             fill_price=float(r.filled_avg_price) if r.filled_avg_price else None,
-            slippage_bps=None,
+            slippage_bps=_slippage_for(r),
             timestamp=(r.filled_at or r.submitted_at or "").isoformat()  # type: ignore[union-attr]
             if hasattr(r.filled_at or r.submitted_at, "isoformat")
             else "",
