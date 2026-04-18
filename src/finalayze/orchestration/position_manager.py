@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from finalayze.api.alerts import TelegramAlerter
     from finalayze.execution.broker_router import BrokerRouter
     from finalayze.execution.simulated_broker import StopLossState
+    from finalayze.orchestration.db_persistence import TradingPersistence
     from finalayze.risk.kelly import RollingKelly
 
 _log = structlog.get_logger(__name__)
@@ -42,6 +43,7 @@ class PositionTracker:
         kelly_sizer: RollingKelly,
         broker_router: BrokerRouter,
         alerter: TelegramAlerter | None = None,
+        persistence: TradingPersistence | None = None,
     ) -> None:
         """Initialize position tracker.
 
@@ -49,6 +51,8 @@ class PositionTracker:
             kelly_sizer: RollingKelly instance for P&L updates
             broker_router: BrokerRouter for submitting SELL orders on stop-loss
             alerter: Optional TelegramAlerter for alerts
+            persistence: Optional TradingPersistence for fire-and-forget
+                stop_loss_events writes (STOP-03, D-06). None in TEST/DEBUG modes.
         """
         # Import here to avoid circular imports
         from finalayze.execution.simulated_broker import StopLossState  # noqa: PLC0415
@@ -58,6 +62,7 @@ class PositionTracker:
         self._kelly_sizer = kelly_sizer
         self._broker_router = broker_router
         self._alerter = alerter
+        self._persistence = persistence
 
         # Stop-loss state: symbol -> StopLossState (trailing, thread-safe via lock)
         self._stop_states: dict[str, StopLossState] = {}
@@ -256,3 +261,34 @@ class PositionTracker:
         with self._stop_loss_lock:
             state = self._stop_states.get(symbol)
             return state.current_stop if state is not None else None
+
+    def get_stop_state(self, symbol: str) -> StopLossState | None:
+        """Return a read-consistent snapshot of the full stop-loss state.
+
+        Returns a COPY (via ``dataclasses.replace``) so callers cannot mutate
+        internal state, and so concurrent ratchet in check_stop_losses does
+        not split the caller's read. Thread-safe via ``_stop_loss_lock``.
+
+        Args:
+            symbol: Instrument symbol
+
+        Returns:
+            Copy of StopLossState or None if no stop-loss is active
+        """
+        from dataclasses import replace  # noqa: PLC0415
+
+        with self._stop_loss_lock:
+            state = self._stop_states.get(symbol)
+            return replace(state) if state is not None else None
+
+    def snapshot_all_stops(self) -> dict[str, StopLossState]:
+        """Return copies of every active stop-loss state.
+
+        Used by TradingLoop._strategy_cycle_impl to emit a per-cycle snapshot.
+        Returns copies under lock so the caller can hold them off-lock without
+        risking mid-ratchet inconsistency (Pitfall 1 of 54-RESEARCH).
+        """
+        from dataclasses import replace  # noqa: PLC0415
+
+        with self._stop_loss_lock:
+            return {sym: replace(st) for sym, st in self._stop_states.items()}
