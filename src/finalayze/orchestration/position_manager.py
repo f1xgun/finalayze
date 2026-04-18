@@ -12,13 +12,14 @@ Thread safety: all methods use _stop_loss_lock for atomic state updates.
 from __future__ import annotations
 
 import threading
-from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import structlog
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from finalayze.api.alerts import TelegramAlerter
     from finalayze.execution.broker_router import BrokerRouter
     from finalayze.execution.simulated_broker import StopLossState
@@ -167,7 +168,8 @@ class PositionTracker:
         # Writer has its own synchronization; keeping it off the critical
         # section lets other trades proceed immediately.
         if trigger_snapshot is not None and self._persistence is not None:
-            from datetime import UTC, datetime as _dt  # noqa: PLC0415
+            from datetime import UTC  # noqa: PLC0415
+            from datetime import datetime as _dt  # noqa: PLC0415
 
             self._persistence.persist_stop_snapshots(
                 states={symbol: trigger_snapshot},
@@ -222,7 +224,8 @@ class PositionTracker:
             self._stop_states[symbol] = stop_state
         # Fire 'entry' event to stop_loss_events (D-06) -- no broker scan.
         if self._persistence is not None:
-            from datetime import UTC, datetime as _dt  # noqa: PLC0415
+            from datetime import UTC  # noqa: PLC0415
+            from datetime import datetime as _dt  # noqa: PLC0415
 
             self._persistence.persist_stop_snapshots(
                 states={symbol: stop_state},

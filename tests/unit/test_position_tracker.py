@@ -18,8 +18,8 @@ from finalayze.orchestration.position_manager import PositionTracker
 def _make_state(entry: float = 100.0) -> StopLossState:
     d = Decimal(str(entry))
     return StopLossState(
-        initial_stop=d - Decimal("5"),
-        current_stop=d - Decimal("5"),
+        initial_stop=d - Decimal(5),
+        current_stop=d - Decimal(5),
         highest_price=d,
         trail_activated=False,
         activation_atr=Decimal("1.0"),
@@ -58,7 +58,7 @@ def test_get_stop_state_mutation_does_not_bleed_back() -> None:
         tracker._stop_states["SBER"] = original
     returned = tracker.get_stop_state("SBER")
     assert returned is not None
-    returned.highest_price = Decimal("999")
+    returned.highest_price = Decimal(999)
     # Second read gets untouched internal state
     again = tracker.get_stop_state("SBER")
     assert again is not None
@@ -105,7 +105,7 @@ def test_get_stop_state_concurrent_read() -> None:
                 s = tracker._stop_states.get("SBER")
                 if s is not None:
                     s.highest_price += Decimal("0.01")
-                    s.current_stop = s.highest_price - Decimal("2")
+                    s.current_stop = s.highest_price - Decimal(2)
 
     def reader() -> None:
         for _ in range(2000):
@@ -183,7 +183,7 @@ def test_snapshot_all_stops_to_db_writes_snapshot() -> None:
     now = datetime.now(UTC)
     tracker.snapshot_all_stops_to_db(
         market_ids={"SBER": "moex"},
-        prices={"SBER": Decimal("105")},
+        prices={"SBER": Decimal(105)},
         now=now,
     )
     persistence.persist_stop_snapshots.assert_called_once()
@@ -191,7 +191,7 @@ def test_snapshot_all_stops_to_db_writes_snapshot() -> None:
     assert kwargs["event_type"] == "snapshot"
     assert "SBER" in kwargs["states"]
     assert kwargs["market_ids"] == {"SBER": "moex"}
-    assert kwargs["prices"] == {"SBER": Decimal("105")}
+    assert kwargs["prices"] == {"SBER": Decimal(105)}
     assert kwargs["now"] == now
 
 
@@ -207,7 +207,7 @@ def test_register_entry_fires_entry_event_with_caller_market_id() -> None:
     )
     tracker.register_entry(
         "SBER",
-        Decimal("100"),
+        Decimal(100),
         "momentum",
         _make_state(),
         market_id="moex",
@@ -217,7 +217,7 @@ def test_register_entry_fires_entry_event_with_caller_market_id() -> None:
     assert kwargs["event_type"] == "entry"
     assert kwargs["market_ids"] == {"SBER": "moex"}
     assert "SBER" in kwargs["states"]
-    assert kwargs["prices"] == {"SBER": Decimal("100")}
+    assert kwargs["prices"] == {"SBER": Decimal(100)}
     # Crucially: broker_router.route was NOT called by register_entry (no O(N*M) scan).
     router.route.assert_not_called()
 
@@ -226,11 +226,9 @@ def test_register_entry_no_persistence_does_not_fail() -> None:
     """When persistence=None, register_entry must still register the position."""
     tracker = _make_tracker()  # persistence=None
     stop_state = _make_state()
-    tracker.register_entry(
-        "SBER", Decimal("100"), "momentum", stop_state, market_id="moex"
-    )
+    tracker.register_entry("SBER", Decimal(100), "momentum", stop_state, market_id="moex")
     assert tracker.has_stop("SBER")
-    assert tracker._entry_prices["SBER"] == Decimal("100")
+    assert tracker._entry_prices["SBER"] == Decimal(100)
     assert tracker._entry_strategy["SBER"] == "momentum"
 
 
@@ -240,7 +238,7 @@ def test_check_stop_losses_trigger_fires_trigger_event() -> None:
     kelly = MagicMock()
     router = MagicMock()
     broker = MagicMock()
-    broker.get_positions.return_value = {"SBER": Decimal("10")}
+    broker.get_positions.return_value = {"SBER": Decimal(10)}
     broker.submit_order.return_value = MagicMock()
     router.route.return_value = broker
     persistence = MagicMock()
@@ -250,14 +248,14 @@ def test_check_stop_losses_trigger_fires_trigger_event() -> None:
         persistence=persistence,
     )
     state = _make_state()
-    state.current_stop = Decimal("95")  # trigger when current_price <= 95
+    state.current_stop = Decimal(95)  # trigger when current_price <= 95
     with tracker._stop_loss_lock:
         tracker._stop_states["SBER"] = state
 
     tracker.check_stop_losses(
         market_id="moex",
         symbol="SBER",
-        current_price=Decimal("90"),
+        current_price=Decimal(90),
     )
 
     # Expect EXACTLY one call with event_type='trigger'.
@@ -269,7 +267,7 @@ def test_check_stop_losses_trigger_fires_trigger_event() -> None:
     assert len(calls) == 1
     assert "SBER" in calls[0].kwargs["states"]
     assert calls[0].kwargs["market_ids"] == {"SBER": "moex"}
-    assert calls[0].kwargs["prices"] == {"SBER": Decimal("90")}
+    assert calls[0].kwargs["prices"] == {"SBER": Decimal(90)}
     # State deleted after trigger.
     assert "SBER" not in tracker._stop_states
 
@@ -285,14 +283,12 @@ def test_check_stop_losses_no_trigger_does_not_fire() -> None:
         persistence=persistence,
     )
     state = _make_state()
-    state.current_stop = Decimal("95")
+    state.current_stop = Decimal(95)
     with tracker._stop_loss_lock:
         tracker._stop_states["SBER"] = state
 
     # current_price=100 > current_stop=95 -- no trigger.
-    tracker.check_stop_losses(
-        market_id="moex", symbol="SBER", current_price=Decimal("100")
-    )
+    tracker.check_stop_losses(market_id="moex", symbol="SBER", current_price=Decimal(100))
 
     # No 'trigger' event was fired.
     trigger_calls = [
@@ -310,7 +306,7 @@ def test_check_stop_losses_no_persistence_does_not_fail() -> None:
     kelly = MagicMock()
     router = MagicMock()
     broker = MagicMock()
-    broker.get_positions.return_value = {"SBER": Decimal("10")}
+    broker.get_positions.return_value = {"SBER": Decimal(10)}
     broker.submit_order.return_value = MagicMock()
     router.route.return_value = broker
     tracker = PositionTracker(
@@ -319,13 +315,11 @@ def test_check_stop_losses_no_persistence_does_not_fail() -> None:
         # persistence omitted -- defaults to None.
     )
     state = _make_state()
-    state.current_stop = Decimal("95")
+    state.current_stop = Decimal(95)
     with tracker._stop_loss_lock:
         tracker._stop_states["SBER"] = state
 
     # Must not raise AttributeError on self._persistence.persist_stop_snapshots.
-    tracker.check_stop_losses(
-        market_id="moex", symbol="SBER", current_price=Decimal("90")
-    )
+    tracker.check_stop_losses(market_id="moex", symbol="SBER", current_price=Decimal(90))
     # Trigger still happened — state cleared.
     assert "SBER" not in tracker._stop_states
