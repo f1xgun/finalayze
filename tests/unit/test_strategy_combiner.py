@@ -1330,3 +1330,48 @@ class TestDedupEventSignals:
         }
         zeroed = _dedup_event_signals(collected)
         assert len(zeroed) == 0
+
+
+# ── Phase 55-01 Task 2: signal_price field on Signal schema + SignalModel ──
+
+
+def test_signal_schema_default_signal_price_is_none() -> None:
+    """Signal schema accepts construction without signal_price; default is None."""
+    sig = Signal(
+        strategy_name="unit",
+        symbol="SBER",
+        market_id="moex",
+        segment_id="ru_blue_chips",
+        direction=SignalDirection.BUY,
+        confidence=HIGH_CONFIDENCE,
+        features={},
+        reasoning="test",
+    )
+    assert sig.signal_price is None
+
+
+def test_signal_schema_signal_price_preserves_decimal() -> None:
+    """Signal round-trips a Decimal signal_price without float corruption."""
+    sig = Signal(
+        strategy_name="unit",
+        symbol="SBER",
+        market_id="moex",
+        segment_id="ru_blue_chips",
+        direction=SignalDirection.BUY,
+        confidence=HIGH_CONFIDENCE,
+        features={},
+        reasoning="test",
+        signal_price=Decimal("280.5000"),
+    )
+    assert sig.signal_price == Decimal("280.5000")
+
+
+def test_signal_model_orm_declares_signal_price_column() -> None:
+    """SignalModel exposes a signal_price column with Numeric(12, 4) nullable=True."""
+    from finalayze.core.models import SignalModel
+
+    col = SignalModel.__table__.c["signal_price"]
+    assert col.nullable is True
+    # SQLAlchemy Numeric(12,4) carries precision/scale on the type
+    assert col.type.precision == 12
+    assert col.type.scale == 4

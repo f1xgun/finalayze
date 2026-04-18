@@ -83,6 +83,7 @@ class Signal(BaseModel):
     features: dict[str, float]
     reasoning: str
     instrument_type: str = "stock"  # "stock" or "bond"
+    signal_price: Decimal | None = None
 
     @field_validator("confidence")
     @classmethod
