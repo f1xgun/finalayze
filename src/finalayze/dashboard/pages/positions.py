@@ -136,11 +136,30 @@ def _render_history_chart(events: list[dict[str, Any]], symbol: str) -> None:
             )
         activation_rows = df[df["event_type"] == "activation"]
         for _, row in activation_rows.iterrows():
-            fig.add_vline(
-                x=row["timestamp"],
-                line_dash="dot",
-                line_color="orange",
-                annotation_text="Trail activated",
+            # Do NOT use fig.add_vline — it computes annotation placement via
+            # arithmetic on x (see plotly/shapeannotation.py), which fails on
+            # pandas Timestamp under pandas 2.x ("Addition/subtraction of
+            # integers and Timestamp is no longer supported"). Use add_shape +
+            # add_annotation explicitly with yref='paper' to bypass the
+            # spanning-shape code path.
+            ts = row["timestamp"]
+            fig.add_shape(
+                type="line",
+                x0=ts,
+                x1=ts,
+                y0=0,
+                y1=1,
+                yref="paper",
+                line={"color": "orange", "dash": "dot"},
+            )
+            fig.add_annotation(
+                x=ts,
+                y=1,
+                yref="paper",
+                text="Trail activated",
+                showarrow=False,
+                yanchor="bottom",
+                font={"color": "orange"},
             )
 
     fig.update_layout(title=f"{symbol} - stop-loss history", height=_HISTORY_CHART_HEIGHT)

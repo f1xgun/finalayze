@@ -82,6 +82,52 @@ def test_render_history_chart_builds_figure_with_traces(mocker: object) -> None:
     assert len(fig.data) >= 3
 
 
+def test_render_history_chart_handles_activation_event(mocker: object) -> None:
+    """Regression (UAT 2026-04-18): fig.add_vline(x=Timestamp) raised
+    ``TypeError: Addition/subtraction of integers and Timestamp...`` under
+    pandas 2.x because Plotly does arithmetic on the x-coordinate when
+    computing annotation placement. Fix: pass ISO string to add_vline.
+
+    An event with event_type='activation' must render without raising.
+    """
+    patched = mocker.patch("streamlit.plotly_chart")  # type: ignore[attr-defined]
+    from finalayze.dashboard.pages.positions import _render_history_chart
+
+    events = [
+        {
+            "timestamp": "2026-04-18T10:00:00+00:00",
+            "event_type": "entry",
+            "current_stop": 95.0,
+            "entry_price": 100.0,
+            "highest_price": 100.0,
+            "current_price": 100.0,
+            "atr_value": 2.5,
+            "trail_activated": False,
+        },
+        {
+            "timestamp": "2026-04-18T10:30:00+00:00",
+            "event_type": "activation",
+            "current_stop": 98.0,
+            "entry_price": 100.0,
+            "highest_price": 105.0,
+            "current_price": 105.0,
+            "atr_value": 2.5,
+            "trail_activated": True,
+        },
+    ]
+    _render_history_chart(events, "SBER")
+    patched.assert_called_once()
+    fig = patched.call_args.args[0]
+    # The activation event becomes a vertical line shape in fig.layout.shapes
+    # and an annotation in fig.layout.annotations. Both must exist.
+    shapes = fig.layout.shapes or ()
+    annotations = fig.layout.annotations or ()
+    assert len(shapes) >= 1, "add_vline should append a shape"
+    assert any(ann.text == "Trail activated" for ann in annotations), (
+        "annotation text 'Trail activated' missing"
+    )
+
+
 def test_render_heatmap_assigns_colors_per_position(mocker: object) -> None:
     """I-05: _render_heatmap must emit the correct color per ATR bucket.
 
