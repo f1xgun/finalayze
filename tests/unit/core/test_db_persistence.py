@@ -375,3 +375,174 @@ class TestSentimentPersistence:
 
         loop._persist_to_db(broken(), table="sentiment_scores")
         # If we reach here, the failure was swallowed
+
+
+class TestPersistStopSnapshots:
+    """Contract tests for persist_stop_snapshots (PERSIST-05 envelope, STOP-03)."""
+
+    def _make_persistence(self, db_url: str | None = "postgresql+asyncpg://test/db"):  # type: ignore[no-untyped-def]
+        from finalayze.orchestration.db_persistence import TradingPersistence
+
+        loop = asyncio.new_event_loop()
+        return TradingPersistence(db_url=db_url, async_loop=loop)
+
+    def _make_state(self):  # type: ignore[no-untyped-def]
+        from finalayze.execution.simulated_broker import StopLossState
+
+        return StopLossState(
+            initial_stop=Decimal("95"),
+            current_stop=Decimal("95"),
+            highest_price=Decimal("100"),
+            trail_activated=False,
+            activation_atr=Decimal("1.0"),
+            trail_atr=Decimal("1.5"),
+            entry_price=Decimal("100"),
+            atr_value=Decimal("2.5"),
+        )
+
+    def test_empty_states_is_noop(self, mocker: pytest.FixtureRequest) -> None:
+        from datetime import UTC, datetime
+
+        persistence = self._make_persistence()
+        spy = mocker.spy(persistence, "_persist_to_db")  # type: ignore[attr-defined]
+        persistence.persist_stop_snapshots({}, {}, {}, datetime.now(UTC))
+        assert spy.call_count == 0
+
+    def test_skips_when_db_url_none(self, mocker: pytest.FixtureRequest) -> None:
+        from datetime import UTC, datetime
+
+        persistence = self._make_persistence(db_url=None)
+        # Spy on _run_async — should NEVER be called when db_url is None
+        run_spy = mocker.spy(persistence, "_run_async")  # type: ignore[attr-defined]
+        persistence.persist_stop_snapshots(
+            {"SBER": self._make_state()},
+            {"SBER": "moex"},
+            {"SBER": Decimal("100")},
+            datetime.now(UTC),
+        )
+        assert run_spy.call_count == 0
+
+    def test_catches_exceptions_and_does_not_reraise(
+        self, mocker: pytest.FixtureRequest
+    ) -> None:
+        from datetime import UTC, datetime
+
+        persistence = self._make_persistence()
+        # Force _run_async to raise
+        mocker.patch.object(  # type: ignore[attr-defined]
+            persistence, "_run_async", side_effect=RuntimeError("db down")
+        )
+        mock_metric = mocker.patch("finalayze.api.metrics.db_write_failures")  # type: ignore[attr-defined]
+        # No exception should escape
+        persistence.persist_stop_snapshots(
+            {"SBER": self._make_state()},
+            {"SBER": "moex"},
+            {"SBER": Decimal("100")},
+            datetime.now(UTC),
+        )
+        # Counter incremented for stop_loss_events table
+        mock_metric.labels.assert_called_with(table="stop_loss_events")
+        mock_metric.labels.return_value.inc.assert_called_once()
+
+    def test_event_type_propagates(self, mocker: pytest.FixtureRequest) -> None:
+        from datetime import UTC, datetime
+
+        persistence = self._make_persistence()
+        captured: dict[str, object] = {}
+
+        def _fake_persist(coro, *, table, **ctx):  # type: ignore[no-untyped-def]
+            captured["table"] = table
+            captured.update(ctx)
+            coro.close()  # prevent "coroutine was never awaited" warning
+
+        mocker.patch.object(persistence, "_persist_to_db", side_effect=_fake_persist)  # type: ignore[attr-defined]
+        persistence.persist_stop_snapshots(
+            {"SBER": self._make_state()},
+            {"SBER": "moex"},
+            {"SBER": Decimal("100")},
+            datetime.now(UTC),
+            event_type="entry",
+        )
+        assert captured["table"] == "stop_loss_events"
+        assert captured["event"] == "entry"
+        assert captured["count"] == 1
+
+    def test_does_not_touch_consecutive_errors(
+        self, mocker: pytest.FixtureRequest
+    ) -> None:
+        """Persistence failures must never affect TradingLoop counters.
+
+        ``_consecutive_equity_errors`` lives on TradingLoop
+        (trading_loop.py:370). ``TradingPersistence`` has no such counter
+        and must not gain one — its role is to swallow exceptions locally.
+        """
+        from datetime import UTC, datetime
+
+        persistence = self._make_persistence()
+        # Snapshot ALL non-callable public attrs BEFORE the call
+        before_attrs = {
+            name: getattr(persistence, name)
+            for name in dir(persistence)
+            if not name.startswith("__") and not callable(getattr(persistence, name, None))
+        }
+        # Force _run_async to raise — this is the failure path
+        mocker.patch.object(  # type: ignore[attr-defined]
+            persistence, "_run_async", side_effect=RuntimeError("db down")
+        )
+        mocker.patch("finalayze.api.metrics.db_write_failures")  # type: ignore[attr-defined]
+        persistence.persist_stop_snapshots(
+            {"SBER": self._make_state()},
+            {"SBER": "moex"},
+            {"SBER": Decimal("100")},
+            datetime.now(UTC),
+        )
+        after_attrs = {
+            name: getattr(persistence, name)
+            for name in dir(persistence)
+            if not name.startswith("__") and not callable(getattr(persistence, name, None))
+        }
+        # No new attr appeared, no counter incremented. Ignore mock-injected attrs.
+        for name in before_attrs:
+            if name.startswith("_mock"):
+                continue
+            assert before_attrs[name] == after_attrs.get(name), (
+                f"persistence.{name} changed after failure: "
+                f"{before_attrs[name]!r} -> {after_attrs.get(name)!r}"
+            )
+        # Explicitly: no attribute named like the trading-loop counter
+        assert not hasattr(persistence, "_consecutive_equity_errors")
+        assert not hasattr(persistence, "consecutive_equity_errors")
+
+    def test_logs_db_persist_failed_on_error(
+        self, mocker: pytest.FixtureRequest, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """On DB failure, log a warning with table='stop_loss_events' kwarg."""
+        import logging
+        from datetime import UTC, datetime
+
+        persistence = self._make_persistence()
+        mocker.patch.object(  # type: ignore[attr-defined]
+            persistence, "_run_async", side_effect=RuntimeError("db down")
+        )
+        mocker.patch("finalayze.api.metrics.db_write_failures")  # type: ignore[attr-defined]
+        # Capture the structlog-driven 'db_persist_failed' warning.
+        log_warning = mocker.patch.object(  # type: ignore[attr-defined]
+            __import__(
+                "finalayze.orchestration.db_persistence", fromlist=["_log"]
+            )._log,
+            "warning",
+        )
+        with caplog.at_level(logging.WARNING):
+            persistence.persist_stop_snapshots(
+                {"SBER": self._make_state()},
+                {"SBER": "moex"},
+                {"SBER": Decimal("100")},
+                datetime.now(UTC),
+            )
+        # Assert the warning was called with db_persist_failed event + table kwarg
+        call_args_list = log_warning.call_args_list
+        assert any(
+            (args and args[0] == "db_persist_failed")
+            and kwargs.get("table") == "stop_loss_events"
+            for args, kwargs in ((c.args, c.kwargs) for c in call_args_list)
+        ), f"expected db_persist_failed/table=stop_loss_events, got {call_args_list}"
