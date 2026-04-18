@@ -54,10 +54,10 @@ async def list_trades(
     try:
         from sqlalchemy import func, select, text  # noqa: PLC0415
 
-        from finalayze.core.db import async_session_factory  # noqa: PLC0415
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import OrderModel  # noqa: PLC0415
 
-        async with async_session_factory()() as session:
+        async with get_async_session_factory()() as session:
             stmt = (
                 select(OrderModel)
                 .where(OrderModel.status == "filled")
@@ -110,11 +110,11 @@ async def trade_analytics(
 
         from sqlalchemy import func, select  # noqa: PLC0415
 
-        from finalayze.core.db import async_session_factory  # noqa: PLC0415
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import OrderModel  # noqa: PLC0415
 
         cutoff = datetime.now(UTC) - timedelta(days=period)
-        async with async_session_factory()() as session:
+        async with get_async_session_factory()() as session:
             stmt = (
                 select(func.count())
                 .select_from(OrderModel)
@@ -151,10 +151,10 @@ async def get_trade(trade_id: str) -> TradeEntry:
     try:
         from sqlalchemy import select  # noqa: PLC0415
 
-        from finalayze.core.db import async_session_factory  # noqa: PLC0415
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import OrderModel  # noqa: PLC0415
 
-        async with async_session_factory()() as session:
+        async with get_async_session_factory()() as session:
             import uuid  # noqa: PLC0415
 
             stmt = select(OrderModel).where(OrderModel.id == uuid.UUID(trade_id))

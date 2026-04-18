@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AsyncSession",
-    "async_session_factory",
     "async_sessionmaker",
     "create_async_engine",
     "get_async_session_factory",

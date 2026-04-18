@@ -121,8 +121,11 @@ async def get_portfolio(request: Request) -> PortfolioResponse:
 
     registry = default_registry()
     markets: list[MarketPortfolio] = []
+    registered = broker_router.registered_markets
     for market_def in registry.list_markets():
         market_id = market_def.id
+        if market_id not in registered:
+            continue
         try:
             broker = broker_router.route(market_id)
             loop = asyncio.get_running_loop()
@@ -162,8 +165,11 @@ async def get_positions(request: Request) -> PositionsResponse:
     market_registry = default_registry()
     instrument_registry = build_default_registry()
     positions: list[PositionDetail] = []
+    registered = broker_router.registered_markets
     for market_def in market_registry.list_markets():
         market_id = market_def.id
+        if market_id not in registered:
+            continue
         try:
             broker = broker_router.route(market_id)
             # Use enriched positions if available (TinkoffBroker)
@@ -240,11 +246,11 @@ async def get_portfolio_history() -> HistoryResponse:
 
         from sqlalchemy import select, text  # noqa: PLC0415
 
-        from finalayze.core.db import async_session_factory  # noqa: PLC0415
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import SandboxMetricRow  # noqa: PLC0415
 
         cutoff = datetime.now(UTC) - timedelta(days=30)
-        async with async_session_factory()() as session:
+        async with get_async_session_factory()() as session:
             stmt = (
                 select(SandboxMetricRow)
                 .where(SandboxMetricRow.timestamp >= cutoff)

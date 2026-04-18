@@ -145,7 +145,7 @@
       },
       "targets": [
         {
-          "expr": "sum(count_over_time({container=\"finalayze-sandbox-app\"} |~ \"signal|Signal\" [$__range]))",
+          "expr": "sum(count_over_time({container=\"finalayze-sandbox-app\"} | json | event=~\"signal_generated|strategy_cycle_summary\" [$__range]))",
           "legendFormat": "Signals",
           "refId": "A"
         }
@@ -186,7 +186,7 @@
       },
       "targets": [
         {
-          "expr": "sum(count_over_time({container=\"finalayze-sandbox-app\"} |~ \"order|trade|fill|submit\" [$__range]))",
+          "expr": "sum(count_over_time({container=\"finalayze-sandbox-app\"} | json | event=~\"order_submitted|order_filled\" [$__range]))",
           "legendFormat": "Trades",
           "refId": "A"
         }

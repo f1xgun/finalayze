@@ -90,6 +90,7 @@ def test_get_portfolio_returns_broker_data_via_executor() -> None:
 
     mock_broker_router = MagicMock()
     mock_broker_router.route.return_value = mock_broker
+    mock_broker_router.registered_markets = ["moex"]
 
     mock_market = MagicMock()
     mock_market.id = "moex"
@@ -119,6 +120,7 @@ def test_get_portfolio_skips_market_on_broker_error() -> None:
 
     mock_broker_router = MagicMock()
     mock_broker_router.route.return_value = mock_broker
+    mock_broker_router.registered_markets = ["moex"]
 
     mock_market = MagicMock()
     mock_market.id = "moex"

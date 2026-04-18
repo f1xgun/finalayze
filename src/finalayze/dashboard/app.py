@@ -1,4 +1,4 @@
-"""Streamlit dashboard entry point — auth gate and home page.
+"""Streamlit dashboard entry point — auth gate, navigation, and frame.
 
 Run with:
     streamlit run src/finalayze/dashboard/app.py
@@ -41,34 +41,24 @@ if not st.session_state["authenticated"]:
             st.error("Invalid password")
     st.stop()
 
-# Authenticated — build shared API client stored in session state
+# Authenticated — build shared API client (available to all pages via session_state)
 _api = ApiClient(
     base_url=st.secrets.get("api_url", "http://localhost:8000"),
     api_key=st.secrets.get("api_key", ""),
 )
 st.session_state["api"] = _api
 
-# Home page: system overview summary
-st.title("Finalayze — Operator Dashboard")
-st.markdown("Use the sidebar to navigate between pages.")
+# Explicit page navigation (replaces deprecated pages/ directory convention)
+page = st.navigation(
+    [
+        st.Page("pages/system_status.py", title="System Status", icon=":material/monitor_heart:"),
+        st.Page("pages/signals.py", title="Signals", icon=":material/ssid_chart:"),
+        st.Page("pages/trades.py", title="Trades", icon=":material/swap_horiz:"),
+        st.Page("pages/risk.py", title="Risk", icon=":material/shield:"),
+        st.Page("pages/portfolio.py", title="Portfolio", icon=":material/account_balance:"),
+        st.Page("pages/sandbox.py", title="Sandbox", icon=":material/science:"),
+        st.Page("pages/experiments_list.py", title="Experiments", icon=":material/biotech:"),
+    ],
+)
 
-# Quick health summary
-try:
-    health = _api.get("/api/v1/health").json()
-    mode = health.get("mode", "unknown")
-    status = health.get("status", "unknown")
-
-    col1, col2 = st.columns(2)
-    col1.metric("Mode", mode.upper())
-    col2.metric("Status", status.upper())
-
-    components = health.get("components", {})
-    if components:
-        st.subheader("Component Health")
-        comp_cols = st.columns(len(components))
-        items = list(components.items())
-        for col, (name, comp_status) in zip(comp_cols, items, strict=False):
-            icon = "OK" if comp_status == "ok" else "ERR"
-            col.metric(name.upper(), f"{icon}: {comp_status}")
-except Exception:
-    st.warning("Could not reach API — check that the API server is running.")
+page.run()

@@ -58,10 +58,10 @@ async def list_signals(
     try:
         from sqlalchemy import select, text  # noqa: PLC0415
 
-        from finalayze.core.db import async_session_factory  # noqa: PLC0415
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import SignalModel  # noqa: PLC0415
 
-        async with async_session_factory()() as session:
+        async with get_async_session_factory()() as session:
             stmt = select(SignalModel).order_by(text("created_at desc")).limit(limit)
             if market:
                 stmt = stmt.where(SignalModel.market_id == market)
@@ -95,10 +95,10 @@ async def strategies_performance() -> StrategiesResponse:
     try:
         from sqlalchemy import func, select  # noqa: PLC0415
 
-        from finalayze.core.db import async_session_factory  # noqa: PLC0415
+        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
         from finalayze.core.models import SignalModel  # noqa: PLC0415
 
-        async with async_session_factory()() as session:
+        async with get_async_session_factory()() as session:
             stmt = select(
                 SignalModel.strategy_name,
                 SignalModel.market_id,
