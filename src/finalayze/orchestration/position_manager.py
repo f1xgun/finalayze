@@ -12,6 +12,7 @@ Thread safety: all methods use _stop_loss_lock for atomic state updates.
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -95,11 +96,16 @@ class PositionTracker:
         The entire check-sell-remove is atomic under _stop_loss_lock to prevent
         double-sell from concurrent threads (CONC-01).
 
+        On a trigger, a ``'trigger'`` event is fired to ``persist_stop_snapshots``
+        AFTER the ``with _stop_loss_lock:`` block closes, so the fire-and-forget
+        DB write never blocks the critical section (STOP-03, D-06).
+
         Args:
             market_id: Market identifier (e.g., "us", "moex")
             symbol: Instrument symbol
             current_price: Current market price
         """
+        trigger_snapshot: StopLossState | None = None
         with self._stop_loss_lock:
             state = self._stop_states.get(symbol)
             if state is None:
@@ -131,6 +137,11 @@ class PositionTracker:
                 stop=float(state.current_stop),
                 trailing=state.trail_activated,
             )
+            # Capture a copy of the triggering state so we can persist it
+            # outside the critical section.
+            from dataclasses import replace  # noqa: PLC0415
+
+            trigger_snapshot = replace(state)
             broker = self._broker_router.route(market_id)
 
             # Import OrderRequest at call site to avoid circular imports
@@ -151,6 +162,20 @@ class PositionTracker:
             del self._stop_states[symbol]
             self._entry_strategy.pop(symbol, None)
             self._cycle_exited_symbols.add(symbol)  # PARITY-04
+
+        # Fire 'trigger' event to stop_loss_events (D-06) — OUTSIDE the lock.
+        # Writer has its own synchronization; keeping it off the critical
+        # section lets other trades proceed immediately.
+        if trigger_snapshot is not None and self._persistence is not None:
+            from datetime import UTC, datetime as _dt  # noqa: PLC0415
+
+            self._persistence.persist_stop_snapshots(
+                states={symbol: trigger_snapshot},
+                market_ids={symbol: market_id},
+                prices={symbol: current_price},
+                now=_dt.now(UTC),
+                event_type="trigger",
+            )
 
     def _update_kelly(self, symbol: str, fill_price: Decimal) -> None:
         """Compute P&L from entry price and feed a TradeRecord to RollingKelly.
@@ -174,22 +199,38 @@ class PositionTracker:
         price: Decimal,
         strategy: str,
         stop_state: StopLossState,
+        market_id: str,
     ) -> None:
-        """Register a new position entry.
+        """Register a new position entry and fire an 'entry' event to persistence.
 
         Called after a BUY fill to track entry price, strategy ownership, and
-        stop-loss state.
+        stop-loss state. When ``self._persistence`` is wired, also fires an
+        ``event_type='entry'`` row into ``stop_loss_events`` (D-06).
 
         Args:
             symbol: Instrument symbol
             price: Entry fill price
             strategy: Strategy name that opened the position
             stop_state: StopLossState object for this position
+            market_id: Market id ("us" | "moex") -- caller-supplied so we avoid
+                an O(markets x positions) broker scan on the fill critical path
+                (I-03 resolution, option A).
         """
         self._entry_prices[symbol] = price
         self._entry_strategy[symbol] = strategy
         with self._stop_loss_lock:
             self._stop_states[symbol] = stop_state
+        # Fire 'entry' event to stop_loss_events (D-06) -- no broker scan.
+        if self._persistence is not None:
+            from datetime import UTC, datetime as _dt  # noqa: PLC0415
+
+            self._persistence.persist_stop_snapshots(
+                states={symbol: stop_state},
+                market_ids={symbol: market_id},
+                prices={symbol: price},
+                now=_dt.now(UTC),
+                event_type="entry",
+            )
 
     def register_exit(self, symbol: str) -> None:
         """Register a position exit (SELL fill).
@@ -292,3 +333,34 @@ class PositionTracker:
 
         with self._stop_loss_lock:
             return {sym: replace(st) for sym, st in self._stop_states.items()}
+
+    def snapshot_all_stops_to_db(
+        self,
+        market_ids: dict[str, str],
+        prices: dict[str, Decimal],
+        now: datetime,
+    ) -> None:
+        """Fire-and-forget snapshot of every active stop to ``stop_loss_events``.
+
+        Called once per strategy cycle by
+        ``TradingLoop._strategy_cycle_impl()``. No-op when ``self._persistence``
+        is None (TEST/DEBUG mode) or when no stops are active.
+
+        Args:
+            market_ids: ``{symbol: market_id}`` map for each active position.
+            prices: ``{symbol: current_price}`` map for chart overlay; optional
+                per symbol (writer forwards ``None`` when absent).
+            now: Snapshot timestamp (UTC-aware ``datetime``).
+        """
+        if self._persistence is None:
+            return
+        states = self.snapshot_all_stops()
+        if not states:
+            return
+        self._persistence.persist_stop_snapshots(
+            states=states,
+            market_ids=market_ids,
+            prices=prices,
+            now=now,
+            event_type="snapshot",
+        )
