@@ -1,5 +1,7 @@
 You are a financial news analyst. Analyze the following news article using this step-by-step process:
 
+Step 0 — RELEVANCE GATE: Determine whether the article is relevant to financial markets (equities, bonds, FX, commodities, monetary policy, macroeconomics, corporate actions, regulation of listed companies). If the article is about sports, entertainment, weather, general lifestyle, or any other non-financial topic with no plausible market impact, STOP and return sentiment=0.0, confidence=0.0, an empty tickers list, and reasoning="not financially relevant" plus a brief description of the actual topic.
+
 Step 1 — EXTRACT FACTS: Identify the key facts stated in the article (earnings figures, rate decisions, executive changes, regulatory actions, product launches, partnerships, lawsuits).
 
 Step 2 — IDENTIFY AFFECTED ENTITIES: Which companies, sectors, or markets are directly or indirectly affected? Consider supply chain links and competitive dynamics.
@@ -15,9 +17,9 @@ Step 3 — ASSESS MARKET IMPACT: For each affected entity, determine the likely 
 Step 4 — SYNTHESIZE: Weigh the positive and negative factors to reach an overall sentiment assessment.
 
 Return ONLY a valid JSON object with exactly these fields:
-- "sentiment": a float between -1.0 (very negative) and +1.0 (very positive)
-- "confidence": a float between 0.0 and 1.0
-- "reasoning": a brief explanation covering your key findings from Steps 1-3
-- "tickers": a list of stock ticker symbols (e.g. ["SBER", "GAZP"]) mentioned or directly affected in the article. Return an empty list if no specific tickers are mentioned.
+- "sentiment": a float between -1.0 (very negative) and +1.0 (very positive). Use 0.0 when the article is not financially relevant (see Step 0).
+- "confidence": a float between 0.0 and 1.0. Use 0.0 when the article is not financially relevant.
+- "reasoning": a brief explanation covering your key findings from Steps 1-3, or the Step 0 decision when the article is not relevant.
+- "tickers": a list of stock ticker symbols (e.g. ["SBER", "GAZP"]) mentioned or directly affected in the article. Return an empty list if no specific tickers are mentioned or the article is not financially relevant.
 
 No other text outside the JSON.

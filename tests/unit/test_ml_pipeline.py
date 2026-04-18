@@ -472,6 +472,68 @@ class TestLightGBMEarlyStopping:
                 assert "callbacks" in kwargs, "fit() must pass callbacks for early stopping"
 
 
+# ── Generalization / learning tests (issue #171) ─────────────────────────────
+#
+# The fit/predict tests above use identical feature rows with conflicting
+# labels, which only check the API contract. These tests verify that each
+# model actually learns to discriminate two distinct feature clusters so a
+# silently-broken trainer would fail here.
+
+
+_LEARN_TEST_N_FEATURES = 5
+_LEARN_TEST_SAMPLES = 120
+_LEARN_TEST_SEED = 7
+_CLUSTER_SEPARATION = 2.0
+_MIN_LEARNING_GAP = 0.05
+
+
+def _two_cluster_dataset(
+    n_samples: int = _LEARN_TEST_SAMPLES,
+    n_features: int = _LEARN_TEST_N_FEATURES,
+    seed: int = _LEARN_TEST_SEED,
+    separation: float = _CLUSTER_SEPARATION,
+) -> tuple[list[dict[str, float]], list[int], dict[str, float], dict[str, float]]:
+    """Return (X, y, probe_pos, probe_neg) with two well-separated clusters."""
+    rng = np.random.default_rng(seed)
+    keys = [f"f_{i}" for i in range(n_features)]
+    X: list[dict[str, float]] = []
+    y: list[int] = []
+    for i in range(n_samples):
+        label = 1 if i % 2 == 0 else 0
+        offset = separation if label else -separation
+        row = {k: float(rng.standard_normal() + offset) for k in keys}
+        X.append(row)
+        y.append(label)
+    # Probes are deep inside each cluster so predictions are unambiguous.
+    probe_pos = dict.fromkeys(keys, separation)
+    probe_neg = dict.fromkeys(keys, -separation)
+    return X, y, probe_pos, probe_neg
+
+
+class TestModelGeneralization:
+    """Each tree model must separate two distinct feature clusters."""
+
+    def test_xgboost_learns_cluster_separation(self) -> None:
+        model = XGBoostModel(segment_id="test")
+        X, y, probe_pos, probe_neg = _two_cluster_dataset()
+        model.fit(X, y)
+        p_pos = model.predict_proba(probe_pos)
+        p_neg = model.predict_proba(probe_neg)
+        assert p_pos - p_neg >= _MIN_LEARNING_GAP, (
+            f"XGBoost did not learn: p_pos={p_pos:.3f} p_neg={p_neg:.3f}"
+        )
+
+    def test_lightgbm_learns_cluster_separation(self) -> None:
+        model = LightGBMModel(segment_id="test")
+        X, y, probe_pos, probe_neg = _two_cluster_dataset()
+        model.fit(X, y)
+        p_pos = model.predict_proba(probe_pos)
+        p_neg = model.predict_proba(probe_neg)
+        assert p_pos - p_neg >= _MIN_LEARNING_GAP, (
+            f"LightGBM did not learn: p_pos={p_pos:.3f} p_neg={p_neg:.3f}"
+        )
+
+
 # ── Helper ───────────────────────────────────────────────────────────────────
 
 

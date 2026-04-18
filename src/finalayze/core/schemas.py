@@ -147,6 +147,10 @@ class BacktestResult(BaseModel):
     sortino_ratio: Decimal | None = None
     calmar_ratio: Decimal | None = None
     turnover_ratio: Decimal | None = None
+    # Sharpe statistical significance (t-test under IID normal returns)
+    sharpe_n_samples: int | None = None
+    sharpe_t_statistic: Decimal | None = None
+    sharpe_p_value: Decimal | None = None
     # Benchmark comparison fields (populated when benchmark_candles are provided)
     alpha: Decimal | None = None
     beta: Decimal | None = None

@@ -45,6 +45,11 @@ logger = structlog.get_logger(__name__)
 _DEFAULT_WIN_RATE = Decimal("0.5")
 _DEFAULT_AVG_WIN_RATIO = Decimal("1.5")
 
+# Default cap on order size as a fraction of the fill candle's volume.
+# 5% of ADV is a standard liquidity-aware sizing cap used by institutional
+# execution desks; larger orders get split over multiple bars.
+_DEFAULT_MAX_ORDER_VOLUME_PCT = Decimal("0.05")
+
 
 class BacktestPositionExecutor:
     """Handles BUY / SELL order execution and trade recording.
@@ -78,6 +83,7 @@ class BacktestPositionExecutor:
         portfolio_returns: list[float],
         us_market_open_utc: time,
         moex_market_open_utc: time,
+        max_order_volume_pct: Decimal = _DEFAULT_MAX_ORDER_VOLUME_PCT,
     ) -> None:
         self._journal = journal
         self._rolling_kelly = rolling_kelly
@@ -97,6 +103,7 @@ class BacktestPositionExecutor:
         self._portfolio_returns = portfolio_returns
         self._us_market_open_utc = us_market_open_utc
         self._moex_market_open_utc = moex_market_open_utc
+        self._max_order_volume_pct = max_order_volume_pct
 
     # ------------------------------------------------------------------
     # Mutable property setters -- the engine updates these between runs
@@ -338,6 +345,34 @@ class BacktestPositionExecutor:
                 skip_reason="quantity_zero",
             )
             return
+
+        # Liquidity cap: never exceed max_order_volume_pct of the fill bar's volume.
+        # Large orders relative to ADV are unrealistic at the open price; we clamp
+        # rather than reject so strategies still participate, just at reduced size.
+        if self._max_order_volume_pct > 0 and fill_candle.volume > 0:
+            volume_cap = (
+                Decimal(fill_candle.volume) * self._max_order_volume_pct
+            ).to_integral_value(rounding=ROUND_DOWN)
+            if quantity > volume_cap:
+                logger.info(
+                    "backtest_order_volume_capped",
+                    symbol=symbol,
+                    requested=str(quantity),
+                    capped=str(volume_cap),
+                    bar_volume=fill_candle.volume,
+                    cap_pct=str(self._max_order_volume_pct),
+                )
+                quantity = volume_cap
+            if quantity <= 0:
+                self._journal.record_skip(
+                    timestamp=fill_candle.timestamp,
+                    symbol=symbol,
+                    segment_id=segment_id,
+                    broker=broker,
+                    history=history,
+                    skip_reason="volume_cap_zero",
+                )
+                return
 
         # Pre-compute ATR stop-loss -- use strategy-specific multiplier
         strategy_name = signal.strategy_name if signal is not None else ""

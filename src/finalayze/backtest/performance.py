@@ -8,6 +8,7 @@ max relative drawdown).
 
 from __future__ import annotations
 
+import logging
 import math
 import statistics
 from decimal import Decimal
@@ -17,6 +18,8 @@ from finalayze.core.schemas import BacktestResult, PortfolioState, TradeResult
 
 if TYPE_CHECKING:
     from finalayze.core.schemas import Candle
+
+_log = logging.getLogger(__name__)
 
 # Annualisation factor for daily returns.
 _TRADING_DAYS_PER_YEAR = 252
@@ -29,6 +32,16 @@ _LARGE_RATIO_SENTINEL = Decimal(999)
 # A real profit factor is undefined (division by zero) when gross_loss == 0;
 # we use 999 as a large-but-finite sentinel so the result remains a valid Decimal.
 _INFINITE_PROFIT_FACTOR = Decimal(999)
+
+# Below this sample count, even a Sharpe of 1.0 fails a two-sided 5% t-test
+# (t_crit ~= 1.96, so n must be >= ~4 for Sharpe=1 to clear it; in practice
+# we warn below 27 samples, which is the IID one-sided threshold).
+_SHARPE_SIGNIFICANCE_MIN_SAMPLES = 27
+
+
+def _std_normal_cdf(x: float) -> float:
+    """Standard-normal CDF (Abramowitz-Stegun via erf). Avoids scipy import."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
 class PerformanceAnalyzer:
@@ -49,10 +62,11 @@ class PerformanceAnalyzer:
         """
         total_trades = len(trades)
 
+        sharpe, sharpe_n, sharpe_t, sharpe_p = self._compute_sharpe_with_significance(snapshots)
+
         if total_trades == 0:
             # Still compute equity-curve metrics from snapshots if available
             max_drawdown = self._compute_max_drawdown(snapshots)
-            sharpe = self._compute_sharpe(snapshots)
             sortino = self.sortino_ratio(snapshots)
             calmar = self.calmar_ratio(snapshots)
             if len(snapshots) >= 2:  # noqa: PLR2004
@@ -76,6 +90,9 @@ class PerformanceAnalyzer:
                 sortino_ratio=sortino,
                 calmar_ratio=calmar,
                 turnover_ratio=Decimal(0),
+                sharpe_n_samples=sharpe_n,
+                sharpe_t_statistic=sharpe_t,
+                sharpe_p_value=sharpe_p,
                 **benchmark_metrics,
             )
 
@@ -95,7 +112,6 @@ class PerformanceAnalyzer:
             total_return = Decimal(0)
 
         max_drawdown = self._compute_max_drawdown(snapshots)
-        sharpe = self._compute_sharpe(snapshots)
         sortino = self.sortino_ratio(snapshots)
         calmar = self.calmar_ratio(snapshots)
         turnover = self._compute_turnover_ratio(trades, snapshots)
@@ -111,6 +127,9 @@ class PerformanceAnalyzer:
             sortino_ratio=sortino,
             calmar_ratio=calmar,
             turnover_ratio=turnover,
+            sharpe_n_samples=sharpe_n,
+            sharpe_t_statistic=sharpe_t,
+            sharpe_p_value=sharpe_p,
             **benchmark_metrics,
         )
 
@@ -138,9 +157,26 @@ class PerformanceAnalyzer:
         risk_free_rate: float = 0.0,
     ) -> Decimal:
         """Compute annualised Sharpe ratio from equity snapshots."""
+        sharpe, _, _, _ = PerformanceAnalyzer._compute_sharpe_with_significance(
+            snapshots, risk_free_rate=risk_free_rate
+        )
+        return sharpe
+
+    @staticmethod
+    def _compute_sharpe_with_significance(
+        snapshots: list[PortfolioState],
+        risk_free_rate: float = 0.0,
+    ) -> tuple[Decimal, int, Decimal | None, Decimal | None]:
+        """Return ``(sharpe, n_samples, t_stat, p_value)`` for the equity curve.
+
+        Sharpe is annualised. ``t_stat = sharpe * sqrt(n / 252)``  is the IID
+        t-statistic. ``p_value`` is a two-sided normal-approximation p-value.
+        Logs a warning when ``n < _SHARPE_SIGNIFICANCE_MIN_SAMPLES`` because
+        the Sharpe point estimate has high variance at those sample sizes.
+        """
         min_snapshots = 3
         if len(snapshots) < min_snapshots:
-            return Decimal(0)
+            return Decimal(0), 0, None, None
 
         equities = [float(s.equity) for s in snapshots]
         returns = [
@@ -149,16 +185,39 @@ class PerformanceAnalyzer:
             if equities[i - 1] > 0
         ]
         if not returns:
-            return Decimal(0)
+            return Decimal(0), 0, None, None
 
         mean_return = statistics.mean(returns) - risk_free_rate / _TRADING_DAYS_PER_YEAR
         std_return = statistics.stdev(returns) if len(returns) > 1 else 0.0
 
+        n = len(returns)
         if std_return == 0:
-            return Decimal(0)
+            return Decimal(0), n, None, None
 
         sharpe = (mean_return / std_return) * (_TRADING_DAYS_PER_YEAR**0.5)
-        return Decimal(str(round(sharpe, 4)))
+        # t = sharpe_annualised * sqrt(n / 252); derived from t = mean/std * sqrt(n).
+        t_stat = sharpe * math.sqrt(n / _TRADING_DAYS_PER_YEAR)
+        # Two-sided normal approximation (exact t-distribution p requires scipy).
+        p_value = 2.0 * (1.0 - _std_normal_cdf(abs(t_stat)))
+
+        if n < _SHARPE_SIGNIFICANCE_MIN_SAMPLES:
+            _log.warning(
+                "sharpe_low_sample_size",
+                extra={
+                    "n_returns": n,
+                    "min_for_significance": _SHARPE_SIGNIFICANCE_MIN_SAMPLES,
+                    "sharpe": round(sharpe, 4),
+                    "t_stat": round(t_stat, 4),
+                    "p_value": round(p_value, 4),
+                },
+            )
+
+        return (
+            Decimal(str(round(sharpe, 4))),
+            n,
+            Decimal(str(round(t_stat, 4))),
+            Decimal(str(round(p_value, 4))),
+        )
 
     def sortino_ratio(
         self,
