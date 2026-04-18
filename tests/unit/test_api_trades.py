@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from finalayze.api.v1._fifo import PairedTrade, fifo_pair
+from finalayze.api.v1._slippage import compute_slippage_bps
 from finalayze.main import create_app
 
 
@@ -98,3 +99,40 @@ def test_fifo_pair_sell_without_buy_is_skipped() -> None:
     """A SELL with no prior BUY yields nothing (Pitfall 3 — shorts out of scope)."""
     orders = [_mk_order("SELL", "100", "290", datetime(2026, 4, 2, tzinfo=UTC))]
     assert list(fifo_pair(orders)) == []
+
+
+# ── Phase 55-03 Task 1: compute_slippage_bps helper + Settings commission fields ──
+
+
+def test_compute_slippage_bps_buy_positive_when_filled_above_reference() -> None:
+    """BUY filled ABOVE the reference price is adverse → positive bps (D-08)."""
+    bps = compute_slippage_bps(Decimal(281), Decimal(280), "BUY")
+    assert bps is not None
+    assert 35.0 < bps < 36.5
+
+
+def test_compute_slippage_bps_sell_positive_when_filled_below_reference() -> None:
+    """SELL filled BELOW the reference price is adverse → positive bps (D-08)."""
+    bps = compute_slippage_bps(Decimal(279), Decimal(280), "SELL")
+    assert bps is not None
+    assert 35.0 < bps < 36.5
+
+
+def test_compute_slippage_bps_null_reference_returns_none() -> None:
+    """No reference price → slippage is unknown (D-07 null fallback)."""
+    assert compute_slippage_bps(Decimal(280), None, "BUY") is None
+
+
+def test_compute_slippage_bps_zero_reference_returns_none() -> None:
+    """Zero reference price → guard against div-by-zero (D-07 null fallback)."""
+    assert compute_slippage_bps(Decimal(280), Decimal(0), "BUY") is None
+
+
+def test_settings_exposes_default_commission_bps() -> None:
+    """Settings exposes the three new analytics cost fields with the expected defaults."""
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.default_commission_bps_moex == 4.0  # noqa: PLR2004
+    assert s.default_commission_bps_us == 1.0
+    assert s.default_slippage_cost_bps == 5.0  # noqa: PLR2004
