@@ -139,3 +139,61 @@ def test_get_portfolio_skips_market_on_broker_error() -> None:
     body = resp.json()
     assert body["total_equity_usd"] == 0.0
     assert len(body["markets"]) == 0
+
+
+# ------ STOP-01 D-02 schema tests ------
+
+
+def test_position_detail_has_d02_stop_fields() -> None:
+    from finalayze.api.v1.portfolio import PositionDetail
+
+    fields = PositionDetail.model_fields
+    expected = {
+        "stop_price",
+        "distance_pct",
+        "distance_atr",
+        "atr_value",
+        "entry_price",
+        "highest_price",
+        "trail_activated",
+        "activation_threshold",
+    }
+    assert expected.issubset(set(fields.keys()))
+
+
+def test_position_detail_removed_legacy_stop_distance_atr() -> None:
+    from finalayze.api.v1.portfolio import PositionDetail
+
+    assert "stop_distance_atr" not in PositionDetail.model_fields
+
+
+def test_position_detail_stop_fields_all_nullable() -> None:
+    from finalayze.api.v1.portfolio import PositionDetail
+
+    # Instantiate with only the mandatory fields (D-03: all stop fields default to None)
+    pd = PositionDetail(
+        symbol="SBER",
+        market_id="moex",
+        segment_id="ru_blue_chips",
+        quantity=10.0,
+        avg_price=100.0,
+        current_price=105.0,
+        market_value=1050.0,
+        unrealized_pnl=50.0,
+        unrealized_pnl_pct=5.0,
+    )
+    assert pd.stop_price is None
+    assert pd.distance_pct is None
+    assert pd.distance_atr is None
+    assert pd.atr_value is None
+    assert pd.entry_price is None
+    assert pd.highest_price is None
+    assert pd.trail_activated is None
+    assert pd.activation_threshold is None
+
+
+def test_position_detail_distance_pct_field_description_documents_convention() -> None:
+    from finalayze.api.v1.portfolio import PositionDetail
+
+    desc = PositionDetail.model_fields["distance_pct"].description or ""
+    assert "(current_price - stop_price) / current_price" in desc
