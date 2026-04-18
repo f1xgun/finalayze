@@ -239,8 +239,9 @@ class TestStalenessCheck:
         instrument.figi = "BBG004730N88"
         instrument.segment_id = "ru_blue_chips"
 
-        # Candle from 3 days ago (stale -- exceeds 48h threshold)
-        stale_ts = datetime.now(UTC) - timedelta(hours=72)
+        # Candle from 10 days ago -- far beyond the 72h threshold even after
+        # the calendar-aware weekend/holiday subtraction.
+        stale_ts = datetime.now(UTC) - timedelta(hours=240)
         stale_candle = _make_candle("SBER", ts=stale_ts)
 
         fetcher = MagicMock()

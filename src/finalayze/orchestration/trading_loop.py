@@ -1100,9 +1100,10 @@ class TradingLoop:
 
         # 6A.2: Market-hours gate -- skip cycle when all markets are closed
         any_market_open = False
+        now_for_schedule = self._now()
         for market_id in self._broker_router.registered_markets:
             schedule = SCHEDULES.get(market_id)
-            if schedule is None or schedule.is_market_open():
+            if schedule is None or schedule.is_market_open(now_for_schedule):
                 any_market_open = True
                 break
         if not any_market_open:
