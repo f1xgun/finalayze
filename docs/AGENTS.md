@@ -1,111 +1,117 @@
-# Agent System Guide
+# docs/ — Documentation & Agent Dispatch (Area Node)
 
-How AI agents navigate and work with the Finalayze codebase.
-This file is the canonical reference for agent dispatch, context loading, and coordination.
+Parent: [root AGENTS.md](../AGENTS.md)
 
-## Context Loading Order
+This node serves two jobs at once:
+1. **Docs map** — pointers to all design specs, architecture, quality reports.
+2. **Agent dispatch** — which sub-agent to invoke for which kind of task.
 
-When an agent starts a session, it loads context in this order:
+## Agent dispatch
 
-```
-1. CLAUDE.md                          ← project rules, conventions, current status
-2. .claude/agents/<agent-name>.md     ← agent-specific role and domain
-3. docs/GLOSSARY.md                   ← domain terminology (if unfamiliar terms)
-4. src/finalayze/<module>/CLAUDE.md   ← module-specific context (if working in module)
-5. docs/design/<SPEC>.md              ← detailed spec (if needed for design decisions)
-6. .planning/STATE.md                 ← current project state (if doing planned work)
-```
+### Domain experts (audit / design review)
 
-## Agent Dispatch Rules
+Use these for high-level analysis and pre-merge gates, not for implementation.
 
-### By Task Type
+| Invoke when… | Agent |
+|---|---|
+| Reviewing strategy math, signal quality, or backtest methodology | `quant-analyst` |
+| Auditing risk thresholds, circuit breakers, pre-trade checks | `risk-officer` |
+| Reviewing ML pipeline, feature engineering, model calibration | `ml-engineer` |
+| Checking layer violations, async correctness, data-flow integrity | `systems-architect` |
+| Portfolio allocation, cross-asset correlation, capital distribution | `portfolio-strategist` |
 
-| Task | Primary Agent | Supporting Agents |
-|------|--------------|-------------------|
-| **Strategy implementation** | `strategies-agent` | `quant-analyst` (review), `backtest-agent` (validate) |
-| **Risk rule changes** | `risk-agent` | `risk-officer` (audit), `evaluation-agent` (full eval) |
-| **ML model work** | `ml-agent` | `ml-engineer` (review), `data-quality-agent` (validate data) |
-| **News pipeline** | `news-pipeline-agent` | `analysis-agent` (LLM prompts), `data-agent` (fetchers) |
-| **Broker integration** | `execution-agent` | `systems-architect` (async correctness) |
-| **API endpoints** | `api-agent` | `systems-architect` (contract review) |
-| **Portfolio allocation** | `portfolio-strategist` | `quant-analyst` (math), `risk-officer` (limits) |
-| **Live debugging** | `live-monitor-agent` | domain-specific agent based on issue |
-| **Data quality** | `data-quality-agent` | `data-agent` (fix implementation) |
-| **Full evaluation** | `evaluation-agent` | all domain experts in parallel |
+### Module agents (implementers)
 
-### By Dependency Layer
+Dispatch one per module touched. They own the files under that path.
 
-```
-Layer 0: Types & Schemas       → core-agent
-Layer 1: Configuration         → config-agent
-Layer 2: Data / Repository     → data-agent, markets-agent, news-pipeline-agent
-Layer 3: Analysis / ML         → analysis-agent, ml-agent
-Layer 4: Strategy / Risk       → strategies-agent, risk-agent
-Layer 5: Execution             → execution-agent
-Layer 6: API / Dashboard       → api-agent
-Cross-cutting                  → systems-architect, infra-agent
-```
+| Module path | Agent |
+|---|---|
+| `src/finalayze/core/` | `core-agent` |
+| `config/` | `config-agent` |
+| `src/finalayze/data/` | `data-agent` |
+| `src/finalayze/markets/` | `markets-agent` |
+| `src/finalayze/analysis/` | `analysis-agent` |
+| `src/finalayze/ml/` | `ml-agent` |
+| `src/finalayze/strategies/` | `strategies-agent` |
+| `src/finalayze/risk/` | `risk-agent` |
+| `src/finalayze/execution/` | `execution-agent` |
+| `src/finalayze/backtest/` | `backtest-agent` |
+| `src/finalayze/api/`, `src/finalayze/dashboard/` | `api-agent` |
+| News pipeline (cross-module: `data/` + `analysis/`) | `news-pipeline-agent` |
+| `docker/`, `alembic/`, `pyproject.toml`, CI workflows | `infra-agent` |
 
-## Spec Files Index
+### Operations / specialised agents
 
-Agents should read these specs before making design decisions in the relevant domain:
+| Use case | Agent |
+|---|---|
+| Investigate live / sandbox execution issues, trade-log forensics | `live-monitor-agent` |
+| Full strategy evaluation with backtest journaling + grade | `evaluation-agent` |
+| Orchestrate a debate: collect outputs → ConflictDetector → arbiter | `agent-orchestrator` |
+| Fact-check conflicting agent claims against codebase + history | `arbiter-agent` |
+
+Multi-module task? Dispatch module agents **sequentially** (they edit overlapping files).
+Independent audits? Dispatch domain experts **in parallel**.
+
+## Spec index
+
+Read these before making design decisions in the corresponding domain.
 
 | Spec | Path | Covers |
-|------|------|--------|
-| Architecture Overview | `docs/architecture/OVERVIEW.md` | System diagram, tech stack |
-| Dependency Layers | `docs/architecture/DEPENDENCY_LAYERS.md` | Import rules (MUST follow) |
-| Data Flow | `docs/architecture/DATA_FLOW.md` | Event flow diagrams |
-| Strategies | `docs/design/STRATEGIES.md` | All 8 strategies, signal contracts |
-| Risk Management | `docs/design/RISK.md` | Sizing, stops, circuit breakers |
-| ML Pipeline | `docs/design/ML_PIPELINE.md` | Features, models, training |
-| Markets | `docs/design/MARKETS.md` | MOEX vs US, instruments, calendars |
-| Segments | `docs/design/SEGMENTS.md` | 9 segments, universes, presets |
-| News Pipeline | `docs/design/NEWS_PIPELINE.md` | RSS, Telegram, LLM analysis |
-| API Endpoints | `docs/api/ENDPOINTS.md` | REST API contracts |
-| Glossary | `docs/GLOSSARY.md` | Domain terminology |
+|---|---|---|
+| Architecture overview | [`architecture/OVERVIEW.md`](architecture/OVERVIEW.md) | System diagram, tech stack |
+| Dependency layers | [`architecture/DEPENDENCY_LAYERS.md`](architecture/DEPENDENCY_LAYERS.md) | Import rules (MUST follow) |
+| Data flow | [`architecture/DATA_FLOW.md`](architecture/DATA_FLOW.md) | Event flow diagrams |
+| ADRs | [`architecture/DECISIONS.md`](architecture/DECISIONS.md) | Historical architecture decisions |
+| Strategies | [`design/STRATEGIES.md`](design/STRATEGIES.md) | All strategies + ADX routing + combiner |
+| Risk | [`design/RISK.md`](design/RISK.md) | Sizing, stops, circuit breakers |
+| ML pipeline | [`design/ML_PIPELINE.md`](design/ML_PIPELINE.md) | Features, models, training |
+| Markets | [`design/MARKETS.md`](design/MARKETS.md) | US vs MOEX, instruments, calendars |
+| Segments | [`design/SEGMENTS.md`](design/SEGMENTS.md) | Segment system |
+| News pipeline | [`design/NEWS_PIPELINE.md`](design/NEWS_PIPELINE.md) | RSS, Telegram, LLM analysis |
+| Broker contracts | [`design/BROKER_CONTRACTS.md`](design/BROKER_CONTRACTS.md) | Broker integration specs |
+| Database schema | [`database/SCHEMA.md`](database/SCHEMA.md) | Tables, migrations |
+| REST API | [`api/ENDPOINTS.md`](api/ENDPOINTS.md) | Endpoint reference |
+| Glossary | [`GLOSSARY.md`](GLOSSARY.md) | Domain terminology |
 
-## Module Context Files
+## Quality & operations
 
-Each module has a `CLAUDE.md` with layer rules, public API, contracts, and testing info:
+| Doc | Purpose |
+|---|---|
+| [`quality/GRADES.md`](quality/GRADES.md) | Per-domain quality grades |
+| [`quality/GAPS.md`](quality/GAPS.md) | Tech-debt tracker |
+| [`quality/TEST_STRATEGY.md`](quality/TEST_STRATEGY.md) | Testing approach per module |
+| [`operations/DEPLOYMENT.md`](operations/DEPLOYMENT.md) | Production Docker deployment |
+| [`operations/MONITORING.md`](operations/MONITORING.md) | Prometheus + Alertmanager |
+| [`operations/RUNBOOK.md`](operations/RUNBOOK.md) | Incident runbook |
+| [`operations/GO_LIVE_CHECKLIST.md`](operations/GO_LIVE_CHECKLIST.md) | Pre-production validation |
+
+## Plans, evaluations, research
+
+- `plans/ROADMAP.md` — active roadmap + phase status
+- `plans/<YYYY-MM-DD>-*.md` — individual phase / design / improvement plans
+- `evaluations/` — backtest evaluation reports
+- `research/` — deep research notes (ML, quant, strategy)
+- `reviews/` — expert audit reports from domain-expert agents
+
+## Coordination patterns (when to parallelise vs serialise)
 
 ```
-src/finalayze/core/CLAUDE.md        ← schemas, exceptions, trading loop
-src/finalayze/strategies/CLAUDE.md  ← strategy implementations, presets
-src/finalayze/risk/CLAUDE.md        ← sizing, stops, circuit breakers
-src/finalayze/ml/CLAUDE.md          ← features, models, training
-src/finalayze/analysis/CLAUDE.md    ← LLM, sentiment, events
-src/finalayze/data/CLAUDE.md        ← fetchers, normalizers
-src/finalayze/execution/CLAUDE.md   ← brokers, order routing
-src/finalayze/backtest/CLAUDE.md    ← engine, walk-forward
-src/finalayze/markets/CLAUDE.md     ← instruments, calendars
-src/finalayze/api/CLAUDE.md         ← REST API, metrics
-```
+Sequential (default):
+  research-agent → planner → plan-checker → executor → verifier
 
-## Coordination Patterns
-
-### Sequential Pipeline (most common)
-```
-research-agent → planner → plan-checker → executor → verifier
-```
-
-### Parallel Domain Review
-```
+Parallel domain review:
                 ┌─→ quant-analyst ──────┐
-code change ────┼─→ risk-officer ───────┼─→ merge findings
+  code change ──┼─→ risk-officer ───────┼─→ arbiter → merge findings
                 └─→ systems-architect ──┘
+
+Live issue investigation:
+  live-monitor-agent → identifies domain → spawns module agent → fix → backtest-iteration
 ```
 
-### Live Issue Investigation
-```
-live-monitor-agent → identifies domain → spawns domain agent → fix → backtest-iteration
-```
+## Mandatory gates (re-asserted from root)
 
-## Mandatory Gates
-
-These MUST be followed regardless of which agent is working:
-
-1. **Dependency layers** — imports flow downward only (Layer 0→6)
-2. **TDD** — write failing test first, then implement
-3. **Backtest-iteration** — after ANY strategy/risk/ML change
-4. **Ruff + mypy** — code must pass `ruff check` and `mypy src/`
-5. **MOEX data** — always use T-Invest API, never yfinance for MOEX tickers
+1. Dependency layers — downward only
+2. TDD — failing test first
+3. `backtest-iteration` after any strategy / risk / backtest / ML change
+4. `ruff check` + `mypy src/` green
+5. MOEX data — Tinkoff gRPC only
