@@ -26,3 +26,12 @@ repos:
       - id: detect-private-key
       - id: no-commit-to-branch
         args: ['--branch', 'main']
+
+  - repo: local
+    hooks:
+      - id: graph-check
+        name: graph-check (AGENTS.md manifest)
+        entry: python scripts/graph_check.py
+        language: system
+        pass_filenames: false
+        files: '(AGENTS\.md|\.agents/manifest\.jsonl)$'
