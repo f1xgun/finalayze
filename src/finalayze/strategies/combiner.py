@@ -237,6 +237,7 @@ class StrategyCombiner:
         market_id: str,
         segment_id: str,
         dominant_strategy_name: str = "combined",
+        signal_price: Decimal | None = None,
     ) -> Signal:
         """Create the combined Signal from net score and features."""
         direction = SignalDirection.BUY if net > _ZERO else SignalDirection.SELL
@@ -253,6 +254,7 @@ class StrategyCombiner:
             reasoning=(
                 f"Combined signal: net_score={float(net):.3f} from {strategy_count} strategies"
             ),
+            signal_price=signal_price,
         )
 
     def _resolve_effective_overrides(
@@ -554,6 +556,7 @@ class StrategyCombiner:
             candles[0].market_id,
             segment_id,
             dominant_strategy_name=dominant_strategy_name,
+            signal_price=Decimal(str(candles[-1].close)),
         )
         self._on_final_signal(result, feature_contributions)
         return result

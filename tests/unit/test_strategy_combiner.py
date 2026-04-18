@@ -1375,3 +1375,73 @@ def test_signal_model_orm_declares_signal_price_column() -> None:
     # SQLAlchemy Numeric(12,4) carries precision/scale on the type
     assert col.type.precision == 12
     assert col.type.scale == 4
+
+
+# ── Phase 55-02 Task 1: signal_price captured in _build_result ──
+
+
+def _make_candle_with_close(close: Decimal, day: int) -> Candle:
+    """Build a Candle with an explicit close price (distinct from _candle's BASE_PRICE)."""
+    return Candle(
+        symbol="AAPL",
+        market_id="us",
+        timeframe="1d",
+        timestamp=datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=day),
+        open=close,
+        high=close + CANDLE_HIGH_OFFSET,
+        low=close - CANDLE_LOW_OFFSET,
+        close=close,
+        volume=VOLUME,
+    )
+
+
+def test_signal_price_captured_at_build_result() -> None:
+    """generate_signal must stamp Signal.signal_price with candles[-1].close (Decimal)."""
+    config: dict[str, Any] = {
+        "strategies": {"momentum": {"enabled": True, "weight": 1.0}},
+    }
+    buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+    strategy = MockStrategy("momentum", buy_signal)
+    combiner = StrategyCombiner([strategy])
+    # Trailing candle with close=280.5, 29 earlier candles at BASE_PRICE.
+    candles = [
+        *_make_candles(CANDLE_COUNT - 1),
+        _make_candle_with_close(Decimal("280.5"), CANDLE_COUNT - 1),
+    ]
+    with patch.object(combiner, "_load_config", return_value=config):
+        result = combiner.generate_signal("AAPL", candles, "us_broad")
+    assert result is not None
+    assert result.signal_price == Decimal("280.5")
+
+
+def test_signal_price_uses_last_candle_not_first() -> None:
+    """signal_price comes from candles[-1], not candles[0]."""
+    config: dict[str, Any] = {
+        "strategies": {"momentum": {"enabled": True, "weight": 1.0}},
+    }
+    buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
+    strategy = MockStrategy("momentum", buy_signal)
+    combiner = StrategyCombiner([strategy])
+    # Three candles with closes 100, 200, 300. We expect 300 on the produced signal.
+    candles = [
+        _make_candle_with_close(Decimal(100), 0),
+        _make_candle_with_close(Decimal(200), 1),
+        _make_candle_with_close(Decimal(300), 2),
+    ]
+    with patch.object(combiner, "_load_config", return_value=config):
+        result = combiner.generate_signal("AAPL", candles, "us_broad")
+    assert result is not None
+    assert result.signal_price == Decimal(300)
+
+
+def test_signal_price_none_when_build_result_called_directly() -> None:
+    """Direct _build_result calls (no signal_price kwarg) leave Signal.signal_price=None."""
+    combiner = StrategyCombiner([MockStrategy("momentum", None)])
+    result = combiner._build_result(
+        Decimal("0.6"),
+        {"momentum_confidence": 0.6, "momentum_direction": 1.0},
+        "AAPL",
+        "us",
+        "us_broad",
+    )
+    assert result.signal_price is None
