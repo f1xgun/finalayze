@@ -49,3 +49,14 @@ Backward-compatible shim modules remain in core/ for existing imports.
 - Use `TYPE_CHECKING` guard for imports from upper layers
 - All Pydantic models use `model_config = ConfigDict(frozen=True)`
 - Decimal for monetary values, float for probabilities/ratios
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `core-agent`
+- **Layer:** 0
+- **Imports from:** — (only stdlib + Pydantic)
+- **Imported by:** every other module (schemas and exceptions are universal)
+- **Keywords:** `schemas`, `candle`, `signal`, `exceptions`, `FinalayzeError`, `EventBus`, `WorkMode`, `ORM`, `clock`, `kill_switch`, `layer_ledger`, `bond_math`

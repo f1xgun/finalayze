@@ -46,3 +46,14 @@ Layer 4 -- Strategy / Risk. Can import from layers 0-3. Never import from layers
 - Combiner loads weights from `presets/<segment_id>.yaml` on first call per segment
 - StrategyCombiner has 4 hook methods (`_on_generate_start`, `_on_strategy_signal`, `_on_normalized`, `_on_final_signal`) for extensibility (JournalingStrategyCombiner overrides these)
 - Market context propagated to strategies via duck-typed `set_market_context()`
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `strategies-agent` (review: `quant-analyst`)
+- **Layer:** 4
+- **Imports from:** `core/`, `config/`, `data/`, `markets/`, `analysis/`, `ml/`
+- **Imported by:** `backtest/`, `orchestration/`, `execution/` (signal consumers), `api/`
+- **Keywords:** `BaseStrategy`, `StrategyCombiner`, `ADX`, `regime_routing`, `dual_momentum`, `mean_reversion`, `rsi2_connors`, `ou_mean_reversion`, `momentum`, `ml_strategy`, `event_driven`, `pead`, `pairs`, `bond_carry`, `ichimoku`, `presets`, `HRP`, `vol_targeting`

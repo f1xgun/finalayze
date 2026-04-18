@@ -35,3 +35,14 @@ Layer 3 -- Analysis / ML. Can import from layers 0-2. Never import from layers 4
 - Prompt files are loaded lazily and cached in-memory
 - LLMRateLimitError vs LLMError distinction for retry logic
 - JSON response parsing with fallback to neutral on any parse failure
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `analysis-agent` (pipeline orchestration: `news-pipeline-agent`)
+- **Layer:** 3
+- **Imports from:** `core/`, `config/`, `data/`
+- **Imported by:** `strategies/` (event-driven, disabled), `backtest/`, `orchestration/`, `api/`
+- **Keywords:** `LLM`, `Anthropic`, `OpenAI`, `OpenRouter`, `NewsAnalyzer`, `sentiment`, `entity_extractor`, `event_classifier`, `fact_checker`, `impact_estimator`, `prompts`, `SentimentResult`

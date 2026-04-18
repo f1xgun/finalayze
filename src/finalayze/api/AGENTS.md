@@ -42,3 +42,14 @@ Layer 6 -- API / Dashboard. Can import from all layers 0-5.
 - Telegram webhook is conditionally mounted in `main.py` based on config
 - MetricsCollector uses static methods so callers need no instance
 - FastAPI dependency injection used for database sessions (`get_db()`)
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `api-agent`
+- **Layer:** 6
+- **Imports from:** `core/`, `config/`, `data/`, `markets/`, `analysis/`, `ml/`, `strategies/`, `risk/`, `execution/`, `orchestration/`
+- **Imported by:** `monitoring/`, `dashboard/`, `main.py`
+- **Keywords:** `FastAPI`, `v1_router`, `Prometheus`, `MetricsCollector`, `TelegramAlerter`, `TelegramBotHandler`, `auth`, `API_key`, `portfolio`, `trades`, `signals`, `risk_endpoints`, `ml_endpoints`, `news_endpoints`, `webhook`, `/status`, `/gonogo`

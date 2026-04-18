@@ -49,3 +49,14 @@ Layer 3 -- Analysis / ML. Can import from layers 0-2. Never import from layers 4
 - `selected_features.json` controls which features are used at inference time
 - Training uses `scripts/train_models.py --segment X --walk-forward --excess-returns --sequential-bootstrap`
 - Conformal calibrator produces prediction sets: singleton {1} = BUY, singleton {0} = SELL, {0,1} = abstain
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `ml-agent` (review: `ml-engineer`)
+- **Layer:** 3
+- **Imports from:** `core/`, `config/`, `data/`, `markets/`
+- **Imported by:** `strategies/` (ml_strategy), `risk/` (MetaLabeler in sizing pipeline), `backtest/`, `api/`
+- **Keywords:** `XGBoost`, `LightGBM`, `CatBoost`, `LSTM`, `EnsembleModel`, `MetaLabeler`, `calibration`, `conformal`, `features`, `walk_forward`, `feature_selection`, `quality_gates`, `trend_scanning`, `sequential_bootstrap`

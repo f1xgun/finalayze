@@ -33,3 +33,14 @@ Import rule: monitoring/ may import from L0-L5 and L6 (api/). Must NOT be import
 ## Testing
 - Test location: tests/unit/test_health_monitor.py, tests/unit/test_sandbox_monitor.py
 - Run: uv run pytest tests/unit/test_health_monitor.py tests/unit/test_sandbox_monitor.py -v
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `live-monitor-agent` (code owner: shared across module agents)
+- **Layer:** 6
+- **Imports from:** `core/`, `config/`, `execution/`, `risk/`, `orchestration/`, `api/` (TelegramAlerter)
+- **Imported by:** `main.py` lifespan, `api/` endpoints that expose status
+- **Keywords:** `HealthMonitor`, `SandboxMonitorService`, `AnomalyDetector`, `GoNoGoReporter`, `GateVerdict`, `CycleMetrics`, `feed_freshness`, `PROCEED_DEFER_ABORT`, `gate_thresholds`

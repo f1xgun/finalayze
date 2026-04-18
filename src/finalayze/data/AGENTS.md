@@ -42,3 +42,14 @@ Layer 2 -- Data / Repository. Can import from layers 0-1. Never import from laye
 - Tinkoff client uses `async with AsyncClient(target=...) as services:` context manager pattern
 - `MarketDataLoader._safe_fetch()` wraps all external calls with broad exception handling
 - File caches use `GenericFileCache` from `_cache_utils.py`
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `data-agent` (news pipeline: `news-pipeline-agent`)
+- **Layer:** 2
+- **Imports from:** `core/`, `config/`, `markets/`
+- **Imported by:** `analysis/`, `ml/`, `strategies/`, `risk/`, `execution/`, `backtest/`, `orchestration/`, `api/`
+- **Keywords:** `fetcher`, `yfinance`, `tinkoff_data`, `moex_iss`, `cbr`, `finnhub`, `newsapi`, `rss`, `telegram`, `cache`, `normalizer`, `rate_limiter`, `bond_discovery`, `moex_calendar`
