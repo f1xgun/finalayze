@@ -144,6 +144,9 @@ class BacktestConfig:
     use_impact_model: bool = False
     impact_coeff: float = 0.1
     max_impact_bps: float = 50.0
+    # Liquidity-aware sizing: cap BUY quantity at N% of the fill bar's volume.
+    # 5% of ADV is the institutional-execution convention. Set to 0 to disable.
+    max_order_volume_pct: Decimal = Decimal("0.05")
 
     # EVT tail-risk sizing and copula correlation scaling (Sprint 3)
     use_evt_sizing: bool = False

@@ -248,6 +248,7 @@ class BacktestEngine:
             portfolio_returns=self._portfolio_returns,
             us_market_open_utc=_US_MARKET_OPEN_UTC,
             moex_market_open_utc=_MOEX_MARKET_OPEN_UTC,
+            max_order_volume_pct=self._config.max_order_volume_pct,
         )
 
     def run(  # noqa: PLR0912, PLR0915

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -25,6 +26,27 @@ _MIN_KALMAN_POINTS = 20
 _KALMAN_R = 0.001  # observation noise (measurement variance)
 _KALMAN_Q = 1e-5  # process noise (state transition variance)
 _KALMAN_STATE_DIM = 2
+
+# Cointegration / hedge-ratio calibration cache.
+# Re-running coint() on every bar is O(N^2) per evaluation and produces a
+# beta that jitters with each new observation. We calibrate periodically
+# (monthly by default) and reuse (beta, spread_mean, spread_std) between
+# recalibrations — only the z-score on the most recent bar is recomputed.
+_DEFAULT_CALIBRATION_BARS = 21  # ~one trading month
+_CALIBRATION_CACHE_MAX = 128
+
+
+@dataclass(frozen=True)
+class _PairCalibration:
+    """Cached cointegration calibration for a single pair."""
+
+    calibrated_at_timestamp: datetime
+    hist_length: int
+    p_value: float
+    beta: float
+    spread_mean: float
+    spread_std: float
+    hedge_method: str
 
 
 def compute_kalman_hedge_ratio(
@@ -97,6 +119,14 @@ class PairsStrategy(BaseStrategy):
 
     def __init__(self) -> None:
         self._peer_candles: dict[str, list[Candle]] = {}
+        # Keyed by (segment_id, sym_a, sym_b). Calibration is re-used until
+        # ``_DEFAULT_CALIBRATION_BARS`` new bars arrive. Eviction keeps the
+        # cache bounded under many-segment workloads.
+        self._calibration_cache: dict[tuple[str, str, str], _PairCalibration] = {}
+
+    def invalidate_calibration_cache(self) -> None:
+        """Clear cached pair calibrations (e.g. before a fresh backtest run)."""
+        self._calibration_cache.clear()
 
     @property
     def name(self) -> str:
@@ -233,34 +263,22 @@ class PairsStrategy(BaseStrategy):
         log_a = np.log([float(c.close) for c in sorted_a])
         log_b = np.log([float(c.close) for c in sorted_b])
 
-        # Slice out historical data (exclude current bar to avoid look-ahead bias)
-        log_a_hist = log_a[:-1]
-        log_b_hist = log_b[:-1]
-
-        # Cointegration gate — historical data only
-        _, p_value, _ = coint(log_a_hist, log_b_hist)
-        if float(p_value) > _COINT_P_THRESHOLD:
+        calibration = self._get_or_refresh_calibration(
+            segment_id=segment_id,
+            sym_a=sorted_a[0].symbol,
+            sym_b=sorted_b[0].symbol,
+            log_a=log_a,
+            log_b=log_b,
+            latest_timestamp=sorted_a[-1].timestamp,
+            use_kalman=use_kalman,
+        )
+        if calibration is None:
             return None
 
-        # Hedge ratio estimation
-        hedge_method: str
-        if use_kalman and len(log_a_hist) >= _MIN_KALMAN_POINTS:
-            alpha_k, beta = compute_kalman_hedge_ratio(log_a_hist.tolist(), log_b_hist.tolist())
-            hedge_method = "kalman"
-            _ = alpha_k  # intercept captured in spread via mean-centering below
-        else:
-            # OLS beta — historical data only
-            cov_matrix = np.cov(log_a_hist, log_b_hist)
-            beta = float(cov_matrix[0, 1] / cov_matrix[1, 1])
-            hedge_method = "ols"
-
-        # Spread statistics from historical data only
-        spread_hist = log_a_hist - beta * log_b_hist
-        spread_mean = float(spread_hist.mean())
-        spread_std = float(spread_hist.std(ddof=1))
-
-        if spread_std == 0.0:
-            return None
+        beta = calibration.beta
+        spread_mean = calibration.spread_mean
+        spread_std = calibration.spread_std
+        hedge_method = calibration.hedge_method
 
         # Current spread uses latest bar with historically-fitted beta
         current_spread = float(log_a[-1]) - beta * float(log_b[-1])
@@ -305,3 +323,76 @@ class PairsStrategy(BaseStrategy):
             },
             reasoning=f"pairs z={z:.2f} beta={beta:.3f} ({hedge_method})",
         )
+
+    def _get_or_refresh_calibration(
+        self,
+        *,
+        segment_id: str,
+        sym_a: str,
+        sym_b: str,
+        log_a: np.ndarray,  # type: ignore[type-arg]
+        log_b: np.ndarray,  # type: ignore[type-arg]
+        latest_timestamp: datetime,
+        use_kalman: bool,
+    ) -> _PairCalibration | None:
+        """Return cached calibration, recalibrating periodically.
+
+        Recalibration runs when the bar-count since the last calibration
+        exceeds ``_DEFAULT_CALIBRATION_BARS``, or when no prior calibration
+        exists for this pair. This avoids rerunning the O(N^2) Engle-Granger
+        test on every bar while still keeping beta/spread stats reasonably
+        fresh.
+        """
+        log_a_hist = log_a[:-1]
+        log_b_hist = log_b[:-1]
+        hist_length = len(log_a_hist)
+
+        # Caller guarantees n >= _MIN_CANDLES_FOR_HIST; hist_length can still be
+        # as small as 2 on that boundary. Degenerate cases (< 1) are a hard skip.
+        if hist_length < 1:
+            return None
+
+        key = (segment_id, sym_a, sym_b)
+        cached = self._calibration_cache.get(key)
+        if cached is not None and hist_length - cached.hist_length < _DEFAULT_CALIBRATION_BARS:
+            return cached
+
+        _, p_value, _ = coint(log_a_hist, log_b_hist)
+        p_value_f = float(p_value)
+        if p_value_f > _COINT_P_THRESHOLD:
+            # Drop any stale calibration once cointegration breaks down.
+            self._calibration_cache.pop(key, None)
+            return None
+
+        hedge_method: str
+        if use_kalman and hist_length >= _MIN_KALMAN_POINTS:
+            _, beta = compute_kalman_hedge_ratio(log_a_hist.tolist(), log_b_hist.tolist())
+            hedge_method = "kalman"
+        else:
+            cov_matrix = np.cov(log_a_hist, log_b_hist)
+            beta = float(cov_matrix[0, 1] / cov_matrix[1, 1])
+            hedge_method = "ols"
+
+        spread_hist = log_a_hist - beta * log_b_hist
+        spread_mean = float(spread_hist.mean())
+        spread_std = float(spread_hist.std(ddof=1))
+
+        if spread_std == 0.0:
+            self._calibration_cache.pop(key, None)
+            return None
+
+        # Trim the cache before inserting a fresh calibration.
+        if len(self._calibration_cache) >= _CALIBRATION_CACHE_MAX:
+            self._calibration_cache.pop(next(iter(self._calibration_cache)))
+
+        calibration = _PairCalibration(
+            calibrated_at_timestamp=latest_timestamp,
+            hist_length=hist_length,
+            p_value=p_value_f,
+            beta=beta,
+            spread_mean=spread_mean,
+            spread_std=spread_std,
+            hedge_method=hedge_method,
+        )
+        self._calibration_cache[key] = calibration
+        return calibration

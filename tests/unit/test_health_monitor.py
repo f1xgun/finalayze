@@ -82,20 +82,25 @@ class TestHealthMonitor:
             feed_freshness_minutes=30,
         )
 
-        # No feed timestamp set -- stale
-        result = monitor.check_now()
-        assert result.feed_fresh is False
+        # Force market-open path so off-hours suppression doesn't mask staleness.
+        with patch(
+            "finalayze.monitoring.health_monitor.HealthMonitor._is_market_hours",
+            return_value=True,
+        ):
+            # No feed timestamp set -- stale
+            result = monitor.check_now()
+            assert result.feed_fresh is False
 
-        # Recent feed timestamp -- fresh
-        monitor.update_feed_timestamp(datetime.now(tz=UTC))
-        result = monitor.check_now()
-        assert result.feed_fresh is True
+            # Recent feed timestamp -- fresh
+            monitor.update_feed_timestamp(datetime.now(tz=UTC))
+            result = monitor.check_now()
+            assert result.feed_fresh is True
 
-        # Old feed timestamp -- stale
-        old_ts = datetime.now(tz=UTC) - timedelta(minutes=60)
-        monitor.update_feed_timestamp(old_ts)
-        result = monitor.check_now()
-        assert result.feed_fresh is False
+            # Old feed timestamp -- stale
+            old_ts = datetime.now(tz=UTC) - timedelta(minutes=60)
+            monitor.update_feed_timestamp(old_ts)
+            result = monitor.check_now()
+            assert result.feed_fresh is False
 
     def test_check_now_detects_dead_loop(self):
         """Test 4: check_now() detects dead loop (cycle count unchanged)."""
