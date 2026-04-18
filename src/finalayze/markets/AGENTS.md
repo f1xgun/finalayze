@@ -33,3 +33,14 @@ Layer 2 -- Data / Repository. Can import from layers 0-1. Never import from laye
 - MarketRegistry.is_market_open() converts UTC to local timezone before checking hours
 - CurrencyConverter auto-derives inverse pair when `set_rate()` is called
 - Weekend check: `weekday() >= 5` means Saturday or Sunday
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `markets-agent`
+- **Layer:** 2
+- **Imports from:** `core/`, `config/`
+- **Imported by:** `data/`, `ml/`, `strategies/`, `risk/`, `execution/`, `backtest/`, `orchestration/`, `api/`
+- **Keywords:** `MarketRegistry`, `Instrument`, `FIGI`, `CurrencyConverter`, `fx_service`, `trading_hours`, `MOEX`, `US`, `lot_size`, `schedule`

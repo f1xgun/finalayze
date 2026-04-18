@@ -52,3 +52,14 @@ Layer 4 -- Strategy / Risk. Can import from layers 0-3. Never import from layers
 - All monetary calculations use `Decimal` (never float)
 - PreTradeChecker returns a list of all violations (not just first failure)
 - Circuit breaker tracks `_consecutive_profitable_days` for L2 recovery (requires 2 consecutive profitable days)
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `risk-agent` (review: `risk-officer`)
+- **Layer:** 4
+- **Imports from:** `core/`, `config/`, `data/`, `markets/`, `ml/` (MetaLabeler)
+- **Imported by:** `backtest/`, `execution/` (pre-trade), `orchestration/`, `api/`
+- **Keywords:** `Half-Kelly`, `ATR_stop`, `circuit_breaker`, `pre_trade_check`, `position_sizing_pipeline`, `chandelier_exit`, `drawdown_monitor`, `regime`, `VIX`, `correlation`, `GARCH`, `HMM`, `EVT`, `copula`, `BOCPD`, `DV01`, `yield_stop`, `MOEX_1.2x_uplift`

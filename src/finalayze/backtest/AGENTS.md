@@ -44,3 +44,14 @@ Import rule: backtest/ may import from L0-L5. Must NOT import from L6 (api/, mon
 - JournalingStrategyCombiner overrides 4 hook methods from StrategyCombiner (no logic duplication)
 - Iteration results saved to `results/iterations/` with JSONL history at `results/iterations/history.jsonl`
 - Run iterations via `scripts/run_iteration.py --name <name> --segments us_tech,us_broad`
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `backtest-agent`
+- **Layer:** 4–5 (cross-cutting test infra)
+- **Imports from:** `core/`, `config/`, `data/`, `markets/`, `analysis/`, `ml/`, `strategies/`, `risk/`, `execution/`, `orchestration/` (apply_ofz_rotation)
+- **Imported by:** `scripts/` (iteration runners), `api/` (report endpoints). MUST NOT import `api/`, `monitoring/`, `dashboard/`.
+- **Keywords:** `BacktestEngine`, `walk_forward`, `JournalingStrategyCombiner`, `DecisionJournal`, `IterationTracker`, `grace_bar`, `performance`, `Sharpe`, `Sortino`, `Calmar`, `Monte_Carlo`, `stress_test`, `portfolio_aggregator`, `bond_engine`

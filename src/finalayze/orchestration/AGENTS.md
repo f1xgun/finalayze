@@ -32,3 +32,14 @@ Injected with L6 dependencies (MetricsCollector, TelegramAlerter) via constructo
 - `from __future__ import annotations` in every file
 - Use `TYPE_CHECKING` guard for imports from upper layers (alerts, monitoring)
 - Thread safety via threading.Lock for _sentiment_cache in TradingLoop
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `core-agent` (moved from core/ in Phase 22)
+- **Layer:** 5
+- **Imports from:** `core/`, `config/`, `data/`, `markets/`, `analysis/`, `ml/`, `strategies/`, `risk/`, `execution/`
+- **Imported by:** `api/`, `monitoring/`, `backtest/` (bond_engine uses `apply_ofz_rotation`)
+- **Keywords:** `TradingLoop`, `APScheduler`, `news_cycle`, `strategy_cycle`, `daily_reset`, `BondCycleProcessor`, `OFZ_rotation`, `PK_PD`

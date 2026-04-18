@@ -39,3 +39,14 @@ Layer 5 -- Execution. Can import from layers 0-4. Never import from layer 6.
 - Tinkoff broker must use `target="invest-public-api.tbank.ru:443"` (old domain deprecated)
 - `fill_candle` parameter used only by simulated brokers; live brokers ignore it
 - Retry separates fatal errors (InsufficientFundsError) from transient (ConnectionError)
+
+---
+
+## Graph
+
+- **Parent:** [`src/finalayze/AGENTS.md`](../AGENTS.md)
+- **Agent owner:** `execution-agent`
+- **Layer:** 5
+- **Imports from:** `core/`, `config/`, `data/`, `markets/`, `strategies/`, `risk/`
+- **Imported by:** `orchestration/`, `backtest/` (simulated broker), `api/`, `monitoring/`
+- **Keywords:** `BrokerBase`, `BrokerRouter`, `Alpaca`, `Tinkoff`, `SimulatedBroker`, `OrderRequest`, `OrderResult`, `RetryPolicy`, `market_impact`, `slippage`, `sandbox_tracker`, `bond_simulated_broker`
