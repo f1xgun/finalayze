@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from finalayze.orchestration.trading_loop import TradingLoop
 
@@ -542,3 +542,69 @@ class TestPersistStopSnapshots:
             (args and args[0] == "db_persist_failed") and kwargs.get("table") == "stop_loss_events"
             for args, kwargs in ((c.args, c.kwargs) for c in call_args_list)
         ), f"expected db_persist_failed/table=stop_loss_events, got {call_args_list}"
+
+
+# ── Phase 55-02 Task 2: signal_price round-trip through _persist_signal_async ──
+
+
+def _make_signal_with_price(price: Decimal | None):  # type: ignore[no-untyped-def]
+    """Build a Signal with a specific signal_price for persistence round-trip tests."""
+    from finalayze.core.schemas import Signal, SignalDirection
+
+    return Signal(
+        strategy_name="combined",
+        symbol="SBER",
+        market_id="moex",
+        segment_id="ru_blue_chips",
+        direction=SignalDirection.BUY,
+        confidence=0.6,
+        features={},
+        reasoning="unit",
+        signal_price=price,
+    )
+
+
+def _make_persistence():  # type: ignore[no-untyped-def]
+    """Standalone TradingPersistence with no DB / no event loop."""
+    from finalayze.orchestration.db_persistence import TradingPersistence
+
+    return TradingPersistence(db_url="postgresql://unused", async_loop=None, settings=None)
+
+
+def _patched_session_factory(captured: dict[str, object]):  # type: ignore[no-untyped-def]
+    """Create a MagicMock async-context-manager session that captures session.add()."""
+    session = MagicMock()
+    session.add = MagicMock(side_effect=lambda row: captured.setdefault("row", row))
+    session.commit = AsyncMock()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=session)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    factory = MagicMock(return_value=cm)
+    return factory, session
+
+
+def test_persist_signal_writes_signal_price() -> None:
+    """_persist_signal_async copies Signal.signal_price into SignalModel.signal_price."""
+    persistence = _make_persistence()
+    captured: dict[str, object] = {}
+    factory, session = _patched_session_factory(captured)
+
+    with patch.object(persistence, "_get_bg_session_factory", return_value=factory):
+        asyncio.run(persistence._persist_signal_async(_make_signal_with_price(Decimal("280.5000"))))
+
+    row = captured["row"]
+    assert row.signal_price == Decimal("280.5000")  # type: ignore[attr-defined]
+    session.commit.assert_awaited_once()
+
+
+def test_persist_signal_accepts_none_signal_price() -> None:
+    """_persist_signal_async tolerates Signal.signal_price=None (legacy/synthetic path)."""
+    persistence = _make_persistence()
+    captured: dict[str, object] = {}
+    factory, session = _patched_session_factory(captured)
+
+    with patch.object(persistence, "_get_bg_session_factory", return_value=factory):
+        asyncio.run(persistence._persist_signal_async(_make_signal_with_price(None)))
+
+    assert captured["row"].signal_price is None  # type: ignore[attr-defined]
+    session.commit.assert_awaited_once()
