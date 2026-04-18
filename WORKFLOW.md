@@ -1,107 +1,40 @@
 # Workflow & Development Process Conventions
 
-This document defines the development workflow for the Finalayze project.
-All contributors (human and AI agents) must follow these conventions.
+Process conventions for humans and AI agents working in this repository.
+This file is **not** the agent entry point — that is [`AGENTS.md`](AGENTS.md).
 
-## Superpowers Development Lifecycle
+> **What used to live here and where it went:**
+> - "Superpowers Development Lifecycle" — **removed**. Replaced by GSD (see `AGENTS.md`).
+> - §8 Agent Dispatch Rules — **moved** to [`docs/AGENTS.md`](docs/AGENTS.md).
+> - §9 Trading-Specific Skills — **moved** to [`docs/AGENTS.md`](docs/AGENTS.md).
 
-Every feature, bugfix, or refactor follows this mandatory sequence:
+## Development lifecycle
 
-### 1. Brainstorm (design before code)
-- **Skill:** `brainstorming`
-- Explore requirements, constraints, and edge cases through dialogue
-- Output: validated design document
-- **Gate:** Design must be approved before proceeding
+See [`AGENTS.md`](AGENTS.md) for the `/gsd:*` commands (planned work, quick tasks, debugging,
+session handoff). That file is the single source of truth for workflow commands.
 
-### 2. Isolate (git worktree)
-- **Skill:** `using-git-worktrees`
-- Create isolated worktree for the feature
-- Verify clean test baseline before touching code
+## Branch strategy
 
-### 3. Plan (implementation plan)
-- **Skill:** `writing-plans`
-- Break work into bite-sized tasks (2-5 minutes each)
-- Document exact file paths, code, test steps, verification commands
-- Save to `docs/plans/YYYY-MM-DD-<feature-name>.md`
+- `main` — production-ready, protected
+- `dev` — integration, feature branches merge here first
+- `feature/<name>` — new functionality
+- `fix/<name>` — bug fixes
+- `refactor/<name>` — structural improvements, no behaviour change
 
-### 4. Execute (TDD + subagents)
-- **Skill:** `subagent-driven-development` (same session) or `executing-plans` (batch mode)
-- Each task uses `test-driven-development`: RED-GREEN-REFACTOR
-  - Write failing test first
-  - Verify it fails correctly
-  - Write minimal code to pass
-  - Verify it passes
-  - Refactor if needed
-- If bugs arise, use `systematic-debugging` (root cause first, never guess)
-- Use `dispatching-parallel-agents` for independent tasks
-- `requesting-code-review` after each task (spec compliance + code quality)
+## Commit conventions
 
-### 5. Verify (evidence before claims)
-- **Skill:** `verification-before-completion`
-- Run full test suite fresh, read output, check exit code
-- Never claim "done" without evidence
-
-### 5b. Backtest Validation (mandatory for strategy/risk/backtest/ML changes)
-- **Skill:** `backtest-iteration` (custom, `.claude/skills/backtest-iteration.md`)
-- Run iteration: `uv run python scripts/run_iteration.py --name <name> --segments us_tech,us_broad`
-- Compare metrics against previous iteration (PF, DD, Trades, WF Sharpe)
-- PASS/FAIL/REVIEW gate — do NOT merge if metrics regressed without explanation
-- Use `strategy-diagnose` if a specific strategy underperforms
-- Use `iteration-history` to understand metrics trajectory before tuning
-- Use `preset-tuner` for structured parameter optimization (max 15 grid points)
-
-### 6. Finish (merge or PR)
-- **Skill:** `finishing-a-development-branch`
-- Options: merge locally, create PR, keep branch, or discard
-
-### 7. PR Review-Fix Cycle (mandatory for PRs)
-
-After CI passes on a PR, run an automated review-fix loop until no issues remain:
-
-1. **Dispatch review subagent** — reads all changed files, creates GitHub issues for every
-   problem found (bugs, convention violations, missing tests, type safety, etc.)
-2. **Dispatch fix subagent** — reads all open issues on the PR, fixes them on the branch,
-   pushes, and verifies CI still passes
-3. **Repeat** steps 1-2 until the review subagent finds zero new issues to create
-4. **Merge** once CI is green and the review cycle is clean
-
-Each review issue must be:
-- Specific (file:line reference)
-- Actionable (exact description of the fix)
-- Labeled correctly (`bug`, `enhancement`, `test`, etc.)
-
-```bash
-# Create a review issue
-gh issue create --repo owner/repo --title "..." --body "file:line — ..." --label "bug"
-
-# Close fixed issues from a commit message
-gh issue close <number> --comment "Fixed in <commit-sha>"
-```
-
-## Branch Strategy
-
-- `main` -- production-ready code, protected
-- `dev` -- integration branch, all feature branches merge here first
-- `feature/<name>` -- new functionality
-- `fix/<name>` -- bug fixes
-- `refactor/<name>` -- structural improvements with no behavior change
-
-## Commit Conventions
-
-Follow [Conventional Commits](https://www.conventionalcommits.org/) format:
+[Conventional Commits](https://www.conventionalcommits.org/) format:
 
 ```
 <type>(<scope>): <description>
 
 [optional body]
-
-[optional footer(s)]
+[optional footer]
 ```
 
 **Types:** `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`, `perf`.
-
-**Scopes:** `core`, `config`, `data`, `analysis`, `strategies`, `markets`, `ml`,
-`risk`, `execution`, `backtest`, `dashboard`, `api`, `infra`.
+**Scopes:** `core`, `config`, `data`, `analysis`, `strategies`, `markets`, `ml`, `risk`,
+`execution`, `backtest`, `dashboard`, `api`, `infra`.
 
 Examples:
 ```
@@ -111,10 +44,10 @@ test(strategies): add momentum strategy unit tests
 docs(architecture): update data flow diagram
 ```
 
-## Pull Request Process
+## Pull request process
 
 1. Create a feature branch from `dev`.
-2. Implement changes with tests. Minimum coverage: 80% for new code.
+2. Implement with tests. Minimum coverage: 80% for new code.
 3. Run the full quality check locally before pushing:
    ```bash
    uv run ruff check .
@@ -122,32 +55,44 @@ docs(architecture): update data flow diagram
    uv run mypy src/
    uv run pytest --cov
    ```
-4. Open a PR against `dev`. The PR description must include:
-   - **What** changed and **why**.
-   - Link to the relevant phase/task in `docs/plans/`.
-   - Test plan or evidence of testing.
+4. Open a PR against `dev`. Description must include **what**, **why**, link to the relevant
+   phase plan in `docs/plans/`, and test plan / evidence.
 5. Wait for all CI jobs to pass (lint, typecheck, test).
-6. Run the **PR Review-Fix Cycle** (see Step 7 above) — dispatch review subagent,
-   fix all issues, repeat until clean.
-7. Squash-merge to keep history clean once CI is green and no open review issues remain.
+6. Run the PR review-fix cycle (below).
+7. Squash-merge once CI is green and no open review issues remain.
 
-> **First PR for this project:** https://github.com/f1xgun/finalayze/pull/1 (Phase 1 backtest slice)
+## PR review-fix cycle (mandatory)
 
-## Code Review Checklist
+After CI passes, loop until clean:
+
+1. **Dispatch review sub-agent** — reads changed files, creates GitHub issues for every problem
+   (bugs, convention violations, missing tests, type gaps).
+2. **Dispatch fix sub-agent** — reads open issues on the PR, fixes them, pushes, verifies CI.
+3. **Repeat** until the review sub-agent finds zero new issues.
+
+Each review issue must be:
+- Specific (`file:line` reference)
+- Actionable (exact description of the fix)
+- Labelled (`bug`, `enhancement`, `test`, ...)
+
+```bash
+gh issue create --repo owner/repo --title "..." --body "file:line — ..." --label "bug"
+gh issue close <number> --comment "Fixed in <commit-sha>"
+```
+
+## Code review checklist
 
 - [ ] Layer violations: no upward imports across dependency layers
 - [ ] Type safety: no `Any` without explicit justification
 - [ ] Error handling: domain exceptions from `core/exceptions.py`, not bare `Exception`
 - [ ] Async correctness: no blocking calls in async functions
-- [ ] Tests: unit tests for logic, integration tests for DB/API
+- [ ] Tests: unit for logic, integration for DB/API
 - [ ] Docstrings: Google style on all public functions and classes
 - [ ] Configuration: no hardcoded values; use `config/settings.py`
-- [ ] Secrets: no credentials in code; use environment variables
-- [ ] TDD evidence: tests written before implementation code
+- [ ] Secrets: no credentials in code; environment variables only
+- [ ] TDD evidence: tests written before implementation
 
-## Quality Gates
-
-Every PR must pass these automated checks:
+## Quality gates
 
 | Check | Tool | Threshold |
 |---|---|---|
@@ -157,21 +102,20 @@ Every PR must pass these automated checks:
 | Unit tests | pytest | all pass |
 | Coverage | pytest-cov | >= 80% new code |
 
-## Documentation Updates
+## Documentation updates
 
 When making changes, update the relevant docs:
 
-- New module or feature --> update `docs/architecture/OVERVIEW.md`
-- API change --> update `docs/api/ENDPOINTS.md`
-- New dependency --> update `docs/architecture/DEPENDENCY_LAYERS.md`
-- Architecture decision --> add ADR in `docs/architecture/DECISIONS.md`
-- Completed task --> update `docs/plans/PHASE_*.md` and `docs/plans/ROADMAP.md`
-- Quality improvement --> update `docs/quality/GRADES.md`
-- Resolved tech debt --> update `docs/quality/GAPS.md`
+- New module or feature → update `docs/architecture/OVERVIEW.md`
+- API change → update `docs/api/ENDPOINTS.md`
+- New dependency → update `docs/architecture/DEPENDENCY_LAYERS.md`
+- Architecture decision → add ADR in `docs/architecture/DECISIONS.md`
+- Completed task → update `docs/plans/*.md` and `docs/plans/ROADMAP.md`
+- Quality improvement → update `docs/quality/GRADES.md`
+- Resolved tech debt → update `docs/quality/GAPS.md`
+- **New module / renamed AGENTS.md node** → update `.agents/manifest.jsonl`
 
-## Work Modes
-
-The system operates in four modes. Always develop and test in the appropriate mode:
+## Work modes
 
 | Mode | Purpose | Broker | Data |
 |---|---|---|---|
@@ -180,119 +124,33 @@ The system operates in four modes. Always develop and test in the appropriate mo
 | `test` | Automated integration testing | Simulated | Historical |
 | `real` | Live trading with real money | Alpaca Live / Tinkoff Live | Live |
 
-**Rule:** Never deploy code to `real` mode without passing all quality gates
-in `sandbox` and `test` modes first.
+**Rule:** never deploy code to `real` without passing all quality gates in `sandbox` and `test` first.
 
-## Task Tracking
+## Task tracking
 
-- Phases and tasks are tracked in `docs/plans/`.
-- Update task status as work progresses: `NOT STARTED` -> `IN PROGRESS` -> `DONE`.
+- Phases and tasks live in `.planning/` (GSD state) and `docs/plans/` (historical plans).
+- Status transitions: `NOT STARTED` → `IN PROGRESS` → `DONE`.
 - Log blockers and decisions in the relevant phase document.
 
 ## Changelog
 
-All user-facing and system-affecting changes must be recorded in `CHANGELOG.md`
-following [Keep a Changelog](https://keepachangelog.com/) format.
+All user-facing and system-affecting changes go in `CHANGELOG.md` following
+[Keep a Changelog](https://keepachangelog.com/).
 
-## Environment Setup
+## Environment setup
 
 ```bash
-# Clone and install
 git clone <repo-url>
 cd finalayze
 uv sync
 
-# Copy environment template
 cp .env.example .env
-# Edit .env with your credentials
+# Edit .env with your credentials (notably FINALAYZE_TINKOFF_TOKEN for MOEX)
 
-# Start infrastructure
 docker compose -f docker/docker-compose.dev.yml up -d
-
-# Run migrations
 uv run alembic upgrade head
 
-# Verify setup
 uv run pytest
 uv run ruff check .
 uv run mypy src/
 ```
-
-## §8 Agent Dispatch Rules
-
-The project uses 16 Claude Code sub-agents defined in `.claude/agents/`. Two tiers:
-
-### Tier 1: Domain Expert Agents
-
-Invoke these for high-level analysis, audits, and design review.
-They cross-cut the entire codebase and produce structured reports + GitHub issues.
-
-| Invoke when... | Agent |
-|---|---|
-| Reviewing strategy math, signal quality, or backtest methodology | `quant-analyst` |
-| Auditing risk thresholds, circuit breakers, or pre-trade checks | `risk-officer` |
-| Reviewing ML pipeline, feature engineering, or model calibration | `ml-engineer` |
-| Checking layer violations, async correctness, or data flow | `systems-architect` |
-
-**Brainstorm gate:** Before finalising any design that touches strategies, risk, ML, or architecture, invoke the relevant domain expert(s):
-
-```
-Task("quant-analyst: review the proposed momentum strategy changes")
-Task("risk-officer: audit new position sizing formula")
-```
-
-**Quarterly audit:** Dispatch all 4 experts in parallel to audit the full system:
-
-```
-Task("quant-analyst: full strategy and backtest audit — create GitHub issues for every gap")
-Task("risk-officer: full risk management audit — create GitHub issues for every gap")
-Task("ml-engineer: full ML pipeline audit — create GitHub issues for every gap")
-Task("systems-architect: full architecture audit — create GitHub issues for every gap")
-```
-
-### Tier 2: Module Agents
-
-Use as the **implementer** in `subagent-driven-development`. The controller identifies which module a task touches and dispatches the appropriate agent.
-
-| Module path | Agent to dispatch |
-|---|---|
-| `src/finalayze/core/` | `core-agent` |
-| `config/` | `config-agent` |
-| `src/finalayze/data/` | `data-agent` |
-| `src/finalayze/markets/` | `markets-agent` |
-| `src/finalayze/analysis/` | `analysis-agent` |
-| `src/finalayze/ml/` | `ml-agent` |
-| `src/finalayze/strategies/` | `strategies-agent` |
-| `src/finalayze/risk/` | `risk-agent` |
-| `src/finalayze/execution/` | `execution-agent` |
-| `src/finalayze/backtest/` | `backtest-agent` |
-| `src/finalayze/api/`, `src/finalayze/dashboard/` | `api-agent` |
-| `docker/`, `alembic/`, `pyproject.toml`, CI | `infra-agent` |
-
-**Task touches multiple modules?** Dispatch one agent per module sequentially (not parallel — they may edit overlapping files).
-
-## §9 Trading-Specific Skills
-
-Custom skills in `.claude/skills/` provide domain-specific workflows for this trading system.
-Agents and the main controller MUST use these skills when their trigger conditions match.
-
-| Skill | Trigger | Purpose |
-|---|---|---|
-| `backtest-iteration` | After ANY change to strategies/risk/backtest/ML | Run iteration, compare metrics, PASS/FAIL gate |
-| `strategy-diagnose` | Strategy underperforms or fires rarely | Cross-file investigation: YAML + ADX + stops + sizing |
-| `iteration-history` | Need metrics trend or sprint retrospective | Analyze trajectory across all iterations |
-| `data-quality-check` | Before major backtest or when data issues suspected | Validate OHLCV integrity, completeness, dividends |
-| `ml-experiment` | Training models or deciding to enable ML | Train, evaluate, gate ML with overfitting checks |
-| `preset-tuner` | Tuning strategy parameters | Structured grid search with sensitivity testing |
-
-### Installed External Skills (global)
-
-| Skill | Source | Purpose |
-|---|---|---|
-| `quantitative-research` | `omer-metin/skills-for-antigravity` | Quant methodology: walk-forward, alpha signals, stat arb, regime detection, anti-patterns (overfitting, look-ahead bias, survivorship bias) |
-| `risk-metrics-calculation` | `sickn33/antigravity-awesome-skills` | Risk metrics reference: VaR, CVaR, Sharpe, Sortino, drawdown analysis, stress testing, rolling metrics |
-
-**Usage rules:**
-- `quantitative-research` — consult when designing new strategies, reviewing backtest methodology, or evaluating ML approaches. Its `sharp_edges.md` lists critical pitfalls.
-- `risk-metrics-calculation` — consult when implementing or auditing risk calculations, building dashboards, or computing portfolio-level metrics.
-- Custom skills take precedence over external skills for project-specific workflows.
