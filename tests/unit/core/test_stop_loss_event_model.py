@@ -1,38 +1,52 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from datetime import UTC, datetime
+from decimal import Decimal
 
 
 def test_stop_loss_event_model_tablename() -> None:
     from finalayze.core.models import StopLossEventModel
+
     assert StopLossEventModel.__tablename__ == "stop_loss_events"
 
 
 def test_stop_loss_event_model_composite_primary_key() -> None:
     from finalayze.core.models import StopLossEventModel
+
     pk_columns = {c.name for c in StopLossEventModel.__table__.primary_key.columns}
     assert pk_columns == {"timestamp", "symbol", "market_id"}
 
 
 def test_stop_loss_event_model_columns_present() -> None:
     from finalayze.core.models import StopLossEventModel
+
     cols = {c.name for c in StopLossEventModel.__table__.columns}
     assert cols == {
-        "timestamp", "symbol", "market_id", "event_type",
-        "entry_price", "current_stop", "highest_price", "atr_value",
-        "activation_atr", "trail_atr", "trail_activated", "current_price",
+        "timestamp",
+        "symbol",
+        "market_id",
+        "event_type",
+        "entry_price",
+        "current_stop",
+        "highest_price",
+        "atr_value",
+        "activation_atr",
+        "trail_atr",
+        "trail_activated",
+        "current_price",
     }
 
 
 def test_stop_loss_event_model_event_type_not_null() -> None:
     from finalayze.core.models import StopLossEventModel
+
     col = StopLossEventModel.__table__.columns["event_type"]
     assert col.nullable is False
 
 
 def test_stop_loss_event_model_instantiation() -> None:
     from finalayze.core.models import StopLossEventModel
+
     row = StopLossEventModel(
         timestamp=datetime.now(UTC),
         symbol="SBER",
