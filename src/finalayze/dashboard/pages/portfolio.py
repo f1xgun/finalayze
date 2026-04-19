@@ -15,7 +15,12 @@ _RED_BUCKET_THRESHOLD = 0.5
 # D-13: Plotly subplot stack — mirrors sandbox.py:106-136 exactly
 _EQUITY_ROW_HEIGHT = 0.7
 _DD_ROW_HEIGHT = 0.3
-_SUBPLOT_SPACING = 0.05
+_SUBPLOT_SPACING = 0.12
+
+# Compact-currency thresholds: render large values as "₽2.61M" instead of
+# "₽2,611,415.32" so 6-column metric tiles do not truncate at narrow widths.
+_COMPACT_M_THRESHOLD = 1_000_000
+_COMPACT_K_THRESHOLD = 10_000
 
 # D-15: period dropdown options. The "All" sentinel maps to a 10-year window —
 # generous upper bound that effectively disables the cutoff for live trading
@@ -27,6 +32,16 @@ _PERIOD_OPTIONS: dict[str, int] = {
     "90d": 90,
     "All": 3650,
 }
+
+
+def _format_compact_currency(value: float, sym: str) -> str:
+    """Compact currency format — keeps long RUB values inside narrow metric tiles."""
+    abs_v = abs(value)
+    if abs_v >= _COMPACT_M_THRESHOLD:
+        return f"{sym}{value / _COMPACT_M_THRESHOLD:.2f}M"
+    if abs_v >= _COMPACT_K_THRESHOLD:
+        return f"{sym}{value / 1_000:.1f}K"
+    return f"{sym}{value:,.2f}"
 
 
 def _count_at_risk(positions: list[dict[str, object]] | None) -> int:
@@ -88,8 +103,11 @@ def render(api: ApiClient) -> None:
     cash_pct = (total_cash / total_equity * 100) if total_equity > 0 else 0.0
 
     col1, col2, col3, col4, col5, col6 = st.columns(6)
-    col1.metric(f"Total Equity ({currency_label})", f"{currency_sym}{total_equity:,.2f}")
-    pnl_label = f"{currency_sym}{daily_pnl:,.2f}"
+    col1.metric(
+        f"Total Equity ({currency_label})",
+        _format_compact_currency(total_equity, currency_sym),
+    )
+    pnl_label = _format_compact_currency(daily_pnl, currency_sym)
     col2.metric(f"Daily P&L ({currency_label})", pnl_label, f"{daily_pnl_pct:.2f}%")
     col3.metric("Cash %", f"{cash_pct:.1f}%")
     col4.metric("Sharpe (30d)", f"{sharpe:.2f}" if sharpe is not None else "N/A")
@@ -118,7 +136,6 @@ def render(api: ApiClient) -> None:
             shared_xaxes=True,
             row_heights=[_EQUITY_ROW_HEIGHT, _DD_ROW_HEIGHT],
             vertical_spacing=_SUBPLOT_SPACING,
-            subplot_titles=("Equity (mixed RUB / USD per market)", "Drawdown %"),
         )
 
         # D-14: one Scatter trace per market_id (us, moex, moex_bonds), color-coded.
@@ -130,7 +147,7 @@ def render(api: ApiClient) -> None:
                         x=df_pivot.index,
                         y=df_pivot[market_id],
                         name=str(market_id),
-                        mode="lines",
+                        mode="lines+markers",
                     ),
                     row=1,
                     col=1,
@@ -141,7 +158,7 @@ def render(api: ApiClient) -> None:
                     x=df["timestamp"],
                     y=df["equity"],
                     name="Equity",
-                    mode="lines",
+                    mode="lines+markers",
                 ),
                 row=1,
                 col=1,
@@ -166,9 +183,10 @@ def render(api: ApiClient) -> None:
                             x=df_dd.index,
                             y=dd_pct,
                             name=f"DD {market_id}",
-                            mode="lines",
+                            mode="lines+markers",
                             fill="tozeroy",
                             line={"color": "red"},
+                            marker={"color": "red", "size": 6},
                             opacity=0.4,
                             showlegend=False,
                         ),
@@ -192,7 +210,15 @@ def render(api: ApiClient) -> None:
                     col=1,
                 )
 
-        fig.update_layout(height=500, margin={"t": 50, "b": 30})
+        equity_axis_label = f"Equity ({currency_label})"
+        fig.update_yaxes(title_text=equity_axis_label, row=1, col=1)
+        fig.update_yaxes(title_text="Drawdown %", row=2, col=1)
+        fig.update_layout(
+            height=600,
+            margin={"t": 30, "b": 30, "l": 60, "r": 20},
+            hovermode="x unified",
+            hoverdistance=-1,
+        )
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No historical data yet — equity curve will appear after the first trading cycle.")
