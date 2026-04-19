@@ -120,7 +120,7 @@ def test_migration_008_idempotent() -> None:
             conn.execute(
                 sa.text(
                     "SELECT create_hypertable('daily_equity_snapshots', 'timestamp', "
-                    "if_not_exists => TRUE)"
+                    "if_not_exists => TRUE, migrate_data => TRUE)"
                 )
             )
             conn.execute(
@@ -130,5 +130,77 @@ def test_migration_008_idempotent() -> None:
                 )
             )
             conn.commit()
+    finally:
+        engine.dispose()
+
+
+def test_migration_008_handles_pre_existing_populated_table() -> None:
+    """Regression: migration 008 must convert a pre-populated plain table to a hypertable.
+
+    In environments bootstrapped via `Base.metadata.create_all()` the
+    `daily_equity_snapshots` table is created as a *plain* (non-hypertable)
+    Postgres table. The existing `daily_reset` writer may then populate it
+    with rows BEFORE migration 008 ever runs. In that scenario, calling
+    `create_hypertable(..., if_not_exists => TRUE)` without `migrate_data => TRUE`
+    raises `psycopg2.errors.FeatureNotSupported: table is not empty`.
+
+    This test simulates the worst-case bootstrap order: plain table + data
+    + hypertable conversion. The migration's own SQL is exercised; the
+    operation must succeed and preserve existing rows.
+    """
+    import sqlalchemy as sa
+
+    url = _db_url()
+    sync_url = _sync_url(url)
+    engine = sa.create_engine(sync_url)
+    try:
+        with engine.connect() as conn:
+            # Force back to a plain-table-with-data state: drop hypertable,
+            # recreate as a plain table, insert one synthetic row.
+            conn.execute(sa.text("DROP TABLE IF EXISTS daily_equity_snapshots CASCADE"))
+            conn.execute(
+                sa.text(
+                    "CREATE TABLE daily_equity_snapshots ("
+                    "timestamp TIMESTAMP WITH TIME ZONE NOT NULL, "
+                    "market_id VARCHAR(20) NOT NULL, "
+                    "equity NUMERIC(14, 4) NOT NULL, "
+                    "currency VARCHAR(3) NOT NULL DEFAULT 'USD', "
+                    "PRIMARY KEY (timestamp, market_id))"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "INSERT INTO daily_equity_snapshots "
+                    "(timestamp, market_id, equity, currency) VALUES "
+                    "('2026-04-01 00:00:00+00', 'moex', 1000000.0000, 'RUB')"
+                )
+            )
+            conn.commit()
+
+            # Now invoke the migration's own create_hypertable call — the bug
+            # being defended against is "table is not empty" when
+            # migrate_data => TRUE is missing.
+            conn.execute(
+                sa.text(
+                    "SELECT create_hypertable('daily_equity_snapshots', 'timestamp', "
+                    "if_not_exists => TRUE, migrate_data => TRUE)"
+                )
+            )
+            conn.commit()
+
+            # Hypertable conversion succeeded.
+            ht_row = conn.execute(
+                sa.text(
+                    "SELECT 1 FROM timescaledb_information.hypertables "
+                    "WHERE hypertable_name = 'daily_equity_snapshots'"
+                )
+            ).fetchone()
+            assert ht_row is not None, "Pre-populated table must convert to hypertable"
+
+            # Data preserved.
+            row_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM daily_equity_snapshots")
+            ).scalar()
+            assert row_count == 1, f"Pre-existing rows must be migrated; got {row_count}"
     finally:
         engine.dispose()
