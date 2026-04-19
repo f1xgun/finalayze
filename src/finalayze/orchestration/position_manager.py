@@ -79,6 +79,11 @@ class PositionTracker:
         # Per-cycle re-entry guard: symbols stopped out this cycle skip signal gen
         self._cycle_exited_symbols: set[str] = set()
 
+        # ALRT-01 D-07: monotonic cycle index mirrored from TradingLoop._cycle_count
+        # via set_current_cycle(). Read by check_stop_losses to compute hold_bars
+        # without extending the 3-param public signature (revision B3).
+        self._current_cycle_index: int = 0
+
     def check_stop_losses(
         self,
         market_id: str,
@@ -220,6 +225,9 @@ class PositionTracker:
         """
         self._entry_prices[symbol] = price
         self._entry_strategy[symbol] = strategy
+        # ALRT-01 D-07: stamp the current monotonic cycle index onto the state
+        # so check_stop_losses can compute hold_bars on trigger.
+        stop_state.entry_cycle_index = self._current_cycle_index
         with self._stop_loss_lock:
             self._stop_states[symbol] = stop_state
         # Fire 'entry' event to stop_loss_events (D-06) -- no broker scan.
@@ -266,6 +274,16 @@ class PositionTracker:
         cycle's exited symbols (PARITY-04).
         """
         self._cycle_exited_symbols = set()
+
+    def set_current_cycle(self, cycle_index: int) -> None:
+        """Mirror TradingLoop._cycle_count onto the tracker (ALRT-01 D-07).
+
+        Called from the top of ``TradingLoop._strategy_cycle_impl`` so
+        ``check_stop_losses`` can compute ``hold_bars`` on trigger without an
+        extension to its 3-param public signature (revision B3). Stamped onto
+        ``StopLossState.entry_cycle_index`` at ``register_entry`` time.
+        """
+        self._current_cycle_index = cycle_index
 
     @property
     def exited_symbols(self) -> set[str]:

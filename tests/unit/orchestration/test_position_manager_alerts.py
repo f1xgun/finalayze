@@ -15,7 +15,6 @@ from finalayze.execution.simulated_broker import StopLossState
 from finalayze.orchestration.position_manager import PositionTracker
 from finalayze.orchestration.trading_loop import TradingLoop
 
-
 # Test constants (no magic numbers per ruff PLR2004)
 _TRIGGER_PRICE = Decimal(92)
 _ENTRY_PRICE = Decimal(100)
@@ -117,12 +116,17 @@ def test_strategy_cycle_impl_contains_cycle_count_increment() -> None:
 
 
 def test_trading_loop_cycle_count_init_only_in_class_body() -> None:
-    """`self._cycle_count = 0` must appear exactly once (in __init__).
+    """`self._cycle_count` must be reset to 0 exactly once (in __init__).
 
     Enforces monotonic semantics: no method body resets the counter mid-run.
+    Counts both annotated (`self._cycle_count: int = 0`) and bare
+    (`self._cycle_count = 0`) reset forms — should be exactly one.
     """
     src = inspect.getsource(TradingLoop)
-    assert src.count("self._cycle_count = 0") == 1
+    # Either `self._cycle_count = 0` or `self._cycle_count: int = 0` counts.
+    bare = src.count("self._cycle_count = 0")
+    annotated = src.count("self._cycle_count: int = 0")
+    assert bare + annotated == 1
 
 
 def test_register_entry_stamps_current_cycle() -> None:
@@ -148,7 +152,7 @@ def test_register_entry_stamps_current_cycle() -> None:
 
 def test_check_stop_losses_fires_alert_after_submit_success() -> None:
     """After a successful submit_order, on_stop_loss_triggered fires with enriched data."""
-    tracker, alerter, broker = _make_tracker_with_alerter()
+    tracker, alerter, _broker = _make_tracker_with_alerter()
     state = _make_state(entry=100.0, entry_cycle_index=_HOLD_CYCLE_ENTRY)
     state.current_stop = _CURRENT_STOP  # trigger when current_price <= 95
     with tracker._stop_loss_lock:

@@ -35,6 +35,7 @@ class StopLossState:
     trail_atr: Decimal  # ATR multiplier for trailing distance (default 1.5)
     entry_price: Decimal  # entry price (to compute activation threshold)
     atr_value: Decimal  # ATR at time of entry
+    entry_cycle_index: int = 0  # ALRT-01 D-07: monotonic cycle counter at entry
 
 
 class SimulatedBroker(BrokerBase):

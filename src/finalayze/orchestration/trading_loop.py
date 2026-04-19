@@ -303,6 +303,12 @@ class TradingLoop:
         # Total strategy cycles completed (used by HealthMonitor for liveness)
         self._total_cycles: int = 0
 
+        # ALRT-01 D-07: monotonic cycle counter, incremented at the top of every
+        # _strategy_cycle_impl invocation. NEVER reset (initialised exactly once
+        # here). Stamped onto StopLossState.entry_cycle_index at register_entry
+        # so check_stop_losses can compute hold_bars on trigger.
+        self._cycle_count: int = 0
+
         # Per-cycle portfolio cache: market_id -> PortfolioState
         # Populated at the start of each strategy cycle, cleared at the end.
         self._cycle_portfolio_cache: dict[str, Any] = {}
@@ -1217,6 +1223,13 @@ class TradingLoop:
 
     def _strategy_cycle_impl(self) -> None:
         """Inner implementation of _strategy_cycle with portfolio caching."""
+        # ALRT-01 D-07: monotonic cycle counter — bumped FIRST so any code
+        # below (halt, breaker, snapshot) sees the new index. Mirror onto
+        # PositionTracker so check_stop_losses can compute hold_bars without
+        # an extension to its 3-param public signature (revision B3).
+        self._cycle_count += 1
+        if self._position_tracker is not None:
+            self._position_tracker.set_current_cycle(self._cycle_count)
         now = self._now()
         market_equities: dict[str, Decimal] = {}
         baseline_equities: dict[str, Decimal] = {}
