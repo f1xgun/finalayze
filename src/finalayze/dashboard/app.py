@@ -57,6 +57,7 @@ page = st.navigation(
         st.Page("pages/risk.py", title="Risk", icon=":material/shield:"),
         st.Page("pages/portfolio.py", title="Portfolio", icon=":material/account_balance:"),
         st.Page("pages/positions.py", title="Positions", icon=":material/track_changes:"),
+        st.Page("pages/alerts.py", title="Alerts", icon=":material/notifications:"),
         st.Page("pages/sandbox.py", title="Sandbox", icon=":material/science:"),
         st.Page("pages/experiments_list.py", title="Experiments", icon=":material/biotech:"),
     ],
