@@ -357,6 +357,49 @@ class StopLossEventModel(Base):
     current_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
 
 
+class AlertModel(Base):
+    """Alert emission log (raw + LLM follow-up threaded via parent_id).
+
+    ALRT-03 (Phase 57). Two-row schema for anomaly pair: raw row with
+    alert_type='anomaly_raw' + parent_id=NULL; LLM follow-up with
+    alert_type='anomaly_llm' + parent_id=<raw.id>.
+    """
+
+    __tablename__ = "alerts"
+
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True,
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    alert_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    priority: Mapped[str] = mapped_column(String(10), nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    market_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("alerts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    delivery_status: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="queued",
+    )
+    alert_metadata: Mapped[dict[str, object] | None] = mapped_column(
+        "metadata",  # column name; Python attr renamed to avoid SQLAlchemy reserved word
+        JSONB,
+        nullable=True,
+    )
+
+    def __init__(self, **kwargs: object) -> None:
+        # SQLAlchemy 2.0 `default=` only applies at flush time, not at __init__.
+        # Apply the Python-side default for delivery_status so callers can rely
+        # on AlertModel().delivery_status == "queued" without an explicit pass.
+        kwargs.setdefault("delivery_status", "queued")
+        super().__init__(**kwargs)
+
+
 class PortfolioSnapshot(Base):
     """Portfolio equity snapshot written after each strategy cycle."""
 
