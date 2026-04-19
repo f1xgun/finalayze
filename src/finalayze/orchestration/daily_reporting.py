@@ -181,6 +181,62 @@ class DailyReportingService:
 
         return new_baselines
 
+    def persist_cycle_snapshot(self, now: datetime) -> None:
+        """Per-cycle equity snapshot writer (EQTY-01 D-01, D-02, D-03).
+
+        Mirrors ``daily_reset()`` lines 102-138 but writes WITHOUT resetting
+        circuit breakers and WITHOUT sending the daily Telegram summary.
+        Idempotent on failure: ``TradingPersistence.persist_equity_snapshots``
+        is fire-and-forget under the PERSIST-05 envelope at
+        ``db_persistence.py:115-127``.
+
+        Called from ``TradingLoop._strategy_cycle_impl`` after the per-market
+        loop completes (D-02 Route B -- see Phase 56 Plan 02 objective for the
+        routing rationale: ``SignalExecutor`` is per-instrument, not per-cycle,
+        so the cycle boundary lives in ``TradingLoop``). Halt paths (cross-market
+        breaker trip, loss-limit halt) early-return BEFORE this call site, so
+        snapshots only fire on cycles that actually completed.
+
+        Args:
+            now: Cycle timestamp (UTC-aware).
+        """
+        baselines: dict[str, Decimal] = {}
+
+        # Per-market broker equity (mirror daily_reset lines 102-119, minus cb.reset_daily)
+        for market_id in self._circuit_breakers:
+            try:
+                broker = self._broker_router.route(market_id)
+                portfolio = broker.get_portfolio()
+                baselines[market_id] = portfolio.equity
+            except Exception:
+                _log.exception(
+                    "persist_cycle_snapshot: market %s broker fetch failed",
+                    market_id,
+                )
+
+        # Bond ledger equity (mirror daily_reset lines 122-138)
+        if self._bond_processor is not None:
+            try:
+                bond_equity: Decimal = sum(
+                    (
+                        ledger.current_equity
+                        for ledger in self._bond_processor._layer_ledgers.values()
+                    ),
+                    _ZERO,
+                )
+                baselines["moex_bonds"] = bond_equity
+            except Exception:
+                _log.exception("persist_cycle_snapshot: bond equity sum failed")
+
+        if not baselines:
+            return
+
+        # Reuse existing TradingPersistence wrapper -- same one daily_reset uses.
+        # Currency derivation (moex/ru_ -> RUB else USD) happens inside
+        # _persist_snapshots_async at db_persistence.py:285-287, so no new
+        # currency logic is needed here.
+        self._persistence.persist_equity_snapshots(baselines, now)
+
     def _compute_top_movers(self, baselines: dict[str, Decimal]) -> list[tuple[str, float]]:
         """Compute top 3 movers by absolute P&L % across all markets.
 
