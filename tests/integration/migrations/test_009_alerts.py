@@ -27,9 +27,13 @@ def _extract_module_assignment(source: str, name: str) -> object:
     """
     tree = ast.parse(source)
     for node in tree.body:
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if node.target.id == name and node.value is not None:
-                return ast.literal_eval(node.value)
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+            and node.value is not None
+        ):
+            return ast.literal_eval(node.value)
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == name:
