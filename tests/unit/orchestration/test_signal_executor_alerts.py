@@ -23,10 +23,6 @@ from finalayze.orchestration.signal_executor import (
     SignalExecutor,
 )
 
-if TYPE_CHECKING:
-    pass
-
-
 # Test constants (no magic numbers per ruff PLR2004).
 _HIGH_CONF = 0.65
 _LOW_CONF = 0.40
@@ -94,7 +90,7 @@ def _make_executor(broker_positions: dict[str, Decimal] | None = None) -> tuple[
 def test_min_alert_confidence_is_half() -> None:
     """_MIN_ALERT_CONFIDENCE pinned to 0.5 per D-13."""
     expected = 0.5
-    assert _MIN_ALERT_CONFIDENCE == expected
+    assert expected == _MIN_ALERT_CONFIDENCE
 
 
 def test_extract_strategy_contribs_sorts_desc() -> None:

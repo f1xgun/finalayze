@@ -53,6 +53,7 @@ if TYPE_CHECKING:
 _CANDLE_LOOKBACK = 210  # SMA-200 needs 200 bars + buffer; dual_momentum needs 126
 _CAUTION_SIZE_FACTOR = Decimal("0.5")  # halve position size at CAUTION
 _MIN_CONFIDENCE_BOOST = 1.2  # raise required confidence 20% at CAUTION
+_MIN_ALERT_CONFIDENCE = 0.5  # ALRT-02 D-13: skip noise below this threshold
 _ZERO = Decimal(0)
 _STALENESS_THRESHOLD_HOURS: float = 72.0  # 3x daily; covers weekends + calendar-aware holidays
 _ATR_MULTIPLIER_US = Decimal("2.0")
@@ -451,6 +452,15 @@ class SignalExecutor:
             stats["dropped_pre_trade"] = 1
             return stats
 
+        # ALRT-02 (D-11/D-12/D-13/D-14): fire signal alert AFTER pre-trade pass,
+        # BEFORE submit. Best-effort — never crashes the cycle.
+        self._fire_signal_alert(
+            signal=signal,
+            market_id=market_id,
+            symbol=symbol,
+            broker=broker,
+        )
+
         price = candles[-1].close if candles else _ZERO
         _log.info(
             "order_submitted",
@@ -696,6 +706,79 @@ class SignalExecutor:
         strategy via auto-apply.  Returns a copy so callers cannot mutate internal state.
         """
         return self._position_tracker.get_entry_strategies()
+
+    def _extract_strategy_contribs(
+        self,
+        signal: Signal,
+    ) -> list[tuple[str, float]]:
+        """Return [(name, confidence)] sorted descending by confidence.
+
+        Reads the per-strategy ``{name}_confidence`` keys that
+        ``StrategyCombiner`` writes onto ``signal.features``. Excludes the ADX
+        routing keys (``adx_*_confidence``) which are not contributing
+        strategies. ALRT-02 D-14: caller (TelegramAlerter.on_signal_generated)
+        truncates to top-3 + "(+N more)".
+        """
+        contribs: list[tuple[str, float]] = []
+        for key, val in (signal.features or {}).items():
+            if key.endswith("_confidence") and not key.startswith("adx_"):
+                name = key[: -len("_confidence")]
+                contribs.append((name, float(val)))
+        contribs.sort(key=lambda t: -t[1])
+        return contribs
+
+    def _fire_signal_alert(
+        self,
+        *,
+        signal: Signal,
+        market_id: str,
+        symbol: str,
+        broker: object,
+    ) -> None:
+        """ALRT-02 (D-11/D-12/D-13/D-14): fire on_signal_generated with NEW/ADD/FLIP.
+
+        Called from ``process_instrument`` AFTER pre-trade validation passes,
+        BEFORE the order is submitted (D-12). Skips when:
+
+        - signal.confidence < _MIN_ALERT_CONFIDENCE (D-13 noise gate)
+        - self._alerter is None
+        - broker.get_positions raises (broker outage — alert is best-effort)
+
+        Position context (D-11):
+        - qty == 0          => NEW
+        - qty * direction same sign => ADD
+        - qty * direction opposite  => FLIP
+
+        A Telegram outage NEVER crashes the cycle (logged via _log.exception).
+        """
+        if signal.confidence < _MIN_ALERT_CONFIDENCE or self._alerter is None:
+            return
+        try:
+            broker_positions = broker.get_positions()  # type: ignore[attr-defined]
+        except Exception:
+            _log.exception("signal_alert_get_positions_failed", symbol=symbol)
+            return
+        current_qty = broker_positions.get(symbol, _ZERO)
+        if current_qty == _ZERO:
+            position_context = "NEW"
+        elif (current_qty > _ZERO and signal.direction == SignalDirection.BUY) or (
+            current_qty < _ZERO and signal.direction == SignalDirection.SELL
+        ):
+            position_context = "ADD"
+        else:
+            position_context = "FLIP"
+        strategy_contribs = self._extract_strategy_contribs(signal)
+        try:
+            self._alerter.on_signal_generated(
+                symbol=symbol,
+                market_id=market_id,
+                side=signal.direction.value,
+                confidence=float(signal.confidence),
+                strategy_breakdown=strategy_contribs,
+                position_context=position_context,
+            )
+        except Exception:
+            _log.exception("signal_alert_fire_failed", symbol=symbol)
 
     def _submit_order(  # noqa: PLR0912
         self,
