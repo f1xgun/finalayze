@@ -247,7 +247,7 @@ class TestHTMLParseMode:
 
 
 class TestHTTP429Handling:
-    """_send returns False on HTTP 429 (rate limited)."""
+    """_send returns ``(ok, alert_id)`` tuple; ok is False on HTTP 429 (rate limited)."""
 
     @pytest.mark.asyncio
     async def test_send_returns_false_on_429(self) -> None:
@@ -257,8 +257,9 @@ class TestHTTP429Handling:
         mock_client = MagicMock()
         mock_client.post = AsyncMock(return_value=mock_resp)
         alerter._client = mock_client
-        result = await alerter._send("test")
-        assert result is False
+        # Phase 57-02: _send returns ``tuple[bool, uuid.UUID | None]``
+        ok, _alert_id = await alerter._send("test")
+        assert ok is False
 
     @pytest.mark.asyncio
     async def test_send_returns_true_on_success(self) -> None:
@@ -266,8 +267,9 @@ class TestHTTP429Handling:
         mock_client = MagicMock()
         mock_client.post = AsyncMock(return_value=MagicMock(status_code=200))
         alerter._client = mock_client
-        result = await alerter._send("test")
-        assert result is True
+        # Phase 57-02: _send returns ``tuple[bool, uuid.UUID | None]``
+        ok, _alert_id = await alerter._send("test")
+        assert ok is True
 
 
 class TestQueueIntegration:

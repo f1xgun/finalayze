@@ -20,7 +20,8 @@ BATCH_THRESHOLD = 5
 
 def _make_alerter() -> TelegramAlerter:
     alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
-    alerter._send = AsyncMock(return_value=True)  # type: ignore[assignment]
+    # Phase 57-02: _send now returns ``tuple[bool, uuid.UUID | None]``
+    alerter._send = AsyncMock(return_value=(True, None))  # type: ignore[assignment]
     return alerter
 
 
@@ -99,7 +100,8 @@ class TestRetryLogic:
     @pytest.mark.asyncio
     async def test_retry_on_failure(self) -> None:
         alerter = _make_alerter()
-        alerter._send = AsyncMock(side_effect=[False, True])  # type: ignore[assignment]
+        # Phase 57-02: _send returns ``tuple[bool, uuid.UUID | None]``
+        alerter._send = AsyncMock(side_effect=[(False, None), (True, None)])  # type: ignore[assignment]
         queue = TelegramMessageQueue(alerter)
         with patch("finalayze.core.alerts.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             result = await queue._send_with_retry("test msg")
@@ -110,7 +112,8 @@ class TestRetryLogic:
     @pytest.mark.asyncio
     async def test_drop_after_second_failure(self) -> None:
         alerter = _make_alerter()
-        alerter._send = AsyncMock(return_value=False)  # type: ignore[assignment]
+        # Phase 57-02: _send returns ``tuple[bool, uuid.UUID | None]``
+        alerter._send = AsyncMock(return_value=(False, None))  # type: ignore[assignment]
         queue = TelegramMessageQueue(alerter)
         with patch("finalayze.core.alerts.asyncio.sleep", new_callable=AsyncMock):
             result = await queue._send_with_retry("test msg")
