@@ -313,7 +313,7 @@ def _build_history_with_drawdown(
     out: list[SnapshotEntry] = []
     for ts, market_id, equity in rows:
         prev_peak = peaks.get(market_id, equity)
-        peak = prev_peak if prev_peak > equity else equity
+        peak = max(prev_peak, equity)
         peaks[market_id] = peak
         dd = float((peak - equity) / peak) if peak > 0 else 0.0
         out.append(

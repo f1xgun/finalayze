@@ -27,7 +27,6 @@ from fastapi.testclient import TestClient
 
 from finalayze.main import create_app
 
-
 # ---------- Fixtures and helpers -------------------------------------------------
 
 
@@ -115,26 +114,21 @@ def _patch_session_factory(
             return None
 
         async def execute(self, stmt: Any) -> _Result:
+            # Render the compiled SQL (with bound markers) for table detection
+            # and market_id filter detection. SQLAlchemy clauses raise
+            # TypeError on truthiness checks, so we MUST avoid bool(stmt).
             sql = str(stmt)
             if "daily_equity_snapshots" in sql:
                 rows: list[Any] = list(daily_rows)
             else:
                 rows = list(sandbox_rows)
 
-            # Replicate WHERE timestamp >= :cutoff and ?market_id= filter.
-            # We can't easily extract bind params from a compiled stmt without
-            # a dialect, so the test seeds rows that all sit inside the test's
-            # intended window; market_id filter is honored via the
-            # `whereclause` repr inspection.
-            wc = str(getattr(stmt, "whereclause", "") or "")
-            if "market_id" in wc:
-                # Crude but reliable: each test that filters by market sets
-                # _expected_market_id on the patcher. We pull it from the
-                # closure if present.
-                expected = _Session._market_filter
-                if expected is not None:
-                    rows = [r for r in rows if r.market_id == expected]
-            # Sort by timestamp ascending to match `ORDER BY timestamp asc`.
+            # market_id filter: each test sets _Session._market_filter to the
+            # value it passed via ?market_id=...; if None, no filter applied.
+            expected = _Session._market_filter
+            if expected is not None:
+                rows = [r for r in rows if r.market_id == expected]
+            # Sort by timestamp ascending to mirror ORDER BY timestamp asc.
             rows.sort(key=lambda r: r.timestamp)
             return _Result(rows)
 
@@ -171,9 +165,7 @@ def test_history_uses_daily_equity_snapshots_when_sufficient() -> None:
     assert resp.status_code == 200
     snapshots = resp.json()["snapshots"]
     assert len(snapshots) == 6, f"Expected 6 daily snapshots, got {len(snapshots)}"
-    served = [
-        e for e in captured if e.get("event") == "portfolio_history_served"
-    ]
+    served = [e for e in captured if e.get("event") == "portfolio_history_served"]
     assert served, "Expected a portfolio_history_served log line"
     assert served[-1]["history_source"] == "daily_equity_snapshots", (
         f"Expected history_source=daily_equity_snapshots, got {served[-1].get('history_source')!r}"
@@ -205,12 +197,11 @@ def test_history_falls_back_to_sandbox_metrics_when_sparse() -> None:
     assert equities == sorted([5000.0, 5001.0, 5002.0]), (
         f"Expected sandbox equities {[5000.0, 5001.0, 5002.0]}, got {equities}"
     )
-    served = [
-        e for e in captured if e.get("event") == "portfolio_history_served"
-    ]
+    served = [e for e in captured if e.get("event") == "portfolio_history_served"]
     assert served, "Expected a portfolio_history_served log line"
+    actual_source = served[-1].get("history_source")
     assert served[-1]["history_source"] == "sandbox_metrics", (
-        f"Expected fallback history_source=sandbox_metrics, got {served[-1].get('history_source')!r}"
+        f"Expected fallback history_source=sandbox_metrics, got {actual_source!r}"
     )
 
 
@@ -255,24 +246,29 @@ def test_history_query_params() -> None:
 def test_drawdown_pct_per_market_running_peak() -> None:
     """drawdown_pct is computed per market, independently, via running peak (D-07)."""
     now = datetime.now(UTC)
-    # Series: equity = 100, 110, 105, 120, 90 for market "moex"
+    # Series ordered chronologically: equity = 100, 110, 105, 120, 90, 95
     # Expected per-row drawdown_pct (running peak per market):
     #   100 -> peak=100 dd=0
     #   110 -> peak=110 dd=0
     #   105 -> peak=110 dd=(110-105)/110 ≈ 0.04545
     #   120 -> peak=120 dd=0
     #    90 -> peak=120 dd=(120-90)/120 = 0.25
-    equities = [100.0, 110.0, 105.0, 120.0, 90.0]
-    expected_dd = [0.0, 0.0, (110.0 - 105.0) / 110.0, 0.0, (120.0 - 90.0) / 120.0]
+    #    95 -> peak=120 dd=(120-95)/120 ≈ 0.20833
+    equities = [100.0, 110.0, 105.0, 120.0, 90.0, 95.0]
+    expected_dd = [
+        0.0,
+        0.0,
+        (110.0 - 105.0) / 110.0,
+        0.0,
+        (120.0 - 90.0) / 120.0,
+        (120.0 - 95.0) / 120.0,
+    ]
+    # Stagger timestamps in strictly ascending order (5 minutes apart) so
+    # the handler's ORDER BY timestamp asc returns the same sequence.
     daily_one = [
-        _make_daily_row(now - timedelta(hours=len(equities) - i - 1), "moex", eq)
+        _make_daily_row(now - timedelta(hours=10) + timedelta(minutes=5 * i), "moex", eq)
         for i, eq in enumerate(equities)
     ]
-
-    # Add ≥1 extra row to keep total >=5 so the primary path is exercised.
-    # 5 already; one safety addition for robustness:
-    daily_one.append(_make_daily_row(now - timedelta(seconds=1), "moex", 95.0))
-    expected_dd.append((120.0 - 95.0) / 120.0)
 
     patcher, sess = _patch_session_factory(daily_one, [])
     sess._market_filter = "moex"  # type: ignore[attr-defined]
@@ -297,9 +293,7 @@ def test_drawdown_pct_per_market_running_peak() -> None:
     daily_two: list[SimpleNamespace] = []
     base_a = now - timedelta(days=2)
     base_b = now - timedelta(days=2)
-    for i, (eq_a, eq_b) in enumerate(
-        [(100.0, 50.0), (150.0, 50.0), (200.0, 25.0)]
-    ):
+    for i, (eq_a, eq_b) in enumerate([(100.0, 50.0), (150.0, 50.0), (200.0, 25.0)]):
         daily_two.append(_make_daily_row(base_a + timedelta(hours=i), "us", eq_a))
         daily_two.append(_make_daily_row(base_b + timedelta(hours=i, minutes=30), "moex", eq_b))
 
@@ -322,8 +316,9 @@ def test_drawdown_pct_per_market_running_peak() -> None:
     # moex final row equity=25 vs peak=50 → drawdown=0.5
     assert moex_snaps, "Expected moex rows in mixed-market response"
     final_moex = moex_snaps[-1]
-    assert abs(final_moex["drawdown_pct"] - 0.5) < 1e-6, (
-        f"Expected moex final drawdown 0.5 (independent of us peak), got {final_moex['drawdown_pct']}"
+    final_dd = final_moex["drawdown_pct"]
+    assert abs(final_dd - 0.5) < 1e-6, (
+        f"Expected moex final drawdown 0.5 (independent of us peak), got {final_dd}"
     )
 
 
