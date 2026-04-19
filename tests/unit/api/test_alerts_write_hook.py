@@ -18,12 +18,11 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
-import pytest
 
 from finalayze.api.alerts import AlertPriority, TelegramAlerter
 
 if TYPE_CHECKING:
-    pass
+    import pytest
 
 
 _FAKE_TOKEN = "fake-bot-token"  # noqa: S105

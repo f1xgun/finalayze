@@ -19,8 +19,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import IntEnum
 from typing import TYPE_CHECKING
@@ -30,6 +32,7 @@ import structlog
 
 if TYPE_CHECKING:
     from finalayze.execution.broker_base import OrderRequest, OrderResult
+    from finalayze.orchestration.db_persistence import TradingPersistence
     from finalayze.risk.circuit_breaker import CircuitLevel
 
 _TELEGRAM_API_BASE = "https://api.telegram.org/bot"
@@ -171,10 +174,10 @@ class TelegramMessageQueue:
 
     async def _send_with_retry(self, text: str, parse_mode: str = "HTML") -> bool:
         """Send via alerter._send, retry once on failure after 5s."""
-        ok = await self._alerter._send(text, parse_mode=parse_mode)
+        ok, _ = await self._alerter._send(text, parse_mode=parse_mode)
         if not ok:
             await asyncio.sleep(self._RETRY_DELAY)
-            ok = await self._alerter._send(text, parse_mode=parse_mode)
+            ok, _ = await self._alerter._send(text, parse_mode=parse_mode)
         return ok
 
 
@@ -192,12 +195,25 @@ class TelegramAlerter:
     without any network call (safe default for debug and test modes).
     """
 
-    def __init__(self, bot_token: str, chat_id: str) -> None:
+    def __init__(
+        self,
+        bot_token: str,
+        chat_id: str,
+        *,
+        persistence: TradingPersistence | None = None,
+    ) -> None:
         self._token = bot_token
         self._chat_id = chat_id
         self._client: httpx.AsyncClient = httpx.AsyncClient(timeout=10)
         self._queue: TelegramMessageQueue | None = None
         self._closed: bool = False
+        # Phase 57-02 ALRT-03: optional fire-and-forget DB persistence wrapping
+        # every outbound message. Backwards-compatible: existing callers that
+        # construct ``TelegramAlerter(bot_token, chat_id)`` continue to work.
+        self._persistence: TradingPersistence | None = persistence
+        # Cache (alert_id -> timestamp) so _update_alert_status_async hits the
+        # composite (timestamp, id) PK exactly. Pop on update.
+        self._last_alert_ts: dict[uuid.UUID, datetime] = {}
 
     def set_queue(self, queue: TelegramMessageQueue) -> None:
         """Attach a message queue for rate limiting and batching."""
@@ -394,14 +410,88 @@ class TelegramAlerter:
 
     # ── Internal ─────────────────────────────────────────────────────────────
 
-    async def _send(self, text: str, *, parse_mode: str = "HTML") -> bool:
+    def _persist_alert_before_send(
+        self,
+        text: str,
+        alert_type: str,
+        priority: AlertPriority,
+        symbol: str | None,
+        market_id: str | None,
+        parent_id: uuid.UUID | None,
+        alert_metadata: dict[str, object] | None,
+    ) -> uuid.UUID | None:
+        """Insert alerts row with ``delivery_status='queued'`` BEFORE httpx.post.
+
+        Returns ``alert_id`` on success, ``None`` if persistence is unavailable
+        or the call failed. NEVER raises — persistence failures must NOT block
+        the Telegram send path (PERSIST-05 envelope).
+        """
+        if self._persistence is None:
+            return None
+        alert_id = uuid.uuid4()
+        timestamp = datetime.now(tz=UTC)
+        try:
+            self._persistence.persist_alert(
+                alert_id,
+                timestamp,
+                alert_type,
+                priority.name,
+                text,
+                symbol=symbol,
+                market_id=market_id,
+                parent_id=parent_id,
+                delivery_status="queued",
+                alert_metadata=alert_metadata,
+            )
+            self._last_alert_ts[alert_id] = timestamp
+        except Exception:
+            _log.warning("alert_persist_before_send_failed", exc_info=True)
+            return None
+        return alert_id
+
+    def _update_alert_status(
+        self,
+        alert_id: uuid.UUID | None,
+        delivery_status: str,
+    ) -> None:
+        """Update ``delivery_status`` after the httpx response. NEVER raises."""
+        if self._persistence is None or alert_id is None:
+            return
+        ts = self._last_alert_ts.pop(alert_id, None)
+        if ts is None:
+            return
+        try:
+            self._persistence.update_alert_status(alert_id, ts, delivery_status)
+        except Exception:
+            _log.warning("alert_status_update_failed", exc_info=True)
+
+    async def _send(
+        self,
+        text: str,
+        *,
+        parse_mode: str = "HTML",
+        alert_type: str = "generic",
+        priority: AlertPriority = AlertPriority.INFO,
+        symbol: str | None = None,
+        market_id: str | None = None,
+        parent_id: uuid.UUID | None = None,
+        alert_metadata: dict[str, object] | None = None,
+    ) -> tuple[bool, uuid.UUID | None]:
         """Async POST a message to the Telegram Bot API.
 
-        Uses persistent ``self._client``. Returns True on success, False on failure.
-        Silently returns True (no-op) if token is empty.
+        Uses persistent ``self._client``. Returns ``(ok, alert_id)`` so the
+        anomaly path can thread parent_id from raw -> llm follow-up. Persists
+        an alerts row BEFORE the httpx.post and updates delivery_status AFTER
+        (Phase 57-02 ALRT-03; PERSIST-05 envelope — persistence failures never
+        block the send).
         """
+        alert_id = self._persist_alert_before_send(
+            text, alert_type, priority, symbol, market_id, parent_id, alert_metadata,
+        )
+
         if not self._token:
-            return True
+            self._update_alert_status(alert_id, "sent")
+            return (True, alert_id)
 
         url = f"{_TELEGRAM_API_BASE}{self._token}{_SEND_MESSAGE_PATH}"
         payload: dict[str, str] = {
@@ -414,33 +504,57 @@ class TelegramAlerter:
             if resp.status_code == 429:  # noqa: PLR2004
                 retry_after = resp.json().get("parameters", {}).get("retry_after", 30)
                 _log.warning("Telegram rate limited", retry_after=retry_after)
-                return False
-            return True
+                self._update_alert_status(alert_id, "failed")
+                return (False, alert_id)
+            self._update_alert_status(alert_id, "sent")
+            return (True, alert_id)
         except Exception:
             _log.exception("TelegramAlerter failed to send message")
-            return False
+            self._update_alert_status(alert_id, "failed")
+            return (False, alert_id)
 
-    def _send_sync(self, text: str) -> bool:
+    def _send_sync(
+        self,
+        text: str,
+        *,
+        parse_mode: str = "HTML",
+        alert_type: str = "generic",
+        priority: AlertPriority = AlertPriority.INFO,
+        symbol: str | None = None,
+        market_id: str | None = None,
+        parent_id: uuid.UUID | None = None,
+        alert_metadata: dict[str, object] | None = None,
+    ) -> tuple[bool, uuid.UUID | None]:
         """Synchronous POST to Telegram Bot API.
 
         Used when called from non-async context (APScheduler threads).
         Creates a short-lived httpx.Client per call to avoid event loop issues.
+        Same persist-before/update-after envelope as ``_send``.
         """
+        alert_id = self._persist_alert_before_send(
+            text, alert_type, priority, symbol, market_id, parent_id, alert_metadata,
+        )
+
         if not self._token:
-            return True
+            self._update_alert_status(alert_id, "sent")
+            return (True, alert_id)
+
         url = f"{_TELEGRAM_API_BASE}{self._token}{_SEND_MESSAGE_PATH}"
-        payload = {"chat_id": self._chat_id, "text": text, "parse_mode": "HTML"}
+        payload = {"chat_id": self._chat_id, "text": text, "parse_mode": parse_mode}
         try:
             with httpx.Client(timeout=10) as client:
                 resp = client.post(url, json=payload)
                 if resp.status_code == 429:  # noqa: PLR2004
                     retry_after = resp.json().get("parameters", {}).get("retry_after", 30)
                     _log.warning("Telegram rate limited", retry_after=retry_after)
-                    return False
-                return True
+                    self._update_alert_status(alert_id, "failed")
+                    return (False, alert_id)
+                self._update_alert_status(alert_id, "sent")
+                return (True, alert_id)
         except Exception:
             _log.exception("TelegramAlerter sync send failed")
-            return False
+            self._update_alert_status(alert_id, "failed")
+            return (False, alert_id)
 
     def send_alert(
         self,
