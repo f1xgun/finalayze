@@ -164,6 +164,39 @@ class PositionTracker:
                     return  # Don't clear stop state -- retry next cycle
                 # Update Kelly with stop-loss exit
                 self._update_kelly(symbol, current_price)
+                # ALRT-01 (D-08, D-10): compute P&L + hold_bars and fire enriched
+                # on_stop_loss_triggered AFTER successful broker submit, BEFORE
+                # clearing the stop state. Wrapped so a Telegram outage NEVER
+                # crashes the cycle.
+                if self._alerter is not None:
+                    pnl_amount = (current_price - state.entry_price) * qty
+                    pnl_pct = (
+                        float((current_price - state.entry_price) / state.entry_price)
+                        if state.entry_price > _ZERO
+                        else None
+                    )
+                    # hold_bars: cycle-now minus cycle-at-entry. None when the
+                    # state pre-dates Phase 57 (entry_cycle_index defaulted to 0
+                    # on a stale row, e.g. post-restart) per Pitfall 5.
+                    hold_bars = (
+                        self._current_cycle_index - state.entry_cycle_index
+                        if state.entry_cycle_index > 0
+                        else None
+                    )
+                    currency = "RUB" if market_id.startswith(("moex", "ru_")) else "USD"
+                    try:
+                        self._alerter.on_stop_loss_triggered(
+                            symbol=symbol,
+                            entry_price=state.entry_price,
+                            stop_price=state.current_stop,
+                            current_price=current_price,
+                            pnl_amount=pnl_amount,
+                            pnl_pct=pnl_pct,
+                            hold_bars=hold_bars,
+                            currency=currency,
+                        )
+                    except Exception:
+                        _log.exception("stop_alert_fire_failed", symbol=symbol)
             # Clear stop state after successful trigger (or zero position)
             del self._stop_states[symbol]
             self._entry_strategy.pop(symbol, None)

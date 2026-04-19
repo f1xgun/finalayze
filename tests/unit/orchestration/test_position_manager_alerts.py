@@ -237,7 +237,9 @@ def test_hold_bars_none_when_entry_cycle_zero_on_restart() -> None:
 
 def test_currency_usd_for_non_moex() -> None:
     """market_id not starting with 'moex' or 'ru_' yields currency='USD'."""
-    tracker, alerter, _broker = _make_tracker_with_alerter()
+    tracker, alerter, broker = _make_tracker_with_alerter()
+    # Re-seed broker positions under the AAPL symbol used by this test.
+    broker.get_positions.return_value = {"AAPL": _QTY}
     state = _make_state(entry=100.0, entry_cycle_index=_HOLD_CYCLE_ENTRY)
     state.current_stop = _CURRENT_STOP
     with tracker._stop_loss_lock:
