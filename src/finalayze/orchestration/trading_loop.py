@@ -741,6 +741,18 @@ class TradingLoop:
             id="daily_reset",
             replace_existing=True,
         )
+        # ALRT-04 (Phase 57 D-01, Pitfall 6): register portfolio review cron.
+        # Fires at 15:50 UTC = 18:50 MSK, post-MOEX-close. The method body
+        # at _portfolio_review_cycle exists since Phase 52, but PR #223
+        # decomposition lost the add_job registration — re-added here.
+        from apscheduler.triggers.cron import CronTrigger as _PRCronTrigger  # noqa: PLC0415
+
+        self._scheduler.add_job(
+            self._portfolio_review_cycle,
+            _PRCronTrigger(hour=15, minute=50, timezone="UTC"),
+            id="portfolio_review",
+            replace_existing=True,
+        )
         if self._ml_registry is not None and getattr(self._settings, "ml_enabled", False):
             self._scheduler.add_job(
                 self._ml_retrainer.retrain_all,
@@ -1613,15 +1625,32 @@ class TradingLoop:
         )
 
     async def _run_portfolio_review_async(self) -> None:
-        """Fire-and-forget async portfolio review -- never raises, never blocks."""
+        """Fire-and-forget async portfolio review -- never raises, never blocks.
+
+        ALRT-04 (Phase 57 D-01): the LLM advisory result is merged with a
+        deterministic ``compute_daily_recap`` payload so the single daily
+        Telegram message carries today's realized P&L, positions opened/
+        closed, and equity change vs previous close (Option A
+        consolidation — no new message type added).
+        """
+        # ALRT-04 (D-01): require persistence to be wired; short-circuit
+        # if not. _get_bg_session_factory lives on TradingPersistence, not
+        # TradingLoop — tests/backtest paths that don't inject persistence
+        # must noop cleanly here (the LLM advisory still depends on the
+        # session factory for the recap merge).
+        if self._persistence is None:
+            _log.warning("portfolio_review_skipped_no_persistence")
+            return
         try:
             from finalayze.analysis.portfolio_review_agent import (  # noqa: PLC0415
                 PORTFOLIO_REVIEW_SYSTEM_PROMPT,
                 REVIEW_LLM_TIMEOUT,
                 PortfolioReviewResult,
                 build_review_prompt,
+                compute_daily_recap,
                 format_review_telegram,
             )
+            from finalayze.api.alerts import AlertPriority  # noqa: PLC0415
 
             portfolio_data = self._gather_portfolio_data()
             prompt = build_review_prompt(portfolio_data)
@@ -1634,8 +1663,28 @@ class TradingLoop:
                 ),
                 timeout=REVIEW_LLM_TIMEOUT,
             )
+            # ALRT-04 (D-01): merge deterministic daily recap into advisory
+            # LLM result. Failure to compute recap MUST NOT block the
+            # advisory message — log and continue with the unmerged result.
+            try:
+                factory = self._persistence._get_bg_session_factory()
+                async with factory() as session:
+                    recap = await compute_daily_recap(
+                        session, datetime.now(tz=UTC),
+                    )
+                # model_copy with update keyword — Pydantic v2 idiom,
+                # preserves frozen-model immutability.
+                result = result.model_copy(update=recap)
+            except Exception:
+                _log.warning(
+                    "portfolio_review_recap_merge_failed", exc_info=True,
+                )
             message = format_review_telegram(result)
-            await self._alerter._send(message)
+            await self._alerter._send(
+                message,
+                alert_type="daily_summary",
+                priority=AlertPriority.INFO,
+            )
         except Exception:
             _log.warning("portfolio_review_llm_failure")
 

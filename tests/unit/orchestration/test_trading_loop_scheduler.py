@@ -184,12 +184,12 @@ class TestRunPortfolioReviewAsyncMerge:
         tl._persistence = persistence  # type: ignore[attr-defined]
 
         recap = {
-            "total_realized_pnl": Decimal("100"),
+            "total_realized_pnl": Decimal(100),
             "positions_opened_today": 2,
             "positions_closed_today": 1,
             "equity_change_pct": 0.01,
-            "equity_change_amount": Decimal("100"),
-            "previous_close_equity": Decimal("10000"),
+            "equity_change_amount": Decimal(100),
+            "previous_close_equity": Decimal(10000),
         }
         with patch(
             "finalayze.analysis.portfolio_review_agent.compute_daily_recap",
