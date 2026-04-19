@@ -14,6 +14,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import structlog
+from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
     import uuid
@@ -445,30 +446,63 @@ class TradingPersistence:
         delivery_status: str,
         alert_metadata: dict[str, object] | None,
     ) -> None:
-        """Write one AlertModel row. Internal async body for persist_alert.
+        """Write one AlertModel row with FK-retry on parent commit race.
 
-        Phase 57-01 (ALRT-03). Used by the Phase 57-02 alerter write hook
-        (`TelegramAlerter._send` / `_send_sync`) to record every outbound
-        Telegram message into the `alerts` hypertable.
+        Phase 57-01 (ALRT-03) + Phase 57-04 Task 3 Pitfall 2: when an
+        anomaly_llm child commits before its anomaly_raw parent (the raw
+        commit is fire-and-forget), the FK INSERT can race-fail with
+        IntegrityError. Revision M5 — explicit flat try/except ladder
+        (NOT a loop with continue) so the happy path writes exactly once
+        and the FK race degrades cleanly:
+
+        1. Attempt 1: write with the supplied parent_id. Success → return.
+        2. On IntegrityError with parent_id set: sleep 100ms, attempt 2
+           with the SAME parent_id (parent commit may now be visible).
+        3. On second IntegrityError: degrade to parent_id=NULL — the row
+           lands but loses the parent link (acceptable per the schema's
+           ``ON DELETE SET NULL`` design from Plan 57-01).
+        4. On IntegrityError with parent_id ALREADY None: propagate
+           (it's not a parent-FK race; some other constraint is broken).
         """
         from finalayze.core.models import AlertModel  # noqa: PLC0415
 
         factory = self._get_bg_session_factory()
-        async with factory() as session:
-            row = AlertModel(
-                id=alert_id,
-                timestamp=timestamp,
-                alert_type=alert_type,
-                priority=priority,
-                symbol=symbol,
-                market_id=market_id,
-                message=message,
-                parent_id=parent_id,
-                delivery_status=delivery_status,
-                alert_metadata=alert_metadata,
-            )
-            session.add(row)
-            await session.commit()
+
+        async def _do_write(current_parent_id: uuid.UUID | None) -> None:
+            async with factory() as session:
+                row = AlertModel(
+                    id=alert_id,
+                    timestamp=timestamp,
+                    alert_type=alert_type,
+                    priority=priority,
+                    symbol=symbol,
+                    market_id=market_id,
+                    message=message,
+                    parent_id=current_parent_id,
+                    delivery_status=delivery_status,
+                    alert_metadata=alert_metadata,
+                )
+                session.add(row)
+                await session.commit()
+
+        # Attempt 1: happy path with original parent_id.
+        try:
+            await _do_write(parent_id)
+            return
+        except IntegrityError:
+            if parent_id is None:
+                # Non-FK IntegrityError (no parent to degrade away from).
+                raise
+            await asyncio.sleep(0.1)
+
+        # Attempt 2: retry with the SAME parent_id (parent commit may have landed).
+        try:
+            await _do_write(parent_id)
+            return
+        except IntegrityError:
+            _log.warning("alert_parent_fk_fallback_null", alert_id=str(alert_id))
+            # Degraded write: drop parent_id so the row at least lands.
+            await _do_write(None)
 
     def persist_alert(
         self,

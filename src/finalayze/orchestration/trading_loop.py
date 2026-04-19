@@ -45,6 +45,8 @@ from finalayze.orchestration.signal_executor import (
 )
 
 if TYPE_CHECKING:
+    import uuid
+
     from config.settings import Settings
 
     from finalayze.analysis.event_classifier import EventClassifier
@@ -1488,13 +1490,64 @@ class TradingLoop:
 
     # ---- Anomaly enrichment (test compat) ----
 
+    async def _handle_anomaly_async(
+        self,
+        symbol: str,
+        market_id: str,
+        anomaly: object,
+        raw_text: str,
+    ) -> uuid.UUID | None:
+        """Orchestrate the anomaly raw + LLM-enrichment pair (Phase 57-04 D-04).
+
+        Sends the raw alert via ``_send(alert_type='anomaly_raw')`` to capture
+        ``raw_alert_id``, then schedules the async LLM follow-up via
+        ``asyncio.create_task(self._enrich_anomaly_async(..., parent_id=
+        raw_alert_id))`` so the follow-up's persisted row carries the
+        parent_id FK (Plan 57-01 schema). Returns the captured raw alert id
+        for caller-side tracking; never raises.
+        """
+        try:
+            _ok, raw_alert_id = await self._alerter._send(
+                raw_text,
+                alert_type="anomaly_raw",
+                symbol=symbol,
+                market_id=market_id,
+                parent_id=None,
+            )
+        except Exception:
+            _log.warning(
+                "anomaly_raw_send_failed", symbol=symbol, market_id=market_id,
+            )
+            return None
+
+        if self._llm_client is not None:
+            # Fire-and-forget: store the task on the instance so the asyncio
+            # GC doesn't drop it mid-flight (ruff RUF006). The reference is
+            # purposely overwritten on the next anomaly so we don't leak a
+            # growing list across cycles.
+            self._anomaly_enrich_task = asyncio.create_task(
+                self._enrich_anomaly_async(
+                    symbol, market_id, anomaly, parent_id=raw_alert_id,
+                ),
+            )
+        return raw_alert_id
+
     async def _enrich_anomaly_async(
         self,
         symbol: str,
         market_id: str,
         anomaly: object,
+        *,
+        parent_id: uuid.UUID | None = None,
     ) -> None:
-        """Fire-and-forget LLM enrichment -- never raises, never blocks raw alert."""
+        """Fire-and-forget LLM enrichment -- never raises, never blocks raw alert.
+
+        Phase 57-04 (D-04): when ``parent_id`` is supplied (the alert_id
+        returned by the prior raw-alert ``_send`` call), the LLM follow-up
+        ``_send`` threads it through ``alert_type='anomaly_llm'`` so the
+        persisted child row's FK to the parent anomaly_raw row is populated
+        at insert time.
+        """
         try:
             prompt = (
                 f"Ticker: {symbol} ({market_id})\n"
@@ -1509,7 +1562,13 @@ class TradingLoop:
                 timeout=_ANOMALY_LLM_TIMEOUT,
             )
             follow_up = f"AI interpretation (unverified): {explanation}"
-            await self._alerter._send(follow_up)
+            await self._alerter._send(
+                follow_up,
+                alert_type="anomaly_llm",
+                symbol=symbol,
+                market_id=market_id,
+                parent_id=parent_id,
+            )
         except Exception:
             _log.warning(
                 "anomaly_llm_failure",
