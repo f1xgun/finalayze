@@ -1281,6 +1281,20 @@ class TradingLoop:
             # PERSIST-05: must NEVER affect _consecutive_equity_errors.
             _log.warning("stop_snapshot_write_failed", exc_info=True)
 
+        # Phase 56 EQTY-01: per-cycle equity snapshot (D-01, D-02 Route B, D-03).
+        # Wrapped in its own try/except so a DB failure here NEVER propagates
+        # to _strategy_cycle's outer catch — that would inflate
+        # _consecutive_equity_errors (mirrors STOP-03 pattern above).
+        # Placement is intentional: AFTER the per-market loop and AFTER halt
+        # early-returns at lines ~1257 and ~1264 — halted cycles do not snapshot
+        # (matches D-01 "after each strategy cycle completes" — see 56-RESEARCH
+        # Pitfall 6).
+        try:
+            self._daily_reporter.persist_cycle_snapshot(now)
+        except Exception:
+            # PERSIST-05: must NEVER affect _consecutive_equity_errors.
+            _log.warning("equity_snapshot_persist_failed", exc_info=True)
+
     def _build_symbol_to_market_map(self) -> dict[str, str]:
         """Resolve each open-position symbol to its market_id via ``broker_router``.
 
