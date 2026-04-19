@@ -37,9 +37,9 @@ def test_on_stop_loss_triggered_legacy_signature() -> None:
 
     alerter.on_stop_loss_triggered(
         "SBER",
-        Decimal("100"),
-        Decimal("95"),
-        Decimal("92"),
+        Decimal(100),
+        Decimal(95),
+        Decimal(92),
     )
 
     alerter.send_alert.assert_called_once()  # type: ignore[attr-defined]
@@ -58,9 +58,9 @@ def test_on_stop_loss_triggered_enriched() -> None:
 
     alerter.on_stop_loss_triggered(
         "SBER",
-        Decimal("100"),
-        Decimal("95"),
-        Decimal("92"),
+        Decimal(100),
+        Decimal(95),
+        Decimal(92),
         pnl_amount=Decimal("-80.50"),
         pnl_pct=-0.0805,
         hold_bars=12,
@@ -80,9 +80,9 @@ def test_on_stop_loss_triggered_pnl_positive_sign() -> None:
 
     alerter.on_stop_loss_triggered(
         "AAPL",
-        Decimal("100"),
-        Decimal("95"),
-        Decimal("96"),
+        Decimal(100),
+        Decimal(95),
+        Decimal(96),
         pnl_amount=Decimal("50.00"),
         pnl_pct=0.05,
         currency="USD",
@@ -100,10 +100,10 @@ def test_on_stop_loss_triggered_mixed_none() -> None:
 
     alerter.on_stop_loss_triggered(
         "AAPL",
-        Decimal("100"),
-        Decimal("95"),
-        Decimal("96"),
-        pnl_amount=Decimal("20"),
+        Decimal(100),
+        Decimal(95),
+        Decimal(96),
+        pnl_amount=Decimal(20),
         pnl_pct=None,
         hold_bars=5,
         currency="USD",
@@ -123,9 +123,9 @@ def test_on_stop_loss_triggered_priority_important() -> None:
 
     alerter.on_stop_loss_triggered(
         "SBER",
-        Decimal("100"),
-        Decimal("95"),
-        Decimal("92"),
+        Decimal(100),
+        Decimal(95),
+        Decimal(92),
     )
 
     alerter.send_alert.assert_called_once()  # type: ignore[attr-defined]

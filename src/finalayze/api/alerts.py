@@ -389,6 +389,45 @@ class TelegramAlerter:
         )
         self.send_alert(text, priority=AlertPriority.IMPORTANT)
 
+    def on_signal_generated(
+        self,
+        symbol: str,
+        market_id: str,
+        side: str,
+        confidence: float,
+        strategy_breakdown: list[tuple[str, float]],
+        position_context: str,
+    ) -> None:
+        """Alert on a new signal with strategy attribution (ALRT-02, D-14).
+
+        Args:
+            symbol: Instrument ticker (e.g., 'SBER').
+            market_id: Market identifier (e.g., 'moex').
+            side: 'BUY' or 'SELL'.
+            confidence: Combined signal confidence in [0, 1].
+            strategy_breakdown: ``[(name, confidence)]`` sorted desc by
+                contribution. Truncated to top-3 + ``(+N more)`` per D-14.
+            position_context: One of 'NEW', 'ADD', or 'FLIP' per D-11.
+
+        Example::
+
+            🟢 BUY SBER [moex] | momentum 0.72 + macd 0.64 + rsi 0.51 → conf 0.58 (NEW)
+        """
+        emoji = "\U0001f7e2" if side == "BUY" else "\U0001f534"  # green / red
+        top_strats = strategy_breakdown[:3]
+        remainder = len(strategy_breakdown) - 3
+        strat_str = (
+            " + ".join(f"{name} {conf:.2f}" for name, conf in top_strats) if top_strats else ""
+        )
+        if remainder > 0:
+            strat_str += f" (+{remainder} more)"
+        text = (
+            f"{emoji} {side} <b>{symbol}</b> [{market_id}] | "
+            f"{strat_str} \u2192 conf <code>{confidence:.2f}</code> "
+            f"({position_context})"
+        )
+        self.send_alert(text, priority=AlertPriority.INFO)
+
     def on_startup(self, mode: str, markets: list[str], instruments: int) -> None:
         """Alert on system startup.
 
