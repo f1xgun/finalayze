@@ -317,9 +317,13 @@ def test_list_alerts_filters_by_date_range() -> None:
     sess._until_filter = until  # type: ignore[attr-defined]
 
     with patcher:
+        # Use httpx.params= so the +00:00 timezone offset is properly URL-
+        # encoded as %2B00:00 (otherwise the bare + decodes to a space and
+        # FastAPI's datetime parser rejects "2026-04-20T... 00:00").
         resp = TestClient(create_app()).get(
-            f"/api/v1/alerts?since={since.isoformat()}&until={until.isoformat()}",
+            "/api/v1/alerts",
             headers=_auth(),
+            params={"since": since.isoformat(), "until": until.isoformat()},
         )
 
     assert resp.status_code == 200, resp.text

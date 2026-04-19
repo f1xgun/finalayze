@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from finalayze.api.v1.alerts import router as alerts_router
 from finalayze.api.v1.debates import router as debates_router
 from finalayze.api.v1.experiments import router as experiments_router
 from finalayze.api.v1.ml import router as ml_router
@@ -24,6 +25,7 @@ api_router.include_router(news_router)
 api_router.include_router(sandbox_router)
 api_router.include_router(debates_router)
 api_router.include_router(experiments_router)
+api_router.include_router(alerts_router)
 
 # Telegram webhook router is mounted in main.py create_app() when
 # telegram_bot_token and telegram_webhook_secret are configured.
