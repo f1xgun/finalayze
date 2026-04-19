@@ -135,6 +135,10 @@ class SignalModel(Base):
     segment_id: Mapped[str] = mapped_column(String(30), nullable=False)
     direction: Mapped[str] = mapped_column(String(4), nullable=False)
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    signal_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 4),
+        nullable=True,
+    )
     features: Mapped[dict[str, object] | None] = mapped_column(
         JSONB,
         nullable=True,

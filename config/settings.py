@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     daily_loss_limit_pct: float = 0.02
     max_cross_market_exposure_pct: float = 0.80
 
+    # Analytics (Phase 55 TRAD-02 D-03 cost-threshold win definition).
+    # Commission expressed in basis points per notional. Source: backtest/costs.py
+    # MOEX_COSTS.commission_rate=0.0004 (=4 bps), US per-share rate normalizes
+    # to ~1 bps at $500 avg fill (RESEARCH.md Open Q1).
+    default_commission_bps_us: float = 1.0
+    default_commission_bps_moex: float = 4.0
+    default_slippage_cost_bps: float = 5.0
+
     # Risk
     kelly_fraction: float = 0.5
     stop_loss_atr_multiplier: float = 2.0

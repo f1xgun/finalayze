@@ -243,6 +243,7 @@ class TradingPersistence:
                 segment_id=signal.segment_id,
                 direction=signal.direction.value,
                 confidence=Decimal(str(round(signal.confidence, 4))),
+                signal_price=signal.signal_price,
                 features=signal.features or None,
                 reasoning=signal.reasoning,
                 created_at=datetime.now(UTC),
