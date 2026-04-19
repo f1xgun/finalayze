@@ -17,10 +17,17 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003
-from decimal import Decimal  # noqa: TC003
+from datetime import datetime, timedelta
+from decimal import Decimal
+from typing import TYPE_CHECKING
 
+import structlog
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+_log = structlog.get_logger()
 
 # ── Sub-schemas (all frozen Pydantic v2 BaseModel) ─────────────────────────
 
@@ -77,6 +84,16 @@ class PortfolioReviewResult(BaseModel):
     catalyst_events: list[CatalystEvent] = Field(default_factory=list)
     overall_assessment: str  # brief narrative, NOT a trade recommendation
     risk_score: float  # 0.0-1.0 advisory risk level, NOT confidence
+
+    # ALRT-04 (Phase 57 D-01): deterministic daily recap fields.
+    # MUST remain Optional — additive-only per Pitfall 4 so existing
+    # kwargs-only callers (LLM parse_structured + tests) keep working.
+    total_realized_pnl: Decimal | None = None
+    positions_opened_today: int | None = None
+    positions_closed_today: int | None = None
+    equity_change_pct: float | None = None  # vs previous close
+    equity_change_amount: Decimal | None = None
+    previous_close_equity: Decimal | None = None
 
 
 # ── Module-level safety assertion (PFRA-03) ────────────────────────────────
@@ -223,4 +240,162 @@ def format_review_telegram(result: PortfolioReviewResult) -> str:
     sections.append(f"Assessment: {result.overall_assessment}")
     sections.append(f"Risk Score: {result.risk_score:.2f}")
 
+    # ALRT-04 (Phase 57 D-01): Daily Recap section.
+    # Emitted only when at least one recap field is populated. HTML
+    # ampersand escape (&amp;) matches Plan 02 Task 2 convention so the
+    # message renders cleanly with parse_mode='HTML' on Telegram.
+    if (
+        result.total_realized_pnl is not None
+        or result.equity_change_pct is not None
+        or result.positions_opened_today is not None
+        or result.positions_closed_today is not None
+    ):
+        sections.append("")
+        sections.append("Daily Recap")
+        if result.total_realized_pnl is not None:
+            sign = "+" if result.total_realized_pnl >= 0 else ""
+            sections.append(
+                f"  Realized P&amp;L: {sign}{result.total_realized_pnl:.2f}",
+            )
+        if result.positions_opened_today is not None:
+            sections.append(f"  Opened: {result.positions_opened_today}")
+        if result.positions_closed_today is not None:
+            sections.append(f"  Closed: {result.positions_closed_today}")
+        if result.equity_change_pct is not None:
+            sections.append(
+                f"  Equity change: {result.equity_change_pct:+.2%}",
+            )
+
     return "\n".join(sections)
+
+
+# ── Daily recap helper (ALRT-04, Phase 57 D-01) ───────────────────────────
+
+
+async def compute_daily_recap(
+    session: AsyncSession,
+    now: datetime,
+) -> dict[str, object]:
+    """Compute deterministic daily-recap values for ALRT-04.
+
+    Returns a dict with keys matching ``PortfolioReviewResult`` recap
+    fields. Never raises — returns ``None``/zero defaults on query
+    failure so the LLM advisory message is never blocked.
+
+    Realized P&L is derived from ``fifo_pair(orders)``: sum of
+    ``(exit_price - entry_price) * quantity`` across closed round-trips
+    today. ``DailyEquitySnapshot`` is used ONLY for equity_change (column
+    name: ``equity`` — there is no ``total_equity`` or ``realized_pnl``
+    column on this table). Equity sums across markets — currency mixing
+    (RUB + USD) is acceptable for the directional-change signal but
+    documented in the SUMMARY.
+    """
+    from sqlalchemy import and_, func, select  # noqa: PLC0415
+
+    from finalayze.api.v1._fifo import fifo_pair  # noqa: PLC0415
+    from finalayze.core.models import (  # noqa: PLC0415
+        DailyEquitySnapshot,
+        OrderModel,
+    )
+
+    today_start = datetime(
+        now.year, now.month, now.day, tzinfo=now.tzinfo,
+    )
+    yesterday_start = today_start - timedelta(days=1)
+
+    result: dict[str, object] = {
+        "total_realized_pnl": None,
+        "positions_opened_today": 0,
+        "positions_closed_today": 0,
+        "equity_change_pct": None,
+        "equity_change_amount": None,
+        "previous_close_equity": None,
+    }
+
+    try:
+        # Positions opened/closed today from OrderModel.
+        buy_count = (
+            await session.execute(
+                select(func.count())
+                .select_from(OrderModel)
+                .where(
+                    and_(
+                        OrderModel.filled_at >= today_start,
+                        OrderModel.side == "BUY",
+                    ),
+                ),
+            )
+        ).scalar() or 0
+        sell_count = (
+            await session.execute(
+                select(func.count())
+                .select_from(OrderModel)
+                .where(
+                    and_(
+                        OrderModel.filled_at >= today_start,
+                        OrderModel.side == "SELL",
+                    ),
+                ),
+            )
+        ).scalar() or 0
+        result["positions_opened_today"] = int(buy_count)
+        result["positions_closed_today"] = int(sell_count)
+
+        # Total realized P&L via FIFO pairing of today's orders.
+        # PairedTrade has NO realized_pnl field — compute inline as
+        # (exit_price - entry_price) * quantity. fifo_pair returns an
+        # Iterator, so materialise with list() (defensive — keeps the
+        # pattern safe against future double-iteration changes).
+        today_orders_rows = (
+            await session.execute(
+                select(OrderModel)
+                .where(OrderModel.filled_at >= today_start)
+                .order_by(OrderModel.filled_at.asc()),
+            )
+        ).scalars().all()
+        if today_orders_rows:
+            paired = list(fifo_pair(list(today_orders_rows)))
+            realized = sum(
+                (
+                    (p.exit_price - p.entry_price) * p.quantity
+                    for p in paired
+                ),
+                Decimal(0),
+            )
+            result["total_realized_pnl"] = realized
+
+        # Equity change: yesterday end-of-day vs today's latest snapshot.
+        # DailyEquitySnapshot column is `equity` (NOT `total_equity`).
+        today_equity = (
+            await session.execute(
+                select(func.sum(DailyEquitySnapshot.equity)).where(
+                    DailyEquitySnapshot.timestamp >= today_start,
+                ),
+            )
+        ).scalar()
+        yesterday_equity = (
+            await session.execute(
+                select(func.sum(DailyEquitySnapshot.equity)).where(
+                    and_(
+                        DailyEquitySnapshot.timestamp >= yesterday_start,
+                        DailyEquitySnapshot.timestamp < today_start,
+                    ),
+                ),
+            )
+        ).scalar()
+        if (
+            today_equity is not None
+            and yesterday_equity is not None
+            and yesterday_equity != 0
+        ):
+            change_amt = Decimal(str(today_equity)) - Decimal(
+                str(yesterday_equity),
+            )
+            result["equity_change_amount"] = change_amt
+            result["previous_close_equity"] = Decimal(str(yesterday_equity))
+            result["equity_change_pct"] = float(
+                change_amt / Decimal(str(yesterday_equity)),
+            )
+    except Exception:
+        _log.warning("compute_daily_recap_failed", exc_info=True)
+    return result

@@ -29,10 +29,6 @@ from finalayze.analysis.portfolio_review_agent import (
     format_review_telegram,
 )
 
-if TYPE_CHECKING:
-    pass
-
-
 # ── Test 1-3: PortfolioReviewResult schema extension ─────────────────────
 
 
@@ -63,15 +59,15 @@ class TestRecapFieldsSchema:
             positions_opened_today=3,
             positions_closed_today=2,
             equity_change_pct=0.021,
-            equity_change_amount=Decimal("2800"),
-            previous_close_equity=Decimal("130000"),
+            equity_change_amount=Decimal(2800),
+            previous_close_equity=Decimal(130000),
         )
         assert result.total_realized_pnl == Decimal("1250.50")
         assert result.positions_opened_today == 3
         assert result.positions_closed_today == 2
         assert result.equity_change_pct == pytest.approx(0.021)
-        assert result.equity_change_amount == Decimal("2800")
-        assert result.previous_close_equity == Decimal("130000")
+        assert result.equity_change_amount == Decimal(2800)
+        assert result.previous_close_equity == Decimal(130000)
 
     def test_existing_signature_backward_compat(self) -> None:
         """Existing keyword construction (no recap fields) still works.
@@ -126,8 +122,8 @@ class TestFormatTelegramRecapSection:
             positions_opened_today=3,
             positions_closed_today=2,
             equity_change_pct=0.021,
-            equity_change_amount=Decimal("2800"),
-            previous_close_equity=Decimal("130000"),
+            equity_change_amount=Decimal(2800),
+            previous_close_equity=Decimal(130000),
         )
         msg = format_review_telegram(result)
         assert "Daily Recap" in msg
@@ -143,7 +139,7 @@ class TestFormatTelegramRecapSection:
 # ── Test 6-7: compute_daily_recap helper ─────────────────────────────────
 
 
-@pytest.fixture()
+@pytest.fixture
 def now_utc() -> datetime:
     """A fixed 'now' anchored to 2026-04-19 15:50 UTC."""
     return datetime(2026, 4, 19, 15, 50, tzinfo=UTC)
@@ -159,10 +155,7 @@ def _mock_session_with_results(*, scalar_returns: list) -> AsyncMock:
 
     def _execute(_stmt: object) -> MagicMock:
         # Pop the next scalar value; wrap it in a result-like mock.
-        if results:
-            current = results.pop(0)
-        else:
-            current = None
+        current = results.pop(0) if results else None
         result = MagicMock()
         if isinstance(current, list):
             # ORM row collection (for .scalars().all())
@@ -237,15 +230,15 @@ class TestComputeDailyRecap:
         ]
         # Order: buy_count, sell_count, today_orders_rows, today_eq, yest_eq
         session = _mock_session_with_results(
-            scalar_returns=[2, 2, orders, Decimal("10200"), Decimal("10000")],
+            scalar_returns=[2, 2, orders, Decimal(10200), Decimal(10000)],
         )
 
         recap = await compute_daily_recap(session, now_utc)
         assert recap["positions_opened_today"] == 2
         assert recap["positions_closed_today"] == 2
-        assert recap["total_realized_pnl"] == Decimal("100")
-        assert recap["equity_change_amount"] == Decimal("200")
-        assert recap["previous_close_equity"] == Decimal("10000")
+        assert recap["total_realized_pnl"] == Decimal(100)
+        assert recap["equity_change_amount"] == Decimal(200)
+        assert recap["previous_close_equity"] == Decimal(10000)
         assert recap["equity_change_pct"] == pytest.approx(0.02)
         # Make sure yesterday_start is referenced for clarity (avoid linter
         # complaints about unused locals while keeping the docstring honest).
