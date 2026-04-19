@@ -50,6 +50,11 @@ _PF_COLORSCALE: list[list[Any]] = [
     [1.0, "#1a9850"],
 ]
 
+# Sentinel for empty / below-gate cells (D-12 gray, D-15 N<5). Rendered as a visible
+# gray via the colorscale's lowest stop so the grid is always readable on dark themes.
+_EMPTY_SENTINEL = -1.0
+_EMPTY_GRAY = "#3a3a3a"
+
 
 def _heatmap_cell_value(
     win_rate: float | None,
@@ -82,6 +87,7 @@ def _render_strategy_heatmap(rows: list[dict[str, Any]], metric: str) -> None:
 
     z: list[list[float]] = []
     text: list[list[str]] = []
+    all_empty = True
     for strat in strategies:
         z_row: list[float] = []
         t_row: list[str] = []
@@ -89,7 +95,7 @@ def _render_strategy_heatmap(rows: list[dict[str, Any]], metric: str) -> None:
             r = by_key.get((strat, seg))
             if r is None:
                 # D-12: missing cell = gray "—"
-                z_row.append(float("nan"))
+                z_row.append(_EMPTY_SENTINEL)
                 t_row.append("—")
                 continue
             v = _heatmap_cell_value(
@@ -99,25 +105,48 @@ def _render_strategy_heatmap(rows: list[dict[str, Any]], metric: str) -> None:
                 metric,
             )
             if v is None:
-                z_row.append(float("nan"))
+                z_row.append(_EMPTY_SENTINEL)
                 t_row.append("—")
             elif metric == "win_rate":
                 z_row.append(float(v) * 100.0)  # domain 0-100 for the win_rate colorscale
                 t_row.append(f"{float(v) * 100:.0f}%")
+                all_empty = False
             else:
                 z_row.append(min(float(v), _PF_ZMAX))  # cap display at zmax
                 t_row.append(f"{float(v):.2f}")
+                all_empty = False
         z.append(z_row)
         text.append(t_row)
 
     if metric == "win_rate":
-        colorscale = _WIN_RATE_COLORSCALE
-        zmin: float = 0.0
+        # Extend [0,100] domain with gray at [-1,0) for empty cells; rescale stops proportionally.
+        real_range = 101.0  # zmax(100) - zmin(-1)
+        colorscale = [
+            [0.0, _EMPTY_GRAY],
+            [1.0 / real_range, _EMPTY_GRAY],
+            *[[(1.0 + stop * 100.0) / real_range, color] for stop, color in _WIN_RATE_COLORSCALE],
+        ]
+        zmin: float = _EMPTY_SENTINEL
         zmax: float = 100.0
     else:
-        colorscale = _PF_COLORSCALE
-        zmin = _PF_ZMIN
+        real_range = _PF_ZMAX - _EMPTY_SENTINEL
+        colorscale = [
+            [0.0, _EMPTY_GRAY],
+            [(0.0 - _EMPTY_SENTINEL) / real_range, _EMPTY_GRAY],
+            *[
+                [(stop * _PF_ZMAX - _EMPTY_SENTINEL) / real_range, color]
+                for stop, color in _PF_COLORSCALE
+            ],
+        ]
+        zmin = _EMPTY_SENTINEL
         zmax = _PF_ZMAX
+
+    if all_empty:
+        st.info(
+            "No closed FIFO trades in the selected period -- cells colorize once "
+            "`trades_count >= 5` per (strategy x segment). Grid below shows the "
+            "signal coverage."
+        )
 
     fig = go.Figure(
         go.Heatmap(
@@ -130,6 +159,7 @@ def _render_strategy_heatmap(rows: list[dict[str, Any]], metric: str) -> None:
             text=text,
             texttemplate="%{text}",
             hoverongaps=False,
+            showscale=not all_empty,
         )
     )
     fig.update_xaxes(side="top")
