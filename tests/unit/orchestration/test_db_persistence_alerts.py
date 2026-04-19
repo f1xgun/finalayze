@@ -67,8 +67,15 @@ def test_persist_alert_fire_and_forget_on_db_failure(
     persistence = _make_persistence()
     # Force the underlying _run_async to raise — exercises the real PERSIST-05
     # envelope inside _persist_to_db (logs db_persist_failed + increments counter).
+    # Close the coroutine to suppress 'coroutine was never awaited' RuntimeWarning.
+    def _raise(coro, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if asyncio.iscoroutine(coro):
+            coro.close()
+        msg = "db down"
+        raise RuntimeError(msg)
+
     mocker.patch.object(  # type: ignore[attr-defined]
-        persistence, "_run_async", side_effect=RuntimeError("db down")
+        persistence, "_run_async", side_effect=_raise
     )
     mock_metric = mocker.patch("finalayze.api.metrics.db_write_failures")  # type: ignore[attr-defined]
 
@@ -114,8 +121,15 @@ def test_update_alert_status_fire_and_forget(
 ) -> None:
     """update_alert_status MUST NOT raise on DB failure (PERSIST-05)."""
     persistence = _make_persistence()
+
+    def _raise(coro, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if asyncio.iscoroutine(coro):
+            coro.close()
+        msg = "db down"
+        raise RuntimeError(msg)
+
     mocker.patch.object(  # type: ignore[attr-defined]
-        persistence, "_run_async", side_effect=RuntimeError("db down")
+        persistence, "_run_async", side_effect=_raise
     )
     mocker.patch("finalayze.api.metrics.db_write_failures")  # type: ignore[attr-defined]
 

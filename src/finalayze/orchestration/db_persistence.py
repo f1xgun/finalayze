@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 if TYPE_CHECKING:
+    import uuid
+
     from config.settings import Settings
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -428,6 +430,118 @@ class TradingPersistence:
             table="stop_loss_events",
             event_kind=event_type,
             count=len(states),
+        )
+
+    async def _persist_alert_async(
+        self,
+        alert_id: uuid.UUID,
+        timestamp: datetime,
+        alert_type: str,
+        priority: str,
+        symbol: str | None,
+        market_id: str | None,
+        message: str,
+        parent_id: uuid.UUID | None,
+        delivery_status: str,
+        alert_metadata: dict[str, object] | None,
+    ) -> None:
+        """Write one AlertModel row. Internal async body for persist_alert.
+
+        Phase 57-01 (ALRT-03). Used by the Phase 57-02 alerter write hook
+        (`TelegramAlerter._send` / `_send_sync`) to record every outbound
+        Telegram message into the `alerts` hypertable.
+        """
+        from finalayze.core.models import AlertModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            row = AlertModel(
+                id=alert_id,
+                timestamp=timestamp,
+                alert_type=alert_type,
+                priority=priority,
+                symbol=symbol,
+                market_id=market_id,
+                message=message,
+                parent_id=parent_id,
+                delivery_status=delivery_status,
+                alert_metadata=alert_metadata,
+            )
+            session.add(row)
+            await session.commit()
+
+    def persist_alert(
+        self,
+        alert_id: uuid.UUID,
+        timestamp: datetime,
+        alert_type: str,
+        priority: str,
+        message: str,
+        *,
+        symbol: str | None = None,
+        market_id: str | None = None,
+        parent_id: uuid.UUID | None = None,
+        delivery_status: str = "queued",
+        alert_metadata: dict[str, object] | None = None,
+    ) -> None:
+        """Fire-and-forget alert persistence (PERSIST-05 envelope).
+
+        Never raises: DB failures increment ``db_write_failures`` counter +
+        log warning. Used by TelegramAlerter write-hook (Phase 57 ALRT-03).
+        """
+        # Forward `alert_type` under the `alert_type_key` ctx kwarg so the
+        # `db_persist_skipped/ok/failed` log lines do not collide with the
+        # structlog-reserved `event` positional arg (mirrors `event_kind`
+        # precedent in persist_stop_snapshots).
+        self._persist_to_db(
+            self._persist_alert_async(
+                alert_id, timestamp, alert_type, priority, symbol, market_id,
+                message, parent_id, delivery_status, alert_metadata,
+            ),
+            table="alerts",
+            alert_type_key=alert_type,
+            symbol=symbol or "",
+        )
+
+    async def _update_alert_status_async(
+        self,
+        alert_id: uuid.UUID,
+        timestamp: datetime,
+        delivery_status: str,
+    ) -> None:
+        """Update delivery_status for an existing alert row (D-05).
+
+        Called by the alerter write hook AFTER the httpx response is observed:
+        ``sent`` on success, ``failed`` on transport error or rate limit.
+        """
+        from sqlalchemy import update  # noqa: PLC0415
+
+        from finalayze.core.models import AlertModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            await session.execute(
+                update(AlertModel)
+                .where(
+                    AlertModel.id == alert_id,
+                    AlertModel.timestamp == timestamp,
+                )
+                .values(delivery_status=delivery_status),
+            )
+            await session.commit()
+
+    def update_alert_status(
+        self,
+        alert_id: uuid.UUID,
+        timestamp: datetime,
+        delivery_status: str,
+    ) -> None:
+        """Fire-and-forget status update. Never blocks the Telegram send path."""
+        self._persist_to_db(
+            self._update_alert_status_async(alert_id, timestamp, delivery_status),
+            table="alerts",
+            op="status_update",
+            status=delivery_status,
         )
 
     async def persist_sentiment_batch_async(
