@@ -360,16 +360,32 @@ class TelegramAlerter:
         entry_price: Decimal,
         stop_price: Decimal,
         current_price: Decimal,
+        *,
+        pnl_amount: Decimal | None = None,
+        pnl_pct: float | None = None,
+        hold_bars: int | None = None,
+        currency: str | None = None,
     ) -> None:
-        """Alert on a stop-loss trigger.
+        """Alert on a stop-loss trigger with enriched context (ALRT-01, D-09).
 
-        Example: ``Stop-loss: SBER entry=280.50, stop=266.48, price=265.00``
+        None fields render as '—' (Phase 54 D-03 'null is the signal').
+
+        Example::
+
+            🛑 Stop-loss: SBER entry=280.50, stop=266.48, price=265.00
+            P&L: ₽-80.50 (-8.05%) | Hold: 12 bars
         """
+        cur_sym = {"RUB": "₽", "USD": "$"}.get(currency or "", "")
+        pnl_amt_str = f"{cur_sym}{pnl_amount:+.2f}" if pnl_amount is not None else "—"
+        pnl_pct_str = f"{pnl_pct * 100:+.2f}%" if pnl_pct is not None else "—"
+        hold_str = f"{hold_bars} bars" if hold_bars is not None else "—"
         text = (
             f"\U0001f6d1 Stop-loss: <b>{symbol}</b> "
             f"entry=<code>{entry_price:.2f}</code>, "
             f"stop=<code>{stop_price:.2f}</code>, "
-            f"price=<code>{current_price:.2f}</code>"
+            f"price=<code>{current_price:.2f}</code>\n"
+            f"P&amp;L: <code>{pnl_amt_str}</code> ({pnl_pct_str}) | "
+            f"Hold: {hold_str}"
         )
         self.send_alert(text, priority=AlertPriority.IMPORTANT)
 
