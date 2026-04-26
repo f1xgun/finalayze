@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict, deque
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING, TypeVar
 import anthropic
 import openai
 import structlog
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from finalayze.core.exceptions import ConfigurationError, LLMError, LLMRateLimitError
 
@@ -551,6 +552,139 @@ class DeepSeekClient(_CachingLLMClient):
         )
 
 
+class ClaudeCodeHeadlessClient(_CachingLLMClient):
+    """LLM client that shells out to the local ``claude -p`` CLI.
+
+    Calls are billed against the user's Claude.ai subscription quota (OAuth
+    auth in ``~/.config/claude``) instead of the Anthropic API key. Uses
+    ``--system-prompt`` (full replace) — NOT ``--append-system-prompt`` —
+    so project ``CLAUDE.md`` / memory / hooks / skills are NOT loaded into
+    every call (would cost ~44k cache_creation tokens otherwise).
+    """
+
+    _DEFAULT_MAX_BUDGET_USD = 0.50
+    _RATE_LIMIT_PATTERNS = (
+        "usage limit",
+        "rate limit",
+        "rate_limit",
+        "rate-limit",
+        "quota",
+    )
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        max_budget_usd: float = _DEFAULT_MAX_BUDGET_USD,
+        rate_limiter: _AsyncRateLimiter | None = None,
+    ) -> None:
+        super().__init__(rate_limiter=rate_limiter)
+        self._model = model
+        self._max_budget_usd = max_budget_usd
+
+    def _build_args(
+        self,
+        prompt: str,
+        system: str,
+        *,
+        json_schema: dict[str, object] | None = None,
+    ) -> list[str]:
+        args = [
+            "claude",
+            "-p",
+            prompt,
+            "--system-prompt",
+            system,
+            "--model",
+            self._model,
+            "--output-format",
+            "json",
+            "--no-session-persistence",
+            "--max-budget-usd",
+            str(self._max_budget_usd),
+        ]
+        if json_schema is not None:
+            args.extend(["--json-schema", json.dumps(json_schema)])
+        return args
+
+    async def _run_cli(self, args: list[str]) -> str:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+        except FileNotFoundError as exc:
+            msg = "claude CLI not found on PATH (Claude Code subscription mode requires it)"
+            raise LLMError(msg) from exc
+        except OSError as exc:
+            msg = f"claude CLI subprocess failed to start: {exc}"
+            raise LLMError(msg) from exc
+
+        if proc.returncode != 0:
+            err_text = stderr.decode("utf-8", errors="replace")
+            err_lower = err_text.lower()
+            if any(p in err_lower for p in self._RATE_LIMIT_PATTERNS):
+                msg = f"Claude Code subscription rate limit: {err_text[:200]}"
+                raise LLMRateLimitError(msg)
+            msg = f"claude CLI exited with code {proc.returncode}: {err_text[:500]}"
+            raise LLMError(msg)
+
+        try:
+            envelope = json.loads(stdout.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError as exc:
+            msg = f"claude CLI produced non-JSON output: {stdout[:500]!r}"
+            raise LLMError(msg) from exc
+
+        if envelope.get("is_error"):
+            detail = envelope.get("result") or envelope.get("subtype") or "unknown"
+            msg = f"claude CLI returned is_error=true: {str(detail)[:500]}"
+            raise LLMError(msg)
+
+        result = envelope.get("result")
+        if result is None:
+            msg = f"claude CLI envelope missing 'result' field: {envelope}"
+            raise LLMError(msg)
+        return str(result)
+
+    async def _complete_once(
+        self,
+        prompt: str,
+        system: str,
+        *,
+        json_mode: bool = False,
+        max_tokens: int | None = None,  # noqa: ARG002 — CLI controls max_tokens internally
+    ) -> str:
+        effective_system = system
+        if json_mode:
+            effective_system = (
+                system + "\n\nIMPORTANT: Respond with valid JSON only. No comments, no extra text."
+            )
+        args = self._build_args(prompt, effective_system)
+        return await self._run_cli(args)
+
+    async def _parse_structured_once(
+        self,
+        prompt: str,
+        system: str,
+        response_model: type[T],
+        *,
+        max_tokens: int | None = None,  # noqa: ARG002 — CLI controls max_tokens internally
+    ) -> T:
+        schema = response_model.model_json_schema()
+        args = self._build_args(prompt, system, json_schema=schema)
+        raw = await self._run_cli(args)
+        try:
+            return response_model.model_validate_json(raw)
+        except ValidationError as exc:
+            msg = (
+                f"Claude Code structured output failed schema validation "
+                f"for {response_model.__name__}: {exc}"
+            )
+            raise LLMError(msg) from exc
+
+
 class FallbackLLMClient(LLMClient):
     """Wraps a primary and fallback client; switches on rate limit errors.
 
@@ -685,7 +819,10 @@ def _build_single_client(
         return DeepSeekClient(api_key=key, model=model, rate_limiter=rate_limiter)
     if provider == "groq":
         return GroqClient(api_key=key, model=model, rate_limiter=rate_limiter)
+    if provider == "claude_code_headless":
+        # Subscription-backed: api_key is unused (OAuth via local Claude Code).
+        return ClaudeCodeHeadlessClient(model=model, rate_limiter=rate_limiter)
 
-    providers = "openrouter, openai, anthropic, deepseek, groq"
+    providers = "openrouter, openai, anthropic, deepseek, groq, claude_code_headless"
     msg = f"Unknown llm_provider {provider!r}. Choose: {providers}"
     raise ConfigurationError(msg)
