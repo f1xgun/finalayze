@@ -158,3 +158,85 @@ async def test_five_tick_dry_run_writes_five_rows(
         log for log in logs if log.get("event") == "meta_agent_classify_completed"
     ]
     assert len(classify_events) == _NUM_TICKS
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-02-07: Runner invokes executor.execute(decision) when not dry-run
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_runner_invokes_executor_when_not_dry_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #6 + #8: with meta_agent_dry_run=False, runner.run_one_tick()
+    must call executor.execute(decision) exactly once after persist_decision.
+    Decision passed to executor carries id, timestamp, severity, summary,
+    rationale, decision_metadata so ActionExecutor can stamp its UPDATE.
+    """
+    from finalayze.meta_agent import runner as runner_module
+    from finalayze.meta_agent.classifier import Severity
+    from finalayze.meta_agent.runner import MetaAgentRunner
+    from finalayze.meta_agent.snapshot import PositionsSummary, Snapshot
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = False
+    settings.meta_agent_enabled = True
+    settings.api_key = "test-key"
+
+    fake_snapshot = Snapshot(
+        timestamp=datetime.now(UTC),
+        alerts_last_hour=[],
+        drawdown_pct=4.0,  # > 3.0 → INVESTIGATE
+        equity_persist_failures=0,
+        ml_signal_error_rate=None,
+        positions_summary=PositionsSummary(raw={"positions": []}),
+        raw={},
+    )
+
+    async def _fake_build_snapshot(_client, *, now):
+        return fake_snapshot
+
+    monkeypatch.setattr(runner_module, "build_snapshot", _fake_build_snapshot)
+    monkeypatch.setattr(
+        runner_module, "classify", lambda _snap: Severity.INVESTIGATE,
+    )
+
+    persistence = MagicMock()
+    persistence.persist_decision = MagicMock()
+    persistence.update_decision_status = MagicMock()
+
+    executor = MagicMock()
+    executor.execute = AsyncMock()
+
+    fake_client = AsyncMock()
+    fake_client.aclose = AsyncMock()
+    runner = MetaAgentRunner(
+        settings=settings,
+        persistence=persistence,
+        executor=executor,
+        http_client_factory=lambda: fake_client,
+    )
+
+    await runner.run_one_tick()
+
+    # persist_decision called exactly once.
+    assert persistence.persist_decision.call_count == 1
+    persisted_kwargs = persistence.persist_decision.call_args.kwargs
+    assert persisted_kwargs["dry_run"] is False
+    assert persisted_kwargs["severity"] == "INVESTIGATE"
+
+    # executor.execute called exactly once with a single positional decision arg.
+    assert executor.execute.call_count == 1, (
+        f"executor.execute must run when not dry_run, got "
+        f"call_count={executor.execute.call_count}"
+    )
+    # Inspect the decision-shaped arg passed.
+    call = executor.execute.call_args
+    if call.args:
+        decision = call.args[0]
+    else:
+        decision = call.kwargs["decision"]
+    assert decision.severity == "INVESTIGATE"
+    assert decision.id == persisted_kwargs["decision_id"]
+    assert decision.timestamp == persisted_kwargs["timestamp"]

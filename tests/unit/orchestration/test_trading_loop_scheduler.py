@@ -268,3 +268,78 @@ class TestRunPortfolioReviewAsyncMerge:
         # No LLM call, no telegram send — early return.
         llm_client.parse_structured.assert_not_called()
         alerter._send.assert_not_called()
+
+
+# ── Phase 58-02-07: meta-agent APScheduler job registration ─────────────────
+
+
+class TestMetaAgentJobRegistration:
+    """Phase 58-02-07: TradingLoop.start() registers the meta-agent job
+    only when ``settings.meta_agent_enabled is True``. SPEC AC #6 + #18.
+    """
+
+    @patch("finalayze.core.trading_loop.BackgroundScheduler")
+    def test_meta_agent_job_registered_when_enabled(
+        self,
+        mock_scheduler_cls: MagicMock,
+    ) -> None:
+        """meta_agent_enabled=True → register_meta_agent_job adds an id='meta_agent' job."""
+        from finalayze.meta_agent.runner import MetaAgentRunner
+
+        mock_scheduler = MagicMock()
+        mock_scheduler_cls.return_value = mock_scheduler
+        loop = _make_trading_loop()
+        # Enable the meta-agent + inject a runner so the wiring branch fires.
+        loop._settings.meta_agent_enabled = True  # type: ignore[attr-defined]
+        loop._settings.meta_agent_dry_run = True  # type: ignore[attr-defined]
+        loop._settings.meta_agent_interval_minutes = 30  # type: ignore[attr-defined]
+        runner = MagicMock(spec=MetaAgentRunner)
+        loop._meta_agent_runner = runner  # type: ignore[attr-defined]
+
+        with (
+            patch.object(loop, "_load_baseline_from_db"),
+            patch.object(loop, "_reconcile_inflight_orders"),
+            patch.object(loop, "_stop_event") as mock_stop,
+        ):
+            mock_stop.wait.side_effect = lambda: None
+            loop.start()  # type: ignore[union-attr]
+
+        meta_calls = [
+            call
+            for call in mock_scheduler.add_job.call_args_list
+            if (call.kwargs or {}).get("id") == "meta_agent"
+        ]
+        assert len(meta_calls) == 1, (
+            f"Expected exactly one meta_agent add_job call, got "
+            f"{len(meta_calls)}: "
+            f"{[c.kwargs.get('id') for c in mock_scheduler.add_job.call_args_list]}"
+        )
+
+    @patch("finalayze.core.trading_loop.BackgroundScheduler")
+    def test_meta_agent_job_not_registered_when_disabled(
+        self,
+        mock_scheduler_cls: MagicMock,
+    ) -> None:
+        """meta_agent_enabled=False → no add_job with id='meta_agent'."""
+        mock_scheduler = MagicMock()
+        mock_scheduler_cls.return_value = mock_scheduler
+        loop = _make_trading_loop()
+        loop._settings.meta_agent_enabled = False  # type: ignore[attr-defined]
+
+        with (
+            patch.object(loop, "_load_baseline_from_db"),
+            patch.object(loop, "_reconcile_inflight_orders"),
+            patch.object(loop, "_stop_event") as mock_stop,
+        ):
+            mock_stop.wait.side_effect = lambda: None
+            loop.start()  # type: ignore[union-attr]
+
+        meta_calls = [
+            call
+            for call in mock_scheduler.add_job.call_args_list
+            if (call.kwargs or {}).get("id") == "meta_agent"
+        ]
+        assert len(meta_calls) == 0, (
+            f"Expected zero meta_agent add_job calls when disabled, got "
+            f"{len(meta_calls)}"
+        )
