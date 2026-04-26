@@ -77,7 +77,14 @@ class Settings(BaseSettings):
 
     # LLM
     llm_model: str = "meta-llama/llama-3.1-8b-instruct:free"
-    llm_provider: Literal["openrouter", "openai", "anthropic", "deepseek", "groq"] = "openrouter"
+    llm_provider: Literal[
+        "openrouter",
+        "openai",
+        "anthropic",
+        "deepseek",
+        "groq",
+        "claude_code_headless",  # uses local `claude -p` CLI + Claude.ai subscription
+    ] = "openrouter"
     llm_api_key: str = ""  # API key for selected provider
     llm_max_rpm: int = 0  # FINALAYZE_LLM_MAX_RPM — max requests/min (0 = unlimited)
     # Fallback LLM: used when primary provider returns rate limit errors
