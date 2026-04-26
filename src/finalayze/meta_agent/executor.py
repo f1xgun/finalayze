@@ -1,27 +1,36 @@
-"""ActionExecutor — Telegram-action leg of the meta-agent (Phase 58-02, META-05).
+"""ActionExecutor — Telegram + investigate-spawn legs (Phase 58-02 + 58-03).
 
-When ``meta_agent_dry_run=False`` and severity ∈ ``{WATCH, INVESTIGATE, FIX}``,
-the executor sends one Telegram alert via the existing ``TelegramAlerter``
-(Phase 57 persist-before-send envelope), enforces
-``meta_agent_max_telegram_alerts_per_day``, and stamps the agent_decisions
-row with ``status='sent'`` plus ``decision_metadata['telegram_alert_id']`` (or
-``status='queued_capped'`` when capped).
+58-02 (Telegram leg): when ``meta_agent_dry_run=False`` and severity ∈
+``{WATCH, INVESTIGATE, FIX}``, send one Telegram alert via the existing
+``TelegramAlerter`` (Phase 57 persist-before-send envelope), enforce
+``meta_agent_max_telegram_alerts_per_day``, and stamp the agent_decisions
+row with ``status='sent'`` plus ``decision_metadata['telegram_alert_id']``
+(or ``status='queued_capped'`` when capped).
 
-The dry-run short-circuit is the FIRST line of ``execute()`` (PATTERNS AP-10):
+58-03 (investigate spawn): a separate ``execute_investigate_spawn(decision)``
+entry point that, after the cap check, transitions the row through
+``'spawned' → 'completed'/'failed'/'rejected'`` while invoking
+``spawner.spawn_readonly(...)``. The runner dispatches this as a fire-and-
+forget task tracked on ``self._spawn_tasks`` (RUF006).
+
+Dry-run short-circuit on ``execute()`` is the FIRST line (PATTERNS AP-10):
 no Telegram send, no persistence update, no session open before the gate.
 
-Subprocess spawning for INVESTIGATE/FIX lands in Plans 58-03 / 58-04 — this
-module is the Telegram-leg only.
+FIX-spawn pipeline (worktree, /approve, allow-list validator) lands in 58-04.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
 
 from finalayze.meta_agent.classifier import Severity
+from finalayze.meta_agent.skill_loader import SkillSpec, load_skill
+from finalayze.meta_agent.spawner import SpawnOutcome, spawn_readonly
 
 if TYPE_CHECKING:
     import uuid
@@ -33,6 +42,17 @@ if TYPE_CHECKING:
     from finalayze.orchestration.db_persistence import TradingPersistence
 
 _log = structlog.get_logger()
+
+# ── 58-03 module-level constants (PLR2004) ─────────────────────────────────
+_INVESTIGATE_SKILL_PATH = (
+    Path(__file__).resolve().parents[3]
+    / ".claude"
+    / "skills"
+    / "meta-agent-investigate"
+    / "SKILL.md"
+)
+_OUTCOME_TEXT_MAX_BYTES = 64 * 1024  # D-06 cap on persisted outcome text
+_INVEST_TIMEOUT_S = 300  # SPEC §Requirement 6 — 300s investigate timeout
 
 
 # SPEC §Requirement 5 mapping — severity to AlertPriority for Telegram routing.
@@ -246,3 +266,186 @@ class ActionExecutor:
         )
         result = await session.execute(stmt)
         return int(result.scalar_one())
+
+    # ── 58-03 META-06: read-only investigate spawn ──────────────────────────
+
+    async def execute_investigate_spawn(
+        self,
+        decision: MetaAgentDecisionModel | Any,
+    ) -> None:
+        """Dispatch a read-only investigation spawn for ``decision``.
+
+        SPEC AC #10 + #11. State machine (SPEC line 57):
+          1. Cap query (``_spawn_count_today_async('INVESTIGATE')``).
+          2. If ``count >= settings.meta_agent_max_spawns_per_day``:
+             flip ``status='rejected'`` with ``outcome='spawn_cap_exceeded'``
+             and emit ``meta_agent_spawn_cap_exceeded``. Return.
+          3. Else: flip ``status='spawned'`` BEFORE invoking the subprocess
+             (so the next tick's cap query sees the in-flight row).
+          4. Load ``meta-agent-investigate`` skill from
+             ``.claude/skills/meta-agent-investigate/SKILL.md``.
+          5. ``await spawner.spawn_readonly(prompt, decision_id=...,
+             timeout_s=300)``.
+          6. Build ``outcome_text`` = exit_code + stdout + stderr, truncated
+             to 64 KiB. Flip ``status='completed'`` on exit_code==0 (and not
+             timed_out), else ``'failed'``.
+
+        NEVER raises — all failure modes flip the decision to ``'failed'``
+        with a structlog warning. The runner (Plan 58-01 / 58-02) treats
+        executor failures as non-fatal so the scheduler keeps ticking.
+        """
+        decision_id = decision.id
+        timestamp = decision.timestamp
+
+        # 1. Cap query.
+        try:
+            count = await self._persistence._spawn_count_today_async(
+                "INVESTIGATE",
+            )
+        except Exception:
+            _log.warning(
+                "meta_agent_spawn_cap_query_failed",
+                decision_id_key=str(decision_id),
+                exc_info=True,
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="failed",
+                outcome="spawn_cap_query_failed",
+            )
+            return
+
+        # 2. Cap exceeded → reject and return.
+        cap = self._settings.meta_agent_max_spawns_per_day
+        if count >= cap:
+            _log.warning(
+                "meta_agent_spawn_cap_exceeded",
+                decision_id_key=str(decision_id),
+                spawn_type="investigate",
+                count=count,
+                cap=cap,
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="rejected",
+                outcome="spawn_cap_exceeded",
+            )
+            return
+
+        # 3. Mark 'spawned' BEFORE invoking — the next tick's cap query
+        #    must see this row even if the spawn is still running.
+        self._persistence.update_decision_status(
+            decision_id=decision_id,
+            timestamp=timestamp,
+            status="spawned",
+        )
+
+        # 4. Load the investigate skill (system prompt + spawner directives).
+        try:
+            skill = load_skill(_INVESTIGATE_SKILL_PATH)
+        except (FileNotFoundError, ValueError):
+            _log.warning(
+                "meta_agent_skill_load_failed",
+                decision_id_key=str(decision_id),
+                skill_path=str(_INVESTIGATE_SKILL_PATH),
+                exc_info=True,
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="failed",
+                outcome="skill_missing",
+            )
+            return
+
+        prompt = self._build_invest_prompt(decision, skill)
+
+        # 5. Spawn — never raises (the spawner swallows everything except
+        #    CancelledError, which the runner-level exception guard handles).
+        try:
+            outcome = await spawn_readonly(
+                prompt,
+                decision_id=decision_id,
+                timeout_s=_INVEST_TIMEOUT_S,
+            )
+        except asyncio.CancelledError:
+            # Killswitch fired (Plan 58-05). Mark 'failed' and re-raise so
+            # the cancellation propagates to the task supervisor.
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="failed",
+                outcome="killed_by_killswitch",
+            )
+            raise
+        except Exception:
+            _log.warning(
+                "meta_agent_spawn_failed",
+                decision_id_key=str(decision_id),
+                exc_info=True,
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="failed",
+                outcome="spawn_invocation_failed",
+            )
+            return
+
+        # 6. Build outcome text (D-06: 64 KiB cap on persisted column).
+        outcome_text = _build_outcome_text(outcome)
+        terminal_status = (
+            "completed" if outcome.exit_code == 0 and not outcome.timed_out else "failed"
+        )
+        self._persistence.update_decision_status(
+            decision_id=decision_id,
+            timestamp=timestamp,
+            status=terminal_status,
+            outcome=outcome_text,
+        )
+
+    @staticmethod
+    def _build_invest_prompt(
+        decision: MetaAgentDecisionModel | Any,
+        skill: SkillSpec,
+    ) -> str:
+        """Build the user-turn prompt threaded into ``claude -p`` (D-10).
+
+        Composes the skill's system-prompt body with a JSON-stringified
+        snapshot summary derived from the decision row (severity, summary,
+        rationale). The skill body is appended so the spawned CLI session
+        carries both context.
+        """
+        import json  # noqa: PLC0415
+
+        snapshot_payload = {
+            "decision_id": str(decision.id),
+            "timestamp": str(decision.timestamp),
+            "severity": decision.severity,
+            "summary": decision.summary,
+            "rationale": decision.rationale,
+        }
+        return (
+            f"{skill.system_prompt}\n\n"
+            f"## Snapshot\n\n"
+            f"```json\n{json.dumps(snapshot_payload, indent=2)}\n```\n"
+        )
+
+
+def _build_outcome_text(outcome: SpawnOutcome) -> str:
+    """Format a SpawnOutcome into the ``decision.outcome`` text column.
+
+    Format: ``<exit_code=N>\\n<stdout>\\n---\\n<stderr>`` (SPEC line 57).
+    Truncated to 64 KiB total (D-06) with marker.
+    """
+    text = (
+        f"<exit_code={outcome.exit_code} timed_out={outcome.timed_out} "
+        f"killed_by_killswitch={outcome.killed_by_killswitch}>\n"
+        f"{outcome.stdout}\n---\n{outcome.stderr}"
+    )
+    if len(text) <= _OUTCOME_TEXT_MAX_BYTES:
+        return text
+    # Truncate at the byte limit, keep the marker.
+    return text[:_OUTCOME_TEXT_MAX_BYTES] + "\n[truncated_at=64KiB]"
