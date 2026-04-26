@@ -150,7 +150,25 @@ class ActionExecutor:
         async with self._open_session() as session:
             count = await self._telegram_count_today(session)
 
-        # Cap enforcement branch lands in Task 58-02-06.
+        # SPEC AC #9: cap is "at most N per day" — strict >= so the (cap+1)th
+        # decision in a UTC day records 'queued_capped' with zero side
+        # effects (no Telegram, no metadata stamp).
+        if count >= self._settings.meta_agent_max_telegram_alerts_per_day:
+            _log.warning(
+                "meta_agent_executor_telegram_cap_hit",
+                decision_id_key=str(decision.id),
+                severity_key=decision.severity,
+                count=count,
+                cap=self._settings.meta_agent_max_telegram_alerts_per_day,
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision.id,
+                timestamp=decision.timestamp,
+                status="queued_capped",
+            )
+            return ExecutionResult(
+                skipped=True, reason="telegram_cap_hit", telegram_alert_id=None,
+            )
 
         # Build the message body — operator-friendly summary + rationale.
         message = self._build_message(decision)
