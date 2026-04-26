@@ -402,3 +402,96 @@ async def test_telegram_count_today_uses_utc_day_boundary() -> None:
     )
     # The text fragment "now() at time zone 'utc'" appears verbatim.
     assert "utc" in sql, f"cap query must use UTC tz boundary, got: {sql!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-02-05: INVESTIGATE severity → send Telegram + stamp metadata
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_execute_investigate_sends_telegram_and_stamps_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #8: with dry_run=False, severity=INVESTIGATE, cap not hit,
+    executor:
+      1. Calls alerter._send with alert_type='meta_agent_INVESTIGATE'.
+      2. Returns ExecutionResult(skipped=False, reason=None,
+         telegram_alert_id=<uuid>).
+      3. Calls persistence.update_decision_status(status='sent',
+         metadata_patch={'telegram_alert_id': str(uuid)}) exactly once.
+      4. Emits structlog event meta_agent_executor_telegram_sent.
+    """
+    import structlog
+
+    from finalayze.meta_agent.classifier import Severity
+    from finalayze.meta_agent.executor import ActionExecutor, ExecutionResult
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = False
+    settings.meta_agent_max_telegram_alerts_per_day = _CAP_HIGH
+
+    alerter = MagicMock()
+    alerter._send = AsyncMock(return_value=(True, _FAKE_ALERT_UUID))
+
+    persistence = MagicMock()
+    persistence.update_decision_status = MagicMock()
+
+    executor = ActionExecutor(
+        settings=settings,
+        alerter=alerter,
+        persistence=persistence,
+    )
+
+    # Patch _telegram_count_today and the session-factory so we never touch
+    # the real DB.
+    async def _zero_count(_session: Any) -> int:
+        return 0
+
+    monkeypatch.setattr(executor, "_telegram_count_today", _zero_count)
+
+    class _FakeSession:
+        async def __aenter__(self) -> _FakeSession:
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+    def _factory() -> _FakeSession:
+        return _FakeSession()
+
+    monkeypatch.setattr(
+        executor, "_open_session", lambda: _factory(), raising=False,
+    )
+
+    decision = _make_decision(severity=Severity.INVESTIGATE.value)
+
+    with structlog.testing.capture_logs() as logs:
+        result = await executor.execute(decision)
+
+    assert isinstance(result, ExecutionResult)
+    assert result.skipped is False, f"INVESTIGATE must SEND, got result={result!r}"
+    assert result.reason is None
+    assert result.telegram_alert_id == _FAKE_ALERT_UUID
+
+    # alerter._send was called exactly once with alert_type='meta_agent_INVESTIGATE'.
+    assert alerter._send.call_count == 1, (
+        f"expected one Telegram send, got {alerter._send.call_count}"
+    )
+    send_kwargs = alerter._send.call_args.kwargs
+    assert send_kwargs["alert_type"] == "meta_agent_INVESTIGATE"
+
+    # persistence.update_decision_status called once with status='sent' and
+    # metadata_patch={'telegram_alert_id': str(uuid)}.
+    assert persistence.update_decision_status.call_count == 1
+    upd_kwargs = persistence.update_decision_status.call_args.kwargs
+    assert upd_kwargs["status"] == "sent"
+    assert upd_kwargs["metadata_patch"] == {"telegram_alert_id": str(_FAKE_ALERT_UUID)}
+
+    # Structlog event emitted.
+    sent_events = [
+        log for log in logs if log.get("event") == "meta_agent_executor_telegram_sent"
+    ]
+    assert len(sent_events) >= 1, (
+        f"expected meta_agent_executor_telegram_sent event, got {logs!r}"
+    )
