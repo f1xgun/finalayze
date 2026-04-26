@@ -103,3 +103,138 @@ def test_persistence_helpers_use_fire_and_forget_envelope() -> None:
     assert captured["table"] == "agent_decisions"
     assert captured["ctx"]["severity_key"] == "HEALTHY"
     assert captured["ctx"]["decision_id_key"] == str(_FAKE_DECISION_ID)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-02-01b: update_decision_status accepts metadata_patch kwarg
+#                 (JSONB SELECT-then-merge-then-UPDATE)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_decision_status_metadata_patch_merges_into_decision_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #8 dependency for Task 58-02-05.
+
+    With an existing row whose decision_metadata = {'trace_id': 'abc'},
+    calling update_decision_status(metadata_patch={'telegram_alert_id': '...'})
+    must SELECT current metadata, merge {**current, **patch}, and issue an
+    UPDATE whose .values() includes decision_metadata={'trace_id': 'abc',
+    'telegram_alert_id': '...'} (existing keys preserved, patch keys override).
+
+    Calling with metadata_patch=None must NOT touch decision_metadata.
+    Calling with metadata_patch={} must NOT touch decision_metadata.
+    """
+    from finalayze.orchestration.db_persistence import TradingPersistence
+
+    persistence = TradingPersistence(db_url=None, async_loop=None)
+
+    # ── case 1: metadata_patch supplies a new key ──────────────────────────
+    captured_select_calls: list[Any] = []
+    captured_update_values: list[dict[str, Any]] = []
+
+    class _FakeScalarRes:
+        def __init__(self, value: Any) -> None:
+            self._value = value
+
+        def scalar_one_or_none(self) -> Any:
+            return self._value
+
+    class _FakeSession:
+        def __init__(self, current_meta: Any) -> None:
+            self._current_meta = current_meta
+
+        async def __aenter__(self) -> _FakeSession:
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+        async def execute(self, stmt: Any) -> Any:
+            # Distinguish SELECT vs UPDATE by inspecting the compiled SQL.
+            stmt_str = str(stmt).lower()
+            if stmt_str.startswith("select"):
+                captured_select_calls.append(stmt)
+                return _FakeScalarRes(self._current_meta)
+            # UPDATE — record the .values() dict on the compiled statement.
+            captured_update_values.append(dict(stmt.compile().params))
+            return MagicMock()
+
+        async def commit(self) -> None:
+            return None
+
+    def _make_factory(current_meta: Any) -> Any:
+        def _factory() -> _FakeSession:
+            return _FakeSession(current_meta)
+
+        return _factory
+
+    monkeypatch.setattr(
+        persistence,
+        "_get_bg_session_factory",
+        lambda: _make_factory({"trace_id": "abc"}),
+    )
+
+    # Direct call to the async helper (bypasses _persist_to_db so we can await).
+    fake_alert_id = str(_FAKE_ALERT_UUID)
+    await persistence._update_decision_status_async(
+        decision_id=_FAKE_DECISION_ID,
+        timestamp=_FAKE_TS,
+        status="sent",
+        outcome=None,
+        metadata_patch={"telegram_alert_id": fake_alert_id},
+    )
+
+    # SELECT was issued for the merge.
+    assert len(captured_select_calls) == 1, "expected one SELECT for current metadata"
+    # UPDATE values include merged decision_metadata.
+    assert len(captured_update_values) == 1
+    update_values = captured_update_values[0]
+    assert update_values["status"] == "sent"
+    # Column is named "metadata" at the DB level (decision_metadata is the
+    # Python attr; SQLAlchemy reserved-word workaround per AP-3).
+    merged = update_values["metadata"]
+    assert merged == {"trace_id": "abc", "telegram_alert_id": fake_alert_id}, (
+        f"expected deep-merge, got {merged!r}"
+    )
+
+    # ── case 2: metadata_patch=None → no SELECT, no decision_metadata in UPDATE ──
+    captured_select_calls.clear()
+    captured_update_values.clear()
+    monkeypatch.setattr(
+        persistence,
+        "_get_bg_session_factory",
+        lambda: _make_factory({"trace_id": "abc"}),
+    )
+    await persistence._update_decision_status_async(
+        decision_id=_FAKE_DECISION_ID,
+        timestamp=_FAKE_TS,
+        status="failed",
+        outcome="boom",
+        metadata_patch=None,
+    )
+    assert len(captured_select_calls) == 0, "metadata_patch=None must NOT issue SELECT"
+    assert len(captured_update_values) == 1
+    assert "metadata" not in captured_update_values[0]
+    assert captured_update_values[0]["status"] == "failed"
+    assert captured_update_values[0]["outcome"] == "boom"
+
+    # ── case 3: metadata_patch={} → no SELECT, no decision_metadata in UPDATE ──
+    captured_select_calls.clear()
+    captured_update_values.clear()
+    monkeypatch.setattr(
+        persistence,
+        "_get_bg_session_factory",
+        lambda: _make_factory({"trace_id": "abc"}),
+    )
+    await persistence._update_decision_status_async(
+        decision_id=_FAKE_DECISION_ID,
+        timestamp=_FAKE_TS,
+        status="queued_capped",
+        outcome=None,
+        metadata_patch={},
+    )
+    assert len(captured_select_calls) == 0, "metadata_patch={} must NOT issue SELECT"
+    assert len(captured_update_values) == 1
+    assert "metadata" not in captured_update_values[0]
