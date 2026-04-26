@@ -495,3 +495,99 @@ async def test_execute_investigate_sends_telegram_and_stamps_metadata(
     assert len(sent_events) >= 1, (
         f"expected meta_agent_executor_telegram_sent event, got {logs!r}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-02-06: Cap enforcement — 3rd INVESTIGATE with cap=2 → queued_capped
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_third_investigate_with_cap_2_is_queued_capped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #9: with cap=2, three consecutive INVESTIGATE decisions:
+      - 1st (count=0) → sent.
+      - 2nd (count=1) → sent.
+      - 3rd (count=2) → status='queued_capped', no send, structlog
+        meta_agent_executor_telegram_cap_hit.
+    """
+    import structlog
+
+    from finalayze.meta_agent.classifier import Severity
+    from finalayze.meta_agent.executor import ActionExecutor
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = False
+    settings.meta_agent_max_telegram_alerts_per_day = _CAP_TWO
+
+    alerter = MagicMock()
+    alerter._send = AsyncMock(return_value=(True, _FAKE_ALERT_UUID))
+
+    persistence = MagicMock()
+    persistence.update_decision_status = MagicMock()
+
+    executor = ActionExecutor(
+        settings=settings,
+        alerter=alerter,
+        persistence=persistence,
+    )
+
+    counts = iter([0, 1, _CAP_TWO])
+
+    async def _next_count(_session: Any) -> int:
+        return next(counts)
+
+    monkeypatch.setattr(executor, "_telegram_count_today", _next_count)
+
+    class _FakeSession:
+        async def __aenter__(self) -> _FakeSession:
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+    monkeypatch.setattr(executor, "_open_session", lambda: _FakeSession(), raising=False)
+
+    decision = _make_decision(severity=Severity.INVESTIGATE.value)
+
+    results = []
+    with structlog.testing.capture_logs() as logs:
+        for _ in range(_NUM_THIRD):
+            results.append(await executor.execute(decision))
+
+    # First two: sent.
+    assert results[0].skipped is False, (
+        f"1st call must SEND, got {results[0]!r}"
+    )
+    assert results[1].skipped is False, (
+        f"2nd call must SEND, got {results[1]!r}"
+    )
+    # Third: queued_capped.
+    assert results[2].skipped is True, f"3rd call must be capped, got {results[2]!r}"
+    assert results[2].reason == "telegram_cap_hit"
+    assert results[2].telegram_alert_id is None
+
+    # alerter._send called exactly twice (the first two).
+    assert alerter._send.call_count == 2, (
+        f"expected exactly 2 sends, got {alerter._send.call_count}"
+    )
+
+    # Third update_decision_status call has status='queued_capped'.
+    upd_calls = persistence.update_decision_status.call_args_list
+    # Two for the sent path + one for the cap path.
+    assert len(upd_calls) == _NUM_THIRD, (
+        f"expected {_NUM_THIRD} update_decision_status calls, got {upd_calls!r}"
+    )
+    cap_call = upd_calls[2]
+    assert cap_call.kwargs["status"] == "queued_capped"
+
+    # Structlog cap_hit event emitted.
+    cap_events = [
+        log
+        for log in logs
+        if log.get("event") == "meta_agent_executor_telegram_cap_hit"
+    ]
+    assert len(cap_events) == 1, (
+        f"expected 1 telegram_cap_hit event, got {cap_events!r}"
+    )
