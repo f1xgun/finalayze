@@ -79,3 +79,82 @@ async def test_run_one_tick_dry_run_writes_one_decision_no_side_effects(
     # last_run_ts populated.
     assert runner._last_run_ts is not None
     assert runner._last_run_ts >= _NOW_BEFORE
+
+
+@pytest.mark.asyncio
+async def test_five_tick_dry_run_writes_five_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC §Acceptance Criterion #7: 5-tick dry-run simulation with
+    INVESTIGATE severity yields 5 persisted rows, all dry_run=True,
+    status='queued', actions=[], zero Telegram sends, zero spawns.
+    """
+    import structlog
+
+    from finalayze.meta_agent import runner as runner_module
+    from finalayze.meta_agent.classifier import Severity
+    from finalayze.meta_agent.runner import MetaAgentRunner
+    from finalayze.meta_agent.snapshot import PositionsSummary, Snapshot
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = True
+    settings.meta_agent_enabled = True
+    settings.api_key = "test-key"
+
+    fake_snapshot = Snapshot(
+        timestamp=datetime.now(UTC),
+        alerts_last_hour=[],
+        drawdown_pct=4.0,  # > 3.0 → INVESTIGATE
+        equity_persist_failures=0,
+        ml_signal_error_rate=None,
+        positions_summary=PositionsSummary(raw={"positions": []}),
+        raw={},
+    )
+
+    async def _fake_build_snapshot(_client, *, now):
+        return fake_snapshot
+
+    monkeypatch.setattr(runner_module, "build_snapshot", _fake_build_snapshot)
+    monkeypatch.setattr(
+        runner_module, "classify", lambda _snap: Severity.INVESTIGATE,
+    )
+
+    persistence = MagicMock()
+    persistence.persist_decision = MagicMock()
+    executor = MagicMock()
+    executor.execute = AsyncMock()
+    telegram_alerter = MagicMock()
+    telegram_alerter._send = AsyncMock()
+
+    fake_client = AsyncMock()
+    fake_client.aclose = AsyncMock()
+    runner = MetaAgentRunner(
+        settings=settings,
+        persistence=persistence,
+        executor=executor,
+        http_client_factory=lambda: fake_client,
+    )
+
+    structlog.configure(
+        processors=[structlog.testing.LogCapture()],
+    )
+    with structlog.testing.capture_logs() as logs:
+        for _ in range(_NUM_TICKS):
+            await runner.run_one_tick()
+
+    assert persistence.persist_decision.call_count == _NUM_TICKS
+    for call in persistence.persist_decision.call_args_list:
+        assert call.kwargs["dry_run"] is True
+        assert call.kwargs["status"] == "queued"
+        assert call.kwargs["actions"] == []
+        assert call.kwargs["severity"] == "INVESTIGATE"
+
+    # No side-effects.
+    executor.execute.assert_not_called()
+    telegram_alerter._send.assert_not_called()
+
+    # Five classify-completed events.
+    classify_events = [
+        log for log in logs if log.get("event") == "meta_agent_classify_completed"
+    ]
+    assert len(classify_events) == _NUM_TICKS
