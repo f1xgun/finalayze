@@ -303,3 +303,45 @@ async def test_execute_dry_run_short_circuits_first_line() -> None:
     assert len(dryrun_events) == 1, (
         f"expected exactly 1 dry_run_skipped event, got {dryrun_events!r}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-02-03: HEALTHY severity → no Telegram, no persistence touch
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_execute_healthy_severity_does_not_send_telegram() -> None:
+    """SPEC §Requirement 5: only WATCH/INVESTIGATE/FIX trigger Telegram.
+    With dry_run=False and severity=HEALTHY, executor returns
+    ExecutionResult(skipped=True, reason='severity_below_threshold',
+    telegram_alert_id=None); zero alerter._send and zero
+    persistence.update_decision_status calls.
+    """
+    from finalayze.meta_agent.classifier import Severity
+    from finalayze.meta_agent.executor import ActionExecutor, ExecutionResult
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = False
+
+    alerter = MagicMock()
+    alerter._send = AsyncMock()
+    persistence = MagicMock()
+    persistence.update_decision_status = MagicMock()
+
+    executor = ActionExecutor(
+        settings=settings,
+        alerter=alerter,
+        persistence=persistence,
+    )
+    decision = _make_decision(severity=Severity.HEALTHY.value)
+
+    result = await executor.execute(decision)
+
+    assert isinstance(result, ExecutionResult)
+    assert result.skipped is True
+    assert result.reason == "severity_below_threshold"
+    assert result.telegram_alert_id is None
+
+    alerter._send.assert_not_called()
+    persistence.update_decision_status.assert_not_called()
