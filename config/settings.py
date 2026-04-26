@@ -112,7 +112,8 @@ class Settings(BaseSettings):
     meta_agent_enabled: bool = False  # FINALAYZE_META_AGENT_ENABLED
     meta_agent_dry_run: bool = True  # FINALAYZE_META_AGENT_DRY_RUN
     meta_agent_interval_minutes: int = 30  # FINALAYZE_META_AGENT_INTERVAL_MINUTES
-    meta_agent_max_telegram_alerts_per_day: int = 12  # FINALAYZE_META_AGENT_MAX_TELEGRAM_ALERTS_PER_DAY
+    # FINALAYZE_META_AGENT_MAX_TELEGRAM_ALERTS_PER_DAY
+    meta_agent_max_telegram_alerts_per_day: int = 12
     meta_agent_max_spawns_per_day: int = 10  # FINALAYZE_META_AGENT_MAX_SPAWNS_PER_DAY
     meta_agent_max_fix_spawns_per_day: int = 2  # FINALAYZE_META_AGENT_MAX_FIX_SPAWNS_PER_DAY
 

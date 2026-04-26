@@ -19,10 +19,9 @@ attribute is reserved for plan 58-02.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
@@ -31,7 +30,11 @@ from finalayze.meta_agent.classifier import Severity, classify
 from finalayze.meta_agent.snapshot import build_snapshot
 
 if TYPE_CHECKING:
+    import asyncio
+    from collections.abc import Callable
+
     from config.settings import Settings
+
     from finalayze.meta_agent.snapshot import Snapshot
 
 _log = structlog.get_logger()
@@ -92,13 +95,13 @@ class MetaAgentRunner:
 
         try:
             snapshot = await self._collect_snapshot(now=tick_start)
-        except Exception:  # noqa: BLE001 — resilient envelope (D-03 spirit)
+        except Exception:
             _log.warning("meta_agent_snapshot_failed", exc_info=True)
             return
 
         try:
             severity = classify(snapshot)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.warning("meta_agent_classify_failed", exc_info=True)
             return
 
@@ -127,7 +130,7 @@ class MetaAgentRunner:
                 decision_metadata=None,
                 parent_decision_id=None,
             )
-        except Exception:  # noqa: BLE001 — never raise into the scheduler
+        except Exception:
             _log.warning("meta_agent_persist_failed", exc_info=True)
 
         # Dry-run gate — first decision after persist (D-04 / SPEC line 47).
@@ -144,7 +147,7 @@ class MetaAgentRunner:
                 severity=severity,
                 snapshot=snapshot,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.warning(
                 "meta_agent_executor_failed",
                 severity_key=severity.value,

@@ -19,15 +19,17 @@ fixtures stay green by default (``meta_agent_enabled=False``).
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from apscheduler.triggers.interval import IntervalTrigger
 
 if TYPE_CHECKING:
-    from apscheduler.schedulers.background import BackgroundScheduler
+    from collections.abc import Callable
 
+    from apscheduler.schedulers.background import BackgroundScheduler
     from config.settings import Settings
+
     from finalayze.meta_agent.runner import MetaAgentRunner
 
 _log = structlog.get_logger()

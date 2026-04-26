@@ -101,7 +101,7 @@ async def _fetch_one(
     """
     try:
         resp = await client.get(path, params=params)
-    except Exception as exc:  # noqa: BLE001 — partial-failure envelope (D-03)
+    except Exception as exc:
         _log.warning(
             "meta_agent_snapshot_partial",
             endpoint=_endpoint_label(path),
@@ -118,7 +118,7 @@ async def _fetch_one(
         return None
     try:
         body = resp.json()
-    except Exception:  # noqa: BLE001
+    except Exception:
         _log.warning(
             "meta_agent_snapshot_partial",
             endpoint=_endpoint_label(path),
@@ -175,11 +175,9 @@ async def build_snapshot(
         dd = perf_body.get("drawdown_pct")
         drawdown = float(dd) if dd is not None else None
 
-    positions: PositionsSummary | None
-    if pos_body is None:
-        positions = None
-    else:
-        positions = PositionsSummary(raw=pos_body)
+    positions: PositionsSummary | None = (
+        None if pos_body is None else PositionsSummary(raw=pos_body)
+    )
 
     raw_payload: dict[str, Any] = {
         "alerts": alerts_body,

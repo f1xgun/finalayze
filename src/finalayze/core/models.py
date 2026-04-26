@@ -6,7 +6,7 @@ See docs/architecture/OVERVIEW.md for database schema.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, time  # noqa: TC003
+from datetime import UTC, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import (
