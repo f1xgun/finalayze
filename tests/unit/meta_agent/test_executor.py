@@ -238,3 +238,68 @@ async def test_update_decision_status_metadata_patch_merges_into_decision_metada
     assert len(captured_select_calls) == 0, "metadata_patch={} must NOT issue SELECT"
     assert len(captured_update_values) == 1
     assert "metadata" not in captured_update_values[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-02-02: ActionExecutor dry-run short-circuit (FIRST line of execute())
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_decision(severity: str = "FIX") -> Any:
+    """Build a MetaAgentDecisionModel-shaped object for executor tests."""
+    decision = MagicMock()
+    decision.id = _FAKE_DECISION_ID
+    decision.timestamp = _FAKE_TS
+    decision.severity = severity
+    decision.summary = "test summary"
+    decision.rationale = "test rationale"
+    decision.decision_metadata = None
+    return decision
+
+
+@pytest.mark.asyncio
+async def test_execute_dry_run_short_circuits_first_line() -> None:
+    """SPEC AC #7 + #8: with meta_agent_dry_run=True, execute() must
+    short-circuit on its FIRST line. No Telegram send, no persistence
+    update, no session open. Returns ExecutionResult(skipped=True,
+    reason='dry_run', telegram_alert_id=None) and emits structlog event
+    'meta_agent_executor_dry_run_skipped' exactly once. (PATTERNS AP-10.)
+    """
+    import structlog
+
+    from finalayze.meta_agent.executor import ActionExecutor, ExecutionResult
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = True
+
+    alerter = MagicMock()
+    alerter._send = AsyncMock()
+    persistence = MagicMock()
+    persistence.update_decision_status = MagicMock()
+
+    executor = ActionExecutor(
+        settings=settings,
+        alerter=alerter,
+        persistence=persistence,
+    )
+
+    decision = _make_decision(severity="FIX")
+
+    with structlog.testing.capture_logs() as logs:
+        result = await executor.execute(decision)
+
+    assert isinstance(result, ExecutionResult)
+    assert result.skipped is True
+    assert result.reason == "dry_run"
+    assert result.telegram_alert_id is None
+
+    # Zero side effects.
+    alerter._send.assert_not_called()
+    persistence.update_decision_status.assert_not_called()
+
+    dryrun_events = [
+        log for log in logs if log.get("event") == "meta_agent_executor_dry_run_skipped"
+    ]
+    assert len(dryrun_events) == 1, (
+        f"expected exactly 1 dry_run_skipped event, got {dryrun_events!r}"
+    )
