@@ -108,7 +108,28 @@ class ActionExecutor:
                 telegram_alert_id=None,
             )
 
-        # Subsequent branches added by Tasks 58-02-04 → 58-02-06.
+        # Subsequent branches (cap query, Telegram send, cap enforcement)
+        # added by Tasks 58-02-05 → 58-02-06.
         return ExecutionResult(
             skipped=True, reason="not_implemented", telegram_alert_id=None,
         )
+
+    async def _telegram_count_today(self, session: Any) -> int:
+        """Return the count of meta-agent Telegram alerts already sent in the
+        current UTC day (CONTEXT D-13 / SPEC AC #9 / RESEARCH §11.2).
+
+        Cap resets at 00:00 UTC via ``date_trunc('day', NOW() AT TIME ZONE
+        'UTC')`` — TIMESTAMPTZ columns auto-convert. The LIKE pattern
+        ``meta_agent_%`` matches the ``alert_type`` value the executor
+        passes to ``TelegramAlerter._send`` (Task 58-02-05).
+        """
+        from sqlalchemy import func, select, text  # noqa: PLC0415
+
+        from finalayze.core.models import AlertModel  # noqa: PLC0415
+
+        stmt = select(func.count()).select_from(AlertModel).where(
+            AlertModel.alert_type.like("meta_agent_%"),
+            AlertModel.timestamp >= text("date_trunc('day', NOW() AT TIME ZONE 'UTC')"),
+        )
+        result = await session.execute(stmt)
+        return int(result.scalar_one())
