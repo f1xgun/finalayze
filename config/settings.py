@@ -107,6 +107,15 @@ class Settings(BaseSettings):
     telegram_admin_chat_id: str = ""  # FINALAYZE_TELEGRAM_ADMIN_CHAT_ID
     weekly_digest_hour_utc: int = 16  # FINALAYZE_WEEKLY_DIGEST_HOUR_UTC (Sunday 19:00 MSK)
 
+    # Meta-agent (Phase 58) — defaults SPEC-locked (58-SPEC.md §Constraints line 117).
+    # Safety defaults: enabled=False, dry_run=True until phase verifier signs off.
+    meta_agent_enabled: bool = False  # FINALAYZE_META_AGENT_ENABLED
+    meta_agent_dry_run: bool = True  # FINALAYZE_META_AGENT_DRY_RUN
+    meta_agent_interval_minutes: int = 30  # FINALAYZE_META_AGENT_INTERVAL_MINUTES
+    meta_agent_max_telegram_alerts_per_day: int = 12  # FINALAYZE_META_AGENT_MAX_TELEGRAM_ALERTS_PER_DAY
+    meta_agent_max_spawns_per_day: int = 10  # FINALAYZE_META_AGENT_MAX_SPAWNS_PER_DAY
+    meta_agent_max_fix_spawns_per_day: int = 2  # FINALAYZE_META_AGENT_MAX_FIX_SPAWNS_PER_DAY
+
     # Kill switch
     kill_switch_flag_path: str = "/tmp/finalayze_killed"  # noqa: S108  # FINALAYZE_KILL_SWITCH_FLAG_PATH
 
