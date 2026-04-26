@@ -79,9 +79,7 @@ def render(api: ApiClient) -> None:
         st.error("Cannot reach API server")
         return
 
-    alerts: list[dict[str, object]] = (
-        payload.get("alerts", []) if isinstance(payload, dict) else []
-    )
+    alerts: list[dict[str, object]] = payload.get("alerts", []) if isinstance(payload, dict) else []
     total = int(payload.get("total", 0) if isinstance(payload, dict) else 0)
     page_size = int(
         payload.get("page_size", _PAGE_SIZE) if isinstance(payload, dict) else _PAGE_SIZE
@@ -95,9 +93,7 @@ def render(api: ApiClient) -> None:
 
     # Pagination caption — shown above the table for visibility.
     pages_total = max(1, math.ceil(total / page_size)) if page_size else 1
-    st.caption(
-        f"Page {current_page} of {pages_total} — showing {len(alerts)} of {total} alerts"
-    )
+    st.caption(f"Page {current_page} of {pages_total} — showing {len(alerts)} of {total} alerts")
 
     if not display_rows:
         st.info("No alerts match the current filters.")

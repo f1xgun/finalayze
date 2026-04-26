@@ -135,16 +135,14 @@ def test_exceptions_inherit_finalayze_error_and_end_in_error() -> None:
 
     # Raise + carry message.
     msg_denied = "denied path: src/finalayze/risk/manager.py"
-    try:
+    with pytest.raises(MetaAgentDeniedPathError) as exc_info:
         raise MetaAgentDeniedPathError(msg_denied)
-    except MetaAgentDeniedPathError as exc:
-        assert str(exc) == msg_denied
+    assert str(exc_info.value) == msg_denied
 
     msg_cap = "spawn cap exceeded for INVESTIGATE"
-    try:
+    with pytest.raises(MetaAgentSpawnCapExceededError) as exc_info:
         raise MetaAgentSpawnCapExceededError(msg_cap)
-    except MetaAgentSpawnCapExceededError as exc:
-        assert str(exc) == msg_cap
+    assert str(exc_info.value) == msg_cap
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -168,10 +166,7 @@ async def test_spawn_readonly_happy_path_captures_stdout_and_exit_code(
 
     captured: dict[str, Any] = {}
 
-    fake_stdout = (
-        b'{"type":"assistant","content":"hello"}\n'
-        b'{"type":"result","is_error":false}\n'
-    )
+    fake_stdout = b'{"type":"assistant","content":"hello"}\n{"type":"result","is_error":false}\n'
     fake_proc = _FakeProcess(stdout=fake_stdout, stderr=b"", exit_code=_EXIT_OK)
 
     async def _fake_create(*args: Any, **kwargs: Any) -> _FakeProcess:
@@ -311,9 +306,7 @@ async def test_spawn_readonly_timeout_terminates_process_group(
     # Wall-clock: timeout (~2s) + grace (0.2s) + kill (0.2s) ≈ 2.4s.
     # Allow generous headroom for slow CI machines.
     max_wall_s = _TIMEOUT_SHORT + _GRACE_TEST + _KILL_TEST + 1.0
-    assert elapsed < max_wall_s, (
-        f"timeout path took {elapsed:.2f}s; expected < {max_wall_s:.2f}s"
-    )
+    assert elapsed < max_wall_s, f"timeout path took {elapsed:.2f}s; expected < {max_wall_s:.2f}s"
 
     # Outcome shape.
     assert outcome.timed_out is True, f"expected timed_out=True, got {outcome!r}"
@@ -327,17 +320,13 @@ async def test_spawn_readonly_timeout_terminates_process_group(
     # Order: SIGTERM first, then SIGKILL.
     sigterm_idx = sig_seq.index(signal.SIGTERM)
     sigkill_idx = sig_seq.index(signal.SIGKILL)
-    assert sigterm_idx < sigkill_idx, (
-        f"SIGTERM must precede SIGKILL; sequence={sig_seq!r}"
-    )
+    assert sigterm_idx < sigkill_idx, f"SIGTERM must precede SIGKILL; sequence={sig_seq!r}"
     # All calls used the same pgid (process-group control).
     pgids = {pgid for (pgid, _sig) in killpg_calls}
     assert pgids == {_FAKE_PGID}, f"expected single pgid {_FAKE_PGID}, got {pgids}"
 
     # Structlog event emitted.
-    timeout_events = [
-        log for log in logs if log.get("event") == "meta_agent_spawn_timeout"
-    ]
+    timeout_events = [log for log in logs if log.get("event") == "meta_agent_spawn_timeout"]
     assert len(timeout_events) == 1, (
         f"expected 1 meta_agent_spawn_timeout event, got {timeout_events!r}"
     )
@@ -393,13 +382,12 @@ async def test_concurrent_investigate_spawns_rejected_with_already_inflight(
     await asyncio.sleep(0.05)
 
     # Pre-condition: the lock IS held by the first task.
-    assert sp._INVESTIGATE_LOCK.locked() is True, (
-        "first spawn must have acquired the lock by now"
-    )
+    assert sp._INVESTIGATE_LOCK.locked() is True, "first spawn must have acquired the lock by now"
 
     with structlog.testing.capture_logs() as logs:
         second_outcome = await spawn_readonly(
-            "second prompt", decision_id=_FAKE_DECISION_ID_2,
+            "second prompt",
+            decision_id=_FAKE_DECISION_ID_2,
         )
 
     # Second outcome shape — rejected without taking the lock.
@@ -413,13 +401,9 @@ async def test_concurrent_investigate_spawns_rejected_with_already_inflight(
 
     # Structlog event from the rejected caller.
     rejected_events = [
-        log
-        for log in logs
-        if log.get("event") == "meta_agent_spawn_already_inflight"
+        log for log in logs if log.get("event") == "meta_agent_spawn_already_inflight"
     ]
-    assert len(rejected_events) == 1, (
-        f"expected 1 already_inflight event, got {rejected_events!r}"
-    )
+    assert len(rejected_events) == 1, f"expected 1 already_inflight event, got {rejected_events!r}"
     assert rejected_events[0].get("decision_id_key") == str(_FAKE_DECISION_ID_2)
 
     # The first spawn must still complete cleanly and release the lock.

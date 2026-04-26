@@ -95,6 +95,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node .claude/hooks/ast-index-grep-guard.js",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "bash .claude/hooks/gsd-validate-commit.sh",
             "timeout": 5
           }

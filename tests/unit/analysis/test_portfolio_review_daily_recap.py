@@ -205,9 +205,13 @@ class TestComputeDailyRecap:
         from finalayze.analysis.portfolio_review_agent import compute_daily_recap
 
         today_start = datetime(
-            now_utc.year, now_utc.month, now_utc.day, tzinfo=now_utc.tzinfo,
+            now_utc.year,
+            now_utc.month,
+            now_utc.day,
+            tzinfo=now_utc.tzinfo,
         )
         yesterday_start = today_start - timedelta(days=1)
+
         # Build duck-typed OrderModel-like rows for fifo_pair.
         # fifo_pair requires: status, side, symbol, filled_quantity,
         # filled_avg_price, filled_at, signal_id.

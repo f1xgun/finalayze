@@ -114,9 +114,7 @@ def _patch_session_factory(rows: list[SimpleNamespace]) -> Any:
             # Apply in-memory filters from the test-set state
             filtered = list(rows)
             if _Session._alert_type_filter is not None:
-                filtered = [
-                    r for r in filtered if r.alert_type in _Session._alert_type_filter
-                ]
+                filtered = [r for r in filtered if r.alert_type in _Session._alert_type_filter]
             if _Session._symbol_filter is not None:
                 filtered = [r for r in filtered if r.symbol == _Session._symbol_filter]
             if _Session._priority_filter is not None:
@@ -189,9 +187,7 @@ def _patch_failing_session() -> Any:
 def test_list_alerts_returns_paginated_response() -> None:
     """Page 1 with default page_size=50 returns 50 alerts of 75 total."""
     now = datetime.now(UTC)
-    rows = [
-        _make_row(timestamp=now - timedelta(minutes=i)) for i in range(_TOTAL_75)
-    ]
+    rows = [_make_row(timestamp=now - timedelta(minutes=i)) for i in range(_TOTAL_75)]
 
     patcher, sess = _patch_session_factory(rows)
     sess._limit = _PAGE_50  # type: ignore[attr-defined]
@@ -214,9 +210,7 @@ def test_list_alerts_returns_paginated_response() -> None:
 def test_list_alerts_page_2_returns_remaining() -> None:
     """Page 2 with page_size=50 returns the remaining 25 alerts."""
     now = datetime.now(UTC)
-    rows = [
-        _make_row(timestamp=now - timedelta(minutes=i)) for i in range(_TOTAL_75)
-    ]
+    rows = [_make_row(timestamp=now - timedelta(minutes=i)) for i in range(_TOTAL_75)]
 
     patcher, sess = _patch_session_factory(rows)
     sess._limit = _PAGE_50  # type: ignore[attr-defined]
@@ -306,9 +300,7 @@ def test_list_alerts_filters_by_priority() -> None:
 def test_list_alerts_filters_by_date_range() -> None:
     """?since=...&until=... narrows to a time window."""
     now = datetime.now(UTC).replace(microsecond=0)
-    rows = [
-        _make_row(timestamp=now - timedelta(hours=h)) for h in (0, 6, 12, 18, 24)
-    ]
+    rows = [_make_row(timestamp=now - timedelta(hours=h)) for h in (0, 6, 12, 18, 24)]
     since = now - timedelta(hours=18)
     until = now - timedelta(hours=6)
 
@@ -336,9 +328,7 @@ def test_list_alerts_orders_desc() -> None:
     """Rows must be ordered by timestamp DESC (newest first)."""
     now = datetime.now(UTC)
     # Insert in random order but expect DESC return
-    rows = [
-        _make_row(timestamp=now - timedelta(hours=h)) for h in (5, 1, 10, 3, 0)
-    ]
+    rows = [_make_row(timestamp=now - timedelta(hours=h)) for h in (5, 1, 10, 3, 0)]
 
     patcher, _ = _patch_session_factory(rows)
     with patcher:
@@ -346,9 +336,7 @@ def test_list_alerts_orders_desc() -> None:
 
     assert resp.status_code == 200, resp.text
     timestamps = [datetime.fromisoformat(a["timestamp"]) for a in resp.json()["alerts"]]
-    assert timestamps == sorted(timestamps, reverse=True), (
-        f"Expected DESC order, got: {timestamps}"
-    )
+    assert timestamps == sorted(timestamps, reverse=True), f"Expected DESC order, got: {timestamps}"
 
 
 def test_list_alerts_page_size_validation() -> None:

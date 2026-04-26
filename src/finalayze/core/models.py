@@ -368,10 +368,13 @@ class AlertModel(Base):
     __tablename__ = "alerts"
 
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), primary_key=True,
+        DateTime(timezone=True),
+        primary_key=True,
     )
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
     )
     alert_type: Mapped[str] = mapped_column(String(30), nullable=False)
     priority: Mapped[str] = mapped_column(String(10), nullable=False)
@@ -388,7 +391,9 @@ class AlertModel(Base):
         nullable=True,
     )
     delivery_status: Mapped[str] = mapped_column(
-        String(10), nullable=False, default="queued",
+        String(10),
+        nullable=False,
+        default="queued",
     )
     alert_metadata: Mapped[dict[str, object] | None] = mapped_column(
         "metadata",  # column name; Python attr renamed to avoid SQLAlchemy reserved word
@@ -422,16 +427,21 @@ class MetaAgentDecisionModel(Base):
     __tablename__ = "agent_decisions"
 
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), primary_key=True,
+        DateTime(timezone=True),
+        primary_key=True,
     )
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
     )
     severity: Mapped[str] = mapped_column(String(15), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
     actions: Mapped[list[dict[str, object]]] = mapped_column(
-        JSONB, nullable=False, default=list,
+        JSONB,
+        nullable=False,
+        default=list,
     )
     outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
     dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -450,7 +460,9 @@ class MetaAgentDecisionModel(Base):
         nullable=True,
     )
     status: Mapped[str] = mapped_column(
-        String(15), nullable=False, default="queued",
+        String(15),
+        nullable=False,
+        default="queued",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

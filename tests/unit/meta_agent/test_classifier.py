@@ -132,9 +132,7 @@ def test_classify_boundary_fixtures(desc: str, kwargs: dict, expected: str) -> N
 
     snap = _snap(**kwargs)
     result = classify(snap)
-    assert result == Severity(expected), (
-        f"{desc}: expected {expected}, got {result.value}"
-    )
+    assert result == Severity(expected), f"{desc}: expected {expected}, got {result.value}"
 
 
 def test_llm_severity_override_does_not_raise_classifier_verdict() -> None:

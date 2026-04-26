@@ -299,7 +299,10 @@ async def compute_daily_recap(
     )
 
     today_start = datetime(
-        now.year, now.month, now.day, tzinfo=now.tzinfo,
+        now.year,
+        now.month,
+        now.day,
+        tzinfo=now.tzinfo,
     )
     yesterday_start = today_start - timedelta(days=1)
 
@@ -347,19 +350,20 @@ async def compute_daily_recap(
         # Iterator, so materialise with list() (defensive — keeps the
         # pattern safe against future double-iteration changes).
         today_orders_rows = (
-            await session.execute(
-                select(OrderModel)
-                .where(OrderModel.filled_at >= today_start)
-                .order_by(OrderModel.filled_at.asc()),
+            (
+                await session.execute(
+                    select(OrderModel)
+                    .where(OrderModel.filled_at >= today_start)
+                    .order_by(OrderModel.filled_at.asc()),
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if today_orders_rows:
             paired = list(fifo_pair(list(today_orders_rows)))
             realized = sum(
-                (
-                    (p.exit_price - p.entry_price) * p.quantity
-                    for p in paired
-                ),
+                ((p.exit_price - p.entry_price) * p.quantity for p in paired),
                 Decimal(0),
             )
             result["total_realized_pnl"] = realized
@@ -383,11 +387,7 @@ async def compute_daily_recap(
                 ),
             )
         ).scalar()
-        if (
-            today_equity is not None
-            and yesterday_equity is not None
-            and yesterday_equity != 0
-        ):
+        if today_equity is not None and yesterday_equity is not None and yesterday_equity != 0:
             change_amt = Decimal(str(today_equity)) - Decimal(
                 str(yesterday_equity),
             )

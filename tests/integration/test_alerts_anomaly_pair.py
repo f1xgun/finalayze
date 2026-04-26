@@ -1,19 +1,20 @@
 """Integration tests for anomaly raw + LLM follow-up parent_id threading.
 
-Phase 57-04 Task 3 (D-04 + Pitfall 2):
+Phase 57-04 Task 3 (D-04):
 - The TradingLoop anomaly orchestration must capture the alert_id of the
   raw alert (alert_type='anomaly_raw') and thread it into the async LLM
   enrichment (alert_type='anomaly_llm') so the persisted child row's
-  ``parent_id`` FK is populated at insert time.
-- The persistence layer (`TradingPersistence._persist_alert_async`) must
-  retry once on FK violation (parent commit race), then degrade to
-  ``parent_id=NULL`` rather than dropping the row (revision M5 — flat
-  try/except ladder, NOT a loop with continue, so the happy path writes
-  exactly once).
+  ``parent_id`` is populated at insert time.
 
-The persistence-side tests do not require a real DB — they patch the
-session factory + AlertModel constructor so we can simulate IntegrityError
-on demand without spinning up TimescaleDB.
+Phase 57 UAT gap-closure: parent_id has NO database-level FK to alerts(id).
+TimescaleDB hypertables forbid the UNIQUE (id) constraint that a self-FK
+would require, so integrity is managed at the application layer (raw
+alerts always persist before LLM follow-ups send). The FK retry ladder
+that the original Plan 04 introduced is gone; ``_persist_alert_async``
+now writes exactly once.
+
+The persistence-side test does not require a real DB — it patches the
+session factory.
 """
 
 from __future__ import annotations
@@ -27,7 +28,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 
 from finalayze.api.alerts import TelegramAlerter
 from finalayze.orchestration.db_persistence import TradingPersistence
@@ -137,7 +137,10 @@ async def test_enrich_passes_parent_id_to_send() -> None:
 
     anomaly = _make_anomaly()
     await tl._enrich_anomaly_async(
-        _SYMBOL, _MARKET_ID, anomaly, parent_id=parent_uuid,
+        _SYMBOL,
+        _MARKET_ID,
+        anomaly,
+        parent_id=parent_uuid,
     )
 
     alerter._send.assert_awaited_once()
@@ -163,21 +166,15 @@ def _make_persistence() -> TradingPersistence:
     return persistence
 
 
-def _patch_session_factory(persistence: TradingPersistence, behaviours: list[str]) -> list[str]:
-    """Patch _get_bg_session_factory so each session.commit() is driven by ``behaviours``.
+def _patch_session_factory(persistence: TradingPersistence) -> list[str]:
+    """Patch _get_bg_session_factory with a single-shot fake session.
 
-    Each entry is one of:
-      * "ok"  — commit succeeds.
-      * "fk_error" — commit raises IntegrityError.
-    Returns a recorder list of the operations actually attempted.
+    Records every ``add`` and ``commit`` call so tests can assert exactly
+    one write happens per ``_persist_alert_async`` invocation.
     """
     recorder: list[str] = []
-    behaviour_iter = iter(behaviours)
 
     class _FakeSession:
-        def __init__(self) -> None:
-            self._behaviour = next(behaviour_iter)
-
         async def __aenter__(self) -> _FakeSession:
             return self
 
@@ -188,9 +185,7 @@ def _patch_session_factory(persistence: TradingPersistence, behaviours: list[str
             recorder.append("add")
 
         async def commit(self) -> None:
-            recorder.append(f"commit:{self._behaviour}")
-            if self._behaviour == "fk_error":
-                raise IntegrityError("INSERT", {}, Exception("fk violation"))
+            recorder.append("commit")
 
     def _factory_callable() -> _FakeSession:
         return _FakeSession()
@@ -200,15 +195,11 @@ def _patch_session_factory(persistence: TradingPersistence, behaviours: list[str
 
 
 @pytest.mark.asyncio
-async def test_fk_violation_retry_succeeds_on_second_attempt() -> None:
-    """First commit raises FK violation; sleep+retry succeeds with same parent_id."""
+async def test_persist_alert_async_writes_exactly_once() -> None:
+    """parent_id has no DB FK — single write per call, no retry ladder."""
     persistence = _make_persistence()
-    recorder = _patch_session_factory(
-        persistence,
-        ["fk_error", "ok"],  # 1st attempt fails, retry succeeds
-    )
+    recorder = _patch_session_factory(persistence)
 
-    parent_id = uuid.uuid4()
     await persistence._persist_alert_async(
         alert_id=uuid.uuid4(),
         timestamp=datetime.now(UTC),
@@ -217,78 +208,23 @@ async def test_fk_violation_retry_succeeds_on_second_attempt() -> None:
         symbol=_SYMBOL,
         market_id=_MARKET_ID,
         message="LLM follow-up",
-        parent_id=parent_id,
+        parent_id=uuid.uuid4(),
         delivery_status="queued",
         alert_metadata=None,
     )
 
-    # Two write attempts; the second succeeded with the original parent_id.
-    commit_events = [r for r in recorder if r.startswith("commit:")]
-    assert commit_events == ["commit:fk_error", "commit:ok"], recorder
-
-
-@pytest.mark.asyncio
-async def test_fk_violation_falls_back_to_null_after_retry_exhausted() -> None:
-    """Both attempts raise FK violation; the third write degrades parent_id to NULL."""
-    persistence = _make_persistence()
-    recorder = _patch_session_factory(
-        persistence,
-        ["fk_error", "fk_error", "ok"],  # both retries fail; NULL fallback succeeds
+    assert recorder == ["add", "commit"], (
+        f"_persist_alert_async must write exactly once; got: {recorder}"
     )
 
-    parent_id = uuid.uuid4()
-    await persistence._persist_alert_async(
-        alert_id=uuid.uuid4(),
-        timestamp=datetime.now(UTC),
-        alert_type="anomaly_llm",
-        priority="INFO",
-        symbol=_SYMBOL,
-        market_id=_MARKET_ID,
-        message="LLM follow-up",
-        parent_id=parent_id,
-        delivery_status="queued",
-        alert_metadata=None,
-    )
 
-    commit_events = [r for r in recorder if r.startswith("commit:")]
-    # Three commits total: try1 (fk), retry (fk), final NULL fallback (ok).
-    assert commit_events == ["commit:fk_error", "commit:fk_error", "commit:ok"], recorder
-
-
-@pytest.mark.asyncio
-async def test_happy_path_writes_exactly_once() -> None:
-    """Revision M5: when no FK error, _do_write is invoked exactly once."""
-    persistence = _make_persistence()
-    recorder = _patch_session_factory(persistence, ["ok"])
-
-    await persistence._persist_alert_async(
-        alert_id=uuid.uuid4(),
-        timestamp=datetime.now(UTC),
-        alert_type="signal",
-        priority="INFO",
-        symbol=_SYMBOL,
-        market_id=_MARKET_ID,
-        message="signal alert",
-        parent_id=uuid.uuid4(),  # parent_id present BUT no FK error
-        delivery_status="queued",
-        alert_metadata=None,
-    )
-
-    commit_events = [r for r in recorder if r.startswith("commit:")]
-    add_events = [r for r in recorder if r == "add"]
-    assert commit_events == ["commit:ok"], (
-        f"Happy path must commit exactly once, got: {recorder}"
-    )
-    assert len(add_events) == 1, f"Happy path must add exactly one row, got: {recorder}"
-
-
-def test_persist_alert_async_source_uses_do_write_helper() -> None:
-    """Revision M5 source-presence guard: inner _do_write helper exists, no loop fall-through."""
+def test_persist_alert_async_source_has_no_fk_retry_ladder() -> None:
+    """parent_id integrity is app-managed — no FK retry ladder remains."""
     src = inspect.getsource(TradingPersistence._persist_alert_async)
-    assert "_do_write" in src, (
-        "Revision M5: _persist_alert_async must use the inner _do_write helper"
+    assert "IntegrityError" not in src, (
+        "FK retry ladder removed — TimescaleDB hypertable forbids the UNIQUE "
+        "constraint that a self-FK would require, so parent_id is a plain "
+        "nullable UUID and FK retry is no longer needed"
     )
-    assert "for attempt in" not in src, (
-        "Revision M5: the old loop-with-continue pattern must be gone "
-        "(double-write risk eliminated)"
-    )
+    assert "for attempt in" not in src, "No retry loop — single write per call"
+    assert "asyncio.sleep" not in src, "No retry sleep — single write per call"

@@ -77,8 +77,7 @@ def test_persistence_helpers_use_fire_and_forget_envelope() -> None:
     skipped = [
         log
         for log in logs
-        if log.get("event") == "db_persist_skipped"
-        and log.get("table") == "agent_decisions"
+        if log.get("event") == "db_persist_skipped" and log.get("table") == "agent_decisions"
     ]
     assert len(skipped) >= 2, (
         f"expected >=2 db_persist_skipped events for agent_decisions, got {logs!r}"
@@ -406,9 +405,7 @@ async def test_telegram_count_today_uses_utc_day_boundary() -> None:
     assert "alerts" in sql, f"cap query must FROM alerts, got: {sql!r}"
     assert "alert_type" in sql, f"cap query must filter alert_type, got: {sql!r}"
     assert "like" in sql, f"cap query must use LIKE for alert_type, got: {sql!r}"
-    assert "date_trunc" in sql, (
-        f"cap query must use date_trunc for UTC-day boundary, got: {sql!r}"
-    )
+    assert "date_trunc" in sql, f"cap query must use date_trunc for UTC-day boundary, got: {sql!r}"
     # The text fragment "now() at time zone 'utc'" appears verbatim.
     assert "utc" in sql, f"cap query must use UTC tz boundary, got: {sql!r}"
 
@@ -496,12 +493,8 @@ async def test_execute_investigate_sends_telegram_and_stamps_metadata(
     assert upd_kwargs["metadata_patch"] == {"telegram_alert_id": str(_FAKE_ALERT_UUID)}
 
     # Structlog event emitted.
-    sent_events = [
-        log for log in logs if log.get("event") == "meta_agent_executor_telegram_sent"
-    ]
-    assert len(sent_events) >= 1, (
-        f"expected meta_agent_executor_telegram_sent event, got {logs!r}"
-    )
+    sent_events = [log for log in logs if log.get("event") == "meta_agent_executor_telegram_sent"]
+    assert len(sent_events) >= 1, f"expected meta_agent_executor_telegram_sent event, got {logs!r}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -514,10 +507,10 @@ async def test_third_investigate_with_cap_2_is_queued_capped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SPEC AC #9: with cap=2, three consecutive INVESTIGATE decisions:
-      - 1st (count=0) → sent.
-      - 2nd (count=1) → sent.
-      - 3rd (count=2) → status='queued_capped', no send, structlog
-        meta_agent_executor_telegram_cap_hit.
+    - 1st (count=0) → sent.
+    - 2nd (count=1) → sent.
+    - 3rd (count=2) → status='queued_capped', no send, structlog
+      meta_agent_executor_telegram_cap_hit.
     """
     import structlog
 
@@ -565,12 +558,8 @@ async def test_third_investigate_with_cap_2_is_queued_capped(
             results.append(result)  # noqa: PERF401 — async iteration, not a comprehension
 
     # First two: sent.
-    assert results[0].skipped is False, (
-        f"1st call must SEND, got {results[0]!r}"
-    )
-    assert results[1].skipped is False, (
-        f"2nd call must SEND, got {results[1]!r}"
-    )
+    assert results[0].skipped is False, f"1st call must SEND, got {results[0]!r}"
+    assert results[1].skipped is False, f"2nd call must SEND, got {results[1]!r}"
     # Third: queued_capped.
     assert results[2].skipped is True, f"3rd call must be capped, got {results[2]!r}"
     assert results[2].reason == "telegram_cap_hit"
@@ -591,14 +580,8 @@ async def test_third_investigate_with_cap_2_is_queued_capped(
     assert cap_call.kwargs["status"] == "queued_capped"
 
     # Structlog cap_hit event emitted.
-    cap_events = [
-        log
-        for log in logs
-        if log.get("event") == "meta_agent_executor_telegram_cap_hit"
-    ]
-    assert len(cap_events) == 1, (
-        f"expected 1 telegram_cap_hit event, got {cap_events!r}"
-    )
+    cap_events = [log for log in logs if log.get("event") == "meta_agent_executor_telegram_cap_hit"]
+    assert len(cap_events) == 1, f"expected 1 telegram_cap_hit event, got {cap_events!r}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -652,19 +635,13 @@ async def test_spawn_count_today_uses_utc_day_and_filters_status(
     sql = str(stmt.compile(compile_kwargs={"literal_binds": False})).lower()
 
     # AP-14: cap reads agent_decisions, NOT alerts.
-    assert "agent_decisions" in sql, (
-        f"cap query must FROM agent_decisions, got: {sql!r}"
-    )
-    assert "alerts" not in sql, (
-        f"cap query must NOT touch alerts table, got: {sql!r}"
-    )
+    assert "agent_decisions" in sql, f"cap query must FROM agent_decisions, got: {sql!r}"
+    assert "alerts" not in sql, f"cap query must NOT touch alerts table, got: {sql!r}"
     # Severity filter.
     assert "severity" in sql, f"cap query must filter severity, got: {sql!r}"
     # Status filter (IN clause for spawned/completed/failed).
     assert "status" in sql, f"cap query must filter status, got: {sql!r}"
-    assert "in (" in sql, (
-        f"cap query must use IN clause for status, got: {sql!r}"
-    )
+    assert "in (" in sql, f"cap query must use IN clause for status, got: {sql!r}"
     # UTC day boundary.
     assert "date_trunc" in sql, f"cap query must use date_trunc, got: {sql!r}"
     assert "utc" in sql, f"cap query must use UTC tz boundary, got: {sql!r}"
@@ -680,13 +657,13 @@ async def test_execute_investigate_spawn_happy_path_marks_completed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SPEC AC #10 + #11: with cap not hit and a successful spawn (exit=0):
-      1. _spawn_count_today_async called with severity='INVESTIGATE' BEFORE
-         the spawn.
-      2. update_decision_status(status='spawned') called BEFORE invoking
-         spawn_readonly (so the count query in the next tick sees the row).
-      3. spawn_readonly invoked with the loaded skill's prompt.
-      4. update_decision_status(status='completed', outcome=<truncated
-         stdout/stderr/exit_code text>) called AFTER successful exit.
+    1. _spawn_count_today_async called with severity='INVESTIGATE' BEFORE
+       the spawn.
+    2. update_decision_status(status='spawned') called BEFORE invoking
+       spawn_readonly (so the count query in the next tick sees the row).
+    3. spawn_readonly invoked with the loaded skill's prompt.
+    4. update_decision_status(status='completed', outcome=<truncated
+       stdout/stderr/exit_code text>) called AFTER successful exit.
     """
     from finalayze.meta_agent.classifier import Severity
     from finalayze.meta_agent.executor import ActionExecutor
@@ -722,7 +699,8 @@ async def test_execute_investigate_spawn_happy_path_marks_completed(
         return fake_outcome
 
     monkeypatch.setattr(
-        "finalayze.meta_agent.executor.spawn_readonly", _fake_spawn,
+        "finalayze.meta_agent.executor.spawn_readonly",
+        _fake_spawn,
     )
 
     decision = _make_decision(severity=Severity.INVESTIGATE.value)
@@ -756,11 +734,11 @@ async def test_execute_investigate_spawn_cap_2_third_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SPEC AC #11: with cap=2 and 2 prior INVESTIGATE rows already counted:
-      - cap query returns 2.
-      - executor does NOT call spawn_readonly.
-      - update_decision_status called once with status='rejected',
-        outcome='spawn_cap_exceeded'.
-      - Structlog event meta_agent_spawn_cap_exceeded is emitted.
+    - cap query returns 2.
+    - executor does NOT call spawn_readonly.
+    - update_decision_status called once with status='rejected',
+      outcome='spawn_cap_exceeded'.
+    - Structlog event meta_agent_spawn_cap_exceeded is emitted.
     """
     import structlog
 
@@ -790,7 +768,8 @@ async def test_execute_investigate_spawn_cap_2_third_rejected(
         raise AssertionError(msg)
 
     monkeypatch.setattr(
-        "finalayze.meta_agent.executor.spawn_readonly", _fake_spawn,
+        "finalayze.meta_agent.executor.spawn_readonly",
+        _fake_spawn,
     )
 
     decision = _make_decision(severity=Severity.INVESTIGATE.value)
@@ -813,11 +792,7 @@ async def test_execute_investigate_spawn_cap_2_third_rejected(
     assert rejected_call.kwargs["outcome"] == "spawn_cap_exceeded"
 
     # Structlog event emitted.
-    cap_events = [
-        log
-        for log in logs
-        if log.get("event") == "meta_agent_spawn_cap_exceeded"
-    ]
+    cap_events = [log for log in logs if log.get("event") == "meta_agent_spawn_cap_exceeded"]
     assert len(cap_events) == 1, (
         f"expected 1 meta_agent_spawn_cap_exceeded event, got {cap_events!r}"
     )

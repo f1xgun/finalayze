@@ -108,12 +108,8 @@ class TestPortfolioReviewCronRegistration:
         # Inspect the trigger's fields — APScheduler stores them as a tuple.
         # Robust check: stringified trigger contains "hour='15'" and "minute='50'".
         trigger_str = str(trigger)
-        assert "hour='15'" in trigger_str, (
-            f"Expected hour=15 in trigger, got: {trigger_str}"
-        )
-        assert "minute='50'" in trigger_str, (
-            f"Expected minute=50 in trigger, got: {trigger_str}"
-        )
+        assert "hour='15'" in trigger_str, f"Expected hour=15 in trigger, got: {trigger_str}"
+        assert "minute='50'" in trigger_str, f"Expected minute=50 in trigger, got: {trigger_str}"
 
     @patch("finalayze.core.trading_loop.BackgroundScheduler")
     def test_portfolio_review_cron_uses_replace_existing(
@@ -344,6 +340,5 @@ class TestMetaAgentJobRegistration:
             if (call.kwargs or {}).get("id") == "meta_agent"
         ]
         assert len(meta_calls) == 0, (
-            f"Expected zero meta_agent add_job calls when disabled, got "
-            f"{len(meta_calls)}"
+            f"Expected zero meta_agent add_job calls when disabled, got {len(meta_calls)}"
         )

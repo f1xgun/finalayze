@@ -101,18 +101,13 @@ def upgrade() -> None:
         "if_not_exists => TRUE)"
     )
     op.execute(
-        "SELECT add_retention_policy('agent_decisions', INTERVAL '365 days', "
-        "if_not_exists => TRUE)"
+        "SELECT add_retention_policy('agent_decisions', INTERVAL '365 days', if_not_exists => TRUE)"
     )
 
 
 def downgrade() -> None:
-    op.execute(
-        "SELECT remove_retention_policy('agent_decisions', if_exists => TRUE)"
-    )
-    op.execute(
-        "SELECT remove_compression_policy('agent_decisions', if_exists => TRUE)"
-    )
+    op.execute("SELECT remove_retention_policy('agent_decisions', if_exists => TRUE)")
+    op.execute("SELECT remove_compression_policy('agent_decisions', if_exists => TRUE)")
     op.execute("DROP INDEX IF EXISTS ix_agent_decisions_parent")
     op.execute("DROP INDEX IF EXISTS ix_agent_decisions_status_ts")
     op.execute("DROP INDEX IF EXISTS ix_agent_decisions_severity_ts")

@@ -42,17 +42,21 @@ def test_alert_model_composite_pk() -> None:
     assert pk_names == {"timestamp", "id"}
 
 
-def test_alert_model_parent_id_fk() -> None:
-    """parent_id must FK to alerts.id with ON DELETE SET NULL."""
+def test_alert_model_parent_id_no_fk() -> None:
+    """parent_id is a plain nullable UUID without a database FK.
+
+    Phase 57 UAT gap-closure: TimescaleDB hypertables forbid the UNIQUE (id)
+    constraint that a self-FK would require, so parent_id is a plain UUID
+    column and integrity is managed at the application layer (raw alerts
+    persist before LLM follow-ups thread parent_id).
+    """
     from finalayze.core.models import AlertModel
 
     fks = list(AlertModel.__table__.foreign_keys)
-    expected_fk_count = 1
-    assert len(fks) == expected_fk_count, f"expected exactly 1 FK, found {len(fks)}"
-    fk = fks[0]
-    assert fk.column.table.name == "alerts"
-    assert fk.column.name == "id"
-    assert fk.ondelete == "SET NULL"
+    assert fks == [], f"AlertModel must have NO FKs (TimescaleDB conflict); found {fks!r}"
+    parent_col = AlertModel.__table__.c["parent_id"]
+    assert parent_col.nullable is True, "parent_id must be nullable"
+    assert str(parent_col.type) == "UUID", f"parent_id must be UUID; got {parent_col.type!r}"
 
 
 def test_alert_metadata_column_name() -> None:

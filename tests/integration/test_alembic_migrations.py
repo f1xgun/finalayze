@@ -134,6 +134,95 @@ def test_migration_008_idempotent() -> None:
         engine.dispose()
 
 
+def test_migration_009_creates_alerts_hypertable() -> None:
+    """Migration 009 must create `alerts` as a TimescaleDB hypertable on a fresh DB.
+
+    Regression for the Phase 57-UAT blocker (gap closure): the original migration
+    declared `PRIMARY KEY (timestamp, id)` plus `FOREIGN KEY (parent_id)
+    REFERENCES alerts(id)`, which Postgres rejects with `there is no unique
+    constraint matching given keys for referenced table "alerts"` — the composite
+    PK does not make the single `id` column unique. The fix adds an explicit
+    `UNIQUE (id)` constraint inside the CREATE TABLE body, satisfying the FK
+    requirement without altering the hypertable PK shape.
+
+    The static AST test in tests/integration/migrations/test_009_alerts.py
+    verified the SQL string contained the FK literal but did NOT execute it
+    against a real Postgres instance — that is why the bug shipped past the
+    Plan 01 verifier. This live-DB test closes that gap.
+    """
+    import sqlalchemy as sa
+    from alembic import command
+    from alembic.config import Config
+
+    url = _db_url()
+    cfg = Config("alembic/alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+
+    sync_url = _sync_url(url)
+    engine = sa.create_engine(sync_url)
+    try:
+        with engine.connect() as conn:
+            assert sa.inspect(engine).has_table("alerts"), (
+                "alerts table must exist after `alembic upgrade head`"
+            )
+
+            ht_row = conn.execute(
+                sa.text(
+                    "SELECT 1 FROM timescaledb_information.hypertables "
+                    "WHERE hypertable_name = 'alerts'"
+                )
+            ).fetchone()
+            assert ht_row is not None, "alerts must be registered as a TimescaleDB hypertable"
+
+            pk_cols = [
+                row[0]
+                for row in conn.execute(
+                    sa.text(
+                        "SELECT kcu.column_name "
+                        "FROM information_schema.table_constraints tc "
+                        "JOIN information_schema.key_column_usage kcu "
+                        "  ON tc.constraint_name = kcu.constraint_name "
+                        " AND tc.table_name = kcu.table_name "
+                        "WHERE tc.table_name = 'alerts' "
+                        "  AND tc.constraint_type = 'PRIMARY KEY' "
+                        "ORDER BY kcu.ordinal_position"
+                    )
+                ).fetchall()
+            ]
+            assert pk_cols == ["timestamp", "id"], (
+                f"Composite PK must be (timestamp, id); got {pk_cols!r}"
+            )
+
+            # parent_id is a plain nullable UUID without a self-FK — TimescaleDB
+            # hypertables forbid UNIQUE constraints that don't include the
+            # partition column, which would be required for a self-FK.
+            parent_id_col = conn.execute(
+                sa.text(
+                    "SELECT data_type, is_nullable "
+                    "FROM information_schema.columns "
+                    "WHERE table_name = 'alerts' AND column_name = 'parent_id'"
+                )
+            ).fetchone()
+            assert parent_id_col is not None, "parent_id column must exist"
+            assert parent_id_col[0] == "uuid", f"parent_id must be UUID; got {parent_id_col[0]!r}"
+            assert parent_id_col[1] == "YES", "parent_id must be nullable"
+
+            fk_count = conn.execute(
+                sa.text(
+                    "SELECT COUNT(*) "
+                    "FROM pg_constraint "
+                    "WHERE conrelid = 'alerts'::regclass "
+                    "  AND contype = 'f'"
+                )
+            ).scalar()
+            assert fk_count == 0, (
+                f"alerts must have NO foreign keys (TimescaleDB conflict); got {fk_count}"
+            )
+    finally:
+        engine.dispose()
+
+
 def test_migration_008_handles_pre_existing_populated_table() -> None:
     """Regression: migration 008 must convert a pre-populated plain table to a hypertable.
 

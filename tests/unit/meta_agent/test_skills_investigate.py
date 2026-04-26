@@ -12,9 +12,7 @@ from pathlib import Path
 # Module-level constants (PLR2004).
 _INVEST_MAX_TURNS = 20
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_INVESTIGATE_SKILL = (
-    _REPO_ROOT / ".claude" / "skills" / "meta-agent-investigate" / "SKILL.md"
-)
+_INVESTIGATE_SKILL = _REPO_ROOT / ".claude" / "skills" / "meta-agent-investigate" / "SKILL.md"
 
 
 def test_investigate_skill_exists_and_parses() -> None:
@@ -24,9 +22,7 @@ def test_investigate_skill_exists_and_parses() -> None:
     """
     from finalayze.meta_agent.skill_loader import load_skill
 
-    assert _INVESTIGATE_SKILL.exists(), (
-        f"Missing investigate skill at {_INVESTIGATE_SKILL}"
-    )
+    assert _INVESTIGATE_SKILL.exists(), f"Missing investigate skill at {_INVESTIGATE_SKILL}"
 
     spec = load_skill(_INVESTIGATE_SKILL)
     assert spec.name == "meta-agent-investigate"

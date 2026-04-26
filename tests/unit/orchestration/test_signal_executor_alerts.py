@@ -50,7 +50,9 @@ def _make_signal(
     )
 
 
-def _make_executor(broker_positions: dict[str, Decimal] | None = None) -> tuple[
+def _make_executor(
+    broker_positions: dict[str, Decimal] | None = None,
+) -> tuple[
     SignalExecutor,
     MagicMock,
     MagicMock,
@@ -163,9 +165,7 @@ def test_signal_alert_fires_on_new_position() -> None:
     executor, alerter, broker = _make_executor(broker_positions={})
     signal = _make_signal(confidence=_HIGH_CONF, direction=SignalDirection.BUY)
 
-    _fire_alert_if_eligible(
-        executor, signal, market_id="moex", symbol="SBER", broker=broker
-    )
+    _fire_alert_if_eligible(executor, signal, market_id="moex", symbol="SBER", broker=broker)
 
     alerter.on_signal_generated.assert_called_once()
     kwargs = alerter.on_signal_generated.call_args.kwargs
@@ -181,9 +181,7 @@ def test_signal_alert_confidence_gate_skips_below_threshold() -> None:
     executor, alerter, broker = _make_executor(broker_positions={})
     signal = _make_signal(confidence=_LOW_CONF, direction=SignalDirection.BUY)
 
-    _fire_alert_if_eligible(
-        executor, signal, market_id="moex", symbol="SBER", broker=broker
-    )
+    _fire_alert_if_eligible(executor, signal, market_id="moex", symbol="SBER", broker=broker)
 
     alerter.on_signal_generated.assert_not_called()
 
@@ -193,9 +191,7 @@ def test_signal_alert_position_context_add_long() -> None:
     executor, alerter, broker = _make_executor(broker_positions={"SBER": _QTY_HELD})
     signal = _make_signal(confidence=_HIGH_CONF, direction=SignalDirection.BUY)
 
-    _fire_alert_if_eligible(
-        executor, signal, market_id="moex", symbol="SBER", broker=broker
-    )
+    _fire_alert_if_eligible(executor, signal, market_id="moex", symbol="SBER", broker=broker)
 
     alerter.on_signal_generated.assert_called_once()
     assert alerter.on_signal_generated.call_args.kwargs["position_context"] == "ADD"
@@ -206,9 +202,7 @@ def test_signal_alert_position_context_flip_long_to_sell() -> None:
     executor, alerter, broker = _make_executor(broker_positions={"SBER": _QTY_HELD})
     signal = _make_signal(confidence=_HIGH_CONF, direction=SignalDirection.SELL)
 
-    _fire_alert_if_eligible(
-        executor, signal, market_id="moex", symbol="SBER", broker=broker
-    )
+    _fire_alert_if_eligible(executor, signal, market_id="moex", symbol="SBER", broker=broker)
 
     alerter.on_signal_generated.assert_called_once()
     assert alerter.on_signal_generated.call_args.kwargs["position_context"] == "FLIP"
@@ -223,9 +217,7 @@ def test_signal_alert_strategy_breakdown_passed_through() -> None:
         features={"a_confidence": 0.3, "b_confidence": 0.9, "c_confidence": 0.6},
     )
 
-    _fire_alert_if_eligible(
-        executor, signal, market_id="moex", symbol="SBER", broker=broker
-    )
+    _fire_alert_if_eligible(executor, signal, market_id="moex", symbol="SBER", broker=broker)
 
     alerter.on_signal_generated.assert_called_once()
     breakdown = alerter.on_signal_generated.call_args.kwargs["strategy_breakdown"]
@@ -239,9 +231,7 @@ def test_signal_alert_exception_does_not_propagate() -> None:
     signal = _make_signal(confidence=_HIGH_CONF, direction=SignalDirection.BUY)
 
     # Must NOT raise.
-    _fire_alert_if_eligible(
-        executor, signal, market_id="moex", symbol="SBER", broker=broker
-    )
+    _fire_alert_if_eligible(executor, signal, market_id="moex", symbol="SBER", broker=broker)
     alerter.on_signal_generated.assert_called_once()
 
 
@@ -252,9 +242,7 @@ def test_signal_alert_no_alerter_is_noop() -> None:
     signal = _make_signal(confidence=_HIGH_CONF, direction=SignalDirection.BUY)
 
     # Must NOT raise.
-    _fire_alert_if_eligible(
-        executor, signal, market_id="moex", symbol="SBER", broker=broker
-    )
+    _fire_alert_if_eligible(executor, signal, market_id="moex", symbol="SBER", broker=broker)
 
 
 def test_alert_block_present_in_process_instrument_source() -> None:

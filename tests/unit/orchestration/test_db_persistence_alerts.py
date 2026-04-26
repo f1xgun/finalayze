@@ -65,6 +65,7 @@ def test_persist_alert_fire_and_forget_on_db_failure(
 ) -> None:
     """persist_alert MUST NOT raise on _persist_to_db failure; counter increments."""
     persistence = _make_persistence()
+
     # Force the underlying _run_async to raise — exercises the real PERSIST-05
     # envelope inside _persist_to_db (logs db_persist_failed + increments counter).
     # Close the coroutine to suppress 'coroutine was never awaited' RuntimeWarning.

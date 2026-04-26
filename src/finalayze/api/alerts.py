@@ -541,7 +541,13 @@ class TelegramAlerter:
         block the send).
         """
         alert_id = self._persist_alert_before_send(
-            text, alert_type, priority, symbol, market_id, parent_id, alert_metadata,
+            text,
+            alert_type,
+            priority,
+            symbol,
+            market_id,
+            parent_id,
+            alert_metadata,
         )
 
         if not self._token:
@@ -587,7 +593,13 @@ class TelegramAlerter:
         Same persist-before/update-after envelope as ``_send``.
         """
         alert_id = self._persist_alert_before_send(
-            text, alert_type, priority, symbol, market_id, parent_id, alert_metadata,
+            text,
+            alert_type,
+            priority,
+            symbol,
+            market_id,
+            parent_id,
+            alert_metadata,
         )
 
         if not self._token:

@@ -15,10 +15,12 @@ body alone must NOT break tests — only schema changes do.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Module-level defaults — keep numeric/string constants out of the dataclass
 # definition so callers can override per-skill from the YAML.

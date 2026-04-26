@@ -134,12 +134,9 @@ async def test_build_snapshot_alerts_endpoint_500_sets_field_none(
     partial_events = [
         log
         for log in logs
-        if log.get("event") == "meta_agent_snapshot_partial"
-        and log.get("endpoint") == "alerts"
+        if log.get("event") == "meta_agent_snapshot_partial" and log.get("endpoint") == "alerts"
     ]
-    assert partial_events, (
-        f"Expected meta_agent_snapshot_partial(endpoint='alerts'); got {logs!r}"
-    )
+    assert partial_events, f"Expected meta_agent_snapshot_partial(endpoint='alerts'); got {logs!r}"
     assert partial_events[0].get("status") == _HTTP_INTERNAL_ERROR
 
     await client.aclose()

@@ -33,12 +33,12 @@ import asyncio
 import os
 import signal
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from uuid import UUID
 
 _log = structlog.get_logger()
@@ -103,7 +103,7 @@ async def _drain(stream: asyncio.StreamReader | None) -> bytes:
         return b""
     try:
         return await asyncio.wait_for(stream.read(), timeout=_DRAIN_TIMEOUT_S)
-    except (TimeoutError, asyncio.TimeoutError):
+    except TimeoutError:
         return b""
 
 
@@ -138,7 +138,7 @@ async def _terminate_process_group(
     try:
         await asyncio.wait_for(proc.wait(), timeout=grace_s)
         return  # Cooperative shutdown succeeded.
-    except (TimeoutError, asyncio.TimeoutError):
+    except TimeoutError:
         pass
 
     # SIGKILL phase — unblockable; kernel guarantees fast reap.
@@ -149,7 +149,7 @@ async def _terminate_process_group(
 
     try:
         await asyncio.wait_for(proc.wait(), timeout=kill_s)
-    except (TimeoutError, asyncio.TimeoutError):
+    except TimeoutError:
         # Should be unreachable on a sane kernel — but never raise from
         # the killswitch path.
         _log.warning(
@@ -174,11 +174,15 @@ def _build_argv(
     """
     argv: list[str] = [
         "claude",
-        "-p", prompt,
-        "--output-format", "stream-json",
+        "-p",
+        prompt,
+        "--output-format",
+        "stream-json",
         "--verbose",
-        "--allowedTools", allowed_tools,
-        "--max-turns", max_turns,
+        "--allowedTools",
+        allowed_tools,
+        "--max-turns",
+        max_turns,
     ]
     if cwd is not None:
         argv.extend(["--add-dir", str(cwd)])
@@ -195,7 +199,7 @@ def _strip_anthropic_api_key(env: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in env.items() if k != "ANTHROPIC_API_KEY"}
 
 
-async def spawn_readonly(  # noqa: PLR0913 — kwargs are config knobs, not hidden state
+async def spawn_readonly(
     prompt: str,
     *,
     decision_id: UUID,
@@ -276,7 +280,7 @@ async def spawn_readonly(  # noqa: PLR0913 — kwargs are config knobs, not hidd
                 proc.communicate(),
                 timeout=timeout_s,
             )
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             timed_out = True
             _log.warning(
                 "meta_agent_spawn_timeout",
@@ -285,7 +289,9 @@ async def spawn_readonly(  # noqa: PLR0913 — kwargs are config knobs, not hidd
                 timeout_s=timeout_s,
             )
             await _terminate_process_group(
-                proc, grace_s=sigterm_grace_s, kill_s=sigkill_reap_s,
+                proc,
+                grace_s=sigterm_grace_s,
+                kill_s=sigkill_reap_s,
             )
             stdout_bytes = await _drain(proc.stdout)
             stderr_bytes = await _drain(proc.stderr)
@@ -297,7 +303,9 @@ async def spawn_readonly(  # noqa: PLR0913 — kwargs are config knobs, not hidd
                 spawn_type="investigate",
             )
             await _terminate_process_group(
-                proc, grace_s=sigterm_grace_s, kill_s=sigkill_reap_s,
+                proc,
+                grace_s=sigterm_grace_s,
+                kill_s=sigkill_reap_s,
             )
             raise
         finally:

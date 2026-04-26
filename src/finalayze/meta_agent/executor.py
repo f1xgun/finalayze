@@ -146,7 +146,9 @@ class ActionExecutor:
                 severity_key=decision.severity,
             )
             return ExecutionResult(
-                skipped=True, reason="dry_run", telegram_alert_id=None,
+                skipped=True,
+                reason="dry_run",
+                telegram_alert_id=None,
             )
 
         # SPEC §Requirement 5: only WATCH/INVESTIGATE/FIX trigger Telegram.
@@ -187,7 +189,9 @@ class ActionExecutor:
                 status="queued_capped",
             )
             return ExecutionResult(
-                skipped=True, reason="telegram_cap_hit", telegram_alert_id=None,
+                skipped=True,
+                reason="telegram_cap_hit",
+                telegram_alert_id=None,
             )
 
         # Build the message body — operator-friendly summary + rationale.
@@ -213,7 +217,9 @@ class ActionExecutor:
                 outcome="telegram_send_failed",
             )
             return ExecutionResult(
-                skipped=True, reason="telegram_send_failed", telegram_alert_id=None,
+                skipped=True,
+                reason="telegram_send_failed",
+                telegram_alert_id=None,
             )
 
         # Single UPDATE that flips status and stamps decision_metadata
@@ -232,7 +238,9 @@ class ActionExecutor:
             count_before=count,
         )
         return ExecutionResult(
-            skipped=False, reason=None, telegram_alert_id=alert_id,
+            skipped=False,
+            reason=None,
+            telegram_alert_id=alert_id,
         )
 
     @staticmethod
@@ -243,9 +251,7 @@ class ActionExecutor:
         dependency-free so 58-03/58-04 can extend without breaking the
         Phase 57 escape conventions (D-09).
         """
-        return (
-            f"[meta-agent {decision.severity}] {decision.summary}\n{decision.rationale}"
-        )
+        return f"[meta-agent {decision.severity}] {decision.summary}\n{decision.rationale}"
 
     async def _telegram_count_today(self, session: Any) -> int:
         """Return the count of meta-agent Telegram alerts already sent in the
@@ -260,9 +266,13 @@ class ActionExecutor:
 
         from finalayze.core.models import AlertModel  # noqa: PLC0415
 
-        stmt = select(func.count()).select_from(AlertModel).where(
-            AlertModel.alert_type.like("meta_agent_%"),
-            AlertModel.timestamp >= text("date_trunc('day', NOW() AT TIME ZONE 'UTC')"),
+        stmt = (
+            select(func.count())
+            .select_from(AlertModel)
+            .where(
+                AlertModel.alert_type.like("meta_agent_%"),
+                AlertModel.timestamp >= text("date_trunc('day', NOW() AT TIME ZONE 'UTC')"),
+            )
         )
         result = await session.execute(stmt)
         return int(result.scalar_one())

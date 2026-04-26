@@ -46,7 +46,9 @@ async def test_run_one_tick_dry_run_writes_one_decision_no_side_effects(
 
     monkeypatch.setattr(runner_module, "build_snapshot", _fake_build_snapshot)
     monkeypatch.setattr(
-        runner_module, "classify", lambda _snap: Severity.HEALTHY,
+        runner_module,
+        "classify",
+        lambda _snap: Severity.HEALTHY,
     )
 
     persistence = MagicMock()
@@ -116,7 +118,9 @@ async def test_five_tick_dry_run_writes_five_rows(
 
     monkeypatch.setattr(runner_module, "build_snapshot", _fake_build_snapshot)
     monkeypatch.setattr(
-        runner_module, "classify", lambda _snap: Severity.INVESTIGATE,
+        runner_module,
+        "classify",
+        lambda _snap: Severity.INVESTIGATE,
     )
 
     persistence = MagicMock()
@@ -154,9 +158,7 @@ async def test_five_tick_dry_run_writes_five_rows(
     telegram_alerter._send.assert_not_called()
 
     # Five classify-completed events.
-    classify_events = [
-        log for log in logs if log.get("event") == "meta_agent_classify_completed"
-    ]
+    classify_events = [log for log in logs if log.get("event") == "meta_agent_classify_completed"]
     assert len(classify_events) == _NUM_TICKS
 
 
@@ -199,7 +201,9 @@ async def test_runner_invokes_executor_when_not_dry_run(
 
     monkeypatch.setattr(runner_module, "build_snapshot", _fake_build_snapshot)
     monkeypatch.setattr(
-        runner_module, "classify", lambda _snap: Severity.INVESTIGATE,
+        runner_module,
+        "classify",
+        lambda _snap: Severity.INVESTIGATE,
     )
 
     persistence = MagicMock()
@@ -228,8 +232,7 @@ async def test_runner_invokes_executor_when_not_dry_run(
 
     # executor.execute called exactly once with a single positional decision arg.
     assert executor.execute.call_count == 1, (
-        f"executor.execute must run when not dry_run, got "
-        f"call_count={executor.execute.call_count}"
+        f"executor.execute must run when not dry_run, got call_count={executor.execute.call_count}"
     )
     # Inspect the decision-shaped arg passed.
     call = executor.execute.call_args

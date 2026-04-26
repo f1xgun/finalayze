@@ -35,6 +35,18 @@ depends_on: str | None = None
 def upgrade() -> None:
     # IF NOT EXISTS — defensive against Base.metadata.create_all() bootstrap
     # (per 2026-04-19 lesson on migration 008 daily_equity_snapshots).
+    # parent_id is a plain nullable UUID — NO database-level FK to alerts(id).
+    # Two TimescaleDB constraints make a real self-FK impractical:
+    #   1. Hypertables forbid UNIQUE constraints that don't include the
+    #      partition column (timestamp), so we can't put UNIQUE on `id`.
+    #   2. Without UNIQUE on `id`, Postgres can't accept FOREIGN KEY
+    #      (parent_id) REFERENCES alerts(id).
+    # parent_id integrity is managed at the application layer: the anomaly
+    # path threads parent_id only after the raw alert has been persisted
+    # (TelegramAlerter._send returns the alert_id only AFTER successful
+    # write). On any insert failure the persist envelope swallows + logs;
+    # alerts is an audit log with 365-day retention, so dangling parent_id
+    # references are cosmetic — the dashboard /alerts page tolerates orphans.
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS alerts (
@@ -48,8 +60,7 @@ def upgrade() -> None:
             parent_id UUID,
             delivery_status VARCHAR(10) NOT NULL DEFAULT 'queued',
             metadata JSONB,
-            PRIMARY KEY (timestamp, id),
-            FOREIGN KEY (parent_id) REFERENCES alerts(id) ON DELETE SET NULL
+            PRIMARY KEY (timestamp, id)
         )
         """
     )
@@ -81,14 +92,8 @@ def upgrade() -> None:
         "  timescaledb.compress_segmentby = 'alert_type'"
         ")"
     )
-    op.execute(
-        "SELECT add_compression_policy('alerts', INTERVAL '30 days', "
-        "if_not_exists => TRUE)"
-    )
-    op.execute(
-        "SELECT add_retention_policy('alerts', INTERVAL '365 days', "
-        "if_not_exists => TRUE)"
-    )
+    op.execute("SELECT add_compression_policy('alerts', INTERVAL '30 days', if_not_exists => TRUE)")
+    op.execute("SELECT add_retention_policy('alerts', INTERVAL '365 days', if_not_exists => TRUE)")
 
 
 def downgrade() -> None:

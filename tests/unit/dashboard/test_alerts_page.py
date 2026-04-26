@@ -95,17 +95,13 @@ def test_render_passes_filter_params() -> None:
         page_mod.render(api)
 
     # Inspect the kwargs of the first /api/v1/alerts call.
-    alert_calls = [
-        c for c in api.get.call_args_list if "/api/v1/alerts" in c.args[0]
-    ]
+    alert_calls = [c for c in api.get.call_args_list if "/api/v1/alerts" in c.args[0]]
     assert alert_calls, "Expected at least one /api/v1/alerts call"
     params = alert_calls[0].kwargs.get("params", {})
     assert params.get("alert_type") == ["stop_loss"], (
         f"alert_type should be ['stop_loss'], got {params.get('alert_type')!r}"
     )
-    assert params.get("symbol") == "SBER", (
-        f"symbol should be 'SBER', got {params.get('symbol')!r}"
-    )
+    assert params.get("symbol") == "SBER", f"symbol should be 'SBER', got {params.get('symbol')!r}"
     assert params.get("priority") == "INFO", (
         f"priority should be 'INFO', got {params.get('priority')!r}"
     )
@@ -300,9 +296,7 @@ def test_api_client_list_alerts_helper() -> None:
     assert params.get("alert_type") == ["signal"], (
         f"alert_type should be ['signal'], got {params.get('alert_type')!r}"
     )
-    assert params.get("symbol") == "SBER", (
-        f"symbol should be 'SBER', got {params.get('symbol')!r}"
-    )
+    assert params.get("symbol") == "SBER", f"symbol should be 'SBER', got {params.get('symbol')!r}"
     assert isinstance(result, dict)
     assert "alerts" in result
 

@@ -1,7 +1,7 @@
 """Tests for meta_agent.scheduler (Phase 58-01, META-04 wiring).
 
-  - register_meta_agent_job: only adds the job when settings.meta_agent_enabled
-  - _meta_agent_cycle: sync wrapper that defers to asyncio.run_coroutine_threadsafe
+- register_meta_agent_job: only adds the job when settings.meta_agent_enabled
+- _meta_agent_cycle: sync wrapper that defers to asyncio.run_coroutine_threadsafe
 """
 
 from __future__ import annotations
@@ -27,7 +27,10 @@ def test_register_meta_agent_job_only_when_enabled() -> None:
     runner = MagicMock()
 
     result = register_meta_agent_job(
-        scheduler, settings=settings, runner=runner, async_loop=None,
+        scheduler,
+        settings=settings,
+        runner=runner,
+        async_loop=None,
     )
 
     assert result is False
@@ -47,7 +50,10 @@ def test_register_meta_agent_job_adds_interval_job_when_enabled() -> None:
     runner = MagicMock()
 
     result = register_meta_agent_job(
-        scheduler, settings=settings, runner=runner, async_loop=None,
+        scheduler,
+        settings=settings,
+        runner=runner,
+        async_loop=None,
     )
 
     assert result is True

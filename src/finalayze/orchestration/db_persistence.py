@@ -501,8 +501,16 @@ class TradingPersistence:
         # precedent in persist_stop_snapshots).
         self._persist_to_db(
             self._persist_alert_async(
-                alert_id, timestamp, alert_type, priority, symbol, market_id,
-                message, parent_id, delivery_status, alert_metadata,
+                alert_id,
+                timestamp,
+                alert_type,
+                priority,
+                symbol,
+                market_id,
+                message,
+                parent_id,
+                delivery_status,
+                alert_metadata,
             ),
             table="alerts",
             alert_type_key=alert_type,
@@ -628,8 +636,15 @@ class TradingPersistence:
         # precedent in persist_alert).
         self._persist_to_db(
             self._persist_decision_async(
-                decision_id, timestamp, severity, summary, rationale,
-                actions, dry_run, decision_metadata, parent_decision_id,
+                decision_id,
+                timestamp,
+                severity,
+                summary,
+                rationale,
+                actions,
+                dry_run,
+                decision_metadata,
+                parent_decision_id,
                 status,
             ),
             table="agent_decisions",
@@ -705,7 +720,11 @@ class TradingPersistence:
         """
         self._persist_to_db(
             self._update_decision_status_async(
-                decision_id, timestamp, status, outcome, metadata_patch,
+                decision_id,
+                timestamp,
+                status,
+                outcome,
+                metadata_patch,
             ),
             table="agent_decisions",
             op="status_update",
@@ -736,13 +755,17 @@ class TradingPersistence:
 
         factory = self._get_bg_session_factory()
         async with factory() as session:
-            stmt = select(func.count()).select_from(MetaAgentDecisionModel).where(
-                MetaAgentDecisionModel.severity == severity,
-                MetaAgentDecisionModel.status.in_(
-                    ["spawned", "completed", "failed"],
-                ),
-                MetaAgentDecisionModel.timestamp
-                >= text("date_trunc('day', NOW() AT TIME ZONE 'UTC')"),
+            stmt = (
+                select(func.count())
+                .select_from(MetaAgentDecisionModel)
+                .where(
+                    MetaAgentDecisionModel.severity == severity,
+                    MetaAgentDecisionModel.status.in_(
+                        ["spawned", "completed", "failed"],
+                    ),
+                    MetaAgentDecisionModel.timestamp
+                    >= text("date_trunc('day', NOW() AT TIME ZONE 'UTC')"),
+                )
             )
             result = await session.execute(stmt)
             return int(result.scalar_one())

@@ -91,9 +91,7 @@ def test_migration_downgrade_drops_table() -> None:
     src = _read_migration_source()
     tree = ast.parse(src)
     downgrade_fn = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "downgrade"
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "downgrade"
     )
     downgrade_src = ast.unparse(downgrade_fn)
     assert "DROP TABLE IF EXISTS agent_decisions" in downgrade_src

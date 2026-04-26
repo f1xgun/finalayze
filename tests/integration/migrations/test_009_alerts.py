@@ -64,9 +64,29 @@ def test_migration_uses_create_table_if_not_exists() -> None:
     assert "CREATE TABLE IF NOT EXISTS alerts" in src
 
 
-def test_migration_has_fk_on_delete_set_null() -> None:
+def test_migration_parent_id_is_plain_uuid_without_fk() -> None:
+    """parent_id is a nullable UUID without a database-level self-FK.
+
+    Phase 57 UAT gap-closure: TimescaleDB hypertables forbid UNIQUE
+    constraints that exclude the partition column (timestamp), so a
+    self-FK on alerts(id) is impractical — the FK requires UNIQUE on
+    `id` alone, which conflicts with the hypertable rule. parent_id
+    integrity is managed at the application layer instead (raw alerts
+    persist before LLM follow-ups thread parent_id).
+
+    Migration 009 must therefore declare parent_id as a plain nullable
+    UUID with NO FOREIGN KEY clause and NO UNIQUE (id) constraint.
+    """
     src = _read_migration_source()
-    assert "FOREIGN KEY (parent_id) REFERENCES alerts(id) ON DELETE SET NULL" in src
+    assert "parent_id UUID" in src, "parent_id must remain a nullable UUID column"
+    assert "FOREIGN KEY (parent_id)" not in src, (
+        "parent_id must NOT carry a database FK — TimescaleDB hypertable "
+        "constraint conflict; integrity is managed at the application layer"
+    )
+    assert "UNIQUE (id)" not in src, (
+        "alerts must NOT declare UNIQUE (id) — TimescaleDB rejects UNIQUE "
+        "constraints that don't include the partition column (timestamp)"
+    )
 
 
 def test_migration_has_compression_and_retention() -> None:
@@ -80,8 +100,7 @@ def test_migration_downgrade_drops_table() -> None:
     src = _read_migration_source()
     tree = ast.parse(src)
     downgrade_fn = next(
-        node for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "downgrade"
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "downgrade"
     )
     downgrade_src = ast.unparse(downgrade_fn)
     assert "DROP TABLE IF EXISTS alerts" in downgrade_src

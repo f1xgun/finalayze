@@ -8,8 +8,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies
-RUN uv sync --frozen --no-dev
+# Install dependencies.
+# BuildKit cache mount keeps uv's wheel cache between builds — see Dockerfile.prod
+# for the full rationale.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    UV_LINK_MODE=copy UV_HTTP_TIMEOUT=300 uv sync --frozen --no-dev
 
 # Copy application
 COPY src/ src/

@@ -1545,7 +1545,9 @@ class TradingLoop:
             )
         except Exception:
             _log.warning(
-                "anomaly_raw_send_failed", symbol=symbol, market_id=market_id,
+                "anomaly_raw_send_failed",
+                symbol=symbol,
+                market_id=market_id,
             )
             return None
 
@@ -1556,7 +1558,10 @@ class TradingLoop:
             # growing list across cycles.
             self._anomaly_enrich_task = asyncio.create_task(
                 self._enrich_anomaly_async(
-                    symbol, market_id, anomaly, parent_id=raw_alert_id,
+                    symbol,
+                    market_id,
+                    anomaly,
+                    parent_id=raw_alert_id,
                 ),
             )
         return raw_alert_id
@@ -1687,14 +1692,16 @@ class TradingLoop:
                 factory = self._persistence._get_bg_session_factory()
                 async with factory() as session:
                     recap = await compute_daily_recap(
-                        session, datetime.now(tz=UTC),
+                        session,
+                        datetime.now(tz=UTC),
                     )
                 # model_copy with update keyword — Pydantic v2 idiom,
                 # preserves frozen-model immutability.
                 result = result.model_copy(update=recap)
             except Exception:
                 _log.warning(
-                    "portfolio_review_recap_merge_failed", exc_info=True,
+                    "portfolio_review_recap_merge_failed",
+                    exc_info=True,
                 )
             message = format_review_telegram(result)
             await self._alerter._send(

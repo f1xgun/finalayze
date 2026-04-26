@@ -70,9 +70,7 @@ def _count_recent(
     now: datetime,
 ) -> int:
     return sum(
-        1
-        for a in alerts
-        if a.priority.upper() == priority and _alert_age(a, now=now) <= window
+        1 for a in alerts if a.priority.upper() == priority and _alert_age(a, now=now) <= window
     )
 
 
@@ -102,7 +100,10 @@ def classify(snapshot: Snapshot) -> Severity:
 
     # FIX: ≥1 CRITICAL/30min OR DD>5.0 OR persist_failures>=3
     critical_30m = _count_recent(
-        alerts, priority="CRITICAL", window=_FIX_ALERT_WINDOW, now=now,
+        alerts,
+        priority="CRITICAL",
+        window=_FIX_ALERT_WINDOW,
+        now=now,
     )
     if (
         critical_30m >= 1
@@ -113,16 +114,20 @@ def classify(snapshot: Snapshot) -> Severity:
 
     # INVESTIGATE: ≥1 IMPORTANT/30min OR DD>3.0
     important_30m = _count_recent(
-        alerts, priority="IMPORTANT", window=_FIX_ALERT_WINDOW, now=now,
+        alerts,
+        priority="IMPORTANT",
+        window=_FIX_ALERT_WINDOW,
+        now=now,
     )
-    if important_30m >= 1 or (
-        drawdown is not None and drawdown > _INVESTIGATE_DRAWDOWN_THRESHOLD
-    ):
+    if important_30m >= 1 or (drawdown is not None and drawdown > _INVESTIGATE_DRAWDOWN_THRESHOLD):
         return Severity.INVESTIGATE
 
     # WATCH: ≥5 INFO/hour OR ml_err > 0.01
     info_1h = _count_recent(
-        alerts, priority="INFO", window=_WATCH_ALERT_WINDOW, now=now,
+        alerts,
+        priority="INFO",
+        window=_WATCH_ALERT_WINDOW,
+        now=now,
     )
     if info_1h >= _WATCH_INFO_PER_HOUR_THRESHOLD or (
         ml_err is not None and ml_err > _WATCH_ML_ERROR_RATE_THRESHOLD
