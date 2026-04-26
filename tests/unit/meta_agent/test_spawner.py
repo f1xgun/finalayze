@@ -40,7 +40,14 @@ _EXIT_TIMEOUT = -1
 
 
 class _FakeProcess:
-    """Stand-in for ``asyncio.subprocess.Process`` — records what the spawner does."""
+    """Stand-in for ``asyncio.subprocess.Process`` — records what the spawner does.
+
+    ``ignore_sigterm=True`` makes ``wait()`` block forever (or until
+    ``returncode`` is set externally, e.g. by a fake SIGKILL handler).
+    Useful for testing SIGTERM→SIGKILL escalation: the fake represents a
+    process that doesn't honor SIGTERM, forcing the spawner into the
+    SIGKILL phase.
+    """
 
     def __init__(
         self,
@@ -49,6 +56,7 @@ class _FakeProcess:
         stderr: bytes = b"",
         exit_code: int = 0,
         sleep_before_exit: float = 0.0,
+        ignore_sigterm: bool = False,
     ) -> None:
         self.pid: int = _FAKE_PID
         self.returncode: int | None = None
@@ -56,6 +64,7 @@ class _FakeProcess:
         self._stderr = stderr
         self._exit_code = exit_code
         self._sleep = sleep_before_exit
+        self._ignore_sigterm = ignore_sigterm
         self.terminate_called = False
         self.kill_called = False
 
@@ -66,6 +75,12 @@ class _FakeProcess:
         return self._stdout, self._stderr
 
     async def wait(self) -> int:
+        # Spin until returncode is set — by either communicate() (happy path)
+        # or by an external SIGKILL handler that mutates returncode.
+        if self._ignore_sigterm:
+            while self.returncode is None:
+                await asyncio.sleep(0.01)
+            return self.returncode
         if self.returncode is None:
             self.returncode = self._exit_code
         return self.returncode
@@ -226,4 +241,103 @@ async def test_spawn_readonly_strips_inflight_handle_after_exit(
 
     assert _FAKE_DECISION_ID not in sp._inflight_handles, (
         "spawn_readonly must clear _inflight_handles[decision_id] in finally"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-03-05: 300s timeout terminates process group (SIGTERM → SIGKILL)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_spawn_readonly_timeout_terminates_process_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #10: when ``proc.communicate()`` exceeds ``timeout_s``,
+    spawn_readonly:
+      1. Calls ``os.killpg(pgid, SIGTERM)``.
+      2. Waits up to ``sigterm_grace_s`` for the proc to exit.
+      3. On second timeout, calls ``os.killpg(pgid, SIGKILL)``.
+      4. Returns SpawnOutcome(timed_out=True, killed_by_killswitch=False).
+      5. Emits structlog event ``meta_agent_spawn_timeout``.
+
+    Test parameters use shortened grace + kill windows so the wall-clock
+    bound stays under a second.
+    """
+    import structlog
+
+    from finalayze.meta_agent.spawner import spawn_readonly
+
+    # FakeProcess never finishes communicate() within the test timeout, AND
+    # ignores SIGTERM (forcing the spawner into the SIGKILL escalation path).
+    fake_proc = _FakeProcess(
+        stdout=b"partial output\n",
+        stderr=b"",
+        sleep_before_exit=_LONG_SLEEP,
+        ignore_sigterm=True,
+    )
+
+    async def _fake_create(*_args: Any, **_kwargs: Any) -> _FakeProcess:
+        return fake_proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+
+    # Record killpg signals + arguments.
+    killpg_calls: list[tuple[int, int]] = []
+
+    def _fake_killpg(pgid: int, sig: int) -> None:
+        killpg_calls.append((pgid, sig))
+        # Simulate SIGKILL effect — set returncode so wait() returns.
+        if sig == signal.SIGKILL:
+            fake_proc.returncode = -signal.SIGKILL
+
+    def _fake_getpgid(_pid: int) -> int:
+        return _FAKE_PGID
+
+    monkeypatch.setattr(os, "killpg", _fake_killpg)
+    monkeypatch.setattr(os, "getpgid", _fake_getpgid)
+
+    start = time.monotonic()
+    with structlog.testing.capture_logs() as logs:
+        outcome = await spawn_readonly(
+            "blocking prompt",
+            decision_id=_FAKE_DECISION_ID,
+            timeout_s=_TIMEOUT_SHORT,
+            sigterm_grace_s=_GRACE_TEST,
+            sigkill_reap_s=_KILL_TEST,
+        )
+    elapsed = time.monotonic() - start
+
+    # Wall-clock: timeout (~2s) + grace (0.2s) + kill (0.2s) ≈ 2.4s.
+    # Allow generous headroom for slow CI machines.
+    max_wall_s = _TIMEOUT_SHORT + _GRACE_TEST + _KILL_TEST + 1.0
+    assert elapsed < max_wall_s, (
+        f"timeout path took {elapsed:.2f}s; expected < {max_wall_s:.2f}s"
+    )
+
+    # Outcome shape.
+    assert outcome.timed_out is True, f"expected timed_out=True, got {outcome!r}"
+    assert outcome.killed_by_killswitch is False
+    # exit_code falls back to -SIGKILL (set by our fake) or -1 if proc never reaped.
+
+    # SIGTERM then SIGKILL on the pgid.
+    sig_seq = [sig for (_pgid, sig) in killpg_calls]
+    assert signal.SIGTERM in sig_seq, f"expected SIGTERM call, got {killpg_calls!r}"
+    assert signal.SIGKILL in sig_seq, f"expected SIGKILL call, got {killpg_calls!r}"
+    # Order: SIGTERM first, then SIGKILL.
+    sigterm_idx = sig_seq.index(signal.SIGTERM)
+    sigkill_idx = sig_seq.index(signal.SIGKILL)
+    assert sigterm_idx < sigkill_idx, (
+        f"SIGTERM must precede SIGKILL; sequence={sig_seq!r}"
+    )
+    # All calls used the same pgid (process-group control).
+    pgids = {pgid for (pgid, _sig) in killpg_calls}
+    assert pgids == {_FAKE_PGID}, f"expected single pgid {_FAKE_PGID}, got {pgids}"
+
+    # Structlog event emitted.
+    timeout_events = [
+        log for log in logs if log.get("event") == "meta_agent_spawn_timeout"
+    ]
+    assert len(timeout_events) == 1, (
+        f"expected 1 meta_agent_spawn_timeout event, got {timeout_events!r}"
     )
