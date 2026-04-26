@@ -712,6 +712,41 @@ class TradingPersistence:
             status=status,
         )
 
+    # ── Phase 58-03 META-06: spawn-cap query for INVESTIGATE/FIX ────────────
+    # AP-14: cap reads agent_decisions (NOT alerts). Status filter mirrors
+    # SPEC §Requirement 6 line 57: ('spawned','completed','failed') so that
+    # 'rejected' / 'queued_capped' / 'expired' rows do NOT consume budget.
+    # UTC-day boundary via date_trunc('day', NOW() AT TIME ZONE 'UTC') (D-13).
+
+    async def _spawn_count_today_async(self, severity: str) -> int:
+        """Count agent_decisions rows for today's UTC day, by severity.
+
+        Filter: ``severity == <severity> AND status IN ('spawned',
+        'completed', 'failed') AND timestamp >= date_trunc('day', NOW() AT
+        TIME ZONE 'UTC')``. Used by ``ActionExecutor.execute_investigate_spawn``
+        (Plan 58-03 Task 08) and the FIX-spawn path (Plan 58-04).
+
+        Bypasses the PERSIST-05 envelope because the executor needs the
+        actual count synchronously — DB failure surfaces as an exception
+        which the executor treats conservatively (skip the spawn).
+        """
+        from sqlalchemy import func, select, text  # noqa: PLC0415
+
+        from finalayze.core.models import MetaAgentDecisionModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            stmt = select(func.count()).select_from(MetaAgentDecisionModel).where(
+                MetaAgentDecisionModel.severity == severity,
+                MetaAgentDecisionModel.status.in_(
+                    ["spawned", "completed", "failed"],
+                ),
+                MetaAgentDecisionModel.timestamp
+                >= text("date_trunc('day', NOW() AT TIME ZONE 'UTC')"),
+            )
+            result = await session.execute(stmt)
+            return int(result.scalar_one())
+
     async def persist_sentiment_batch_async(
         self,
         ticker_scores: dict[str, float],
