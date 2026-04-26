@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from finalayze.meta_agent.classifier import Severity
+
 if TYPE_CHECKING:
     from config.settings import Settings
 
@@ -90,7 +92,23 @@ class ActionExecutor:
                 skipped=True, reason="dry_run", telegram_alert_id=None,
             )
 
-        # Subsequent branches added by Tasks 58-02-03 → 58-02-06.
+        # SPEC §Requirement 5: only WATCH/INVESTIGATE/FIX trigger Telegram.
+        # HEALTHY decisions are persisted (status='queued' from runner) and
+        # the executor returns without action. The runner's persist already
+        # captured the row; we do NOT touch persistence here.
+        if decision.severity == Severity.HEALTHY.value:
+            _log.info(
+                "meta_agent_executor_severity_below_threshold",
+                decision_id_key=str(decision.id),
+                severity_key=decision.severity,
+            )
+            return ExecutionResult(
+                skipped=True,
+                reason="severity_below_threshold",
+                telegram_alert_id=None,
+            )
+
+        # Subsequent branches added by Tasks 58-02-04 → 58-02-06.
         return ExecutionResult(
             skipped=True, reason="not_implemented", telegram_alert_id=None,
         )
