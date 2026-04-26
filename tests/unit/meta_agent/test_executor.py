@@ -1,11 +1,16 @@
-"""Tests for meta_agent.executor.ActionExecutor (Phase 58-02, META-05).
+"""Tests for meta_agent.executor.ActionExecutor (Phase 58-02 + 58-03).
 
-Covers SPEC §Acceptance Criteria #8 + #9:
-  - Persist envelope helpers (persist_decision, update_decision_status).
-  - Dry-run short-circuit on the FIRST line of execute().
-  - HEALTHY → no Telegram (severity-below-threshold gate).
-  - WATCH/INVESTIGATE/FIX → send Telegram, stamp metadata, status='sent'.
-  - Daily cap enforcement (UTC-day boundary).
+Covers SPEC §Acceptance Criteria #8, #9, #10, #11:
+  58-02:
+    - Persist envelope helpers (persist_decision, update_decision_status).
+    - Dry-run short-circuit on the FIRST line of execute().
+    - HEALTHY → no Telegram (severity-below-threshold gate).
+    - WATCH/INVESTIGATE/FIX → send Telegram, stamp metadata, status='sent'.
+    - Daily cap enforcement (UTC-day boundary, alerts table).
+  58-03:
+    - _spawn_count_today_async on agent_decisions (UTC-day, status filter).
+    - execute_investigate_spawn happy path → 'spawned' → 'completed'.
+    - execute_investigate_spawn cap=2 + 3rd → 'rejected', 'spawn_cap_exceeded'.
 """
 
 from __future__ import annotations
@@ -25,6 +30,10 @@ _FAKE_COUNT = 7
 _CAP_HIGH = 100
 _CAP_TWO = 2
 _NUM_THIRD = 3
+# 58-03 spawn-cap test constants.
+_FAKE_SPAWN_COUNT = 4
+_INVEST_CAP_2 = 2
+_FAKE_EXIT_OK = 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -590,3 +599,72 @@ async def test_third_investigate_with_cap_2_is_queued_capped(
     assert len(cap_events) == 1, (
         f"expected 1 telegram_cap_hit event, got {cap_events!r}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-03-07: spawn_count_today helper (TradingPersistence)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_spawn_count_today_uses_utc_day_and_filters_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #11 / D-13 + AP-14: ``_spawn_count_today_async`` on
+    TradingPersistence counts agent_decisions rows for the current UTC day,
+    filtered by severity AND status IN ('spawned','completed','failed').
+    Crucially the cap query reads from agent_decisions, NOT alerts (this
+    is the AP-14 inversion vs the Telegram cap query in 58-02).
+    """
+    from finalayze.orchestration.db_persistence import TradingPersistence
+
+    persistence = TradingPersistence(db_url=None, async_loop=None)
+
+    # Capture the issued statement.
+    captured: dict[str, Any] = {}
+
+    class _ScalarRes:
+        def scalar_one(self) -> int:
+            return _FAKE_SPAWN_COUNT
+
+    class _FakeSession:
+        async def __aenter__(self) -> _FakeSession:
+            return self
+
+        async def __aexit__(self, *_a: Any) -> None:
+            return None
+
+        async def execute(self, stmt: Any) -> _ScalarRes:
+            captured["stmt"] = stmt
+            return _ScalarRes()
+
+    def _factory() -> _FakeSession:
+        return _FakeSession()
+
+    monkeypatch.setattr(persistence, "_get_bg_session_factory", lambda: _factory)
+
+    count = await persistence._spawn_count_today_async(severity="INVESTIGATE")
+    assert count == _FAKE_SPAWN_COUNT, (
+        f"expected helper to return {_FAKE_SPAWN_COUNT}, got {count!r}"
+    )
+
+    stmt = captured["stmt"]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": False})).lower()
+
+    # AP-14: cap reads agent_decisions, NOT alerts.
+    assert "agent_decisions" in sql, (
+        f"cap query must FROM agent_decisions, got: {sql!r}"
+    )
+    assert "alerts" not in sql, (
+        f"cap query must NOT touch alerts table, got: {sql!r}"
+    )
+    # Severity filter.
+    assert "severity" in sql, f"cap query must filter severity, got: {sql!r}"
+    # Status filter (IN clause for spawned/completed/failed).
+    assert "status" in sql, f"cap query must filter status, got: {sql!r}"
+    assert "in (" in sql, (
+        f"cap query must use IN clause for status, got: {sql!r}"
+    )
+    # UTC day boundary.
+    assert "date_trunc" in sql, f"cap query must use date_trunc, got: {sql!r}"
+    assert "utc" in sql, f"cap query must use UTC tz boundary, got: {sql!r}"
