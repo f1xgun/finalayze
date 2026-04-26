@@ -460,9 +460,7 @@ async def test_execute_investigate_sends_telegram_and_stamps_metadata(
     def _factory() -> _FakeSession:
         return _FakeSession()
 
-    monkeypatch.setattr(
-        executor, "_open_session", lambda: _factory(), raising=False,
-    )
+    monkeypatch.setattr(executor, "_open_session", _factory, raising=False)
 
     decision = _make_decision(severity=Severity.INVESTIGATE.value)
 
@@ -547,14 +545,15 @@ async def test_third_investigate_with_cap_2_is_queued_capped(
         async def __aexit__(self, *a: Any) -> None:
             return None
 
-    monkeypatch.setattr(executor, "_open_session", lambda: _FakeSession(), raising=False)
+    monkeypatch.setattr(executor, "_open_session", _FakeSession, raising=False)
 
     decision = _make_decision(severity=Severity.INVESTIGATE.value)
 
     results = []
     with structlog.testing.capture_logs() as logs:
         for _ in range(_NUM_THIRD):
-            results.append(await executor.execute(decision))
+            result = await executor.execute(decision)
+            results.append(result)  # noqa: PERF401 — async iteration, not a comprehension
 
     # First two: sent.
     assert results[0].skipped is False, (

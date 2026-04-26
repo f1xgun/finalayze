@@ -233,10 +233,7 @@ async def test_runner_invokes_executor_when_not_dry_run(
     )
     # Inspect the decision-shaped arg passed.
     call = executor.execute.call_args
-    if call.args:
-        decision = call.args[0]
-    else:
-        decision = call.kwargs["decision"]
+    decision = call.args[0] if call.args else call.kwargs["decision"]
     assert decision.severity == "INVESTIGATE"
     assert decision.id == persisted_kwargs["decision_id"]
     assert decision.timestamp == persisted_kwargs["timestamp"]

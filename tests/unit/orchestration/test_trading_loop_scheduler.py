@@ -45,6 +45,10 @@ def _make_trading_loop() -> object:
     settings.ml_enabled = False
     settings.bond_cycle_enabled = False
     settings.weekly_digest_hour_utc = 16
+    # Phase 58-02-07: meta-agent default-disabled so existing trading-loop
+    # registration tests keep passing without injecting a MetaAgentRunner
+    # (per PATTERNS.md "EXTENSION: trading_loop.py" + 58-02-07 plan body).
+    settings.meta_agent_enabled = False
 
     return TradingLoop(
         settings=settings,

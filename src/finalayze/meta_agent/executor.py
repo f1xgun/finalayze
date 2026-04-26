@@ -16,7 +16,6 @@ module is the Telegram-leg only.
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +24,7 @@ import structlog
 from finalayze.meta_agent.classifier import Severity
 
 if TYPE_CHECKING:
+    import uuid
     from collections.abc import Callable
 
     from config.settings import Settings

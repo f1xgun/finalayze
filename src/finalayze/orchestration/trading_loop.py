@@ -182,6 +182,7 @@ class TradingLoop:
         metrics_collector: type[MetricsCollector] | None = None,
         grpc_loop: asyncio.AbstractEventLoop | None = None,
         kill_switch: object | None = None,
+        meta_agent_runner: object | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
@@ -218,6 +219,9 @@ class TradingLoop:
         self._health_monitor = health_monitor
         self._metrics = metrics_collector
         self._kill_switch = kill_switch
+        # Phase 58-02-07: optional MetaAgentRunner injected at bootstrap.
+        # Default None keeps every existing call-site source-compatible.
+        self._meta_agent_runner = meta_agent_runner
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -753,6 +757,19 @@ class TradingLoop:
             id="portfolio_review",
             replace_existing=True,
         )
+        # Phase 58-02-07: meta-agent (cron-driven autonomous monitor).
+        # Guarded by meta_agent_enabled (SPEC AC #6 — disabled → no job).
+        if getattr(self._settings, "meta_agent_enabled", False):
+            from finalayze.meta_agent.scheduler import (  # noqa: PLC0415
+                register_meta_agent_job,
+            )
+
+            register_meta_agent_job(
+                self._scheduler,
+                settings=self._settings,
+                runner=self._meta_agent_runner,
+                async_loop=self._async_loop,
+            )
         if self._ml_registry is not None and getattr(self._settings, "ml_enabled", False):
             self._scheduler.add_job(
                 self._ml_retrainer.retrain_all,

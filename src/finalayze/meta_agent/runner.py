@@ -137,16 +137,25 @@ class MetaAgentRunner:
         if self._settings.meta_agent_dry_run:
             return
 
-        # Non-dry-run path lands in Plan 58-02 via the executor.
+        # Non-dry-run path: dispatch to ActionExecutor (Plan 58-02 META-05).
+        # Construct a decision-shaped object exposing id, timestamp,
+        # severity, summary, rationale, decision_metadata so the executor
+        # can stamp its UPDATE without re-reading the row.
         if self._executor is None:
             _log.info("meta_agent_executor_missing", severity_key=severity.value)
             return
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        decision = SimpleNamespace(
+            id=decision_id,
+            timestamp=tick_start,
+            severity=severity.value,
+            summary=summary,
+            rationale=rationale,
+            decision_metadata=None,
+        )
         try:
-            await self._executor.execute(
-                decision_id=decision_id,
-                severity=severity,
-                snapshot=snapshot,
-            )
+            await self._executor.execute(decision)
         except Exception:
             _log.warning(
                 "meta_agent_executor_failed",
