@@ -25,12 +25,32 @@ import structlog
 from finalayze.meta_agent.classifier import Severity
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from config.settings import Settings
 
     from finalayze.core.models import MetaAgentDecisionModel
     from finalayze.orchestration.db_persistence import TradingPersistence
 
 _log = structlog.get_logger()
+
+
+# SPEC §Requirement 5 mapping — severity to AlertPriority for Telegram routing.
+# IntEnum values: CRITICAL=0, IMPORTANT=1, INFO=2 (lower = higher priority).
+def _severity_to_priority(severity: str) -> Any:
+    """Map a meta-agent severity to the Phase 57 AlertPriority IntEnum.
+
+    Late import via PLC0415 keeps the executor module-load light — the
+    enum lives in ``finalayze.api.alerts`` (Layer 0 alerter package).
+    """
+    from finalayze.api.alerts import AlertPriority  # noqa: PLC0415
+
+    if severity == Severity.FIX.value:
+        return AlertPriority.CRITICAL
+    if severity == Severity.INVESTIGATE.value:
+        return AlertPriority.IMPORTANT
+    # WATCH (and any unexpected non-HEALTHY value, defensively).
+    return AlertPriority.INFO
 
 
 @dataclass(frozen=True)
@@ -65,10 +85,27 @@ class ActionExecutor:
         settings: Settings | Any,
         alerter: Any,
         persistence: TradingPersistence | Any,
+        session_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._settings = settings
         self._alerter = alerter
         self._persistence = persistence
+        # Optional override for tests; production uses persistence's
+        # background session factory.
+        self._session_factory = session_factory
+
+    def _open_session(self) -> Any:
+        """Open an async session for the cap query.
+
+        Production: delegates to ``persistence._get_bg_session_factory()``
+        (mirrors the persist_alert envelope). Tests inject a fake via
+        ``session_factory`` constructor kwarg or by monkeypatching this
+        method directly.
+        """
+        if self._session_factory is not None:
+            return self._session_factory()
+        factory = self._persistence._get_bg_session_factory()
+        return factory()
 
     async def execute(
         self,
@@ -108,10 +145,68 @@ class ActionExecutor:
                 telegram_alert_id=None,
             )
 
-        # Subsequent branches (cap query, Telegram send, cap enforcement)
-        # added by Tasks 58-02-05 → 58-02-06.
+        # SPEC AC #8 + #9 — Telegram path with daily cap.
+        # Open a background session for the cap query (PERSIST-05 envelope).
+        async with self._open_session() as session:
+            count = await self._telegram_count_today(session)
+
+        # Cap enforcement branch lands in Task 58-02-06.
+
+        # Build the message body — operator-friendly summary + rationale.
+        message = self._build_message(decision)
+        priority = _severity_to_priority(decision.severity)
+        alert_type = f"meta_agent_{decision.severity}"
+
+        ok, alert_id = await self._alerter._send(
+            message,
+            alert_type=alert_type,
+            priority=priority,
+        )
+        if not ok or alert_id is None:
+            _log.warning(
+                "meta_agent_executor_telegram_send_failed",
+                decision_id_key=str(decision.id),
+                severity_key=decision.severity,
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision.id,
+                timestamp=decision.timestamp,
+                status="failed",
+                outcome="telegram_send_failed",
+            )
+            return ExecutionResult(
+                skipped=True, reason="telegram_send_failed", telegram_alert_id=None,
+            )
+
+        # Single UPDATE that flips status and stamps decision_metadata
+        # atomically at the single-writer level (Task 58-02-01b).
+        self._persistence.update_decision_status(
+            decision_id=decision.id,
+            timestamp=decision.timestamp,
+            status="sent",
+            metadata_patch={"telegram_alert_id": str(alert_id)},
+        )
+        _log.info(
+            "meta_agent_executor_telegram_sent",
+            decision_id_key=str(decision.id),
+            severity_key=decision.severity,
+            telegram_alert_id=str(alert_id),
+            count_before=count,
+        )
         return ExecutionResult(
-            skipped=True, reason="not_implemented", telegram_alert_id=None,
+            skipped=False, reason=None, telegram_alert_id=alert_id,
+        )
+
+    @staticmethod
+    def _build_message(decision: MetaAgentDecisionModel | Any) -> str:
+        """Compose the Telegram message body for one decision.
+
+        Format: ``[meta-agent <SEVERITY>] <summary>\\n<rationale>``. Kept
+        dependency-free so 58-03/58-04 can extend without breaking the
+        Phase 57 escape conventions (D-09).
+        """
+        return (
+            f"[meta-agent {decision.severity}] {decision.summary}\n{decision.rationale}"
         )
 
     async def _telegram_count_today(self, session: Any) -> int:
