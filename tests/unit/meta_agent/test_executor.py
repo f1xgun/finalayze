@@ -345,3 +345,60 @@ async def test_execute_healthy_severity_does_not_send_telegram() -> None:
 
     alerter._send.assert_not_called()
     persistence.update_decision_status.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-02-04: Daily Telegram cap query (_telegram_count_today)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_telegram_count_today_uses_utc_day_boundary() -> None:
+    """SPEC AC #9 / D-13: cap query uses date_trunc('day', NOW() AT TIME
+    ZONE 'UTC') so the cap resets at 00:00 UTC. WHERE clause includes
+    AlertModel.alert_type LIKE 'meta_agent_%' AND timestamp >= UTC-day-start.
+    """
+    from finalayze.meta_agent.executor import ActionExecutor
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = False
+
+    alerter = MagicMock()
+    persistence = MagicMock()
+    executor = ActionExecutor(
+        settings=settings,
+        alerter=alerter,
+        persistence=persistence,
+    )
+
+    # Mocked async session that records the issued statement.
+    captured_stmt: dict[str, Any] = {}
+
+    class _ScalarRes:
+        def scalar_one(self) -> int:
+            return _FAKE_COUNT
+
+    class _FakeSession:
+        async def execute(self, stmt: Any) -> _ScalarRes:
+            captured_stmt["stmt"] = stmt
+            return _ScalarRes()
+
+    session = _FakeSession()
+
+    count = await executor._telegram_count_today(session)
+    assert count == _FAKE_COUNT, (
+        f"expected helper to return scalar_one() of {_FAKE_COUNT}, got {count!r}"
+    )
+
+    # Inspect the issued SQL — must filter by alert_type LIKE 'meta_agent_%'
+    # AND timestamp >= UTC-day-start.
+    stmt = captured_stmt["stmt"]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": False})).lower()
+    assert "alerts" in sql, f"cap query must FROM alerts, got: {sql!r}"
+    assert "alert_type" in sql, f"cap query must filter alert_type, got: {sql!r}"
+    assert "like" in sql, f"cap query must use LIKE for alert_type, got: {sql!r}"
+    assert "date_trunc" in sql, (
+        f"cap query must use date_trunc for UTC-day boundary, got: {sql!r}"
+    )
+    # The text fragment "now() at time zone 'utc'" appears verbatim.
+    assert "utc" in sql, f"cap query must use UTC tz boundary, got: {sql!r}"
