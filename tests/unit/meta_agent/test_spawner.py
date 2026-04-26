@@ -341,3 +341,92 @@ async def test_spawn_readonly_timeout_terminates_process_group(
     assert len(timeout_events) == 1, (
         f"expected 1 meta_agent_spawn_timeout event, got {timeout_events!r}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-03-06: _INVESTIGATE_LOCK — concurrent attempt → 'already_inflight'
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_concurrent_investigate_spawns_rejected_with_already_inflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC §Boundaries (line 105): at most one in-flight investigate spawn
+    per spawn-type. The second concurrent caller observes
+    ``_INVESTIGATE_LOCK.locked() is True`` WITHOUT taking the lock and
+    returns SpawnOutcome(stderr='already_inflight'). Structlog event
+    ``meta_agent_spawn_already_inflight`` is emitted by the rejected caller.
+
+    The first spawn must still complete normally (lock released cleanly).
+    """
+    import structlog
+
+    from finalayze.meta_agent import spawner as sp
+    from finalayze.meta_agent.spawner import spawn_readonly
+
+    # First spawn: slow but eventually exits.
+    slow_proc = _FakeProcess(
+        stdout=b"slow result\n",
+        stderr=b"",
+        sleep_before_exit=0.5,  # Short enough for the test, long enough for race.
+    )
+    fast_proc = _FakeProcess(stdout=b"fast result\n", exit_code=_EXIT_OK)
+
+    procs = iter([slow_proc, fast_proc])
+
+    async def _fake_create(*_args: Any, **_kwargs: Any) -> _FakeProcess:
+        return next(procs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+
+    # Verify lock is initially free.
+    assert sp._INVESTIGATE_LOCK.locked() is False, "lock must start unlocked"
+
+    # Schedule the first spawn as a background task; it holds the lock for
+    # ~0.5s. Then immediately attempt a second spawn — it must observe
+    # the lock as held and return 'already_inflight'.
+    first_task = asyncio.create_task(
+        spawn_readonly("first prompt", decision_id=_FAKE_DECISION_ID),
+    )
+    # Yield briefly so the first task acquires the lock.
+    await asyncio.sleep(0.05)
+
+    # Pre-condition: the lock IS held by the first task.
+    assert sp._INVESTIGATE_LOCK.locked() is True, (
+        "first spawn must have acquired the lock by now"
+    )
+
+    with structlog.testing.capture_logs() as logs:
+        second_outcome = await spawn_readonly(
+            "second prompt", decision_id=_FAKE_DECISION_ID_2,
+        )
+
+    # Second outcome shape — rejected without taking the lock.
+    assert second_outcome.exit_code == _EXIT_TIMEOUT, (
+        f"expected synthetic exit_code={_EXIT_TIMEOUT}, got {second_outcome!r}"
+    )
+    assert second_outcome.stderr == "already_inflight"
+    assert second_outcome.stdout == ""
+    assert second_outcome.timed_out is False
+    assert second_outcome.killed_by_killswitch is False
+
+    # Structlog event from the rejected caller.
+    rejected_events = [
+        log
+        for log in logs
+        if log.get("event") == "meta_agent_spawn_already_inflight"
+    ]
+    assert len(rejected_events) == 1, (
+        f"expected 1 already_inflight event, got {rejected_events!r}"
+    )
+    assert rejected_events[0].get("decision_id_key") == str(_FAKE_DECISION_ID_2)
+
+    # The first spawn must still complete cleanly and release the lock.
+    first_outcome = await first_task
+    assert first_outcome.exit_code == _EXIT_OK, (
+        f"first spawn should have exited 0, got {first_outcome!r}"
+    )
+    assert sp._INVESTIGATE_LOCK.locked() is False, (
+        "lock must be released after first spawn completes"
+    )
