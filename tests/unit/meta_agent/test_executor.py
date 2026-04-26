@@ -32,22 +32,63 @@ _NUM_THIRD = 3
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_persistence_helpers_use_fire_and_forget_envelope(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_persistence_helpers_use_fire_and_forget_envelope() -> None:
     """SPEC AC #8 foundation: TradingPersistence.persist_decision and
     update_decision_status exist, never raise when _db_url is None, and
     log db_persist_skipped (PERSIST-05 envelope, mirrors persist_alert).
     """
-    import logging
+    import structlog
 
     from finalayze.orchestration.db_persistence import TradingPersistence
 
     persistence = TradingPersistence(db_url=None, async_loop=None)
 
-    # When _db_url is None, both helpers must NOT raise.
-    caplog.set_level(logging.DEBUG)
-    persistence.persist_decision(
+    # Capture structlog events. When _db_url is None, both helpers must
+    # log db_persist_skipped and return without raising.
+    with structlog.testing.capture_logs() as logs:
+        persistence.persist_decision(
+            decision_id=_FAKE_DECISION_ID,
+            timestamp=_FAKE_TS,
+            severity="HEALTHY",
+            summary="s",
+            rationale="r",
+            actions=[],
+            dry_run=True,
+            decision_metadata=None,
+            parent_decision_id=None,
+            status="queued",
+        )
+        persistence.update_decision_status(
+            decision_id=_FAKE_DECISION_ID,
+            timestamp=_FAKE_TS,
+            status="sent",
+            outcome=None,
+        )
+
+    skipped = [
+        log
+        for log in logs
+        if log.get("event") == "db_persist_skipped"
+        and log.get("table") == "agent_decisions"
+    ]
+    assert len(skipped) >= 2, (
+        f"expected >=2 db_persist_skipped events for agent_decisions, got {logs!r}"
+    )
+
+    # AND: when a session factory is mocked (db_url set), persist_decision
+    # enqueues a MetaAgentDecisionModel insert via the same envelope.
+    persistence_with_db = TradingPersistence(db_url=None, async_loop=None)
+    # Patch _persist_to_db to inspect the table arg without spinning up a real session.
+    captured: dict[str, Any] = {}
+
+    def _capture(coro: Any, *, table: str, **ctx: Any) -> None:
+        captured["table"] = table
+        captured["ctx"] = ctx
+        # Close the coroutine so the test does not leak a "never awaited" warning.
+        coro.close()
+
+    persistence_with_db._persist_to_db = _capture  # type: ignore[method-assign]
+    persistence_with_db.persist_decision(
         decision_id=_FAKE_DECISION_ID,
         timestamp=_FAKE_TS,
         severity="HEALTHY",
@@ -59,14 +100,6 @@ def test_persistence_helpers_use_fire_and_forget_envelope(
         parent_decision_id=None,
         status="queued",
     )
-    persistence.update_decision_status(
-        decision_id=_FAKE_DECISION_ID,
-        timestamp=_FAKE_TS,
-        status="sent",
-        outcome=None,
-    )
-
-    # Both should have logged db_persist_skipped via structlog.
-    msgs = [rec.message for rec in caplog.records]
-    skipped = [m for m in msgs if "db_persist_skipped" in m]
-    assert len(skipped) >= 2, f"expected >=2 db_persist_skipped log lines, got {msgs!r}"
+    assert captured["table"] == "agent_decisions"
+    assert captured["ctx"]["severity_key"] == "HEALTHY"
+    assert captured["ctx"]["decision_id_key"] == str(_FAKE_DECISION_ID)

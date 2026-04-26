@@ -14,7 +14,6 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import structlog
-from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
     import uuid
@@ -446,63 +445,36 @@ class TradingPersistence:
         delivery_status: str,
         alert_metadata: dict[str, object] | None,
     ) -> None:
-        """Write one AlertModel row with FK-retry on parent commit race.
+        """Write one AlertModel row.
 
-        Phase 57-01 (ALRT-03) + Phase 57-04 Task 3 Pitfall 2: when an
-        anomaly_llm child commits before its anomaly_raw parent (the raw
-        commit is fire-and-forget), the FK INSERT can race-fail with
-        IntegrityError. Revision M5 — explicit flat try/except ladder
-        (NOT a loop with continue) so the happy path writes exactly once
-        and the FK race degrades cleanly:
+        Phase 57-01 (ALRT-03). parent_id has NO database-level FK constraint
+        (see migration 009 docstring — TimescaleDB hypertables forbid the
+        UNIQUE on `id` that a self-FK would require). Application-level
+        ordering guarantees raw alerts are persisted before their LLM
+        follow-up threads parent_id, so FK retry is unnecessary.
 
-        1. Attempt 1: write with the supplied parent_id. Success → return.
-        2. On IntegrityError with parent_id set: sleep 100ms, attempt 2
-           with the SAME parent_id (parent commit may now be visible).
-        3. On second IntegrityError: degrade to parent_id=NULL — the row
-           lands but loses the parent link (acceptable per the schema's
-           ``ON DELETE SET NULL`` design from Plan 57-01).
-        4. On IntegrityError with parent_id ALREADY None: propagate
-           (it's not a parent-FK race; some other constraint is broken).
+        The PERSIST-05 envelope at the public ``persist_alert`` wrapper
+        catches and logs any exception, so this coroutine never crashes
+        the caller.
         """
         from finalayze.core.models import AlertModel  # noqa: PLC0415
 
         factory = self._get_bg_session_factory()
-
-        async def _do_write(current_parent_id: uuid.UUID | None) -> None:
-            async with factory() as session:
-                row = AlertModel(
-                    id=alert_id,
-                    timestamp=timestamp,
-                    alert_type=alert_type,
-                    priority=priority,
-                    symbol=symbol,
-                    market_id=market_id,
-                    message=message,
-                    parent_id=current_parent_id,
-                    delivery_status=delivery_status,
-                    alert_metadata=alert_metadata,
-                )
-                session.add(row)
-                await session.commit()
-
-        # Attempt 1: happy path with original parent_id.
-        try:
-            await _do_write(parent_id)
-            return
-        except IntegrityError:
-            if parent_id is None:
-                # Non-FK IntegrityError (no parent to degrade away from).
-                raise
-            await asyncio.sleep(0.1)
-
-        # Attempt 2: retry with the SAME parent_id (parent commit may have landed).
-        try:
-            await _do_write(parent_id)
-            return
-        except IntegrityError:
-            _log.warning("alert_parent_fk_fallback_null", alert_id=str(alert_id))
-            # Degraded write: drop parent_id so the row at least lands.
-            await _do_write(None)
+        async with factory() as session:
+            row = AlertModel(
+                id=alert_id,
+                timestamp=timestamp,
+                alert_type=alert_type,
+                priority=priority,
+                symbol=symbol,
+                market_id=market_id,
+                message=message,
+                parent_id=parent_id,
+                delivery_status=delivery_status,
+                alert_metadata=alert_metadata,
+            )
+            session.add(row)
+            await session.commit()
 
     def persist_alert(
         self,
@@ -576,6 +548,168 @@ class TradingPersistence:
             table="alerts",
             op="status_update",
             status=delivery_status,
+        )
+
+    # ── Phase 58-02 META-05: agent_decisions persist envelope ───────────────
+    # Direct line-by-line clones of _persist_alert_async / persist_alert /
+    # _update_alert_status_async / update_alert_status, swapping AlertModel →
+    # MetaAgentDecisionModel, alert_id → decision_id, delivery_status →
+    # status, alert_metadata → decision_metadata. The PERSIST-05 envelope
+    # at _persist_to_db never crashes the calling control flow.
+
+    async def _persist_decision_async(
+        self,
+        decision_id: uuid.UUID,
+        timestamp: datetime,
+        severity: str,
+        summary: str,
+        rationale: str,
+        actions: list[dict[str, object]],
+        dry_run: bool,
+        decision_metadata: dict[str, object] | None,
+        parent_decision_id: uuid.UUID | None,
+        status: str,
+    ) -> None:
+        """Write one MetaAgentDecisionModel row.
+
+        Phase 58-02 (META-05). parent_decision_id has NO database-level FK
+        constraint (see migration 010 docstring — TimescaleDB hypertables
+        forbid the UNIQUE on `id` that a self-FK would require). Application
+        layer guarantees parent decisions are persisted before children
+        thread parent_decision_id, so FK retry is unnecessary.
+
+        The PERSIST-05 envelope at the public ``persist_decision`` wrapper
+        catches and logs any exception, so this coroutine never crashes
+        the caller (mirrors ``_persist_alert_async``).
+        """
+        from finalayze.core.models import MetaAgentDecisionModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            row = MetaAgentDecisionModel(
+                id=decision_id,
+                timestamp=timestamp,
+                severity=severity,
+                summary=summary,
+                rationale=rationale,
+                actions=actions,
+                dry_run=dry_run,
+                decision_metadata=decision_metadata,
+                parent_decision_id=parent_decision_id,
+                status=status,
+            )
+            session.add(row)
+            await session.commit()
+
+    def persist_decision(
+        self,
+        *,
+        decision_id: uuid.UUID,
+        timestamp: datetime,
+        severity: str,
+        summary: str,
+        rationale: str,
+        actions: list[dict[str, object]],
+        dry_run: bool,
+        decision_metadata: dict[str, object] | None = None,
+        parent_decision_id: uuid.UUID | None = None,
+        status: str = "queued",
+    ) -> None:
+        """Fire-and-forget agent_decisions persistence (PERSIST-05 envelope).
+
+        Never raises: DB failures increment ``db_write_failures`` counter +
+        log warning. Used by ``MetaAgentRunner.run_one_tick`` (Phase 58-01)
+        and by ``ActionExecutor.execute`` for status transitions
+        (Phase 58-02).
+        """
+        # Forward `severity` under the `severity_key` ctx kwarg so the
+        # `db_persist_skipped/ok/failed` log lines do not collide with the
+        # structlog-reserved `event` positional arg (mirrors `alert_type_key`
+        # precedent in persist_alert).
+        self._persist_to_db(
+            self._persist_decision_async(
+                decision_id, timestamp, severity, summary, rationale,
+                actions, dry_run, decision_metadata, parent_decision_id,
+                status,
+            ),
+            table="agent_decisions",
+            severity_key=severity,
+            decision_id_key=str(decision_id),
+        )
+
+    async def _update_decision_status_async(
+        self,
+        decision_id: uuid.UUID,
+        timestamp: datetime,
+        status: str,
+        outcome: str | None,
+        metadata_patch: dict[str, Any] | None = None,
+    ) -> None:
+        """Update status (and optionally outcome / decision_metadata) for an
+        existing agent_decisions row.
+
+        ``metadata_patch`` (Phase 58-02-01b): when supplied non-empty, we
+        SELECT the row's current ``decision_metadata``, deep-merge
+        ``{**current, **metadata_patch}``, and include the merged dict in the
+        UPDATE values. Single-writer assumption: the meta-agent tick is the
+        only writer of these rows in Phase 58, so race-on-merge is impossible.
+        A future multi-writer migration MUST revisit this and switch to a
+        single-statement JSONB ``||`` operator (PostgreSQL JSONB concat).
+        """
+        from sqlalchemy import select, update  # noqa: PLC0415
+
+        from finalayze.core.models import MetaAgentDecisionModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            values: dict[str, Any] = {"status": status}
+            if outcome is not None:
+                values["outcome"] = outcome
+            if metadata_patch:
+                # SELECT-then-merge-then-UPDATE (single-writer safe).
+                current_row = await session.execute(
+                    select(MetaAgentDecisionModel.decision_metadata).where(
+                        MetaAgentDecisionModel.id == decision_id,
+                        MetaAgentDecisionModel.timestamp == timestamp,
+                    )
+                )
+                current_meta = current_row.scalar_one_or_none() or {}
+                merged: dict[str, Any] = {**current_meta, **metadata_patch}
+                values["decision_metadata"] = merged
+            await session.execute(
+                update(MetaAgentDecisionModel)
+                .where(
+                    MetaAgentDecisionModel.id == decision_id,
+                    MetaAgentDecisionModel.timestamp == timestamp,
+                )
+                .values(**values),
+            )
+            await session.commit()
+
+    def update_decision_status(
+        self,
+        *,
+        decision_id: uuid.UUID,
+        timestamp: datetime,
+        status: str,
+        outcome: str | None = None,
+        metadata_patch: dict[str, Any] | None = None,
+    ) -> None:
+        """Fire-and-forget agent_decisions status update.
+
+        Never blocks the executor send path. ``metadata_patch`` (added in
+        58-02-01b) optionally deep-merges into ``decision_metadata``; pass
+        ``{"telegram_alert_id": str(uuid)}`` to stamp the alert id on the
+        same UPDATE that flips status to 'sent' (atomic at the
+        single-writer level — see ``_update_decision_status_async``).
+        """
+        self._persist_to_db(
+            self._update_decision_status_async(
+                decision_id, timestamp, status, outcome, metadata_patch,
+            ),
+            table="agent_decisions",
+            op="status_update",
+            status=status,
         )
 
     async def persist_sentiment_batch_async(
