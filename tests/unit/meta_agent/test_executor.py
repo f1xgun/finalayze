@@ -668,3 +668,156 @@ async def test_spawn_count_today_uses_utc_day_and_filters_status(
     # UTC day boundary.
     assert "date_trunc" in sql, f"cap query must use date_trunc, got: {sql!r}"
     assert "utc" in sql, f"cap query must use UTC tz boundary, got: {sql!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-03-08: execute_investigate_spawn end-to-end
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_execute_investigate_spawn_happy_path_marks_completed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #10 + #11: with cap not hit and a successful spawn (exit=0):
+      1. _spawn_count_today_async called with severity='INVESTIGATE' BEFORE
+         the spawn.
+      2. update_decision_status(status='spawned') called BEFORE invoking
+         spawn_readonly (so the count query in the next tick sees the row).
+      3. spawn_readonly invoked with the loaded skill's prompt.
+      4. update_decision_status(status='completed', outcome=<truncated
+         stdout/stderr/exit_code text>) called AFTER successful exit.
+    """
+    from finalayze.meta_agent.classifier import Severity
+    from finalayze.meta_agent.executor import ActionExecutor
+    from finalayze.meta_agent.spawner import SpawnOutcome
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = False
+    settings.meta_agent_max_spawns_per_day = _CAP_HIGH
+
+    alerter = MagicMock()
+    persistence = MagicMock()
+    persistence.update_decision_status = MagicMock()
+    persistence._spawn_count_today_async = AsyncMock(return_value=0)
+
+    executor = ActionExecutor(
+        settings=settings,
+        alerter=alerter,
+        persistence=persistence,
+    )
+
+    # Patch spawn_readonly to a happy-path SpawnOutcome.
+    fake_outcome = SpawnOutcome(
+        exit_code=_FAKE_EXIT_OK,
+        stdout='{"type":"result","is_error":false}\n',
+        stderr="",
+        timed_out=False,
+        killed_by_killswitch=False,
+    )
+    spawn_calls: list[dict[str, Any]] = []
+
+    async def _fake_spawn(prompt: str, **kwargs: Any) -> SpawnOutcome:
+        spawn_calls.append({"prompt": prompt, **kwargs})
+        return fake_outcome
+
+    monkeypatch.setattr(
+        "finalayze.meta_agent.executor.spawn_readonly", _fake_spawn,
+    )
+
+    decision = _make_decision(severity=Severity.INVESTIGATE.value)
+
+    await executor.execute_investigate_spawn(decision)
+
+    # Cap query was issued first.
+    persistence._spawn_count_today_async.assert_awaited_once_with("INVESTIGATE")
+
+    # spawn_readonly called exactly once with the decision's id.
+    assert len(spawn_calls) == 1, f"expected 1 spawn call, got {spawn_calls!r}"
+    assert spawn_calls[0]["decision_id"] == _FAKE_DECISION_ID
+
+    # update_decision_status called twice: 'spawned' then 'completed'.
+    upd_calls = persistence.update_decision_status.call_args_list
+    assert len(upd_calls) == 2, (
+        f"expected 2 status transitions (spawned → completed), got {upd_calls!r}"
+    )
+    spawned_call = upd_calls[0]
+    completed_call = upd_calls[1]
+    assert spawned_call.kwargs["status"] == "spawned"
+    assert completed_call.kwargs["status"] == "completed"
+    # Outcome text contains the exit_code AND the captured stdout.
+    outcome_text = completed_call.kwargs["outcome"]
+    assert "0" in outcome_text  # exit_code
+    assert "is_error" in outcome_text  # stdout content
+
+
+@pytest.mark.asyncio
+async def test_execute_investigate_spawn_cap_2_third_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #11: with cap=2 and 2 prior INVESTIGATE rows already counted:
+      - cap query returns 2.
+      - executor does NOT call spawn_readonly.
+      - update_decision_status called once with status='rejected',
+        outcome='spawn_cap_exceeded'.
+      - Structlog event meta_agent_spawn_cap_exceeded is emitted.
+    """
+    import structlog
+
+    from finalayze.meta_agent.classifier import Severity
+    from finalayze.meta_agent.executor import ActionExecutor
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = False
+    settings.meta_agent_max_spawns_per_day = _INVEST_CAP_2
+
+    alerter = MagicMock()
+    persistence = MagicMock()
+    persistence.update_decision_status = MagicMock()
+    persistence._spawn_count_today_async = AsyncMock(return_value=_INVEST_CAP_2)
+
+    executor = ActionExecutor(
+        settings=settings,
+        alerter=alerter,
+        persistence=persistence,
+    )
+
+    spawn_called: list[Any] = []
+
+    async def _fake_spawn(*args: Any, **kwargs: Any) -> Any:
+        spawn_called.append((args, kwargs))
+        msg = "spawn_readonly should NOT have been called when cap is hit"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        "finalayze.meta_agent.executor.spawn_readonly", _fake_spawn,
+    )
+
+    decision = _make_decision(severity=Severity.INVESTIGATE.value)
+
+    with structlog.testing.capture_logs() as logs:
+        await executor.execute_investigate_spawn(decision)
+
+    # spawn_readonly NEVER called.
+    assert spawn_called == [], (
+        f"spawn_readonly must NOT be invoked when cap is hit, got {spawn_called!r}"
+    )
+
+    # update_decision_status called once with status='rejected'.
+    upd_calls = persistence.update_decision_status.call_args_list
+    assert len(upd_calls) == 1, (
+        f"expected 1 update_decision_status call (rejected), got {upd_calls!r}"
+    )
+    rejected_call = upd_calls[0]
+    assert rejected_call.kwargs["status"] == "rejected"
+    assert rejected_call.kwargs["outcome"] == "spawn_cap_exceeded"
+
+    # Structlog event emitted.
+    cap_events = [
+        log
+        for log in logs
+        if log.get("event") == "meta_agent_spawn_cap_exceeded"
+    ]
+    assert len(cap_events) == 1, (
+        f"expected 1 meta_agent_spawn_cap_exceeded event, got {cap_events!r}"
+    )
