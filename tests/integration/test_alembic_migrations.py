@@ -223,6 +223,175 @@ def test_migration_009_creates_alerts_hypertable() -> None:
         engine.dispose()
 
 
+def test_migration_010_creates_agent_decisions_hypertable() -> None:
+    """Migration 010 must create `agent_decisions` as a TimescaleDB hypertable.
+
+    Closes the live-DB coverage gap noted in `/gsd-add-tests 58`: the AST-static
+    test in `tests/integration/migrations/test_010_agent_decisions.py` parses
+    the migration source but never executes it against a real Postgres+TimescaleDB
+    instance. This test runs `alembic upgrade head` and introspects:
+
+    1. `agent_decisions` exists and is registered as a TimescaleDB hypertable.
+    2. The composite primary key is `(timestamp, id)` — mirrors AlertModel.
+    3. The Python attribute `decision_metadata` maps to a bare DB column named
+       `metadata` (SQLAlchemy reserved-word workaround per AP-3 in PATTERNS.md).
+    4. `parent_decision_id` is a plain nullable UUID with NO foreign key
+       (TimescaleDB hypertables forbid UNIQUE constraints that don't include
+       the partition column — same constraint as AlertModel.parent_id).
+    """
+    import sqlalchemy as sa
+    from alembic import command
+    from alembic.config import Config
+
+    url = _db_url()
+    cfg = Config("alembic/alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+
+    sync_url = _sync_url(url)
+    engine = sa.create_engine(sync_url)
+    try:
+        with engine.connect() as conn:
+            assert sa.inspect(engine).has_table("agent_decisions"), (
+                "agent_decisions table must exist after `alembic upgrade head`"
+            )
+
+            ht_row = conn.execute(
+                sa.text(
+                    "SELECT 1 FROM timescaledb_information.hypertables "
+                    "WHERE hypertable_name = 'agent_decisions'"
+                )
+            ).fetchone()
+            assert ht_row is not None, (
+                "agent_decisions must be registered as a TimescaleDB hypertable"
+            )
+
+            pk_cols = [
+                row[0]
+                for row in conn.execute(
+                    sa.text(
+                        "SELECT kcu.column_name "
+                        "FROM information_schema.table_constraints tc "
+                        "JOIN information_schema.key_column_usage kcu "
+                        "  ON tc.constraint_name = kcu.constraint_name "
+                        " AND tc.table_name = kcu.table_name "
+                        "WHERE tc.table_name = 'agent_decisions' "
+                        "  AND tc.constraint_type = 'PRIMARY KEY' "
+                        "ORDER BY kcu.ordinal_position"
+                    )
+                ).fetchall()
+            ]
+            assert pk_cols == ["timestamp", "id"], (
+                f"Composite PK must be (timestamp, id); got {pk_cols!r}"
+            )
+
+            # decision_metadata Python attr must map to bare column `metadata`.
+            metadata_col = conn.execute(
+                sa.text(
+                    "SELECT data_type "
+                    "FROM information_schema.columns "
+                    "WHERE table_name = 'agent_decisions' AND column_name = 'metadata'"
+                )
+            ).fetchone()
+            assert metadata_col is not None, (
+                "DB column must be named `metadata` (decision_metadata Python attr renamed)"
+            )
+            assert metadata_col[0] == "jsonb", (
+                f"metadata column must be JSONB; got {metadata_col[0]!r}"
+            )
+
+            # parent_decision_id is plain nullable UUID without a FK constraint.
+            fk_count = conn.execute(
+                sa.text(
+                    "SELECT COUNT(*) "
+                    "FROM pg_constraint "
+                    "WHERE conrelid = 'agent_decisions'::regclass "
+                    "  AND contype = 'f'"
+                )
+            ).scalar()
+            assert fk_count == 0, (
+                f"agent_decisions must have NO foreign keys (TimescaleDB conflict); got {fk_count}"
+            )
+    finally:
+        engine.dispose()
+
+
+def test_migration_010_round_trip() -> None:
+    """`MetaAgentDecisionModel` must round-trip through the live `agent_decisions` table.
+
+    Closes the second half of the coverage gap noted in `/gsd-add-tests 58`:
+    the ORM-only round-trip test (`tests/unit/core/test_meta_agent_decision_model.py`)
+    constructs the model in memory but never persists it. This test inserts
+    one decision via async SQLAlchemy, selects it back, and asserts every
+    field — especially the `decision_metadata` Python attr / `metadata` DB
+    column rename — round-trips correctly.
+    """
+    import asyncio
+    import uuid as _uuid_mod
+    from datetime import UTC, datetime
+
+    import sqlalchemy as sa
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from finalayze.core.models import MetaAgentDecisionModel
+
+    url = _db_url()
+
+    async def _round_trip() -> None:
+        engine = create_async_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(sa.text("DELETE FROM agent_decisions"))
+
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            decision_id = _uuid_mod.uuid4()
+            ts = datetime.now(UTC)
+            metadata_payload = {"telegram_alert_id": str(_uuid_mod.uuid4()), "trace": "abc"}
+
+            async with session_factory() as session:
+                session.add(
+                    MetaAgentDecisionModel(
+                        timestamp=ts,
+                        id=decision_id,
+                        severity="INVESTIGATE",
+                        summary="round-trip smoke",
+                        rationale="verify metadata column rename + JSONB merge",
+                        actions=[{"kind": "telegram"}],
+                        outcome=None,
+                        dry_run=False,
+                        decision_metadata=metadata_payload,
+                        parent_decision_id=None,
+                        status="sent",
+                    )
+                )
+                await session.commit()
+
+            async with session_factory() as session:
+                row = (
+                    await session.execute(
+                        sa.select(MetaAgentDecisionModel).where(
+                            MetaAgentDecisionModel.id == decision_id
+                        )
+                    )
+                ).scalar_one()
+
+                assert row.severity == "INVESTIGATE"
+                assert row.summary == "round-trip smoke"
+                assert row.actions == [{"kind": "telegram"}]
+                assert row.dry_run is False
+                assert row.status == "sent"
+                # The critical assertion: Python attr name vs DB column name.
+                assert row.decision_metadata == metadata_payload, (
+                    "decision_metadata Python attr must round-trip via `metadata` DB column"
+                )
+                assert row.parent_decision_id is None
+                assert row.created_at is not None
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_round_trip())
+
+
 def test_migration_008_handles_pre_existing_populated_table() -> None:
     """Regression: migration 008 must convert a pre-populated plain table to a hypertable.
 
