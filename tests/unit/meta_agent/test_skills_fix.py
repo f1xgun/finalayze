@@ -56,8 +56,7 @@ def test_fix_skill_denies_protected_paths() -> None:
     spec = load_skill(_FIX_SKILL)
     for required in _LOCKED_DENIED_PATHS:
         assert required in spec.denied_paths, (
-            f"fix skill denied_paths must include {required!r}; "
-            f"got {spec.denied_paths!r}"
+            f"fix skill denied_paths must include {required!r}; got {spec.denied_paths!r}"
         )
 
 

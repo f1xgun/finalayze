@@ -78,10 +78,7 @@ def create_fix_worktree(short8: str, *, base: str = "HEAD") -> Path:
             returncode=exc.returncode,
             stderr=exc.stderr,
         )
-        msg = (
-            f"git worktree add failed (rc={exc.returncode}) for "
-            f"{target}: {exc.stderr.strip()}"
-        )
+        msg = f"git worktree add failed (rc={exc.returncode}) for {target}: {exc.stderr.strip()}"
         raise MetaAgentWorktreeError(msg) from exc
 
     _log.info(
