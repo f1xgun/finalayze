@@ -468,6 +468,7 @@ class TestTradingLoopStop:
         loop._scheduler = None
         loop._async_loop = None
         loop._async_thread = None
+        loop._meta_agent_runner = None
         loop._cache = None
         loop._event_bus = None
         loop._fx_service = None
@@ -486,6 +487,7 @@ class TestTradingLoopStop:
         loop._scheduler = mock_scheduler
         loop._async_loop = None
         loop._async_thread = None
+        loop._meta_agent_runner = None
         loop._cache = None
         loop._event_bus = None
         loop._fx_service = None
@@ -507,6 +509,7 @@ class TestTradingLoopStop:
         loop._scheduler = None
         loop._async_loop = mock_loop
         loop._async_thread = mock_thread
+        loop._meta_agent_runner = None
         loop._cache = None
         loop._event_bus = None
         loop._fx_service = None
