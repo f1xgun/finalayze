@@ -1,16 +1,20 @@
-"""MetaAgentRunner — orchestrates one cycle of the meta-agent (Phase 58-01).
+"""MetaAgentRunner — orchestrates one cycle of the meta-agent (Phase 58-01 + 58-04).
 
 Responsibilities:
-  1. Build a Snapshot via REST self-call (D-01).
-  2. Classify deterministically (SPEC §Requirement 2).
-  3. Persist a MetaAgentDecisionModel row via the fire-and-forget envelope.
-  4. Dry-run gate: short-circuit BEFORE any executor invocation when
+  1. (58-04 Task 10 / D-14) Run the expire-overdue sweep FIRST so any
+     30-min-old FIX 'sent' rows are flipped to 'expired' before
+     anything else happens this tick (SPEC AC #17).
+  2. Build a Snapshot via REST self-call (D-01).
+  3. Classify deterministically (SPEC §Requirement 2).
+  4. Persist a MetaAgentDecisionModel row via the fire-and-forget envelope.
+  5. Dry-run gate: short-circuit BEFORE any executor invocation when
      ``settings.meta_agent_dry_run`` is True (SPEC §Requirement 4).
-  5. Expose ``status_snapshot()`` for the GET /api/v1/meta-agent/status
+  6. Expose ``status_snapshot()`` for the GET /api/v1/meta-agent/status
      endpoint (Task 58-01-11).
 
-Executor wiring lands in Plan 58-02; this plan accepts ``executor=None``
-default and never invokes it (the dry-run path is the only path here).
+Executor wiring lands in Plan 58-02; approver wiring lands in Plan 58-04
+(both are optional kwargs so the runner remains constructible without them
+during early-deploy / test isolation).
 
 RUF006: any ``asyncio.create_task`` call stores the handle on
 ``self._tasks`` set; current implementation does not spawn tasks but the
@@ -69,10 +73,15 @@ class MetaAgentRunner:
         executor: Any = None,
         http_client_factory: Callable[[], httpx.AsyncClient] | None = None,
         base_url: str = _DEFAULT_BASE_URL,
+        approver: Any = None,
     ) -> None:
         self._settings = settings
         self._persistence = persistence
         self._executor = executor
+        # 58-04: optional MetaAgentApprover. When None, the expire-overdue
+        # sweep is skipped — used in test harnesses + early-deploy paths
+        # without breaking constructor compatibility.
+        self._approver = approver
         self._base_url = base_url
         self._client_factory = http_client_factory
         self._last_run_ts: datetime | None = None
@@ -92,6 +101,16 @@ class MetaAgentRunner:
             "meta_agent_tick_started",
             dry_run=self._settings.meta_agent_dry_run,
         )
+
+        # 58-04 D-14 / SPEC AC #17: BEFORE snapshot collection, sweep any
+        # 30-min-old FIX 'sent' rows to 'expired'. The sweep is bounded
+        # and idempotent. Wrapped in try/except so a sweep failure does
+        # NOT crash the tick.
+        if self._approver is not None:
+            try:
+                await self._approver.expire_overdue_fix_decisions()
+            except Exception:
+                _log.warning("meta_agent_approve_sweep_failed", exc_info=True)
 
         try:
             snapshot = await self._collect_snapshot(now=tick_start)
