@@ -39,6 +39,7 @@ def _make_loop(
         mock_settings.daily_loss_limit_pct = 0.05
         mock_settings.kelly_fraction = 0.5
         mock_settings.ml_enabled = False
+        mock_settings.meta_agent_enabled = False
         mock_settings.telegram_channels = ["@test_channel"]
         mock_settings.weekly_digest_hour_utc = 10
 
