@@ -41,13 +41,12 @@ def test_create_fix_worktree_invokes_git_with_correct_args(
         captured["args"] = args
         captured["kwargs"] = kwargs
         # Return a fake CompletedProcess shape — the function ignores its result.
-        result = subprocess.CompletedProcess(
+        return subprocess.CompletedProcess(
             args=args[0] if args else [],
             returncode=0,
             stdout="Preparing worktree (new branch)\n",
             stderr="",
         )
-        return result
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
 

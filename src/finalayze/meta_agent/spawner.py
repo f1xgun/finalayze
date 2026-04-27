@@ -159,6 +159,11 @@ async def _terminate_process_group(
         )
 
 
+# 58-04: FIX-spawn turn ceiling — distinct from the 20-turn investigate cap.
+_FIX_MAX_TURNS = "40"
+_FIX_TIMEOUT_S = 600  # SPEC §Requirement 7 — 600s fix-spawn timeout
+
+
 def _build_argv(
     prompt: str,
     *,
@@ -197,6 +202,120 @@ def _strip_anthropic_api_key(env: dict[str, str]) -> dict[str, str]:
     the operator's Max subscription stored in ``~/.claude/.credentials.json``.
     """
     return {k: v for k, v in env.items() if k != "ANTHROPIC_API_KEY"}
+
+
+async def _run_claude_subprocess(
+    argv: list[str],
+    *,
+    decision_id: UUID,
+    spawn_type: str,
+    cwd: Path | None,
+    timeout_s: int,
+    output_max_bytes: int,
+    sigterm_grace_s: float,
+    sigkill_reap_s: float,
+) -> SpawnOutcome:
+    """Shared subprocess body for ``spawn_readonly`` and ``spawn_fix``.
+
+    Both public spawners build their own ``argv`` (with the appropriate
+    ``--allowedTools``, ``--max-turns``, ``--add-dir`` flags) and acquire
+    their own lock BEFORE calling this helper. This function:
+
+      1. Strips ``ANTHROPIC_API_KEY`` from env (subscription-auth).
+      2. Spawns the subprocess with ``start_new_session=True`` (process-
+         group killability).
+      3. Registers the handle in the shared ``_inflight_handles`` registry
+         (consumed by 58-05's killswitch).
+      4. ``await asyncio.wait_for(proc.communicate(), timeout=timeout_s)``.
+      5. On TimeoutError, terminates the process group (SIGTERM(3s)→SIGKILL).
+      6. On CancelledError (killswitch), terminates and re-raises.
+      7. Truncates stdout/stderr to ``output_max_bytes`` and returns.
+
+    Per AP-1: raw subprocess.exec + ``os.killpg`` on the pgid (NOT
+    ``proc.terminate()``). The process group escape hatch is what makes
+    the killswitch deterministic on macOS.
+    """
+    env = _strip_anthropic_api_key(dict(os.environ))
+
+    _log.info(
+        "meta_agent_spawn_started",
+        decision_id_key=str(decision_id),
+        spawn_type=spawn_type,
+        timeout_s=timeout_s,
+    )
+
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+        cwd=str(cwd) if cwd is not None else None,
+        start_new_session=True,
+    )
+
+    _inflight_handles[decision_id] = proc
+
+    timed_out = False
+    killed_by_killswitch = False
+    stdout_bytes = b""
+    stderr_bytes = b""
+
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=timeout_s,
+        )
+    except TimeoutError:
+        timed_out = True
+        _log.warning(
+            "meta_agent_spawn_timeout",
+            decision_id_key=str(decision_id),
+            spawn_type=spawn_type,
+            timeout_s=timeout_s,
+        )
+        await _terminate_process_group(
+            proc,
+            grace_s=sigterm_grace_s,
+            kill_s=sigkill_reap_s,
+        )
+        stdout_bytes = await _drain(proc.stdout)
+        stderr_bytes = await _drain(proc.stderr)
+    except asyncio.CancelledError:
+        killed_by_killswitch = True
+        _log.warning(
+            "meta_agent_spawn_cancelled",
+            decision_id_key=str(decision_id),
+            spawn_type=spawn_type,
+        )
+        await _terminate_process_group(
+            proc,
+            grace_s=sigterm_grace_s,
+            kill_s=sigkill_reap_s,
+        )
+        raise
+    finally:
+        _inflight_handles.pop(decision_id, None)
+
+    exit_code = proc.returncode if proc.returncode is not None else _TIMEOUT_OUTCOME_RC
+
+    if not timed_out:
+        _log.info(
+            "meta_agent_spawn_completed",
+            decision_id_key=str(decision_id),
+            spawn_type=spawn_type,
+            exit_code=exit_code,
+            stdout_bytes=len(stdout_bytes),
+            stderr_bytes=len(stderr_bytes),
+        )
+
+    return SpawnOutcome(
+        exit_code=exit_code,
+        stdout=_truncate(stdout_bytes, output_max_bytes),
+        stderr=_truncate(stderr_bytes, output_max_bytes),
+        timed_out=timed_out,
+        killed_by_killswitch=killed_by_killswitch,
+    )
 
 
 async def spawn_readonly(
@@ -249,84 +368,81 @@ async def spawn_readonly(
 
     async with _INVESTIGATE_LOCK:
         argv = _build_argv(prompt, cwd=cwd)
-        env = _strip_anthropic_api_key(dict(os.environ))
-
-        _log.info(
-            "meta_agent_spawn_started",
-            decision_id_key=str(decision_id),
+        return await _run_claude_subprocess(
+            argv,
+            decision_id=decision_id,
             spawn_type="investigate",
+            cwd=cwd,
             timeout_s=timeout_s,
+            output_max_bytes=output_max_bytes,
+            sigterm_grace_s=sigterm_grace_s,
+            sigkill_reap_s=sigkill_reap_s,
         )
 
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-            cwd=str(cwd) if cwd is not None else None,
-            start_new_session=True,
+
+async def spawn_fix(
+    prompt: str,
+    *,
+    decision_id: UUID,
+    cwd: Path,
+    allowed_paths: list[str],  # noqa: ARG001 — reserved for future per-path injection
+    denied_paths: list[str],  # noqa: ARG001 — denied set already enforced via path_validator
+    timeout_s: int = _FIX_TIMEOUT_S,
+    output_max_bytes: int = _OUTCOME_MAX_BYTES,
+    sigterm_grace_s: float = _SIGTERM_GRACE_S,
+    sigkill_reap_s: float = _SIGKILL_REAP_S,
+) -> SpawnOutcome:
+    """Spawn the ``claude`` CLI in FIX mode (Edit allowed, worktree cwd).
+
+    SPEC §Requirement 7 + AC #13. Mirrors ``spawn_readonly`` but:
+      - ``--allowedTools "Read,Grep,Edit,Bash"`` (Edit included).
+      - ``--add-dir <worktree>`` ties the CLI's filesystem reach to the
+        worktree.
+      - ``--max-turns 40`` (FIX ceiling, vs investigate's 20).
+      - ``cwd=<worktree>`` so relative paths resolve inside the worktree.
+      - Acquires ``_FIX_LOCK`` (separate from ``_INVESTIGATE_LOCK`` —
+        FIX and INVESTIGATE can run concurrently per D-07).
+
+    The ``allowed_paths`` and ``denied_paths`` kwargs are accepted for
+    API symmetry with the skill schema; the actual enforcement happens
+    in the executor's pre-spawn ``validate_fix_prompt`` call (Plan 58-04
+    Task 09) AND in the fix-skill's filesystem boundary (the spawned CLI
+    refuses Edit operations outside its allowed tool list). The kwargs
+    are reserved for future per-path injection (e.g. when the CLI grows
+    a flag for path allow-listing directly).
+
+    Returns the same ``SpawnOutcome`` shape as ``spawn_readonly``.
+    Concurrent FIX spawn → ``SpawnOutcome(stderr='already_inflight')``.
+    Never raises except CancelledError (killswitch propagates).
+    """
+    if _FIX_LOCK.locked():
+        _log.warning(
+            "meta_agent_spawn_already_inflight",
+            decision_id_key=str(decision_id),
+            spawn_type="fix",
         )
-
-        _inflight_handles[decision_id] = proc
-
-        timed_out = False
-        killed_by_killswitch = False
-        stdout_bytes = b""
-        stderr_bytes = b""
-
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout_s,
-            )
-        except TimeoutError:
-            timed_out = True
-            _log.warning(
-                "meta_agent_spawn_timeout",
-                decision_id_key=str(decision_id),
-                spawn_type="investigate",
-                timeout_s=timeout_s,
-            )
-            await _terminate_process_group(
-                proc,
-                grace_s=sigterm_grace_s,
-                kill_s=sigkill_reap_s,
-            )
-            stdout_bytes = await _drain(proc.stdout)
-            stderr_bytes = await _drain(proc.stderr)
-        except asyncio.CancelledError:
-            killed_by_killswitch = True
-            _log.warning(
-                "meta_agent_spawn_cancelled",
-                decision_id_key=str(decision_id),
-                spawn_type="investigate",
-            )
-            await _terminate_process_group(
-                proc,
-                grace_s=sigterm_grace_s,
-                kill_s=sigkill_reap_s,
-            )
-            raise
-        finally:
-            _inflight_handles.pop(decision_id, None)
-
-        exit_code = proc.returncode if proc.returncode is not None else _TIMEOUT_OUTCOME_RC
-
-        if not timed_out:
-            _log.info(
-                "meta_agent_spawn_completed",
-                decision_id_key=str(decision_id),
-                spawn_type="investigate",
-                exit_code=exit_code,
-                stdout_bytes=len(stdout_bytes),
-                stderr_bytes=len(stderr_bytes),
-            )
-
         return SpawnOutcome(
-            exit_code=exit_code,
-            stdout=_truncate(stdout_bytes, output_max_bytes),
-            stderr=_truncate(stderr_bytes, output_max_bytes),
-            timed_out=timed_out,
-            killed_by_killswitch=killed_by_killswitch,
+            exit_code=_TIMEOUT_OUTCOME_RC,
+            stdout="",
+            stderr="already_inflight",
+            timed_out=False,
+            killed_by_killswitch=False,
+        )
+
+    async with _FIX_LOCK:
+        argv = _build_argv(
+            prompt,
+            cwd=cwd,
+            allowed_tools="Read,Grep,Edit,Bash",
+            max_turns=_FIX_MAX_TURNS,
+        )
+        return await _run_claude_subprocess(
+            argv,
+            decision_id=decision_id,
+            spawn_type="fix",
+            cwd=cwd,
+            timeout_s=timeout_s,
+            output_max_bytes=output_max_bytes,
+            sigterm_grace_s=sigterm_grace_s,
+            sigkill_reap_s=sigkill_reap_s,
         )

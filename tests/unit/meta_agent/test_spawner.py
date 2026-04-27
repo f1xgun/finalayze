@@ -529,8 +529,9 @@ async def test_concurrent_fix_spawns_rejected_with_already_inflight(
     a FIX spawn does NOT block investigate spawns and vice versa
     (D-07 — locks per spawn-type).
     """
-    import structlog
     from pathlib import Path
+
+    import structlog
 
     from finalayze.meta_agent import spawner as sp
     from finalayze.meta_agent.spawner import spawn_fix
