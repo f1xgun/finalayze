@@ -599,3 +599,100 @@ async def test_concurrent_fix_spawns_rejected_with_already_inflight(
         f"first fix spawn should have exited 0, got {first_outcome!r}"
     )
     assert sp._FIX_LOCK.locked() is False, "FIX lock must be released after first spawn completes"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-05-05 — inflight_count_by_type() helper for status endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_inflight_count_by_type_distinguishes_investigate_and_fix() -> None:
+    """SPEC AC #16: ``spawner.inflight_count_by_type()`` returns
+    ``{"investigate": int, "fix": int}`` reflecting which spawn type
+    currently owns each entry in the shared ``_inflight_handles``
+    registry. The status endpoint reads this for live visibility.
+
+    A parallel ``_INFLIGHT_TYPE: dict[UUID, str]`` is populated by
+    ``spawn_readonly`` (with "investigate") and ``spawn_fix`` (with
+    "fix") in the same try/finally block as ``_inflight_handles``.
+    """
+    from finalayze.meta_agent import spawner as sp
+
+    # Pre-condition: empty registry → both counts zero.
+    sp._inflight_handles.clear()
+    sp._INFLIGHT_TYPE.clear()
+    counts = sp.inflight_count_by_type()
+    assert counts == {"investigate": 0, "fix": 0}
+
+    # Simulate one INVESTIGATE spawn registered.
+    investigate_id = uuid.UUID("aaaa1111-0000-4000-8000-000000000001")
+    sp._inflight_handles[investigate_id] = MagicMock(spec=asyncio.subprocess.Process)
+    sp._INFLIGHT_TYPE[investigate_id] = "investigate"
+
+    counts = sp.inflight_count_by_type()
+    assert counts == {"investigate": 1, "fix": 0}
+
+    # Add one FIX spawn → both counts.
+    fix_id = uuid.UUID("bbbb2222-0000-4000-8000-000000000001")
+    sp._inflight_handles[fix_id] = MagicMock(spec=asyncio.subprocess.Process)
+    sp._INFLIGHT_TYPE[fix_id] = "fix"
+
+    counts = sp.inflight_count_by_type()
+    assert counts == {"investigate": 1, "fix": 1}
+
+    # Cleanup.
+    sp._inflight_handles.clear()
+    sp._INFLIGHT_TYPE.clear()
+
+
+def test_inflight_type_populated_alongside_handles_during_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #16 internal contract: ``spawn_readonly`` populates
+    ``_INFLIGHT_TYPE[decision_id] = "investigate"`` while running, and
+    cleans it up in the finally block (same lifetime as
+    ``_inflight_handles[decision_id]``).
+    """
+    import asyncio as _asyncio
+
+    from finalayze.meta_agent import spawner as sp
+
+    sp._inflight_handles.clear()
+    sp._INFLIGHT_TYPE.clear()
+
+    seen_during: dict[str, int] = {}
+
+    fake_proc = _FakeProcess(stdout=b"ok\n", exit_code=_EXIT_OK)
+
+    async def _fake_create(*_args: Any, **_kwargs: Any) -> _FakeProcess:
+        return fake_proc
+
+    # Snapshot _INFLIGHT_TYPE during the spawn by patching _terminate's no-op
+    # call site is awkward; instead, snapshot before communicate finishes by
+    # patching communicate to peek.
+    real_communicate = fake_proc.communicate
+
+    async def _peek_communicate() -> tuple[bytes, bytes]:
+        seen_during["count_during"] = len(sp._INFLIGHT_TYPE)
+        seen_during["investigate_during"] = sp.inflight_count_by_type()["investigate"]
+        return await real_communicate()
+
+    fake_proc.communicate = _peek_communicate  # type: ignore[method-assign]
+    monkeypatch.setattr(_asyncio, "create_subprocess_exec", _fake_create)
+
+    investigate_id = uuid.UUID("cccc3333-0000-4000-8000-000000000001")
+
+    async def _drive() -> None:
+        from finalayze.meta_agent.spawner import spawn_readonly
+
+        await spawn_readonly("test", decision_id=investigate_id)
+
+    asyncio.run(_drive())
+
+    # During the spawn there was 1 investigate registered.
+    assert seen_during["count_during"] == 1
+    assert seen_during["investigate_during"] == 1
+
+    # After the finally block, the registry is empty again.
+    assert investigate_id not in sp._INFLIGHT_TYPE
+    assert investigate_id not in sp._inflight_handles
