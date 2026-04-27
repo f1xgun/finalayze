@@ -6,6 +6,8 @@ Provides commands for querying and controlling system state via Telegram:
   - /stop: halt all trading cycles
   - /kill: emergency shutdown with 30s confirmation (admin-only)
   - /gonogo: run go/no-go gate evaluation
+  - /approve <id8>: (Phase 58-04) approve a meta-agent FIX-severity decision
+    within 30 min of its Telegram alert; dispatches the FIX spawn pipeline.
 
 Moved from core/ to api/ in Phase 22 (dependency layer cleanup).
 See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
@@ -13,6 +15,8 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+import asyncio
+import re
 import time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -25,11 +29,17 @@ if TYPE_CHECKING:
     from finalayze.api.alerts import TelegramAlerter
     from finalayze.core.kill_switch import KillSwitch
     from finalayze.execution.broker_router import BrokerRouter
+    from finalayze.meta_agent.approver import MetaAgentApprover
     from finalayze.monitoring.go_no_go import GoNoGoReporter
     from finalayze.risk.circuit_breaker import CircuitBreaker
 
 _log = structlog.get_logger()
 _ZERO = Decimal(0)
+
+# 58-04 D-12: locked /approve syntax — anchored regex, case-insensitive on the
+# command itself BUT case-sensitive on the hex (UUID short8 is always lowercase).
+# No extra arguments are accepted — anchor to end of string.
+_APPROVE_PATTERN = re.compile(r"^/approve\s+([0-9a-f]{8})\s*$", re.IGNORECASE)
 
 
 class TelegramBotHandler:
@@ -53,6 +63,7 @@ class TelegramBotHandler:
         trading_loop: Any | None = None,
         kill_switch: KillSwitch | None = None,
         go_no_go_reporter: GoNoGoReporter | None = None,
+        meta_agent_approver: MetaAgentApprover | None = None,
     ) -> None:
         self._alerter = alerter
         self._broker_router = broker_router
@@ -62,7 +73,12 @@ class TelegramBotHandler:
         self._trading_loop = trading_loop
         self._kill_switch = kill_switch
         self._go_no_go_reporter = go_no_go_reporter
+        # 58-04: meta-agent /approve dispatcher (None when meta-agent not deployed).
+        self._meta_agent_approver = meta_agent_approver
         self._pending_kill: dict[str, float] = {}
+        # 58-04 RUF006: store fire-and-forget /approve task handles on the
+        # owning instance so the event-loop tracks their lifetime.
+        self._pending_approve_tasks: set[asyncio.Task[Any]] = set()
 
         self._commands: dict[str, Any] = {
             "/status": self.handle_status,
@@ -70,6 +86,7 @@ class TelegramBotHandler:
             "/stop": self.handle_stop,
             "/kill": self.handle_kill,
             "/gonogo": self.handle_gonogo,
+            "/approve": self.handle_approve,
         }
 
     async def handle_update(self, update: dict[str, Any]) -> dict[str, str]:
@@ -111,7 +128,14 @@ class TelegramBotHandler:
             return {"ok": "no_command"}
 
         try:
-            await handler(chat_id)
+            # 58-04 D-12 + RESEARCH §5.2 Open Q #4: /approve is the first
+            # command that requires the raw text (to parse the short8 arg).
+            # Use an explicit branch so existing handlers keep their
+            # `(chat_id)`-only signature.
+            if command == "/approve":
+                await handler(chat_id, raw_text=text)
+            else:
+                await handler(chat_id)
             return {"ok": "processed"}
         except Exception:
             _log.exception("telegram_command_failed", command=command, chat_id=chat_id)
@@ -297,6 +321,48 @@ class TelegramBotHandler:
         lines.append(f"\n{report.reason}")
 
         await self._alerter._send("\n".join(lines))
+
+    async def handle_approve(self, chat_id: str, *, raw_text: str) -> None:
+        """/approve <id8> — dispatch a meta-agent FIX-severity approval (58-04).
+
+        Phase 58 D-12 + AC #12 + AP-15:
+          - Parses the short8 (8 hex chars) via _APPROVE_PATTERN.
+            Anchored regex; rejects extra args.
+          - Invalid syntax → log meta_agent_approve_invalid_syntax, return.
+          - Approver not configured → log meta_agent_approve_not_configured,
+            return (graceful degradation when meta-agent isn't deployed).
+          - Else dispatch as asyncio.create_task to keep webhook fast
+            (D-15 fire-and-forget envelope). Task handle stored on
+            self._pending_approve_tasks (RUF006) with done-callback
+            cleanup.
+        """
+        match = _APPROVE_PATTERN.match(raw_text.strip())
+        if match is None:
+            _log.info(
+                "meta_agent_approve_invalid_syntax",
+                chat_id=chat_id,
+                raw=raw_text,
+            )
+            return
+
+        short8 = match.group(1).lower()
+
+        if self._meta_agent_approver is None:
+            _log.warning(
+                "meta_agent_approve_not_configured",
+                chat_id=chat_id,
+                short8=short8,
+            )
+            return
+
+        # Fire-and-forget: keep the webhook 200 OK fast (AP-15) by
+        # dispatching the approver as a task. Track the handle on the
+        # instance so RUF006 + lifetime are correct.
+        task = asyncio.create_task(
+            self._meta_agent_approver.handle_approve(short8, chat_id=chat_id),
+        )
+        self._pending_approve_tasks.add(task)
+        task.add_done_callback(self._pending_approve_tasks.discard)
 
     async def _handle_kill_confirm(self, chat_id: str) -> dict[str, str]:
         """Process CONFIRM text for pending kill switch activation."""
