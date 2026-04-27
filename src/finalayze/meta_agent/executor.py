@@ -29,8 +29,11 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from finalayze.meta_agent.classifier import Severity
+from finalayze.meta_agent.exceptions import MetaAgentDeniedPathError, MetaAgentWorktreeError
+from finalayze.meta_agent.path_validator import validate_fix_prompt
 from finalayze.meta_agent.skill_loader import SkillSpec, load_skill
-from finalayze.meta_agent.spawner import SpawnOutcome, spawn_readonly
+from finalayze.meta_agent.spawner import SpawnOutcome, spawn_fix, spawn_readonly
+from finalayze.meta_agent.worktree import create_fix_worktree
 
 if TYPE_CHECKING:
     import uuid
@@ -53,6 +56,17 @@ _INVESTIGATE_SKILL_PATH = (
 )
 _OUTCOME_TEXT_MAX_BYTES = 64 * 1024  # D-06 cap on persisted outcome text
 _INVEST_TIMEOUT_S = 300  # SPEC §Requirement 6 — 300s investigate timeout
+
+# 58-04 module-level constants.
+_FIX_SKILL_PATH = (
+    Path(__file__).resolve().parents[3]
+    / ".claude"
+    / "skills"
+    / "meta-agent-fix"
+    / "SKILL.md"
+)
+_FIX_TIMEOUT_S = 600  # SPEC §Requirement 7 — 600s fix-spawn timeout
+_FIX_SHORT8_LEN = 8
 
 
 # SPEC §Requirement 5 mapping — severity to AlertPriority for Telegram routing.
@@ -247,10 +261,22 @@ class ActionExecutor:
     def _build_message(decision: MetaAgentDecisionModel | Any) -> str:
         """Compose the Telegram message body for one decision.
 
-        Format: ``[meta-agent <SEVERITY>] <summary>\\n<rationale>``. Kept
-        dependency-free so 58-03/58-04 can extend without breaking the
-        Phase 57 escape conventions (D-09).
+        Format (WATCH/INVESTIGATE): ``[meta-agent <SEVERITY>] <summary>\\n
+        <rationale>``.
+
+        Format (FIX, 58-04): adds a header banner with the decision_id
+        short8 and the literal ``/approve <short8>`` instruction so the
+        operator can copy-paste the reply (SPEC §Requirement 7 + AC #12).
         """
+        if decision.severity == Severity.FIX.value:
+            short8 = str(decision.id)[:_FIX_SHORT8_LEN]
+            return (
+                f"\U0001f6a8 [meta-agent FIX proposed]\n"
+                f"decision_id={short8}\n"
+                f"Reply /approve {short8} within 30 min to authorise.\n\n"
+                f"Summary: {decision.summary}\n"
+                f"Rationale: {decision.rationale}"
+            )
         return f"[meta-agent {decision.severity}] {decision.summary}\n{decision.rationale}"
 
     async def _telegram_count_today(self, session: Any) -> int:
@@ -440,6 +466,210 @@ class ActionExecutor:
         return (
             f"{skill.system_prompt}\n\n"
             f"## Snapshot\n\n"
+            f"```json\n{json.dumps(snapshot_payload, indent=2)}\n```\n"
+        )
+
+    # ── 58-04 META-07: FIX-spawn pipeline (worktree + validator + cap) ─────
+
+    async def execute_fix_spawn(
+        self,
+        decision: MetaAgentDecisionModel | Any,
+    ) -> None:
+        """Dispatch the FIX-spawn pipeline (called by approver after /approve).
+
+        SPEC AC #12 + #13 + #14 state machine:
+          1. Cap query (``_spawn_count_today_async('FIX')``).
+             - If ``count >= settings.meta_agent_max_fix_spawns_per_day``:
+               flip ``status='rejected', outcome='fix_spawn_cap_exceeded'``.
+               Return.
+          2. Load the meta-agent-fix skill (path validator pulls
+             ``skill.denied_paths``).
+          3. Build the fix prompt.
+          4. ``validate_fix_prompt(prompt, denied_paths=...)``.
+             - On ``MetaAgentDeniedPathError``: flip
+               ``status='rejected', outcome='denied_path:<exc>'``. Return.
+          5. ``create_fix_worktree(short8)``.
+             - On ``MetaAgentWorktreeError``: flip
+               ``status='failed', outcome='worktree_create_failed:<exc>'``.
+               Return.
+          6. Mark ``status='spawned'``.
+          7. ``await spawn_fix(prompt, decision_id=..., cwd=worktree, ...)``.
+          8. Flip ``status='completed'`` (exit=0 + not timed_out) or
+             ``'failed'``; store outcome text.
+
+        NEVER raises (except CancelledError, propagated from the spawner).
+        """
+        decision_id = decision.id
+        timestamp = decision.timestamp
+        short8 = str(decision_id)[:_FIX_SHORT8_LEN]
+
+        # 1. Cap query.
+        try:
+            count = await self._persistence._spawn_count_today_async("FIX")
+        except Exception:
+            _log.warning(
+                "meta_agent_fix_spawn_cap_query_failed",
+                decision_id_key=str(decision_id),
+                exc_info=True,
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="failed",
+                outcome="fix_spawn_cap_query_failed",
+            )
+            return
+
+        cap = self._settings.meta_agent_max_fix_spawns_per_day
+        if count >= cap:
+            _log.warning(
+                "meta_agent_fix_spawn_cap_exceeded",
+                decision_id_key=str(decision_id),
+                spawn_type="fix",
+                count=count,
+                cap=cap,
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="rejected",
+                outcome="fix_spawn_cap_exceeded",
+            )
+            return
+
+        # 2. Load the fix skill.
+        try:
+            skill = load_skill(_FIX_SKILL_PATH)
+        except (FileNotFoundError, ValueError):
+            _log.warning(
+                "meta_agent_fix_skill_load_failed",
+                decision_id_key=str(decision_id),
+                skill_path=str(_FIX_SKILL_PATH),
+                exc_info=True,
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="failed",
+                outcome="fix_skill_missing",
+            )
+            return
+
+        # 3. Build the prompt.
+        prompt = self._build_fix_prompt(decision, skill)
+
+        # 4. Pre-spawn validator.
+        try:
+            validate_fix_prompt(prompt, denied_paths=skill.denied_paths)
+        except MetaAgentDeniedPathError as exc:
+            _log.warning(
+                "meta_agent_fix_denied_path",
+                decision_id_key=str(decision_id),
+                exc_info=False,
+                error=str(exc),
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="rejected",
+                outcome=f"denied_path:{exc}",
+            )
+            return
+
+        # 5. Create the worktree.
+        try:
+            worktree = create_fix_worktree(short8)
+        except MetaAgentWorktreeError as exc:
+            _log.warning(
+                "meta_agent_fix_worktree_failed",
+                decision_id_key=str(decision_id),
+                error=str(exc),
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="failed",
+                outcome=f"worktree_create_failed:{exc}",
+            )
+            return
+
+        # 6. Mark 'spawned' BEFORE invoking — next tick's cap query sees this.
+        self._persistence.update_decision_status(
+            decision_id=decision_id,
+            timestamp=timestamp,
+            status="spawned",
+        )
+
+        # 7. Spawn — never raises (except CancelledError, propagated).
+        try:
+            outcome = await spawn_fix(
+                prompt,
+                decision_id=decision_id,
+                cwd=worktree,
+                allowed_paths=skill.allowed_paths,
+                denied_paths=skill.denied_paths,
+                timeout_s=_FIX_TIMEOUT_S,
+            )
+        except asyncio.CancelledError:
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="failed",
+                outcome="killed_by_killswitch",
+            )
+            raise
+        except Exception:
+            _log.warning(
+                "meta_agent_fix_spawn_failed",
+                decision_id_key=str(decision_id),
+                exc_info=True,
+            )
+            self._persistence.update_decision_status(
+                decision_id=decision_id,
+                timestamp=timestamp,
+                status="failed",
+                outcome="fix_spawn_invocation_failed",
+            )
+            return
+
+        # 8. Build outcome text + terminal status.
+        outcome_text = _build_outcome_text(outcome)
+        terminal_status = (
+            "completed" if outcome.exit_code == 0 and not outcome.timed_out else "failed"
+        )
+        self._persistence.update_decision_status(
+            decision_id=decision_id,
+            timestamp=timestamp,
+            status=terminal_status,
+            outcome=outcome_text,
+        )
+
+    @staticmethod
+    def _build_fix_prompt(
+        decision: MetaAgentDecisionModel | Any,
+        skill: SkillSpec,
+    ) -> str:
+        """Build the user-turn prompt for the FIX spawn.
+
+        Mirrors ``_build_invest_prompt`` but adds an explicit "FIX" banner
+        and the allowed-path list so the LLM knows the path constraints
+        upfront. The pre-spawn validator (``validate_fix_prompt``) checks
+        this prompt against ``skill.denied_paths`` before any subprocess
+        is created.
+        """
+        import json  # noqa: PLC0415
+
+        snapshot_payload = {
+            "decision_id": str(decision.id),
+            "timestamp": str(decision.timestamp),
+            "severity": decision.severity,
+            "summary": decision.summary,
+            "rationale": decision.rationale,
+            "allowed_paths": skill.allowed_paths,
+        }
+        return (
+            f"{skill.system_prompt}\n\n"
+            f"## FIX Snapshot\n\n"
             f"```json\n{json.dumps(snapshot_payload, indent=2)}\n```\n"
         )
 
