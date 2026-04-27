@@ -162,10 +162,110 @@ class Killswitch:
         _log.warning("meta_agent_killswitch_job_removed")
         return True
 
-    # ── Env-var poller (Task 58-05-03) — placeholder until Task 03 ───────
+    # ── Env-var poller (Task 58-05-03) ───────────────────────────────────
 
     async def start(self) -> None:
-        """Launch the env-var poller task. Implementation lands in Task 03."""
+        """Launch the env-var poller task on the current event loop.
+
+        Polls ``Settings.meta_agent_enabled`` every 1 s; on transition
+        ``True → False``, fires the same abort path as POST /disable.
+        Idempotent — calling ``start()`` twice does NOT spawn a second
+        task (the existing handle is kept).
+
+        Per RUF006 the task handle is stored on ``self._poller_task``.
+        ``stop()`` cancels and awaits it cleanly.
+        """
+        if self._poller_task is not None and not self._poller_task.done():
+            _log.info("meta_agent_killswitch_poller_already_running")
+            return
+        self._stopping.clear()
+        self._poller_task = asyncio.create_task(self._watch_env())
+        _log.info("meta_agent_killswitch_poller_started")
 
     async def stop(self) -> None:
-        """Cancel the env-var poller task cleanly. Implementation lands in Task 03."""
+        """Cancel the env-var poller task cleanly.
+
+        Sets the stopping event so the poller's next sleep wakes early,
+        then awaits the task. Safe to call when the poller never started.
+        """
+        self._stopping.set()
+        task = self._poller_task
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, BaseException):  # noqa: BLE001
+                # Cancellation is the expected shutdown path; any
+                # other exception we swallow because stop() must not
+                # raise (cleaner shutdown ordering).
+                pass
+        self._poller_task = None
+        _log.info("meta_agent_killswitch_poller_stopped")
+
+    async def _watch_env(self) -> None:
+        """1 s polling loop. Reads the live settings via
+        ``settings_provider`` first; subsequent reads invalidate any
+        ``lru_cache`` wrap on ``config.settings.get_settings`` (when
+        present) so a hot env-var change is observed.
+
+        On transition ``True → False`` (the only direction we care about
+        for the killswitch), fires ``abort_all_inflight()`` then
+        ``remove_job()``. The ``meta_agent_killswitch_env_var_flip``
+        warning event is the operator-visible breadcrumb.
+        """
+        prev = bool(self._settings_provider().meta_agent_enabled)
+        while not self._stopping.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._stopping.wait(),
+                    timeout=_POLL_INTERVAL_S,
+                )
+            except TimeoutError:
+                # Normal poll cadence — fall through to the read.
+                pass
+            if self._stopping.is_set():
+                return
+
+            current = self._read_current_enabled()
+            if prev and not current:
+                _log.warning(
+                    "meta_agent_killswitch_env_var_flip",
+                    prev=prev,
+                    current=current,
+                )
+                try:
+                    await self.abort_all_inflight()
+                except Exception:
+                    _log.warning(
+                        "meta_agent_killswitch_abort_failed",
+                        exc_info=True,
+                    )
+                try:
+                    self.remove_job()
+                except Exception:
+                    _log.warning(
+                        "meta_agent_killswitch_remove_job_failed",
+                        exc_info=True,
+                    )
+            prev = current
+
+    @staticmethod
+    def _read_current_enabled() -> bool:
+        """Read ``Settings.meta_agent_enabled`` with cache invalidation.
+
+        The project-wide ``get_settings`` is ``@lru_cache(maxsize=1)``
+        (see ``config/settings.py:198``), so a hot env-var flip would
+        otherwise be invisible. We invalidate the cache before reading.
+        Guarded by ``hasattr`` so the poller works whether or not
+        ``get_settings`` carries a ``cache_clear`` attribute.
+        """
+        from config.settings import get_settings  # noqa: PLC0415
+
+        if hasattr(get_settings, "cache_clear"):
+            try:
+                get_settings.cache_clear()
+            except Exception:  # noqa: BLE001 — diagnostic only
+                _log.debug("meta_agent_killswitch_cache_clear_failed", exc_info=True)
+        return bool(get_settings().meta_agent_enabled)

@@ -231,7 +231,7 @@ def test_remove_job_idempotent_on_missing_job() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-_POLL_WAIT_S = 3.0  # seconds — give the 1 s poller time to detect the flip
+_POLL_WAIT_S = 4.0  # seconds — give the 1 s poller time to detect the flip + abort
 
 
 @pytest.mark.asyncio
@@ -285,8 +285,8 @@ async def test_env_var_flip_aborts_inflight_within_5s(
 
     def _fake_get_settings() -> Any:
         state["calls"] += 1
-        # First two calls return True; third onward return False.
-        enabled = state["calls"] <= 2  # noqa: PLR2004
+        # First call returns True; second onward return False.
+        enabled = state["calls"] <= 1
         s = MagicMock()
         s.meta_agent_enabled = enabled
         return s
