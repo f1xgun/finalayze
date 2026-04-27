@@ -65,6 +65,30 @@ _FIX_LOCK: asyncio.Lock = asyncio.Lock()
 # decision_id so the executor can correlate failed spawns with their row.
 _inflight_handles: dict[UUID, asyncio.subprocess.Process] = {}
 
+# Phase 58-05-05 (META-08, SPEC AC #16): parallel registry tagging each
+# in-flight spawn by type so the GET /api/v1/meta-agent/status endpoint
+# can report ``inflight_spawns={"investigate": N, "fix": M}`` live.
+# Populated alongside ``_inflight_handles`` in ``_run_claude_subprocess``;
+# both registries share the same try/finally lifetime. Acceptable race:
+# the count helper does NOT take ``_INVESTIGATE_LOCK`` / ``_FIX_LOCK``,
+# so the status endpoint may be O(1 ms) stale relative to the registry —
+# fine for operator visibility.
+_INFLIGHT_TYPE: dict[UUID, str] = {}
+
+
+def inflight_count_by_type() -> dict[str, int]:
+    """Return the live in-flight spawn count by type.
+
+    Used by the status endpoint (``GET /api/v1/meta-agent/status``) and
+    by Plan 58-05's killswitch logic. Lock-cheap: a snapshot read of
+    the parallel ``_INFLIGHT_TYPE`` dict — does not block any spawner
+    call site.
+    """
+    return {
+        "investigate": sum(1 for t in _INFLIGHT_TYPE.values() if t == "investigate"),
+        "fix": sum(1 for t in _INFLIGHT_TYPE.values() if t == "fix"),
+    }
+
 
 @dataclass(frozen=True)
 class SpawnOutcome:
@@ -255,6 +279,9 @@ async def _run_claude_subprocess(
     )
 
     _inflight_handles[decision_id] = proc
+    # 58-05-05 (META-08, SPEC AC #16): tag spawn by type so the status
+    # endpoint can report inflight_spawns by-type. Cleaned up in finally.
+    _INFLIGHT_TYPE[decision_id] = spawn_type
 
     timed_out = False
     killed_by_killswitch = False
@@ -296,6 +323,7 @@ async def _run_claude_subprocess(
         raise
     finally:
         _inflight_handles.pop(decision_id, None)
+        _INFLIGHT_TYPE.pop(decision_id, None)
 
     exit_code = proc.returncode if proc.returncode is not None else _TIMEOUT_OUTCOME_RC
 

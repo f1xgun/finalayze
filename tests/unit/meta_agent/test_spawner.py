@@ -21,6 +21,7 @@ import signal
 import time
 import uuid
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
