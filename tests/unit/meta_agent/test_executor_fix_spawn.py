@@ -98,7 +98,7 @@ async def test_execute_fix_severity_sends_telegram_with_short8(
         settings=settings,
         alerter=alerter,
         persistence=persistence,
-        session_factory=lambda: _FakeSession(),
+        session_factory=_FakeSession,
     )
 
     decision = _make_fix_decision()
@@ -207,7 +207,9 @@ async def test_execute_fix_spawn_after_approve_invokes_validate_and_spawn(
     assert len(validate_calls) == 1, f"expected 1 validate call, got {validate_calls!r}"
 
     # create_fix_worktree called with the short8.
-    assert worktree_calls == [_FAKE_SHORT8], f"expected worktree for {_FAKE_SHORT8}, got {worktree_calls!r}"
+    assert worktree_calls == [_FAKE_SHORT8], (
+        f"expected worktree for {_FAKE_SHORT8}, got {worktree_calls!r}"
+    )
 
     # spawn_fix invoked with worktree cwd.
     assert len(spawn_calls) == 1

@@ -192,7 +192,12 @@ class MetaAgentApprover:
             result = await session.execute(stmt)
             await session.commit()
 
-        affected = int(result.rowcount or 0)
+        # ``CursorResult.rowcount`` exists on SQLAlchemy execute() results for
+        # UPDATE / DELETE statements but is typed as a Union in stubs; cast
+        # via getattr so mypy is happy with the test fakes (which set it
+        # directly on a fake _FakeResult).
+        rowcount = getattr(result, "rowcount", 0) or 0
+        affected = int(rowcount)
         _log.info("meta_agent_approve_sweep", affected_count=affected)
         return affected
 
