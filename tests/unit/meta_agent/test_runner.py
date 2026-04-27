@@ -2,6 +2,10 @@
 
 Dry-run path: snapshot → classify → persist; NO Telegram, NO subprocess
 spawns. SPEC §Acceptance Criterion #7.
+
+Phase 58-04 (Task 10): also tests the expire-overdue sweep ordering —
+runner.run_one_tick() MUST call approver.expire_overdue_fix_decisions()
+BEFORE snapshot collection (D-14, AC #17).
 """
 
 from __future__ import annotations
@@ -240,3 +244,127 @@ async def test_runner_invokes_executor_when_not_dry_run(
     assert decision.severity == "INVESTIGATE"
     assert decision.id == persisted_kwargs["decision_id"]
     assert decision.timestamp == persisted_kwargs["timestamp"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-04-10: run_one_tick runs expire_overdue_fix_decisions FIRST (D-14)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_one_tick_runs_expire_sweep_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #17 + D-14: run_one_tick() MUST invoke
+    approver.expire_overdue_fix_decisions() BEFORE build_snapshot().
+    Use a shared call-order list to assert ordering.
+    """
+    from finalayze.meta_agent import runner as runner_module
+    from finalayze.meta_agent.classifier import Severity
+    from finalayze.meta_agent.runner import MetaAgentRunner
+    from finalayze.meta_agent.snapshot import PositionsSummary, Snapshot
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = True
+    settings.meta_agent_enabled = True
+    settings.api_key = "test-key"
+
+    fake_snapshot = Snapshot(
+        timestamp=datetime.now(UTC),
+        alerts_last_hour=[],
+        drawdown_pct=0.0,
+        equity_persist_failures=0,
+        ml_signal_error_rate=None,
+        positions_summary=PositionsSummary(raw={"positions": []}),
+        raw={},
+    )
+
+    # Order tracker — both methods append to this list when invoked.
+    call_order: list[str] = []
+
+    async def _fake_build_snapshot(_client, *, now):  # noqa: ARG001
+        call_order.append("build_snapshot")
+        return fake_snapshot
+
+    monkeypatch.setattr(runner_module, "build_snapshot", _fake_build_snapshot)
+    monkeypatch.setattr(runner_module, "classify", lambda _snap: Severity.HEALTHY)
+
+    persistence = MagicMock()
+    persistence.persist_decision = MagicMock()
+
+    approver = MagicMock()
+
+    async def _fake_sweep() -> int:
+        call_order.append("expire_overdue_fix_decisions")
+        return 0
+
+    approver.expire_overdue_fix_decisions = _fake_sweep
+
+    fake_client = AsyncMock()
+    fake_client.aclose = AsyncMock()
+
+    runner = MetaAgentRunner(
+        settings=settings,
+        persistence=persistence,
+        executor=None,
+        http_client_factory=lambda: fake_client,
+        approver=approver,
+    )
+
+    await runner.run_one_tick()
+
+    # Sweep ran BEFORE snapshot.
+    assert call_order[:2] == ["expire_overdue_fix_decisions", "build_snapshot"], (
+        f"sweep must run before snapshot; got order: {call_order!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_one_tick_without_approver_skips_sweep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backwards compatibility: a runner constructed without an approver
+    (legacy test harness, or pre-58-04 deployment) must not raise — the
+    sweep is simply skipped.
+    """
+    from finalayze.meta_agent import runner as runner_module
+    from finalayze.meta_agent.classifier import Severity
+    from finalayze.meta_agent.runner import MetaAgentRunner
+    from finalayze.meta_agent.snapshot import PositionsSummary, Snapshot
+
+    settings = MagicMock()
+    settings.meta_agent_dry_run = True
+    settings.meta_agent_enabled = True
+    settings.api_key = "test-key"
+
+    fake_snapshot = Snapshot(
+        timestamp=datetime.now(UTC),
+        alerts_last_hour=[],
+        drawdown_pct=0.0,
+        equity_persist_failures=0,
+        ml_signal_error_rate=None,
+        positions_summary=PositionsSummary(raw={"positions": []}),
+        raw={},
+    )
+
+    async def _fake_build_snapshot(_client, *, now):  # noqa: ARG001
+        return fake_snapshot
+
+    monkeypatch.setattr(runner_module, "build_snapshot", _fake_build_snapshot)
+    monkeypatch.setattr(runner_module, "classify", lambda _snap: Severity.HEALTHY)
+
+    persistence = MagicMock()
+    persistence.persist_decision = MagicMock()
+    fake_client = AsyncMock()
+    fake_client.aclose = AsyncMock()
+
+    runner = MetaAgentRunner(
+        settings=settings,
+        persistence=persistence,
+        http_client_factory=lambda: fake_client,
+        # No approver kwarg — legacy compat path.
+    )
+
+    # Must not raise.
+    await runner.run_one_tick()
+    assert persistence.persist_decision.call_count == 1
