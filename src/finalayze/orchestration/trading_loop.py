@@ -770,6 +770,29 @@ class TradingLoop:
                 runner=self._meta_agent_runner,
                 async_loop=self._async_loop,
             )
+            # Phase 58-05-06 (META-08, SPEC AC #15): launch the killswitch
+            # env-var poller on the persistent async loop. The poller
+            # MUST run on the same loop where ``await proc.wait()`` was
+            # set up by spawn_readonly / spawn_fix — see PLAN body Risks.
+            # Lazy-init the async loop now so the poller has a live loop
+            # to attach to (mirrors the lazy init in _run_async()).
+            ks = getattr(self._meta_agent_runner, "killswitch", None)
+            if ks is not None:
+                if self._async_loop is None or self._async_loop.is_closed():
+                    _loop = asyncio.new_event_loop()
+                    self._async_loop = _loop
+                    if (
+                        hasattr(self, "_persistence")
+                        and self._persistence is not None
+                    ):
+                        self._persistence._async_loop = _loop
+                    _t = threading.Thread(target=_loop.run_forever, daemon=True)
+                    _t.start()
+                    self._async_thread = _t
+                asyncio.run_coroutine_threadsafe(
+                    ks.start(),
+                    self._async_loop,
+                )
         if self._ml_registry is not None and getattr(self._settings, "ml_enabled", False):
             self._scheduler.add_job(
                 self._ml_retrainer.retrain_all,
@@ -889,6 +912,22 @@ class TradingLoop:
 
     def stop(self) -> None:
         """Gracefully shut down scheduler, async/gRPC loops, and connections."""
+        # Phase 58-05-06 (META-08, SPEC AC #15): cancel the meta-agent
+        # killswitch poller BEFORE shutting down the async loop (otherwise
+        # the cancel coroutine has nowhere to run). Best-effort — never
+        # raises, mirroring the rest of the stop() shutdown sequence.
+        if (
+            self._meta_agent_runner is not None
+            and getattr(self._meta_agent_runner, "killswitch", None) is not None
+            and self._async_loop is not None
+            and not self._async_loop.is_closed()
+        ):
+            try:
+                ks = self._meta_agent_runner.killswitch
+                future = asyncio.run_coroutine_threadsafe(ks.stop(), self._async_loop)
+                future.result(timeout=5)
+            except Exception:
+                _log.debug("meta_agent_killswitch_stop_failed_during_shutdown")
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=True)
         if self._async_loop is not None and not self._async_loop.is_closed():
