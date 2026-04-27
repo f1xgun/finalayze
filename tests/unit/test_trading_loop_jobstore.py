@@ -27,6 +27,7 @@ class TestTradingLoopJobStore:
         settings.kelly_fraction = 0.5
         settings.database_url = "postgresql+asyncpg://user:pass@localhost/db"
         settings.ml_enabled = False
+        settings.meta_agent_enabled = False
         settings.bond_cycle_enabled = False
         settings.weekly_digest_hour_utc = 16
 
