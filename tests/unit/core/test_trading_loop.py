@@ -488,6 +488,7 @@ class TestSandboxRolloutDefault:
         monkeypatch.setenv("FINALAYZE_MODE", "sandbox")
         monkeypatch.delenv("FINALAYZE_ROLLOUT_PHASE", raising=False)
         monkeypatch.setenv("FINALAYZE_DATABASE_URL", "postgresql+asyncpg://x:x@localhost/x")
+        monkeypatch.setenv("FINALAYZE_LLM_PROVIDER", "openrouter")
 
         from importlib import reload
 
@@ -505,6 +506,7 @@ class TestSandboxRolloutDefault:
         monkeypatch.setenv("FINALAYZE_MODE", "sandbox")
         monkeypatch.setenv("FINALAYZE_ROLLOUT_PHASE", "full")
         monkeypatch.setenv("FINALAYZE_DATABASE_URL", "postgresql+asyncpg://x:x@localhost/x")
+        monkeypatch.setenv("FINALAYZE_LLM_PROVIDER", "openrouter")
 
         from importlib import reload
 
@@ -521,6 +523,7 @@ class TestSandboxRolloutDefault:
         """Non-sandbox modes are not affected by the sandbox default."""
         monkeypatch.setenv("FINALAYZE_MODE", "debug")
         monkeypatch.delenv("FINALAYZE_ROLLOUT_PHASE", raising=False)
+        monkeypatch.setenv("FINALAYZE_LLM_PROVIDER", "openrouter")
 
         from importlib import reload
 

@@ -59,11 +59,7 @@ _INVEST_TIMEOUT_S = 300  # SPEC §Requirement 6 — 300s investigate timeout
 
 # 58-04 module-level constants.
 _FIX_SKILL_PATH = (
-    Path(__file__).resolve().parents[3]
-    / ".claude"
-    / "skills"
-    / "meta-agent-fix"
-    / "SKILL.md"
+    Path(__file__).resolve().parents[3] / ".claude" / "skills" / "meta-agent-fix" / "SKILL.md"
 )
 _FIX_TIMEOUT_S = 600  # SPEC §Requirement 7 — 600s fix-spawn timeout
 _FIX_SHORT8_LEN = 8

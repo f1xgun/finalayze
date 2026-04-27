@@ -111,9 +111,7 @@ async def test_approve_command_invalid_syntax_returns_no_approver_call() -> None
             result = await handler.handle_update(update)
 
         # Webhook still returns processed (200 OK).
-        assert result == {"ok": "processed"}, (
-            f"unexpected result for {raw_text!r}: {result!r}"
-        )
+        assert result == {"ok": "processed"}, f"unexpected result for {raw_text!r}: {result!r}"
 
         # Approver NOT called for any invalid input.
         # (Reset between iterations to detect the per-input behaviour.)

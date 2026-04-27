@@ -133,11 +133,11 @@ async def test_execute_fix_spawn_after_approve_invokes_validate_and_spawn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SPEC AC #13: execute_fix_spawn(decision) runs the full pipeline:
-      1. cap query passes.
-      2. validate_fix_prompt invoked on the built prompt.
-      3. create_fix_worktree invoked with short8.
-      4. spawn_fix invoked with prompt + worktree cwd + paths.
-      5. Decision status flipped to 'completed' (exit=0).
+    1. cap query passes.
+    2. validate_fix_prompt invoked on the built prompt.
+    3. create_fix_worktree invoked with short8.
+    4. spawn_fix invoked with prompt + worktree cwd + paths.
+    5. Decision status flipped to 'completed' (exit=0).
     """
     from pathlib import Path
 
