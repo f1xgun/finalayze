@@ -342,3 +342,143 @@ class TestMetaAgentJobRegistration:
         assert len(meta_calls) == 0, (
             f"Expected zero meta_agent add_job calls when disabled, got {len(meta_calls)}"
         )
+
+
+# ── Phase 58-05-06: TradingLoop wires killswitch start/stop ─────────────────
+
+
+class TestMetaAgentKillswitchWiring:
+    """Phase 58-05-06: TradingLoop.start() launches the meta-agent
+    killswitch poller (env-var watcher) when meta_agent_enabled=True
+    AND a killswitch is wired on the runner. ``stop()`` cancels the
+    poller cleanly.
+
+    SPEC AC #15 + #18.
+    """
+
+    @patch("finalayze.core.trading_loop.BackgroundScheduler")
+    def test_meta_agent_killswitch_started_when_enabled(
+        self,
+        mock_scheduler_cls: MagicMock,
+    ) -> None:
+        """meta_agent_enabled=True with a wired killswitch on the runner →
+        TradingLoop.start() schedules ``runner.killswitch.start()`` onto
+        the persistent async loop.
+        """
+        from finalayze.meta_agent.killswitch import Killswitch
+        from finalayze.meta_agent.runner import MetaAgentRunner
+
+        mock_scheduler = MagicMock()
+        mock_scheduler_cls.return_value = mock_scheduler
+        loop = _make_trading_loop()
+        loop._settings.meta_agent_enabled = True  # type: ignore[attr-defined]
+        loop._settings.meta_agent_dry_run = True  # type: ignore[attr-defined]
+        loop._settings.meta_agent_interval_minutes = 30  # type: ignore[attr-defined]
+
+        # Build runner whose .killswitch is a Killswitch-shaped MagicMock.
+        runner = MagicMock(spec=MetaAgentRunner)
+        ks = MagicMock(spec=Killswitch)
+        ks.start = AsyncMock()
+        ks.stop = AsyncMock()
+        runner.killswitch = ks
+        loop._meta_agent_runner = runner  # type: ignore[attr-defined]
+
+        with (
+            patch.object(loop, "_load_baseline_from_db"),
+            patch.object(loop, "_reconcile_inflight_orders"),
+            patch.object(loop, "_stop_event") as mock_stop,
+            patch("asyncio.run_coroutine_threadsafe") as mock_run_threadsafe,
+        ):
+            mock_stop.wait.side_effect = lambda: None
+            loop.start()  # type: ignore[union-attr]
+
+        # The wiring path scheduled killswitch.start() onto the async loop
+        # via run_coroutine_threadsafe. The first positional arg of one of
+        # those calls must be the coroutine returned by ks.start().
+        assert ks.start.call_count == 1, (
+            f"Expected exactly one ks.start() invocation, got {ks.start.call_count}"
+        )
+        # And run_coroutine_threadsafe was called with the resulting coro.
+        ks_start_calls = [
+            call
+            for call in mock_run_threadsafe.call_args_list
+            if call.args and getattr(call.args[0], "__class__", None).__name__ == "coroutine"
+        ]
+        # At least one run_coroutine_threadsafe call dispatched a coroutine.
+        assert len(ks_start_calls) >= 1, (
+            f"Expected ≥1 run_coroutine_threadsafe(coro) call, got "
+            f"{[c.args for c in mock_run_threadsafe.call_args_list]}"
+        )
+
+    @patch("finalayze.core.trading_loop.BackgroundScheduler")
+    def test_meta_agent_killswitch_not_started_when_disabled(
+        self,
+        mock_scheduler_cls: MagicMock,
+    ) -> None:
+        """meta_agent_enabled=False → no killswitch.start() call."""
+        from finalayze.meta_agent.killswitch import Killswitch
+        from finalayze.meta_agent.runner import MetaAgentRunner
+
+        mock_scheduler = MagicMock()
+        mock_scheduler_cls.return_value = mock_scheduler
+        loop = _make_trading_loop()
+        loop._settings.meta_agent_enabled = False  # type: ignore[attr-defined]
+
+        runner = MagicMock(spec=MetaAgentRunner)
+        ks = MagicMock(spec=Killswitch)
+        ks.start = AsyncMock()
+        ks.stop = AsyncMock()
+        runner.killswitch = ks
+        loop._meta_agent_runner = runner  # type: ignore[attr-defined]
+
+        with (
+            patch.object(loop, "_load_baseline_from_db"),
+            patch.object(loop, "_reconcile_inflight_orders"),
+            patch.object(loop, "_stop_event") as mock_stop,
+        ):
+            mock_stop.wait.side_effect = lambda: None
+            loop.start()  # type: ignore[union-attr]
+
+        ks.start.assert_not_called()
+
+    @patch("finalayze.core.trading_loop.BackgroundScheduler")
+    def test_meta_agent_killswitch_stopped_on_trading_loop_stop(
+        self,
+        mock_scheduler_cls: MagicMock,
+    ) -> None:
+        """TradingLoop.stop() cancels the killswitch poller via
+        run_coroutine_threadsafe(ks.stop()) when a killswitch is wired.
+        """
+        from finalayze.meta_agent.killswitch import Killswitch
+        from finalayze.meta_agent.runner import MetaAgentRunner
+
+        mock_scheduler = MagicMock()
+        mock_scheduler_cls.return_value = mock_scheduler
+        loop = _make_trading_loop()
+        loop._settings.meta_agent_enabled = True  # type: ignore[attr-defined]
+        loop._settings.meta_agent_dry_run = True  # type: ignore[attr-defined]
+        loop._settings.meta_agent_interval_minutes = 30  # type: ignore[attr-defined]
+
+        runner = MagicMock(spec=MetaAgentRunner)
+        ks = MagicMock(spec=Killswitch)
+        ks.start = AsyncMock()
+        ks.stop = AsyncMock()
+        runner.killswitch = ks
+        loop._meta_agent_runner = runner  # type: ignore[attr-defined]
+
+        # Pre-set _async_loop so stop() doesn't try to enter the live-loop
+        # close path on a None/closed loop.
+        fake_async_loop = MagicMock()
+        fake_async_loop.is_closed.return_value = False
+        loop._async_loop = fake_async_loop  # type: ignore[attr-defined]
+
+        with patch("asyncio.run_coroutine_threadsafe") as mock_run_threadsafe:
+            loop.stop()  # type: ignore[union-attr]
+
+        # ks.stop was invoked (the coroutine was created).
+        assert ks.stop.call_count >= 1, (
+            f"TradingLoop.stop() must invoke killswitch.stop(); "
+            f"got call_count={ks.stop.call_count}"
+        )
+        # And dispatched onto the async loop.
+        assert mock_run_threadsafe.call_count >= 1
