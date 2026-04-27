@@ -236,4 +236,103 @@ def _make_loop_stub(*, metrics: MagicMock | None = None) -> MagicMock:
     loop._cycle_exited_symbols = set()
     loop._anomaly_detector = MagicMock()
     loop._anomaly_detector.check.return_value = None
+    loop._daily_reporter = MagicMock()
     return loop
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 56 EQTY-01 / D-02 Route B: per-cycle equity snapshot wiring
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStrategyCyclePersistsEquitySnapshot:
+    """Verify _strategy_cycle_impl wires DailyReportingService.persist_cycle_snapshot."""
+
+    @staticmethod
+    def _make_strategy_cycle_stub() -> MagicMock:
+        """Stub a TradingLoop suitable for invoking _strategy_cycle_impl()."""
+        from datetime import UTC, datetime
+
+        from finalayze.risk.circuit_breaker import CircuitLevel
+
+        loop = _make_loop_stub()
+        loop._CircuitLevel = CircuitLevel
+        loop._now = MagicMock(return_value=datetime(2026, 4, 19, 12, 0, tzinfo=UTC))
+        loop._circuit_breakers = {"us": MagicMock()}
+        loop._circuit_breakers["us"].check.return_value = CircuitLevel.NORMAL
+        loop._baseline_equities = {"us": Decimal(50000)}
+        loop._get_market_equity = MagicMock(return_value=Decimal(50000))
+        loop._cross_market_breaker = MagicMock()
+        loop._cross_market_breaker.check.return_value = False
+        loop._loss_limit_tracker = MagicMock()
+        loop._loss_limit_tracker.is_halted.return_value = False
+        loop._liquidate_market = MagicMock()
+        loop._process_market_cycle = MagicMock()
+        loop._build_symbol_to_market_map = MagicMock(return_value={})
+        loop._last_prices = {}
+        return loop
+
+    def test_strategy_cycle_persists_equity_snapshot_after_market_loop(self) -> None:
+        """Cycle hook fires DailyReportingService.persist_cycle_snapshot AFTER per-market loop.
+
+        EQTY-01 D-02 Route B: snapshot writer is called from
+        TradingLoop._strategy_cycle_impl() right after the per-market loop and
+        the existing position_tracker.snapshot_all_stops_to_db() call.
+        """
+        from finalayze.core.trading_loop import TradingLoop
+
+        loop = self._make_strategy_cycle_stub()
+
+        # Use a parent Mock to capture call ordering across both attached children
+        parent = MagicMock()
+        parent.attach_mock(loop._position_tracker.snapshot_all_stops_to_db, "snap_stops")
+        parent.attach_mock(loop._daily_reporter.persist_cycle_snapshot, "persist_snap")
+
+        TradingLoop._strategy_cycle_impl(loop)
+
+        # Assert: persist_cycle_snapshot is called once with cycle's "now"
+        loop._daily_reporter.persist_cycle_snapshot.assert_called_once_with(loop._now.return_value)
+
+        # Assert ordering: stop snapshot comes BEFORE persist_cycle_snapshot
+        call_names = [c[0] for c in parent.mock_calls]
+        assert "snap_stops" in call_names
+        assert "persist_snap" in call_names
+        assert call_names.index("snap_stops") < call_names.index("persist_snap")
+
+    def test_strategy_cycle_skips_persist_on_loss_limit_halt(self) -> None:
+        """When loss_limit_tracker is halted, persist_cycle_snapshot must NOT be called.
+
+        Per Pitfall 6 in 56-RESEARCH: halt-path early returns must skip the
+        snapshot writer (a halted cycle did not complete normally).
+        """
+        from finalayze.core.trading_loop import TradingLoop
+
+        loop = self._make_strategy_cycle_stub()
+        loop._loss_limit_tracker.is_halted.return_value = True
+
+        TradingLoop._strategy_cycle_impl(loop)
+
+        loop._daily_reporter.persist_cycle_snapshot.assert_not_called()
+
+    def test_strategy_cycle_skips_persist_on_cross_market_halt(self) -> None:
+        """When cross-market breaker trips, persist_cycle_snapshot must NOT be called."""
+        from finalayze.core.trading_loop import TradingLoop
+
+        loop = self._make_strategy_cycle_stub()
+        loop._cross_market_breaker.check.return_value = True
+
+        TradingLoop._strategy_cycle_impl(loop)
+
+        loop._daily_reporter.persist_cycle_snapshot.assert_not_called()
+
+    def test_strategy_cycle_swallows_persist_failure(self) -> None:
+        """When persist_cycle_snapshot raises, the cycle must NOT propagate (PERSIST-05)."""
+        from finalayze.core.trading_loop import TradingLoop
+
+        loop = self._make_strategy_cycle_stub()
+        loop._daily_reporter.persist_cycle_snapshot.side_effect = RuntimeError("DB down")
+
+        # Should NOT raise -- failure is logged and swallowed inside _strategy_cycle_impl
+        TradingLoop._strategy_cycle_impl(loop)
+
+        loop._daily_reporter.persist_cycle_snapshot.assert_called_once()

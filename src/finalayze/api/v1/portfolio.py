@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -210,12 +211,71 @@ class HistoryResponse(BaseModel):
 
 class PerformanceResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
-    sharpe_30d: float | None
-    sortino_30d: float | None
-    max_drawdown_pct: float | None
-    win_rate: float | None
-    profit_factor: float | None
-    avg_win_loss_ratio: float | None
+    sharpe_30d: float | None = Field(
+        default=None,
+        description=(
+            "Annualised Sharpe ratio over the requested window (default 30d). "
+            "Multi-currency portfolios mix RUB and USD equities directly; "
+            "FX-adjusted variant is out of scope (D-11). Null when "
+            "n_snapshots < 3."
+        ),
+    )
+    sortino_30d: float | None = Field(
+        default=None,
+        description=(
+            "Annualised Sortino ratio over the requested window. "
+            "PerformanceAnalyzer returns 0 on negative-mean returns — "
+            "that is a meaningful 'losing portfolio' value, not 'no data'. "
+            "Null only when n_snapshots < 3 (D-12 + Open Q4)."
+        ),
+    )
+    max_drawdown_pct: float | None = Field(
+        default=None,
+        description=(
+            "Portfolio-aggregate max drawdown over the window. "
+            "Distinct from per-market drawdown_pct shown on /history "
+            "(see Pitfall 4). Null when n_snapshots < 2."
+        ),
+    )
+    win_rate: float | None = Field(
+        default=None,
+        description=(
+            "FIFO-paired win rate (wins / total paired trades). Reuses "
+            "api/v1/_fifo.fifo_pair — single source of truth shared with "
+            "/trades/analytics (D-10). Null when n_paired_trades == 0."
+        ),
+    )
+    profit_factor: float | None = Field(
+        default=None,
+        description=(
+            "Gross profit / gross loss across FIFO-paired trades. "
+            "Null when n_paired_trades == 0 or gross_loss == 0."
+        ),
+    )
+    avg_win_loss_ratio: float | None = Field(
+        default=None,
+        description=(
+            "Average winning trade P&L / average losing trade P&L. "
+            "Null when there are no losses or no wins."
+        ),
+    )
+    n_snapshots: int = Field(
+        default=0,
+        description=(
+            "Count of daily_equity_snapshots in the window. Drives null "
+            "logic for sharpe_30d / sortino_30d / max_drawdown_pct "
+            "(Pitfall 5 / Open Q3 — separate from n_paired_trades)."
+        ),
+    )
+    n_paired_trades: int = Field(
+        default=0,
+        description=(
+            "Count of FIFO-paired round-trip trades in the window. "
+            "Drives null logic for win_rate / profit_factor / "
+            "avg_win_loss_ratio (Pitfall 5 / Open Q3 — separate from "
+            "n_snapshots)."
+        ),
+    )
 
 
 def _empty_portfolio() -> PortfolioResponse:
@@ -226,6 +286,45 @@ def _empty_portfolio() -> PortfolioResponse:
         daily_pnl_pct=0.0,
         markets=[],
     )
+
+
+# EQTY-02 D-05 hybrid fallback threshold. If daily_equity_snapshots returns
+# fewer than this many rows in the requested window, the handler falls back
+# to sandbox_metrics so day-1 of the EQTY-01 writer rollout never produces
+# an empty chart.
+_MIN_ROWS_FOR_PRIMARY = 5
+
+
+def _build_history_with_drawdown(
+    rows: list[tuple[datetime, str, Decimal]],
+) -> list[SnapshotEntry]:
+    """Per-market running-peak drawdown (EQTY-02 D-07).
+
+    Walks rows in timestamp order, tracks per-market peak, and emits
+    ``(peak - equity) / peak`` per row. Per-market scope is intentional:
+    each market's drawdown is independent (market A's higher equity does
+    NOT influence market B's peak).
+
+    This is distinct from ``PerformanceResponse.max_drawdown_pct`` (Plan
+    56-04), which aggregates across markets via summed equity. See
+    Pitfall 4 in 56-RESEARCH.md.
+    """
+    peaks: dict[str, Decimal] = {}
+    out: list[SnapshotEntry] = []
+    for ts, market_id, equity in rows:
+        prev_peak = peaks.get(market_id, equity)
+        peak = max(prev_peak, equity)
+        peaks[market_id] = peak
+        dd = float((peak - equity) / peak) if peak > 0 else 0.0
+        out.append(
+            SnapshotEntry(
+                timestamp=ts.isoformat(),
+                market_id=market_id,
+                equity=float(equity),
+                drawdown_pct=dd,
+            )
+        )
+    return out
 
 
 @router.get("", response_model=PortfolioResponse)
@@ -420,35 +519,89 @@ async def get_position(symbol: str, request: Request) -> PositionDetail:
 
 
 @router.get("/history", response_model=HistoryResponse)
-async def get_portfolio_history() -> HistoryResponse:
-    """Equity curve from sandbox_metrics table (last 30 days)."""
+async def get_portfolio_history(
+    days: int = 30,
+    market_id: str | None = None,
+) -> HistoryResponse:
+    """Equity curve from daily_equity_snapshots with sandbox_metrics fallback.
+
+    EQTY-02 D-05: primary source is `daily_equity_snapshots` (populated by
+    Plan 56-02's per-cycle writer). When fewer than ``_MIN_ROWS_FOR_PRIMARY``
+    rows fall inside the requested window, the handler falls back to
+    `sandbox_metrics` so operators never see an empty chart on day-1 of
+    the writer rollout.
+
+    Query params (D-06):
+    * ``days`` — window length in days (default 30).
+    * ``market_id`` — restrict to a single market (omitted = all markets).
+
+    ``drawdown_pct`` is computed server-side per market via running peak
+    (D-07); see ``_build_history_with_drawdown``. Per-market scope is
+    distinct from ``PerformanceResponse.max_drawdown_pct`` (Plan 56-04),
+    which aggregates across markets.
+
+    Source choice is logged via structlog under event
+    ``portfolio_history_served`` with keys ``history_source`` and
+    ``row_count`` (D-08; no ``?source=`` override).
+    """
+    from datetime import UTC, timedelta  # noqa: PLC0415
+
+    from sqlalchemy import select, text  # noqa: PLC0415
+
+    from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+    from finalayze.core.models import (  # noqa: PLC0415
+        DailyEquitySnapshot,
+        SandboxMetricRow,
+    )
+
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+
     try:
-        from datetime import UTC, datetime, timedelta  # noqa: PLC0415
-
-        from sqlalchemy import select, text  # noqa: PLC0415
-
-        from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
-        from finalayze.core.models import SandboxMetricRow  # noqa: PLC0415
-
-        cutoff = datetime.now(UTC) - timedelta(days=30)
         async with get_async_session_factory()() as session:
+            # PRIMARY: daily_equity_snapshots
             stmt = (
-                select(SandboxMetricRow)
-                .where(SandboxMetricRow.timestamp >= cutoff)
+                select(DailyEquitySnapshot)
+                .where(DailyEquitySnapshot.timestamp >= cutoff)
                 .order_by(text("timestamp asc"))
             )
-            result = await session.execute(stmt)
-            rows = result.scalars().all()
+            if market_id:
+                stmt = stmt.where(DailyEquitySnapshot.market_id == market_id)
+            primary_rows = (await session.execute(stmt)).scalars().all()
 
-        snapshots = [
-            SnapshotEntry(
-                timestamp=r.timestamp.isoformat(),
-                market_id=r.market_id,
-                equity=float(r.equity_rub),
-                drawdown_pct=float(r.drawdown_pct) if r.drawdown_pct is not None else 0.0,
-            )
-            for r in rows
-        ]
+            if len(primary_rows) >= _MIN_ROWS_FOR_PRIMARY:
+                source = "daily_equity_snapshots"
+                snapshots = _build_history_with_drawdown(
+                    [(r.timestamp, r.market_id, Decimal(r.equity)) for r in primary_rows]
+                )
+            else:
+                # FALLBACK: sandbox_metrics (preserves drawdown_pct from the
+                # writer-side column when present; older rows may be null).
+                source = "sandbox_metrics"
+                fallback_stmt = (
+                    select(SandboxMetricRow)
+                    .where(SandboxMetricRow.timestamp >= cutoff)
+                    .order_by(text("timestamp asc"))
+                )
+                if market_id:
+                    fallback_stmt = fallback_stmt.where(SandboxMetricRow.market_id == market_id)
+                fallback_rows = (await session.execute(fallback_stmt)).scalars().all()
+                snapshots = [
+                    SnapshotEntry(
+                        timestamp=r.timestamp.isoformat(),
+                        market_id=r.market_id,
+                        equity=float(r.equity_rub),
+                        drawdown_pct=float(r.drawdown_pct) if r.drawdown_pct is not None else 0.0,
+                    )
+                    for r in fallback_rows
+                ]
+
+        _log.info(
+            "portfolio_history_served",
+            history_source=source,
+            row_count=len(snapshots),
+            days=days,
+            market_id=market_id,
+        )
         return HistoryResponse(snapshots=snapshots)
     except Exception as exc:
         _log.warning("portfolio_history_failed", error=str(exc))
@@ -456,13 +609,122 @@ async def get_portfolio_history() -> HistoryResponse:
 
 
 @router.get("/performance", response_model=PerformanceResponse)
-async def get_performance() -> PerformanceResponse:
-    """Rolling 30-day performance metrics. Stub."""
-    return PerformanceResponse(
-        sharpe_30d=None,
-        sortino_30d=None,
-        max_drawdown_pct=None,
-        win_rate=None,
-        profit_factor=None,
-        avg_win_loss_ratio=None,
-    )
+async def get_performance(days: int = 30) -> PerformanceResponse:
+    """Rolling N-day Sharpe/Sortino/MaxDD + FIFO-derived win/PF metrics (PERF-01).
+
+    Reuses ``backtest.performance.PerformanceAnalyzer`` for the snapshot-derived
+    metrics (D-09 — Layer 6 importing Layer 4 is permitted) and the shared
+    ``api/v1/_fifo.fifo_pair`` helper for win_rate / profit_factor /
+    avg_win_loss_ratio (D-10 — single source of truth with /trades/analytics).
+
+    Per-metric null gating is on COUNT (n_snapshots / n_paired_trades), NOT
+    on metric value (D-12 + Open Q4): a Sortino of 0 from negative-mean
+    returns is a meaningful 'losing portfolio' signal, distinct from
+    'no data'.
+    """
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+
+    from sqlalchemy import select, text  # noqa: PLC0415
+
+    from finalayze.api.v1._fifo import fifo_pair  # noqa: PLC0415
+    from finalayze.api.v1._perf import equity_snapshots_to_portfolio_states  # noqa: PLC0415
+    from finalayze.backtest.performance import PerformanceAnalyzer  # noqa: PLC0415
+    from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+    from finalayze.core.models import DailyEquitySnapshot, OrderModel  # noqa: PLC0415
+
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    # PerformanceAnalyzer requires ≥3 snapshots for Sharpe/Sortino
+    # (backtest/performance.py:178); ≥2 for MaxDD (line 141).
+    _MIN_SNAPSHOTS_FOR_SHARPE = 3  # noqa: N806
+    _MIN_SNAPSHOTS_FOR_DD = 2  # noqa: N806
+
+    try:
+        async with get_async_session_factory()() as session:
+            equity_rows = (
+                (
+                    await session.execute(
+                        select(DailyEquitySnapshot)
+                        .where(DailyEquitySnapshot.timestamp >= cutoff)
+                        .order_by(text("timestamp asc"))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            order_rows = (
+                (
+                    await session.execute(
+                        select(OrderModel)
+                        .where(OrderModel.status == "filled")
+                        .where(OrderModel.filled_at >= cutoff)
+                        .order_by(text("symbol asc, filled_at asc"))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        portfolio_snapshots = equity_snapshots_to_portfolio_states(equity_rows)
+        n_snapshots = len(portfolio_snapshots)
+
+        # D-09: reuse PerformanceAnalyzer (Layer 4) — Layer 6 import permitted
+        sharpe_dec, _, _, _ = PerformanceAnalyzer._compute_sharpe_with_significance(
+            portfolio_snapshots
+        )
+        sortino_dec = PerformanceAnalyzer().sortino_ratio(portfolio_snapshots)
+        max_dd_dec = PerformanceAnalyzer._compute_max_drawdown(portfolio_snapshots)
+
+        # D-10: FIFO-derived win_rate / profit_factor / avg_win_loss_ratio
+        # via the shared api/v1/_fifo.fifo_pair helper (single source of truth
+        # with /trades/analytics).
+        paired = list(fifo_pair(order_rows))
+        n_paired = len(paired)
+        wins = [p for p in paired if (p.exit_price - p.entry_price) * p.quantity > 0]
+        losses = [p for p in paired if (p.exit_price - p.entry_price) * p.quantity < 0]
+        gross_profit = sum(
+            ((p.exit_price - p.entry_price) * p.quantity for p in wins),
+            Decimal(0),
+        )
+        gross_loss = -sum(
+            ((p.exit_price - p.entry_price) * p.quantity for p in losses),
+            Decimal(0),
+        )
+        win_rate = (Decimal(len(wins)) / Decimal(n_paired)) if n_paired > 0 else None
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else None
+        avg_win = (gross_profit / Decimal(len(wins))) if wins else None
+        avg_loss = (gross_loss / Decimal(len(losses))) if losses else None
+        avg_win_loss_ratio = (
+            (avg_win / avg_loss)
+            if (avg_win is not None and avg_loss is not None and avg_loss > 0)
+            else None
+        )
+
+        # D-12 (per Open Q3 + Q4): null logic gates on COUNT, not metric value.
+        # PerformanceAnalyzer.sortino_ratio returns Decimal(0) on negative-mean
+        # returns — that is a meaningful "0" (negative-portfolio period), NOT
+        # "no data". Honor it.
+        return PerformanceResponse(
+            sharpe_30d=(float(sharpe_dec) if n_snapshots >= _MIN_SNAPSHOTS_FOR_SHARPE else None),
+            sortino_30d=(float(sortino_dec) if n_snapshots >= _MIN_SNAPSHOTS_FOR_SHARPE else None),
+            max_drawdown_pct=(float(max_dd_dec) if n_snapshots >= _MIN_SNAPSHOTS_FOR_DD else None),
+            win_rate=float(win_rate) if win_rate is not None else None,
+            profit_factor=float(profit_factor) if profit_factor is not None else None,
+            avg_win_loss_ratio=(
+                float(avg_win_loss_ratio) if avg_win_loss_ratio is not None else None
+            ),
+            n_snapshots=n_snapshots,
+            n_paired_trades=n_paired,
+        )
+    except Exception as exc:
+        _log.warning("performance_failed", error=str(exc))
+        return PerformanceResponse(
+            sharpe_30d=None,
+            sortino_30d=None,
+            max_drawdown_pct=None,
+            win_rate=None,
+            profit_factor=None,
+            avg_win_loss_ratio=None,
+            n_snapshots=0,
+            n_paired_trades=0,
+        )

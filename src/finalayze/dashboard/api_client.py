@@ -52,6 +52,43 @@ class ApiClient:
             resp.raise_for_status()
         return resp
 
+    def list_alerts(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        alert_type: list[str] | None = None,
+        symbol: str | None = None,
+        priority: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> dict[str, object]:
+        """Fetch paginated alerts from /api/v1/alerts (Phase 57-04 ALRT-03).
+
+        Builds a params dict that omits any unset filter so the FastAPI
+        endpoint receives only the filters the caller actually supplied
+        (matches the priority='All' sentinel handling on the page).
+
+        Returns the parsed JSON envelope ``{alerts, total, page, page_size}``;
+        on a non-dict response (network failure surfaced as text), returns
+        an empty envelope so the dashboard never crashes.
+        """
+        params: dict[str, object] = {"page": page, "page_size": page_size}
+        if alert_type:
+            params["alert_type"] = alert_type
+        if symbol:
+            params["symbol"] = symbol
+        if priority:
+            params["priority"] = priority
+        if since:
+            params["since"] = since
+        if until:
+            params["until"] = until
+        result = self.get("/api/v1/alerts", params=params).json()
+        if isinstance(result, dict):
+            return result
+        return {"alerts": [], "total": 0, "page": page, "page_size": page_size}
+
 
 # ── Convenience functions used by page modules ─────────────────────────────────
 

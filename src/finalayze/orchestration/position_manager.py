@@ -79,6 +79,11 @@ class PositionTracker:
         # Per-cycle re-entry guard: symbols stopped out this cycle skip signal gen
         self._cycle_exited_symbols: set[str] = set()
 
+        # ALRT-01 D-07: monotonic cycle index mirrored from TradingLoop._cycle_count
+        # via set_current_cycle(). Read by check_stop_losses to compute hold_bars
+        # without extending the 3-param public signature (revision B3).
+        self._current_cycle_index: int = 0
+
     def check_stop_losses(
         self,
         market_id: str,
@@ -159,6 +164,39 @@ class PositionTracker:
                     return  # Don't clear stop state -- retry next cycle
                 # Update Kelly with stop-loss exit
                 self._update_kelly(symbol, current_price)
+                # ALRT-01 (D-08, D-10): compute P&L + hold_bars and fire enriched
+                # on_stop_loss_triggered AFTER successful broker submit, BEFORE
+                # clearing the stop state. Wrapped so a Telegram outage NEVER
+                # crashes the cycle.
+                if self._alerter is not None:
+                    pnl_amount = (current_price - state.entry_price) * qty
+                    pnl_pct = (
+                        float((current_price - state.entry_price) / state.entry_price)
+                        if state.entry_price > _ZERO
+                        else None
+                    )
+                    # hold_bars: cycle-now minus cycle-at-entry. None when the
+                    # state pre-dates Phase 57 (entry_cycle_index defaulted to 0
+                    # on a stale row, e.g. post-restart) per Pitfall 5.
+                    hold_bars = (
+                        self._current_cycle_index - state.entry_cycle_index
+                        if state.entry_cycle_index > 0
+                        else None
+                    )
+                    currency = "RUB" if market_id.startswith(("moex", "ru_")) else "USD"
+                    try:
+                        self._alerter.on_stop_loss_triggered(
+                            symbol=symbol,
+                            entry_price=state.entry_price,
+                            stop_price=state.current_stop,
+                            current_price=current_price,
+                            pnl_amount=pnl_amount,
+                            pnl_pct=pnl_pct,
+                            hold_bars=hold_bars,
+                            currency=currency,
+                        )
+                    except Exception:
+                        _log.exception("stop_alert_fire_failed", symbol=symbol)
             # Clear stop state after successful trigger (or zero position)
             del self._stop_states[symbol]
             self._entry_strategy.pop(symbol, None)
@@ -220,6 +258,9 @@ class PositionTracker:
         """
         self._entry_prices[symbol] = price
         self._entry_strategy[symbol] = strategy
+        # ALRT-01 D-07: stamp the current monotonic cycle index onto the state
+        # so check_stop_losses can compute hold_bars on trigger.
+        stop_state.entry_cycle_index = self._current_cycle_index
         with self._stop_loss_lock:
             self._stop_states[symbol] = stop_state
         # Fire 'entry' event to stop_loss_events (D-06) -- no broker scan.
@@ -266,6 +307,16 @@ class PositionTracker:
         cycle's exited symbols (PARITY-04).
         """
         self._cycle_exited_symbols = set()
+
+    def set_current_cycle(self, cycle_index: int) -> None:
+        """Mirror TradingLoop._cycle_count onto the tracker (ALRT-01 D-07).
+
+        Called from the top of ``TradingLoop._strategy_cycle_impl`` so
+        ``check_stop_losses`` can compute ``hold_bars`` on trigger without an
+        extension to its 3-param public signature (revision B3). Stamped onto
+        ``StopLossState.entry_cycle_index`` at ``register_entry`` time.
+        """
+        self._current_cycle_index = cycle_index
 
     @property
     def exited_symbols(self) -> set[str]:

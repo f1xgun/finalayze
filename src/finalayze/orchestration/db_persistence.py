@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 if TYPE_CHECKING:
+    import uuid
+
     from config.settings import Settings
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -430,6 +432,344 @@ class TradingPersistence:
             event_kind=event_type,
             count=len(states),
         )
+
+    async def _persist_alert_async(
+        self,
+        alert_id: uuid.UUID,
+        timestamp: datetime,
+        alert_type: str,
+        priority: str,
+        symbol: str | None,
+        market_id: str | None,
+        message: str,
+        parent_id: uuid.UUID | None,
+        delivery_status: str,
+        alert_metadata: dict[str, object] | None,
+    ) -> None:
+        """Write one AlertModel row.
+
+        Phase 57-01 (ALRT-03). parent_id has NO database-level FK constraint
+        (see migration 009 docstring — TimescaleDB hypertables forbid the
+        UNIQUE on `id` that a self-FK would require). Application-level
+        ordering guarantees raw alerts are persisted before their LLM
+        follow-up threads parent_id, so FK retry is unnecessary.
+
+        The PERSIST-05 envelope at the public ``persist_alert`` wrapper
+        catches and logs any exception, so this coroutine never crashes
+        the caller.
+        """
+        from finalayze.core.models import AlertModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            row = AlertModel(
+                id=alert_id,
+                timestamp=timestamp,
+                alert_type=alert_type,
+                priority=priority,
+                symbol=symbol,
+                market_id=market_id,
+                message=message,
+                parent_id=parent_id,
+                delivery_status=delivery_status,
+                alert_metadata=alert_metadata,
+            )
+            session.add(row)
+            await session.commit()
+
+    def persist_alert(
+        self,
+        alert_id: uuid.UUID,
+        timestamp: datetime,
+        alert_type: str,
+        priority: str,
+        message: str,
+        *,
+        symbol: str | None = None,
+        market_id: str | None = None,
+        parent_id: uuid.UUID | None = None,
+        delivery_status: str = "queued",
+        alert_metadata: dict[str, object] | None = None,
+    ) -> None:
+        """Fire-and-forget alert persistence (PERSIST-05 envelope).
+
+        Never raises: DB failures increment ``db_write_failures`` counter +
+        log warning. Used by TelegramAlerter write-hook (Phase 57 ALRT-03).
+        """
+        # Forward `alert_type` under the `alert_type_key` ctx kwarg so the
+        # `db_persist_skipped/ok/failed` log lines do not collide with the
+        # structlog-reserved `event` positional arg (mirrors `event_kind`
+        # precedent in persist_stop_snapshots).
+        self._persist_to_db(
+            self._persist_alert_async(
+                alert_id,
+                timestamp,
+                alert_type,
+                priority,
+                symbol,
+                market_id,
+                message,
+                parent_id,
+                delivery_status,
+                alert_metadata,
+            ),
+            table="alerts",
+            alert_type_key=alert_type,
+            symbol=symbol or "",
+        )
+
+    async def _update_alert_status_async(
+        self,
+        alert_id: uuid.UUID,
+        timestamp: datetime,
+        delivery_status: str,
+    ) -> None:
+        """Update delivery_status for an existing alert row (D-05).
+
+        Called by the alerter write hook AFTER the httpx response is observed:
+        ``sent`` on success, ``failed`` on transport error or rate limit.
+        """
+        from sqlalchemy import update  # noqa: PLC0415
+
+        from finalayze.core.models import AlertModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            await session.execute(
+                update(AlertModel)
+                .where(
+                    AlertModel.id == alert_id,
+                    AlertModel.timestamp == timestamp,
+                )
+                .values(delivery_status=delivery_status),
+            )
+            await session.commit()
+
+    def update_alert_status(
+        self,
+        alert_id: uuid.UUID,
+        timestamp: datetime,
+        delivery_status: str,
+    ) -> None:
+        """Fire-and-forget status update. Never blocks the Telegram send path."""
+        self._persist_to_db(
+            self._update_alert_status_async(alert_id, timestamp, delivery_status),
+            table="alerts",
+            op="status_update",
+            status=delivery_status,
+        )
+
+    # ── Phase 58-02 META-05: agent_decisions persist envelope ───────────────
+    # Direct line-by-line clones of _persist_alert_async / persist_alert /
+    # _update_alert_status_async / update_alert_status, swapping AlertModel →
+    # MetaAgentDecisionModel, alert_id → decision_id, delivery_status →
+    # status, alert_metadata → decision_metadata. The PERSIST-05 envelope
+    # at _persist_to_db never crashes the calling control flow.
+
+    async def _persist_decision_async(
+        self,
+        decision_id: uuid.UUID,
+        timestamp: datetime,
+        severity: str,
+        summary: str,
+        rationale: str,
+        actions: list[dict[str, object]],
+        dry_run: bool,
+        decision_metadata: dict[str, object] | None,
+        parent_decision_id: uuid.UUID | None,
+        status: str,
+    ) -> None:
+        """Write one MetaAgentDecisionModel row.
+
+        Phase 58-02 (META-05). parent_decision_id has NO database-level FK
+        constraint (see migration 010 docstring — TimescaleDB hypertables
+        forbid the UNIQUE on `id` that a self-FK would require). Application
+        layer guarantees parent decisions are persisted before children
+        thread parent_decision_id, so FK retry is unnecessary.
+
+        The PERSIST-05 envelope at the public ``persist_decision`` wrapper
+        catches and logs any exception, so this coroutine never crashes
+        the caller (mirrors ``_persist_alert_async``).
+        """
+        from finalayze.core.models import MetaAgentDecisionModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            row = MetaAgentDecisionModel(
+                id=decision_id,
+                timestamp=timestamp,
+                severity=severity,
+                summary=summary,
+                rationale=rationale,
+                actions=actions,
+                dry_run=dry_run,
+                decision_metadata=decision_metadata,
+                parent_decision_id=parent_decision_id,
+                status=status,
+            )
+            session.add(row)
+            await session.commit()
+
+    def persist_decision(
+        self,
+        *,
+        decision_id: uuid.UUID,
+        timestamp: datetime,
+        severity: str,
+        summary: str,
+        rationale: str,
+        actions: list[dict[str, object]],
+        dry_run: bool,
+        decision_metadata: dict[str, object] | None = None,
+        parent_decision_id: uuid.UUID | None = None,
+        status: str = "queued",
+    ) -> None:
+        """Fire-and-forget agent_decisions persistence (PERSIST-05 envelope).
+
+        Never raises: DB failures increment ``db_write_failures`` counter +
+        log warning. Used by ``MetaAgentRunner.run_one_tick`` (Phase 58-01)
+        and by ``ActionExecutor.execute`` for status transitions
+        (Phase 58-02).
+        """
+        # Forward `severity` under the `severity_key` ctx kwarg so the
+        # `db_persist_skipped/ok/failed` log lines do not collide with the
+        # structlog-reserved `event` positional arg (mirrors `alert_type_key`
+        # precedent in persist_alert).
+        self._persist_to_db(
+            self._persist_decision_async(
+                decision_id,
+                timestamp,
+                severity,
+                summary,
+                rationale,
+                actions,
+                dry_run,
+                decision_metadata,
+                parent_decision_id,
+                status,
+            ),
+            table="agent_decisions",
+            severity_key=severity,
+            decision_id_key=str(decision_id),
+        )
+
+    async def _update_decision_status_async(
+        self,
+        decision_id: uuid.UUID,
+        timestamp: datetime,
+        status: str,
+        outcome: str | None,
+        metadata_patch: dict[str, Any] | None = None,
+    ) -> None:
+        """Update status (and optionally outcome / decision_metadata) for an
+        existing agent_decisions row.
+
+        ``metadata_patch`` (Phase 58-02-01b): when supplied non-empty, we
+        SELECT the row's current ``decision_metadata``, deep-merge
+        ``{**current, **metadata_patch}``, and include the merged dict in the
+        UPDATE values. Single-writer assumption: the meta-agent tick is the
+        only writer of these rows in Phase 58, so race-on-merge is impossible.
+        A future multi-writer migration MUST revisit this and switch to a
+        single-statement JSONB ``||`` operator (PostgreSQL JSONB concat).
+        """
+        from sqlalchemy import select, update  # noqa: PLC0415
+
+        from finalayze.core.models import MetaAgentDecisionModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            values: dict[str, Any] = {"status": status}
+            if outcome is not None:
+                values["outcome"] = outcome
+            if metadata_patch:
+                # SELECT-then-merge-then-UPDATE (single-writer safe).
+                current_row = await session.execute(
+                    select(MetaAgentDecisionModel.decision_metadata).where(
+                        MetaAgentDecisionModel.id == decision_id,
+                        MetaAgentDecisionModel.timestamp == timestamp,
+                    )
+                )
+                current_meta = current_row.scalar_one_or_none() or {}
+                merged: dict[str, Any] = {**current_meta, **metadata_patch}
+                values["decision_metadata"] = merged
+            await session.execute(
+                update(MetaAgentDecisionModel)
+                .where(
+                    MetaAgentDecisionModel.id == decision_id,
+                    MetaAgentDecisionModel.timestamp == timestamp,
+                )
+                .values(**values),
+            )
+            await session.commit()
+
+    def update_decision_status(
+        self,
+        *,
+        decision_id: uuid.UUID,
+        timestamp: datetime,
+        status: str,
+        outcome: str | None = None,
+        metadata_patch: dict[str, Any] | None = None,
+    ) -> None:
+        """Fire-and-forget agent_decisions status update.
+
+        Never blocks the executor send path. ``metadata_patch`` (added in
+        58-02-01b) optionally deep-merges into ``decision_metadata``; pass
+        ``{"telegram_alert_id": str(uuid)}`` to stamp the alert id on the
+        same UPDATE that flips status to 'sent' (atomic at the
+        single-writer level — see ``_update_decision_status_async``).
+        """
+        self._persist_to_db(
+            self._update_decision_status_async(
+                decision_id,
+                timestamp,
+                status,
+                outcome,
+                metadata_patch,
+            ),
+            table="agent_decisions",
+            op="status_update",
+            status=status,
+        )
+
+    # ── Phase 58-03 META-06: spawn-cap query for INVESTIGATE/FIX ────────────
+    # AP-14: cap reads agent_decisions (NOT alerts). Status filter mirrors
+    # SPEC §Requirement 6 line 57: ('spawned','completed','failed') so that
+    # 'rejected' / 'queued_capped' / 'expired' rows do NOT consume budget.
+    # UTC-day boundary via date_trunc('day', NOW() AT TIME ZONE 'UTC') (D-13).
+
+    async def _spawn_count_today_async(self, severity: str) -> int:
+        """Count agent_decisions rows for today's UTC day, by severity.
+
+        Filter: ``severity == <severity> AND status IN ('spawned',
+        'completed', 'failed') AND timestamp >= date_trunc('day', NOW() AT
+        TIME ZONE 'UTC')``. Used by ``ActionExecutor.execute_investigate_spawn``
+        (Plan 58-03 Task 08) and the FIX-spawn path (Plan 58-04).
+
+        Bypasses the PERSIST-05 envelope because the executor needs the
+        actual count synchronously — DB failure surfaces as an exception
+        which the executor treats conservatively (skip the spawn).
+        """
+        from sqlalchemy import func, select, text  # noqa: PLC0415
+
+        from finalayze.core.models import MetaAgentDecisionModel  # noqa: PLC0415
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            stmt = (
+                select(func.count())
+                .select_from(MetaAgentDecisionModel)
+                .where(
+                    MetaAgentDecisionModel.severity == severity,
+                    MetaAgentDecisionModel.status.in_(
+                        ["spawned", "completed", "failed"],
+                    ),
+                    MetaAgentDecisionModel.timestamp
+                    >= text("date_trunc('day', NOW() AT TIME ZONE 'UTC')"),
+                )
+            )
+            result = await session.execute(stmt)
+            return int(result.scalar_one())
 
     async def persist_sentiment_batch_async(
         self,

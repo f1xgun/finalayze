@@ -45,16 +45,20 @@ def _make_alerter(token: str = VALID_TOKEN) -> TelegramAlerter:
 
 
 class TestSendSync:
-    """_send_sync: synchronous HTTP POST used by APScheduler threads."""
+    """_send_sync: synchronous HTTP POST used by APScheduler threads.
+
+    Phase 57-02: ``_send_sync`` now returns ``tuple[bool, uuid.UUID | None]``
+    (alert_id is non-None only when a TradingPersistence is injected).
+    """
 
     def test_send_sync_noop_with_empty_token(self) -> None:
-        """_send_sync returns True without HTTP call when token is empty."""
+        """_send_sync returns (True, None) without HTTP call when token is empty."""
         alerter = _make_alerter(token="")
-        result = alerter._send_sync("test")
-        assert result is True
+        ok, _alert_id = alerter._send_sync("test")
+        assert ok is True
 
     def test_send_sync_returns_true_on_success(self) -> None:
-        """_send_sync returns True on HTTP 200."""
+        """_send_sync returns (True, None) on HTTP 200."""
         alerter = _make_alerter()
         mock_resp = MagicMock(status_code=200)
         mock_client = MagicMock()
@@ -63,13 +67,13 @@ class TestSendSync:
         mock_client.post.return_value = mock_resp
 
         with patch("finalayze.core.alerts.httpx.Client", return_value=mock_client):
-            result = alerter._send_sync("hello")
+            ok, _alert_id = alerter._send_sync("hello")
 
-        assert result is True
+        assert ok is True
         mock_client.post.assert_called_once()
 
     def test_send_sync_returns_false_on_429(self) -> None:
-        """_send_sync returns False on HTTP 429 rate limit."""
+        """_send_sync returns (False, None) on HTTP 429 rate limit."""
         alerter = _make_alerter()
         mock_resp = MagicMock(status_code=429)
         mock_resp.json.return_value = {"parameters": {"retry_after": 30}}
@@ -79,16 +83,16 @@ class TestSendSync:
         mock_client.post.return_value = mock_resp
 
         with patch("finalayze.core.alerts.httpx.Client", return_value=mock_client):
-            result = alerter._send_sync("hello")
+            ok, _alert_id = alerter._send_sync("hello")
 
-        assert result is False
+        assert ok is False
 
     def test_send_sync_exception_suppressed(self) -> None:
-        """_send_sync suppresses exceptions and returns False."""
+        """_send_sync suppresses exceptions and returns (False, None)."""
         alerter = _make_alerter()
         with patch("finalayze.core.alerts.httpx.Client", side_effect=Exception("network")):
-            result = alerter._send_sync("hello")
-        assert result is False
+            ok, _alert_id = alerter._send_sync("hello")
+        assert ok is False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

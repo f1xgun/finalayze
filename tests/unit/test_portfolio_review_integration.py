@@ -65,6 +65,23 @@ def _make_portfolio_mock() -> MagicMock:
     return portfolio
 
 
+def _make_persistence_for_recap_failure() -> MagicMock:
+    """Build a TradingPersistence mock whose recap-merge path raises.
+
+    Phase 57-05 ALRT-04: ``_run_portfolio_review_async`` requires
+    ``_persistence`` to be wired (None-guard short-circuits early). The
+    pre-Plan-05 tests in this module only exercise the LLM + Telegram
+    legs; we wire a persistence mock whose ``_get_bg_session_factory``
+    raises so the recap-merge ``try/except`` swallows it and the test
+    contract (LLM-only) is preserved end-to-end.
+    """
+    persistence = MagicMock()
+    persistence._get_bg_session_factory.side_effect = RuntimeError(
+        "no recap in legacy test",
+    )
+    return persistence
+
+
 # -- PFRA-01: Cron Dispatch ---------------------------------------------------
 
 
@@ -155,6 +172,11 @@ class TestLLMCallAndTelegramDelivery:
         tl._alerter = alerter  # type: ignore[attr-defined]
         tl._circuit_breakers = {}  # type: ignore[attr-defined]
         tl._broker_router = MagicMock()  # type: ignore[attr-defined]
+        # Phase 57-05 ALRT-04: _run_portfolio_review_async now requires
+        # _persistence to be wired. We provide a factory whose recap-merge
+        # path raises, so the original LLM-only test contract is preserved
+        # (recap failure is best-effort — LLM advisory still ships).
+        tl._persistence = _make_persistence_for_recap_failure()  # type: ignore[attr-defined]
 
         await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
 
@@ -180,6 +202,11 @@ class TestLLMCallAndTelegramDelivery:
         tl._alerter = alerter  # type: ignore[attr-defined]
         tl._circuit_breakers = {}  # type: ignore[attr-defined]
         tl._broker_router = MagicMock()  # type: ignore[attr-defined]
+        # Phase 57-05 ALRT-04: _run_portfolio_review_async now requires
+        # _persistence to be wired. We provide a factory whose recap-merge
+        # path raises, so the original LLM-only test contract is preserved
+        # (recap failure is best-effort — LLM advisory still ships).
+        tl._persistence = _make_persistence_for_recap_failure()  # type: ignore[attr-defined]
 
         await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
 
@@ -202,6 +229,11 @@ class TestLLMCallAndTelegramDelivery:
         tl._alerter = alerter  # type: ignore[attr-defined]
         tl._circuit_breakers = {}  # type: ignore[attr-defined]
         tl._broker_router = MagicMock()  # type: ignore[attr-defined]
+        # Phase 57-05 ALRT-04: _run_portfolio_review_async now requires
+        # _persistence to be wired. We provide a factory whose recap-merge
+        # path raises, so the original LLM-only test contract is preserved
+        # (recap failure is best-effort — LLM advisory still ships).
+        tl._persistence = _make_persistence_for_recap_failure()  # type: ignore[attr-defined]
 
         await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
 
@@ -231,6 +263,7 @@ class TestGracefulDegradation:
         tl._alerter = alerter  # type: ignore[attr-defined]
         tl._circuit_breakers = {}  # type: ignore[attr-defined]
         tl._broker_router = MagicMock()  # type: ignore[attr-defined]
+        tl._persistence = _make_persistence_for_recap_failure()  # type: ignore[attr-defined]
 
         with structlog.testing.capture_logs() as captured:
             await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
@@ -255,6 +288,7 @@ class TestGracefulDegradation:
         tl._alerter = alerter  # type: ignore[attr-defined]
         tl._circuit_breakers = {}  # type: ignore[attr-defined]
         tl._broker_router = MagicMock()  # type: ignore[attr-defined]
+        tl._persistence = _make_persistence_for_recap_failure()  # type: ignore[attr-defined]
 
         with structlog.testing.capture_logs() as captured:
             await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
@@ -279,6 +313,7 @@ class TestGracefulDegradation:
         tl._alerter = alerter  # type: ignore[attr-defined]
         tl._circuit_breakers = {}  # type: ignore[attr-defined]
         tl._broker_router = MagicMock()  # type: ignore[attr-defined]
+        tl._persistence = _make_persistence_for_recap_failure()  # type: ignore[attr-defined]
 
         # Must not raise
         await tl._run_portfolio_review_async()  # type: ignore[attr-defined]

@@ -6,7 +6,7 @@ See docs/architecture/OVERVIEW.md for database schema.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, time  # noqa: TC003
+from datetime import UTC, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -359,6 +359,130 @@ class StopLossEventModel(Base):
     trail_atr: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
     trail_activated: Mapped[bool | None] = mapped_column(Boolean)
     current_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+
+
+class AlertModel(Base):
+    """Alert emission log (raw + LLM follow-up threaded via parent_id).
+
+    ALRT-03 (Phase 57). Two-row schema for anomaly pair: raw row with
+    alert_type='anomaly_raw' + parent_id=NULL; LLM follow-up with
+    alert_type='anomaly_llm' + parent_id=<raw.id>.
+    """
+
+    __tablename__ = "alerts"
+
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        primary_key=True,
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    alert_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    priority: Mapped[str] = mapped_column(String(10), nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    market_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    # parent_id is a plain nullable UUID without a database FK — see migration
+    # 009 docstring. TimescaleDB hypertables forbid UNIQUE constraints that
+    # exclude the partition column, so the self-FK is impractical. parent_id
+    # integrity is managed at the application layer (raw alert persists first;
+    # child alert threads parent_id only after the raw write succeeds).
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    delivery_status: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="queued",
+    )
+    alert_metadata: Mapped[dict[str, object] | None] = mapped_column(
+        "metadata",  # column name; Python attr renamed to avoid SQLAlchemy reserved word
+        JSONB,
+        nullable=True,
+    )
+
+    def __init__(self, **kwargs: object) -> None:
+        # SQLAlchemy 2.0 `default=` only applies at flush time, not at __init__.
+        # Apply the Python-side default for delivery_status so callers can rely
+        # on AlertModel().delivery_status == "queued" without an explicit pass.
+        kwargs.setdefault("delivery_status", "queued")
+        super().__init__(**kwargs)
+
+
+class MetaAgentDecisionModel(Base):
+    """Meta-agent decision log — one row per cycle (Phase 58-01, META-03).
+
+    Mirrors AlertModel ergonomics line-for-line:
+      - composite primary key (timestamp, id) for TimescaleDB hypertable
+      - parent_decision_id is a plain nullable UUID without a database FK
+        (hypertables forbid the UNIQUE (id) constraint a self-FK would
+        require — same constraint as alerts.parent_id; integrity is managed
+        at the application layer)
+      - decision_metadata Python attribute maps to the bare DB column
+        ``metadata`` (SQLAlchemy DeclarativeBase reserves ``metadata``)
+      - ``__init__`` override applies Python-side defaults that
+        ``mapped_column(default=...)`` only fires at flush time
+    """
+
+    __tablename__ = "agent_decisions"
+
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        primary_key=True,
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    severity: Mapped[str] = mapped_column(String(15), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    actions: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+    )
+    outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    decision_metadata: Mapped[dict[str, object] | None] = mapped_column(
+        "metadata",  # column name; Python attr renamed to avoid SQLAlchemy reserved word
+        JSONB,
+        nullable=True,
+    )
+    # parent_decision_id is a plain nullable UUID without a database FK — see
+    # migration 010 docstring. TimescaleDB hypertables forbid UNIQUE
+    # constraints that exclude the partition column, so the self-FK is
+    # impractical. Integrity is managed at the application layer (the runner
+    # threads parent_decision_id only after the parent row is persisted).
+    parent_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(15),
+        nullable=False,
+        default="queued",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    def __init__(self, **kwargs: object) -> None:
+        # SQLAlchemy 2.0 `default=` only applies at flush time, not at __init__.
+        # Apply Python-side defaults so callers can construct
+        # MetaAgentDecisionModel(severity=..., summary=..., rationale=...)
+        # and read .actions, .dry_run, .status without explicit passes.
+        kwargs.setdefault("actions", [])
+        kwargs.setdefault("dry_run", True)
+        kwargs.setdefault("status", "queued")
+        super().__init__(**kwargs)
 
 
 class PortfolioSnapshot(Base):

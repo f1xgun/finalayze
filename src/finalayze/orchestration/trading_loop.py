@@ -45,6 +45,8 @@ from finalayze.orchestration.signal_executor import (
 )
 
 if TYPE_CHECKING:
+    import uuid
+
     from config.settings import Settings
 
     from finalayze.analysis.event_classifier import EventClassifier
@@ -180,6 +182,7 @@ class TradingLoop:
         metrics_collector: type[MetricsCollector] | None = None,
         grpc_loop: asyncio.AbstractEventLoop | None = None,
         kill_switch: object | None = None,
+        meta_agent_runner: object | None = None,
     ) -> None:
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
@@ -216,6 +219,9 @@ class TradingLoop:
         self._health_monitor = health_monitor
         self._metrics = metrics_collector
         self._kill_switch = kill_switch
+        # Phase 58-02-07: optional MetaAgentRunner injected at bootstrap.
+        # Default None keeps every existing call-site source-compatible.
+        self._meta_agent_runner = meta_agent_runner
 
         self._fx = CurrencyConverter(base_currency="USD")
 
@@ -302,6 +308,12 @@ class TradingLoop:
 
         # Total strategy cycles completed (used by HealthMonitor for liveness)
         self._total_cycles: int = 0
+
+        # ALRT-01 D-07: monotonic cycle counter, incremented at the top of every
+        # _strategy_cycle_impl invocation. NEVER reset (initialised exactly once
+        # here). Stamped onto StopLossState.entry_cycle_index at register_entry
+        # so check_stop_losses can compute hold_bars on trigger.
+        self._cycle_count: int = 0
 
         # Per-cycle portfolio cache: market_id -> PortfolioState
         # Populated at the start of each strategy cycle, cleared at the end.
@@ -667,7 +679,7 @@ class TradingLoop:
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
-    def start(self) -> None:
+    def start(self) -> None:  # noqa: PLR0915 — wires many subsystems incl. meta_agent (Phase 58-05)
         """Start the APScheduler and block until stop() is called."""
         if (
             self._kill_switch is not None
@@ -733,6 +745,51 @@ class TradingLoop:
             id="daily_reset",
             replace_existing=True,
         )
+        # ALRT-04 (Phase 57 D-01, Pitfall 6): register portfolio review cron.
+        # Fires at 15:50 UTC = 18:50 MSK, post-MOEX-close. The method body
+        # at _portfolio_review_cycle exists since Phase 52, but PR #223
+        # decomposition lost the add_job registration — re-added here.
+        from apscheduler.triggers.cron import CronTrigger as _PRCronTrigger  # noqa: PLC0415
+
+        self._scheduler.add_job(
+            self._portfolio_review_cycle,
+            _PRCronTrigger(hour=15, minute=50, timezone="UTC"),
+            id="portfolio_review",
+            replace_existing=True,
+        )
+        # Phase 58-02-07: meta-agent (cron-driven autonomous monitor).
+        # Guarded by meta_agent_enabled (SPEC AC #6 — disabled → no job).
+        if getattr(self._settings, "meta_agent_enabled", False):
+            from finalayze.meta_agent.scheduler import (  # noqa: PLC0415
+                register_meta_agent_job,
+            )
+
+            register_meta_agent_job(
+                self._scheduler,
+                settings=self._settings,
+                runner=self._meta_agent_runner,
+                async_loop=self._async_loop,
+            )
+            # Phase 58-05-06 (META-08, SPEC AC #15): launch the killswitch
+            # env-var poller on the persistent async loop. The poller
+            # MUST run on the same loop where ``await proc.wait()`` was
+            # set up by spawn_readonly / spawn_fix — see PLAN body Risks.
+            # Lazy-init the async loop now so the poller has a live loop
+            # to attach to (mirrors the lazy init in _run_async()).
+            ks = getattr(self._meta_agent_runner, "killswitch", None)
+            if ks is not None:
+                if self._async_loop is None or self._async_loop.is_closed():
+                    _loop = asyncio.new_event_loop()
+                    self._async_loop = _loop
+                    if hasattr(self, "_persistence") and self._persistence is not None:
+                        self._persistence._async_loop = _loop
+                    _t = threading.Thread(target=_loop.run_forever, daemon=True)
+                    _t.start()
+                    self._async_thread = _t
+                asyncio.run_coroutine_threadsafe(
+                    ks.start(),
+                    self._async_loop,
+                )
         if self._ml_registry is not None and getattr(self._settings, "ml_enabled", False):
             self._scheduler.add_job(
                 self._ml_retrainer.retrain_all,
@@ -850,8 +907,24 @@ class TradingLoop:
             self._metrics.set_drawdown(market_id, 0.0)
         _log.info("metrics_initialized", markets=list(self._fetchers.keys()))
 
-    def stop(self) -> None:
+    def stop(self) -> None:  # noqa: PLR0912 — orderly shutdown of multiple subsystems incl. meta_agent killswitch (Phase 58-05)
         """Gracefully shut down scheduler, async/gRPC loops, and connections."""
+        # Phase 58-05-06 (META-08, SPEC AC #15): cancel the meta-agent
+        # killswitch poller BEFORE shutting down the async loop (otherwise
+        # the cancel coroutine has nowhere to run). Best-effort — never
+        # raises, mirroring the rest of the stop() shutdown sequence.
+        if (
+            self._meta_agent_runner is not None
+            and getattr(self._meta_agent_runner, "killswitch", None) is not None
+            and self._async_loop is not None
+            and not self._async_loop.is_closed()
+        ):
+            try:
+                ks = self._meta_agent_runner.killswitch  # type: ignore[attr-defined]
+                future = asyncio.run_coroutine_threadsafe(ks.stop(), self._async_loop)
+                future.result(timeout=5)
+            except Exception:
+                _log.debug("meta_agent_killswitch_stop_failed_during_shutdown")
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=True)
         if self._async_loop is not None and not self._async_loop.is_closed():
@@ -1217,6 +1290,13 @@ class TradingLoop:
 
     def _strategy_cycle_impl(self) -> None:
         """Inner implementation of _strategy_cycle with portfolio caching."""
+        # ALRT-01 D-07: monotonic cycle counter — bumped FIRST so any code
+        # below (halt, breaker, snapshot) sees the new index. Mirror onto
+        # PositionTracker so check_stop_losses can compute hold_bars without
+        # an extension to its 3-param public signature (revision B3).
+        self._cycle_count += 1
+        if self._position_tracker is not None:
+            self._position_tracker.set_current_cycle(self._cycle_count)
         now = self._now()
         market_equities: dict[str, Decimal] = {}
         baseline_equities: dict[str, Decimal] = {}
@@ -1280,6 +1360,20 @@ class TradingLoop:
         except Exception:
             # PERSIST-05: must NEVER affect _consecutive_equity_errors.
             _log.warning("stop_snapshot_write_failed", exc_info=True)
+
+        # Phase 56 EQTY-01: per-cycle equity snapshot (D-01, D-02 Route B, D-03).
+        # Wrapped in its own try/except so a DB failure here NEVER propagates
+        # to _strategy_cycle's outer catch — that would inflate
+        # _consecutive_equity_errors (mirrors STOP-03 pattern above).
+        # Placement is intentional: AFTER the per-market loop and AFTER halt
+        # early-returns at lines ~1257 and ~1264 — halted cycles do not snapshot
+        # (matches D-01 "after each strategy cycle completes" — see 56-RESEARCH
+        # Pitfall 6).
+        try:
+            self._daily_reporter.persist_cycle_snapshot(now)
+        except Exception:
+            # PERSIST-05: must NEVER affect _consecutive_equity_errors.
+            _log.warning("equity_snapshot_persist_failed", exc_info=True)
 
     def _build_symbol_to_market_map(self) -> dict[str, str]:
         """Resolve each open-position symbol to its market_id via ``broker_router``.
@@ -1461,13 +1555,69 @@ class TradingLoop:
 
     # ---- Anomaly enrichment (test compat) ----
 
+    async def _handle_anomaly_async(
+        self,
+        symbol: str,
+        market_id: str,
+        anomaly: object,
+        raw_text: str,
+    ) -> uuid.UUID | None:
+        """Orchestrate the anomaly raw + LLM-enrichment pair (Phase 57-04 D-04).
+
+        Sends the raw alert via ``_send(alert_type='anomaly_raw')`` to capture
+        ``raw_alert_id``, then schedules the async LLM follow-up via
+        ``asyncio.create_task(self._enrich_anomaly_async(..., parent_id=
+        raw_alert_id))`` so the follow-up's persisted row carries the
+        parent_id FK (Plan 57-01 schema). Returns the captured raw alert id
+        for caller-side tracking; never raises.
+        """
+        try:
+            _ok, raw_alert_id = await self._alerter._send(
+                raw_text,
+                alert_type="anomaly_raw",
+                symbol=symbol,
+                market_id=market_id,
+                parent_id=None,
+            )
+        except Exception:
+            _log.warning(
+                "anomaly_raw_send_failed",
+                symbol=symbol,
+                market_id=market_id,
+            )
+            return None
+
+        if self._llm_client is not None:
+            # Fire-and-forget: store the task on the instance so the asyncio
+            # GC doesn't drop it mid-flight (ruff RUF006). The reference is
+            # purposely overwritten on the next anomaly so we don't leak a
+            # growing list across cycles.
+            self._anomaly_enrich_task = asyncio.create_task(
+                self._enrich_anomaly_async(
+                    symbol,
+                    market_id,
+                    anomaly,
+                    parent_id=raw_alert_id,
+                ),
+            )
+        return raw_alert_id
+
     async def _enrich_anomaly_async(
         self,
         symbol: str,
         market_id: str,
         anomaly: object,
+        *,
+        parent_id: uuid.UUID | None = None,
     ) -> None:
-        """Fire-and-forget LLM enrichment -- never raises, never blocks raw alert."""
+        """Fire-and-forget LLM enrichment -- never raises, never blocks raw alert.
+
+        Phase 57-04 (D-04): when ``parent_id`` is supplied (the alert_id
+        returned by the prior raw-alert ``_send`` call), the LLM follow-up
+        ``_send`` threads it through ``alert_type='anomaly_llm'`` so the
+        persisted child row's FK to the parent anomaly_raw row is populated
+        at insert time.
+        """
         try:
             prompt = (
                 f"Ticker: {symbol} ({market_id})\n"
@@ -1482,7 +1632,13 @@ class TradingLoop:
                 timeout=_ANOMALY_LLM_TIMEOUT,
             )
             follow_up = f"AI interpretation (unverified): {explanation}"
-            await self._alerter._send(follow_up)
+            await self._alerter._send(
+                follow_up,
+                alert_type="anomaly_llm",
+                symbol=symbol,
+                market_id=market_id,
+                parent_id=parent_id,
+            )
         except Exception:
             _log.warning(
                 "anomaly_llm_failure",
@@ -1527,15 +1683,32 @@ class TradingLoop:
         )
 
     async def _run_portfolio_review_async(self) -> None:
-        """Fire-and-forget async portfolio review -- never raises, never blocks."""
+        """Fire-and-forget async portfolio review -- never raises, never blocks.
+
+        ALRT-04 (Phase 57 D-01): the LLM advisory result is merged with a
+        deterministic ``compute_daily_recap`` payload so the single daily
+        Telegram message carries today's realized P&L, positions opened/
+        closed, and equity change vs previous close (Option A
+        consolidation — no new message type added).
+        """
+        # ALRT-04 (D-01): require persistence to be wired; short-circuit
+        # if not. _get_bg_session_factory lives on TradingPersistence, not
+        # TradingLoop — tests/backtest paths that don't inject persistence
+        # must noop cleanly here (the LLM advisory still depends on the
+        # session factory for the recap merge).
+        if self._persistence is None:
+            _log.warning("portfolio_review_skipped_no_persistence")
+            return
         try:
             from finalayze.analysis.portfolio_review_agent import (  # noqa: PLC0415
                 PORTFOLIO_REVIEW_SYSTEM_PROMPT,
                 REVIEW_LLM_TIMEOUT,
                 PortfolioReviewResult,
                 build_review_prompt,
+                compute_daily_recap,
                 format_review_telegram,
             )
+            from finalayze.api.alerts import AlertPriority  # noqa: PLC0415
 
             portfolio_data = self._gather_portfolio_data()
             prompt = build_review_prompt(portfolio_data)
@@ -1548,8 +1721,30 @@ class TradingLoop:
                 ),
                 timeout=REVIEW_LLM_TIMEOUT,
             )
+            # ALRT-04 (D-01): merge deterministic daily recap into advisory
+            # LLM result. Failure to compute recap MUST NOT block the
+            # advisory message — log and continue with the unmerged result.
+            try:
+                factory = self._persistence._get_bg_session_factory()
+                async with factory() as session:
+                    recap = await compute_daily_recap(
+                        session,
+                        datetime.now(tz=UTC),
+                    )
+                # model_copy with update keyword — Pydantic v2 idiom,
+                # preserves frozen-model immutability.
+                result = result.model_copy(update=recap)
+            except Exception:
+                _log.warning(
+                    "portfolio_review_recap_merge_failed",
+                    exc_info=True,
+                )
             message = format_review_telegram(result)
-            await self._alerter._send(message)
+            await self._alerter._send(
+                message,
+                alert_type="daily_summary",
+                priority=AlertPriority.INFO,
+            )
         except Exception:
             _log.warning("portfolio_review_llm_failure")
 

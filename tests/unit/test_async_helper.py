@@ -26,6 +26,7 @@ def _make_loop() -> MagicMock:
     loop = MagicMock(spec=TradingLoop)
     loop._async_loop = None
     loop._async_thread = None
+    loop._meta_agent_runner = None
     loop._run_async = TradingLoop._run_async.__get__(loop)
     return loop
 

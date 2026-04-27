@@ -39,6 +39,7 @@ def _make_loop(
         mock_settings.daily_loss_limit_pct = 0.05
         mock_settings.kelly_fraction = 0.5
         mock_settings.ml_enabled = False
+        mock_settings.meta_agent_enabled = False
         mock_settings.telegram_channels = ["@test_channel"]
         mock_settings.weekly_digest_hour_utc = 10
 
@@ -487,6 +488,7 @@ class TestSandboxRolloutDefault:
         monkeypatch.setenv("FINALAYZE_MODE", "sandbox")
         monkeypatch.delenv("FINALAYZE_ROLLOUT_PHASE", raising=False)
         monkeypatch.setenv("FINALAYZE_DATABASE_URL", "postgresql+asyncpg://x:x@localhost/x")
+        monkeypatch.setenv("FINALAYZE_LLM_PROVIDER", "openrouter")
 
         from importlib import reload
 
@@ -504,6 +506,7 @@ class TestSandboxRolloutDefault:
         monkeypatch.setenv("FINALAYZE_MODE", "sandbox")
         monkeypatch.setenv("FINALAYZE_ROLLOUT_PHASE", "full")
         monkeypatch.setenv("FINALAYZE_DATABASE_URL", "postgresql+asyncpg://x:x@localhost/x")
+        monkeypatch.setenv("FINALAYZE_LLM_PROVIDER", "openrouter")
 
         from importlib import reload
 
@@ -520,6 +523,7 @@ class TestSandboxRolloutDefault:
         """Non-sandbox modes are not affected by the sandbox default."""
         monkeypatch.setenv("FINALAYZE_MODE", "debug")
         monkeypatch.delenv("FINALAYZE_ROLLOUT_PHASE", raising=False)
+        monkeypatch.setenv("FINALAYZE_LLM_PROVIDER", "openrouter")
 
         from importlib import reload
 
