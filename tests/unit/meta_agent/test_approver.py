@@ -96,9 +96,7 @@ async def test_handle_approve_within_ttl_flips_status_and_dispatches_spawn(
 
     # update_decision_status called exactly once with status='approved'.
     upd_calls = persistence.update_decision_status.call_args_list
-    assert len(upd_calls) == 1, (
-        f"expected 1 update_decision_status call, got {upd_calls!r}"
-    )
+    assert len(upd_calls) == 1, f"expected 1 update_decision_status call, got {upd_calls!r}"
     assert upd_calls[0].kwargs["status"] == "approved"
     assert upd_calls[0].kwargs["decision_id"] == _FAKE_DECISION_UUID
     assert upd_calls[0].kwargs["timestamp"] == _FAKE_TS
@@ -138,9 +136,7 @@ async def test_handle_approve_unknown_id_logs_and_skips() -> None:
     unknown_events = [
         log for log in logs if log.get("event") == "meta_agent_approve_unknown_decision_id"
     ]
-    assert len(unknown_events) == 1, (
-        f"expected 1 unknown_decision_id event, got {unknown_events!r}"
-    )
+    assert len(unknown_events) == 1, f"expected 1 unknown_decision_id event, got {unknown_events!r}"
 
 
 @pytest.mark.asyncio
@@ -177,9 +173,7 @@ async def test_handle_approve_state_mismatch_skips() -> None:
     mismatch_events = [
         log for log in logs if log.get("event") == "meta_agent_approve_state_mismatch"
     ]
-    assert len(mismatch_events) == 1, (
-        f"expected 1 state_mismatch event, got {mismatch_events!r}"
-    )
+    assert len(mismatch_events) == 1, f"expected 1 state_mismatch event, got {mismatch_events!r}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -290,7 +284,7 @@ async def test_expire_overdue_fix_decisions_runs_single_update(
     monkeypatch.setattr(
         persistence,
         "_get_bg_session_factory",
-        lambda: _factory_factory(),
+        _factory_factory,
     )
 
     executor = MagicMock()
