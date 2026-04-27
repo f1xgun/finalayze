@@ -182,3 +182,45 @@ async def test_abort_all_inflight_returns_zero_when_empty(
     count = await ks.abort_all_inflight()
     assert count == 0
     assert killpg_calls == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-05-02 — Killswitch.remove_job() calls scheduler.remove_job("meta_agent")
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_remove_job_calls_scheduler() -> None:
+    """SPEC AC #15: ``remove_job()`` calls
+    ``scheduler.remove_job("meta_agent")`` exactly once and returns True
+    on success.
+    """
+    from finalayze.meta_agent.killswitch import Killswitch
+
+    scheduler = MagicMock()
+    ks = Killswitch(
+        scheduler=scheduler,
+        settings_provider=MagicMock(),
+    )
+    result = ks.remove_job()
+    assert result is True
+    scheduler.remove_job.assert_called_once_with("meta_agent")
+
+
+def test_remove_job_idempotent_on_missing_job() -> None:
+    """SPEC AC #15: a second ``remove_job()`` call (or any call when the
+    job is not registered) returns False without raising — the killswitch
+    must be safe to invoke twice (REST + env-var paths can race).
+    """
+    from apscheduler.jobstores.base import JobLookupError
+
+    from finalayze.meta_agent.killswitch import Killswitch
+
+    scheduler = MagicMock()
+    scheduler.remove_job.side_effect = JobLookupError("meta_agent")
+    ks = Killswitch(
+        scheduler=scheduler,
+        settings_provider=MagicMock(),
+    )
+    result = ks.remove_job()
+    assert result is False
+    scheduler.remove_job.assert_called_once_with("meta_agent")
