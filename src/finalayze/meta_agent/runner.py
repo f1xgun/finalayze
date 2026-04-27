@@ -74,6 +74,7 @@ class MetaAgentRunner:
         http_client_factory: Callable[[], httpx.AsyncClient] | None = None,
         base_url: str = _DEFAULT_BASE_URL,
         approver: Any = None,
+        killswitch: Any = None,
     ) -> None:
         self._settings = settings
         self._persistence = persistence
@@ -82,6 +83,11 @@ class MetaAgentRunner:
         # sweep is skipped — used in test harnesses + early-deploy paths
         # without breaking constructor compatibility.
         self._approver = approver
+        # 58-05 (META-08, SPEC AC #15): optional Killswitch. The REST
+        # POST /api/v1/meta-agent/disable handler reads ``self.killswitch``
+        # to invoke abort_all_inflight + remove_job. Default None keeps
+        # construction compatible during early-deploy / test isolation.
+        self.killswitch = killswitch
         self._base_url = base_url
         self._client_factory = http_client_factory
         self._last_run_ts: datetime | None = None
@@ -187,15 +193,20 @@ class MetaAgentRunner:
         """Return the data shape consumed by GET /api/v1/meta-agent/status.
 
         Task 58-01-11 wraps this in ``MetaAgentStatus``. The
-        ``inflight_spawns`` registry lands in Plan 58-05; for now we
-        report zeroes.
+        ``inflight_spawns`` registry is read live from
+        ``meta_agent.spawner.inflight_count_by_type()`` (Plan 58-05).
+        ``scheduler_active`` reflects whether the killswitch has been
+        invoked: when ``settings.meta_agent_enabled`` is True AND
+        no killswitch reset has been triggered.
         """
+        from finalayze.meta_agent.spawner import inflight_count_by_type  # noqa: PLC0415
+
         return {
             "enabled": self._settings.meta_agent_enabled,
             "dry_run": self._settings.meta_agent_dry_run,
             "last_run_ts": self._last_run_ts,
             "scheduler_active": self._settings.meta_agent_enabled,
-            "inflight_spawns": {"investigate": 0, "fix": 0},
+            "inflight_spawns": inflight_count_by_type(),
         }
 
     # ── helpers ───────────────────────────────────────────────────────────
