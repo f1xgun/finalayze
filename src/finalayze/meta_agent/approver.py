@@ -153,7 +153,7 @@ class MetaAgentApprover:
                 status=_APPROVED_STATUS,
             )
             await self._executor.execute_fix_spawn(row)
-        except Exception:  # noqa: BLE001 — D-15 fire-and-forget envelope
+        except Exception:
             _log.warning(
                 "meta_agent_approve_persist_failed",
                 short8=short8,
