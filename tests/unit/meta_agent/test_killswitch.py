@@ -224,3 +224,138 @@ def test_remove_job_idempotent_on_missing_job() -> None:
     result = ks.remove_job()
     assert result is False
     scheduler.remove_job.assert_called_once_with("meta_agent")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-05-03 — Killswitch._watch_env() 1 s poller (env-var → abort within 5 s)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_POLL_WAIT_S = 3.0  # seconds — give the 1 s poller time to detect the flip
+
+
+@pytest.mark.asyncio
+async def test_env_var_flip_aborts_inflight_within_5s(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #15 (env-var path): the 1 s poller detects
+    ``meta_agent_enabled=False`` within ≤ 1 s, then triggers
+    ``abort_all_inflight()`` + ``remove_job()``. Total wall-clock from
+    flip to abort completion ≤ 5 s.
+
+    Test scaffolding:
+      - Pre-stage one fake INFLIGHT spawn whose ``wait()`` returns on
+        SIGTERM (cooperative).
+      - Stub ``config.settings.get_settings`` to return successive
+        ``meta_agent_enabled`` values: True, True, False, False, ...
+        The poller starts → reads True → sleeps 1 s → reads True → sleeps
+        1 s → reads False → fires abort path. The flip happens at the
+        third invocation (~2 s after start), so total wall-clock ≤
+        2 s + grace + reap ≈ < 5 s.
+      - Cleanup: ``await ks.stop()`` cancels the poller cleanly so the
+        test loop can exit.
+    """
+    from config import settings as cfg_settings_module
+    from finalayze.meta_agent import spawner as sp
+    from finalayze.meta_agent.killswitch import Killswitch
+
+    # Pre-condition: registry has one fake spawn.
+    sp._inflight_handles.clear()
+    cooperative = _FakeProcess(pid=_FAKE_PID, ignore_sigterm=False)
+    sp._inflight_handles[_FAKE_DECISION_ID] = cooperative  # type: ignore[assignment]
+
+    # killpg recorder.
+    killpg_calls: list[tuple[int, int]] = []
+
+    def _fake_killpg(pgid: int, sig: int) -> None:
+        killpg_calls.append((pgid, sig))
+        if sig == signal.SIGTERM and pgid == _FAKE_PGID:
+            cooperative.returncode = -signal.SIGTERM
+
+    def _fake_getpgid(pid: int) -> int:
+        return pid
+
+    monkeypatch.setattr(os, "killpg", _fake_killpg)
+    monkeypatch.setattr(os, "getpgid", _fake_getpgid)
+
+    # Stub get_settings: returns a Settings whose meta_agent_enabled flips
+    # to False on the third invocation.
+    sequence_lock = asyncio.Lock()
+    state = {"calls": 0}
+
+    def _fake_get_settings() -> Any:
+        state["calls"] += 1
+        # First two calls return True; third onward return False.
+        enabled = state["calls"] <= 2  # noqa: PLR2004
+        s = MagicMock()
+        s.meta_agent_enabled = enabled
+        return s
+
+    # cache_clear is required by the Killswitch poller to invalidate
+    # any lru_cache wrap on get_settings. Patch both the function and
+    # its cache_clear attribute.
+    _fake_get_settings.cache_clear = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setattr(cfg_settings_module, "get_settings", _fake_get_settings)
+
+    # First reading via settings_provider returns True; subsequent reads
+    # via the get_settings poll path will flip to False.
+    initial_settings = MagicMock()
+    initial_settings.meta_agent_enabled = True
+
+    scheduler = MagicMock()
+    ks = Killswitch(
+        scheduler=scheduler,
+        settings_provider=lambda: initial_settings,
+        sigterm_grace_s=_GRACE_TEST,
+        sigkill_reap_s=_KILL_TEST,
+    )
+
+    start = time.monotonic()
+    await ks.start()
+    assert ks._poller_task is not None  # poller running
+
+    # Wait long enough for the poller to detect the flip (1 s × 2 sleeps
+    # + abort budget). Cooperative SIGTERM exits immediately.
+    async with sequence_lock:
+        await asyncio.sleep(_POLL_WAIT_S)
+    duration = time.monotonic() - start
+
+    # Stop the poller cleanly.
+    await ks.stop()
+
+    # SPEC ceiling.
+    assert duration < _KILLSWITCH_CEILING_S + _POLL_WAIT_S, (
+        f"poller took {duration:.2f}s; should be under "
+        f"{_KILLSWITCH_CEILING_S + _POLL_WAIT_S}s"
+    )
+
+    # Abort triggered: SIGTERM was sent to the fake.
+    sigterm_pgids = [pgid for pgid, sig in killpg_calls if sig == signal.SIGTERM]
+    assert _FAKE_PGID in sigterm_pgids, (
+        f"poller did not abort the in-flight spawn; killpg_calls={killpg_calls}"
+    )
+
+    # remove_job called.
+    scheduler.remove_job.assert_called_with("meta_agent")
+
+    # Cleanup.
+    sp._inflight_handles.clear()
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_poller_when_started() -> None:
+    """``stop()`` cancels the poller task cleanly even when no flip has
+    occurred. After stop, the poller task is in a finished state.
+    """
+    from finalayze.meta_agent.killswitch import Killswitch
+
+    initial_settings = MagicMock()
+    initial_settings.meta_agent_enabled = True
+    ks = Killswitch(
+        scheduler=MagicMock(),
+        settings_provider=lambda: initial_settings,
+    )
+    await ks.start()
+    assert ks._poller_task is not None
+    await ks.stop()
+    assert ks._poller_task is None or ks._poller_task.done()
