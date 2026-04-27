@@ -477,8 +477,7 @@ class TestMetaAgentKillswitchWiring:
 
         # ks.stop was invoked (the coroutine was created).
         assert ks.stop.call_count >= 1, (
-            f"TradingLoop.stop() must invoke killswitch.stop(); "
-            f"got call_count={ks.stop.call_count}"
+            f"TradingLoop.stop() must invoke killswitch.stop(); got call_count={ks.stop.call_count}"
         )
         # And dispatched onto the async loop.
         assert mock_run_threadsafe.call_count >= 1

@@ -138,8 +138,7 @@ async def test_abort_all_inflight_terminates_via_killpg(
 
     # Wall-clock under SPEC ceiling.
     assert duration < _KILLSWITCH_CEILING_S, (
-        f"abort_all_inflight took {duration:.2f}s; SPEC ceiling is "
-        f"{_KILLSWITCH_CEILING_S}s"
+        f"abort_all_inflight took {duration:.2f}s; SPEC ceiling is {_KILLSWITCH_CEILING_S}s"
     )
 
     # Both SIGTERM calls happened.
@@ -256,6 +255,7 @@ async def test_env_var_flip_aborts_inflight_within_5s(
         test loop can exit.
     """
     from config import settings as cfg_settings_module
+
     from finalayze.meta_agent import spawner as sp
     from finalayze.meta_agent.killswitch import Killswitch
 
@@ -314,7 +314,7 @@ async def test_env_var_flip_aborts_inflight_within_5s(
     await ks.start()
     assert ks._poller_task is not None  # poller running
 
-    # Wait long enough for the poller to detect the flip (1 s × 2 sleeps
+    # Wait long enough for the poller to detect the flip (1 s x 2 sleeps
     # + abort budget). Cooperative SIGTERM exits immediately.
     async with sequence_lock:
         await asyncio.sleep(_POLL_WAIT_S)
@@ -325,8 +325,7 @@ async def test_env_var_flip_aborts_inflight_within_5s(
 
     # SPEC ceiling.
     assert duration < _KILLSWITCH_CEILING_S + _POLL_WAIT_S, (
-        f"poller took {duration:.2f}s; should be under "
-        f"{_KILLSWITCH_CEILING_S + _POLL_WAIT_S}s"
+        f"poller took {duration:.2f}s; should be under {_KILLSWITCH_CEILING_S + _POLL_WAIT_S}s"
     )
 
     # Abort triggered: SIGTERM was sent to the fake.

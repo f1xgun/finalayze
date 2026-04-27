@@ -117,12 +117,6 @@ async def test_build_snapshot_alerts_endpoint_500_sets_field_none(
         return_value=httpx.Response(200, json={"positions": []}),
     )
 
-    # capture_logs requires structlog default processors; configure if not
-    # already (idempotent under test isolation).
-    structlog.configure(
-        processors=[structlog.testing.LogCapture()],
-    )
-
     with capture_logs() as logs:
         snap = await build_snapshot(client, now=_NOW)
 

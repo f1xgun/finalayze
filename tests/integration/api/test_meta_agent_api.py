@@ -108,10 +108,10 @@ def test_post_disable_aborts_inflight_and_removes_job_within_5s(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SPEC AC #15: POST /api/v1/meta-agent/disable
-      1. Returns 200 with {status, aborted_spawns, job_removed}.
-      2. Calls scheduler.remove_job("meta_agent").
-      3. Aborts every entry in spawner._inflight_handles via SIGTERM.
-      4. Total wall-clock from POST → response ≤ 5 s.
+    1. Returns 200 with {status, aborted_spawns, job_removed}.
+    2. Calls scheduler.remove_job("meta_agent").
+    3. Aborts every entry in spawner._inflight_handles via SIGTERM.
+    4. Total wall-clock from POST → response ≤ 5 s.
     """
     from finalayze.api.v1.meta_agent import set_runner
     from finalayze.meta_agent import spawner as sp

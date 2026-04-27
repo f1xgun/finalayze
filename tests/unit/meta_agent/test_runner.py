@@ -143,9 +143,6 @@ async def test_five_tick_dry_run_writes_five_rows(
         http_client_factory=lambda: fake_client,
     )
 
-    structlog.configure(
-        processors=[structlog.testing.LogCapture()],
-    )
     with structlog.testing.capture_logs() as logs:
         for _ in range(_NUM_TICKS):
             await runner.run_one_tick()

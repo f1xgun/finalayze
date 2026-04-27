@@ -93,11 +93,12 @@ def _imports_in_file(path: Path) -> list[tuple[str, int]]:
     hits: list[tuple[str, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == _META_AGENT_PREFIX or alias.name.startswith(
-                    _META_AGENT_PREFIX + ".",
-                ):
-                    hits.append((alias.name, node.lineno))
+            hits.extend(
+                (alias.name, node.lineno)
+                for alias in node.names
+                if alias.name == _META_AGENT_PREFIX
+                or alias.name.startswith(_META_AGENT_PREFIX + ".")
+            )
         elif isinstance(node, ast.ImportFrom):
             if node.module is None:
                 continue
@@ -154,6 +155,5 @@ def test_layer_discipline_scan_visits_orchestration_and_core() -> None:
         "would not catch a trading_loop.py violation."
     )
     assert any(s.startswith("core/") for s in suffixes), (
-        "scan must visit core/ — otherwise the discipline test would "
-        "not catch a core/ violation."
+        "scan must visit core/ — otherwise the discipline test would not catch a core/ violation."
     )

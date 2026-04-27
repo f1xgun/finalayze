@@ -679,7 +679,7 @@ class TradingLoop:
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
-    def start(self) -> None:
+    def start(self) -> None:  # noqa: PLR0915 — wires many subsystems incl. meta_agent (Phase 58-05)
         """Start the APScheduler and block until stop() is called."""
         if (
             self._kill_switch is not None
@@ -781,10 +781,7 @@ class TradingLoop:
                 if self._async_loop is None or self._async_loop.is_closed():
                     _loop = asyncio.new_event_loop()
                     self._async_loop = _loop
-                    if (
-                        hasattr(self, "_persistence")
-                        and self._persistence is not None
-                    ):
+                    if hasattr(self, "_persistence") and self._persistence is not None:
                         self._persistence._async_loop = _loop
                     _t = threading.Thread(target=_loop.run_forever, daemon=True)
                     _t.start()
@@ -910,7 +907,7 @@ class TradingLoop:
             self._metrics.set_drawdown(market_id, 0.0)
         _log.info("metrics_initialized", markets=list(self._fetchers.keys()))
 
-    def stop(self) -> None:
+    def stop(self) -> None:  # noqa: PLR0912 — orderly shutdown of multiple subsystems incl. meta_agent killswitch (Phase 58-05)
         """Gracefully shut down scheduler, async/gRPC loops, and connections."""
         # Phase 58-05-06 (META-08, SPEC AC #15): cancel the meta-agent
         # killswitch poller BEFORE shutting down the async loop (otherwise
@@ -923,7 +920,7 @@ class TradingLoop:
             and not self._async_loop.is_closed()
         ):
             try:
-                ks = self._meta_agent_runner.killswitch
+                ks = self._meta_agent_runner.killswitch  # type: ignore[attr-defined]
                 future = asyncio.run_coroutine_threadsafe(ks.stop(), self._async_loop)
                 future.result(timeout=5)
             except Exception:

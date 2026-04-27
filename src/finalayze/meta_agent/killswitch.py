@@ -31,6 +31,7 @@ to satisfy RUF006. Lifecycle owned by ``TradingLoop.start()/stop()``
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -41,7 +42,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from apscheduler.schedulers.background import BackgroundScheduler
-
     from config.settings import Settings
 
 _log = structlog.get_logger()
@@ -194,13 +194,11 @@ class Killswitch:
             return
         if not task.done():
             task.cancel()
-            try:
+            # Cancellation is the expected shutdown path; any other
+            # exception we swallow because stop() must not raise
+            # (cleaner shutdown ordering). BaseException is intentional.
+            with contextlib.suppress(BaseException):
                 await task
-            except (asyncio.CancelledError, BaseException):  # noqa: BLE001
-                # Cancellation is the expected shutdown path; any
-                # other exception we swallow because stop() must not
-                # raise (cleaner shutdown ordering).
-                pass
         self._poller_task = None
         _log.info("meta_agent_killswitch_poller_stopped")
 
@@ -217,14 +215,14 @@ class Killswitch:
         """
         prev = bool(self._settings_provider().meta_agent_enabled)
         while not self._stopping.is_set():
-            try:
+            # Normal poll cadence — wait_for raises TimeoutError when no
+            # stop signal arrives within _POLL_INTERVAL_S; that's the
+            # signal to read the env-var.
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(
                     self._stopping.wait(),
                     timeout=_POLL_INTERVAL_S,
                 )
-            except TimeoutError:
-                # Normal poll cadence — fall through to the read.
-                pass
             if self._stopping.is_set():
                 return
 
@@ -266,6 +264,6 @@ class Killswitch:
         if hasattr(get_settings, "cache_clear"):
             try:
                 get_settings.cache_clear()
-            except Exception:  # noqa: BLE001 — diagnostic only
+            except Exception:
                 _log.debug("meta_agent_killswitch_cache_clear_failed", exc_info=True)
         return bool(get_settings().meta_agent_enabled)
