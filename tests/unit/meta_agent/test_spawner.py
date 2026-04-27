@@ -1,10 +1,13 @@
-"""Tests for meta_agent.spawner — read-only investigation subprocess (Phase 58-03).
+"""Tests for meta_agent.spawner — read-only investigation subprocess (Phase 58-03)
+and FIX-spawn pipeline (Phase 58-04).
 
-Covers SPEC §Acceptance Criteria #10 + #11:
+Covers SPEC §Acceptance Criteria #10 + #11 + #13:
   - Exception classes (Task 58-03-01)
   - spawn_readonly happy path with monkeypatched subprocess (Task 58-03-04)
   - 300s timeout → SIGTERM → SIGKILL (Task 58-03-05)
   - Concurrent investigate → already_inflight (Task 58-03-06)
+  - spawn_fix argv uses Edit + worktree cwd (Task 58-04-04)
+  - Concurrent fix → already_inflight via _FIX_LOCK (Task 58-04-04)
 
 The CLI (`claude`) need NOT be on $PATH — tests monkeypatch
 ``asyncio.create_subprocess_exec`` so the spawner is exercised hermetically.
@@ -414,3 +417,184 @@ async def test_concurrent_investigate_spawns_rejected_with_already_inflight(
     assert sp._INVESTIGATE_LOCK.locked() is False, (
         "lock must be released after first spawn completes"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 58-04-04: spawn_fix() reuses spawner infra with FIX argv + _FIX_LOCK
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_FIX_MAX_TURNS_STR = "40"
+_WORKTREE_CWD = "/tmp/.worktrees/meta-agent-fix-abc"  # noqa: S108
+_FIX_ALLOWED_PATHS = ["src/finalayze/strategies/presets/", "config/segments.py"]
+_FIX_DENIED_PATHS = [
+    "src/finalayze/risk/",
+    "src/finalayze/execution/",
+    "src/finalayze/core/",
+]
+
+
+@pytest.mark.asyncio
+async def test_spawn_fix_argv_uses_edit_and_worktree_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC AC #13 (Task 58-04-04): ``spawn_fix(prompt, decision_id, cwd,
+    allowed_paths, denied_paths, timeout_s)`` invokes ``claude`` with:
+      - ``--allowedTools "Read,Grep,Edit,Bash"`` (Edit included for FIX)
+      - ``--add-dir <worktree>`` so the spawned CLI has filesystem access
+        to the worktree
+      - ``--max-turns 40`` (FIX ceiling, not the 20 from investigate)
+      - ``cwd=<worktree>`` so any relative paths resolve inside the worktree
+      - ``start_new_session=True`` (process-group killability)
+    """
+    from pathlib import Path
+
+    from finalayze.meta_agent.spawner import SpawnOutcome, spawn_fix
+
+    captured: dict[str, Any] = {}
+    fake_proc = _FakeProcess(
+        stdout=b'{"type":"result","is_error":false}\n',
+        exit_code=_EXIT_OK,
+    )
+
+    async def _fake_create(*args: Any, **kwargs: Any) -> _FakeProcess:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return fake_proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+
+    outcome = await spawn_fix(
+        "fix prompt body",
+        decision_id=_FAKE_DECISION_ID,
+        cwd=Path(_WORKTREE_CWD),
+        allowed_paths=_FIX_ALLOWED_PATHS,
+        denied_paths=_FIX_DENIED_PATHS,
+        timeout_s=600,
+    )
+
+    # Outcome shape — happy path.
+    assert isinstance(outcome, SpawnOutcome)
+    assert outcome.exit_code == _EXIT_OK
+    assert outcome.timed_out is False
+    assert outcome.killed_by_killswitch is False
+
+    # Argv inspection — FIX-specific flag set.
+    args = captured["args"]
+    assert args[0] == "claude"
+    assert args[1] == "-p"
+    assert args[2] == "fix prompt body"
+
+    # --allowedTools includes Edit (FIX-specific vs investigate's
+    # "Read,Grep,Bash").
+    assert "--allowedTools" in args
+    at_idx = args.index("--allowedTools")
+    assert args[at_idx + 1] == "Read,Grep,Edit,Bash", (
+        f"expected FIX allowedTools='Read,Grep,Edit,Bash', got {args[at_idx + 1]!r}"
+    )
+
+    # --add-dir points at the worktree.
+    assert "--add-dir" in args
+    ad_idx = args.index("--add-dir")
+    assert args[ad_idx + 1] == _WORKTREE_CWD, (
+        f"expected --add-dir={_WORKTREE_CWD}, got {args[ad_idx + 1]!r}"
+    )
+
+    # --max-turns 40 (FIX ceiling).
+    assert "--max-turns" in args
+    mt_idx = args.index("--max-turns")
+    assert args[mt_idx + 1] == _FIX_MAX_TURNS_STR, (
+        f"expected --max-turns=40 for FIX, got {args[mt_idx + 1]!r}"
+    )
+
+    # Subprocess control kwargs.
+    kwargs = captured["kwargs"]
+    assert kwargs.get("start_new_session") is True
+    assert kwargs.get("cwd") == _WORKTREE_CWD, (
+        f"subprocess cwd must be the worktree path; got {kwargs.get('cwd')!r}"
+    )
+    assert kwargs.get("stdin") == asyncio.subprocess.DEVNULL
+
+
+@pytest.mark.asyncio
+async def test_concurrent_fix_spawns_rejected_with_already_inflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SPEC §Boundaries (line 105): at most one in-flight FIX spawn at a
+    time. The second concurrent caller observes ``_FIX_LOCK.locked() is
+    True`` WITHOUT taking the lock and returns
+    SpawnOutcome(stderr='already_inflight').
+
+    NOTE: ``_FIX_LOCK`` is a SEPARATE lock from ``_INVESTIGATE_LOCK`` —
+    a FIX spawn does NOT block investigate spawns and vice versa
+    (D-07 — locks per spawn-type).
+    """
+    import structlog
+    from pathlib import Path
+
+    from finalayze.meta_agent import spawner as sp
+    from finalayze.meta_agent.spawner import spawn_fix
+
+    slow_proc = _FakeProcess(
+        stdout=b"slow fix result\n",
+        stderr=b"",
+        sleep_before_exit=0.5,
+    )
+    fast_proc = _FakeProcess(stdout=b"fast fix result\n", exit_code=_EXIT_OK)
+
+    procs = iter([slow_proc, fast_proc])
+
+    async def _fake_create(*_args: Any, **_kwargs: Any) -> _FakeProcess:
+        return next(procs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+
+    # Verify lock is initially free.
+    assert sp._FIX_LOCK.locked() is False, "FIX lock must start unlocked"
+
+    first_task = asyncio.create_task(
+        spawn_fix(
+            "first fix prompt",
+            decision_id=_FAKE_DECISION_ID,
+            cwd=Path(_WORKTREE_CWD),
+            allowed_paths=_FIX_ALLOWED_PATHS,
+            denied_paths=_FIX_DENIED_PATHS,
+        ),
+    )
+    # Yield briefly so the first task acquires the lock.
+    await asyncio.sleep(0.05)
+
+    # Pre-condition.
+    assert sp._FIX_LOCK.locked() is True, "first fix spawn must have acquired _FIX_LOCK"
+
+    with structlog.testing.capture_logs() as logs:
+        second_outcome = await spawn_fix(
+            "second fix prompt",
+            decision_id=_FAKE_DECISION_ID_2,
+            cwd=Path(_WORKTREE_CWD),
+            allowed_paths=_FIX_ALLOWED_PATHS,
+            denied_paths=_FIX_DENIED_PATHS,
+        )
+
+    # Second outcome: rejected, no subprocess spawned.
+    assert second_outcome.exit_code == _EXIT_TIMEOUT, (
+        f"expected synthetic exit_code={_EXIT_TIMEOUT}, got {second_outcome!r}"
+    )
+    assert second_outcome.stderr == "already_inflight"
+    assert second_outcome.stdout == ""
+
+    # Structlog event from the rejected caller (spawn_type='fix').
+    rejected_events = [
+        log for log in logs if log.get("event") == "meta_agent_spawn_already_inflight"
+    ]
+    assert len(rejected_events) == 1, (
+        f"expected 1 already_inflight event for fix, got {rejected_events!r}"
+    )
+    assert rejected_events[0].get("spawn_type") == "fix"
+
+    # First spawn must still complete and release the lock.
+    first_outcome = await first_task
+    assert first_outcome.exit_code == _EXIT_OK, (
+        f"first fix spawn should have exited 0, got {first_outcome!r}"
+    )
+    assert sp._FIX_LOCK.locked() is False, "FIX lock must be released after first spawn completes"
