@@ -86,7 +86,7 @@ def render(api: ApiClient) -> None:
         return
 
     df = pd.DataFrame(metrics)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], format="ISO8601")
 
     # Section 1: Metrics table
     st.subheader("Metrics Table")

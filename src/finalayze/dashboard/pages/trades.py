@@ -99,7 +99,7 @@ def render(api: ApiClient) -> None:
             if not numeric_slip.empty:
                 st.subheader("Slippage by Time of Day")
                 if "timestamp" in numeric_slip.columns:
-                    numeric_slip["timestamp"] = pd.to_datetime(numeric_slip["timestamp"])
+                    numeric_slip["timestamp"] = pd.to_datetime(numeric_slip["timestamp"], format="ISO8601")
                 st.scatter_chart(
                     numeric_slip,
                     x="timestamp",

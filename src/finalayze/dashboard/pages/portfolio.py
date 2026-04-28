@@ -128,7 +128,7 @@ def render(api: ApiClient) -> None:
     if snapshots and isinstance(snapshots, list):
         st.subheader("Equity Curve & Drawdown")
         df = pd.DataFrame(snapshots)
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], format="ISO8601")
 
         fig = make_subplots(
             rows=2,

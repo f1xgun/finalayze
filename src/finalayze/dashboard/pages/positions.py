@@ -89,7 +89,7 @@ def _render_history_chart(events: list[dict[str, Any]], symbol: str) -> None:
         st.info("No stop-loss history yet for this position.")
         return
     df = pd.DataFrame(events)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], format="ISO8601")
 
     fig = go.Figure()
     if "current_price" in df.columns:
