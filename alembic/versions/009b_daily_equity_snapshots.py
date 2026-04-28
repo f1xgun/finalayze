@@ -1,7 +1,7 @@
-"""008 daily equity snapshots
+"""009b daily equity snapshots
 
-Revision ID: 008
-Revises: 007
+Revision ID: 009b
+Revises: 009
 Create Date: 2026-04-19
 
 Creates the `daily_equity_snapshots` TimescaleDB hypertable used by
@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "008"
-down_revision: str | None = "007"
+revision: str = "009b"
+down_revision: str | None = "009"
 branch_labels: str | None = None
 depends_on: str | None = None
 

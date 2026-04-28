@@ -1,7 +1,7 @@
 """010 agent_decisions hypertable
 
 Revision ID: 010
-Revises: 009
+Revises: 009b
 Create Date: 2026-04-26
 
 Creates the ``agent_decisions`` TimescaleDB hypertable used by Phase 58
@@ -41,7 +41,7 @@ from __future__ import annotations
 from alembic import op
 
 revision: str = "010"
-down_revision: str | None = "009"
+down_revision: str | None = "009b"
 branch_labels: str | None = None
 depends_on: str | None = None
 
