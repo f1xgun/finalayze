@@ -87,6 +87,7 @@ class TelegramBotHandler:
             "/kill": self.handle_kill,
             "/gonogo": self.handle_gonogo,
             "/approve": self.handle_approve,
+            "/meta": self.handle_meta,
         }
 
     async def handle_update(self, update: dict[str, Any]) -> dict[str, str]:
@@ -393,6 +394,26 @@ class TelegramBotHandler:
             _log.exception("telegram_kill_confirm_failed")
             await self._alerter._send("Kill switch activation failed. Check logs.")
             return {"ok": "error"}
+
+    async def handle_meta(self, chat_id: str) -> None:  # noqa: ARG002
+        """/meta — manually trigger one meta-agent tick and report severity."""
+        from finalayze.api.v1.meta_agent import _runner as _meta_runner  # noqa: PLC0415
+
+        if _meta_runner is None:
+            await self._alerter._send("Meta-agent not wired (runner=None).")
+            return
+        await self._alerter._send("Meta-agent tick triggered...")
+        result = await _meta_runner.run_one_tick()
+        if result is None:
+            await self._alerter._send("Meta-agent tick failed — snapshot unavailable.")
+            return
+        severity = result.get("severity", "?")
+        rationale = result.get("rationale", "")
+        severity_emoji = {"HEALTHY": "✅", "WATCH": "👀", "INVESTIGATE": "⚠️", "FIX": "🚨"}
+        emoji = severity_emoji.get(severity, "❓")
+        await self._alerter._send(
+            f"{emoji} Meta-agent: {severity}\n{rationale}"
+        )
 
     def _cleanup_expired_kills(self) -> None:
         """Remove pending kill confirmations older than 60s."""

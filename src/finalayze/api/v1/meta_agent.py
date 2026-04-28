@@ -68,6 +68,15 @@ class DisableResponse(BaseModel):
     job_removed: bool
 
 
+class RunResponse(BaseModel):
+    """Result of a manual meta-agent tick trigger."""
+
+    model_config = ConfigDict(frozen=True)
+    status: Literal["triggered", "no_runner"]
+    severity: str | None = None
+    rationale: str | None = None
+
+
 # Module-level singleton (mirrors ``api/v1/system.py:_kill_switch``).
 _runner: MetaAgentRunner | None = None
 
@@ -104,6 +113,19 @@ async def get_meta_agent_status() -> MetaAgentStatus:
             investigate=int(inflight_raw.get("investigate", 0)),
             fix=int(inflight_raw.get("fix", 0)),
         ),
+    )
+
+
+@router.post("/run", response_model=RunResponse)
+async def run_meta_agent_now() -> RunResponse:
+    """Manually trigger one meta-agent tick immediately (operator use)."""
+    if _runner is None:
+        return RunResponse(status="no_runner")
+    result = await _runner.run_one_tick()
+    return RunResponse(
+        status="triggered",
+        severity=result.get("severity") if result else None,
+        rationale=result.get("rationale") if result else None,
     )
 
 

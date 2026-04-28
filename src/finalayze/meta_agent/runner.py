@@ -97,9 +97,11 @@ class MetaAgentRunner:
 
     # ── public ────────────────────────────────────────────────────────────
 
-    async def run_one_tick(self) -> None:
+    async def run_one_tick(self) -> dict[str, str] | None:
         """Execute one cycle. NEVER raises — failures are logged and the
         runner returns so the scheduler tick is non-fatal.
+
+        Returns dict with severity/rationale on success, None on snapshot failure.
         """
         tick_start = datetime.now(UTC)
         self._last_run_ts = tick_start
@@ -122,13 +124,13 @@ class MetaAgentRunner:
             snapshot = await self._collect_snapshot(now=tick_start)
         except Exception:
             _log.warning("meta_agent_snapshot_failed", exc_info=True)
-            return
+            return None
 
         try:
             severity = classify(snapshot)
         except Exception:
             _log.warning("meta_agent_classify_failed", exc_info=True)
-            return
+            return None
 
         rationale = self._derive_rationale(snapshot, severity)
         summary = f"meta_agent severity={severity.value}"
@@ -160,7 +162,7 @@ class MetaAgentRunner:
 
         # Dry-run gate — first decision after persist (D-04 / SPEC line 47).
         if self._settings.meta_agent_dry_run:
-            return
+            return {"severity": severity.value, "rationale": rationale}
 
         # Non-dry-run path: dispatch to ActionExecutor (Plan 58-02 META-05).
         # Construct a decision-shaped object exposing id, timestamp,
@@ -168,7 +170,7 @@ class MetaAgentRunner:
         # can stamp its UPDATE without re-reading the row.
         if self._executor is None:
             _log.info("meta_agent_executor_missing", severity_key=severity.value)
-            return
+            return {"severity": severity.value, "rationale": rationale}
         from types import SimpleNamespace  # noqa: PLC0415
 
         decision = SimpleNamespace(
@@ -188,6 +190,7 @@ class MetaAgentRunner:
                 decision_id=str(decision_id),
                 exc_info=True,
             )
+        return {"severity": severity.value, "rationale": rationale}
 
     def status_snapshot(self) -> dict[str, Any]:
         """Return the data shape consumed by GET /api/v1/meta-agent/status.
