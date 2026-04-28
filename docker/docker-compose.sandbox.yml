@@ -74,6 +74,28 @@ services:
       - net
     restart: unless-stopped
 
+  streamlit:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    image: finalayze-sandbox-app
+    container_name: finalayze-sandbox-streamlit
+    entrypoint: ["/app/streamlit-entrypoint.sh"]
+    env_file:
+      - ../.env
+    environment:
+      DASHBOARD_API_URL: "http://app:8000"
+    volumes:
+      - ../.streamlit/config.toml:/app/.streamlit/config.toml:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    networks:
+      - net
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:v2.51.0
     container_name: finalayze-sandbox-prometheus

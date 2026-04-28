@@ -43,9 +43,10 @@ COPY config/ config/
 COPY alembic/ alembic/
 COPY certs/ certs/
 
-# Copy entrypoint
+# Copy entrypoints
 COPY docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+COPY docker/streamlit-entrypoint.sh /app/streamlit-entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/streamlit-entrypoint.sh
 
 # Set ownership
 RUN chown -R finalayze:finalayze /app
