@@ -277,10 +277,20 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
         from pathlib import Path  # noqa: PLC0415
 
         # Build TradingLoop first, then create KillSwitch that references it
-        # ── Build TradingLoop ────────────────────────────────────────────
+        # ── Meta-Agent Runner ────────────────────────────────────────────
         from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
         from finalayze.core.kill_switch import KillSwitch  # noqa: PLC0415
 
+        meta_agent_runner = None
+        if getattr(settings, "meta_agent_enabled", False):
+            from finalayze.meta_agent.runner import MetaAgentRunner  # noqa: PLC0415
+
+            meta_agent_runner = MetaAgentRunner(
+                settings=settings,
+                persistence=None,  # wired after persistence is available in loop.start()
+            )
+
+        # ── Build TradingLoop ────────────────────────────────────────────
         loop = TradingLoop(
             settings=settings,
             fetchers=fetchers,
@@ -300,6 +310,7 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
             sector_ticker_mapper=sector_ticker_mapper,
             sandbox_monitor=sandbox_monitor,
             metrics_collector=MetricsCollector,
+            meta_agent_runner=meta_agent_runner,
         )
         # ── Create KillSwitch (after loop exists) ────────────────────
         kill_switch = KillSwitch(

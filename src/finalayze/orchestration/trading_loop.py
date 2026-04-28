@@ -760,6 +760,9 @@ class TradingLoop:
         # Phase 58-02-07: meta-agent (cron-driven autonomous monitor).
         # Guarded by meta_agent_enabled (SPEC AC #6 — disabled → no job).
         if getattr(self._settings, "meta_agent_enabled", False):
+            from finalayze.api.v1.meta_agent import (  # noqa: PLC0415
+                set_runner as _set_meta_runner,
+            )
             from finalayze.meta_agent.scheduler import (  # noqa: PLC0415
                 register_meta_agent_job,
             )
@@ -770,6 +773,7 @@ class TradingLoop:
                 runner=self._meta_agent_runner,
                 async_loop=self._async_loop,
             )
+            _set_meta_runner(self._meta_agent_runner)  # type: ignore[arg-type]
             # Phase 58-05-06 (META-08, SPEC AC #15): launch the killswitch
             # env-var poller on the persistent async loop. The poller
             # MUST run on the same loop where ``await proc.wait()`` was
