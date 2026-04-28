@@ -34,12 +34,13 @@ _trading_loop_thread: threading.Thread | None = None
 
 # Module-level reference for Telegram bot handler (wired in lifespan)
 _bot_handler_instance: Any | None = None
+_telegram_poller: Any | None = None
 
 
 @asynccontextmanager
 async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR0915
     """Start TradingLoop in background thread for sandbox/real modes, shut down on exit."""
-    global _trading_loop_instance, _trading_loop_thread  # noqa: PLW0603
+    global _trading_loop_instance, _trading_loop_thread, _telegram_poller  # noqa: PLW0603
 
     log.info("finalayze started", mode=_settings.mode.value)
 
@@ -183,6 +184,16 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
         except Exception:
             log.exception("trading_loop_build_failed")
 
+    # Start Telegram long-polling (if bot token configured and handler wired)
+    if (
+        _settings.telegram_bot_token
+        and _bot_handler_instance is not None
+    ):
+        from finalayze.api.telegram_poller import TelegramPoller  # noqa: PLC0415
+
+        _telegram_poller = TelegramPoller(_settings.telegram_bot_token, _bot_handler_instance)
+        await _telegram_poller.start()
+
     yield
 
     # Shutdown
@@ -207,6 +218,9 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
             log.debug("trading_loop_stop_failed", exc_info=True)
     if _trading_loop_thread is not None and _trading_loop_thread.is_alive():
         _trading_loop_thread.join(timeout=10)
+
+    if _telegram_poller is not None:
+        await _telegram_poller.stop()
 
     # Close TelegramAlerter httpx clients to prevent resource leaks
     # Trading loop alerter (first instance)
