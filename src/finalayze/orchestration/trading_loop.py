@@ -790,6 +790,14 @@ class TradingLoop:
                 _t = threading.Thread(target=_loop.run_forever, daemon=True)
                 _t.start()
                 self._async_thread = _t
+            # Phase 58-05-06 (META-08, SPEC AC #15): launch killswitch poller.
+            if (
+                self._meta_agent_runner is not None
+                and getattr(self._meta_agent_runner, "killswitch", None) is not None
+                and self._async_loop is not None
+            ):
+                _ks = self._meta_agent_runner.killswitch  # type: ignore[attr-defined]
+                asyncio.run_coroutine_threadsafe(_ks.start(), self._async_loop)
         if self._ml_registry is not None and getattr(self._settings, "ml_enabled", False):
             self._scheduler.add_job(
                 self._ml_retrainer.retrain_all,

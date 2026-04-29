@@ -43,9 +43,9 @@ def test_migration_revision_id_is_010() -> None:
     assert _extract_module_assignment(src, "revision") == "010"
 
 
-def test_migration_down_revision_is_009() -> None:
+def test_migration_down_revision_is_009b() -> None:
     src = _read_migration_source()
-    assert _extract_module_assignment(src, "down_revision") == "009"
+    assert _extract_module_assignment(src, "down_revision") == "009b"
 
 
 def test_migration_upgrade_creates_hypertable() -> None:
