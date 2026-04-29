@@ -194,12 +194,17 @@ def _build_argv(
     cwd: Path | None = None,
     allowed_tools: str = "Read,Grep,Bash",
     max_turns: str = _DEFAULT_MAX_TURNS,
+    skip_permissions: bool = False,
 ) -> list[str]:
     """Build the ``claude -p`` argv (RESEARCH §3.1, §3.3).
 
     ``--allowedTools`` is camelCase per the CLI's flag parser. We pair
     ``--output-format stream-json`` with ``--verbose`` (required by the
     streaming mode).
+
+    ``skip_permissions=True`` adds ``--dangerously-skip-permissions`` for
+    fix spawns where Edit/Bash would otherwise hang waiting for stdin in
+    headless mode.
     """
     argv: list[str] = [
         "claude",
@@ -213,6 +218,8 @@ def _build_argv(
         "--max-turns",
         max_turns,
     ]
+    if skip_permissions:
+        argv.append("--dangerously-skip-permissions")
     if cwd is not None:
         argv.extend(["--add-dir", str(cwd)])
     return argv
@@ -463,6 +470,7 @@ async def spawn_fix(
             cwd=cwd,
             allowed_tools="Read,Grep,Edit,Bash",
             max_turns=_FIX_MAX_TURNS,
+            skip_permissions=True,
         )
         return await _run_claude_subprocess(
             argv,

@@ -7,7 +7,6 @@ Handles equity snapshots, P&L calculations, circuit breaker resets, and alerts.
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -296,7 +295,7 @@ class DailyReportingService:
             return baselines
 
     def _load_baseline_async(self, fetchers_keys: list[str]) -> dict[str, Decimal]:  # noqa: ARG002
-        """Async helper to query today's equity snapshots from TimescaleDB.
+        """Query today's equity snapshots from TimescaleDB.
 
         Fetches all DailyEquitySnapshot rows for today, groups by market_id,
         and takes the latest equity per market.
@@ -310,27 +309,8 @@ class DailyReportingService:
         Raises:
             ValueError: If no snapshots found for today
         """
-        factory = self._persistence._get_bg_session_factory()
-
         try:
-            # Try async if we have an event loop, otherwise sync
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # We're in async context — need to run sync code
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        result = loop.run_in_executor(
-                            executor,
-                            self._query_snapshots_sync,
-                            factory,
-                        )
-                        baselines = loop.run_until_complete(result)
-                else:
-                    # Sync context
-                    baselines = self._query_snapshots_sync(factory)
-            except RuntimeError:
-                # No event loop
-                baselines = self._query_snapshots_sync(factory)
+            baselines = self._query_snapshots_sync(self._persistence)
         except Exception:
             _log.exception("_load_baseline_async: query failed")
             raise ValueError("no snapshots for today") from None
@@ -343,13 +323,11 @@ class DailyReportingService:
         return baselines
 
     @staticmethod
-    def _query_snapshots_sync(
-        factory: Any,
-    ) -> dict[str, Decimal]:
-        """Synchronous query of DailyEquitySnapshot from DB.
+    def _query_snapshots_sync(persistence: Any) -> dict[str, Decimal]:
+        """Run async DB query in a fresh event loop from a sync thread.
 
         Args:
-            factory: SessionFactory from persistence
+            persistence: TradingPersistence instance
 
         Returns:
             dict[market_id] -> Decimal equity
@@ -358,11 +336,10 @@ class DailyReportingService:
 
         from finalayze.core.models import DailyEquitySnapshot  # noqa: PLC0415
 
-        baselines: dict[str, Decimal] = {}
-        session = factory()
-        try:
+        async def _run() -> dict[str, Decimal]:
+            factory = persistence._get_bg_session_factory()
+            baselines: dict[str, Decimal] = {}
             today_start = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-            # Subquery: latest timestamp per market_id for today
             subq = (
                 select(
                     DailyEquitySnapshot.market_id,
@@ -377,15 +354,14 @@ class DailyReportingService:
                 (DailyEquitySnapshot.market_id == subq.c.market_id)
                 & (DailyEquitySnapshot.timestamp == subq.c.max_ts),
             )
-            result = session.execute(stmt)
-            rows = result.all()
+            async with factory() as session:
+                result = await session.execute(stmt)
+                rows = result.all()
+                for row in rows:
+                    baselines[row.market_id] = row.equity
+            return baselines
 
-            for row in rows:
-                baselines[row.market_id] = row.equity
-        finally:
-            session.close()
-
-        return baselines
+        return asyncio.run(_run())
 
     def _get_market_equity(self, market_id: str) -> Decimal | None:
         """Return current portfolio equity for market, or None on failure.

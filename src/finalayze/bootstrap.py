@@ -312,6 +312,26 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
             metrics_collector=MetricsCollector,
             meta_agent_runner=meta_agent_runner,
         )
+        # Wire persistence into alerter so persist-before-send envelope works.
+        alerter._persistence = loop._persistence
+
+        # Wire persistence + executor + approver into meta-agent runner.
+        if meta_agent_runner is not None:
+            from finalayze.meta_agent.approver import MetaAgentApprover  # noqa: PLC0415
+            from finalayze.meta_agent.executor import ActionExecutor  # noqa: PLC0415
+
+            meta_agent_runner._persistence = loop._persistence
+            _executor = ActionExecutor(
+                settings=settings,
+                alerter=alerter,
+                persistence=loop._persistence,
+            )
+            meta_agent_runner._executor = _executor
+            meta_agent_runner._approver = MetaAgentApprover(
+                executor=_executor,
+                persistence=loop._persistence,
+            )
+
         # ── Create KillSwitch (after loop exists) ────────────────────
         kill_switch = KillSwitch(
             broker_router=broker_router,
@@ -335,6 +355,15 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
         loop._kill_switch = kill_switch
         loop._circuit_breakers = circuit_breakers
         loop._alerter_ref = alerter
+        if meta_agent_runner is not None:
+            from finalayze.meta_agent.killswitch import (  # noqa: PLC0415
+                Killswitch as MetaKillswitch,
+            )
+
+            meta_agent_runner.killswitch = MetaKillswitch(
+                scheduler=loop._scheduler,
+                settings_provider=lambda: settings,
+            )
 
         log.info(
             "trading_loop_built",
