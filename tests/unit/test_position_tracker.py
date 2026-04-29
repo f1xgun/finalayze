@@ -337,11 +337,13 @@ def test_restore_stops_does_not_overwrite_live_state() -> None:
 
 def test_restore_stops_multiple_symbols() -> None:
     tracker = _make_tracker()
-    tracker.restore_stops({
-        "SBER": ("moex", _make_state(100.0)),
-        "GAZP": ("moex", _make_state(200.0)),
-        "CBOM": ("moex", _make_state(7.3)),
-    })
+    tracker.restore_stops(
+        {
+            "SBER": ("moex", _make_state(100.0)),
+            "GAZP": ("moex", _make_state(200.0)),
+            "CBOM": ("moex", _make_state(7.3)),
+        }
+    )
     assert set(tracker.snapshot_all_stops().keys()) == {"SBER", "GAZP", "CBOM"}
     assert tracker._entry_prices["GAZP"] == Decimal("200.0")
 

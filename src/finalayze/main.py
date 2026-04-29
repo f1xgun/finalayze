@@ -94,6 +94,17 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
                     set_kill_switch(kill_switch)
                     log.info("kill_switch_wired_to_rest_api")
 
+                # Wire MetaAgentRunner to REST API (unconditional — also needed
+                # when no Telegram bot is configured).
+                _meta_runner_for_api = getattr(_trading_loop_instance, "_meta_agent_runner", None)
+                if _meta_runner_for_api is not None:
+                    from finalayze.api.v1.meta_agent import (  # noqa: PLC0415
+                        set_runner as _set_meta_runner_early,
+                    )
+
+                    _set_meta_runner_early(_meta_runner_for_api)
+                    log.info("meta_agent_runner_wired_to_rest_api")
+
                 # Wire KillSwitch and GoNoGoReporter to Telegram bot handler
                 if _bot_handler_instance is not None:
                     if kill_switch is not None:
@@ -132,6 +143,22 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
                         _bot_handler_instance._circuit_breakers = circuit_breakers_ref
                         _bot_handler_instance._trading_loop = _trading_loop_instance
                         log.info("bot_handler_fully_wired")
+
+                    # Wire meta-agent approver so /approve command works.
+                    _meta_runner = getattr(_trading_loop_instance, "_meta_agent_runner", None)
+                    if _meta_runner is not None:
+                        _approver = getattr(_meta_runner, "_approver", None)
+                        if _approver is not None:
+                            _bot_handler_instance._meta_agent_approver = _approver
+                            log.info("meta_agent_approver_wired_to_telegram_bot")
+                        # Wire the uvicorn event loop into executor so that
+                        # alerter._send (httpx.AsyncClient bound to this loop)
+                        # is always called from the correct loop even when the
+                        # meta-agent tick runs in _async_loop.
+                        _exec = getattr(_meta_runner, "_executor", None)
+                        if _exec is not None:
+                            _exec._main_loop = asyncio.get_running_loop()
+                            log.info("meta_agent_executor_main_loop_wired")
 
                 # Wire GoNoGoReporter to sandbox endpoint even without Telegram bot
                 if _bot_handler_instance is None:
@@ -185,10 +212,7 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
             log.exception("trading_loop_build_failed")
 
     # Start Telegram long-polling (if bot token configured and handler wired)
-    if (
-        _settings.telegram_bot_token
-        and _bot_handler_instance is not None
-    ):
+    if _settings.telegram_bot_token and _bot_handler_instance is not None:
         from finalayze.api.telegram_poller import TelegramPoller  # noqa: PLC0415
 
         _telegram_poller = TelegramPoller(_settings.telegram_bot_token, _bot_handler_instance)

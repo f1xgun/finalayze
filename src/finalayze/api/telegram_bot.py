@@ -411,9 +411,7 @@ class TelegramBotHandler:
         rationale = result.get("rationale", "")
         severity_emoji = {"HEALTHY": "✅", "WATCH": "👀", "INVESTIGATE": "⚠️", "FIX": "🚨"}
         emoji = severity_emoji.get(severity, "❓")
-        await self._alerter._send(
-            f"{emoji} Meta-agent: {severity}\n{rationale}"
-        )
+        await self._alerter._send(f"{emoji} Meta-agent: {severity}\n{rationale}")
 
     def _cleanup_expired_kills(self) -> None:
         """Remove pending kill confirmations older than 60s."""

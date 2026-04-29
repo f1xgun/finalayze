@@ -146,17 +146,19 @@ def _make_candles(n: int = 30, base_price: float = 7.3) -> list:
     for i in range(n):
         p = Decimal(str(base_price + i * 0.01))
         ts = now - datetime.timedelta(days=n - i - 1)
-        candles.append(Candle(
-            symbol="CBOM",
-            market_id="moex",
-            timeframe="1d",
-            timestamp=ts,
-            open=p - Decimal("0.1"),
-            high=p + Decimal("0.2"),
-            low=p - Decimal("0.2"),
-            close=p,
-            volume=10000,
-        ))
+        candles.append(
+            Candle(
+                symbol="CBOM",
+                market_id="moex",
+                timeframe="1d",
+                timestamp=ts,
+                open=p - Decimal("0.1"),
+                high=p + Decimal("0.2"),
+                low=p - Decimal("0.2"),
+                close=p,
+                volume=10000,
+            )
+        )
     return candles
 
 
