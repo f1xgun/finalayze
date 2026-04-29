@@ -12,7 +12,6 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-
 # ── TradingPersistence.load_stop_snapshots ──────────────────────────────────
 
 
@@ -103,9 +102,11 @@ def test_restore_stop_states_from_db_calls_restore_stops() -> None:
     broker_mock.get_positions.return_value = {"SBER": Decimal(238)}
     loop._broker_router.route.return_value = broker_mock  # type: ignore[union-attr]
 
-    with patch.object(loop._persistence, "load_stop_snapshots", return_value=snapshot):  # type: ignore[union-attr]
-        with patch.object(loop._position_tracker, "restore_stops") as mock_restore:  # type: ignore[union-attr]
-            loop._restore_stop_states_from_db()  # type: ignore[union-attr]
+    with (
+        patch.object(loop._persistence, "load_stop_snapshots", return_value=snapshot),  # type: ignore[union-attr]
+        patch.object(loop._position_tracker, "restore_stops") as mock_restore,  # type: ignore[union-attr]
+    ):
+        loop._restore_stop_states_from_db()  # type: ignore[union-attr]
 
     mock_restore.assert_called_once()
     restored_arg = mock_restore.call_args[0][0]
@@ -137,9 +138,10 @@ def test_restore_stop_states_called_in_start() -> None:
 
 def _make_candles(n: int = 30, base_price: float = 7.3) -> list:
     import datetime
+
     from finalayze.core.schemas import Candle
 
-    now = datetime.datetime.now(tz=datetime.timezone.utc)
+    now = datetime.datetime.now(tz=datetime.UTC)
     candles = []
     for i in range(n):
         p = Decimal(str(base_price + i * 0.01))
@@ -162,6 +164,7 @@ def test_retroactive_stop_set_when_position_has_no_stop_state() -> None:
     """If broker reports open position but PositionTracker has no stop state,
     process_instrument must retroactively register a stop."""
     from unittest.mock import MagicMock, patch
+
     from finalayze.orchestration.position_manager import PositionTracker
     from finalayze.orchestration.signal_executor import SignalExecutor
 
