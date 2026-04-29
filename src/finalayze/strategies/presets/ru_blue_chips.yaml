@@ -34,7 +34,7 @@ strategies:
       volume_min_ratio: 0.8
       neutral_reset_bars: 8
       vol_target_enabled: true
-      vol_target: 0.40
+      vol_target: 0.20
   event_driven:
     enabled: true
     weight: 0.15
@@ -102,7 +102,7 @@ strategies:
       lookback_6m: 126
       min_confidence: 0.50
       vol_target_enabled: true
-      vol_target: 0.40
+      vol_target: 0.20
   ou_mean_reversion:
     enabled: false
     weight: 0.00

@@ -780,20 +780,24 @@ class TradingLoop:
             # set up by spawn_readonly / spawn_fix — see PLAN body Risks.
             # Lazy-init the async loop now so the poller has a live loop
             # to attach to (mirrors the lazy init in _run_async()).
-            ks = getattr(self._meta_agent_runner, "killswitch", None)
-            if ks is not None:
-                if self._async_loop is None or self._async_loop.is_closed():
-                    _loop = asyncio.new_event_loop()
-                    self._async_loop = _loop
-                    if hasattr(self, "_persistence") and self._persistence is not None:
-                        self._persistence._async_loop = _loop
-                    _t = threading.Thread(target=_loop.run_forever, daemon=True)
-                    _t.start()
-                    self._async_thread = _t
-                asyncio.run_coroutine_threadsafe(
-                    ks.start(),
-                    self._async_loop,
-                )
+            # Always ensure async_loop is initialized when meta_agent is enabled
+            # so persist_decision / persist_alert work from the very first tick.
+            if self._async_loop is None or self._async_loop.is_closed():
+                _loop = asyncio.new_event_loop()
+                self._async_loop = _loop
+                if hasattr(self, "_persistence") and self._persistence is not None:
+                    self._persistence._async_loop = _loop
+                _t = threading.Thread(target=_loop.run_forever, daemon=True)
+                _t.start()
+                self._async_thread = _t
+            # Phase 58-05-06 (META-08, SPEC AC #15): launch killswitch poller.
+            if (
+                self._meta_agent_runner is not None
+                and getattr(self._meta_agent_runner, "killswitch", None) is not None
+                and self._async_loop is not None
+            ):
+                _ks = self._meta_agent_runner.killswitch  # type: ignore[attr-defined]
+                asyncio.run_coroutine_threadsafe(_ks.start(), self._async_loop)
         if self._ml_registry is not None and getattr(self._settings, "ml_enabled", False):
             self._scheduler.add_job(
                 self._ml_retrainer.retrain_all,
@@ -851,6 +855,9 @@ class TradingLoop:
 
         # Reconcile in-flight orders from previous session before trading
         self._reconcile_inflight_orders()
+
+        # Restore stop-loss state from DB so existing positions are protected
+        self._restore_stop_states_from_db()
 
         # Preflight checks: gRPC connectivity, macro data, bond cycle gating
         self._preflight_check()
@@ -1805,6 +1812,46 @@ class TradingLoop:
             self._baseline_equities
         )
         return result
+
+    def _restore_stop_states_from_db(self) -> None:
+        """Re-hydrate PositionTracker stop-loss state from the last DB snapshot.
+
+        Called on startup after _reconcile_inflight_orders and before
+        _preflight_check, so the first strategy cycle has ATR stops for all
+        positions that existed before the restart.
+
+        Positions that appear in the broker but have no DB snapshot are logged
+        as warnings — they remain unprotected until the next BUY fill would
+        re-establish a stop (or until a future orphan-recovery pass is added).
+        """
+        if self._persistence is None:
+            return
+        all_states = self._persistence.load_stop_snapshots()
+        if not all_states:
+            _log.info("stop_restore_no_snapshots_found")
+            return
+
+        # Reconcile against broker: only restore for symbols still open
+        open_symbols: set[str] = set()
+        for market_id in list(self._circuit_breakers.keys()):
+            try:
+                broker = self._broker_router.route(market_id)
+                positions = broker.get_positions()
+                open_symbols.update(positions.keys())
+            except Exception:
+                _log.warning("stop_restore_broker_fetch_failed", market=market_id)
+
+        filtered = {sym: st for sym, st in all_states.items() if sym in open_symbols}
+        orphaned = open_symbols - set(all_states.keys())
+
+        if filtered:
+            self._position_tracker.restore_stops(filtered)
+        if orphaned:
+            _log.warning(
+                "stop_restore_orphaned_positions",
+                symbols=sorted(orphaned),
+                reason="no DB snapshot — no stop protection until next BUY",
+            )
 
     def _load_baseline_from_db(self) -> None:
         """Load latest equity snapshots from DB on startup.

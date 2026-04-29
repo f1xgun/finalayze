@@ -30,7 +30,15 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import structlog
 
-from finalayze.meta_agent.classifier import Severity, classify
+from finalayze.meta_agent.classifier import (
+    _FIX_DRAWDOWN_THRESHOLD,
+    _FIX_PERSIST_FAILURE_THRESHOLD,
+    _INVESTIGATE_DRAWDOWN_THRESHOLD,
+    _WATCH_INFO_PER_HOUR_THRESHOLD,
+    _WATCH_ML_ERROR_RATE_THRESHOLD,
+    Severity,
+    classify,
+)
 from finalayze.meta_agent.snapshot import build_snapshot
 
 if TYPE_CHECKING:
@@ -232,13 +240,62 @@ class MetaAgentRunner:
 
     @staticmethod
     def _derive_rationale(snapshot: Snapshot, severity: Severity) -> str:
-        """One-line rationale stub. The full LLM-generated text lands in
-        plan 58-02 / 58-03; this keeps the column NOT NULL constraint
-        satisfied during dry-run."""
+        """Human-readable rationale with triggering metrics and suggested action."""
         if (
             snapshot.alerts_last_hour is None
             and snapshot.drawdown_pct is None
             and snapshot.positions_summary is None
         ):
             return "snapshot_unusable"
-        return f"rule-derived severity={severity.value}"
+
+        parts: list[str] = []
+        alerts = snapshot.alerts_last_hour or []
+        dd = snapshot.drawdown_pct
+
+        # Describe what triggered the severity
+        if severity == Severity.FIX:
+            critical = [a for a in alerts if a.priority == "CRITICAL"]
+            if critical:
+                symbols = ", ".join(filter(None, (a.symbol for a in critical[:3])))
+                parts.append(
+                    f"{len(critical)} CRITICAL alert(s) in last 30 min"
+                    + (f" ({symbols})" if symbols else "")
+                )
+            if dd is not None and dd > _FIX_DRAWDOWN_THRESHOLD:
+                parts.append(f"drawdown {dd:.2f}% exceeds FIX threshold {_FIX_DRAWDOWN_THRESHOLD}%")
+            if snapshot.equity_persist_failures >= _FIX_PERSIST_FAILURE_THRESHOLD:
+                parts.append(f"{snapshot.equity_persist_failures} equity persist failures")
+            suggestion = (
+                "Suggested action: review open positions, "
+                "consider reducing exposure or halting trading."
+            )
+
+        elif severity == Severity.INVESTIGATE:
+            important = [a for a in alerts if a.priority == "IMPORTANT"]
+            if important:
+                symbols = ", ".join(filter(None, (a.symbol for a in important[:3])))
+                parts.append(
+                    f"{len(important)} IMPORTANT alert(s) in last 30 min"
+                    + (f" ({symbols})" if symbols else "")
+                )
+            if dd is not None and dd > _INVESTIGATE_DRAWDOWN_THRESHOLD:
+                parts.append(
+                    f"drawdown {dd:.2f}% exceeds INVESTIGATE "
+                    f"threshold {_INVESTIGATE_DRAWDOWN_THRESHOLD}%"
+                )
+            suggestion = "Suggested action: investigate recent trades and market conditions."
+
+        elif severity == Severity.WATCH:
+            info_count = len([a for a in alerts if a.priority == "INFO"])
+            if info_count >= _WATCH_INFO_PER_HOUR_THRESHOLD:
+                parts.append(f"{info_count} INFO alerts in last hour")
+            ml_err = snapshot.ml_signal_error_rate
+            if ml_err is not None and ml_err > _WATCH_ML_ERROR_RATE_THRESHOLD:
+                parts.append(f"ML error rate {ml_err:.1%}")
+            suggestion = "Suggested action: monitor for further deterioration."
+
+        else:
+            return "All metrics within normal range."
+
+        trigger = "; ".join(parts) if parts else f"severity={severity.value}"
+        return f"Triggers: {trigger}. {suggestion}"

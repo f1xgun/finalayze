@@ -301,6 +301,53 @@ def test_check_stop_losses_no_trigger_does_not_fire() -> None:
     assert "SBER" in tracker._stop_states
 
 
+def test_restore_stops_populates_state_and_entry_prices() -> None:
+    """restore_stops hydrates _stop_states and _entry_prices from DB snapshot."""
+    tracker = _make_tracker()
+    state = _make_state(100.0)
+    tracker.restore_stops({"SBER": ("moex", state)})
+    assert tracker.get_stop_state("SBER") is not None
+    assert tracker._entry_prices["SBER"] == Decimal("100.0")
+
+
+def test_restore_stops_empty_is_noop() -> None:
+    tracker = _make_tracker()
+    tracker.restore_stops({})
+    assert tracker.snapshot_all_stops() == {}
+    assert tracker._entry_prices == {}
+
+
+def test_restore_stops_does_not_overwrite_live_state() -> None:
+    """If a BUY fill already registered a fresh state, restore_stops skips it."""
+    tracker = _make_tracker()
+    live_state = _make_state(110.0)
+    with tracker._stop_loss_lock:
+        tracker._stop_states["SBER"] = live_state
+    tracker._entry_prices["SBER"] = Decimal("110.0")
+
+    stale_state = _make_state(90.0)
+    tracker.restore_stops({"SBER": ("moex", stale_state)})
+
+    # Live state must be preserved
+    snap = tracker.get_stop_state("SBER")
+    assert snap is not None
+    assert snap.entry_price == Decimal("110.0")
+    assert tracker._entry_prices["SBER"] == Decimal("110.0")
+
+
+def test_restore_stops_multiple_symbols() -> None:
+    tracker = _make_tracker()
+    tracker.restore_stops(
+        {
+            "SBER": ("moex", _make_state(100.0)),
+            "GAZP": ("moex", _make_state(200.0)),
+            "CBOM": ("moex", _make_state(7.3)),
+        }
+    )
+    assert set(tracker.snapshot_all_stops().keys()) == {"SBER", "GAZP", "CBOM"}
+    assert tracker._entry_prices["GAZP"] == Decimal("200.0")
+
+
 def test_check_stop_losses_no_persistence_does_not_fail() -> None:
     """When persistence=None, check_stop_losses trigger branch must not crash."""
     kelly = MagicMock()

@@ -264,6 +264,54 @@ class SignalExecutor:
         broker = self._broker_router.route(market_id)
         has_open_position = broker.has_position(symbol)
 
+        # Retroactive stop: position open but no stop state (e.g. after container restart
+        # with no DB snapshot). Compute ATR stop from current candles and register it
+        # so check_stop_losses starts protecting the position from next cycle onward.
+        if has_open_position and candles and not self._position_tracker.has_stop(symbol):
+            from finalayze.execution.simulated_broker import (  # noqa: PLC0415
+                StopLossState,
+            )
+            from finalayze.risk.stop_loss import compute_atr_stop_loss  # noqa: PLC0415
+
+            is_moex = market_id == "moex"
+            mult = _ATR_MULTIPLIER_MOEX if is_moex else _ATR_MULTIPLIER_US
+            cur = Decimal(str(candles[-1].close))
+            entry = self._position_tracker._entry_prices.get(symbol, cur)
+            natural_stop = compute_atr_stop_loss(entry, candles, atr_multiplier=mult)
+            if natural_stop is not None and mult > _ZERO:
+                atr_val = (entry - natural_stop) / mult
+                if cur >= natural_stop:
+                    stop_price = natural_stop
+                    trail_activated = False
+                    highest = max(entry, cur)
+                else:
+                    # Already below natural stop — grace: 0.5 ATR below current
+                    stop_price = max(cur - Decimal("0.5") * atr_val, _ZERO)
+                    trail_activated = True
+                    highest = cur
+                strategy = self._position_tracker._entry_strategy.get(symbol, "retroactive")
+                stop_state = StopLossState(
+                    initial_stop=stop_price,
+                    current_stop=stop_price,
+                    highest_price=highest,
+                    trail_activated=trail_activated,
+                    activation_atr=Decimal("1.0"),
+                    trail_atr=Decimal("1.5"),
+                    entry_price=entry,
+                    atr_value=atr_val,
+                )
+                self._position_tracker.register_entry(
+                    symbol, entry, strategy, stop_state, market_id=market_id
+                )
+                _log.warning(
+                    "stop_retroactive_set",
+                    symbol=symbol,
+                    stop_price=float(stop_price),
+                    entry_price=float(entry),
+                    trail_activated=trail_activated,
+                    market=market_id,
+                )
+
         signal = self._strategy.generate_signal(
             symbol,
             candles,
