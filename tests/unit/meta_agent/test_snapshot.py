@@ -69,7 +69,7 @@ async def test_build_snapshot_happy_path_populates_all_fields(
     respx.get(f"{_BASE}/api/v1/portfolio/performance").mock(
         return_value=httpx.Response(
             200,
-            json={"equity": 100000.0, "drawdown_pct": _DRAWDOWN_FIXTURE},
+            json={"equity": 100000.0, "current_drawdown_pct": _DRAWDOWN_FIXTURE / 100},
         ),
     )
     respx.get(f"{_BASE}/api/v1/positions").mock(
@@ -110,7 +110,7 @@ async def test_build_snapshot_alerts_endpoint_500_sets_field_none(
     respx.get(f"{_BASE}/api/v1/portfolio/performance").mock(
         return_value=httpx.Response(
             200,
-            json={"equity": 100000.0, "drawdown_pct": _DRAWDOWN_FIXTURE},
+            json={"equity": 100000.0, "current_drawdown_pct": _DRAWDOWN_FIXTURE / 100},
         ),
     )
     respx.get(f"{_BASE}/api/v1/positions").mock(
