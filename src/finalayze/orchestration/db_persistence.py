@@ -55,19 +55,29 @@ class TradingPersistence:
         self._db_url = db_url
         self._async_loop = async_loop
         self._settings = settings
-        self._bg_session_factory: async_sessionmaker[AsyncSession] | None = None
+        # Per-loop-id cache: each asyncio event loop gets its own engine so
+        # asyncpg connections are never shared across loops (avoids
+        # "Future attached to a different loop" when meta-agent runs on both
+        # the uvicorn loop (REST trigger) and the background trading loop
+        # (APScheduler cron trigger)).
+        self._bg_session_factories: dict[int, async_sessionmaker[AsyncSession]] = {}
 
     def _get_bg_session_factory(self) -> async_sessionmaker[AsyncSession]:
-        """Return a session factory bound to the background event loop.
+        """Return a session factory for the CURRENT running event loop.
 
-        asyncpg connections are pinned to the event loop where they were first
-        used.  The global ``get_async_session_factory()`` creates its engine on
-        the FastAPI (uvicorn) loop, so using it from the background loop that
-        ``_run_async`` manages causes ``RuntimeError: Future attached to a
-        different loop``.  This method lazily creates a *separate* engine for
-        the background loop, avoiding the cross-loop conflict.
+        Keyed by ``id(asyncio.get_running_loop())``: each loop gets its own
+        SQLAlchemy async engine so asyncpg connections are never shared across
+        loops.  Two engines (uvicorn + background trading loop) is the expected
+        steady-state; the overhead is negligible (each uses pool_size=5).
         """
-        if self._bg_session_factory is None:
+        import asyncio as _asyncio  # noqa: PLC0415
+
+        try:
+            loop_id = id(_asyncio.get_running_loop())
+        except RuntimeError:
+            loop_id = -1  # called from non-async context — use sentinel
+
+        if loop_id not in self._bg_session_factories:
             from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession  # noqa: PLC0415
             from sqlalchemy.ext.asyncio import (  # noqa: PLC0415
                 async_sessionmaker as _async_sessionmaker,
@@ -88,10 +98,10 @@ class TradingPersistence:
                 pool_timeout=30,
                 pool_recycle=1800,
             )
-            self._bg_session_factory = _async_sessionmaker(
+            self._bg_session_factories[loop_id] = _async_sessionmaker(
                 engine, class_=_AsyncSession, expire_on_commit=False
             )
-        return self._bg_session_factory
+        return self._bg_session_factories[loop_id]
 
     def _run_async(self, coro: Any, *, timeout: int = 30) -> Any:
         """Execute a coroutine on the background event loop.
@@ -433,6 +443,71 @@ class TradingPersistence:
             count=len(states),
         )
 
+    async def _load_stop_snapshots_async(
+        self,
+    ) -> dict[str, tuple[str, StopLossState]]:
+        """Query latest snapshot per symbol from stop_loss_events."""
+        from sqlalchemy import func, select  # noqa: PLC0415
+
+        from finalayze.core.models import StopLossEventModel  # noqa: PLC0415
+        from finalayze.execution.simulated_broker import (  # noqa: PLC0415
+            StopLossState as _StopLossState,
+        )
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            subq = (
+                select(
+                    StopLossEventModel.symbol,
+                    func.max(StopLossEventModel.timestamp).label("max_ts"),
+                )
+                .where(StopLossEventModel.event_type.in_(["snapshot", "entry"]))
+                .group_by(StopLossEventModel.symbol)
+                .subquery()
+            )
+            stmt = select(StopLossEventModel).join(
+                subq,
+                (StopLossEventModel.symbol == subq.c.symbol)
+                & (StopLossEventModel.timestamp == subq.c.max_ts),
+            )
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+
+        out: dict[str, tuple[str, StopLossState]] = {}
+        for row in rows:
+            if row.current_stop is None or row.entry_price is None or row.atr_value is None:
+                continue
+            state = _StopLossState(
+                initial_stop=row.current_stop,  # initial_stop not stored; use current_stop
+                current_stop=row.current_stop,
+                highest_price=row.highest_price or row.entry_price,
+                trail_activated=bool(row.trail_activated),
+                activation_atr=row.activation_atr or Decimal("1.0"),
+                trail_atr=row.trail_atr or Decimal("1.5"),
+                entry_price=row.entry_price,
+                atr_value=row.atr_value,
+            )
+            out[row.symbol] = (row.market_id, state)
+        return out
+
+    def load_stop_snapshots(self) -> dict[str, tuple[str, StopLossState]]:
+        """Load the latest stop-loss snapshot per symbol from stop_loss_events.
+
+        Called once on startup (from TradingLoop._restore_stop_states_from_db)
+        to re-hydrate PositionTracker after a container restart.
+
+        Returns:
+            dict symbol -> (market_id, StopLossState). Empty on any error or
+            when db_url is not configured.
+        """
+        if self._db_url is None:
+            return {}
+        try:
+            return asyncio.run(self._load_stop_snapshots_async())
+        except Exception:
+            _log.warning("load_stop_snapshots_failed", exc_info=True)
+            return {}
+
     async def _persist_alert_async(
         self,
         alert_id: uuid.UUID,
@@ -762,7 +837,7 @@ class TradingPersistence:
                 .where(
                     MetaAgentDecisionModel.severity == severity,
                     MetaAgentDecisionModel.status.in_(
-                        ["spawned", "completed", "failed"],
+                        ["spawned", "completed"],
                     ),
                     MetaAgentDecisionModel.timestamp
                     >= text("date_trunc('day', NOW() AT TIME ZONE 'UTC')"),

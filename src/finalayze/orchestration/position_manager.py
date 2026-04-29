@@ -276,6 +276,27 @@ class PositionTracker:
                 event_type="entry",
             )
 
+    def restore_stops(self, states: dict[str, tuple[str, StopLossState]]) -> None:
+        """Re-hydrate stop-loss state from a DB snapshot after container restart.
+
+        Only writes to symbols that are NOT already tracked (i.e., a fresh BUY
+        fill that happened between restart and this call takes precedence).
+
+        Args:
+            states: symbol -> (market_id, StopLossState) from load_stop_snapshots.
+        """
+        if not states:
+            return
+        restored: list[str] = []
+        with self._stop_loss_lock:
+            for symbol, (_, state) in states.items():
+                if symbol not in self._stop_states:
+                    self._stop_states[symbol] = state
+                    self._entry_prices[symbol] = state.entry_price
+                    restored.append(symbol)
+        if restored:
+            _log.info("stop_states_restored_from_db", count=len(restored), symbols=restored)
+
     def register_exit(self, symbol: str) -> None:
         """Register a position exit (SELL fill).
 
