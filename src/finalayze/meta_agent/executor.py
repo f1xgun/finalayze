@@ -209,11 +209,20 @@ class ActionExecutor:
         priority = _severity_to_priority(decision.severity)
         alert_type = f"meta_agent_{decision.severity}"
 
-        ok, alert_id = await self._alerter._send(
-            message,
-            alert_type=alert_type,
-            priority=priority,
-        )
+        # alerter._send uses an httpx.AsyncClient bound to the uvicorn event loop.
+        # When called from _async_loop (meta-agent tick), bridge via wrap_future
+        # so the HTTP request executes in the loop where the client was created.
+        main_loop = getattr(self, "_main_loop", None)
+        if main_loop is not None and main_loop.is_running():
+            _coro = self._alerter._send(message, alert_type=alert_type, priority=priority)
+            _fut = asyncio.run_coroutine_threadsafe(_coro, main_loop)
+            ok, alert_id = await asyncio.wrap_future(_fut)
+        else:
+            ok, alert_id = await self._alerter._send(
+                message,
+                alert_type=alert_type,
+                priority=priority,
+            )
         if not ok or alert_id is None:
             _log.warning(
                 "meta_agent_executor_telegram_send_failed",
@@ -554,9 +563,12 @@ class ActionExecutor:
         # 3. Build the prompt.
         prompt = self._build_fix_prompt(decision, skill)
 
-        # 4. Pre-spawn validator.
+        # 4. Pre-spawn validator — scan only the decision-derived content
+        # (summary + rationale), not the trusted skill body which intentionally
+        # lists denied paths as examples of what NOT to touch.
+        decision_payload = f"{decision.summary}\n{decision.rationale}"
         try:
-            validate_fix_prompt(prompt, denied_paths=skill.denied_paths)
+            validate_fix_prompt(decision_payload, denied_paths=skill.denied_paths)
         except MetaAgentDeniedPathError as exc:
             _log.warning(
                 "meta_agent_fix_denied_path",

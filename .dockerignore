@@ -46,8 +46,9 @@ docker-compose.*.yml
 # Monitoring configs (mounted as volumes)
 monitoring/
 
-# Claude/Agent configs
+# Claude/Agent configs (skills needed at runtime for meta-agent fix spawns)
 .claude/
+!.claude/skills/
 .agents/
 
 # Skills

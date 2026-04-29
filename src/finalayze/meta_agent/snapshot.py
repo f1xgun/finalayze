@@ -157,7 +157,7 @@ async def build_snapshot(
     since = (now - timedelta(hours=1)).isoformat()
     alerts_body, perf_body, pos_body = await asyncio.gather(
         _fetch_one(client, path=_ALERTS_PATH, params={"since": since}),
-        _fetch_one(client, path=_PERFORMANCE_PATH, params={"days": 1}),
+        _fetch_one(client, path=_PERFORMANCE_PATH, params={"days": 30}),
         _fetch_one(client, path=_POSITIONS_PATH),
         return_exceptions=False,
     )
@@ -172,8 +172,8 @@ async def build_snapshot(
     if perf_body is None:
         drawdown = None
     else:
-        dd = perf_body.get("drawdown_pct")
-        drawdown = float(dd) if dd is not None else None
+        dd = perf_body.get("current_drawdown_pct")
+        drawdown = float(dd) * 100 if dd is not None else None
 
     positions: PositionsSummary | None = (
         None if pos_body is None else PositionsSummary(raw=pos_body)

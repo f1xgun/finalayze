@@ -276,6 +276,16 @@ class PerformanceResponse(BaseModel):
             "n_snapshots)."
         ),
     )
+    current_drawdown_pct: float | None = Field(
+        default=None,
+        description=(
+            "Current drawdown from the period high-water mark: "
+            "(peak_equity - latest_equity) / peak_equity. "
+            "Unlike max_drawdown_pct (worst historical point), this resets "
+            "when the portfolio recovers above its previous peak. "
+            "Null when n_snapshots < 2."
+        ),
+    )
 
 
 def _empty_portfolio() -> PortfolioResponse:
@@ -700,6 +710,17 @@ async def get_performance(days: int = 30) -> PerformanceResponse:
             else None
         )
 
+        # Current drawdown: running peak → latest equity (resets on recovery).
+        current_dd: float | None = None
+        if n_snapshots >= _MIN_SNAPSHOTS_FOR_DD:
+            running_peak = float(portfolio_snapshots[0].equity)
+            latest_dd = 0.0
+            for ps in portfolio_snapshots:
+                eq = float(ps.equity)
+                running_peak = max(running_peak, eq)
+                latest_dd = (running_peak - eq) / running_peak if running_peak > 0 else 0.0
+            current_dd = latest_dd
+
         # D-12 (per Open Q3 + Q4): null logic gates on COUNT, not metric value.
         # PerformanceAnalyzer.sortino_ratio returns Decimal(0) on negative-mean
         # returns — that is a meaningful "0" (negative-portfolio period), NOT
@@ -708,6 +729,7 @@ async def get_performance(days: int = 30) -> PerformanceResponse:
             sharpe_30d=(float(sharpe_dec) if n_snapshots >= _MIN_SNAPSHOTS_FOR_SHARPE else None),
             sortino_30d=(float(sortino_dec) if n_snapshots >= _MIN_SNAPSHOTS_FOR_SHARPE else None),
             max_drawdown_pct=(float(max_dd_dec) if n_snapshots >= _MIN_SNAPSHOTS_FOR_DD else None),
+            current_drawdown_pct=current_dd,
             win_rate=float(win_rate) if win_rate is not None else None,
             profit_factor=float(profit_factor) if profit_factor is not None else None,
             avg_win_loss_ratio=(
@@ -722,6 +744,7 @@ async def get_performance(days: int = 30) -> PerformanceResponse:
             sharpe_30d=None,
             sortino_30d=None,
             max_drawdown_pct=None,
+            current_drawdown_pct=None,
             win_rate=None,
             profit_factor=None,
             avg_win_loss_ratio=None,
