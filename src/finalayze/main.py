@@ -200,6 +200,11 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
                         _trading_loop_instance._health_monitor = health_monitor
                     health_monitor.start()
                     log.info("health_monitor_started")
+                    # Bridge alerter to uvicorn loop so APScheduler health-check
+                    # threads use run_coroutine_threadsafe instead of _send_sync.
+                    if hasattr(alerter_ref, "set_event_loop"):
+                        alerter_ref.set_event_loop(_main_loop)
+                        log.info("alerter_main_loop_wired")
 
                 _trading_loop_thread = threading.Thread(
                     target=_trading_loop_instance.start,

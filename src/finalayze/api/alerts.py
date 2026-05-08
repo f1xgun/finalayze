@@ -214,10 +214,18 @@ class TelegramAlerter:
         # Cache (alert_id -> timestamp) so _update_alert_status_async hits the
         # composite (timestamp, id) PK exactly. Pop on update.
         self._last_alert_ts: dict[uuid.UUID, datetime] = {}
+        # Main uvicorn event loop — set via set_event_loop() in lifespan so that
+        # sync callers (APScheduler threads) can bridge via run_coroutine_threadsafe
+        # instead of falling back to the less reliable _send_sync path.
+        self._main_loop: asyncio.AbstractEventLoop | None = None
 
     def set_queue(self, queue: TelegramMessageQueue) -> None:
         """Attach a message queue for rate limiting and batching."""
         self._queue = queue
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Store the main event loop so sync callers can use run_coroutine_threadsafe."""
+        self._main_loop = loop
 
     async def close(self) -> None:
         """Shut down persistent httpx client and queue.
@@ -632,7 +640,9 @@ class TelegramAlerter:
         """Send alert safely from any thread context.
 
         From async context (running event loop): uses create_task with async _send.
-        From sync context (APScheduler threads): uses synchronous httpx.Client.
+        From sync context with known main loop: uses run_coroutine_threadsafe so
+        the persistent async httpx.AsyncClient is always used.
+        From sync context without known loop: falls back to synchronous httpx.Client.
 
         Exceptions are always suppressed -- alerts must never crash the caller.
         """
@@ -652,8 +662,12 @@ class TelegramAlerter:
                     )
                 else:
                     _task = loop.create_task(self._send(message))  # type: ignore[arg-type]
+            elif self._main_loop is not None and self._main_loop.is_running():
+                # Sync context (APScheduler thread) with known main loop —
+                # bridge to the uvicorn loop so the async client is reused.
+                asyncio.run_coroutine_threadsafe(self._send(message), self._main_loop)
             else:
-                # Sync context (APScheduler thread) — use sync httpx
+                # Sync context without a known main loop — use sync httpx.
                 self._send_sync(message)
         except Exception:
             _log.exception("TelegramAlerter send_alert failed")
