@@ -8,6 +8,7 @@ from decimal import Decimal
 from finalayze.risk.pre_trade_check import (
     _PDT_EQUITY_THRESHOLD,
     _PDT_MAX_DAY_TRADES,
+    CheckContext,
     PDTTracker,
     PreTradeChecker,
 )
@@ -94,13 +95,15 @@ class TestPDTInPreTradeChecker:
 
         dt = datetime(_MONDAY.year, _MONDAY.month, _MONDAY.day + 3, 15, 0, tzinfo=UTC)
         result = checker.check(
-            order_value=_TRADE_VALUE,
-            portfolio_equity=_SMALL_ACCOUNT,
-            available_cash=_CASH,
-            open_position_count=_POSITIONS,
-            market_id="us",
-            dt=dt,
-            is_day_trade=True,
+            CheckContext(
+                order_value=_TRADE_VALUE,
+                portfolio_equity=_SMALL_ACCOUNT,
+                available_cash=_CASH,
+                open_position_count=_POSITIONS,
+                market_id="us",
+                dt=dt,
+                is_day_trade=True,
+            )
         )
         assert not result.passed
         assert any("PDT" in v for v in result.violations)
@@ -116,15 +119,16 @@ class TestPDTInPreTradeChecker:
 
         dt = datetime(_MONDAY.year, _MONDAY.month, _MONDAY.day + 3, 15, 0, tzinfo=UTC)
         result = checker.check(
-            order_value=_TRADE_VALUE,
-            portfolio_equity=_SMALL_ACCOUNT,
-            available_cash=_CASH,
-            open_position_count=_POSITIONS,
-            market_id="us",
-            dt=dt,
-            is_day_trade=False,
+            CheckContext(
+                order_value=_TRADE_VALUE,
+                portfolio_equity=_SMALL_ACCOUNT,
+                available_cash=_CASH,
+                open_position_count=_POSITIONS,
+                market_id="us",
+                dt=dt,
+                is_day_trade=False,
+            )
         )
-        # Should pass (PDT only applies to day trades)
         assert result.passed
 
     def test_moex_skips_pdt(self) -> None:
@@ -138,13 +142,15 @@ class TestPDTInPreTradeChecker:
 
         dt = datetime(_MONDAY.year, _MONDAY.month, _MONDAY.day + 3, 8, 0, tzinfo=UTC)
         result = checker.check(
-            order_value=_TRADE_VALUE,
-            portfolio_equity=_SMALL_ACCOUNT,
-            available_cash=_CASH,
-            open_position_count=_POSITIONS,
-            market_id="moex",
-            dt=dt,
-            is_day_trade=True,
+            CheckContext(
+                order_value=_TRADE_VALUE,
+                portfolio_equity=_SMALL_ACCOUNT,
+                available_cash=_CASH,
+                open_position_count=_POSITIONS,
+                market_id="moex",
+                dt=dt,
+                is_day_trade=True,
+            )
         )
         assert result.passed
 
@@ -155,12 +161,14 @@ class TestPDTInPreTradeChecker:
 
         dt = datetime(_MONDAY.year, _MONDAY.month, _MONDAY.day, 15, 0, tzinfo=UTC)
         result = checker.check(
-            order_value=_TRADE_VALUE,
-            portfolio_equity=_SMALL_ACCOUNT,
-            available_cash=_CASH,
-            open_position_count=_POSITIONS,
-            market_id="us",
-            dt=dt,
-            is_day_trade=True,
+            CheckContext(
+                order_value=_TRADE_VALUE,
+                portfolio_equity=_SMALL_ACCOUNT,
+                available_cash=_CASH,
+                open_position_count=_POSITIONS,
+                market_id="us",
+                dt=dt,
+                is_day_trade=True,
+            )
         )
         assert result.passed

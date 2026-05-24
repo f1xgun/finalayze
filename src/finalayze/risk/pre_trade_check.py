@@ -1,6 +1,9 @@
 """Pre-trade risk checks (Layer 4).
 
 See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
+
+Interface: PreTradeChecker.check(ctx: CheckContext) → PreTradeResult
+Each built-in guard implements PreTradeCheck: check(ctx) → str | None.
 """
 
 from __future__ import annotations
@@ -9,7 +12,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import structlog
 
@@ -51,12 +54,66 @@ _PDT_ROLLING_DAYS = 5
 _PDT_EQUITY_THRESHOLD = Decimal(25000)
 
 
+# ── Typed context ──────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class CheckContext:
+    """Typed context carrying all data needed by pre-trade checks.
+
+    Replaces the 22-param ``PreTradeChecker.check()`` signature.  Callers
+    build one context object; the registry fans out to each check.
+    """
+
+    order_value: Decimal
+    portfolio_equity: Decimal
+    available_cash: Decimal
+    open_position_count: int
+    market_id: str = "us"
+    dt: datetime | None = None
+    circuit_breaker_level: CircuitLevel | None = None
+    stop_loss_price: Decimal | None = None
+    require_stop_loss: bool = False
+    has_pending_order: bool = False
+    symbol: str = ""
+    cross_market_exposure_pct: Decimal | None = None
+    max_cross_market_exposure_pct: Decimal | None = None
+    is_day_trade: bool = False
+    sector_exposure_value: Decimal | None = None
+    sector_id: str = ""
+    markets_active: list[str] | None = None
+    regime_state: RegimeState | None = None
+    strategy_name: str | None = None
+    param_age_bars: int | None = None
+    open_positions: list[str] | None = None
+    correlations: dict[tuple[str, str], float] | None = None
+
+
+# ── Protocol ───────────────────────────────────────────────────────────────
+
+
+@runtime_checkable
+class PreTradeCheck(Protocol):
+    """Single-method protocol for one pre-trade guard.
+
+    Return the violation string on failure, ``None`` on pass.
+    """
+
+    def check(self, ctx: CheckContext) -> str | None: ...
+
+
+# ── Result ────────────────────────────────────────────────────────────────
+
+
 @dataclass(frozen=True)
 class PreTradeResult:
     """Result of pre-trade risk validation."""
 
     passed: bool
     violations: list[str] = field(default_factory=list)
+
+
+# ── PDT tracker (stateful, not a check) ───────────────────────────────────
 
 
 class PDTTracker:
@@ -70,7 +127,6 @@ class PDTTracker:
     """
 
     def __init__(self) -> None:
-        # Store dates of day trades (most recent last)
         self._day_trade_dates: deque[date] = deque()
 
     def record_day_trade(self, trade_date: date) -> None:
@@ -78,24 +134,13 @@ class PDTTracker:
         self._day_trade_dates.append(trade_date)
 
     def _count_recent_day_trades(self, as_of: date) -> int:
-        """Count day trades in the 5-business-day window ending on *as_of*.
-
-        Business days are approximated by counting calendar days back to
-        cover 5 weekdays (typically 7 calendar days).  We use a conservative
-        7-calendar-day window to avoid missing trades near weekends.
-        """
         cutoff = as_of - timedelta(days=7)
-        # Purge stale entries older than the window
         while self._day_trade_dates and self._day_trade_dates[0] < cutoff:
             self._day_trade_dates.popleft()
         return sum(1 for d in self._day_trade_dates if d >= cutoff)
 
     def would_violate(self, as_of: date, account_equity: Decimal) -> bool:
-        """Return True if executing another day trade would violate PDT.
-
-        Accounts with equity >= $25,000 are exempt from the PDT rule.
-        Non-US markets are never subject to PDT.
-        """
+        """Return True if executing another day trade would violate PDT."""
         if account_equity >= _PDT_EQUITY_THRESHOLD:
             return False
         recent = self._count_recent_day_trades(as_of)
@@ -107,24 +152,249 @@ class PDTTracker:
         return len(self._day_trade_dates)
 
 
-class PreTradeChecker:
-    """Validates orders against risk limits before execution.
+# ── Shared helper ─────────────────────────────────────────────────────────
 
-    Implements 14 pre-trade checks:
-        1. Market hours check (per market)
-        2. Symbol validity (symbol exists in market) — caller responsibility
-        3. Mode allows order — caller responsibility
-        4. Circuit breaker status (per market)
-        5. PDT compliance (US only, accounts < $25K)
-        6. Position size (Kelly + max cap)
-        7. Portfolio rules (max positions, sector concentration)
-        8. Cash sufficient (per market/currency)
-        9. Stop-loss must be set (when require_stop_loss=True)
-        10. No duplicate pending order
-        11. Cross-market exposure limit
-        12. Regime gate — block new longs when regime blocks
-        13. Parameter freshness — for OU/pairs strategies
-        14. Correlation position limit — max 3 positions with r > 0.7
+
+def _is_market_open(market_id: str, dt: datetime) -> bool:
+    if dt.weekday() >= _WEEKEND_WEEKDAY:
+        return False
+    if market_id == "us":
+        open_min = _US_MARKET_OPEN_UTC_HOUR * 60 + _US_MARKET_OPEN_UTC_MINUTE
+        close_min = _US_MARKET_CLOSE_UTC_HOUR * 60 + _US_MARKET_CLOSE_UTC_MINUTE
+    elif market_id == "moex":
+        open_min = _MOEX_MARKET_OPEN_UTC_HOUR * 60 + _MOEX_MARKET_OPEN_UTC_MINUTE
+        close_min = _MOEX_MARKET_CLOSE_UTC_HOUR * 60 + _MOEX_MARKET_CLOSE_UTC_MINUTE
+    else:
+        return True
+    current = dt.hour * 60 + dt.minute
+    return open_min <= current < close_min
+
+
+# ── Built-in check classes ─────────────────────────────────────────────────
+
+
+class MarketHoursCheck:
+    """Check 1 — market must be open."""
+
+    def check(self, ctx: CheckContext) -> str | None:
+        dt = ctx.dt if ctx.dt is not None else datetime.now(UTC)
+        if not _is_market_open(ctx.market_id, dt):
+            return f"Market '{ctx.market_id}' is closed at {dt.strftime('%Y-%m-%d %H:%M UTC')}"
+        return None
+
+
+class CircuitBreakerCheck:
+    """Check 4 — circuit breaker must not be in a halting state."""
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.circuit_breaker_level is None:
+            return None
+        level_str = str(ctx.circuit_breaker_level).lower()
+        if level_str in _HALTING_LEVELS:
+            return f"Circuit breaker is {level_str} for market '{ctx.market_id}' — trading halted"
+        return None
+
+
+class PDTCheck:
+    """Check 5 — PDT compliance (US only, accounts < $25 K)."""
+
+    def __init__(self, tracker: PDTTracker | None = None) -> None:
+        self._tracker = tracker
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.market_id != "us" or not ctx.is_day_trade or self._tracker is None:
+            return None
+        dt = ctx.dt if ctx.dt is not None else datetime.now(UTC)
+        if self._tracker.would_violate(dt.date(), ctx.portfolio_equity):
+            recent = self._tracker.recent_day_trades
+            return (
+                f"PDT violation: {recent} day trades in last 5 business days "
+                f"(max {_PDT_MAX_DAY_TRADES}), equity "
+                f"${float(ctx.portfolio_equity):,.0f} "
+                f"< ${float(_PDT_EQUITY_THRESHOLD):,.0f}"
+            )
+        return None
+
+
+class PositionSizeCheck:
+    """Check 6 — order must not exceed max position size."""
+
+    def __init__(self, max_position_pct: Decimal = Decimal("0.20")) -> None:
+        self._max_pct = max_position_pct
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.portfolio_equity == 0:
+            return "Portfolio equity is zero; no trades permitted"
+        pct = ctx.order_value / ctx.portfolio_equity
+        if pct > self._max_pct:
+            return f"Position size {float(pct):.1%} exceeds max {float(self._max_pct):.1%}"
+        return None
+
+
+class MaxPositionsCheck:
+    """Check 7a — open positions must not reach the cap."""
+
+    def __init__(self, max_positions: int = 10) -> None:
+        self._max = max_positions
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.open_position_count >= self._max:
+            return f"Open positions ({ctx.open_position_count}) >= max ({self._max})"
+        return None
+
+
+class SectorConcentrationCheck:
+    """Check 7b — sector/segment concentration limit."""
+
+    def __init__(self, max_sector_pct: Decimal = Decimal("0.40")) -> None:
+        self._max = max_sector_pct
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.sector_exposure_value is None or not ctx.sector_id or ctx.portfolio_equity <= 0:
+            return None
+        concentration = (ctx.sector_exposure_value + ctx.order_value) / ctx.portfolio_equity
+        if concentration > self._max:
+            return (
+                f"Sector '{ctx.sector_id}' concentration "
+                f"{float(concentration):.1%} exceeds max "
+                f"{float(self._max):.1%}"
+            )
+        return None
+
+
+class CashCheck:
+    """Check 8a — sufficient cash for the order."""
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.order_value > ctx.available_cash:
+            return f"Insufficient cash: need {ctx.order_value}, have {ctx.available_cash}"
+        return None
+
+
+class CashReserveCheck:
+    """Check 8b — post-trade cash reserve must stay above minimum."""
+
+    def __init__(self, min_cash_reserve_pct: Decimal = Decimal("0.20")) -> None:
+        self._min = min_cash_reserve_pct
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.portfolio_equity <= 0:
+            return None
+        post_cash = ctx.available_cash - ctx.order_value
+        ratio = post_cash / ctx.portfolio_equity
+        if ratio < self._min:
+            return f"Post-trade cash reserve {float(ratio):.1%} below min {float(self._min):.1%}"
+        return None
+
+
+class StopLossRequiredCheck:
+    """Check 9 — stop-loss must be set when required."""
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.require_stop_loss and ctx.stop_loss_price is None:
+            return "Stop-loss price is required but not set"
+        return None
+
+
+class DuplicateOrderCheck:
+    """Check 10 — no duplicate pending order for the same symbol."""
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.has_pending_order and ctx.symbol:
+            return f"Duplicate pending order for {ctx.symbol}"
+        return None
+
+
+class CrossMarketExposureCheck:
+    """Check 11 — cross-market exposure within configured limit."""
+
+    def check(self, ctx: CheckContext) -> str | None:
+        markets = ctx.markets_active or []
+        multi_market = len(markets) > 1
+
+        # Fail-closed: multi-market but exposure not provided
+        if multi_market and ctx.cross_market_exposure_pct is None:
+            return (
+                "Cross-market exposure unknown: multiple markets active "
+                f"({', '.join(markets)}) but cross_market_exposure_pct "
+                "not provided"
+            )
+
+        # Exceed limit: check exposure pct vs max regardless of markets_active
+        if (
+            ctx.cross_market_exposure_pct is not None
+            and ctx.max_cross_market_exposure_pct is not None
+            and ctx.cross_market_exposure_pct > ctx.max_cross_market_exposure_pct
+        ):
+            return (
+                f"Cross-market exposure "
+                f"{float(ctx.cross_market_exposure_pct):.1%} "
+                f"exceeds max "
+                f"{float(ctx.max_cross_market_exposure_pct):.1%}"
+            )
+        return None
+
+
+class RegimeGateCheck:
+    """Check 12 — regime must allow new longs."""
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.regime_state is not None and not ctx.regime_state.allow_new_longs:
+            return f"Check 12 FAIL: regime '{ctx.regime_state.regime}' blocks new longs"
+        return None
+
+
+class ParamFreshnessCheck:
+    """Check 13 — strategy parameters must be fresh for OU/pairs strategies."""
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if (
+            ctx.strategy_name is not None
+            and ctx.strategy_name in _PARAM_FRESHNESS_STRATEGIES
+            and ctx.param_age_bars is not None
+            and ctx.param_age_bars > _MAX_PARAM_AGE_BARS
+        ):
+            return (
+                f"Check 13 FAIL: {ctx.strategy_name} params stale "
+                f"({ctx.param_age_bars} bars > max {_MAX_PARAM_AGE_BARS})"
+            )
+        return None
+
+
+class CorrelationLimitCheck:
+    """Check 14 — max 3 correlated open positions (r > 0.7)."""
+
+    def check(self, ctx: CheckContext) -> str | None:
+        if ctx.open_positions is None or ctx.correlations is None or not ctx.symbol:
+            return None
+        from finalayze.risk.correlation import count_correlated_positions  # noqa: PLC0415
+
+        correlated = count_correlated_positions(
+            ctx.symbol,
+            ctx.open_positions,
+            ctx.correlations,
+            threshold=_CORRELATION_THRESHOLD,
+        )
+        if correlated >= _MAX_CORRELATED_POSITIONS:
+            return (
+                f"Check 14 FAIL: {correlated} correlated positions "
+                f"(max {_MAX_CORRELATED_POSITIONS})"
+            )
+        return None
+
+
+# ── Registry ───────────────────────────────────────────────────────────────
+
+
+class PreTradeChecker:
+    """Runs a registry of :class:`PreTradeCheck` adapters against a context.
+
+    Interface: one method, one typed context, one result.
+
+        result = checker.check(ctx)
+
+    Configuration (max sizes, thresholds) is injected at construction time.
+    Pass ``checks=`` to replace the default registry with custom adapters.
     """
 
     def __init__(
@@ -134,219 +404,54 @@ class PreTradeChecker:
         pdt_tracker: PDTTracker | None = None,
         max_sector_concentration_pct: Decimal = Decimal("0.40"),
         min_cash_reserve_pct: Decimal = Decimal("0.20"),
+        checks: list[PreTradeCheck] | None = None,
     ) -> None:
         self._max_position_pct = max_position_pct
         self._max_positions = max_positions_per_market
         self._pdt_tracker = pdt_tracker
         self._max_sector_pct = max_sector_concentration_pct
         self._min_cash_reserve_pct = min_cash_reserve_pct
+        self._checks: list[PreTradeCheck] = (
+            checks if checks is not None else self._build_default_checks()
+        )
 
-    def check(  # noqa: PLR0912, PLR0915
-        self,
-        order_value: Decimal,
-        portfolio_equity: Decimal,
-        available_cash: Decimal,
-        open_position_count: int,
-        market_id: str = "us",
-        dt: datetime | None = None,
-        circuit_breaker_level: CircuitLevel | None = None,
-        stop_loss_price: Decimal | None = None,
-        require_stop_loss: bool = False,
-        has_pending_order: bool = False,
-        symbol: str = "",
-        cross_market_exposure_pct: Decimal | None = None,
-        max_cross_market_exposure_pct: Decimal | None = None,
-        is_day_trade: bool = False,
-        sector_exposure_value: Decimal | None = None,
-        sector_id: str = "",
-        markets_active: list[str] | None = None,
-        regime_state: RegimeState | None = None,
-        strategy_name: str | None = None,
-        param_age_bars: int | None = None,
-        open_positions: list[str] | None = None,
-        correlations: dict[tuple[str, str], float] | None = None,
-    ) -> PreTradeResult:
-        """Run all pre-trade risk checks.
+    def _build_default_checks(self) -> list[PreTradeCheck]:
+        return [
+            MarketHoursCheck(),
+            CircuitBreakerCheck(),
+            PDTCheck(self._pdt_tracker),
+            PositionSizeCheck(self._max_position_pct),
+            MaxPositionsCheck(self._max_positions),
+            SectorConcentrationCheck(self._max_sector_pct),
+            CashCheck(),
+            CashReserveCheck(self._min_cash_reserve_pct),
+            StopLossRequiredCheck(),
+            DuplicateOrderCheck(),
+            CrossMarketExposureCheck(),
+            RegimeGateCheck(),
+            ParamFreshnessCheck(),
+            CorrelationLimitCheck(),
+        ]
 
-        Args:
-            order_value: Notional value of the proposed order.
-            portfolio_equity: Current total portfolio equity.
-            available_cash: Cash available for trading.
-            open_position_count: Number of currently open positions.
-            market_id: Market identifier ("us" or "moex").
-            dt: Current UTC datetime for market hours check. Uses now() if None.
-            circuit_breaker_level: Current circuit breaker level for this market.
-            stop_loss_price: Stop-loss price for the order (None if not set).
-            require_stop_loss: Whether a stop-loss price is required.
-            has_pending_order: Whether there is already a pending order for symbol.
-            symbol: The symbol being ordered (for duplicate check).
-            cross_market_exposure_pct: Current cross-market exposure fraction.
-            max_cross_market_exposure_pct: Maximum allowed cross-market exposure.
-            is_day_trade: Whether this order would constitute a day trade.
-            markets_active: List of active market IDs (e.g. ["us", "moex"]).
-            regime_state: Current market regime state (check 12).
-            strategy_name: Name of the strategy generating this order (check 13).
-            param_age_bars: Age of strategy parameters in bars (check 13).
-            open_positions: List of symbols with open positions (check 14).
-            correlations: Pairwise correlation dict (check 14).
-
-        Returns:
-            A :class:`PreTradeResult` indicating pass/fail and any violations.
-        """
+    def check(self, ctx: CheckContext) -> PreTradeResult:
+        """Run all checks against *ctx* and return the aggregated result."""
         violations: list[str] = []
-
-        # 1. Market hours check
-        check_dt = dt if dt is not None else datetime.now(UTC)
-        if not self._is_market_open(market_id, check_dt):
-            violations.append(
-                f"Market '{market_id}' is closed at {check_dt.strftime('%Y-%m-%d %H:%M UTC')}"
-            )
-
-        # 4. Circuit breaker status
-        if circuit_breaker_level is not None:
-            level_str = str(circuit_breaker_level).lower()
-            if level_str in _HALTING_LEVELS:
-                violations.append(
-                    f"Circuit breaker is {level_str} for market '{market_id}' — trading halted"
-                )
-
-        # 5. PDT compliance (US only)
-        if (
-            market_id == "us"
-            and is_day_trade
-            and self._pdt_tracker is not None
-            and self._pdt_tracker.would_violate(check_dt.date(), portfolio_equity)
-        ):
-            recent = self._pdt_tracker.recent_day_trades
-            violations.append(
-                f"PDT violation: {recent} day trades in last 5 business days "
-                f"(max {_PDT_MAX_DAY_TRADES}), equity ${float(portfolio_equity):,.0f} "
-                f"< ${float(_PDT_EQUITY_THRESHOLD):,.0f}"
-            )
-
-        # 6. Position size check
-        if portfolio_equity == 0:
-            violations.append("Portfolio equity is zero; no trades permitted")
-        else:
-            pct = order_value / portfolio_equity
-            if pct > self._max_position_pct:
-                max_pct = float(self._max_position_pct)
-                violations.append(f"Position size {float(pct):.1%} exceeds max {max_pct:.1%}")
-
-        # 7. Portfolio rules — max positions
-        if open_position_count >= self._max_positions:
-            violations.append(
-                f"Open positions ({open_position_count}) >= max ({self._max_positions})"
-            )
-
-        # 7b. Sector/segment concentration
-        if sector_exposure_value is not None and portfolio_equity > 0 and sector_id:
-            prospective = sector_exposure_value + order_value
-            concentration = prospective / portfolio_equity
-            if concentration > self._max_sector_pct:
-                violations.append(
-                    f"Sector '{sector_id}' concentration {float(concentration):.1%} "
-                    f"exceeds max {float(self._max_sector_pct):.1%}"
-                )
-
-        # 8. Cash sufficient
-        if order_value > available_cash:
-            violations.append(f"Insufficient cash: need {order_value}, have {available_cash}")
-
-        # 8b. Cash reserve check
-        if portfolio_equity > 0:
-            post_trade_cash = available_cash - order_value
-            reserve_ratio = post_trade_cash / portfolio_equity
-            if reserve_ratio < self._min_cash_reserve_pct:
-                violations.append(
-                    f"Post-trade cash reserve {float(reserve_ratio):.1%} "
-                    f"below min {float(self._min_cash_reserve_pct):.1%}"
-                )
-
-        # 9. Stop-loss must be set
-        if require_stop_loss and stop_loss_price is None:
-            violations.append("Stop-loss price is required but not set")
-
-        # 10. No duplicate pending order
-        if has_pending_order and symbol:
-            violations.append(f"Duplicate pending order for {symbol}")
-
-        # 11. Cross-market exposure limit
-        _markets = markets_active or []
-        _multi_market = len(_markets) > 1
-        if _multi_market and cross_market_exposure_pct is None:
-            violations.append(
-                "Cross-market exposure unknown: multiple markets active "
-                f"({', '.join(_markets)}) but cross_market_exposure_pct not provided"
-            )
-        elif (
-            cross_market_exposure_pct is not None
-            and max_cross_market_exposure_pct is not None
-            and cross_market_exposure_pct > max_cross_market_exposure_pct
-        ):
-            violations.append(
-                f"Cross-market exposure {float(cross_market_exposure_pct):.1%} "
-                f"exceeds max {float(max_cross_market_exposure_pct):.1%}"
-            )
-
-        # 12. Regime gate — block new longs when regime blocks
-        if regime_state is not None and not regime_state.allow_new_longs:
-            violations.append(f"Check 12 FAIL: regime '{regime_state.regime}' blocks new longs")
-
-        # 13. Parameter freshness — for OU/pairs strategies
-        if (
-            strategy_name is not None
-            and strategy_name in _PARAM_FRESHNESS_STRATEGIES
-            and param_age_bars is not None
-            and param_age_bars > _MAX_PARAM_AGE_BARS
-        ):
-            violations.append(
-                f"Check 13 FAIL: {strategy_name} params stale "
-                f"({param_age_bars} bars > max {_MAX_PARAM_AGE_BARS})"
-            )
-
-        # 14. Correlation position limit — max 3 positions with r > 0.7
-        if open_positions is not None and correlations is not None and symbol:
-            from finalayze.risk.correlation import (  # noqa: PLC0415
-                count_correlated_positions,
-            )
-
-            correlated_count = count_correlated_positions(
-                symbol, open_positions, correlations, threshold=_CORRELATION_THRESHOLD
-            )
-            if correlated_count >= _MAX_CORRELATED_POSITIONS:
-                violations.append(
-                    f"Check 14 FAIL: {correlated_count} correlated positions "
-                    f"(max {_MAX_CORRELATED_POSITIONS})"
-                )
-
+        for guard in self._checks:
+            v = guard.check(ctx)
+            if v is not None:
+                violations.append(v)
         result = PreTradeResult(passed=len(violations) == 0, violations=violations)
         if not result.passed:
             _log.warning(
                 "pre_trade_check_failed",
-                symbol=symbol,
-                market=market_id,
+                symbol=ctx.symbol,
+                market=ctx.market_id,
                 violations=result.violations,
-                order_value=float(order_value),
+                order_value=float(ctx.order_value),
             )
         return result
 
     @staticmethod
     def _is_market_open(market_id: str, dt: datetime) -> bool:
-        """Return True if the market is open at the given UTC datetime."""
-        # Weekends: Saturday=5, Sunday=6
-        if dt.weekday() >= _WEEKEND_WEEKDAY:
-            return False
-
-        if market_id == "us":
-            open_minutes = _US_MARKET_OPEN_UTC_HOUR * 60 + _US_MARKET_OPEN_UTC_MINUTE
-            close_minutes = _US_MARKET_CLOSE_UTC_HOUR * 60 + _US_MARKET_CLOSE_UTC_MINUTE
-        elif market_id == "moex":
-            open_minutes = _MOEX_MARKET_OPEN_UTC_HOUR * 60 + _MOEX_MARKET_OPEN_UTC_MINUTE
-            close_minutes = _MOEX_MARKET_CLOSE_UTC_HOUR * 60 + _MOEX_MARKET_CLOSE_UTC_MINUTE
-        else:
-            # Unknown market: assume open
-            return True
-
-        current_minutes = dt.hour * 60 + dt.minute
-        return open_minutes <= current_minutes < close_minutes
+        """Kept for any direct callers."""
+        return _is_market_open(market_id, dt)

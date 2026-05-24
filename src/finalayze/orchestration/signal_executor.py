@@ -28,6 +28,7 @@ import structlog
 from finalayze.core.schemas import SignalDirection
 from finalayze.orchestration.cycle_stats import CycleStats
 from finalayze.risk.exposure import ExposureCalculator
+from finalayze.risk.pre_trade_check import CheckContext
 
 if TYPE_CHECKING:
     from config.settings import Settings
@@ -430,6 +431,7 @@ class SignalExecutor:
             max_exposure=max_exposure,
             is_day_trade=is_day_trade,
         )
+
         if not pre_result.passed:
             _log.info(
                 "pre_trade_rejected",
@@ -981,7 +983,7 @@ class SignalExecutor:
         sub-component; the call site stays focused on flow control.
         """
         open_positions = [s for s, q in portfolio.positions.items() if q > _ZERO]
-        return self._pre_trade_checker.check(
+        ctx = CheckContext(
             order_value=order_value,
             portfolio_equity=portfolio.equity,
             available_cash=portfolio.cash,
@@ -1003,3 +1005,4 @@ class SignalExecutor:
             open_positions=open_positions,
             correlations=self._get_correlations(open_positions),
         )
+        return self._pre_trade_checker.check(ctx)

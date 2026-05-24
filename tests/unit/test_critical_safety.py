@@ -29,7 +29,7 @@ from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.execution.broker_base import OrderRequest, OrderResult
 from finalayze.markets.instruments import Instrument, InstrumentRegistry
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
-from finalayze.risk.pre_trade_check import PreTradeChecker
+from finalayze.risk.pre_trade_check import CheckContext, PreTradeChecker
 
 # A Monday during US market hours (14:30 UTC = 10:30 ET)
 _MARKET_OPEN_DT = datetime(2026, 2, 23, 15, 0, tzinfo=UTC)  # Monday 15:00 UTC
@@ -236,12 +236,14 @@ class TestPreTradeCheckerAllChecks:
         # During market hours (Mon 14:30 UTC = 10:30 ET)
         market_open_dt = datetime(2026, 2, 24, 14, 30, tzinfo=UTC)  # Monday
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
-            dt=market_open_dt,
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+                dt=market_open_dt,
+            )
         )
         # Should pass market hours (Mon 14:30 UTC)
         violations_about_hours = [
@@ -254,12 +256,14 @@ class TestPreTradeCheckerAllChecks:
         # Weekend (Sat 14:30 UTC) - US market is closed
         weekend_dt = datetime(2026, 2, 28, 14, 30, tzinfo=UTC)  # Saturday
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
-            dt=weekend_dt,
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+                dt=weekend_dt,
+            )
         )
         violations_about_hours = [
             v
@@ -272,12 +276,14 @@ class TestPreTradeCheckerAllChecks:
     def test_circuit_breaker_halted_fails(self) -> None:
         checker = self._make_checker()
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
-            circuit_breaker_level=CircuitLevel.HALTED,
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+                circuit_breaker_level=CircuitLevel.HALTED,
+            )
         )
         assert not result.passed
         assert any("circuit" in v.lower() or "halted" in v.lower() for v in result.violations)
@@ -285,12 +291,14 @@ class TestPreTradeCheckerAllChecks:
     def test_circuit_breaker_normal_passes(self) -> None:
         checker = self._make_checker()
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
-            circuit_breaker_level=CircuitLevel.NORMAL,
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+                circuit_breaker_level=CircuitLevel.NORMAL,
+            )
         )
         circuit_violations = [
             v for v in result.violations if "circuit" in v.lower() or "halted" in v.lower()
@@ -301,13 +309,15 @@ class TestPreTradeCheckerAllChecks:
     def test_missing_stop_loss_fails(self) -> None:
         checker = self._make_checker()
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
-            stop_loss_price=None,
-            require_stop_loss=True,
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+                stop_loss_price=None,
+                require_stop_loss=True,
+            )
         )
         assert not result.passed
         assert any("stop" in v.lower() for v in result.violations)
@@ -315,13 +325,15 @@ class TestPreTradeCheckerAllChecks:
     def test_stop_loss_set_passes(self) -> None:
         checker = self._make_checker()
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
-            stop_loss_price=Decimal("140.00"),
-            require_stop_loss=True,
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+                stop_loss_price=Decimal("140.00"),
+                require_stop_loss=True,
+            )
         )
         stop_violations = [v for v in result.violations if "stop" in v.lower()]
         assert len(stop_violations) == 0
@@ -330,13 +342,15 @@ class TestPreTradeCheckerAllChecks:
     def test_duplicate_pending_order_fails(self) -> None:
         checker = self._make_checker()
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
-            has_pending_order=True,
-            symbol="AAPL",
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+                has_pending_order=True,
+                symbol="AAPL",
+            )
         )
         assert not result.passed
         assert any("pending" in v.lower() or "duplicate" in v.lower() for v in result.violations)
@@ -344,13 +358,15 @@ class TestPreTradeCheckerAllChecks:
     def test_no_duplicate_pending_order_passes(self) -> None:
         checker = self._make_checker()
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
-            has_pending_order=False,
-            symbol="AAPL",
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+                has_pending_order=False,
+                symbol="AAPL",
+            )
         )
         dup_violations = [
             v for v in result.violations if "pending" in v.lower() or "duplicate" in v.lower()
@@ -361,13 +377,15 @@ class TestPreTradeCheckerAllChecks:
     def test_cross_market_exposure_exceeded_fails(self) -> None:
         checker = self._make_checker()
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
-            cross_market_exposure_pct=Decimal("0.95"),
-            max_cross_market_exposure_pct=Decimal("0.80"),
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+                cross_market_exposure_pct=Decimal("0.95"),
+                max_cross_market_exposure_pct=Decimal("0.80"),
+            )
         )
         assert not result.passed
         assert any("exposure" in v.lower() or "cross" in v.lower() for v in result.violations)
@@ -375,13 +393,15 @@ class TestPreTradeCheckerAllChecks:
     def test_cross_market_exposure_ok_passes(self) -> None:
         checker = self._make_checker()
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
-            cross_market_exposure_pct=Decimal("0.50"),
-            max_cross_market_exposure_pct=Decimal("0.80"),
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+                cross_market_exposure_pct=Decimal("0.50"),
+                max_cross_market_exposure_pct=Decimal("0.80"),
+            )
         )
         exposure_violations = [
             v for v in result.violations if "exposure" in v.lower() or "cross" in v.lower()
@@ -392,33 +412,39 @@ class TestPreTradeCheckerAllChecks:
     def test_position_size_too_large_fails(self) -> None:
         checker = self._make_checker()
         result = checker.check(
-            order_value=Decimal(25_000),  # 25% of 100k
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
+            CheckContext(
+                order_value=Decimal(25_000),  # 25% of 100k
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+            )
         )
         assert not result.passed
 
     def test_insufficient_cash_fails(self) -> None:
         checker = self._make_checker()
         result = checker.check(
-            order_value=Decimal(60_000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=0,
-            market_id=MARKET_US,
+            CheckContext(
+                order_value=Decimal(60_000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=0,
+                market_id=MARKET_US,
+            )
         )
         assert not result.passed
 
     def test_too_many_positions_fails(self) -> None:
         checker = self._make_checker(max_positions_per_market=5)
         result = checker.check(
-            order_value=Decimal(1000),
-            portfolio_equity=Decimal(100_000),
-            available_cash=Decimal(50_000),
-            open_position_count=5,
-            market_id=MARKET_US,
+            CheckContext(
+                order_value=Decimal(1000),
+                portfolio_equity=Decimal(100_000),
+                available_cash=Decimal(50_000),
+                open_position_count=5,
+                market_id=MARKET_US,
+            )
         )
         assert not result.passed
 

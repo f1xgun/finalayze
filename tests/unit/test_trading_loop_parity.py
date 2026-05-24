@@ -513,12 +513,12 @@ class TestPreTradeCheckParams:
             now=datetime.now(UTC),
         )
 
-        call_kwargs = loop._signal_executor._pre_trade_checker.check.call_args
-        assert call_kwargs is not None, "pre_trade_checker.check must be called"
-        # Check stop_loss_price is passed (keyword argument)
-        kw = call_kwargs.kwargs or {}
-        assert "stop_loss_price" in kw, "stop_loss_price must be passed to pre-trade check"
-        assert kw["stop_loss_price"] == expected_stop
+        call_args = loop._signal_executor._pre_trade_checker.check.call_args
+        assert call_args is not None, "pre_trade_checker.check must be called"
+        ctx = call_args.args[0]
+        assert ctx.stop_loss_price == expected_stop, (
+            "stop_loss_price must be passed to pre-trade check"
+        )
 
     def test_pre_trade_receives_has_pending_order(self) -> None:
         """has_pending_order passed to pre-trade check."""
@@ -567,11 +567,12 @@ class TestPreTradeCheckParams:
             now=datetime.now(UTC),
         )
 
-        call_kwargs = loop._signal_executor._pre_trade_checker.check.call_args
-        assert call_kwargs is not None
-        kw = call_kwargs.kwargs or {}
-        assert "strategy_name" in kw, "strategy_name must be passed to pre-trade check"
-        assert kw["strategy_name"] == "dual_momentum"
+        call_args = loop._signal_executor._pre_trade_checker.check.call_args
+        assert call_args is not None
+        ctx = call_args.args[0]
+        assert ctx.strategy_name == "dual_momentum", (
+            "strategy_name must be passed to pre-trade check"
+        )
 
     def test_pre_trade_receives_open_positions_and_correlations(self) -> None:
         """open_positions and correlations passed to pre-trade check."""
@@ -594,13 +595,13 @@ class TestPreTradeCheckParams:
             now=datetime.now(UTC),
         )
 
-        call_kwargs = loop._signal_executor._pre_trade_checker.check.call_args
-        assert call_kwargs is not None
-        kw = call_kwargs.kwargs or {}
-        assert "open_positions" in kw, "open_positions must be passed"
-        assert "correlations" in kw, "correlations must be passed"
-        assert isinstance(kw["open_positions"], list)
-        assert isinstance(kw["correlations"], dict)
+        call_args = loop._signal_executor._pre_trade_checker.check.call_args
+        assert call_args is not None
+        ctx = call_args.args[0]
+        assert hasattr(ctx, "open_positions"), "open_positions must be passed"
+        assert hasattr(ctx, "correlations"), "correlations must be passed"
+        assert isinstance(ctx.open_positions, list)
+        assert ctx.correlations is None or isinstance(ctx.correlations, dict)
 
     def test_pre_trade_receives_require_stop_loss_false_for_new_entry(self) -> None:
         """require_stop_loss=False for new entries (no existing stop state)."""
@@ -623,15 +624,13 @@ class TestPreTradeCheckParams:
             now=datetime.now(UTC),
         )
 
-        call_kwargs = loop._signal_executor._pre_trade_checker.check.call_args
-        assert call_kwargs is not None
-        kw = call_kwargs.kwargs or {}
-        assert "require_stop_loss" in kw, "require_stop_loss must be passed"
-        assert kw["require_stop_loss"] is False, (
+        call_args = loop._signal_executor._pre_trade_checker.check.call_args
+        assert call_args is not None
+        ctx = call_args.args[0]
+        assert ctx.require_stop_loss is False, (
             "New entries have no stop state yet; require_stop_loss must be False"
         )
-        assert "symbol" in kw, "symbol must be passed"
-        assert kw["symbol"] == SYMBOL_AAPL
+        assert ctx.symbol == SYMBOL_AAPL, "symbol must be passed"
 
     def test_pre_trade_receives_require_stop_loss_true_for_existing_position(self) -> None:
         """require_stop_loss=True when symbol already has a stop state."""
@@ -657,10 +656,9 @@ class TestPreTradeCheckParams:
             now=datetime.now(UTC),
         )
 
-        call_kwargs = loop._signal_executor._pre_trade_checker.check.call_args
-        assert call_kwargs is not None
-        kw = call_kwargs.kwargs or {}
-        assert "require_stop_loss" in kw, "require_stop_loss must be passed"
-        assert kw["require_stop_loss"] is True, (
+        call_args = loop._signal_executor._pre_trade_checker.check.call_args
+        assert call_args is not None
+        ctx = call_args.args[0]
+        assert ctx.require_stop_loss is True, (
             "Existing positions must require stop loss in pre-trade check"
         )

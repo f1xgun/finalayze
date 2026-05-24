@@ -105,43 +105,38 @@ class TestPreTradeCheckerWiring:
 
         return checker
 
+    def _get_ctx(self, checker: MagicMock) -> object:
+        """Return the CheckContext passed to checker.check()."""
+        return checker.check.call_args.args[0]
+
     def test_passes_market_id_us(self) -> None:
         """Engine passes market_id='us' for US segments."""
         checker = self._run_handle_buy(segment_id="us_tech")
-        call_kwargs = checker.check.call_args.kwargs
-        assert call_kwargs["market_id"] == "us"
+        assert self._get_ctx(checker).market_id == "us"
 
     def test_passes_market_id_moex(self) -> None:
         """Engine passes market_id='moex' for RU segments."""
         checker = self._run_handle_buy(segment_id="ru_blue_chips")
-        call_kwargs = checker.check.call_args.kwargs
-        assert call_kwargs["market_id"] == "moex"
+        assert self._get_ctx(checker).market_id == "moex"
 
     def test_passes_symbol(self) -> None:
         """Engine passes symbol to checker."""
         checker = self._run_handle_buy(symbol="MSFT")
-        call_kwargs = checker.check.call_args.kwargs
-        assert call_kwargs["symbol"] == "MSFT"
+        assert self._get_ctx(checker).symbol == "MSFT"
 
     def test_passes_open_positions(self) -> None:
         """Engine passes list of open position symbols."""
         checker = self._run_handle_buy(open_position_symbols=["AAPL", "GOOG"])
-        call_kwargs = checker.check.call_args.kwargs
-        assert set(call_kwargs["open_positions"]) == {"AAPL", "GOOG"}
+        assert set(self._get_ctx(checker).open_positions) == {"AAPL", "GOOG"}
 
     def test_passes_strategy_name(self) -> None:
         """Engine passes strategy_name from signal."""
         signal = _make_signal()
         checker = self._run_handle_buy(signal=signal)
-        call_kwargs = checker.check.call_args.kwargs
-        assert call_kwargs["strategy_name"] == "momentum"
+        assert self._get_ctx(checker).strategy_name == "momentum"
 
     def test_passes_none_strategy_name_when_no_signal(self) -> None:
         """Engine passes None strategy_name when signal is None."""
-        # Create a signal with HOLD to skip _handle_buy, but we need to test
-        # the None path directly — use signal=None scenario.
-        # Actually, _handle_buy receives signal param directly.
-        # We need to call with signal=None but that would skip BUY.
         # The code does: signal.strategy_name if signal is not None else None
         # This is tested indirectly — just verify the code path exists.
         pass
@@ -149,19 +144,16 @@ class TestPreTradeCheckerWiring:
     def test_passes_sector_id_to_checker(self) -> None:
         """Engine passes segment_id as sector_id to PreTradeChecker."""
         checker = self._run_handle_buy(segment_id="us_tech")
-        call_kwargs = checker.check.call_args.kwargs
-        assert call_kwargs["sector_id"] == "us_tech"
+        assert self._get_ctx(checker).sector_id == "us_tech"
 
     def test_passes_sector_exposure_value(self) -> None:
         """Engine passes sector_exposure_value (position value) to PreTradeChecker."""
         checker = self._run_handle_buy(segment_id="us_tech")
-        call_kwargs = checker.check.call_args.kwargs
-        assert "sector_exposure_value" in call_kwargs
-        assert call_kwargs["sector_exposure_value"] >= Decimal(0)
+        assert self._get_ctx(checker).sector_exposure_value >= Decimal(0)
 
     def test_passes_correlations_to_checker(self) -> None:
         """Engine passes correlations dict (possibly None) to PreTradeChecker."""
         checker = self._run_handle_buy(segment_id="us_tech")
-        call_kwargs = checker.check.call_args.kwargs
-        # In single-symbol mode, correlations should be None (empty cache)
-        assert "correlations" in call_kwargs
+        # CheckContext.correlations field exists — value may be None for empty cache
+        ctx = self._get_ctx(checker)
+        assert hasattr(ctx, "correlations")

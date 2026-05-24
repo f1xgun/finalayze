@@ -14,7 +14,7 @@ from finalayze.risk.position_sizing_pipeline import (
     SizingContext,
     VolTargetStep,
 )
-from finalayze.risk.pre_trade_check import PreTradeChecker
+from finalayze.risk.pre_trade_check import CheckContext, PreTradeChecker
 from finalayze.risk.regime import (
     MarketRegime,
     RegimeState,
@@ -270,8 +270,8 @@ class TestKellyKillSwitch:
 # ════════════════════════════════════════════════════════════════════════════
 
 
-def _cross_market_base_kwargs() -> dict:
-    return {
+def _cross_market_base_ctx(**overrides: object) -> CheckContext:
+    base: dict[str, object] = {
         "order_value": _ORDER_VALUE,
         "portfolio_equity": _PORTFOLIO_EQUITY,
         "available_cash": _AVAILABLE_CASH,
@@ -280,6 +280,8 @@ def _cross_market_base_kwargs() -> dict:
         "dt": _MARKET_OPEN_DT,
         "circuit_breaker_level": CircuitLevel.NORMAL,
     }
+    base.update(overrides)
+    return CheckContext(**base)  # type: ignore[arg-type]
 
 
 class TestCrossMarketFailClosed:
@@ -288,11 +290,13 @@ class TestCrossMarketFailClosed:
     def test_fails_closed_when_exposure_not_provided(self) -> None:
         """Multiple markets active but cross_market_exposure_pct is None -> violation."""
         checker = PreTradeChecker()
-        kwargs = _cross_market_base_kwargs()
-        kwargs["markets_active"] = ["us", "moex"]
-        kwargs["cross_market_exposure_pct"] = None
-        kwargs["max_cross_market_exposure_pct"] = Decimal("0.60")
-        result = checker.check(**kwargs)
+        result = checker.check(
+            _cross_market_base_ctx(
+                markets_active=["us", "moex"],
+                cross_market_exposure_pct=None,
+                max_cross_market_exposure_pct=Decimal("0.60"),
+            )
+        )
         assert not result.passed
         violation_text = " ".join(result.violations)
         assert "cross-market" in violation_text.lower() or "cross_market" in violation_text.lower()
@@ -300,11 +304,13 @@ class TestCrossMarketFailClosed:
     def test_passes_when_exposure_provided(self) -> None:
         """Multiple markets with valid exposure percentage passes."""
         checker = PreTradeChecker()
-        kwargs = _cross_market_base_kwargs()
-        kwargs["markets_active"] = ["us", "moex"]
-        kwargs["cross_market_exposure_pct"] = Decimal("0.40")
-        kwargs["max_cross_market_exposure_pct"] = Decimal("0.60")
-        result = checker.check(**kwargs)
+        result = checker.check(
+            _cross_market_base_ctx(
+                markets_active=["us", "moex"],
+                cross_market_exposure_pct=Decimal("0.40"),
+                max_cross_market_exposure_pct=Decimal("0.60"),
+            )
+        )
         # No cross-market violation (other checks may still fail/pass)
         cross_violations = [
             v for v in result.violations if "cross" in v.lower() or "market" in v.lower()
@@ -314,10 +320,12 @@ class TestCrossMarketFailClosed:
     def test_single_market_skips_check(self) -> None:
         """Single market active skips cross-market check even with None exposure."""
         checker = PreTradeChecker()
-        kwargs = _cross_market_base_kwargs()
-        kwargs["markets_active"] = ["us"]
-        kwargs["cross_market_exposure_pct"] = None
-        kwargs["max_cross_market_exposure_pct"] = Decimal("0.60")
-        result = checker.check(**kwargs)
+        result = checker.check(
+            _cross_market_base_ctx(
+                markets_active=["us"],
+                cross_market_exposure_pct=None,
+                max_cross_market_exposure_pct=Decimal("0.60"),
+            )
+        )
         cross_violations = [v for v in result.violations if "cross" in v.lower()]
         assert len(cross_violations) == 0

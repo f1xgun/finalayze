@@ -25,6 +25,7 @@ from finalayze.risk.position_sizer import (
     compute_realized_vol,
 )
 from finalayze.risk.position_sizing_pipeline import SizingContext
+from finalayze.risk.pre_trade_check import CheckContext
 from finalayze.risk.stop_loss import compute_atr_stop_loss
 
 if TYPE_CHECKING:
@@ -290,20 +291,22 @@ class BacktestPositionExecutor:
                 check_dt = datetime.combine(check_dt.date(), self._us_market_open_utc)
         market_id = "moex" if segment_id.startswith("ru_") else "us"
         result = checker.check(
-            order_value=position_value,
-            portfolio_equity=portfolio.equity,
-            available_cash=portfolio.cash,
-            open_position_count=len(portfolio.positions),
-            dt=check_dt,
-            market_id=market_id,
-            symbol=symbol,
-            open_positions=list(broker.get_positions().keys()),
-            strategy_name=signal.strategy_name if signal is not None else None,
-            sector_id=segment_id,
-            sector_exposure_value=BacktestRiskEvaluator.compute_segment_exposure(
-                broker, segment_id
-            ),
-            correlations=self._correlation_cache or None,
+            CheckContext(
+                order_value=position_value,
+                portfolio_equity=portfolio.equity,
+                available_cash=portfolio.cash,
+                open_position_count=len(portfolio.positions),
+                dt=check_dt,
+                market_id=market_id,
+                symbol=symbol,
+                open_positions=list(broker.get_positions().keys()),
+                strategy_name=signal.strategy_name if signal is not None else None,
+                sector_id=segment_id,
+                sector_exposure_value=BacktestRiskEvaluator.compute_segment_exposure(
+                    broker, segment_id
+                ),
+                correlations=self._correlation_cache or None,
+            )
         )
         if not result.passed:
             if self._journal.has_journal:
