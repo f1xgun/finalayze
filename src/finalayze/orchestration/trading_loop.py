@@ -178,8 +178,9 @@ class TradingLoop:
     Designed for TEST / SANDBOX modes. Will gate on WorkMode in real mode.
     """
 
-    # Class-level defaults so MagicMock(spec=TradingLoop) recognizes these attrs.
-    # All are overridden in __init__.
+    # Class-level defaults so MagicMock(spec=TradingLoop) recognizes these attrs,
+    # and so post-construction wiring from bootstrap.py (e.g. `loop._alerter_ref`)
+    # type-checks. All sub-component fields are overridden in __init__.
     _news_pipeline: Any = None
     _signal_executor: Any = None
     _position_tracker: Any = None
@@ -192,6 +193,10 @@ class TradingLoop:
     _async_thread: Any = None
     _grpc_loop: Any = None
     _grpc_thread: Any = None
+    # Post-construction wiring slot used by api/lifespan to reach the alerter
+    # without traversing every sub-component (bootstrap.py sets this after
+    # constructing the loop and circuit breakers).
+    _alerter_ref: Any = None
 
     def __init__(self, deps: TradingLoopDeps) -> None:  # noqa: PLR0915
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
