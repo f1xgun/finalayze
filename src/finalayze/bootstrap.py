@@ -47,6 +47,10 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
         from finalayze.strategies.dual_momentum import DualMomentumStrategy  # noqa: PLC0415
         from finalayze.strategies.mean_reversion import MeanReversionStrategy  # noqa: PLC0415
         from finalayze.strategies.momentum import MomentumStrategy  # noqa: PLC0415
+        from finalayze.strategies.preset_validator import (  # noqa: PLC0415
+            log_preset_issues,
+            validate_presets,
+        )
         from finalayze.strategies.rsi2_connors import RSI2ConnorsStrategy  # noqa: PLC0415
 
         log = structlog.get_logger()
@@ -177,6 +181,11 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
             RSI2ConnorsStrategy(),
         ]
         combiner = StrategyCombiner(strategies=strategies_list)
+
+        # Surface silent preset schema drift (typo'd keys, bad Decimal values,
+        # unknown normalize_mode) before any trades execute. Logs only;
+        # per-segment fail-soft handling in the combiner remains the guardrail.
+        log_preset_issues(validate_presets(combiner.presets_dir), log)
 
         # ── Risk ─────────────────────────────────────────────────────────
         _limits = settings.effective_risk_limits()
