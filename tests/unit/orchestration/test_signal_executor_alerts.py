@@ -246,13 +246,15 @@ def test_signal_alert_no_alerter_is_noop() -> None:
 
 
 def test_alert_block_present_in_process_instrument_source() -> None:
-    """process_instrument body MUST contain the alert call site post-pre_result.passed.
+    """_stage_submit_and_record MUST contain the alert call site post-pre_result.passed.
 
     Asserts the integration plumbing that _fire_alert_if_eligible exercises
-    in unit-test isolation actually lands in the production process_instrument
-    method (otherwise the helper would be tested but the call site dead).
+    in unit-test isolation actually lands in the production submit stage
+    (otherwise the helper would be tested but the call site dead). After
+    Phase 3 the alert lives in _stage_submit_and_record, the third stage
+    of process_instrument.
     """
     import inspect
 
-    src = inspect.getsource(SignalExecutor.process_instrument)
+    src = inspect.getsource(SignalExecutor._stage_submit_and_record)
     assert "_fire_signal_alert" in src

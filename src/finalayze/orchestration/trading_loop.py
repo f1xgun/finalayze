@@ -1442,13 +1442,13 @@ class TradingLoop:
             stats = self._signal_executor.process_instrument(
                 instrument, market_id, level, fetcher, now, equity, cash, portfolio
             )
-            self._cycle_signals_generated += stats.get("signals_generated", 0)
-            self._cycle_orders_submitted += stats.get("orders_submitted", 0)
-            self._cycle_orders_filled += stats.get("orders_filled", 0)
-            self._cycle_errors_caught += stats.get("errors_caught", 0)
-            self._cycle_dropped_no_bars += stats.get("dropped_no_bars", 0)
-            self._cycle_dropped_below_threshold += stats.get("dropped_below_threshold", 0)
-            self._cycle_dropped_pre_trade += stats.get("dropped_pre_trade", 0)
+            self._cycle_signals_generated += stats.signals_generated
+            self._cycle_orders_submitted += stats.orders_submitted
+            self._cycle_orders_filled += stats.orders_filled
+            self._cycle_errors_caught += stats.errors_caught
+            self._cycle_dropped_no_bars += stats.dropped_no_bars
+            self._cycle_dropped_below_threshold += stats.dropped_below_threshold
+            self._cycle_dropped_pre_trade += stats.dropped_pre_trade
 
         # Update Prometheus metrics after processing all instruments
         market_equity = market_equities.get(market_id)

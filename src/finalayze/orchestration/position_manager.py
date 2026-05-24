@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from finalayze.api.alerts import TelegramAlerter
+    from finalayze.core.schemas import Candle
     from finalayze.execution.broker_router import BrokerRouter
     from finalayze.execution.simulated_broker import StopLossState
     from finalayze.orchestration.db_persistence import TradingPersistence
@@ -28,6 +29,13 @@ if TYPE_CHECKING:
 
 _log = structlog.get_logger(__name__)
 _ZERO = Decimal(0)
+
+# Retroactive stop ATR multipliers (matches signal_executor defaults).
+_RETRO_ATR_MULT_US = Decimal("2.0")
+_RETRO_ATR_MULT_MOEX = Decimal("2.5")
+_RETRO_GRACE_FRACTION = Decimal("0.5")  # 0.5 ATR below current when already underwater
+_RETRO_ACTIVATION_ATR = Decimal("1.0")
+_RETRO_TRAIL_ATR = Decimal("1.5")
 
 
 class PositionTracker:
@@ -275,6 +283,74 @@ class PositionTracker:
                 now=_dt.now(UTC),
                 event_type="entry",
             )
+
+    def maybe_register_retroactive_stop(
+        self,
+        symbol: str,
+        candles: list[Candle],
+        market_id: str,
+    ) -> bool:
+        """Register an ATR-based stop for an orphaned open position.
+
+        Used after container restart when the broker reports an open position
+        but the in-memory ``_stop_states`` is empty (no DB snapshot replayed).
+        Caller is responsible for confirming the broker holds the position
+        before invoking; this method only checks PositionTracker-internal state.
+
+        Args:
+            symbol: Instrument symbol.
+            candles: Recent candle history; ATR is computed from this.
+            market_id: ``"us"`` or ``"moex"`` — selects the ATR multiplier.
+
+        Returns:
+            True when a new stop was registered, False if skipped (already has
+            a stop, no candles, or ATR could not be computed).
+        """
+        from finalayze.execution.simulated_broker import StopLossState  # noqa: PLC0415
+        from finalayze.risk.stop_loss import compute_atr_stop_loss  # noqa: PLC0415
+
+        if not candles or self.has_stop(symbol):
+            return False
+
+        mult = _RETRO_ATR_MULT_MOEX if market_id == "moex" else _RETRO_ATR_MULT_US
+        cur = Decimal(str(candles[-1].close))
+        entry = self._entry_prices.get(symbol, cur)
+        natural_stop = compute_atr_stop_loss(entry, candles, atr_multiplier=mult)
+        if natural_stop is None or mult <= _ZERO:
+            return False
+
+        atr_val = (entry - natural_stop) / mult
+        if cur >= natural_stop:
+            stop_price = natural_stop
+            trail_activated = False
+            highest = max(entry, cur)
+        else:
+            # Already underwater — grace stop sits _RETRO_GRACE_FRACTION ATR below current
+            stop_price = max(cur - _RETRO_GRACE_FRACTION * atr_val, _ZERO)
+            trail_activated = True
+            highest = cur
+
+        strategy = self._entry_strategy.get(symbol, "retroactive")
+        stop_state = StopLossState(
+            initial_stop=stop_price,
+            current_stop=stop_price,
+            highest_price=highest,
+            trail_activated=trail_activated,
+            activation_atr=_RETRO_ACTIVATION_ATR,
+            trail_atr=_RETRO_TRAIL_ATR,
+            entry_price=entry,
+            atr_value=atr_val,
+        )
+        self.register_entry(symbol, entry, strategy, stop_state, market_id=market_id)
+        _log.warning(
+            "stop_retroactive_set",
+            symbol=symbol,
+            stop_price=float(stop_price),
+            entry_price=float(entry),
+            trail_activated=trail_activated,
+            market=market_id,
+        )
+        return True
 
     def restore_stops(self, states: dict[str, tuple[str, StopLossState]]) -> None:
         """Re-hydrate stop-loss state from a DB snapshot after container restart.
