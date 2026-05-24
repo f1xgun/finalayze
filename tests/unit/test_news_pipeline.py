@@ -27,18 +27,13 @@ def _make_article(i: int = 0) -> NewsArticle:
 
 
 def _wire_subcomponents(loop: Any) -> None:
-    """Wire NewsPipeline and SentimentManager onto a TradingLoop instance."""
+    """Wire NewsPipeline onto a TradingLoop instance (sentiment_mgr already wired by caller)."""
     from finalayze.orchestration.news_pipeline import NewsPipeline
-    from finalayze.orchestration.sentiment_manager import SentimentManager
 
-    sentiment_mgr = SentimentManager.__new__(SentimentManager)
-    sentiment_mgr._sentiment_cache = loop._sentiment_cache
-    sentiment_mgr._sentiment_lock = loop._sentiment_lock
+    sentiment_mgr = loop._sentiment_mgr
     sentiment_mgr._cache = loop._cache
-    sentiment_mgr._event_driven_active = True
     sentiment_mgr._registry = loop._registry
     sentiment_mgr._market_ids = list(loop._fetchers.keys()) if loop._fetchers else []
-    loop._sentiment_mgr = sentiment_mgr
 
     _PIPELINE_ATTRS = (
         "_news_fetcher",
@@ -73,7 +68,10 @@ def _wire_subcomponents(loop: Any) -> None:
 
 def _make_trading_loop(**overrides: Any) -> Any:
     """Create a TradingLoop with minimal mocks for news cycle testing."""
+    import threading
+
     from finalayze.core.trading_loop import TradingLoop
+    from finalayze.orchestration.sentiment_manager import SentimentManager
 
     settings = MagicMock()
     settings.max_position_pct = 0.1
@@ -99,21 +97,21 @@ def _make_trading_loop(**overrides: Any) -> Any:
     loop._registry.list_by_market.return_value = []
     loop._fetchers = {}
     loop._cache = None
-    loop._sentiment_cache = {}
     loop._llm_consecutive_failures = 0
-
-    import threading
-
-    loop._sentiment_lock = threading.Lock()
     loop._async_loop = None
     loop._async_thread = None
-    loop._event_driven_active = True
     loop._rss_fetcher = None
     loop._telegram_reader = None
     loop._news_impact_analyzer = None
     loop._seen_article_hashes = OrderedDict()
     loop._health_monitor = None
     loop._metrics = None
+
+    sentiment_mgr = SentimentManager.__new__(SentimentManager)
+    sentiment_mgr._sentiment_cache = {}
+    sentiment_mgr._sentiment_lock = threading.Lock()
+    sentiment_mgr._event_driven_active = True
+    loop._sentiment_mgr = sentiment_mgr
 
     for key, val in overrides.items():
         setattr(loop, f"_{key}", val)
@@ -141,7 +139,7 @@ class TestBudgetCap:
             return (20, 0, "")
 
         loop._news_pipeline._async_loop_fn = mock_run_async
-        loop._news_cycle()
+        loop._news_pipeline.run_news_cycle()
 
         from finalayze.core.trading_loop import _MAX_ARTICLES_PER_CYCLE
 
@@ -154,7 +152,7 @@ class TestBudgetCap:
         loop._news_fetcher.fetch_news.return_value = articles
 
         with patch("finalayze.api.metrics.MetricsCollector") as mock_metrics:
-            loop._news_cycle()
+            loop._news_pipeline.run_news_cycle()
             mock_metrics.inc_news_budget_cap_hit.assert_called_once()
 
     def test_no_budget_cap_under_limit(self) -> None:
@@ -165,7 +163,7 @@ class TestBudgetCap:
         loop._news_fetcher.fetch_news.return_value = articles
 
         with patch("finalayze.api.metrics.MetricsCollector") as mock_metrics:
-            loop._news_cycle()
+            loop._news_pipeline.run_news_cycle()
             mock_metrics.inc_news_budget_cap_hit.assert_not_called()
 
 
@@ -258,7 +256,7 @@ class TestTickerValidation:
             return (1, 0, "")
 
         loop._run_async = mock_run_async
-        loop._news_cycle()
+        loop._news_pipeline.run_news_cycle()
 
         # Verify credibility score is correct for "test" source
         expected_cred = get_credibility("test")
@@ -292,7 +290,7 @@ class TestLLMLiveness:
         loop._news_pipeline._async_loop_fn = MagicMock(return_value=(ok, fail, ""))
         loop._run_async = MagicMock(return_value=(ok, fail, ""))
 
-        loop._news_cycle()
+        loop._news_pipeline.run_news_cycle()
 
     def test_llm_liveness_no_alert_under_threshold(self) -> None:
         """2 consecutive all-fail cycles do not trigger alert."""
@@ -388,7 +386,7 @@ class TestLLMLiveness:
         # _run_async returns (1 ok, 1 fail) -> resets counter
         loop._news_impact_analyzer = MagicMock()
         loop._run_async = MagicMock(return_value=(1, 1, ""))
-        loop._news_cycle()
+        loop._news_pipeline.run_news_cycle()
 
         assert loop._llm_consecutive_failures == 0
 

@@ -375,7 +375,7 @@ class TestPaperTradingCycle:
         After seeding, _strategy_cycle should still produce orders (sentiment is advisory,
         not a gate; the primary gate is the circuit breaker level).
         """
-        trading_loop._news_cycle()
+        trading_loop._news_pipeline.run_news_cycle()
         trading_loop._strategy_cycle()
 
         # After seeding positive sentiment, at least one order must reach the US broker

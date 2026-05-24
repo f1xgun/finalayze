@@ -100,9 +100,11 @@ class TestStopLossAtomicity:
         loop, mock_broker = _make_trading_loop()
 
         # Set a stop-loss state
-        loop._stop_states["AAPL"] = _make_stop_state(Decimal("140.00"), Decimal("150.00"))
+        loop._position_tracker._stop_states["AAPL"] = _make_stop_state(
+            Decimal("140.00"), Decimal("150.00")
+        )
         # Set an entry price for Kelly update
-        loop._entry_prices["AAPL"] = Decimal("150.00")
+        loop._position_tracker._entry_prices["AAPL"] = Decimal("150.00")
 
         lock_release_detected = threading.Event()
         original_route = loop._broker_router.route
@@ -111,16 +113,16 @@ class TestStopLossAtomicity:
             """Check that _stop_loss_lock is still held when route() is called."""
             # Try to acquire the lock with timeout=0 (non-blocking)
             # If we CAN acquire it, the lock was released between read and sell (BUG)
-            acquired = loop._stop_loss_lock.acquire(blocking=False)
+            acquired = loop._position_tracker._stop_loss_lock.acquire(blocking=False)
             if acquired:
-                loop._stop_loss_lock.release()
+                loop._position_tracker._stop_loss_lock.release()
                 lock_release_detected.set()
             return original_route(market_id)
 
         loop._broker_router.route = route_checking_lock
 
         # Trigger stop-loss (price below stop)
-        loop._check_stop_losses("us", "AAPL", Decimal("139.00"))
+        loop._position_tracker.check_stop_losses("us", "AAPL", Decimal("139.00"))
 
         # The lock should NOT have been released between read and sell
         assert not lock_release_detected.is_set(), (
@@ -131,7 +133,7 @@ class TestStopLossAtomicity:
         assert mock_broker.submit_order.call_count == 1
 
         # Stop state should be cleared
-        assert "AAPL" not in loop._stop_states
+        assert "AAPL" not in loop._position_tracker._stop_states
 
     def test_concurrent_threads_only_one_sell(self) -> None:
         """If two concurrent threads trigger stop for same symbol, only one submits a sell.
@@ -141,8 +143,10 @@ class TestStopLossAtomicity:
         """
         loop, mock_broker = _make_trading_loop()
 
-        loop._stop_states["AAPL"] = _make_stop_state(Decimal("140.00"), Decimal("150.00"))
-        loop._entry_prices["AAPL"] = Decimal("150.00")
+        loop._position_tracker._stop_states["AAPL"] = _make_stop_state(
+            Decimal("140.00"), Decimal("150.00")
+        )
+        loop._position_tracker._entry_prices["AAPL"] = Decimal("150.00")
 
         barrier = threading.Barrier(2, timeout=5)
         results: list[Exception | None] = [None, None]
@@ -150,7 +154,7 @@ class TestStopLossAtomicity:
         def thread_fn(idx: int) -> None:
             try:
                 barrier.wait()
-                loop._check_stop_losses("us", "AAPL", Decimal("139.00"))
+                loop._position_tracker.check_stop_losses("us", "AAPL", Decimal("139.00"))
             except Exception as e:
                 results[idx] = e
 
@@ -172,7 +176,7 @@ class TestStopLossAtomicity:
         )
 
         # Stop state should be cleared
-        assert "AAPL" not in loop._stop_states
+        assert "AAPL" not in loop._position_tracker._stop_states
 
     def test_stop_price_preserved_on_submit_failure(self) -> None:
         """If submit_order raises, stop price is NOT cleared (retry next cycle)."""
@@ -180,35 +184,37 @@ class TestStopLossAtomicity:
             submit_side_effect=RuntimeError("broker down"),
         )
 
-        loop._stop_states["AAPL"] = _make_stop_state(Decimal("140.00"), Decimal("150.00"))
-        loop._entry_prices["AAPL"] = Decimal("150.00")
+        loop._position_tracker._stop_states["AAPL"] = _make_stop_state(
+            Decimal("140.00"), Decimal("150.00")
+        )
+        loop._position_tracker._entry_prices["AAPL"] = Decimal("150.00")
 
         # Should not raise -- exception is caught internally
-        loop._check_stop_losses("us", "AAPL", Decimal("139.00"))
+        loop._position_tracker.check_stop_losses("us", "AAPL", Decimal("139.00"))
 
         # submit_order was called (and raised)
         assert mock_broker.submit_order.call_count == 1
 
         # Stop state should still be set (preserved for retry)
-        assert "AAPL" in loop._stop_states
-        assert loop._stop_states["AAPL"].current_stop == Decimal("140.00")
+        assert "AAPL" in loop._position_tracker._stop_states
+        assert loop._position_tracker._stop_states["AAPL"].current_stop == Decimal("140.00")
 
     def test_no_sell_when_price_above_stop(self) -> None:
         """No order submitted when current price is above stop price."""
         loop, mock_broker = _make_trading_loop()
-        loop._stop_states["AAPL"] = _make_stop_state(Decimal("140.00"))
+        loop._position_tracker._stop_states["AAPL"] = _make_stop_state(Decimal("140.00"))
 
-        loop._check_stop_losses("us", "AAPL", Decimal("145.00"))
+        loop._position_tracker.check_stop_losses("us", "AAPL", Decimal("145.00"))
 
         mock_broker.submit_order.assert_not_called()
         # Stop state should still be set
-        assert "AAPL" in loop._stop_states
+        assert "AAPL" in loop._position_tracker._stop_states
 
     def test_no_sell_when_no_stop_price(self) -> None:
         """No order submitted when symbol has no stop price set."""
         loop, mock_broker = _make_trading_loop()
 
-        loop._check_stop_losses("us", "AAPL", Decimal("139.00"))
+        loop._position_tracker.check_stop_losses("us", "AAPL", Decimal("139.00"))
 
         mock_broker.submit_order.assert_not_called()
         mock_broker.get_positions.assert_not_called()

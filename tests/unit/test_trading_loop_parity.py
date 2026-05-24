@@ -101,7 +101,7 @@ def _seed_stop_state(loop: TradingLoop, symbol: str = SYMBOL_AAPL) -> StopLossSt
         entry_price=ENTRY_PRICE,
         atr_value=ATR_VALUE,
     )
-    loop._stop_states[symbol] = state
+    loop._position_tracker._stop_states[symbol] = state
     return state
 
 
@@ -117,7 +117,7 @@ class TestStopLossStateStorage:
         assert hasattr(loop, "_stop_states"), (
             "TradingLoop must have _stop_states dict with StopLossState instances"
         )
-        assert isinstance(loop._stop_states, dict)
+        assert isinstance(loop._position_tracker._stop_states, dict)
 
     def test_stop_state_has_required_fields(self) -> None:
         loop = _make_loop()
@@ -145,7 +145,7 @@ class TestTrailingStopRatchet:
             SYMBOL_AAPL: Decimal(10),
         }
 
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, higher_price)
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, higher_price)
         assert state.highest_price == higher_price
 
     def test_trailing_activates_at_threshold(self) -> None:
@@ -155,7 +155,7 @@ class TestTrailingStopRatchet:
         # activation threshold = 150 + 1.0 * 5.0 = 155
         activation_price = ENTRY_PRICE + state.activation_atr * state.atr_value
 
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, activation_price)
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, activation_price)
         assert state.trail_activated is True
 
     def test_trail_stop_ratchets_upward(self) -> None:
@@ -165,7 +165,7 @@ class TestTrailingStopRatchet:
 
         # Push price to 160 (activates trail at 155)
         high_price = Decimal("160.00")
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, high_price)
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, high_price)
         assert state.trail_activated is True
         # trail_stop = 160 - 1.5 * 5 = 152.5
         expected_stop = high_price - state.trail_atr * state.atr_value
@@ -177,11 +177,11 @@ class TestTrailingStopRatchet:
         state = _seed_stop_state(loop)
 
         # Push to 160.00, trail activates, stop = 152.50
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("160.00"))
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("160.00"))
         stop_after_high = state.current_stop
 
         # Price drops to 153.00 (above stop, no trigger)
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("153.00"))
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("153.00"))
         assert state.current_stop == stop_after_high, "Stop must not decrease when price drops"
 
 
@@ -200,7 +200,7 @@ class TestStopTriggerSell:
         loop._broker_router.route.return_value = mock_broker
 
         # Price drops to 139 (below initial stop of 140)
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("139.00"))
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("139.00"))
 
         # SELL order should have been submitted
         mock_broker.submit_order.assert_called_once()
@@ -209,10 +209,10 @@ class TestStopTriggerSell:
         assert sell_order.quantity == Decimal(10)
 
         # Symbol should be in _cycle_exited_symbols
-        assert SYMBOL_AAPL in loop._cycle_exited_symbols
+        assert SYMBOL_AAPL in loop._position_tracker._cycle_exited_symbols
 
         # Stop state should be cleared
-        assert SYMBOL_AAPL not in loop._stop_states
+        assert SYMBOL_AAPL not in loop._position_tracker._stop_states
 
 
 # ── Test 4: Re-entry guard skips signal generation ─────────────────────
@@ -223,7 +223,7 @@ class TestReentryGuard:
 
     def test_process_instrument_skips_exited_symbol(self) -> None:
         loop = _make_loop()
-        loop._cycle_exited_symbols.add(SYMBOL_AAPL)
+        loop._position_tracker._cycle_exited_symbols.add(SYMBOL_AAPL)
 
         instrument = MagicMock()
         instrument.symbol = SYMBOL_AAPL
@@ -254,12 +254,12 @@ class TestCycleExitedCleared:
 
     def test_reset_cycle_counters_clears_exited(self) -> None:
         loop = _make_loop()
-        loop._cycle_exited_symbols.add(SYMBOL_AAPL)
-        loop._cycle_exited_symbols.add("MSFT")
-        assert len(loop._cycle_exited_symbols) > 0
+        loop._position_tracker._cycle_exited_symbols.add(SYMBOL_AAPL)
+        loop._position_tracker._cycle_exited_symbols.add("MSFT")
+        assert len(loop._position_tracker._cycle_exited_symbols) > 0
 
         loop._reset_cycle_counters()
-        assert len(loop._cycle_exited_symbols) == 0
+        assert len(loop._position_tracker._cycle_exited_symbols) == 0
 
 
 # ── PARITY-01: Pipeline sizing tests ─────────────────────────────────
@@ -348,7 +348,7 @@ class TestPipelineSizing:
     def test_pipeline_includes_core_steps(self) -> None:
         """Pipeline includes KellyStep, VolTargetStep, RegimeStep, MetaLabelStep, HardCapsStep."""
         loop = _make_loop()
-        pipeline = loop._build_sizing_pipeline("us_tech")
+        pipeline = loop._signal_executor._build_sizing_pipeline("us_tech")
         step_types = [type(s) for s in pipeline._steps]
         assert KellyStep in step_types
         assert VolTargetStep in step_types
