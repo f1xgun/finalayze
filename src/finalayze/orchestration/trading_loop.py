@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -132,14 +133,54 @@ def validate_tickers(
     return valid
 
 
+@dataclass(frozen=True)
+class TradingLoopDeps:
+    """Typed bundle of every collaborator TradingLoop needs to run.
+
+    Replaces a 30-parameter ctor. Fields kept in original ctor order for
+    diff readability; required fields first, optional fields (default None)
+    grouped at the end.
+    """
+
+    settings: Settings
+    fetchers: dict[str, object]
+    news_fetcher: NewsApiFetcher
+    news_analyzer: NewsAnalyzer
+    event_classifier: EventClassifier
+    impact_estimator: ImpactEstimator
+    strategy: StrategyCombiner
+    broker_router: BrokerRouter
+    circuit_breakers: dict[str, CircuitBreaker]
+    cross_market_breaker: CrossMarketCircuitBreaker
+    alerter: TelegramAlerter
+    instrument_registry: InstrumentRegistry
+    cache: RedisCache | None = None
+    ml_registry: MLModelRegistry | None = None
+    event_bus: EventBus | None = None
+    fx_service: FXRateService | None = None
+    bond_cycle_processor: BondCycleProcessor | None = None
+    macro_cache: MacroCacheService | None = None
+    rss_fetcher: RssNewsFetcher | None = None
+    telegram_reader: TelegramChannelReader | None = None
+    news_impact_analyzer: NewsImpactAnalyzer | None = None
+    sector_ticker_mapper: SectorTickerMapper | None = None
+    sandbox_monitor: SandboxMonitorService | None = None
+    health_monitor: HealthMonitor | None = None
+    metrics_collector: type[MetricsCollector] | None = None
+    grpc_loop: asyncio.AbstractEventLoop | None = field(default=None)
+    kill_switch: object | None = None
+    meta_agent_runner: object | None = None
+
+
 class TradingLoop:
     """Schedules and runs the news, strategy, and daily-reset cycles.
 
     Designed for TEST / SANDBOX modes. Will gate on WorkMode in real mode.
     """
 
-    # Class-level defaults so MagicMock(spec=TradingLoop) recognizes these attrs.
-    # All are overridden in __init__.
+    # Class-level defaults so MagicMock(spec=TradingLoop) recognizes these attrs,
+    # and so post-construction wiring from bootstrap.py (e.g. `loop._alerter_ref`)
+    # type-checks. All sub-component fields are overridden in __init__.
     _news_pipeline: Any = None
     _signal_executor: Any = None
     _position_tracker: Any = None
@@ -152,43 +193,47 @@ class TradingLoop:
     _async_thread: Any = None
     _grpc_loop: Any = None
     _grpc_thread: Any = None
+    # Post-construction wiring slot used by api/lifespan to reach the alerter
+    # without traversing every sub-component (bootstrap.py sets this after
+    # constructing the loop and circuit breakers).
+    _alerter_ref: Any = None
 
-    def __init__(  # noqa: PLR0915
-        self,
-        settings: Settings,
-        fetchers: dict[str, object],
-        news_fetcher: NewsApiFetcher,
-        news_analyzer: NewsAnalyzer,
-        event_classifier: EventClassifier,
-        impact_estimator: ImpactEstimator,
-        strategy: StrategyCombiner,
-        broker_router: BrokerRouter,
-        circuit_breakers: dict[str, CircuitBreaker],
-        cross_market_breaker: CrossMarketCircuitBreaker,
-        alerter: TelegramAlerter,
-        instrument_registry: InstrumentRegistry,
-        cache: RedisCache | None = None,
-        ml_registry: MLModelRegistry | None = None,
-        event_bus: EventBus | None = None,
-        fx_service: FXRateService | None = None,
-        bond_cycle_processor: BondCycleProcessor | None = None,
-        macro_cache: MacroCacheService | None = None,
-        rss_fetcher: RssNewsFetcher | None = None,
-        telegram_reader: TelegramChannelReader | None = None,
-        news_impact_analyzer: NewsImpactAnalyzer | None = None,
-        sector_ticker_mapper: SectorTickerMapper | None = None,
-        sandbox_monitor: SandboxMonitorService | None = None,
-        health_monitor: HealthMonitor | None = None,
-        metrics_collector: type[MetricsCollector] | None = None,
-        grpc_loop: asyncio.AbstractEventLoop | None = None,
-        kill_switch: object | None = None,
-        meta_agent_runner: object | None = None,
-    ) -> None:
+    def __init__(self, deps: TradingLoopDeps) -> None:  # noqa: PLR0915
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
         from finalayze.risk.circuit_breaker import CircuitLevel  # noqa: PLC0415
         from finalayze.risk.kelly import RollingKelly  # noqa: PLC0415
         from finalayze.risk.loss_limits import LossLimitTracker  # noqa: PLC0415
         from finalayze.risk.pre_trade_check import PDTTracker, PreTradeChecker  # noqa: PLC0415
+
+        # Unpack deps into locals so the body below is unchanged.
+        settings = deps.settings
+        fetchers = deps.fetchers
+        news_fetcher = deps.news_fetcher
+        news_analyzer = deps.news_analyzer
+        event_classifier = deps.event_classifier
+        impact_estimator = deps.impact_estimator
+        strategy = deps.strategy
+        broker_router = deps.broker_router
+        circuit_breakers = deps.circuit_breakers
+        cross_market_breaker = deps.cross_market_breaker
+        alerter = deps.alerter
+        instrument_registry = deps.instrument_registry
+        cache = deps.cache
+        ml_registry = deps.ml_registry
+        event_bus = deps.event_bus
+        fx_service = deps.fx_service
+        bond_cycle_processor = deps.bond_cycle_processor
+        macro_cache = deps.macro_cache
+        rss_fetcher = deps.rss_fetcher
+        telegram_reader = deps.telegram_reader
+        news_impact_analyzer = deps.news_impact_analyzer
+        sector_ticker_mapper = deps.sector_ticker_mapper
+        sandbox_monitor = deps.sandbox_monitor
+        health_monitor = deps.health_monitor
+        metrics_collector = deps.metrics_collector
+        grpc_loop = deps.grpc_loop
+        kill_switch = deps.kill_switch
+        meta_agent_runner = deps.meta_agent_runner
 
         # Store class references for runtime use without module-level imports
         self._OrderRequest = OrderRequest
@@ -383,82 +428,6 @@ class TradingLoop:
         self._consecutive_equity_errors: int = 0
         self._consecutive_bond_errors: int = 0
         self._MAX_CONSECUTIVE_ERRORS: int = 3
-
-    # ── Backward-compat delegation ──────────────────────────────────────────
-    # After decomposition, many attributes moved to sub-components. This
-    # __getattr__ transparently delegates access so existing tests and code
-    # that reference loop._stop_states, loop._news_cycle, etc. still work.
-
-    # Maps attribute names to (subcomponent_attr, target_attr_name).
-    # If target_attr_name is None, use the same name as the key.
-    _ATTR_DELEGATES: ClassVar[dict[str, tuple[str, str | None]]] = {
-        # PositionTracker attributes
-        "_stop_states": ("_position_tracker", None),
-        "_entry_strategy": ("_position_tracker", None),
-        "_entry_prices": ("_position_tracker", None),
-        "_stop_loss_lock": ("_position_tracker", None),
-        "_check_stop_losses": ("_position_tracker", "check_stop_losses"),
-        # SignalExecutor attributes
-        "_cycle_exited_symbols": ("_position_tracker", None),
-        "_build_sizing_pipeline": ("_signal_executor", None),
-        "_has_pending_order": ("_signal_executor", None),
-        "_sizing_pipeline": ("_signal_executor", None),
-        "_get_last_price": ("_signal_executor", None),
-        "_last_prices": ("_signal_executor", None),
-        "_get_regime_state": ("_signal_executor", None),
-        "_get_segment_min_confidence": ("_signal_executor", None),
-        # NewsPipeline attributes
-        "_news_cycle": ("_news_pipeline", "run_news_cycle"),
-        "_analyze_impact_batch": ("_news_pipeline", None),
-        "_apply_impact_result": ("_news_pipeline", None),
-        # SentimentManager attributes
-        "_sentiment_lock": ("_sentiment_mgr", None),
-        "_sentiment_cache": ("_sentiment_mgr", None),
-        "_read_decayed_sentiment": ("_sentiment_mgr", "read_decayed_sentiment"),
-        "_get_sentiment": ("_sentiment_mgr", "get_sentiment"),
-        "_event_driven_active": ("_sentiment_mgr", None),
-        # MLRetrainingService attributes
-        "_retrain_cycle": ("_ml_retraining", "retrain_all"),
-        # DailyReportingService attributes
-        "_persist_equity_snapshots": ("_persistence", None),
-        "_persist_snapshots_async": ("_persistence", None),
-        "_load_baseline_async": ("_daily_reporter", None),
-        # TradingPersistence attributes
-        "_get_bg_session_factory": ("_persistence", None),
-    }
-
-    def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to sub-components for backward compatibility."""
-        delegates = type(self)._ATTR_DELEGATES
-        if name in delegates:
-            target_name, attr_name = delegates[name]
-            try:
-                target = object.__getattribute__(self, target_name)
-            except AttributeError:
-                raise AttributeError(  # noqa: B904
-                    f"'{type(self).__name__}' object has no attribute {name!r}"
-                )
-            return getattr(target, attr_name if attr_name is not None else name)
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute {name!r}")
-
-    # Attributes that should be written through to subcomponents
-    _ATTR_SETTERS: ClassVar[dict[str, tuple[str, str | None]]] = {
-        "_event_driven_active": ("_sentiment_mgr", None),
-        "_sentiment_cache": ("_sentiment_mgr", None),
-    }
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        """Write through delegated attributes to sub-components."""
-        setters = type(self)._ATTR_SETTERS
-        if name in setters:
-            target_name, attr_name = setters[name]
-            try:
-                target = object.__getattribute__(self, target_name)
-                setattr(target, attr_name if attr_name is not None else name, value)
-                return
-            except AttributeError:
-                pass  # Fall through to default if subcomponent not yet initialized
-        object.__setattr__(self, name, value)
 
     def _reset_cycle_counters(self) -> None:
         """Reset per-cycle counters for CycleLogEntry tracking."""

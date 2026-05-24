@@ -17,7 +17,7 @@ from config.settings import Settings
 from finalayze.core.alerts import TelegramAlerter
 from finalayze.core.modes import WorkMode
 from finalayze.core.schemas import SignalDirection
-from finalayze.core.trading_loop import TradingLoop
+from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 from finalayze.execution.simulated_broker import StopLossState
 from finalayze.markets.instruments import InstrumentRegistry
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
@@ -73,18 +73,20 @@ def _make_loop() -> TradingLoop:
     registry = InstrumentRegistry()
 
     return TradingLoop(
-        settings=settings,
-        fetchers=fetchers,
-        news_fetcher=news_fetcher,
-        news_analyzer=news_analyzer,
-        event_classifier=event_classifier,
-        impact_estimator=impact_estimator,
-        strategy=strategy,
-        broker_router=broker_router,
-        circuit_breakers=circuit_breakers,
-        cross_market_breaker=cross_market,
-        alerter=alerter,
-        instrument_registry=registry,
+        TradingLoopDeps(
+            settings=settings,
+            fetchers=fetchers,
+            news_fetcher=news_fetcher,
+            news_analyzer=news_analyzer,
+            event_classifier=event_classifier,
+            impact_estimator=impact_estimator,
+            strategy=strategy,
+            broker_router=broker_router,
+            circuit_breakers=circuit_breakers,
+            cross_market_breaker=cross_market,
+            alerter=alerter,
+            instrument_registry=registry,
+        )
     )
 
 
@@ -100,7 +102,7 @@ def _seed_stop_state(loop: TradingLoop, symbol: str = SYMBOL_AAPL) -> StopLossSt
         entry_price=ENTRY_PRICE,
         atr_value=ATR_VALUE,
     )
-    loop._stop_states[symbol] = state
+    loop._position_tracker._stop_states[symbol] = state
     return state
 
 
@@ -112,11 +114,11 @@ class TestStopLossStateStorage:
 
     def test_buy_fill_stores_stop_loss_state(self) -> None:
         loop = _make_loop()
-        # Verify the loop has _stop_states dict (StopLossState-based trailing stops)
-        assert hasattr(loop, "_stop_states"), (
-            "TradingLoop must have _stop_states dict with StopLossState instances"
+        # PositionTracker owns the _stop_states dict (StopLossState-based trailing stops)
+        assert hasattr(loop._position_tracker, "_stop_states"), (
+            "PositionTracker must have _stop_states dict with StopLossState instances"
         )
-        assert isinstance(loop._stop_states, dict)
+        assert isinstance(loop._position_tracker._stop_states, dict)
 
     def test_stop_state_has_required_fields(self) -> None:
         loop = _make_loop()
@@ -144,7 +146,7 @@ class TestTrailingStopRatchet:
             SYMBOL_AAPL: Decimal(10),
         }
 
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, higher_price)
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, higher_price)
         assert state.highest_price == higher_price
 
     def test_trailing_activates_at_threshold(self) -> None:
@@ -154,7 +156,7 @@ class TestTrailingStopRatchet:
         # activation threshold = 150 + 1.0 * 5.0 = 155
         activation_price = ENTRY_PRICE + state.activation_atr * state.atr_value
 
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, activation_price)
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, activation_price)
         assert state.trail_activated is True
 
     def test_trail_stop_ratchets_upward(self) -> None:
@@ -164,7 +166,7 @@ class TestTrailingStopRatchet:
 
         # Push price to 160 (activates trail at 155)
         high_price = Decimal("160.00")
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, high_price)
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, high_price)
         assert state.trail_activated is True
         # trail_stop = 160 - 1.5 * 5 = 152.5
         expected_stop = high_price - state.trail_atr * state.atr_value
@@ -176,11 +178,11 @@ class TestTrailingStopRatchet:
         state = _seed_stop_state(loop)
 
         # Push to 160.00, trail activates, stop = 152.50
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("160.00"))
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("160.00"))
         stop_after_high = state.current_stop
 
         # Price drops to 153.00 (above stop, no trigger)
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("153.00"))
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("153.00"))
         assert state.current_stop == stop_after_high, "Stop must not decrease when price drops"
 
 
@@ -199,7 +201,7 @@ class TestStopTriggerSell:
         loop._broker_router.route.return_value = mock_broker
 
         # Price drops to 139 (below initial stop of 140)
-        loop._check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("139.00"))
+        loop._position_tracker.check_stop_losses(MARKET_US, SYMBOL_AAPL, Decimal("139.00"))
 
         # SELL order should have been submitted
         mock_broker.submit_order.assert_called_once()
@@ -208,10 +210,10 @@ class TestStopTriggerSell:
         assert sell_order.quantity == Decimal(10)
 
         # Symbol should be in _cycle_exited_symbols
-        assert SYMBOL_AAPL in loop._cycle_exited_symbols
+        assert SYMBOL_AAPL in loop._position_tracker._cycle_exited_symbols
 
         # Stop state should be cleared
-        assert SYMBOL_AAPL not in loop._stop_states
+        assert SYMBOL_AAPL not in loop._position_tracker._stop_states
 
 
 # ── Test 4: Re-entry guard skips signal generation ─────────────────────
@@ -222,7 +224,7 @@ class TestReentryGuard:
 
     def test_process_instrument_skips_exited_symbol(self) -> None:
         loop = _make_loop()
-        loop._cycle_exited_symbols.add(SYMBOL_AAPL)
+        loop._position_tracker._cycle_exited_symbols.add(SYMBOL_AAPL)
 
         instrument = MagicMock()
         instrument.symbol = SYMBOL_AAPL
@@ -253,12 +255,12 @@ class TestCycleExitedCleared:
 
     def test_reset_cycle_counters_clears_exited(self) -> None:
         loop = _make_loop()
-        loop._cycle_exited_symbols.add(SYMBOL_AAPL)
-        loop._cycle_exited_symbols.add("MSFT")
-        assert len(loop._cycle_exited_symbols) > 0
+        loop._position_tracker._cycle_exited_symbols.add(SYMBOL_AAPL)
+        loop._position_tracker._cycle_exited_symbols.add("MSFT")
+        assert len(loop._position_tracker._cycle_exited_symbols) > 0
 
         loop._reset_cycle_counters()
-        assert len(loop._cycle_exited_symbols) == 0
+        assert len(loop._position_tracker._cycle_exited_symbols) == 0
 
 
 # ── PARITY-01: Pipeline sizing tests ─────────────────────────────────
@@ -314,9 +316,9 @@ class TestPipelineSizing:
         candles = [_make_candle(150.0) for _ in range(NUM_CANDLES)]
         portfolio = _make_portfolio()
 
-        # The method should now have _build_sizing_pipeline
-        assert hasattr(loop, "_build_sizing_pipeline"), (
-            "TradingLoop must have _build_sizing_pipeline method"
+        # SignalExecutor owns _build_sizing_pipeline
+        assert hasattr(loop._signal_executor, "_build_sizing_pipeline"), (
+            "SignalExecutor must have _build_sizing_pipeline method"
         )
 
         # Patch _build_sizing_pipeline to capture the call
@@ -352,7 +354,7 @@ class TestPipelineSizing:
         pipeline itself no longer needs a dedicated KellyStep.
         """
         loop = _make_loop()
-        pipeline = loop._build_sizing_pipeline("us_tech")
+        pipeline = loop._signal_executor._build_sizing_pipeline("us_tech")
         step_types = [type(s) for s in pipeline._steps]
         assert VolTargetStep in step_types
         assert RegimeStep in step_types
@@ -529,9 +531,9 @@ class TestPreTradeCheckParams:
             return_value=MagicMock(passed=True, violations=[])
         )
 
-        # Check that _has_pending_order method exists
-        assert hasattr(loop, "_has_pending_order"), (
-            "TradingLoop must have _has_pending_order method"
+        # Check that _has_pending_order method exists on SignalExecutor (its owner)
+        assert hasattr(loop._signal_executor, "_has_pending_order"), (
+            "SignalExecutor must have _has_pending_order method"
         )
 
     def test_pre_trade_receives_regime_state(self) -> None:
@@ -543,8 +545,10 @@ class TestPreTradeCheckParams:
             return_value=MagicMock(passed=True, violations=[])
         )
 
-        # Check that _get_regime_state method exists
-        assert hasattr(loop, "_get_regime_state"), "TradingLoop must have _get_regime_state method"
+        # Check that _get_regime_state method exists on SignalExecutor (its owner)
+        assert hasattr(loop._signal_executor, "_get_regime_state"), (
+            "SignalExecutor must have _get_regime_state method"
+        )
 
     def test_pre_trade_receives_strategy_name(self) -> None:
         """strategy_name from signal is passed to pre-trade check."""

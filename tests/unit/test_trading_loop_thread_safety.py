@@ -12,7 +12,7 @@ import pytest
 
 def _make_trading_loop(**overrides: object) -> object:
     """Create a TradingLoop with minimal mock dependencies."""
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     defaults = {
         "settings": MagicMock(
@@ -42,7 +42,7 @@ def _make_trading_loop(**overrides: object) -> object:
         "fx_service": None,
     }
     defaults.update(overrides)
-    return TradingLoop(**defaults)  # type: ignore[arg-type]
+    return TradingLoop(TradingLoopDeps(**defaults))  # type: ignore[arg-type]
 
 
 class TestStopLossLock:
@@ -50,8 +50,8 @@ class TestStopLossLock:
 
     def test_stop_loss_lock_exists(self) -> None:
         loop = _make_trading_loop()
-        assert hasattr(loop, "_stop_loss_lock")
-        assert isinstance(loop._stop_loss_lock, type(threading.Lock()))
+        assert hasattr(loop._position_tracker, "_stop_loss_lock")
+        assert isinstance(loop._position_tracker._stop_loss_lock, type(threading.Lock()))
 
     def test_concurrent_writes_no_crash(self) -> None:
         """Concurrent writes from two threads should not raise."""
@@ -61,8 +61,8 @@ class TestStopLossLock:
         def writer(start: int) -> None:
             try:
                 for i in range(100):
-                    with loop._stop_loss_lock:
-                        loop._stop_states[f"SYM_{start}_{i}"] = Decimal(str(i))
+                    with loop._position_tracker._stop_loss_lock:
+                        loop._position_tracker._stop_states[f"SYM_{start}_{i}"] = Decimal(str(i))
             except Exception as exc:
                 errors.append(exc)
 
@@ -74,7 +74,7 @@ class TestStopLossLock:
         t2.join()
         assert errors == []
         # Both threads wrote 100 entries each
-        assert len(loop._stop_states) == 200
+        assert len(loop._position_tracker._stop_states) == 200
 
 
 class TestSentimentLockScope:
@@ -92,7 +92,7 @@ class TestSentimentLockScope:
         mock_cache = AsyncMock()
 
         async def tracking_set_sentiment(key: str, value: float, **kwargs: object) -> None:
-            locked = loop._sentiment_lock.locked()
+            locked = loop._sentiment_mgr._sentiment_lock.locked()
             lock_held_during_redis_write.append(locked)
 
         mock_cache.set_sentiment = tracking_set_sentiment
@@ -125,7 +125,7 @@ class TestSentimentLockScope:
         # Mock DB persistence to avoid real PostgreSQL connection
         loop._news_pipeline._persist_sentiment_scores_async = AsyncMock()
 
-        _aio.run(loop._apply_impact_result(result))
+        _aio.run(loop._news_pipeline._apply_impact_result(result))
 
         # The Redis write should have happened with lock NOT held
         assert len(lock_held_during_redis_write) > 0, "Redis set_sentiment must be called"

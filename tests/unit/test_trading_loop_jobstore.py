@@ -12,7 +12,7 @@ class TestTradingLoopJobStore:
 
     def _make_trading_loop(self) -> object:
         """Create a TradingLoop with all deps mocked."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         settings = MagicMock()
         settings.mode = MagicMock()
@@ -32,18 +32,20 @@ class TestTradingLoopJobStore:
         settings.weekly_digest_hour_utc = 16
 
         return TradingLoop(
-            settings=settings,
-            fetchers={},
-            news_fetcher=MagicMock(),
-            news_analyzer=MagicMock(),
-            event_classifier=MagicMock(),
-            impact_estimator=MagicMock(),
-            strategy=MagicMock(),
-            broker_router=MagicMock(),
-            circuit_breakers={},
-            cross_market_breaker=MagicMock(),
-            alerter=MagicMock(),
-            instrument_registry=MagicMock(),
+            TradingLoopDeps(
+                settings=settings,
+                fetchers={},
+                news_fetcher=MagicMock(),
+                news_analyzer=MagicMock(),
+                event_classifier=MagicMock(),
+                impact_estimator=MagicMock(),
+                strategy=MagicMock(),
+                broker_router=MagicMock(),
+                circuit_breakers={},
+                cross_market_breaker=MagicMock(),
+                alerter=MagicMock(),
+                instrument_registry=MagicMock(),
+            )
         )
 
     @patch("finalayze.core.trading_loop.BackgroundScheduler")

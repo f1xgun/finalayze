@@ -60,7 +60,7 @@ def _make_loop(
     settings: object | None = None,
 ) -> object:
     """Build a TradingLoop with mocked dependencies."""
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     mock_settings = settings or MagicMock()
     if settings is None:
@@ -79,25 +79,27 @@ def _make_loop(
     mock_news_fetcher = news_fetcher or MagicMock()
 
     loop = TradingLoop(
-        settings=mock_settings,
-        fetchers={},
-        news_fetcher=mock_news_fetcher,
-        news_analyzer=MagicMock(),
-        event_classifier=MagicMock(),
-        impact_estimator=MagicMock(),
-        strategy=MagicMock(),
-        broker_router=MagicMock(),
-        circuit_breakers={},
-        cross_market_breaker=MagicMock(),
-        alerter=MagicMock(),
-        instrument_registry=MagicMock(),
-        rss_fetcher=rss_fetcher,
-        telegram_reader=telegram_reader,
-        news_impact_analyzer=news_impact_analyzer,
-        sector_ticker_mapper=sector_ticker_mapper,
+        TradingLoopDeps(
+            settings=mock_settings,
+            fetchers={},
+            news_fetcher=mock_news_fetcher,
+            news_analyzer=MagicMock(),
+            event_classifier=MagicMock(),
+            impact_estimator=MagicMock(),
+            strategy=MagicMock(),
+            broker_router=MagicMock(),
+            circuit_breakers={},
+            cross_market_breaker=MagicMock(),
+            alerter=MagicMock(),
+            instrument_registry=MagicMock(),
+            rss_fetcher=rss_fetcher,
+            telegram_reader=telegram_reader,
+            news_impact_analyzer=news_impact_analyzer,
+            sector_ticker_mapper=sector_ticker_mapper,
+        )
     )
     # Pre-set event_driven guard so news cycle tests proceed without reading YAMLs
-    loop._event_driven_active = True  # type: ignore[attr-defined]
+    loop._sentiment_mgr._event_driven_active = True  # type: ignore[attr-defined]
     return loop
 
 
@@ -116,7 +118,7 @@ class TestNewsCycleRss:
         loop = _make_loop(rss_fetcher=rss, news_impact_analyzer=analyzer)
         loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(2, 0, ""))  # type: ignore[attr-defined]
 
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
 
         rss.fetch_news.assert_called_once()
         loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
@@ -142,7 +144,7 @@ class TestNewsCycleRss:
         )
         loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
 
         # Telegram articles should still be processed
         loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
@@ -165,7 +167,7 @@ class TestNewsCycleTelegram:
         loop = _make_loop(telegram_reader=tg, news_impact_analyzer=analyzer)
         loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
 
         loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
         processed = loop._news_pipeline._analyze_impact_batch.call_args[0][0]  # type: ignore[attr-defined]
@@ -190,7 +192,7 @@ class TestNewsCycleTelegram:
         )
         loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
 
         # RSS articles should still be processed
         loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
@@ -212,7 +214,7 @@ class TestNewsImpactPipeline:
         loop = _make_loop(rss_fetcher=rss, news_impact_analyzer=analyzer)
         loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
 
         # Should call _analyze_impact_batch, not _process_articles_batch
         loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]
@@ -256,10 +258,10 @@ class TestNewsImpactPipeline:
 
         import asyncio as _aio
 
-        _aio.run(loop._apply_impact_result(result))  # type: ignore[attr-defined]
+        _aio.run(loop._news_pipeline._apply_impact_result(result))  # type: ignore[attr-defined]
 
         # Check per-ticker cache entries
-        cache = loop._sentiment_cache  # type: ignore[attr-defined]
+        cache = loop._sentiment_mgr._sentiment_cache  # type: ignore[attr-defined]
         assert ("ru_blue_chips", "SBER") in cache
         assert ("ru_blue_chips", "VTBR") in cache
         assert ("ru_blue_chips", "TCSG") in cache
@@ -294,9 +296,9 @@ class TestNewsImpactPipeline:
 
         import asyncio as _aio
 
-        _aio.run(loop._apply_impact_result(result))  # type: ignore[attr-defined]
+        _aio.run(loop._news_pipeline._apply_impact_result(result))  # type: ignore[attr-defined]
 
-        cache = loop._sentiment_cache  # type: ignore[attr-defined]
+        cache = loop._sentiment_mgr._sentiment_cache  # type: ignore[attr-defined]
         assert ("ru_blue_chips", "SBER") in cache
         # VTBR was not mentioned, should NOT have entry
         assert ("ru_blue_chips", "VTBR") not in cache
@@ -333,9 +335,9 @@ class TestNewsImpactPipeline:
 
         import asyncio as _aio
 
-        _aio.run(loop._apply_impact_result(result))  # type: ignore[attr-defined]
+        _aio.run(loop._news_pipeline._apply_impact_result(result))  # type: ignore[attr-defined]
 
-        cache = loop._sentiment_cache  # type: ignore[attr-defined]
+        cache = loop._sentiment_mgr._sentiment_cache  # type: ignore[attr-defined]
         score, _ts = cache[("ru_blue_chips", "SBER")]
         # formula: magnitude * direction * sentiment = 0.6 * -1 * -0.5 = 0.3
         # EMA: 0.0 * 0.7 + 0.3 * 0.3 = 0.09
@@ -351,10 +353,10 @@ class TestPerTickerSentimentRead:
         loop = _make_loop()
         now = time.monotonic()
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("ru_blue_chips", "SBER")] = (0.8, now)  # type: ignore[attr-defined]
+        with loop._sentiment_mgr._sentiment_lock:  # type: ignore[attr-defined]
+            loop._sentiment_mgr._sentiment_cache[("ru_blue_chips", "SBER")] = (0.8, now)  # type: ignore[attr-defined]
 
-        result = loop._read_decayed_sentiment("ru_blue_chips", "SBER")  # type: ignore[attr-defined]
+        result = loop._sentiment_mgr.read_decayed_sentiment("ru_blue_chips", "SBER")  # type: ignore[attr-defined]
         assert abs(result - 0.8) < 0.01
 
     def test_read_decayed_sentiment_fallback_to_segment_average(self) -> None:
@@ -362,11 +364,11 @@ class TestPerTickerSentimentRead:
         loop = _make_loop()
         now = time.monotonic()
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("ru_blue_chips", "SBER")] = (0.6, now)  # type: ignore[attr-defined]
-            loop._sentiment_cache[("ru_blue_chips", "VTBR")] = (0.4, now)  # type: ignore[attr-defined]
+        with loop._sentiment_mgr._sentiment_lock:  # type: ignore[attr-defined]
+            loop._sentiment_mgr._sentiment_cache[("ru_blue_chips", "SBER")] = (0.6, now)  # type: ignore[attr-defined]
+            loop._sentiment_mgr._sentiment_cache[("ru_blue_chips", "VTBR")] = (0.4, now)  # type: ignore[attr-defined]
 
-        result = loop._read_decayed_sentiment(  # type: ignore[attr-defined]
+        result = loop._sentiment_mgr.read_decayed_sentiment(  # type: ignore[attr-defined]
             "ru_blue_chips", "UNKNOWN_TICKER"
         )
         # Should be average of 0.6 and 0.4 = 0.5
@@ -375,7 +377,7 @@ class TestPerTickerSentimentRead:
     def test_read_decayed_sentiment_default_when_no_entries(self) -> None:
         """_read_decayed_sentiment returns default when no entries for segment."""
         loop = _make_loop()
-        result = loop._read_decayed_sentiment("nonexistent", "SBER")  # type: ignore[attr-defined]
+        result = loop._sentiment_mgr.read_decayed_sentiment("nonexistent", "SBER")  # type: ignore[attr-defined]
         assert result == 0.0
 
     def test_get_sentiment_passes_ticker(self) -> None:
@@ -384,10 +386,10 @@ class TestPerTickerSentimentRead:
         loop._cache = None  # type: ignore[attr-defined]
         now = time.monotonic()
 
-        with loop._sentiment_lock:  # type: ignore[attr-defined]
-            loop._sentiment_cache[("ru_blue_chips", "SBER")] = (0.8, now)  # type: ignore[attr-defined]
+        with loop._sentiment_mgr._sentiment_lock:  # type: ignore[attr-defined]
+            loop._sentiment_mgr._sentiment_cache[("ru_blue_chips", "SBER")] = (0.8, now)  # type: ignore[attr-defined]
 
-        result = loop._get_sentiment("ru_blue_chips", "SBER")  # type: ignore[attr-defined]
+        result = loop._sentiment_mgr.get_sentiment("ru_blue_chips", "SBER")  # type: ignore[attr-defined]
         assert abs(result - 0.8) < 0.01
 
     def test_sector_only_article_produces_nonzero_sentiment(self) -> None:
@@ -424,9 +426,9 @@ class TestPerTickerSentimentRead:
 
         import asyncio as _aio
 
-        _aio.run(loop._apply_impact_result(result))  # type: ignore[attr-defined]
+        _aio.run(loop._news_pipeline._apply_impact_result(result))  # type: ignore[attr-defined]
 
-        cache = loop._sentiment_cache  # type: ignore[attr-defined]
+        cache = loop._sentiment_mgr._sentiment_cache  # type: ignore[attr-defined]
         score, _ts = cache[("ru_blue_chips", "SBER")]
         assert score != 0.0, "Sector-only article must produce non-zero sentiment"
 
@@ -489,7 +491,7 @@ class TestLegacyFallback:
         loop = _make_loop(news_fetcher=legacy, news_impact_analyzer=analyzer)
         loop._news_pipeline._analyze_impact_batch = AsyncMock(return_value=(1, 0, ""))  # type: ignore[attr-defined]
 
-        loop._news_cycle()  # type: ignore[attr-defined]
+        loop._news_pipeline.run_news_cycle()  # type: ignore[attr-defined]
 
         legacy.fetch_news.assert_called_once()
         loop._news_pipeline._analyze_impact_batch.assert_called_once()  # type: ignore[attr-defined]

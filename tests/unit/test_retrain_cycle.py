@@ -94,7 +94,7 @@ class TestRetrainCycle:
         registry.create_ensemble = MagicMock(return_value=mock_ensemble)
 
         with patch(_SAVE_PATCH):
-            loop._retrain_cycle()
+            loop.retrain_all()
 
         assert registry.get("us_tech") is mock_ensemble
 
@@ -107,7 +107,7 @@ class TestRetrainCycle:
         loop._fetchers["us"].fetch_candles.return_value = candles
 
         with patch(_SAVE_PATCH):
-            loop._retrain_cycle()
+            loop.retrain_all()
 
         assert registry.get("us_tech") is None
 
@@ -119,7 +119,7 @@ class TestRetrainCycle:
         loop._fetchers["us"].fetch_candles.side_effect = RuntimeError("network error")
 
         with patch(_SAVE_PATCH):
-            loop._retrain_cycle()
+            loop.retrain_all()
 
         assert registry.get("us_tech") is None
 
@@ -141,7 +141,7 @@ class TestRetrainCycle:
             labels = [1] * 100
             timestamps = [_BASE_DT + datetime.timedelta(days=i) for i in range(100)]
             mock_bw.return_value = (features, labels, timestamps)
-            loop._retrain_cycle()
+            loop.retrain_all()
 
         assert registry.get("us_tech") is None
 
@@ -163,7 +163,7 @@ class TestRetrainCycle:
             labels = [1] * 200
             timestamps = [_BASE_DT + datetime.timedelta(days=i) for i in range(200)]
             mock_bw.return_value = (features, labels, timestamps)
-            loop._retrain_cycle()
+            loop.retrain_all()
 
         # No validation data after gap → model not registered
         assert registry.get("us_tech") is None
