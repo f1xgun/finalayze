@@ -40,59 +40,37 @@ def _make_alerter(token: str = VALID_TOKEN) -> TelegramAlerter:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TelegramAlerter._send_sync
+# TelegramTransport.send (replaced _send_sync — sync path is gone)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestSendSync:
-    """_send_sync: synchronous HTTP POST used by APScheduler threads.
+    """TelegramTransport.send covers what _send_sync used to test.
 
-    Phase 57-02: ``_send_sync`` now returns ``tuple[bool, uuid.UUID | None]``
-    (alert_id is non-None only when a TradingPersistence is injected).
+    _send_sync is removed — APScheduler threads now use AlertQueue.post() which
+    bridges to the async transport via loop.call_soon_threadsafe().
+    Full HTTP tests are in test_alerter_seam_refactor.py::TestTelegramTransport.
     """
 
-    def test_send_sync_noop_with_empty_token(self) -> None:
-        """_send_sync returns (True, None) without HTTP call when token is empty."""
-        alerter = _make_alerter(token="")
-        ok, _alert_id = alerter._send_sync("test")
-        assert ok is True
-
-    def test_send_sync_returns_true_on_success(self) -> None:
-        """_send_sync returns (True, None) on HTTP 200."""
+    def test_alerter_has_no_send_sync(self) -> None:
+        """_send_sync must not exist on TelegramAlerter."""
         alerter = _make_alerter()
-        mock_resp = MagicMock(status_code=200)
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.post.return_value = mock_resp
+        assert not hasattr(alerter, "_send_sync")
 
-        with patch("finalayze.core.alerts.httpx.Client", return_value=mock_client):
-            ok, _alert_id = alerter._send_sync("hello")
-
-        assert ok is True
-        mock_client.post.assert_called_once()
-
-    def test_send_sync_returns_false_on_429(self) -> None:
-        """_send_sync returns (False, None) on HTTP 429 rate limit."""
+    def test_alerter_has_no_main_loop(self) -> None:
+        """_main_loop must not exist on TelegramAlerter."""
         alerter = _make_alerter()
-        mock_resp = MagicMock(status_code=429)
-        mock_resp.json.return_value = {"parameters": {"retry_after": 30}}
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.post.return_value = mock_resp
+        assert not hasattr(alerter, "_main_loop")
 
-        with patch("finalayze.core.alerts.httpx.Client", return_value=mock_client):
-            ok, _alert_id = alerter._send_sync("hello")
-
-        assert ok is False
-
-    def test_send_sync_exception_suppressed(self) -> None:
-        """_send_sync suppresses exceptions and returns (False, None)."""
+    def test_alerter_has_no_set_event_loop(self) -> None:
+        """set_event_loop must not exist on TelegramAlerter."""
         alerter = _make_alerter()
-        with patch("finalayze.core.alerts.httpx.Client", side_effect=Exception("network")):
-            ok, _alert_id = alerter._send_sync("hello")
-        assert ok is False
+        assert not hasattr(alerter, "set_event_loop")
+
+    def test_alerter_has_no_http_client(self) -> None:
+        """_client must not exist on TelegramAlerter — transport owns HTTP."""
+        alerter = _make_alerter()
+        assert not hasattr(alerter, "_client")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -172,48 +150,44 @@ class TestAlerterOnMethods:
 
 
 class TestSendAlertEdgeCases:
-    """send_alert routing: sync vs async, queue vs direct."""
+    """send_alert: single path through queue.post() regardless of context."""
 
-    def test_send_alert_sync_context_uses_send_sync(self) -> None:
-        """From non-async context (no running loop), uses _send_sync."""
+    def test_send_alert_calls_queue_post(self) -> None:
+        """send_alert always routes through queue.post() — no 3-way branching."""
         alerter = _make_alerter()
-        with patch.object(alerter, "_send_sync") as mock_sync:
-            # No event loop running → should call _send_sync
-            alerter.send_alert("test from thread")
-            mock_sync.assert_called_once_with("test from thread")
+        mock_queue = MagicMock(spec=TelegramMessageQueue)
+        alerter.set_queue(mock_queue)
+        alerter.send_alert("test from thread", priority=AlertPriority.INFO)
+        mock_queue.post.assert_called_once_with("test from thread", AlertPriority.INFO)
 
     def test_send_alert_with_queue_and_priority_enqueues(self) -> None:
-        """With queue attached and priority given, routes through queue.enqueue."""
-        alerter = _make_alerter()
-        mock_queue = MagicMock(spec=TelegramMessageQueue)
-        mock_queue.enqueue = AsyncMock()
-        alerter.set_queue(mock_queue)
-
-        async def _test() -> None:
-            alerter.send_alert("queued msg", priority=AlertPriority.INFO)
-            await asyncio.sleep(0.05)
-            mock_queue.enqueue.assert_called_once()
-
-        asyncio.run(_test())
-
-    def test_send_alert_with_queue_no_priority_uses_direct_send(self) -> None:
-        """With queue but no priority, uses direct _send (not enqueue)."""
+        """With queue attached and priority given, routes through queue.post."""
         alerter = _make_alerter()
         mock_queue = MagicMock(spec=TelegramMessageQueue)
         alerter.set_queue(mock_queue)
+        alerter.send_alert("queued msg", priority=AlertPriority.INFO)
+        mock_queue.post.assert_called_once()
 
-        async def _test() -> None:
-            with patch.object(alerter, "_send", new_callable=AsyncMock):
-                alerter.send_alert("no priority")
-                await asyncio.sleep(0.05)
-                mock_queue.enqueue.assert_not_called()
-
-        asyncio.run(_test())
+    def test_send_alert_with_queue_no_priority_defaults_to_info(self) -> None:
+        """With queue but no priority, defaults to AlertPriority.INFO."""
+        alerter = _make_alerter()
+        mock_queue = MagicMock(spec=TelegramMessageQueue)
+        alerter.set_queue(mock_queue)
+        alerter.send_alert("no priority")
+        mock_queue.post.assert_called_once_with("no priority", AlertPriority.INFO)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TelegramMessageQueue edge cases
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _make_queue() -> TelegramMessageQueue:
+    """Create an AlertQueue (TelegramMessageQueue alias) with mock transport."""
+    loop = asyncio.get_event_loop()
+    transport = MagicMock()
+    transport.send = AsyncMock(return_value=(True, None))
+    return TelegramMessageQueue(loop=loop, transport=transport)
 
 
 class TestQueueEdgeCases:
@@ -222,27 +196,19 @@ class TestQueueEdgeCases:
     @pytest.mark.asyncio
     async def test_batch_reverts_when_below_threshold(self) -> None:
         """If batch collection yields < 5 messages, they're put back individually."""
-        alerter = MagicMock()
-        alerter._send = AsyncMock(return_value=True)
-        queue = TelegramMessageQueue(alerter)
+        from finalayze.core.alerts import QueuedMessage
+
+        queue = _make_queue()
 
         # Enqueue 1 IMPORTANT then 1 INFO (batch won't reach threshold)
         await queue._queue.put(
-            __import__("finalayze.core.alerts", fromlist=["QueuedMessage"]).QueuedMessage(
-                priority=AlertPriority.IMPORTANT,
-                timestamp=time.monotonic(),
-                text="fill_1",
+            QueuedMessage(
+                priority=AlertPriority.IMPORTANT, timestamp=time.monotonic(), text="fill_1"
             )
         )
         # The INFO message breaks the batch collection
-        from finalayze.core.alerts import QueuedMessage
-
         await queue._queue.put(
-            QueuedMessage(
-                priority=AlertPriority.INFO,
-                timestamp=time.monotonic(),
-                text="info_msg",
-            )
+            QueuedMessage(priority=AlertPriority.INFO, timestamp=time.monotonic(), text="info_msg")
         )
         # Collect batch for IMPORTANT — should get only 1 (the INFO stops collection)
         batch = queue._collect_batch(AlertPriority.IMPORTANT)
@@ -253,9 +219,7 @@ class TestQueueEdgeCases:
     @pytest.mark.asyncio
     async def test_rate_limit_boundary_old_timestamps_purged(self) -> None:
         """Timestamps older than 60s are purged from the sliding window."""
-        alerter = MagicMock()
-        alerter._send = AsyncMock(return_value=True)
-        queue = TelegramMessageQueue(alerter)
+        queue = _make_queue()
         now = time.monotonic()
         # Fill with timestamps just outside the window (61s ago)
         window_seconds = 61
@@ -269,9 +233,9 @@ class TestQueueEdgeCases:
     @pytest.mark.asyncio
     async def test_double_start_creates_second_task(self) -> None:
         """Calling start() twice creates a new drain task (second overwrites first)."""
-        alerter = MagicMock()
-        alerter._send = AsyncMock(return_value=True)
-        queue = TelegramMessageQueue(alerter)
+        import contextlib
+
+        queue = _make_queue()
         await queue.start()
         first_task = queue._drain_task
         await queue.start()
@@ -282,7 +246,7 @@ class TestQueueEdgeCases:
         # Clean up
         if first_task and not first_task.done():
             first_task.cancel()
-            with __import__("contextlib").suppress(asyncio.CancelledError):
+            with contextlib.suppress(asyncio.CancelledError):
                 await first_task
         await queue.stop()
 
@@ -747,7 +711,7 @@ class TestBotHandlerEdgeCases:
         from finalayze.core.telegram_bot import TelegramBotHandler
 
         alerter = MagicMock()
-        alerter._send = AsyncMock(return_value=True)
+        alerter.send_async = AsyncMock(return_value=(True, None))
         settings = MagicMock()
         settings.telegram_allowed_chat_ids = allowed_chat_ids or ["123456"]
 
@@ -795,7 +759,7 @@ class TestBotHandlerEdgeCases:
         )
         assert result == {"ok": "processed"}
         # Should have called _send with "unavailable" in text
-        text = handler._alerter._send.call_args[0][0]
+        text = handler._alerter.send_async.call_args[0][0]
         assert "unavailable" in text
 
     @pytest.mark.asyncio
@@ -807,7 +771,7 @@ class TestBotHandlerEdgeCases:
             {"message": {"chat": {"id": 123456}, "text": "/status"}}
         )
         assert result == {"ok": "processed"}
-        text = handler._alerter._send.call_args[0][0]
+        text = handler._alerter.send_async.call_args[0][0]
         assert "Bond Layers" not in text
 
     @pytest.mark.asyncio
@@ -823,7 +787,7 @@ class TestBotHandlerEdgeCases:
             {"message": {"chat": {"id": 123456}, "text": "/breakers"}}
         )
         assert result == {"ok": "processed"}
-        text = handler._alerter._send.call_args[0][0]
+        text = handler._alerter.send_async.call_args[0][0]
         assert "Bond Layer Breakers" not in text
 
     @pytest.mark.asyncio
@@ -853,7 +817,7 @@ class TestWebhookEdgeCases:
         from finalayze.core.telegram_bot import TelegramBotHandler
 
         alerter = MagicMock()
-        alerter._send = AsyncMock(return_value=True)
+        alerter.send_async = AsyncMock(return_value=(True, None))
         settings = MagicMock()
         settings.telegram_allowed_chat_ids = ["123456"]
 

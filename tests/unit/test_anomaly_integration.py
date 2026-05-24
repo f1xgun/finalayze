@@ -82,7 +82,7 @@ class TestOrderingGuarantee:
 
         alerter = MagicMock(spec=TelegramAlerter)
         alerter.send_alert = MagicMock(side_effect=lambda msg: call_order.append("raw_alert"))
-        alerter._send = AsyncMock(side_effect=lambda msg: call_order.append("follow_up"))
+        alerter.send_async = AsyncMock(side_effect=lambda *a, **kw: call_order.append("follow_up"))
 
         llm_client = AsyncMock()
         llm_client.complete = AsyncMock(
@@ -119,21 +119,21 @@ class TestOrderingGuarantee:
             f"raw_alert must be first call, got order: {call_order}"
         )
 
-    def test_anomaly_detection_calls_send_alert_synchronously(self) -> None:
-        """Verify _enrich_anomaly_async uses _send (async follow-up), not send_alert.
+    def test_anomaly_detection_calls_send_async(self) -> None:
+        """Verify _enrich_anomaly_async uses send_async (direct async transport), not send_alert.
 
-        The raw sync alert (send_alert) is fired BEFORE _enrich_anomaly_async
-        is called. _enrich_anomaly_async itself only sends the async follow-up
-        via _send. This ensures the raw alert is never delayed by LLM calls.
+        _enrich_anomaly_async sends the LLM follow-up via send_async so the
+        returned alert_id threads as parent_id FK. send_alert (fire-and-forget
+        queue) must NOT be used here because we need the id.
         """
         import inspect
 
         from finalayze.core.trading_loop import TradingLoop
 
-        # After decomposition, the anomaly enrichment lives on TradingLoop
-        # as _enrich_anomaly_async. Verify it uses _send (async) not send_alert (sync).
         source = inspect.getsource(TradingLoop._enrich_anomaly_async)
-        assert "_send(" in source, "_enrich_anomaly_async must use async _send for follow-up"
+        assert "send_async(" in source, (
+            "_enrich_anomaly_async must use send_async for async follow-up"
+        )
         assert "send_alert(" not in source, (
             "_enrich_anomaly_async must NOT use sync send_alert (that's the caller's job)"
         )
@@ -148,7 +148,7 @@ class TestLLMEnrichment:
     @pytest.mark.asyncio
     async def test_follow_up_contains_unverified_label(self) -> None:
         alerter = MagicMock(spec=TelegramAlerter)
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
 
         llm_client = AsyncMock()
         llm_client.complete = AsyncMock(return_value="Likely driven by CBR rate decision")
@@ -160,8 +160,8 @@ class TestLLMEnrichment:
         anomaly = _make_anomaly_result()
         await tl._enrich_anomaly_async(_SYMBOL, _MARKET_ID, anomaly)  # type: ignore[attr-defined]
 
-        alerter._send.assert_called_once()
-        sent_text = alerter._send.call_args[0][0]
+        alerter.send_async.assert_called_once()
+        sent_text = alerter.send_async.call_args[0][0]
         assert sent_text.startswith("AI interpretation (unverified):"), (
             f"Follow-up must start with 'AI interpretation (unverified):', got: {sent_text!r}"
         )
@@ -170,7 +170,7 @@ class TestLLMEnrichment:
     @pytest.mark.asyncio
     async def test_llm_prompt_includes_anomaly_details(self) -> None:
         alerter = MagicMock(spec=TelegramAlerter)
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
 
         llm_client = AsyncMock()
         llm_client.complete = AsyncMock(return_value="explanation")
@@ -197,7 +197,7 @@ class TestGracefulDegradation:
     @pytest.mark.asyncio
     async def test_llm_timeout_logs_failure_no_follow_up(self) -> None:
         alerter = MagicMock(spec=TelegramAlerter)
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
 
         llm_client = AsyncMock()
         llm_client.complete = AsyncMock(side_effect=TimeoutError("LLM timeout"))
@@ -214,7 +214,7 @@ class TestGracefulDegradation:
             )
 
         # Follow-up must NOT be sent on timeout
-        alerter._send.assert_not_called()
+        alerter.send_async.assert_not_called()
 
         # Must log anomaly_llm_failure
         failure_logs = [log for log in captured if log.get("event") == "anomaly_llm_failure"]
@@ -225,7 +225,7 @@ class TestGracefulDegradation:
     @pytest.mark.asyncio
     async def test_llm_exception_logs_failure_no_follow_up(self) -> None:
         alerter = MagicMock(spec=TelegramAlerter)
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
 
         llm_client = AsyncMock()
         llm_client.complete = AsyncMock(side_effect=RuntimeError("LLM provider down"))
@@ -241,7 +241,7 @@ class TestGracefulDegradation:
                 _SYMBOL, _MARKET_ID, anomaly
             )
 
-        alerter._send.assert_not_called()
+        alerter.send_async.assert_not_called()
         failure_logs = [log for log in captured if log.get("event") == "anomaly_llm_failure"]
         assert len(failure_logs) >= 1
 

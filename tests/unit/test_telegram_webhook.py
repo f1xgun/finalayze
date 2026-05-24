@@ -18,7 +18,7 @@ def _make_handler(
 ) -> tuple[TelegramBotHandler, dict[str, MagicMock]]:
     """Create a TelegramBotHandler with mocked dependencies."""
     alerter = MagicMock()
-    alerter._send = AsyncMock(return_value=True)
+    alerter.send_async = AsyncMock(return_value=(True, None))
 
     broker_router = MagicMock()
     circuit_breakers: dict[str, MagicMock] = {
@@ -158,8 +158,8 @@ class TestCommandDispatch:
         )
         assert resp.status_code == 200
         # Should have called alerter._send with HTML content
-        mocks["alerter"]._send.assert_called()
-        call_text = mocks["alerter"]._send.call_args[0][0]
+        mocks["alerter"].send_async.assert_called()
+        call_text = mocks["alerter"].send_async.call_args[0][0]
         assert (
             "AAPL" in call_text or "Portfolio" in call_text.lower() or "equity" in call_text.lower()
         )
@@ -185,8 +185,8 @@ class TestCommandDispatch:
             headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
         )
         assert resp.status_code == 200
-        mocks["alerter"]._send.assert_called()
-        call_text = mocks["alerter"]._send.call_args[0][0]
+        mocks["alerter"].send_async.assert_called()
+        call_text = mocks["alerter"].send_async.call_args[0][0]
         assert "us" in call_text.lower() or "US" in call_text
         assert "normal" in call_text.lower() or "NORMAL" in call_text
 
@@ -203,7 +203,7 @@ class TestCommandDispatch:
             headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
         )
         assert resp.status_code == 200
-        mocks["alerter"]._send.assert_not_called()
+        mocks["alerter"].send_async.assert_not_called()
 
     def test_malformed_json_returns_400(self) -> None:
         """Malformed JSON body returns 400."""

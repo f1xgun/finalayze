@@ -31,7 +31,7 @@ def _make_handler(
 ) -> TelegramBotHandler:
     """Create TelegramBotHandler with mocked dependencies."""
     alerter = MagicMock()
-    alerter._send = AsyncMock(return_value=True)
+    alerter.send_async = AsyncMock(return_value=(True, None))
 
     settings = MagicMock()
     settings.telegram_allowed_chat_ids = allowed_chat_ids or ["12345", "67890"]
@@ -75,8 +75,8 @@ class TestKillCommand:
 
         await handler.handle_update(_make_update("12345", "/kill"))
 
-        handler._alerter._send.assert_called_once()
-        msg = handler._alerter._send.call_args[0][0]
+        handler._alerter.send_async.assert_called_once()
+        msg = handler._alerter.send_async.call_args[0][0]
         assert "CONFIRM" in msg
         assert "30s" in msg
 
@@ -88,8 +88,8 @@ class TestKillCommand:
 
         await handler.handle_update(_make_update("67890", "/kill"))
 
-        handler._alerter._send.assert_called_once()
-        msg = handler._alerter._send.call_args[0][0]
+        handler._alerter.send_async.assert_called_once()
+        msg = handler._alerter.send_async.call_args[0][0]
         assert "Unauthorized" in msg
         ks.activate.assert_not_called()
 
@@ -131,7 +131,7 @@ class TestKillCommand:
 
         ks.activate.assert_not_called()
         # Last _send call should mention expired
-        last_msg = handler._alerter._send.call_args[0][0]
+        last_msg = handler._alerter.send_async.call_args[0][0]
         assert "expired" in last_msg.lower()
 
     @pytest.mark.asyncio
@@ -220,7 +220,7 @@ class TestGoNoGoCommand:
             await handler.handle_update(_make_update("12345", "/gonogo"))
 
         reporter.evaluate.assert_called_once()
-        msg = handler._alerter._send.call_args[0][0]
+        msg = handler._alerter.send_async.call_args[0][0]
         assert "PROCEED" in msg
         assert "uptime_pct" in msg
 
@@ -261,7 +261,7 @@ class TestGoNoGoCommand:
         ):
             await handler.handle_update(_make_update("12345", "/gonogo"))
 
-        msg = handler._alerter._send.call_args[0][0]
+        msg = handler._alerter.send_async.call_args[0][0]
         assert "ABORT" in msg
         # Failed criterion should have fail indicator
         assert "max_drawdown_pct" in msg

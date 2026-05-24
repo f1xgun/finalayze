@@ -195,7 +195,7 @@ class TelegramBotHandler:
             except Exception:
                 _log.debug("telegram_status_bonds_failed")
 
-        await self._alerter._send("\n".join(lines))
+        await self._alerter.send_async("\n".join(lines))
 
     async def handle_stop(self, chat_id: str) -> None:
         """Emergency stop: halt all trading cycles.
@@ -207,17 +207,19 @@ class TelegramBotHandler:
         if self._trading_loop is not None:
             try:
                 self._trading_loop.stop()
-                await self._alerter._send(
+                await self._alerter.send_async(
                     "<b>TRADING HALTED</b>\n\n"
                     "All cycles stopped. Manual restart required to resume."
                 )
             except Exception:
                 _log.exception("telegram_stop_failed")
-                await self._alerter._send(
+                await self._alerter.send_async(
                     "<b>STOP FAILED</b>\n\nCheck logs. Scheduler may still be running."
                 )
         else:
-            await self._alerter._send("<b>STOP: No trading loop</b>\n\nRunning in API-only mode.")
+            await self._alerter.send_async(
+                "<b>STOP: No trading loop</b>\n\nRunning in API-only mode."
+            )
 
     async def handle_breakers(self, chat_id: str) -> None:  # noqa: ARG002
         """Show circuit breaker states for all layers.
@@ -259,7 +261,7 @@ class TelegramBotHandler:
             except Exception:
                 _log.debug("telegram_breakers_bonds_failed")
 
-        await self._alerter._send("\n".join(lines))
+        await self._alerter.send_async("\n".join(lines))
 
     async def handle_kill(self, chat_id: str) -> None:
         """Start emergency kill confirmation flow (admin-only).
@@ -269,15 +271,15 @@ class TelegramBotHandler:
         """
         admin_id = getattr(self._settings, "telegram_admin_chat_id", "")
         if chat_id != admin_id:
-            await self._alerter._send("Unauthorized: /kill requires admin access")
+            await self._alerter.send_async("Unauthorized: /kill requires admin access")
             return
 
         if self._kill_switch is None:
-            await self._alerter._send("Kill switch not configured")
+            await self._alerter.send_async("Kill switch not configured")
             return
 
         self._pending_kill[chat_id] = time.monotonic()
-        await self._alerter._send(
+        await self._alerter.send_async(
             "<b>KILL SWITCH</b>\n\nType CONFIRM to kill all trading within 30s"
         )
 
@@ -288,7 +290,7 @@ class TelegramBotHandler:
         verdict emoji and per-criterion pass/fail indicators.
         """
         if self._go_no_go_reporter is None:
-            await self._alerter._send("Go/no-go reporter not configured")
+            await self._alerter.send_async("Go/no-go reporter not configured")
             return
 
         try:
@@ -301,7 +303,7 @@ class TelegramBotHandler:
             try:
                 report = await self._go_no_go_reporter.evaluate(None)  # type: ignore[arg-type]
             except Exception:
-                await self._alerter._send("Go/no-go evaluation failed (no DB connection)")
+                await self._alerter.send_async("Go/no-go evaluation failed (no DB connection)")
                 return
 
         verdict_emoji = {
@@ -321,7 +323,7 @@ class TelegramBotHandler:
 
         lines.append(f"\n{report.reason}")
 
-        await self._alerter._send("\n".join(lines))
+        await self._alerter.send_async("\n".join(lines))
 
     async def handle_approve(self, chat_id: str, *, raw_text: str) -> None:
         """/approve <id8> — dispatch a meta-agent FIX-severity approval (58-04).
@@ -373,16 +375,16 @@ class TelegramBotHandler:
 
         elapsed = time.monotonic() - started_at
         if elapsed > self._KILL_CONFIRM_TIMEOUT_S:
-            await self._alerter._send("Confirmation expired. Send /kill again.")
+            await self._alerter.send_async("Confirmation expired. Send /kill again.")
             return {"ok": "processed"}
 
         if self._kill_switch is None:
-            await self._alerter._send("Kill switch not configured")
+            await self._alerter.send_async("Kill switch not configured")
             return {"ok": "error"}
 
         try:
             result = self._kill_switch.activate(reason=f"telegram:{chat_id}")
-            await self._alerter._send(
+            await self._alerter.send_async(
                 f"<b>KILL SWITCH ACTIVATED</b>\n\n"
                 f"Orders cancelled: {result.orders_cancelled}\n"
                 f"Scheduler stopped: {result.scheduler_stopped}\n"
@@ -392,7 +394,7 @@ class TelegramBotHandler:
             return {"ok": "processed"}
         except Exception:
             _log.exception("telegram_kill_confirm_failed")
-            await self._alerter._send("Kill switch activation failed. Check logs.")
+            await self._alerter.send_async("Kill switch activation failed. Check logs.")
             return {"ok": "error"}
 
     async def handle_meta(self, chat_id: str) -> None:  # noqa: ARG002
@@ -400,18 +402,18 @@ class TelegramBotHandler:
         from finalayze.api.v1.meta_agent import _runner as _meta_runner  # noqa: PLC0415
 
         if _meta_runner is None:
-            await self._alerter._send("Meta-agent not wired (runner=None).")
+            await self._alerter.send_async("Meta-agent not wired (runner=None).")
             return
-        await self._alerter._send("Meta-agent tick triggered...")
+        await self._alerter.send_async("Meta-agent tick triggered...")
         result = await _meta_runner.run_one_tick()
         if result is None:
-            await self._alerter._send("Meta-agent tick failed — snapshot unavailable.")
+            await self._alerter.send_async("Meta-agent tick failed — snapshot unavailable.")
             return
         severity = result.get("severity", "?")
         rationale = result.get("rationale", "")
         severity_emoji = {"HEALTHY": "✅", "WATCH": "👀", "INVESTIGATE": "⚠️", "FIX": "🚨"}
         emoji = severity_emoji.get(severity, "❓")
-        await self._alerter._send(f"{emoji} Meta-agent: {severity}\n{rationale}")
+        await self._alerter.send_async(f"{emoji} Meta-agent: {severity}\n{rationale}")
 
     def _cleanup_expired_kills(self) -> None:
         """Remove pending kill confirmations older than 60s."""

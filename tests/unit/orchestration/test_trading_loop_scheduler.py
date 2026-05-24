@@ -162,7 +162,7 @@ class TestRunPortfolioReviewAsyncMerge:
         )
 
         alerter = MagicMock()
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
         llm_client = AsyncMock()
         llm_client.parse_structured = AsyncMock(return_value=base_result)
 
@@ -197,8 +197,8 @@ class TestRunPortfolioReviewAsyncMerge:
         ):
             await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
 
-        alerter._send.assert_called_once()
-        sent_text = alerter._send.call_args[0][0]
+        alerter.send_async.assert_called_once()
+        sent_text = alerter.send_async.call_args[0][0]
         assert "Daily Recap" in sent_text
         assert "100" in sent_text
         assert "Opened: 2" in sent_text
@@ -217,7 +217,7 @@ class TestRunPortfolioReviewAsyncMerge:
         )
 
         alerter = MagicMock()
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
         llm_client = AsyncMock()
         llm_client.parse_structured = AsyncMock(return_value=base_result)
 
@@ -242,8 +242,8 @@ class TestRunPortfolioReviewAsyncMerge:
             await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
 
         # LLM advisory must still ship (no Daily Recap section).
-        alerter._send.assert_called_once()
-        sent_text = alerter._send.call_args[0][0]
+        alerter.send_async.assert_called_once()
+        sent_text = alerter.send_async.call_args[0][0]
         assert "LLM still wants to talk." in sent_text
         assert "Daily Recap" not in sent_text
 
@@ -251,7 +251,7 @@ class TestRunPortfolioReviewAsyncMerge:
     async def test_portfolio_review_async_no_persistence_guard(self) -> None:
         """When _persistence is None, method returns early without crash."""
         alerter = MagicMock()
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
         llm_client = AsyncMock()
         llm_client.parse_structured = AsyncMock()
 
@@ -267,7 +267,7 @@ class TestRunPortfolioReviewAsyncMerge:
 
         # No LLM call, no telegram send — early return.
         llm_client.parse_structured.assert_not_called()
-        alerter._send.assert_not_called()
+        alerter.send_async.assert_not_called()
 
 
 # ── Phase 58-02-07: meta-agent APScheduler job registration ─────────────────

@@ -69,7 +69,7 @@ async def test_portfolio_review_recap_e2e() -> None:
     )
 
     alerter = MagicMock()
-    alerter._send = AsyncMock(return_value=(True, None))
+    alerter.send_async = AsyncMock(return_value=(True, None))
     llm_client = AsyncMock()
     llm_client.parse_structured = AsyncMock(return_value=base_result)
     persistence, _session = _make_persistence_with_session()
@@ -96,8 +96,8 @@ async def test_portfolio_review_recap_e2e() -> None:
         await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
 
     # (a) alerter._send called once with alert_type='daily_summary'
-    alerter._send.assert_called_once()
-    call = alerter._send.call_args
+    alerter.send_async.assert_called_once()
+    call = alerter.send_async.call_args
     assert call.kwargs.get("alert_type") == "daily_summary", (
         f"Expected alert_type='daily_summary', got: {call.kwargs}"
     )
@@ -135,7 +135,7 @@ async def test_portfolio_review_no_data_graceful() -> None:
     )
 
     alerter = MagicMock()
-    alerter._send = AsyncMock(return_value=(True, None))
+    alerter.send_async = AsyncMock(return_value=(True, None))
     llm_client = AsyncMock()
     llm_client.parse_structured = AsyncMock(return_value=base_result)
     persistence, _session = _make_persistence_with_session()
@@ -162,8 +162,8 @@ async def test_portfolio_review_no_data_graceful() -> None:
         # Must not raise.
         await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
 
-    alerter._send.assert_called_once()
-    sent_text = alerter._send.call_args.args[0]
+    alerter.send_async.assert_called_once()
+    sent_text = alerter.send_async.call_args.args[0]
     # LLM advisory still ships
     assert "Quiet market day." in sent_text
     # Recap section renders with the populated count fields (Opened: 0,

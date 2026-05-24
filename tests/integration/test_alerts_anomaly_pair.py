@@ -65,7 +65,7 @@ async def test_raw_alert_passes_anomaly_raw_type() -> None:
     """Raw anomaly send fires with alert_type='anomaly_raw' and parent_id=None."""
     raw_uuid = uuid.uuid4()
     alerter = MagicMock(spec=TelegramAlerter)
-    alerter._send = AsyncMock(return_value=(True, raw_uuid))
+    alerter.send_async = AsyncMock(return_value=(True, raw_uuid))
 
     tl = _make_tl()
     tl._alerter = alerter
@@ -76,8 +76,8 @@ async def test_raw_alert_passes_anomaly_raw_type() -> None:
     raw_id = await tl._handle_anomaly_async(_SYMBOL, _MARKET_ID, anomaly, raw_text)
 
     assert raw_id == raw_uuid
-    alerter._send.assert_awaited()
-    kwargs = alerter._send.await_args.kwargs
+    alerter.send_async.assert_awaited()
+    kwargs = alerter.send_async.await_args.kwargs
     assert kwargs.get("alert_type") == "anomaly_raw", kwargs
     assert kwargs.get("parent_id") is None, kwargs
 
@@ -87,7 +87,7 @@ async def test_enrich_receives_parent_id() -> None:
     """The orchestration scheduler passes parent_id=<raw_id> to _enrich_anomaly_async."""
     raw_uuid = uuid.uuid4()
     alerter = MagicMock(spec=TelegramAlerter)
-    alerter._send = AsyncMock(return_value=(True, raw_uuid))
+    alerter.send_async = AsyncMock(return_value=(True, raw_uuid))
 
     tl = _make_tl()
     tl._alerter = alerter
@@ -126,7 +126,7 @@ async def test_enrich_passes_parent_id_to_send() -> None:
     """_enrich_anomaly_async forwards parent_id into _send(alert_type='anomaly_llm')."""
     parent_uuid = uuid.uuid4()
     alerter = MagicMock(spec=TelegramAlerter)
-    alerter._send = AsyncMock(return_value=(True, uuid.uuid4()))
+    alerter.send_async = AsyncMock(return_value=(True, uuid.uuid4()))
 
     llm_client = AsyncMock()
     llm_client.complete = AsyncMock(return_value="LLM explanation")
@@ -143,8 +143,8 @@ async def test_enrich_passes_parent_id_to_send() -> None:
         parent_id=parent_uuid,
     )
 
-    alerter._send.assert_awaited_once()
-    kwargs = alerter._send.await_args.kwargs
+    alerter.send_async.assert_awaited_once()
+    kwargs = alerter.send_async.await_args.kwargs
     assert kwargs.get("alert_type") == "anomaly_llm", kwargs
     assert kwargs.get("parent_id") == parent_uuid, kwargs
 

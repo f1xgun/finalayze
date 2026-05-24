@@ -20,7 +20,7 @@ def _make_handler(
 ) -> TelegramBotHandler:
     """Create TelegramBotHandler with mocked dependencies."""
     alerter = MagicMock()
-    alerter._send = AsyncMock()
+    alerter.send_async = AsyncMock(return_value=(True, None))
 
     settings = MagicMock()
     settings.telegram_allowed_chat_ids = allowed_chat_ids or ["123"]
@@ -55,8 +55,8 @@ class TestStopCommand:
 
         await handler.handle_stop("123")
 
-        handler._alerter._send.assert_called_once()
-        msg = handler._alerter._send.call_args[0][0]
+        handler._alerter.send_async.assert_called_once()
+        msg = handler._alerter.send_async.call_args[0][0]
         assert "TRADING HALTED" in msg
 
     @pytest.mark.asyncio
@@ -66,7 +66,7 @@ class TestStopCommand:
 
         await handler.handle_stop("123")
 
-        msg = handler._alerter._send.call_args[0][0]
+        msg = handler._alerter.send_async.call_args[0][0]
         assert "API-only mode" in msg
 
     @pytest.mark.asyncio
