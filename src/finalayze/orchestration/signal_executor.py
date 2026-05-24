@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 
 from finalayze.core.schemas import SignalDirection
+from finalayze.orchestration.cycle_stats import CycleStats
 
 if TYPE_CHECKING:
     from config.settings import Settings
@@ -77,12 +78,8 @@ class SignalExecutor:
       - _last_prices: cache during strategy cycle (populated by candle fetch)
       - _segment_min_confidence: cache preset values (lazy-loaded)
 
-    Returned dict from process_instrument includes:
-      - signals_generated: count for this instrument
-      - orders_submitted: count for this instrument
-      - orders_filled: count for this instrument
-      - errors_caught: count for this instrument
-      - dropped_no_bars, dropped_below_threshold, dropped_pre_trade: counts
+    process_instrument returns a CycleStats (see ``cycle_stats.py``) with
+    per-instrument counters; TradingLoop aggregates these across the cycle.
     """
 
     def __init__(
@@ -161,7 +158,7 @@ class SignalExecutor:
         equity: Decimal,
         cash: Decimal,
         portfolio: PortfolioState | None,
-    ) -> dict[str, Any]:
+    ) -> CycleStats:
         """Process one instrument: fetch candles, generate signal, submit order.
 
         This is the CORE trading flow. It handles:
@@ -172,32 +169,16 @@ class SignalExecutor:
           5. Order building
           6. Order submission + fill handling
 
-        Returns a dict with cycle stats:
-          - signals_generated: 0 or 1
-          - orders_submitted: 0 or 1
-          - orders_filled: 0 or 1
-          - errors_caught: count of exceptions
-          - dropped_no_bars: 1 if no valid candles
-          - dropped_below_threshold: 1 if signal below threshold
-          - dropped_pre_trade: 1 if pre-trade check failed
+        Returns a CycleStats with per-instrument counters; the caller (TradingLoop)
+        aggregates these across the strategy cycle via the __add__ operator.
         """
         from finalayze.core.exceptions import InstrumentNotFoundError  # noqa: PLC0415
-
-        stats: dict[str, int] = {
-            "signals_generated": 0,
-            "orders_submitted": 0,
-            "orders_filled": 0,
-            "errors_caught": 0,
-            "dropped_no_bars": 0,
-            "dropped_below_threshold": 0,
-            "dropped_pre_trade": 0,
-        }
 
         # Skip instruments without FIGI (delisted shares, bonds handled by bond_cycle)
         figi = getattr(instrument, "figi", None)
         if not figi:
             _log.debug("skip_no_figi", symbol=getattr(instrument, "symbol", "?"))
-            return stats
+            return CycleStats()
 
         seg_id = getattr(instrument, "segment_id", "") or "us_tech"
         symbol = getattr(instrument, "symbol", "?")
@@ -213,11 +194,10 @@ class SignalExecutor:
             )
         except InstrumentNotFoundError:
             _log.debug("skip_instrument_not_found", symbol=symbol)
-            return stats
+            return CycleStats()
         except Exception:
             _log.exception("process_instrument: failed to fetch candles for %s", symbol)
-            stats["errors_caught"] = 1
-            return stats
+            return CycleStats.error_caught()
 
         # DATA-01: Validate candles through DataNormalizer before any processing
         from finalayze.data.normalizer import DataNormalizer  # noqa: PLC0415
@@ -226,8 +206,7 @@ class SignalExecutor:
         candles = normalizer.normalize_batch(candles)
         if not candles:
             _log.warning("all_candles_invalid", symbol=symbol, market=market_id)
-            stats["dropped_no_bars"] = 1
-            return stats
+            return CycleStats.no_bars()
 
         # DATA-02: Skip instrument if latest candle is stale
         from finalayze.orchestration.trading_loop import TradingLoop  # noqa: PLC0415
@@ -239,7 +218,7 @@ class SignalExecutor:
                 latest_ts=candles[-1].timestamp.isoformat(),
                 threshold_hours=_STALENESS_THRESHOLD_HOURS,
             )
-            return stats
+            return CycleStats()
 
         # Update health monitor feed timestamp on successful fetch
         if candles and self._health_monitor is not None:
@@ -257,7 +236,7 @@ class SignalExecutor:
         # PARITY-04: Skip signal generation for symbols stopped out this cycle
         if symbol in self._position_tracker.exited_symbols:
             _log.debug("skip_reentry_guard", symbol=symbol)
-            return stats
+            return CycleStats()
 
         sentiment_score = self._sentiment_mgr.get_sentiment(seg_id, symbol)
 
@@ -321,8 +300,7 @@ class SignalExecutor:
         )
         if signal is None:
             _log.info("signal_dropped_below_threshold", symbol=symbol, segment=seg_id)
-            stats["dropped_below_threshold"] = 1
-            return stats
+            return CycleStats.signal_dropped_threshold()
 
         # Skip BUY when position already open — prevent infinite accumulation
         if has_open_position and signal.direction == SignalDirection.BUY:
@@ -331,9 +309,7 @@ class SignalExecutor:
                 symbol=symbol,
                 direction="BUY",
             )
-            return stats
-
-        stats["signals_generated"] = 1
+            return CycleStats()
 
         # Fire-and-forget signal persistence (PERSIST-02)
         if self._persistence is not None:
@@ -361,7 +337,7 @@ class SignalExecutor:
 
         # Use cached portfolio or return if unavailable
         if portfolio is None:
-            return stats
+            return CycleStats.signal_generated()
 
         # #162: Use RollingKelly for position sizing
         from finalayze.risk.kelly import RollingKelly  # noqa: PLC0415
@@ -398,7 +374,7 @@ class SignalExecutor:
                 strategy=signal.strategy_name,
                 reason="position size rounded to zero",
             )
-            return stats
+            return CycleStats.signal_generated()
 
         # #141: Run PreTradeChecker before submitting
         order_value = order.quantity * (candles[-1].close if candles else _ZERO)
@@ -497,8 +473,7 @@ class SignalExecutor:
                 strategy=signal.strategy_name,
                 violations=pre_result.violations,
             )
-            stats["dropped_pre_trade"] = 1
-            return stats
+            return CycleStats.pre_trade_rejected()
 
         # ALRT-02 (D-11/D-12/D-13/D-14): fire signal alert AFTER pre-trade pass,
         # BEFORE submit. Best-effort — never crashes the cycle.
@@ -525,9 +500,7 @@ class SignalExecutor:
         result = self._submit_order(
             order, market_id, candles=candles, strategy_name=signal.strategy_name
         )
-        stats["orders_submitted"] = 1
-        if result and result.get("filled"):
-            stats["orders_filled"] = 1
+        filled = bool(result and result.get("filled"))
 
         # 6A.7: Record day trade after successful order submission
         if is_day_trade:
@@ -539,7 +512,7 @@ class SignalExecutor:
                 if isinstance(pdt_tracker, PDTTracker):
                     pdt_tracker.record_day_trade(now.date())
 
-        return stats
+        return CycleStats.order_submitted(filled=filled)
 
     def _build_sizing_pipeline(self, segment_id: str) -> PositionSizingPipeline:
         """Build position sizing pipeline matching backtest engine step order.
