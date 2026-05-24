@@ -191,19 +191,30 @@ class SignalExecutor:
         cash: Decimal,
         portfolio: PortfolioState | None,
     ) -> CycleStats:
-        """Process one instrument through the three-stage pipeline.
+        """Process one instrument through the pipeline.
 
-        Stage 1 (fetch and generate): candle fetch + validation + stop checks +
-            signal generation. Returns SignalContext or an early CycleStats.
-        Stage 2 (validate and size): sizing pipeline + cross-market exposure +
-            pre-trade checks. Returns OrderContext or an early CycleStats.
-        Stage 3 (submit and record): alert fire + order submit + PDT recording.
-            Always returns a CycleStats.
+        Stages:
+          1a. _prepare_candles: fetch, normalize, staleness-check.
+          1b. process_from_candles: stop checks + signal generation (public seam).
+          2.  _stage_validate_and_size: sizing pipeline + pre-trade checks.
+          3.  _stage_submit_and_record: alert + submit + PDT recording.
 
         TradingLoop aggregates the returned CycleStats across the cycle via
         the __add__ operator.
         """
-        sig_or_stats = self._stage_fetch_and_generate(instrument, market_id, fetcher, now)
+        figi = getattr(instrument, "figi", None)
+        if not figi:
+            _log.debug("skip_no_figi", symbol=getattr(instrument, "symbol", "?"))
+            return CycleStats()
+
+        symbol = getattr(instrument, "symbol", "?")
+        seg_id = getattr(instrument, "segment_id", "") or "us_tech"
+
+        candles_result = self._prepare_candles(symbol, fetcher, now, market_id)
+        if isinstance(candles_result, CycleStats):
+            return candles_result
+
+        sig_or_stats = self.process_from_candles(candles_result, symbol, seg_id, market_id)
         if isinstance(sig_or_stats, CycleStats):
             return sig_or_stats
 
@@ -226,23 +237,20 @@ class SignalExecutor:
             now=now,
         )
 
-    def _stage_fetch_and_generate(  # noqa: PLR0911
+    def _prepare_candles(
         self,
-        instrument: object,
-        market_id: str,
+        symbol: str,
         fetcher: object,
         now: datetime,
-    ) -> _SignalContext | CycleStats:
-        """Stage 1: fetch and validate candles, generate signal."""
+        market_id: str,
+    ) -> list[Candle] | CycleStats:
+        """Fetch, normalize, and staleness-check candles for one symbol.
+
+        Returns the validated candle list on success, or a CycleStats early-exit
+        value on any failure (not-found, fetch error, empty after normalize, stale).
+        Side-effects: updates _health_monitor feed timestamp and _last_prices cache.
+        """
         from finalayze.core.exceptions import InstrumentNotFoundError  # noqa: PLC0415
-
-        figi = getattr(instrument, "figi", None)
-        if not figi:
-            _log.debug("skip_no_figi", symbol=getattr(instrument, "symbol", "?"))
-            return CycleStats()
-
-        seg_id = getattr(instrument, "segment_id", "") or "us_tech"
-        symbol = getattr(instrument, "symbol", "?")
 
         try:
             end = now
@@ -284,6 +292,23 @@ class SignalExecutor:
             self._health_monitor.update_feed_timestamp(now)
         self._last_prices[symbol] = Decimal(str(candles[-1].close))
 
+        return candles
+
+    def process_from_candles(
+        self,
+        candles: list[Candle],
+        symbol: str,
+        seg_id: str,
+        market_id: str,
+    ) -> _SignalContext | CycleStats:
+        """Stop checks + signal generation from pre-validated candles.
+
+        Public seam: callers can inject candles directly, bypassing fetch and
+        normalisation. Useful for testing signal-threshold logic without wiring
+        up a fetcher, DataNormalizer, or staleness check.
+
+        Returns a _SignalContext (proceed to Stage 2) or a CycleStats early-exit.
+        """
         # #157/#182: Check stop-losses against latest candle price
         self._position_tracker.check_stop_losses(market_id, symbol, candles[-1].close)
 

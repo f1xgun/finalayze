@@ -105,7 +105,7 @@ class TestFeedTimestampWiring:
 
         from finalayze.orchestration.signal_executor import SignalExecutor
 
-        source = inspect.getsource(SignalExecutor._stage_fetch_and_generate)
+        source = inspect.getsource(SignalExecutor._prepare_candles)
 
         assert "self._health_monitor.update_feed_timestamp(" in source, (
             "Missing direct call: self._health_monitor.update_feed_timestamp(now)"
