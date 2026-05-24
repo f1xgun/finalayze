@@ -355,57 +355,21 @@ class SignalExecutor:
             market_id=market_id, order_value=order_value
         )
 
-        # 6A.7: Detect day trades for PDT compliance
+        # 6A.7: Detect day trades for PDT compliance (also needed for post-fill recording)
         is_day_trade = self._is_day_trade(order.symbol, order.side, market_id)
 
-        # 6A.2: Compute sector exposure for concentration check (SIZE-02 fix)
-        sector_exposure = _ZERO
-        for pos_symbol, qty in portfolio.positions.items():
-            if qty > _ZERO:
-                # Use each position's own last known price, not current instrument's candle
-                pos_price = self._get_last_price(pos_symbol)
-                sector_exposure += qty * pos_price
-        # Only pass if we have segment context
-        seg_exposure: Decimal | None = sector_exposure if seg_id else None
-
-        # PARITY-03: Gather all pre-trade check parameters
-        # Check 9: stop_loss_price from trailing stop state (Plan 01)
-        stop_loss_price = self._position_tracker.get_stop_loss_price(symbol)
-
-        # Check 10: has_pending_order via broker
-        has_pending = self._has_pending_order(symbol, market_id)
-
-        # Check 12: regime_state from macro cache
-        regime_state = self._get_regime_state()
-
-        # Check 13: strategy_name from the signal
-        strategy_name = signal.strategy_name
-
-        # Check 14: open positions and correlations
-        open_positions = [s for s, q in portfolio.positions.items() if q > _ZERO]
-        correlations = self._get_correlations(open_positions)
-
-        pre_result = self._pre_trade_checker.check(
+        pre_result = self._run_pre_trade_check(
+            signal=signal,
             order_value=order_value,
-            portfolio_equity=portfolio.equity,
-            available_cash=portfolio.cash,
+            portfolio=portfolio,
             open_position_count=open_position_count,
             market_id=market_id,
-            dt=now,
-            circuit_breaker_level=self._get_circuit_breaker_level(market_id),
-            stop_loss_price=stop_loss_price,
-            require_stop_loss=self._position_tracker.has_stop(symbol),
-            has_pending_order=has_pending,
             symbol=symbol,
-            cross_market_exposure_pct=cross_exposure,
-            max_cross_market_exposure_pct=max_exposure,
+            seg_id=seg_id,
+            now=now,
+            cross_exposure=cross_exposure,
+            max_exposure=max_exposure,
             is_day_trade=is_day_trade,
-            sector_exposure_value=seg_exposure,
-            sector_id=seg_id,
-            regime_state=regime_state,
-            strategy_name=strategy_name,
-            open_positions=open_positions,
-            correlations=correlations,
         )
 
         if not pre_result.passed:
@@ -903,3 +867,62 @@ class SignalExecutor:
             return Decimal(str(portfolio.equity))
         except Exception:
             return None
+
+    def _compute_sector_exposure(self, portfolio: PortfolioState, seg_id: str) -> Decimal | None:
+        """Sum value of all open positions using each one's last known price (SIZE-02).
+
+        Returns None when no segment context is supplied — caller signals
+        ``sector_exposure_value=None`` to the pre-trade check.
+        """
+        if not seg_id:
+            return None
+        total = _ZERO
+        for pos_symbol, qty in portfolio.positions.items():
+            if qty > _ZERO:
+                total += qty * self._get_last_price(pos_symbol)
+        return total
+
+    def _run_pre_trade_check(
+        self,
+        *,
+        signal: Signal,
+        order_value: Decimal,
+        portfolio: PortfolioState,
+        open_position_count: int,
+        market_id: str,
+        symbol: str,
+        seg_id: str,
+        now: datetime,
+        cross_exposure: Decimal,
+        max_exposure: Decimal,
+        is_day_trade: bool,
+    ) -> Any:
+        """Gather the 14 pre-trade fields and invoke the checker.
+
+        Centralises the parameter assembly that previously lived inline in
+        ``process_instrument``. Each field is fetched from the appropriate
+        sub-component; the call site stays focused on flow control.
+        """
+        open_positions = [s for s, q in portfolio.positions.items() if q > _ZERO]
+        return self._pre_trade_checker.check(
+            order_value=order_value,
+            portfolio_equity=portfolio.equity,
+            available_cash=portfolio.cash,
+            open_position_count=open_position_count,
+            market_id=market_id,
+            dt=now,
+            circuit_breaker_level=self._get_circuit_breaker_level(market_id),
+            stop_loss_price=self._position_tracker.get_stop_loss_price(symbol),
+            require_stop_loss=self._position_tracker.has_stop(symbol),
+            has_pending_order=self._has_pending_order(symbol, market_id),
+            symbol=symbol,
+            cross_market_exposure_pct=cross_exposure,
+            max_cross_market_exposure_pct=max_exposure,
+            is_day_trade=is_day_trade,
+            sector_exposure_value=self._compute_sector_exposure(portfolio, seg_id),
+            sector_id=seg_id,
+            regime_state=self._get_regime_state(),
+            strategy_name=signal.strategy_name,
+            open_positions=open_positions,
+            correlations=self._get_correlations(open_positions),
+        )
