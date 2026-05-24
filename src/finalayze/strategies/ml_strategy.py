@@ -88,7 +88,6 @@ class MLStrategy(BaseStrategy):
         segment_id: str,
         sentiment_score: float = 0.0,  # noqa: ARG002
         has_open_position: bool = False,  # noqa: ARG002
-        **kwargs: object,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a signal from ML ensemble prediction.
 

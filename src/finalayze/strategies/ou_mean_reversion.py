@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
-from finalayze.risk.regime import MarketRegime, RegimeState
 from finalayze.strategies.base import BaseStrategy
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
@@ -299,14 +298,13 @@ class OUMeanReversionStrategy(BaseStrategy):
         """Clear cached OU parameters between backtest runs."""
         self._cached_params = {}
 
-    def generate_signal(  # noqa: PLR0911
+    def generate_signal(
         self,
         symbol: str,
         candles: list[Candle],
         segment_id: str,
         sentiment_score: float = 0.0,  # noqa: ARG002
         has_open_position: bool = False,
-        **kwargs: object,
     ) -> Signal | None:
         """Generate a mean reversion signal using OU process."""
         params = self.get_parameters(segment_id)
@@ -316,14 +314,6 @@ class OUMeanReversionStrategy(BaseStrategy):
         hl_range = params["half_life_range"]
         hl_min = int(hl_range[0])  # type: ignore[index]
         hl_max = int(hl_range[1])  # type: ignore[index]
-
-        # Regime gate
-        regime_state: RegimeState | None = kwargs.get("regime_state")  # type: ignore[assignment]
-        if regime_state is not None:
-            if regime_state.regime == MarketRegime.CRISIS:
-                return None
-            if regime_state.regime == MarketRegime.ELEVATED:
-                entry_threshold = max(entry_threshold, 2.0)
 
         # Need ou_window + 1 candles (window for fitting + 1 current bar)
         min_candles = ou_window + 1

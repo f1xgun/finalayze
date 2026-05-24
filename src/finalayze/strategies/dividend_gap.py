@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 import structlog
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
-from finalayze.risk.regime import MarketRegime, RegimeState
 from finalayze.strategies.base import BaseStrategy
 
 logger = structlog.get_logger(__name__)
@@ -133,19 +132,13 @@ class DividendGapStrategy(BaseStrategy):
         segment_id: str,
         sentiment_score: float = 0.0,  # noqa: ARG002
         has_open_position: bool = False,
-        **kwargs: object,
     ) -> Signal | None:
         """Generate dividend gap signal.
 
-        On ex-div date: BUY if gap > threshold (and regime allows).
+        On ex-div date: BUY if gap > threshold.
         After entry: SELL on gap closure or max_hold_bars reached.
         """
         if len(candles) < 2:  # noqa: PLR2004
-            return None
-
-        # Regime gate
-        regime_state: RegimeState | None = kwargs.get("regime_state")  # type: ignore[assignment]
-        if regime_state is not None and regime_state.regime == MarketRegime.CRISIS:
             return None
 
         current_candle = candles[-1]

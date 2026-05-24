@@ -205,7 +205,6 @@ class AdaptiveStrategyCombiner(StrategyCombiner):
         weight_overrides: dict[str, Decimal] | None = None,
         credibility: float = 1.0,
         event_type_code: float = 0.0,
-        **kwargs: object,  # noqa: ARG002
     ) -> Signal | None:
         """Override to use dynamic weights instead of YAML weights."""
         self._bars_since_rebalance += 1

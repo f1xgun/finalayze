@@ -13,6 +13,7 @@ import yaml
 
 from finalayze.core.schemas import Candle, MarketContext, Signal, SignalDirection
 from finalayze.strategies.adx import compute_adx
+from finalayze.strategies.event_driven import EventDrivenStrategy
 from finalayze.strategies.hrp import compute_hrp_weights
 
 logger = structlog.get_logger(__name__)
@@ -340,7 +341,6 @@ class StrategyCombiner:
         weight_overrides: dict[str, Decimal] | None = None,
         credibility: float = 1.0,
         event_type_code: float = 0.0,
-        **kwargs: object,  # noqa: ARG002
     ) -> Signal | None:
         """Generate a combined signal by weighting enabled strategy signals.
 
@@ -410,7 +410,7 @@ class StrategyCombiner:
                 self._on_strategy_signal(strategy_name, strategy, None, weight)
                 continue  # skip trend strategies in range-bound market
 
-            if strategy_name == "event_driven":
+            if strategy_name == "event_driven" and isinstance(strategy, EventDrivenStrategy):
                 signal = strategy.generate_signal(
                     symbol,
                     candles,
