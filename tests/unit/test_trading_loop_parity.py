@@ -113,9 +113,9 @@ class TestStopLossStateStorage:
 
     def test_buy_fill_stores_stop_loss_state(self) -> None:
         loop = _make_loop()
-        # Verify the loop has _stop_states dict (StopLossState-based trailing stops)
-        assert hasattr(loop, "_stop_states"), (
-            "TradingLoop must have _stop_states dict with StopLossState instances"
+        # PositionTracker owns the _stop_states dict (StopLossState-based trailing stops)
+        assert hasattr(loop._position_tracker, "_stop_states"), (
+            "PositionTracker must have _stop_states dict with StopLossState instances"
         )
         assert isinstance(loop._position_tracker._stop_states, dict)
 
@@ -315,9 +315,9 @@ class TestPipelineSizing:
         candles = [_make_candle(150.0) for _ in range(NUM_CANDLES)]
         portfolio = _make_portfolio()
 
-        # The method should now have _build_sizing_pipeline
-        assert hasattr(loop, "_build_sizing_pipeline"), (
-            "TradingLoop must have _build_sizing_pipeline method"
+        # SignalExecutor owns _build_sizing_pipeline
+        assert hasattr(loop._signal_executor, "_build_sizing_pipeline"), (
+            "SignalExecutor must have _build_sizing_pipeline method"
         )
 
         # Patch _build_sizing_pipeline to capture the call

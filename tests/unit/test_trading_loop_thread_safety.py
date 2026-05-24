@@ -50,7 +50,7 @@ class TestStopLossLock:
 
     def test_stop_loss_lock_exists(self) -> None:
         loop = _make_trading_loop()
-        assert hasattr(loop, "_stop_loss_lock")
+        assert hasattr(loop._position_tracker, "_stop_loss_lock")
         assert isinstance(loop._position_tracker._stop_loss_lock, type(threading.Lock()))
 
     def test_concurrent_writes_no_crash(self) -> None:

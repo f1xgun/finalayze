@@ -18,7 +18,7 @@ import asyncio
 import threading
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -383,70 +383,6 @@ class TradingLoop:
         self._consecutive_equity_errors: int = 0
         self._consecutive_bond_errors: int = 0
         self._MAX_CONSECUTIVE_ERRORS: int = 3
-
-    # ── Backward-compat delegation ──────────────────────────────────────────
-    # After decomposition, many attributes moved to sub-components. This
-    # __getattr__ transparently delegates access so existing tests and code
-    # that reference loop._stop_states, loop._news_cycle, etc. still work.
-
-    # Maps attribute names to (subcomponent_attr, target_attr_name).
-    # If target_attr_name is None, use the same name as the key.
-    _ATTR_DELEGATES: ClassVar[dict[str, tuple[str, str | None]]] = {
-        # PositionTracker attributes
-        "_stop_states": ("_position_tracker", None),
-        "_entry_prices": ("_position_tracker", None),
-        "_stop_loss_lock": ("_position_tracker", None),
-        "_check_stop_losses": ("_position_tracker", "check_stop_losses"),
-        "_cycle_exited_symbols": ("_position_tracker", None),
-        # SignalExecutor attributes
-        "_build_sizing_pipeline": ("_signal_executor", None),
-        # NewsPipeline attributes
-        "_news_cycle": ("_news_pipeline", "run_news_cycle"),
-        "_apply_impact_result": ("_news_pipeline", None),
-        # SentimentManager attributes
-        "_sentiment_lock": ("_sentiment_mgr", None),
-        "_sentiment_cache": ("_sentiment_mgr", None),
-        "_read_decayed_sentiment": ("_sentiment_mgr", "read_decayed_sentiment"),
-        "_get_sentiment": ("_sentiment_mgr", "get_sentiment"),
-        "_event_driven_active": ("_sentiment_mgr", None),
-        # MLRetrainingService attributes
-        "_retrain_cycle": ("_ml_retraining", "retrain_all"),
-        # DailyReportingService attributes
-        "_persist_equity_snapshots": ("_persistence", None),
-    }
-
-    def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to sub-components for backward compatibility."""
-        delegates = type(self)._ATTR_DELEGATES
-        if name in delegates:
-            target_name, attr_name = delegates[name]
-            try:
-                target = object.__getattribute__(self, target_name)
-            except AttributeError:
-                raise AttributeError(  # noqa: B904
-                    f"'{type(self).__name__}' object has no attribute {name!r}"
-                )
-            return getattr(target, attr_name if attr_name is not None else name)
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute {name!r}")
-
-    # Attributes that should be written through to subcomponents
-    _ATTR_SETTERS: ClassVar[dict[str, tuple[str, str | None]]] = {
-        "_event_driven_active": ("_sentiment_mgr", None),
-        "_sentiment_cache": ("_sentiment_mgr", None),
-    }
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        """Write through delegated attributes to sub-components."""
-        setters = type(self)._ATTR_SETTERS
-        if name in setters:
-            target_name, attr_name = setters[name]
-            try:
-                target = object.__getattribute__(self, target_name)
-                setattr(target, attr_name if attr_name is not None else name, value)
-                return
-            except AttributeError:
-                pass  # Fall through to default if subcomponent not yet initialized
-        object.__setattr__(self, name, value)
 
     def _reset_cycle_counters(self) -> None:
         """Reset per-cycle counters for CycleLogEntry tracking."""
