@@ -280,8 +280,10 @@ class TestSectorExposurePerPositionPrice:
         # the sector_exposure_value argument
         # This test will PASS after the fix but we need to verify the fix is wired in
 
-        # Direct test: verify _get_last_price helper exists and works
-        assert hasattr(loop, "_get_last_price"), "_get_last_price helper must exist after fix"
+        # Direct test: verify _get_last_price helper exists on SignalExecutor (its owner)
+        assert hasattr(loop._signal_executor, "_get_last_price"), (
+            "_get_last_price helper must exist on SignalExecutor after fix"
+        )
 
 
 class TestCautionThresholdFromPreset:

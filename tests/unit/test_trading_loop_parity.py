@@ -526,9 +526,9 @@ class TestPreTradeCheckParams:
             return_value=MagicMock(passed=True, violations=[])
         )
 
-        # Check that _has_pending_order method exists
-        assert hasattr(loop, "_has_pending_order"), (
-            "TradingLoop must have _has_pending_order method"
+        # Check that _has_pending_order method exists on SignalExecutor (its owner)
+        assert hasattr(loop._signal_executor, "_has_pending_order"), (
+            "SignalExecutor must have _has_pending_order method"
         )
 
     def test_pre_trade_receives_regime_state(self) -> None:
@@ -540,8 +540,10 @@ class TestPreTradeCheckParams:
             return_value=MagicMock(passed=True, violations=[])
         )
 
-        # Check that _get_regime_state method exists
-        assert hasattr(loop, "_get_regime_state"), "TradingLoop must have _get_regime_state method"
+        # Check that _get_regime_state method exists on SignalExecutor (its owner)
+        assert hasattr(loop._signal_executor, "_get_regime_state"), (
+            "SignalExecutor must have _get_regime_state method"
+        )
 
     def test_pre_trade_receives_strategy_name(self) -> None:
         """strategy_name from signal is passed to pre-trade check."""

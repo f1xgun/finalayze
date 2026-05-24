@@ -394,22 +394,14 @@ class TradingLoop:
     _ATTR_DELEGATES: ClassVar[dict[str, tuple[str, str | None]]] = {
         # PositionTracker attributes
         "_stop_states": ("_position_tracker", None),
-        "_entry_strategy": ("_position_tracker", None),
         "_entry_prices": ("_position_tracker", None),
         "_stop_loss_lock": ("_position_tracker", None),
         "_check_stop_losses": ("_position_tracker", "check_stop_losses"),
-        # SignalExecutor attributes
         "_cycle_exited_symbols": ("_position_tracker", None),
+        # SignalExecutor attributes
         "_build_sizing_pipeline": ("_signal_executor", None),
-        "_has_pending_order": ("_signal_executor", None),
-        "_sizing_pipeline": ("_signal_executor", None),
-        "_get_last_price": ("_signal_executor", None),
-        "_last_prices": ("_signal_executor", None),
-        "_get_regime_state": ("_signal_executor", None),
-        "_get_segment_min_confidence": ("_signal_executor", None),
         # NewsPipeline attributes
         "_news_cycle": ("_news_pipeline", "run_news_cycle"),
-        "_analyze_impact_batch": ("_news_pipeline", None),
         "_apply_impact_result": ("_news_pipeline", None),
         # SentimentManager attributes
         "_sentiment_lock": ("_sentiment_mgr", None),
@@ -421,10 +413,6 @@ class TradingLoop:
         "_retrain_cycle": ("_ml_retraining", "retrain_all"),
         # DailyReportingService attributes
         "_persist_equity_snapshots": ("_persistence", None),
-        "_persist_snapshots_async": ("_persistence", None),
-        "_load_baseline_async": ("_daily_reporter", None),
-        # TradingPersistence attributes
-        "_get_bg_session_factory": ("_persistence", None),
     }
 
     def __getattr__(self, name: str) -> Any:
