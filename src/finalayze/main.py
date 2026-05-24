@@ -35,12 +35,13 @@ _trading_loop_thread: threading.Thread | None = None
 # Module-level reference for Telegram bot handler (wired in lifespan)
 _bot_handler_instance: Any | None = None
 _telegram_poller: Any | None = None
+_alert_transport: Any | None = None
 
 
 @asynccontextmanager
 async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR0915
     """Start TradingLoop in background thread for sandbox/real modes, shut down on exit."""
-    global _trading_loop_instance, _trading_loop_thread, _telegram_poller  # noqa: PLW0603
+    global _trading_loop_instance, _trading_loop_thread, _telegram_poller, _alert_transport  # noqa: PLW0603
 
     log.info("finalayze started", mode=_settings.mode.value)
 
@@ -200,11 +201,19 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
                         _trading_loop_instance._health_monitor = health_monitor
                     health_monitor.start()
                     log.info("health_monitor_started")
-                    # Bridge alerter to uvicorn loop so APScheduler health-check
-                    # threads use run_coroutine_threadsafe instead of _send_sync.
-                    if hasattr(alerter_ref, "set_event_loop"):
-                        alerter_ref.set_event_loop(_main_loop)
-                        log.info("alerter_main_loop_wired")
+                    # Wire AlertQueue so all callers (async and APScheduler
+                    # threads) use a single thread-safe post() path.
+                    from finalayze.api.alerts import AlertQueue  # noqa: PLC0415
+                    from finalayze.api.telegram_transport import TelegramTransport  # noqa: PLC0415
+
+                    _alert_transport = TelegramTransport(
+                        bot_token=_settings.telegram_bot_token or "",
+                        chat_id=_settings.telegram_chat_id or "",
+                    )
+                    _alert_queue = AlertQueue(loop=_main_loop, transport=_alert_transport)
+                    await _alert_queue.start()
+                    alerter_ref.set_queue(_alert_queue)
+                    log.info("alerter_queue_wired")
 
                 _trading_loop_thread = threading.Thread(
                     target=_trading_loop_instance.start,
@@ -251,8 +260,7 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
     if _telegram_poller is not None:
         await _telegram_poller.stop()
 
-    # Close TelegramAlerter httpx clients to prevent resource leaks
-    # Trading loop alerter (first instance)
+    # Close alerter queue + transport (stops drain loop, closes httpx client)
     if _trading_loop_instance is not None:
         alerter_ref = getattr(_trading_loop_instance, "_alerter_ref", None)
         if alerter_ref is not None and hasattr(alerter_ref, "close"):
@@ -262,7 +270,14 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
             except Exception:
                 log.debug("trading_loop_alerter_close_failed", exc_info=True)
 
-    # Bot handler alerter (second instance)
+    if _alert_transport is not None:
+        try:
+            await _alert_transport.close()
+            log.info("alert_transport_closed")
+        except Exception:
+            log.debug("alert_transport_close_failed", exc_info=True)
+
+    # Bot handler alerter (second instance — owns its own transport)
     if _bot_handler_instance is not None:
         bot_alerter = getattr(_bot_handler_instance, "_alerter", None)
         if bot_alerter is not None and hasattr(bot_alerter, "close"):
