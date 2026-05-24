@@ -29,6 +29,11 @@ class ExposureCalculator:
     The ratio is ``(existing_invested + prospective_order) / total_equity``,
     all in the base currency. Callers compare it against the configured
     ``max_cross_market_exposure_pct`` to gate trades.
+
+    Note on market sets: total_equity sums *all known markets* (so the
+    denominator stays stable when only a subset of markets carries symbol
+    limits), while total_invested only sums markets that contributed to
+    ``symbol_limit_markets`` (matching the legacy inline behavior).
     """
 
     def __init__(
@@ -38,6 +43,7 @@ class ExposureCalculator:
         symbol_limit_markets: Iterable[str],
         settings: Settings,
         get_market_equity: Callable[[str], Decimal | None],
+        equity_markets: Iterable[str] | None = None,
     ) -> None:
         """Initialise the calculator.
 
@@ -50,11 +56,18 @@ class ExposureCalculator:
             settings: Source of ``max_cross_market_exposure_pct``.
             get_market_equity: Callable resolving a market id to its current
                 equity (or ``None`` when the market is unknown / unreachable).
+            equity_markets: Iterable of market ids whose equities sum into the
+                denominator. Defaults to the known markets in ``_MARKET_CURRENCY``
+                — i.e., the same ``["us", "moex"]`` set the legacy inline code
+                used. Pass an explicit list to override (e.g. in tests).
         """
         self._broker_router = broker_router
         self._symbol_limit_markets = list(symbol_limit_markets)
         self._settings = settings
         self._get_market_equity = get_market_equity
+        self._equity_markets = (
+            list(equity_markets) if equity_markets is not None else list(_MARKET_CURRENCY)
+        )
 
     def compute(self, *, market_id: str, order_value: Decimal) -> tuple[Decimal, Decimal]:
         """Return ``(cross_exposure_pct, max_exposure_pct)``.
@@ -83,7 +96,7 @@ class ExposureCalculator:
 
     def _total_equity_base(self, fx: object) -> Decimal:
         total = _ZERO
-        for m_id in self._symbol_limit_markets:
+        for m_id in self._equity_markets:
             equity = self._get_market_equity(m_id)
             if equity is None:
                 continue

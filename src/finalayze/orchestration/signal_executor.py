@@ -17,6 +17,7 @@ which handle their own locking. No shared mutable state on SignalExecutor itself
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -64,6 +65,34 @@ _ATR_MULTIPLIER_MOEX = Decimal("2.5")
 _MARKET_CURRENCY: dict[str, str] = {"us": "USD", "moex": "RUB"}
 
 _log = structlog.get_logger(__name__)
+
+
+# ── Stage hand-off contexts (Phase 3) ──────────────────────────────────────
+# Immutable payloads that flow between the three process_instrument stages.
+# Each stage either returns one of these (proceed) or a CycleStats (early exit).
+
+
+@dataclass(frozen=True, slots=True)
+class _SignalContext:
+    signal: Signal
+    candles: list[Candle]
+    seg_id: str
+    symbol: str
+    sentiment_score: float
+    has_open_position: bool
+    broker: Any  # routed broker for downstream alert/submit
+
+
+@dataclass(frozen=True, slots=True)
+class _OrderContext:
+    signal: Signal
+    order: OrderRequest
+    candles: list[Candle]
+    seg_id: str
+    symbol: str
+    broker: Any
+    is_day_trade: bool
+    kelly_fraction: Decimal
 
 
 class SignalExecutor:
@@ -150,7 +179,7 @@ class SignalExecutor:
         # Segment min_combined_confidence cache: seg_id -> float
         self._segment_min_confidence: dict[str, float] = {}
 
-    def process_instrument(  # noqa: PLR0911, PLR0912, PLR0915
+    def process_instrument(
         self,
         instrument: object,
         market_id: str,
@@ -161,22 +190,51 @@ class SignalExecutor:
         cash: Decimal,
         portfolio: PortfolioState | None,
     ) -> CycleStats:
-        """Process one instrument: fetch candles, generate signal, submit order.
+        """Process one instrument through the three-stage pipeline.
 
-        This is the CORE trading flow. It handles:
-          1. Candle fetch and validation
-          2. Stop-loss checks
-          3. Signal generation
-          4. Pre-trade validation
-          5. Order building
-          6. Order submission + fill handling
+        Stage 1 (fetch and generate): candle fetch + validation + stop checks +
+            signal generation. Returns SignalContext or an early CycleStats.
+        Stage 2 (validate and size): sizing pipeline + cross-market exposure +
+            pre-trade checks. Returns OrderContext or an early CycleStats.
+        Stage 3 (submit and record): alert fire + order submit + PDT recording.
+            Always returns a CycleStats.
 
-        Returns a CycleStats with per-instrument counters; the caller (TradingLoop)
-        aggregates these across the strategy cycle via the __add__ operator.
+        TradingLoop aggregates the returned CycleStats across the cycle via
+        the __add__ operator.
         """
+        sig_or_stats = self._stage_fetch_and_generate(instrument, market_id, fetcher, now)
+        if isinstance(sig_or_stats, CycleStats):
+            return sig_or_stats
+
+        ord_or_stats = self._stage_validate_and_size(
+            ctx=sig_or_stats,
+            level=level,
+            equity=equity,
+            cash=cash,
+            portfolio=portfolio,
+            market_id=market_id,
+            now=now,
+        )
+        if isinstance(ord_or_stats, CycleStats):
+            return ord_or_stats
+
+        return self._stage_submit_and_record(
+            ctx=ord_or_stats,
+            market_id=market_id,
+            equity=equity,
+            now=now,
+        )
+
+    def _stage_fetch_and_generate(  # noqa: PLR0911
+        self,
+        instrument: object,
+        market_id: str,
+        fetcher: object,
+        now: datetime,
+    ) -> _SignalContext | CycleStats:
+        """Stage 1: fetch and validate candles, generate signal."""
         from finalayze.core.exceptions import InstrumentNotFoundError  # noqa: PLC0415
 
-        # Skip instruments without FIGI (delisted shares, bonds handled by bond_cycle)
         figi = getattr(instrument, "figi", None)
         if not figi:
             _log.debug("skip_no_figi", symbol=getattr(instrument, "symbol", "?"))
@@ -186,7 +244,6 @@ class SignalExecutor:
         symbol = getattr(instrument, "symbol", "?")
 
         try:
-            # Convert limit (bar count) to date range for fetcher API
             end = now
             start = end - timedelta(days=_CANDLE_LOOKBACK * 2)  # ~2x for weekends/holidays
             candles: list[Candle] = fetcher.fetch_candles(  # type: ignore[attr-defined]
@@ -222,18 +279,12 @@ class SignalExecutor:
             )
             return CycleStats()
 
-        # Update health monitor feed timestamp on successful fetch
-        if candles and self._health_monitor is not None:
+        if self._health_monitor is not None:
             self._health_monitor.update_feed_timestamp(now)
-
-        # Cache last price for per-position sector exposure calculation (SIZE-02)
-        if candles:
-            self._last_prices[symbol] = Decimal(str(candles[-1].close))
+        self._last_prices[symbol] = Decimal(str(candles[-1].close))
 
         # #157/#182: Check stop-losses against latest candle price
-        if candles:
-            current_price = candles[-1].close
-            self._position_tracker.check_stop_losses(market_id, symbol, current_price)
+        self._position_tracker.check_stop_losses(market_id, symbol, candles[-1].close)
 
         # PARITY-04: Skip signal generation for symbols stopped out this cycle
         if symbol in self._position_tracker.exited_symbols:
@@ -241,12 +292,10 @@ class SignalExecutor:
             return CycleStats()
 
         sentiment_score = self._sentiment_mgr.get_sentiment(seg_id, symbol)
-
         broker = self._broker_router.route(market_id)
         has_open_position = broker.has_position(symbol)
 
-        # Retroactive stop: position open but no stop state (e.g. after container restart
-        # with no DB snapshot). PositionTracker computes the ATR stop and registers it.
+        # Retroactive stop for orphaned positions (e.g. after container restart).
         if has_open_position:
             self._position_tracker.maybe_register_retroactive_stop(symbol, candles, market_id)
 
@@ -261,26 +310,18 @@ class SignalExecutor:
             _log.info("signal_dropped_below_threshold", symbol=symbol, segment=seg_id)
             return CycleStats.signal_dropped_threshold()
 
-        # Skip BUY when position already open — prevent infinite accumulation
         if has_open_position and signal.direction == SignalDirection.BUY:
-            _log.debug(
-                "signal_skip_already_positioned",
-                symbol=symbol,
-                direction="BUY",
-            )
+            _log.debug("signal_skip_already_positioned", symbol=symbol, direction="BUY")
             return CycleStats()
 
-        # Fire-and-forget signal persistence (PERSIST-02)
         if self._persistence is not None:
             self._persistence.persist_signal(signal)
-
         if self._metrics:
             self._metrics.record_signal(
                 market=market_id,
                 strategy=signal.strategy_name,
                 direction=signal.direction.value,
             )
-
         _log.info(
             "signal_generated",
             symbol=symbol,
@@ -294,126 +335,162 @@ class SignalExecutor:
             features={k: round(v, 4) for k, v in signal.features.items()} or None,
         )
 
-        # Use cached portfolio or return if unavailable
+        return _SignalContext(
+            signal=signal,
+            candles=candles,
+            seg_id=seg_id,
+            symbol=symbol,
+            sentiment_score=sentiment_score,
+            has_open_position=has_open_position,
+            broker=broker,
+        )
+
+    def _stage_validate_and_size(
+        self,
+        *,
+        ctx: _SignalContext,
+        level: CircuitLevel,
+        equity: Decimal,
+        cash: Decimal,
+        portfolio: PortfolioState | None,
+        market_id: str,
+        now: datetime,
+    ) -> _OrderContext | CycleStats:
+        """Stage 2: portfolio gate, sizing, exposure, pre-trade check."""
         if portfolio is None:
             return CycleStats.signal_generated()
 
-        # #162: Use RollingKelly for position sizing
+        # #162: Kelly fraction from RollingKelly when available
         from finalayze.risk.kelly import RollingKelly  # noqa: PLC0415
 
         kelly_sizer = self._position_tracker._kelly_sizer
-        if isinstance(kelly_sizer, RollingKelly):
-            kelly_fraction = kelly_sizer.optimal_fraction()
-        else:
-            kelly_fraction = Decimal(str(getattr(self._settings, "kelly_fraction", 0.5)))
-
+        kelly_fraction = (
+            kelly_sizer.optimal_fraction()
+            if isinstance(kelly_sizer, RollingKelly)
+            else Decimal(str(getattr(self._settings, "kelly_fraction", 0.5)))
+        )
         _log.debug(
             "kelly_sizing",
-            symbol=symbol,
+            symbol=ctx.symbol,
             kelly_fraction=float(kelly_fraction),
             equity=float(equity),
             cash=float(cash),
         )
+
         order = self._build_order(
-            signal,
+            ctx.signal,
             level,
             equity,
             cash,
-            candles,
-            symbol,
+            ctx.candles,
+            ctx.symbol,
             kelly_fraction,
             portfolio=portfolio,
-            seg_id=seg_id,
+            seg_id=ctx.seg_id,
         )
         if order is None:
             _log.info(
                 "order_sizing_zero",
-                symbol=symbol,
-                direction=signal.direction.value,
-                strategy=signal.strategy_name,
+                symbol=ctx.symbol,
+                direction=ctx.signal.direction.value,
+                strategy=ctx.signal.strategy_name,
                 reason="position size rounded to zero",
             )
             return CycleStats.signal_generated()
 
-        # #141: Run PreTradeChecker before submitting
-        order_value = order.quantity * (candles[-1].close if candles else _ZERO)
+        order_value = order.quantity * (ctx.candles[-1].close if ctx.candles else _ZERO)
         open_position_count = len([q for q in portfolio.positions.values() if q > _ZERO])
 
-        # 6A.4: Cross-market exposure via ExposureCalculator (Phase 2b extraction)
+        # 6A.4: Cross-market exposure
         symbol_limit_markets = (
             self._pre_trade_checker._symbol_limits.keys()
             if hasattr(self._pre_trade_checker, "_symbol_limits")
             else []
         )
-        exposure_calc = ExposureCalculator(
+        cross_exposure, max_exposure = ExposureCalculator(
             broker_router=self._broker_router,
             symbol_limit_markets=symbol_limit_markets,
             settings=self._settings,
             get_market_equity=self._get_market_equity,
-        )
-        cross_exposure, max_exposure = exposure_calc.compute(
-            market_id=market_id, order_value=order_value
-        )
+        ).compute(market_id=market_id, order_value=order_value)
 
-        # 6A.7: Detect day trades for PDT compliance (also needed for post-fill recording)
+        # 6A.7: Detect day trades (also needed for post-fill PDT recording)
         is_day_trade = self._is_day_trade(order.symbol, order.side, market_id)
 
         pre_result = self._run_pre_trade_check(
-            signal=signal,
+            signal=ctx.signal,
             order_value=order_value,
             portfolio=portfolio,
             open_position_count=open_position_count,
             market_id=market_id,
-            symbol=symbol,
-            seg_id=seg_id,
+            symbol=ctx.symbol,
+            seg_id=ctx.seg_id,
             now=now,
             cross_exposure=cross_exposure,
             max_exposure=max_exposure,
             is_day_trade=is_day_trade,
         )
-
         if not pre_result.passed:
             _log.info(
                 "pre_trade_rejected",
-                symbol=symbol,
-                direction=signal.direction.value,
-                strategy=signal.strategy_name,
+                symbol=ctx.symbol,
+                direction=ctx.signal.direction.value,
+                strategy=ctx.signal.strategy_name,
                 violations=pre_result.violations,
             )
             return CycleStats.pre_trade_rejected()
 
+        return _OrderContext(
+            signal=ctx.signal,
+            order=order,
+            candles=ctx.candles,
+            seg_id=ctx.seg_id,
+            symbol=ctx.symbol,
+            broker=ctx.broker,
+            is_day_trade=is_day_trade,
+            kelly_fraction=kelly_fraction,
+        )
+
+    def _stage_submit_and_record(
+        self,
+        *,
+        ctx: _OrderContext,
+        market_id: str,
+        equity: Decimal,
+        now: datetime,
+    ) -> CycleStats:
+        """Stage 3: alert + submit + PDT recording."""
         # ALRT-02 (D-11/D-12/D-13/D-14): fire signal alert AFTER pre-trade pass,
         # BEFORE submit. Best-effort — never crashes the cycle.
         self._fire_signal_alert(
-            signal=signal,
+            signal=ctx.signal,
             market_id=market_id,
-            symbol=symbol,
-            broker=broker,
+            symbol=ctx.symbol,
+            broker=ctx.broker,
         )
 
-        price = candles[-1].close if candles else _ZERO
+        price = ctx.candles[-1].close if ctx.candles else _ZERO
         _log.info(
             "order_submitted",
-            symbol=symbol,
-            direction=order.side,
-            quantity=int(order.quantity),
+            symbol=ctx.symbol,
+            direction=ctx.order.side,
+            quantity=int(ctx.order.quantity),
             price=float(price),
-            value_rub=float(order.quantity * price),
-            kelly=float(kelly_fraction),
+            value_rub=float(ctx.order.quantity * price),
+            kelly=float(ctx.kelly_fraction),
             equity=float(equity),
-            strategy=signal.strategy_name,
+            strategy=ctx.signal.strategy_name,
             market=market_id,
         )
         result = self._submit_order(
-            order, market_id, candles=candles, strategy_name=signal.strategy_name
+            ctx.order, market_id, candles=ctx.candles, strategy_name=ctx.signal.strategy_name
         )
         filled = bool(result and result.get("filled"))
 
         # 6A.7: Record day trade after successful order submission
-        if is_day_trade:
+        if ctx.is_day_trade:
             from finalayze.risk.pre_trade_check import PDTTracker  # noqa: PLC0415
 
-            # Get PDT tracker from pre_trade_checker
             if hasattr(self._pre_trade_checker, "_pdt_tracker"):
                 pdt_tracker = self._pre_trade_checker._pdt_tracker
                 if isinstance(pdt_tracker, PDTTracker):

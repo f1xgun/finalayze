@@ -97,12 +97,15 @@ class TestFeedTimestampWiring:
         )
 
     def test_direct_call_pattern_present(self) -> None:
-        """The code must contain direct call to self._health_monitor.update_feed_timestamp."""
+        """The code must contain direct call to self._health_monitor.update_feed_timestamp.
+
+        After Phase 3 the call lives in the fetch stage of process_instrument.
+        """
         import inspect
 
         from finalayze.orchestration.signal_executor import SignalExecutor
 
-        source = inspect.getsource(SignalExecutor.process_instrument)
+        source = inspect.getsource(SignalExecutor._stage_fetch_and_generate)
 
         assert "self._health_monitor.update_feed_timestamp(" in source, (
             "Missing direct call: self._health_monitor.update_feed_timestamp(now)"

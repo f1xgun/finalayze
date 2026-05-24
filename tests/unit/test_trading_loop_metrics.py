@@ -59,67 +59,101 @@ class TestSubmitOrderMetrics:
 class TestProcessInstrumentMetrics:
     """Verify MetricsCollector.record_signal is called after signal generation."""
 
-    def test_record_signal_called(self) -> None:
+    def test_record_signal_called(self) -> None:  # noqa: PLR0915  # exhaustive executor setup
+        import threading
+        from datetime import UTC, datetime
+
         from finalayze.core.schemas import SignalDirection
         from finalayze.orchestration.signal_executor import SignalExecutor
 
         mc = MagicMock()
-        loop = _make_loop_stub(metrics=mc)
+
+        # Real (uninitialised) SignalExecutor so Phase 3 stage methods dispatch
+        # to their real implementations rather than MagicMock auto-attrs.
+        executor = SignalExecutor.__new__(SignalExecutor)
+        executor._metrics = mc
+        executor._strategy = MagicMock()
 
         signal = MagicMock()
         signal.direction = SignalDirection.BUY
         signal.confidence = 0.8
         signal.strategy_name = "momentum"
-        loop._strategy.generate_signal.return_value = signal
+        signal.reasoning = ""
+        signal.features = {}
+        executor._strategy.generate_signal.return_value = signal
+
+        executor._position_tracker = MagicMock()
+        executor._position_tracker._stop_states = {}
+        executor._position_tracker._stop_loss_lock = threading.Lock()
+        executor._position_tracker._cycle_exited_symbols = set()
+        executor._position_tracker.exited_symbols = set()
+        executor._position_tracker.has_stop.return_value = False
+        # RollingKelly isinstance check falls through to settings.kelly_fraction
+        executor._position_tracker._kelly_sizer = MagicMock()
+        executor._sentiment_mgr = MagicMock()
+        executor._sentiment_mgr.get_sentiment.return_value = 0.0
+        executor._persistence = None
+        executor._health_monitor = None
+        executor._sandbox_monitor = None
+        executor._alerter = MagicMock()
+        executor._registry = MagicMock()
+        executor._ml_registry = None
+        executor._loss_limit_tracker = MagicMock()
+        executor._macro_cache = None
+        executor._settings = MagicMock()
+        executor._settings.kelly_fraction = 0.5
+        executor._settings.target_vol = 0.15
+        executor._settings.max_cross_market_exposure_pct = 0.80
+        # Mock effective_risk_limits().max_position_pct so Decimal(str(...)) succeeds
+        limits = MagicMock()
+        limits.max_position_pct = 0.10
+        executor._settings.effective_risk_limits.return_value = limits
+        executor._last_prices = {}
+        executor._segment_min_confidence = {}
+
+        # Class refs that __init__ normally stamps onto the instance
+        from finalayze.execution.broker_base import OrderRequest
+        from finalayze.risk.circuit_breaker import CircuitLevel
+
+        executor._OrderRequest = OrderRequest
+        executor._CircuitLevel = CircuitLevel
+
+        # Pre-trade pass and portfolio with no positions
+        pre_result = MagicMock()
+        pre_result.passed = True
+        executor._pre_trade_checker = MagicMock()
+        executor._pre_trade_checker.check.return_value = pre_result
+
+        broker = MagicMock()
+        broker.has_position.return_value = False
+        broker.get_positions.return_value = {}  # _fire_signal_alert needs a dict
+        broker.get_portfolio.return_value = MagicMock(cash=Decimal(10000), equity=Decimal(10000))
+        broker.submit.return_value = MagicMock(filled=False, fill_price=None)
+        executor._broker_router = MagicMock()
+        executor._broker_router.route.return_value = broker
+
+        instrument = MagicMock()
+        instrument.figi = "DUMMY-FIGI"
+        instrument.symbol = "AAPL"
+        instrument.segment_id = "us_tech"
 
         candles = [_fake_candle()]
         fetcher = MagicMock()
         fetcher.fetch_candles.return_value = candles
 
-        instrument = MagicMock()
-        instrument.symbol = "AAPL"
-        instrument.segment_id = "us_tech"
-
-        from finalayze.risk.circuit_breaker import CircuitLevel
-
-        # Mock pre-trade checker to pass
-        pre_result = MagicMock()
-        pre_result.passed = True
-        loop._pre_trade_checker.check.return_value = pre_result
-
-        # Mock portfolio
         portfolio = MagicMock()
         portfolio.cash = Decimal(10000)
         portfolio.equity = Decimal(10000)
         portfolio.positions = {}
 
-        broker = MagicMock()
-        broker.has_position.return_value = False
-        loop._broker_router.route.return_value = broker
+        from finalayze.risk.circuit_breaker import CircuitLevel
 
-        # Mock submit result
-        submit_result = MagicMock()
-        submit_result.filled = True
-        submit_result.fill_price = Decimal("150.00")
-        loop._broker_router.submit.return_value = submit_result
-
-        loop._sentiment_mgr = MagicMock()
-        loop._sentiment_mgr.get_sentiment.return_value = 0.0
-        loop._segment_min_confidence = {}
-        loop._last_prices = {}
-        loop._ml_registry = None
-        loop._loss_limit_tracker = MagicMock()
-        loop._macro_cache = None
-        loop._compute_total_equity_base = MagicMock(return_value=Decimal(10000))
-        loop._get_market_equity = MagicMock(return_value=Decimal(10000))
-
-        SignalExecutor.process_instrument(
-            loop,
+        executor.process_instrument(
             instrument,
             "us",
             CircuitLevel.NORMAL,
             fetcher,
-            MagicMock(),
+            datetime.now(UTC),
             equity=Decimal(10000),
             cash=Decimal(10000),
             portfolio=portfolio,

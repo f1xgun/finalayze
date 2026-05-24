@@ -172,7 +172,9 @@ def test_retroactive_stop_set_when_position_has_no_stop_state() -> None:
 
     tracker = PositionTracker(kelly_sizer=MagicMock(), broker_router=MagicMock())
 
-    executor = MagicMock(spec=SignalExecutor)
+    # Real (uninitialised) SignalExecutor so stage methods dispatch to their
+    # real implementations rather than MagicMock auto-attrs.
+    executor = SignalExecutor.__new__(SignalExecutor)
     executor._position_tracker = tracker
     executor._settings = MagicMock()
     executor._sentiment_mgr = MagicMock()
@@ -190,6 +192,7 @@ def test_retroactive_stop_set_when_position_has_no_stop_state() -> None:
     executor._pre_trade_checker = MagicMock()
     executor._last_prices = {}
     executor._broker_router = MagicMock()
+    executor._segment_min_confidence = {}
 
     # Broker reports CBOM as open position (qty=170000)
     broker = MagicMock()

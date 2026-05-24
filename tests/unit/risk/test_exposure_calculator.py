@@ -106,6 +106,23 @@ class TestEdgeCases:
         cross, _ = calc.compute(market_id="us", order_value=_ORDER_VALUE_USD)
         assert cross == Decimal(0)
 
+    def test_default_equity_markets_covers_known_markets(self) -> None:
+        """When symbol_limit_markets is a subset, total_equity still sums
+        over the full default market set (legacy parity)."""
+        portfolios = {
+            "us": _make_portfolio(equity=_US_EQUITY, cash=_US_EQUITY),  # no invested
+            "moex": _make_portfolio(equity=_MOEX_EQUITY, cash=_MOEX_EQUITY),
+        }
+        calc = ExposureCalculator(
+            broker_router=_make_broker_router(portfolios),
+            symbol_limit_markets=[],  # nothing invested counts
+            settings=MagicMock(max_cross_market_exposure_pct=0.80),
+            get_market_equity=lambda m: _market_equity(m, portfolios),
+        )
+        # Total equity = us + moex(in USD) = 50_000 + 30_000 = 80_000; order = 5_000
+        cross, _ = calc.compute(market_id="us", order_value=_ORDER_VALUE_USD)
+        assert cross == _ORDER_VALUE_USD / Decimal(80000)
+
     def test_max_exposure_fallback_on_invalid_setting(self) -> None:
         settings = MagicMock()
         settings.max_cross_market_exposure_pct = "not a number"
@@ -126,6 +143,8 @@ class TestEdgeCases:
             symbol_limit_markets=["unknown"],
             settings=MagicMock(max_cross_market_exposure_pct=0.80),
             get_market_equity=lambda m: _market_equity(m, portfolios),
+            # Override default ["us","moex"] so "unknown" appears in the equity sum
+            equity_markets=["unknown"],
         )
         # Unknown market is treated as USD; 50 invested + 5000 order = 5050 / 100 = 50.5
         cross, _ = calc.compute(market_id="unknown", order_value=_ORDER_VALUE_USD)
