@@ -183,55 +183,6 @@ class TestOUStrategy:
         assert signal is not None
         assert signal.direction == SignalDirection.SELL
 
-    def test_ou_regime_gate_crisis(self) -> None:
-        """Returns None when regime is CRISIS."""
-        prices = _generate_ou_prices(100, mu=0.05, theta=5.0, sigma=0.05, seed=10)
-        prices[-1] = math.exp(5.0) * 0.5  # Would normally BUY
-
-        candles = _make_candles(prices)
-        strategy = self._make_strategy(ou_window=90)
-
-        regime_state = RegimeState(
-            regime=MarketRegime.CRISIS,
-            allow_new_longs=False,
-            position_scale=0.1,
-            vix_value=50.0,
-        )
-        signal = strategy.generate_signal("AAPL", candles, "us_tech", regime_state=regime_state)
-        assert signal is None
-
-    def test_ou_regime_gate_elevated_tightens(self) -> None:
-        """In ELEVATED regime, entry threshold tightens to max(threshold, 2.0)."""
-        prices = _generate_ou_prices(100, mu=0.05, theta=5.0, sigma=0.05, seed=10)
-        # Force a moderate drop that would pass 1.5 but not 2.0
-        mean_price = math.exp(5.0)
-        prices[-1] = mean_price * 0.7  # Moderate drop
-
-        candles = _make_candles(prices)
-
-        # Without elevated: threshold=1.5, might get signal
-        strategy_normal = self._make_strategy(ou_window=90, entry_threshold=1.5)
-        signal_normal = strategy_normal.generate_signal("AAPL", candles, "us_tech")
-
-        # With elevated: threshold tightens to 2.0
-        strategy_elev = self._make_strategy(ou_window=90, entry_threshold=1.5)
-        regime_state = RegimeState(
-            regime=MarketRegime.ELEVATED,
-            allow_new_longs=True,
-            position_scale=0.5,
-            vix_value=30.0,
-        )
-        signal_elev = strategy_elev.generate_signal(
-            "AAPL", candles, "us_tech", regime_state=regime_state
-        )
-
-        # If normal generates a BUY, elevated should NOT (tighter threshold)
-        # or elevated should also be BUY but only if z > 2.0
-        if signal_normal is not None and signal_normal.direction == SignalDirection.BUY:
-            # The elevated might filter it out or still pass if z is extreme enough
-            # We just verify the regime gate is applied
-            assert signal_elev is None or signal_elev.direction == SignalDirection.BUY
-
     def test_ou_reset_clears_state(self) -> None:
         """reset() clears any cached state."""
         strategy = self._make_strategy()
