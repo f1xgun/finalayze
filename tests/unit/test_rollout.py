@@ -10,7 +10,7 @@ import pytest
 from finalayze.core.modes import RolloutPhase
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
 from finalayze.risk.loss_limits import LossLimitTracker
-from finalayze.risk.pre_trade_check import PreTradeChecker
+from finalayze.risk.pre_trade_check import CheckContext, PreTradeChecker
 from finalayze.risk.rollout import ROLLOUT_LIMITS, RolloutLimits
 
 
@@ -146,12 +146,14 @@ class TestRolloutWiring:
             max_positions_per_market=5,
         )
         result = checker.check(
-            order_value=Decimal(4000),
-            portfolio_equity=Decimal(100000),
-            available_cash=Decimal(100000),
-            open_position_count=0,
-            market_id="moex",
-            dt=self._MOEX_OPEN,
+            CheckContext(
+                order_value=Decimal(4000),
+                portfolio_equity=Decimal(100000),
+                available_cash=Decimal(100000),
+                open_position_count=0,
+                market_id="moex",
+                dt=self._MOEX_OPEN,
+            )
         )
         assert not result.passed
         assert any("position" in v.lower() or "exposure" in v.lower() for v in result.violations)
@@ -163,12 +165,14 @@ class TestRolloutWiring:
             max_positions_per_market=5,
         )
         result = checker.check(
-            order_value=Decimal(2500),
-            portfolio_equity=Decimal(100000),
-            available_cash=Decimal(100000),
-            open_position_count=0,
-            market_id="moex",
-            dt=self._MOEX_OPEN,
+            CheckContext(
+                order_value=Decimal(2500),
+                portfolio_equity=Decimal(100000),
+                available_cash=Decimal(100000),
+                open_position_count=0,
+                market_id="moex",
+                dt=self._MOEX_OPEN,
+            )
         )
         assert result.passed
 

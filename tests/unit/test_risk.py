@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from finalayze.core.schemas import Candle
 from finalayze.risk.position_sizer import compute_position_size
-from finalayze.risk.pre_trade_check import PreTradeChecker
+from finalayze.risk.pre_trade_check import CheckContext, PreTradeChecker
 from finalayze.risk.stop_loss import compute_atr_stop_loss
 
 # ── Constants (ruff PLR2004: no magic numbers) ───────────────────────────
@@ -183,18 +183,23 @@ class TestPreTradeChecker:
     # A Monday during US market hours: 14:30-21:00 UTC
     _MARKET_OPEN_DT = datetime(2026, 2, 23, 15, 0, tzinfo=UTC)  # Monday 15:00 UTC
 
+    def _base_ctx(self, **overrides: object) -> CheckContext:
+        base: dict[str, object] = {
+            "order_value": SMALL_ORDER,
+            "portfolio_equity": PORTFOLIO_EQUITY,
+            "available_cash": AVAILABLE_CASH,
+            "open_position_count": POSITION_COUNT_OK,
+            "dt": self._MARKET_OPEN_DT,
+        }
+        base.update(overrides)
+        return CheckContext(**base)  # type: ignore[arg-type]
+
     def test_passes_valid_order(self) -> None:
         checker = PreTradeChecker(
             max_position_pct=MAX_POSITION_PCT,
             max_positions_per_market=MAX_POSITIONS,
         )
-        result = checker.check(
-            order_value=SMALL_ORDER,
-            portfolio_equity=PORTFOLIO_EQUITY,
-            available_cash=AVAILABLE_CASH,
-            open_position_count=POSITION_COUNT_OK,
-            dt=self._MARKET_OPEN_DT,
-        )
+        result = checker.check(self._base_ctx())
         assert result.passed is True
         assert result.violations == []
 
@@ -203,13 +208,7 @@ class TestPreTradeChecker:
             max_position_pct=MAX_POSITION_PCT,
             max_positions_per_market=MAX_POSITIONS,
         )
-        result = checker.check(
-            order_value=LARGE_ORDER,
-            portfolio_equity=PORTFOLIO_EQUITY,
-            available_cash=AVAILABLE_CASH,
-            open_position_count=POSITION_COUNT_OK,
-            dt=self._MARKET_OPEN_DT,
-        )
+        result = checker.check(self._base_ctx(order_value=LARGE_ORDER))
         assert result.passed is False
         assert len(result.violations) == 1
         assert "Position size" in result.violations[0]
@@ -219,13 +218,7 @@ class TestPreTradeChecker:
             max_position_pct=MAX_POSITION_PCT,
             max_positions_per_market=MAX_POSITIONS,
         )
-        result = checker.check(
-            order_value=HUGE_ORDER,
-            portfolio_equity=PORTFOLIO_EQUITY,
-            available_cash=AVAILABLE_CASH,
-            open_position_count=POSITION_COUNT_OK,
-            dt=self._MARKET_OPEN_DT,
-        )
+        result = checker.check(self._base_ctx(order_value=HUGE_ORDER))
         # HUGE_ORDER (60000) > AVAILABLE_CASH (50000) -> insufficient cash
         # HUGE_ORDER (60000) is 60% of equity -> exceeds max 20%
         assert result.passed is False
@@ -238,13 +231,7 @@ class TestPreTradeChecker:
             max_position_pct=MAX_POSITION_PCT,
             max_positions_per_market=MAX_POSITIONS,
         )
-        result = checker.check(
-            order_value=SMALL_ORDER,
-            portfolio_equity=PORTFOLIO_EQUITY,
-            available_cash=AVAILABLE_CASH,
-            open_position_count=POSITION_COUNT_AT_MAX,
-            dt=self._MARKET_OPEN_DT,
-        )
+        result = checker.check(self._base_ctx(open_position_count=POSITION_COUNT_AT_MAX))
         assert result.passed is False
         assert len(result.violations) == 1
         assert "Open positions" in result.violations[0]
@@ -255,11 +242,7 @@ class TestPreTradeChecker:
             max_positions_per_market=MAX_POSITIONS,
         )
         result = checker.check(
-            order_value=HUGE_ORDER,
-            portfolio_equity=PORTFOLIO_EQUITY,
-            available_cash=AVAILABLE_CASH,
-            open_position_count=POSITION_COUNT_AT_MAX,
-            dt=self._MARKET_OPEN_DT,
+            self._base_ctx(order_value=HUGE_ORDER, open_position_count=POSITION_COUNT_AT_MAX)
         )
         # Should fail on position size, cash, position count, and cash reserve (6A.3)
         expected_violation_count = 4

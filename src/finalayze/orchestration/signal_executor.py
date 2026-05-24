@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 
 from finalayze.core.schemas import SignalDirection
+from finalayze.risk.pre_trade_check import CheckContext
 
 if TYPE_CHECKING:
     from config.settings import Settings
@@ -466,7 +467,7 @@ class SignalExecutor:
         open_positions = [s for s, q in portfolio.positions.items() if q > _ZERO]
         correlations = self._get_correlations(open_positions)
 
-        pre_result = self._pre_trade_checker.check(
+        pre_ctx = CheckContext(
             order_value=order_value,
             portfolio_equity=portfolio.equity,
             available_cash=portfolio.cash,
@@ -488,6 +489,7 @@ class SignalExecutor:
             open_positions=open_positions,
             correlations=correlations,
         )
+        pre_result = self._pre_trade_checker.check(pre_ctx)
 
         if not pre_result.passed:
             _log.info(
