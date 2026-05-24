@@ -31,6 +31,26 @@ _log = structlog.get_logger()
 _DB_PERSIST_TIMEOUT = 120  # seconds — generous for fire-and-forget writes
 
 
+def _signal_features_blob(signal: Any) -> dict[str, Any] | None:
+    """Render Signal's three payload fields into the legacy ``features`` JSONB column.
+
+    Schema (DB-A migration plan): keep the column, write a nested dict so all three
+    payload fields are recoverable. ``None`` is preserved when every field is empty
+    so the column is queryable as JSONB without empty-object noise.
+    """
+    metadata_blob = signal.metadata.model_dump(mode="json")
+    payload = signal.strategy_payload
+    contribs = signal.contributions
+    has_metadata = any(v is not None and v != 0 for v in metadata_blob.values())
+    if not (has_metadata or payload or contribs):
+        return None
+    return {
+        "metadata": metadata_blob,
+        "strategy_payload": dict(payload),
+        "contributions": dict(contribs),
+    }
+
+
 class TradingPersistence:
     """Manages all fire-and-forget database persistence operations.
 
@@ -256,7 +276,7 @@ class TradingPersistence:
                 direction=signal.direction.value,
                 confidence=Decimal(str(round(signal.confidence, 4))),
                 signal_price=signal.signal_price,
-                features=signal.features or None,
+                features=_signal_features_blob(signal),
                 reasoning=signal.reasoning,
                 created_at=datetime.now(UTC),
                 mode=mode,

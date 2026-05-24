@@ -145,8 +145,12 @@ class TestSpreadStatsExcludeCurrentBar:
             )
 
         if signal is not None:
-            assert signal.features["z_score"] == pytest.approx(round(expected_z, 4), abs=1e-6)
-            assert signal.features["beta"] == pytest.approx(round(expected_beta, 4), abs=1e-6)
+            assert signal.strategy_payload["z_score"] == pytest.approx(
+                round(expected_z, 4), abs=1e-6
+            )
+            assert signal.strategy_payload["beta"] == pytest.approx(
+                round(expected_beta, 4), abs=1e-6
+            )
 
 
 class TestMinCandlesGuard:

@@ -45,7 +45,7 @@ class _StubStrategy(BaseStrategy):
                 segment_id=segment_id,
                 direction=SignalDirection.BUY,
                 confidence=0.8,
-                features={"momentum": 1.0},
+                strategy_payload={"momentum": 1.0},
                 reasoning="Test buy signal",
             )
         if idx == TRADE_DAY_SELL:
@@ -56,7 +56,7 @@ class _StubStrategy(BaseStrategy):
                 segment_id=segment_id,
                 direction=SignalDirection.SELL,
                 confidence=0.8,
-                features={"momentum": -1.0},
+                strategy_payload={"momentum": -1.0},
                 reasoning="Test sell signal",
             )
         return None

@@ -373,7 +373,7 @@ class OUMeanReversionStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={
+            strategy_payload={
                 "z_score": round(z_score, 4),
                 "ou_mu": round(ou_params.mu, 6),
                 "ou_theta": round(ou_params.theta, 4),

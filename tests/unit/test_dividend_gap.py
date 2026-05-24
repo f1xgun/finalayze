@@ -135,9 +135,9 @@ class TestSignalOnExDivDate:
         )
 
         assert signal is not None
-        assert "gap_pct" in signal.features
+        assert "gap_pct" in signal.strategy_payload
         expected_gap = _DIVIDEND_AMOUNT / float(_BASE_PRICE) * 100.0
-        assert abs(signal.features["gap_pct"] - expected_gap) < 0.1
+        assert abs(signal.strategy_payload["gap_pct"] - expected_gap) < 0.1
 
 
 # ===================================================================

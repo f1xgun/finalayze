@@ -34,7 +34,7 @@ def _make_signal(
     *,
     confidence: float = _HIGH_CONF,
     direction: SignalDirection = SignalDirection.BUY,
-    features: dict[str, float] | None = None,
+    contributions: dict[str, float] | None = None,
 ) -> Signal:
     return Signal(
         strategy_name="momentum",
@@ -43,9 +43,9 @@ def _make_signal(
         segment_id="ru_blue_chips",
         direction=direction,
         confidence=confidence,
-        features=features
-        if features is not None
-        else {"momentum_confidence": 0.72, "macd_confidence": 0.64, "rsi_confidence": 0.51},
+        contributions=contributions
+        if contributions is not None
+        else {"momentum": 0.72, "macd": 0.64, "rsi": 0.51},
         reasoning="test signal",
     )
 
@@ -96,40 +96,23 @@ def test_min_alert_confidence_is_half() -> None:
 
 
 def test_extract_strategy_contribs_sorts_desc() -> None:
-    """Contribs sorted by descending confidence, names stripped of '_confidence'."""
+    """Contribs sorted by descending confidence; names are raw strategy names."""
     executor, _alerter, _broker = _make_executor()
     signal = _make_signal(
-        features={
-            "momentum_confidence": 0.5,
-            "macd_confidence": 0.8,
-            "rsi_confidence": 0.3,
+        contributions={
+            "momentum": 0.5,
+            "macd": 0.8,
+            "rsi": 0.3,
         }
     )
     result = executor._extract_strategy_contribs(signal)
     assert result == [("macd", 0.8), ("momentum", 0.5), ("rsi", 0.3)]
 
 
-def test_extract_strategy_contribs_ignores_adx_prefix() -> None:
-    """adx_*_confidence keys (ADX routing) are NOT contributing strategies."""
+def test_extract_strategy_contribs_handles_empty_contributions() -> None:
+    """Empty contributions dict yields empty contribs list."""
     executor, _alerter, _broker = _make_executor()
-    signal = _make_signal(
-        features={
-            "momentum_confidence": 0.5,
-            "adx_trend_confidence": 0.7,
-            "adx_strength_confidence": 0.4,
-        }
-    )
-    result = executor._extract_strategy_contribs(signal)
-    names = {n for n, _ in result}
-    assert "momentum" in names
-    assert "adx_trend" not in names
-    assert "adx_strength" not in names
-
-
-def test_extract_strategy_contribs_handles_empty_features() -> None:
-    """Empty features dict yields empty contribs list."""
-    executor, _alerter, _broker = _make_executor()
-    signal = _make_signal(features={})
+    signal = _make_signal(contributions={})
     assert executor._extract_strategy_contribs(signal) == []
 
 
@@ -214,7 +197,7 @@ def test_signal_alert_strategy_breakdown_passed_through() -> None:
     signal = _make_signal(
         confidence=_HIGH_CONF,
         direction=SignalDirection.BUY,
-        features={"a_confidence": 0.3, "b_confidence": 0.9, "c_confidence": 0.6},
+        contributions={"a": 0.3, "b": 0.9, "c": 0.6},
     )
 
     _fire_alert_if_eligible(executor, signal, market_id="moex", symbol="SBER", broker=broker)

@@ -55,7 +55,7 @@ class _StubStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=SignalDirection.BUY,
             confidence=0.8,
-            features={},
+            strategy_payload={},
             reasoning="stub",
         )
 

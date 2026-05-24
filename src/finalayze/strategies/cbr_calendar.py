@@ -106,7 +106,7 @@ def generate_cbr_signal(
 
     abs_surprise = abs(event.surprise_bps)
     confidence = min(1.0, abs_surprise / _BPS_FULL_CONFIDENCE)
-    features: dict[str, float] = {
+    strategy_payload: dict[str, float] = {
         "surprise_bps": float(event.surprise_bps),
         "rate_decision": event.rate_decision,
         "expected_rate": event.expected_rate,
@@ -127,7 +127,7 @@ def generate_cbr_signal(
                     sym,
                     SignalDirection.SELL,
                     confidence,
-                    features,
+                    strategy_payload,
                     reasoning=f"CBR surprise hike +{event.surprise_bps}bp → immediate SELL",
                 )
             elif _CONTRARIAN_DELAY_MIN <= bars_since_event <= _CONTRARIAN_DELAY_MAX:
@@ -135,7 +135,7 @@ def generate_cbr_signal(
                     sym,
                     SignalDirection.BUY,
                     confidence,
-                    features,
+                    strategy_payload,
                     reasoning=(
                         f"CBR surprise hike +{event.surprise_bps}bp → "
                         f"contrarian BUY (bar {bars_since_event})"
@@ -146,7 +146,7 @@ def generate_cbr_signal(
                 sym,
                 SignalDirection.BUY,
                 confidence,
-                features,
+                strategy_payload,
                 reasoning=f"CBR surprise cut {event.surprise_bps}bp → immediate BUY",
             )
 
@@ -159,7 +159,7 @@ def _make_signal(
     symbol: str,
     direction: SignalDirection,
     confidence: float,
-    features: dict[str, float],
+    strategy_payload: dict[str, float],
     *,
     reasoning: str,
 ) -> Signal:
@@ -170,6 +170,6 @@ def _make_signal(
         segment_id=_SEGMENT_ID,
         direction=direction,
         confidence=confidence,
-        features=features,
+        strategy_payload=strategy_payload,
         reasoning=reasoning,
     )

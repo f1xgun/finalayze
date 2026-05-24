@@ -23,7 +23,7 @@ def _make_signal(
         segment_id="us_tech",
         direction=direction,
         confidence=confidence,
-        features={"score": 0.8},
+        strategy_payload={"score": 0.8},
         reasoning="test signal",
     )
 

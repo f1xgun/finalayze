@@ -144,5 +144,5 @@ class TestPairsStrategyWithKalman:
         assert isinstance(signal, Signal)
         assert signal.direction in (SignalDirection.BUY, SignalDirection.SELL)
         # Features should contain kalman-related info
-        assert "beta" in signal.features
-        assert signal.features.get("kalman") == 1.0
+        assert "beta" in signal.strategy_payload
+        assert signal.strategy_payload.get("kalman") == 1.0

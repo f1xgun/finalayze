@@ -11,7 +11,15 @@ from typing import TYPE_CHECKING
 import structlog
 import yaml
 
-from finalayze.core.schemas import Candle, MarketContext, Signal, SignalDirection
+from finalayze.core.schemas import (
+    AdxRegime,
+    Candle,
+    EventType,
+    MarketContext,
+    Signal,
+    SignalDirection,
+    SignalMetadata,
+)
 from finalayze.strategies.adx import compute_adx
 from finalayze.strategies.hrp import compute_hrp_weights
 
@@ -55,9 +63,8 @@ _TOM_BUY_BOOST = Decimal("0.05")
 # HRP allocation constants
 _HRP_MIN_HISTORY = 20
 
-# Event type codes that trigger duplicate-signal suppression (EVNT-02).
-# cbr_rate=1.0, earnings/dividend=2.0 — see _EVENT_TYPE_FLOAT_MAP in trading_loop.py.
-_DEDUP_EVENT_CODES: frozenset[float] = frozenset({1.0, 2.0})
+# Event types that trigger duplicate-signal suppression (EVNT-02). NONE is excluded.
+_DEDUP_EVENT_TYPES: frozenset[EventType] = frozenset({EventType.CBR, EventType.DIVIDEND})
 
 
 def _dedup_event_signals(
@@ -66,16 +73,16 @@ def _dedup_event_signals(
     """Find strategy names to zero when duplicate CBR/dividend events detected.
 
     Returns set of strategy names whose weight should be zeroed.
-    Per CONTEXT.md: same ticker + same cycle + same event_type_code -> zero lower-weight.
+    Per CONTEXT.md: same ticker + same cycle + same event_type -> zero lower-weight.
     """
     zeroed: set[str] = set()
-    by_code: dict[float, list[tuple[str, Decimal]]] = {}
+    by_event: dict[EventType, list[tuple[str, Decimal]]] = {}
     for name, (sig, weight) in signals_by_strategy.items():
-        code = sig.features.get("event_type_code", 0.0)
-        if code in _DEDUP_EVENT_CODES:
-            by_code.setdefault(code, []).append((name, weight))
+        event_type = sig.metadata.event_type
+        if event_type in _DEDUP_EVENT_TYPES:
+            by_event.setdefault(event_type, []).append((name, weight))
 
-    for entries in by_code.values():
+    for entries in by_event.values():
         if len(entries) < 2:  # noqa: PLR2004
             continue
         sorted_entries = sorted(entries, key=lambda e: e[1], reverse=True)
@@ -232,17 +239,20 @@ class StrategyCombiner:
     def _build_result(
         self,
         net: Decimal,
-        feature_contributions: dict[str, float],
+        *,
+        metadata: SignalMetadata,
+        contributions: dict[str, float],
+        strategy_payload: dict[str, float],
         symbol: str,
         market_id: str,
         segment_id: str,
         dominant_strategy_name: str = "combined",
         signal_price: Decimal | None = None,
     ) -> Signal:
-        """Create the combined Signal from net score and features."""
+        """Create the combined Signal from net score and split payloads."""
         direction = SignalDirection.BUY if net > _ZERO else SignalDirection.SELL
         confidence = float(min(abs(net), _MAX_CONFIDENCE))
-        strategy_count = len(feature_contributions) // 2
+        strategy_count = len(contributions)
         return Signal(
             strategy_name=dominant_strategy_name,
             symbol=symbol,
@@ -250,7 +260,9 @@ class StrategyCombiner:
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features=feature_contributions,
+            metadata=metadata,
+            contributions=contributions,
+            strategy_payload=strategy_payload,
             reasoning=(
                 f"Combined signal: net_score={float(net):.3f} from {strategy_count} strategies"
             ),
@@ -310,13 +322,13 @@ class StrategyCombiner:
     ) -> None:
         """Hook: called after each strategy fires (including None signals)."""
 
-    def _on_normalized(self, net: float, features: dict[str, float]) -> None:
+    def _on_normalized(self, net: float, strategy_payload: dict[str, float]) -> None:
         """Hook: called after normalization (or 0.0 on early return)."""
 
     def _on_final_signal(
         self,
         signal: Signal | None,
-        contributions: dict[str, float],
+        strategy_payload: dict[str, float],
     ) -> None:
         """Hook: called with the final signal (or None if below threshold)."""
 
@@ -357,15 +369,18 @@ class StrategyCombiner:
         total_weight = _ZERO
         total_enabled_weight = _ZERO
         data_ready_weight = _ZERO  # strategies registered + enabled (data-ready)
-        feature_contributions: dict[str, float] = {}
+        contributions: dict[str, float] = {}  # {strategy_name: confidence}
+        strategy_payload: dict[str, float] = {}  # display data (direction floats, hrp, etc.)
+        firing_names: set[str] = set()
         dominant_strategy_name = "combined"
         dominant_contribution = _ZERO
         collected: dict[str, tuple[Signal, Decimal]] = {}
 
         # ADX regime routing
         adx_value, regime = self._compute_adx_regime(symbol, candles, config)
-        feature_contributions["adx_value"] = adx_value if adx_value is not None else 0.0
-        feature_contributions["adx_regime"] = {"trend": 1.0, "mr": -1.0, "ambiguous": 0.0}[regime]
+        adx_regime_enum: AdxRegime | None = (
+            AdxRegime(regime) if regime in {r.value for r in AdxRegime} else None
+        )
 
         # Per-pool score tracking for ambiguous regime dominant-pool-wins logic
         trend_score = _ZERO
@@ -445,8 +460,9 @@ class StrategyCombiner:
             if abs(contribution) > abs(dominant_contribution):
                 dominant_contribution = contribution
                 dominant_strategy_name = strategy_name
-            feature_contributions[f"{strategy_name}_confidence"] = signal.confidence
-            feature_contributions[f"{strategy_name}_direction"] = (
+            contributions[strategy_name] = signal.confidence
+            firing_names.add(strategy_name)
+            strategy_payload[f"{strategy_name}_direction"] = (
                 1.0 if signal.direction == SignalDirection.BUY else -1.0
             )
             collected[strategy_name] = (signal, weight)
@@ -473,17 +489,14 @@ class StrategyCombiner:
                 total_weight = mr_weight + neutral_weight
 
         if total_weight == _ZERO:
-            self._on_normalized(0.0, feature_contributions)
-            self._on_final_signal(None, feature_contributions)
+            self._on_normalized(0.0, strategy_payload)
+            self._on_final_signal(None, strategy_payload)
             return None
 
         # Reinforcer-only check: if every firing strategy is a reinforcer, suppress the signal.
-        firing_names = {
-            name for name in self._strategies if f"{name}_confidence" in feature_contributions
-        }
         if firing_names and firing_names <= _REINFORCER_STRATEGIES:
-            self._on_normalized(0.0, feature_contributions)
-            self._on_final_signal(None, feature_contributions)
+            self._on_normalized(0.0, strategy_payload)
+            self._on_final_signal(None, strategy_payload)
             return None
 
         if effective_normalize == "total":
@@ -493,8 +506,8 @@ class StrategyCombiner:
         else:  # "firing" (default)
             denominator = total_weight
         if denominator == _ZERO:
-            self._on_normalized(0.0, feature_contributions)
-            self._on_final_signal(None, feature_contributions)
+            self._on_normalized(0.0, strategy_payload)
+            self._on_final_signal(None, strategy_payload)
             return None
         net = weighted_score / denominator
 
@@ -505,16 +518,16 @@ class StrategyCombiner:
             and net > _ZERO
         ):
             net += _TOM_BUY_BOOST
-            feature_contributions["turn_of_month"] = 1.0
+            strategy_payload["turn_of_month"] = 1.0
         else:
-            feature_contributions["turn_of_month"] = 0.0
+            strategy_payload["turn_of_month"] = 0.0
 
         # Add HRP weight features when using HRP allocation
         if hrp_overrides is not None:
             for sname, sweight in hrp_overrides.items():
-                feature_contributions[f"hrp_weight_{sname}"] = float(sweight)
+                strategy_payload[f"hrp_weight_{sname}"] = float(sweight)
 
-        self._on_normalized(float(net), feature_contributions)
+        self._on_normalized(float(net), strategy_payload)
 
         threshold = self._effective_threshold(
             config, effective_min_confidence, has_open_position, net
@@ -531,12 +544,11 @@ class StrategyCombiner:
             firing = {
                 name: {
                     "direction": (
-                        "BUY" if feature_contributions.get(f"{name}_direction", 0) > 0 else "SELL"
+                        "BUY" if strategy_payload.get(f"{name}_direction", 0) > 0 else "SELL"
                     ),
-                    "confidence": feature_contributions.get(f"{name}_confidence", 0),
+                    "confidence": contributions.get(name, 0.0),
                 }
-                for name in self._strategies
-                if f"{name}_confidence" in feature_contributions
+                for name in firing_names
             }
             if firing:
                 logger.debug(
@@ -546,19 +558,25 @@ class StrategyCombiner:
                     net_score=float(net),
                     threshold=float(threshold),
                 )
-            self._on_final_signal(None, feature_contributions)
+            self._on_final_signal(None, strategy_payload)
             return None
 
+        metadata = SignalMetadata(
+            adx_value=adx_value,
+            adx_regime=adx_regime_enum,
+        )
         result = self._build_result(
             net,
-            feature_contributions,
-            symbol,
-            candles[0].market_id,
-            segment_id,
+            metadata=metadata,
+            contributions=contributions,
+            strategy_payload=strategy_payload,
+            symbol=symbol,
+            market_id=candles[0].market_id,
+            segment_id=segment_id,
             dominant_strategy_name=dominant_strategy_name,
             signal_price=Decimal(str(candles[-1].close)),
         )
-        self._on_final_signal(result, feature_contributions)
+        self._on_final_signal(result, strategy_payload)
         return result
 
     def _load_config(self, segment_id: str) -> dict[str, object]:

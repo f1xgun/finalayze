@@ -134,7 +134,7 @@ class CBREventStrategy:
             segment_id=_SEGMENT_ID,
             direction=SignalDirection.SELL,
             confidence=_SELL_CONFIDENCE,
-            features={"exit_type": 1.0, "days_after_meeting": 1.0},
+            strategy_payload={"exit_type": 1.0, "days_after_meeting": 1.0},
             reasoning=f"CBR event exit: T+1/T+2 mechanical close for {symbol}",
             instrument_type="bond",
         )
@@ -178,7 +178,7 @@ class CBREventStrategy:
             segment_id=_SEGMENT_ID,
             direction=SignalDirection.BUY,
             confidence=_BUY_CONFIDENCE,
-            features={
+            strategy_payload={
                 "days_to_meeting": float(days_remaining),
                 "ruonia_gap": float(gap),
             },

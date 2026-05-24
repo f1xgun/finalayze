@@ -245,7 +245,7 @@ class BacktestPositionExecutor:
         # Compute ML confidence from MetaLabeler if available
         ml_confidence: float | None = None
         if self._meta_labeler is not None and signal is not None:
-            ml_confidence = self._meta_labeler.predict(signal, signal.features)
+            ml_confidence = self._meta_labeler.predict(signal, signal.strategy_payload)
 
         context = SizingContext(
             equity=portfolio.equity,

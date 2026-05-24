@@ -428,7 +428,7 @@ class _FixedSignalStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=self._direction,
             confidence=self._confidence,
-            features={},
+            strategy_payload={},
             reasoning="test",
         )
 
@@ -667,7 +667,7 @@ class TestBacktestStopLossCosts:
                         segment_id=segment_id,
                         direction=SignalDirection.BUY,
                         confidence=0.9,
-                        features={},
+                        strategy_payload={},
                         reasoning="test",
                     )
                 return None

@@ -9,7 +9,7 @@ import pandas as pd
 import pandas_ta as ta
 import yaml
 
-from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.core.schemas import Candle, Signal, SignalDirection, SignalMetadata
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.ichimoku import compute_ichimoku
 from finalayze.strategies.vol_targeting import compute_vol_scale
@@ -204,26 +204,21 @@ class MomentumStrategy(BaseStrategy):
             ):
                 confidence = min(1.0, confidence + normalized_thickness * ichimoku_conf_max_boost)
 
-        # Build features dict
-        features: dict[str, float] = {
+        strategy_payload: dict[str, float] = {
             "rsi": round(indicators.current_rsi, 2),
             "rsi_value": round(indicators.current_rsi, 4),
             "macd_hist": round(indicators.current_hist, 4),
             "sma_trend": sma_trend,
-            "adx_value": round(indicators.current_adx, 4)
-            if indicators.current_adx is not None
-            else 0.0,
             "volume_ratio": round(indicators.volume_ratio, 4)
             if indicators.volume_ratio is not None
             else 0.0,
             "sentiment_score": round(sentiment_score, 4),
         }
 
-        # Add Ichimoku features when filter is active
         if indicators.ichimoku_bullish is not None:
-            features["ichimoku_bullish"] = 1.0 if indicators.ichimoku_bullish else 0.0
-            features["ichimoku_bearish"] = 1.0 if indicators.ichimoku_bearish else 0.0
-            features["ichimoku_cloud_thickness"] = round(
+            strategy_payload["ichimoku_bullish"] = 1.0 if indicators.ichimoku_bullish else 0.0
+            strategy_payload["ichimoku_bearish"] = 1.0 if indicators.ichimoku_bearish else 0.0
+            strategy_payload["ichimoku_cloud_thickness"] = round(
                 indicators.ichimoku_cloud_thickness or 0.0, 4
             )
 
@@ -234,7 +229,8 @@ class MomentumStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features=features,
+            metadata=SignalMetadata(adx_value=indicators.current_adx),
+            strategy_payload=strategy_payload,
             reasoning=(
                 f"RSI={indicators.current_rsi:.1f} (recently {rsi_label}), "
                 f"MACD histogram {hist_label}"

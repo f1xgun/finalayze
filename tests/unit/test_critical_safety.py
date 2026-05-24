@@ -92,7 +92,7 @@ def _make_buy_signal() -> Signal:
         segment_id=SEGMENT_US_TECH,
         direction=SignalDirection.BUY,
         confidence=0.75,
-        features={},
+        strategy_payload={},
         reasoning="test signal",
     )
 

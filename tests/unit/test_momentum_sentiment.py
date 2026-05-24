@@ -99,8 +99,8 @@ class TestMomentumSentiment:
         signal = strategy.generate_signal("AAPL", candles, _SEGMENT, sentiment_score=0.5)
 
         if signal is not None:
-            assert "sentiment_score" in signal.features
-            assert signal.features["sentiment_score"] == 0.5
+            assert "sentiment_score" in signal.strategy_payload
+            assert signal.strategy_payload["sentiment_score"] == 0.5
 
     def test_confidence_capped_at_one(self) -> None:
         """Even with extreme sentiment, confidence must stay <= 1.0."""

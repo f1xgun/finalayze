@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.core.schemas import AdxRegime, Candle, Signal, SignalDirection
 from finalayze.strategies.adx import compute_adx
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.combiner import StrategyCombiner
@@ -60,7 +60,7 @@ def _make_signal(
         segment_id=segment_id,
         direction=direction,
         confidence=confidence,
-        features={"mock_feature": confidence},
+        strategy_payload={"mock_feature": confidence},
         reasoning=f"Mock signal: {direction} at {confidence}",
     )
 
@@ -200,7 +200,7 @@ class TestADXRegimeRouting:
         # Signal should still be produced from momentum
         assert signal is not None
         assert signal.direction == SignalDirection.BUY
-        assert signal.features["adx_regime"] == 1.0  # trend
+        assert signal.metadata.adx_regime == AdxRegime.TREND
 
     def test_regime_mr_skips_trend_strategies(self) -> None:
         """When ADX regime is 'mr', trend/momentum strategies are skipped."""
@@ -253,7 +253,7 @@ class TestADXRegimeRouting:
         # Signal should come from MR
         assert signal is not None
         assert signal.direction == SignalDirection.BUY
-        assert signal.features["adx_regime"] == -1.0  # mr
+        assert signal.metadata.adx_regime == AdxRegime.MR
 
     def test_regime_ambiguous_dominant_pool_wins(self) -> None:
         """In ambiguous zone (15 <= ADX <= 35), the pool with higher score wins."""
@@ -283,7 +283,7 @@ class TestADXRegimeRouting:
         # So momentum pool wins -> BUY
         assert signal is not None
         assert signal.direction == SignalDirection.BUY
-        assert signal.features["adx_regime"] == 0.0  # ambiguous
+        assert signal.metadata.adx_regime == AdxRegime.AMBIGUOUS
 
     def test_regime_ambiguous_mr_pool_wins_when_stronger(self) -> None:
         """In ambiguous zone, MR pool wins when it has stronger score."""
@@ -378,7 +378,7 @@ class TestADXRegimeRouting:
         assert signal is not None
 
     def test_adx_features_in_signal(self) -> None:
-        """Combined signal features contain adx_value and adx_regime."""
+        """Combined signal metadata carries adx_value and adx_regime."""
         mom_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
         momentum = MockStrategy("momentum", mom_signal)
 
@@ -399,10 +399,8 @@ class TestADXRegimeRouting:
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
 
         assert signal is not None
-        assert "adx_value" in signal.features
-        assert signal.features["adx_value"] == pytest.approx(40.0)
-        assert "adx_regime" in signal.features
-        assert signal.features["adx_regime"] == 1.0  # trend
+        assert signal.metadata.adx_value == pytest.approx(40.0)
+        assert signal.metadata.adx_regime == AdxRegime.TREND
 
 
 # ── ADX regime transition tests ──────────────────────────────────────────────
@@ -444,7 +442,7 @@ class TestADXHysteresis:
         ):
             sig1 = combiner.generate_signal("AAPL", candles, "us_broad")
         assert sig1 is not None
-        assert sig1.features["adx_regime"] == 1.0  # trend
+        assert sig1.metadata.adx_regime == AdxRegime.TREND
 
         # Second call: ADX=28 -> "ambiguous" (no hysteresis, 28 < 35)
         with (
@@ -453,7 +451,7 @@ class TestADXHysteresis:
         ):
             sig2 = combiner.generate_signal("AAPL", candles, "us_broad")
         assert sig2 is not None
-        assert sig2.features["adx_regime"] == 0.0  # ambiguous
+        assert sig2.metadata.adx_regime == AdxRegime.AMBIGUOUS
 
     def test_adx_hysteresis_mr_no_sticky(self) -> None:
         """ADX 14 -> 22: transitions to 'ambiguous' immediately (hysteresis=0)."""
@@ -472,7 +470,7 @@ class TestADXHysteresis:
         ):
             sig1 = combiner.generate_signal("AAPL", candles, "us_broad")
         assert sig1 is not None
-        assert sig1.features["adx_regime"] == -1.0  # mr
+        assert sig1.metadata.adx_regime == AdxRegime.MR
 
         # Second call: ADX=22 -> "ambiguous" (no hysteresis, 22 > 15)
         with (
@@ -481,7 +479,7 @@ class TestADXHysteresis:
         ):
             sig2 = combiner.generate_signal("AAPL", candles, "us_broad")
         assert sig2 is not None
-        assert sig2.features["adx_regime"] == 0.0  # ambiguous
+        assert sig2.metadata.adx_regime == AdxRegime.AMBIGUOUS
 
     def test_adx_hysteresis_breaks_through(self) -> None:
         """ADX 36 -> 25: transitions from 'trend' to 'ambiguous' (25 < 35)."""
@@ -500,7 +498,7 @@ class TestADXHysteresis:
         ):
             sig1 = combiner.generate_signal("AAPL", candles, "us_broad")
         assert sig1 is not None
-        assert sig1.features["adx_regime"] == 1.0  # trend
+        assert sig1.metadata.adx_regime == AdxRegime.TREND
 
         # Second call: ADX=25 -> transitions to "ambiguous" (25 < 35, no hysteresis)
         with (
@@ -509,7 +507,7 @@ class TestADXHysteresis:
         ):
             sig2 = combiner.generate_signal("AAPL", candles, "us_broad")
         assert sig2 is not None
-        assert sig2.features["adx_regime"] == 0.0  # ambiguous
+        assert sig2.metadata.adx_regime == AdxRegime.AMBIGUOUS
 
     def test_adx_hysteresis_per_symbol_independent(self) -> None:
         """AAPL in 'trend' and MSFT in 'mr' simultaneously (per-symbol state)."""
@@ -521,7 +519,7 @@ class TestADXHysteresis:
             segment_id="us_broad",
             direction=SignalDirection.BUY,
             confidence=HIGH_CONFIDENCE,
-            features={"mock_feature": HIGH_CONFIDENCE},
+            strategy_payload={"mock_feature": HIGH_CONFIDENCE},
             reasoning="Mock MR signal",
         )
         momentum = MockStrategy("momentum", mom_signal_aapl)
@@ -607,14 +605,14 @@ class TestTOMUSOnly:
         with patch.object(combiner_us, "_load_config", return_value=config):
             sig_us = combiner_us.generate_signal("AAPL", candles, "us_tech")
         assert sig_us is not None
-        assert sig_us.features["turn_of_month"] == 1.0
+        assert sig_us.strategy_payload["turn_of_month"] == 1.0
 
         # RU segment: TOM boost should NOT apply
         combiner_ru = StrategyCombiner([MockStrategy("momentum", buy_signal)])
         with patch.object(combiner_ru, "_load_config", return_value=config):
             sig_ru = combiner_ru.generate_signal("SBER", candles, "ru_blue_chips")
         assert sig_ru is not None
-        assert sig_ru.features["turn_of_month"] == 0.0
+        assert sig_ru.strategy_payload["turn_of_month"] == 0.0
 
 
 # ── Dual momentum SELL signal tests ──────────────────────────────────────────

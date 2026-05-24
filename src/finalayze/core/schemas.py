@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from dataclasses import field as dc_field
 from datetime import date, datetime  # noqa: TC003
 from decimal import Decimal
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID  # noqa: TC003
 
@@ -63,6 +63,46 @@ class Candle(BaseModel):
         return v
 
 
+class EventType(IntEnum):
+    """Event type code carried on Signal.metadata.
+
+    Read by ``StrategyCombiner._dedup_event_signals``: same ticker + cycle +
+    event_type collapses to the highest-weighted contributor.
+    """
+
+    NONE = 0
+    CBR = 1
+    DIVIDEND = 2
+
+
+class AdxRegime(StrEnum):
+    """ADX-derived market regime carried on Signal.metadata.
+
+    Written by ``StrategyCombiner`` after computing ADX. Read by display/
+    alerting layers.
+    """
+
+    TREND = "trend"
+    MR = "mr"
+    AMBIGUOUS = "ambiguous"
+
+
+class SignalMetadata(BaseModel):
+    """Cross-module protocol fields attached to every Signal.
+
+    Only fields read by a module *other than* the producer belong here. Per-
+    strategy internal numbers live on ``Signal.strategy_payload``; per-strategy
+    confidence contributions from the combiner live on ``Signal.contributions``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    event_type: EventType = EventType.NONE
+    ml_confidence: float | None = None
+    adx_value: float | None = None
+    adx_regime: AdxRegime | None = None
+
+
 class Signal(BaseModel):
     """Trading signal produced by a strategy.
 
@@ -70,6 +110,16 @@ class Signal(BaseModel):
         ``confidence`` is typed as ``float`` (not ``Decimal``) because it
         represents a probability/ratio in [0.0, 1.0], not a monetary value.
         The "Decimal for money fields" rule does not apply here.
+
+        Signal carries three distinct payloads, replacing the old single
+        ``features: dict[str, float]`` bag (see ADR Candidate 3):
+
+        - ``metadata`` — typed cross-module protocol (event_type, ml_confidence,
+          ADX). Read by non-producers.
+        - ``strategy_payload`` — strategy-internal numbers (e.g. sma_ratio,
+          ou_spread, kalman). Single-writer, read only by display/tests.
+        - ``contributions`` — per-strategy confidence contributions written by
+          ``StrategyCombiner`` keyed by strategy name.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -80,8 +130,10 @@ class Signal(BaseModel):
     segment_id: str
     direction: SignalDirection
     confidence: float
-    features: dict[str, float]
     reasoning: str
+    metadata: SignalMetadata = Field(default_factory=SignalMetadata)
+    strategy_payload: dict[str, float] = Field(default_factory=dict)
+    contributions: dict[str, float] = Field(default_factory=dict)
     instrument_type: str = "stock"  # "stock" or "bond"
     signal_price: Decimal | None = None
 

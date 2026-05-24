@@ -104,7 +104,7 @@ class BondCarryStrategy:
                 segment_id="ru_ofz_pk",
                 direction=SignalDirection.SELL,
                 confidence=0.9,
-                features={"months_to_maturity": float(months_to_maturity)},
+                strategy_payload={"months_to_maturity": float(months_to_maturity)},
                 reasoning=(
                     f"Maturity rotation: {symbol} matures in {months_to_maturity:.1f} months"
                 ),
@@ -150,7 +150,7 @@ class BondCarryStrategy:
                 segment_id="ru_ofz_pk",
                 direction=SignalDirection.BUY,
                 confidence=confidence,
-                features={"rebalance": 1.0, "bar_idx": float(bar_idx)},
+                strategy_payload={"rebalance": 1.0, "bar_idx": float(bar_idx)},
                 reasoning=f"Maturity ladder: adding {symbol} (regime: {regime_label})",
                 instrument_type="bond",
             )

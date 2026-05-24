@@ -871,7 +871,8 @@ class BondCycleProcessor:
                 direction=signal.direction.value,
                 confidence=signal.confidence,
                 strategy=signal.strategy_name,
-                features=signal.features,
+                strategy_payload=signal.strategy_payload,
+                metadata=signal.metadata.model_dump(mode="json"),
                 key_rate=str(macro.key_rate),
                 ruonia=str(macro.ruonia_7d_avg),
             )

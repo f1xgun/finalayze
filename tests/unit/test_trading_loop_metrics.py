@@ -79,7 +79,11 @@ class TestProcessInstrumentMetrics:
         signal.confidence = 0.8
         signal.strategy_name = "momentum"
         signal.reasoning = ""
-        signal.features = {}
+        signal.strategy_payload = {}
+        signal.contributions = {}
+        signal.metadata.ml_confidence = None
+        signal.metadata.adx_value = None
+        signal.metadata.adx_regime = None
         executor._strategy.generate_signal.return_value = signal
 
         executor._position_tracker = MagicMock()

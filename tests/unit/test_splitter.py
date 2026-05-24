@@ -34,7 +34,7 @@ def _make_rows(
             LabelledRow(
                 timestamp=base + timedelta(days=i),
                 symbol=symbol,
-                features={"feat_0": float(i)},
+                strategy_payload={"feat_0": float(i)},
                 label=i % 2,
             )
         )

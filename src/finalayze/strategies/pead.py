@@ -190,7 +190,7 @@ class PEADStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={
+            strategy_payload={
                 "sue_score": best_surprise.sue_score,
                 "actual_eps": best_surprise.actual_eps,
                 "expected_eps": best_surprise.expected_eps,

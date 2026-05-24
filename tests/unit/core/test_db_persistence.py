@@ -227,7 +227,7 @@ class TestSignalPersistence:
             segment_id="ru_blue_chips",
             direction=SignalDirection.BUY,
             confidence=0.7532,
-            features={"rsi": 45.2, "macd": 0.003},
+            strategy_payload={"rsi": 45.2, "macd": 0.003},
             reasoning="Strong momentum",
         )
 
@@ -558,7 +558,7 @@ def _make_signal_with_price(price: Decimal | None):  # type: ignore[no-untyped-d
         segment_id="ru_blue_chips",
         direction=SignalDirection.BUY,
         confidence=0.6,
-        features={},
+        strategy_payload={},
         reasoning="unit",
         signal_price=price,
     )

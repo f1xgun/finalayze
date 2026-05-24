@@ -287,7 +287,7 @@ def _make_signal(direction: SignalDirection = SignalDirection.BUY) -> MagicMock:
     sig.direction = direction
     sig.strategy_name = "dual_momentum"
     sig.confidence = 0.7
-    sig.features = {"ml_confidence": 0.65}
+    sig.strategy_payload = {"ml_confidence": 0.65}
     sig.reasoning = "test signal"
     return sig
 

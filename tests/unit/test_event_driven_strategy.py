@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from finalayze.core.schemas import Candle, SignalDirection
+from finalayze.core.schemas import Candle, EventType, SignalDirection
 from finalayze.strategies.event_driven import EventDrivenStrategy
 
 _CANDLE = Candle(
@@ -160,8 +160,8 @@ class TestSanctionsProximityScoring:
             )
 
         assert signal is not None
-        assert "sanctions_proximity" in signal.features
-        assert signal.features["sanctions_proximity"] == 0.8  # noqa: PLR2004
+        assert "sanctions_proximity" in signal.strategy_payload
+        assert signal.strategy_payload["sanctions_proximity"] == 0.8  # noqa: PLR2004
 
     def test_sanctions_scoring_only_for_sanctions_event_types(self) -> None:
         """Segments without sanctions/geopolitical event_types should not apply scoring."""
@@ -181,27 +181,27 @@ class TestSanctionsProximityScoring:
         # No sanctions in event_types -> no scaling applied
         assert signal.confidence == base_confidence
         # sanctions_proximity should NOT be in features
-        assert "sanctions_proximity" not in signal.features
+        assert "sanctions_proximity" not in signal.strategy_payload
 
 
 class TestEventTypeCode:
-    """Tests for event_type_code embedding in Signal.features (EVNT-01)."""
+    """Tests for event_type embedding in Signal.metadata (EVNT-01)."""
 
-    def test_event_type_code_cbr_in_features(self) -> None:
-        """When event_type_code=1.0 (CBR), Signal.features contains it."""
+    def test_event_type_cbr_in_metadata(self) -> None:
+        """When event_type_code=1.0 (CBR), Signal.metadata.event_type is CBR."""
         strategy = EventDrivenStrategy()
         signal = strategy.generate_signal(
             "SBER", _CANDLES, _SEGMENT, sentiment_score=0.8, event_type_code=1.0
         )
         assert signal is not None
-        assert signal.features["event_type_code"] == 1.0
+        assert signal.metadata.event_type == EventType.CBR
 
-    def test_event_type_code_default_zero(self) -> None:
-        """When no event_type_code kwarg passed, Signal.features has 0.0."""
+    def test_event_type_default_none(self) -> None:
+        """When no event_type_code kwarg passed, Signal.metadata.event_type is NONE."""
         strategy = EventDrivenStrategy()
         signal = strategy.generate_signal("SBER", _CANDLES, _SEGMENT, sentiment_score=0.8)
         assert signal is not None
-        assert signal.features["event_type_code"] == 0.0
+        assert signal.metadata.event_type == EventType.NONE
 
     def test_credibility_scales_confidence(self) -> None:
         """With credibility=0.7 and sentiment=0.8, confidence = min(1.0, 0.8 * 0.7) = 0.56."""

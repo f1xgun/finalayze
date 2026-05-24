@@ -187,7 +187,7 @@ class MeanReversionStrategy(BaseStrategy):
                         segment_id=segment_id,
                         direction=exit_direction,
                         confidence=exit_confidence,
-                        features={
+                        strategy_payload={
                             "bb_lower": lower,
                             "bb_upper": upper,
                             "bb_mid": mid,
@@ -242,7 +242,7 @@ class MeanReversionStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={
+            strategy_payload={
                 "bb_lower": lower,
                 "bb_upper": upper,
                 "bb_mid": mid,

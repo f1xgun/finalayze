@@ -174,7 +174,7 @@ class TestDualMomentum:
             signal = strategy.generate_signal("AAPL", candles, "us_tech")
 
         assert signal is not None
-        features = signal.features
+        features = signal.strategy_payload
         assert abs(features["score_1m"] - ret_1m) < 1e-6
         assert abs(features["score_3m"] - ret_3m) < 1e-6
         assert abs(features["score_6m"] - ret_6m) < 1e-6
@@ -237,9 +237,9 @@ class TestDualMomentumYAMLParams:
         expected_6m = (close_now - close_6m) / close_6m
 
         tolerance = 1e-6
-        assert abs(signal.features["score_1m"] - expected_1m) < tolerance
-        assert abs(signal.features["score_3m"] - expected_3m) < tolerance
-        assert abs(signal.features["score_6m"] - expected_6m) < tolerance
+        assert abs(signal.strategy_payload["score_1m"] - expected_1m) < tolerance
+        assert abs(signal.strategy_payload["score_3m"] - expected_3m) < tolerance
+        assert abs(signal.strategy_payload["score_6m"] - expected_6m) < tolerance
 
     def test_defaults_without_yaml_params(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When YAML preset has no custom params, defaults are used."""
@@ -267,9 +267,9 @@ class TestDualMomentumYAMLParams:
         expected_6m = (close_now - close_6m) / close_6m
 
         tolerance = 1e-6
-        assert abs(signal.features["score_1m"] - expected_1m) < tolerance
-        assert abs(signal.features["score_3m"] - expected_3m) < tolerance
-        assert abs(signal.features["score_6m"] - expected_6m) < tolerance
+        assert abs(signal.strategy_payload["score_1m"] - expected_1m) < tolerance
+        assert abs(signal.strategy_payload["score_3m"] - expected_3m) < tolerance
+        assert abs(signal.strategy_payload["score_6m"] - expected_6m) < tolerance
 
     def test_insufficient_data_adapts_to_custom_lookback(
         self, monkeypatch: pytest.MonkeyPatch

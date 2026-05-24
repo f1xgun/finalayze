@@ -61,7 +61,7 @@ class _StubStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=self._direction,
             confidence=self._confidence,
-            features={},
+            strategy_payload={},
             reasoning="stub",
         )
 

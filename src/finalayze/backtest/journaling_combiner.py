@@ -92,8 +92,8 @@ class JournalingStrategyCombiner(StrategyCombiner):
         if signal is None:
             return
 
-        # Aggregate per-strategy features prefixed by strategy name
-        for feat_key, feat_val in signal.features.items():
+        # Aggregate per-strategy payload values prefixed by strategy name
+        for feat_key, feat_val in signal.strategy_payload.items():
             self._last_features[f"{name}.{feat_key}"] = feat_val
 
         # Capture per-model probas from MLStrategy's EnsembleModel
@@ -106,13 +106,13 @@ class JournalingStrategyCombiner(StrategyCombiner):
                 if probas:
                     self._last_model_probas = dict(probas)
 
-    def _on_normalized(self, net: float, features: dict[str, float]) -> None:  # noqa: ARG002
+    def _on_normalized(self, net: float, strategy_payload: dict[str, float]) -> None:  # noqa: ARG002
         """Record the net score after normalization."""
         self._last_net_score = net
 
     def _on_final_signal(
         self,
         signal: Signal | None,
-        contributions: dict[str, float],
+        strategy_payload: dict[str, float],
     ) -> None:
         """No-op — all journaling state is already captured by other hooks."""

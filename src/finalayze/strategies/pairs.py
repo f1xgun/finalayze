@@ -316,7 +316,7 @@ class PairsStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={
+            strategy_payload={
                 "z_score": round(z, 4),
                 "beta": round(beta, 4),
                 "kalman": 1.0 if hedge_method == "kalman" else 0.0,

@@ -220,7 +220,7 @@ class DualMomentumStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={
+            strategy_payload={
                 "score_1m": ret_1m,
                 "score_3m": ret_3m,
                 "score_6m": ret_6m,
