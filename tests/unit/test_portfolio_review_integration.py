@@ -162,7 +162,7 @@ class TestLLMCallAndTelegramDelivery:
     async def test_run_review_calls_parse_structured_with_correct_model(self) -> None:
         """parse_structured receives PortfolioReviewResult as response_model."""
         alerter = MagicMock(spec=TelegramAlerter)
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
 
         llm_client = AsyncMock()
         llm_client.parse_structured = AsyncMock(return_value=_REVIEW_RESULT)
@@ -192,7 +192,7 @@ class TestLLMCallAndTelegramDelivery:
     async def test_run_review_sends_formatted_telegram(self) -> None:
         """Formatted review message is sent via _alerter._send."""
         alerter = MagicMock(spec=TelegramAlerter)
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
 
         llm_client = AsyncMock()
         llm_client.parse_structured = AsyncMock(return_value=_REVIEW_RESULT)
@@ -210,8 +210,8 @@ class TestLLMCallAndTelegramDelivery:
 
         await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
 
-        alerter._send.assert_called_once()
-        sent_text = alerter._send.call_args[0][0]
+        alerter.send_async.assert_called_once()
+        sent_text = alerter.send_async.call_args[0][0]
         assert "Portfolio Review" in sent_text
         assert "Portfolio is well-balanced." in sent_text
 
@@ -219,7 +219,7 @@ class TestLLMCallAndTelegramDelivery:
     async def test_run_review_uses_correct_system_prompt(self) -> None:
         """parse_structured receives PORTFOLIO_REVIEW_SYSTEM_PROMPT."""
         alerter = MagicMock(spec=TelegramAlerter)
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
 
         llm_client = AsyncMock()
         llm_client.parse_structured = AsyncMock(return_value=_REVIEW_RESULT)
@@ -253,7 +253,7 @@ class TestGracefulDegradation:
     async def test_llm_timeout_logs_failure_no_telegram(self) -> None:
         """TimeoutError from parse_structured is caught, no Telegram sent."""
         alerter = MagicMock(spec=TelegramAlerter)
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
 
         llm_client = AsyncMock()
         llm_client.parse_structured = AsyncMock(side_effect=TimeoutError("LLM timeout"))
@@ -268,7 +268,7 @@ class TestGracefulDegradation:
         with structlog.testing.capture_logs() as captured:
             await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
 
-        alerter._send.assert_not_called()
+        alerter.send_async.assert_not_called()
         failure_logs = [
             log for log in captured if log.get("event") == "portfolio_review_llm_failure"
         ]
@@ -278,7 +278,7 @@ class TestGracefulDegradation:
     async def test_llm_exception_logs_failure_no_telegram(self) -> None:
         """RuntimeError from parse_structured is caught, no Telegram sent."""
         alerter = MagicMock(spec=TelegramAlerter)
-        alerter._send = AsyncMock()
+        alerter.send_async = AsyncMock(return_value=(True, None))
 
         llm_client = AsyncMock()
         llm_client.parse_structured = AsyncMock(side_effect=RuntimeError("LLM provider down"))
@@ -293,7 +293,7 @@ class TestGracefulDegradation:
         with structlog.testing.capture_logs() as captured:
             await tl._run_portfolio_review_async()  # type: ignore[attr-defined]
 
-        alerter._send.assert_not_called()
+        alerter.send_async.assert_not_called()
         failure_logs = [
             log for log in captured if log.get("event") == "portfolio_review_llm_failure"
         ]
@@ -303,7 +303,7 @@ class TestGracefulDegradation:
     async def test_run_review_never_raises(self) -> None:
         """_run_portfolio_review_async swallows ALL exceptions."""
         alerter = MagicMock(spec=TelegramAlerter)
-        alerter._send = AsyncMock(side_effect=Exception("Telegram down"))
+        alerter.send_async = AsyncMock(side_effect=Exception("Telegram down"))
 
         llm_client = AsyncMock()
         llm_client.parse_structured = AsyncMock(return_value=_REVIEW_RESULT)

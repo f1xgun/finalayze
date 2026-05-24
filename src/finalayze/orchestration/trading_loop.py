@@ -1583,7 +1583,7 @@ class TradingLoop:
         for caller-side tracking; never raises.
         """
         try:
-            _ok, raw_alert_id = await self._alerter._send(
+            _ok, raw_alert_id = await self._alerter.send_async(
                 raw_text,
                 alert_type="anomaly_raw",
                 symbol=symbol,
@@ -1643,7 +1643,7 @@ class TradingLoop:
                 timeout=_ANOMALY_LLM_TIMEOUT,
             )
             follow_up = f"AI interpretation (unverified): {explanation}"
-            await self._alerter._send(
+            await self._alerter.send_async(
                 follow_up,
                 alert_type="anomaly_llm",
                 symbol=symbol,
@@ -1751,7 +1751,7 @@ class TradingLoop:
                     exc_info=True,
                 )
             message = format_review_telegram(result)
-            await self._alerter._send(
+            await self._alerter.send_async(
                 message,
                 alert_type="daily_summary",
                 priority=AlertPriority.INFO,

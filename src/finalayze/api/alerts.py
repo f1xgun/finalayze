@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING
 import structlog
 
 if TYPE_CHECKING:
+    import uuid
+
     from finalayze.api.telegram_transport import TelegramTransport
     from finalayze.execution.broker_base import OrderRequest, OrderResult
     from finalayze.risk.circuit_breaker import CircuitLevel
@@ -86,6 +88,10 @@ class AlertQueue:
             maxlen=self._RATE_LIMIT_PER_MINUTE * 2,
         )
         self._drain_task: asyncio.Task[None] | None = None
+
+    @property
+    def transport(self) -> TelegramTransport:
+        return self._transport
 
     def post(self, text: str, priority: AlertPriority) -> None:
         """Thread-safe. Call from any context — sync or async.
@@ -369,3 +375,36 @@ class TelegramAlerter:
             self._queue.post(message, priority if priority is not None else AlertPriority.INFO)
         except Exception:
             _log.exception("send_alert_failed")
+
+    async def send_async(
+        self,
+        text: str,
+        *,
+        priority: AlertPriority | None = None,
+        alert_type: str = "generic",
+        symbol: str | None = None,
+        market_id: str | None = None,
+        parent_id: uuid.UUID | None = None,
+        alert_metadata: dict[str, object] | None = None,
+    ) -> tuple[bool, uuid.UUID | None]:
+        """Direct async send via transport. Returns (ok, alert_id). Never raises.
+
+        For async callers that need the returned alert ID (e.g. anomaly enrichment
+        FK threading). No-op (True, None) when disabled or queue not yet attached.
+        """
+        if not self._enabled or self._queue is None:
+            return True, None
+        p = priority if priority is not None else AlertPriority.INFO
+        try:
+            return await self._queue.transport.send(
+                text,
+                priority_name=p.name,
+                alert_type=alert_type,
+                symbol=symbol,
+                market_id=market_id,
+                parent_id=parent_id,
+                alert_metadata=alert_metadata,
+            )
+        except Exception:
+            _log.exception("send_async_failed")
+            return False, None

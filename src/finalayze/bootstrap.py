@@ -312,9 +312,6 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
             metrics_collector=MetricsCollector,
             meta_agent_runner=meta_agent_runner,
         )
-        # Wire persistence into alerter so persist-before-send envelope works.
-        alerter._persistence = loop._persistence
-
         # Wire persistence + executor + approver into meta-agent runner.
         if meta_agent_runner is not None:
             from finalayze.meta_agent.approver import MetaAgentApprover  # noqa: PLC0415

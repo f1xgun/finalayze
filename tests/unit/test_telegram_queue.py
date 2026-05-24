@@ -1,15 +1,16 @@
-"""Unit tests for TelegramMessageQueue with priority, rate limiting, batching, retry."""
+"""Unit tests for AlertQueue: priority ordering, rate limiting, batching, retry."""
 
 from __future__ import annotations
 
 import asyncio
 import time
 from collections import deque
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from finalayze.core.alerts import AlertPriority, TelegramAlerter, TelegramMessageQueue
+from finalayze.api.alerts import AlertPriority, AlertQueue, TelegramMessageQueue
+from finalayze.api.telegram_transport import TelegramTransport
 
 # ── Constants (ruff PLR2004) ─────────────────────────────────────────────────
 VALID_TOKEN = "1234567890:AABBccDDeEFfGgHhIiJj"  # noqa: S105
@@ -18,23 +19,20 @@ RATE_LIMIT = 20
 BATCH_THRESHOLD = 5
 
 
-def _make_alerter() -> TelegramAlerter:
-    alerter = TelegramAlerter(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
-    # Phase 57-02: _send now returns ``tuple[bool, uuid.UUID | None]``
-    alerter._send = AsyncMock(return_value=(True, None))  # type: ignore[assignment]
-    return alerter
+def _make_queue(loop: asyncio.AbstractEventLoop) -> tuple[AlertQueue, AsyncMock]:
+    """Return (queue, mock_transport_send) for testing."""
+    transport = TelegramTransport(bot_token=VALID_TOKEN, chat_id=VALID_CHAT_ID)
+    mock_send = AsyncMock(return_value=(True, None))
+    transport.send = mock_send  # type: ignore[method-assign]
+    queue = AlertQueue(loop=loop, transport=transport)
+    return queue, mock_send
 
 
-class TestCriticalBypass:
-    """CRITICAL messages bypass queue and call _send immediately."""
+class TestAlertQueueAlias:
+    """TelegramMessageQueue is an alias for AlertQueue."""
 
-    @pytest.mark.asyncio
-    async def test_critical_bypass_sends_immediately(self) -> None:
-        alerter = _make_alerter()
-        queue = TelegramMessageQueue(alerter)
-        await queue.enqueue("CRITICAL alert", AlertPriority.CRITICAL)
-        alerter._send.assert_called_once()
-        assert "CRITICAL alert" in alerter._send.call_args[0][0]
+    def test_alias_is_same_class(self) -> None:
+        assert TelegramMessageQueue is AlertQueue
 
 
 class TestPriorityOrdering:
@@ -42,12 +40,11 @@ class TestPriorityOrdering:
 
     @pytest.mark.asyncio
     async def test_important_before_info(self) -> None:
-        alerter = _make_alerter()
-        queue = TelegramMessageQueue(alerter)
-        # Enqueue INFO first, then IMPORTANT
-        await queue.enqueue("info msg", AlertPriority.INFO)
-        await queue.enqueue("important msg", AlertPriority.IMPORTANT)
-        # Drain one message
+        loop = asyncio.get_running_loop()
+        queue, _ = _make_queue(loop)
+        queue.post("info msg", AlertPriority.INFO)
+        queue.post("important msg", AlertPriority.IMPORTANT)
+        await asyncio.sleep(0.01)  # let call_soon_threadsafe deliver
         msg = await queue._queue.get()
         assert msg.priority == AlertPriority.IMPORTANT
 
@@ -57,20 +54,17 @@ class TestRateLimiting:
 
     @pytest.mark.asyncio
     async def test_rate_limit_blocks_at_threshold(self) -> None:
-        alerter = _make_alerter()
-        queue = TelegramMessageQueue(alerter)
+        loop = asyncio.get_running_loop()
+        queue, _ = _make_queue(loop)
         now = time.monotonic()
-        # Simulate 20 messages sent in the last 60s
         queue._sent_timestamps = deque([now - i for i in range(RATE_LIMIT)], maxlen=RATE_LIMIT * 2)
-        # _is_rate_limited should return True
         assert queue._is_rate_limited() is True
 
     @pytest.mark.asyncio
     async def test_rate_limit_not_blocked_below_threshold(self) -> None:
-        alerter = _make_alerter()
-        queue = TelegramMessageQueue(alerter)
+        loop = asyncio.get_running_loop()
+        queue, _ = _make_queue(loop)
         now = time.monotonic()
-        # Only 5 messages in last 60s
         limit_minus = 15
         queue._sent_timestamps = deque(
             [now - i for i in range(RATE_LIMIT - limit_minus)], maxlen=RATE_LIMIT * 2
@@ -83,43 +77,40 @@ class TestBatching:
 
     @pytest.mark.asyncio
     async def test_batch_five_important_messages(self) -> None:
-        alerter = _make_alerter()
-        queue = TelegramMessageQueue(alerter)
-        # Enqueue 6 IMPORTANT messages
+        loop = asyncio.get_running_loop()
+        queue, _ = _make_queue(loop)
         batch_count = 6
         for i in range(batch_count):
-            await queue.enqueue(f"Fill {i}", AlertPriority.IMPORTANT)
-        # Collect batched messages
+            queue.post(f"Fill {i}", AlertPriority.IMPORTANT)
+        await asyncio.sleep(0.01)
         messages = queue._collect_batch(AlertPriority.IMPORTANT)
         assert len(messages) >= BATCH_THRESHOLD
 
 
 class TestRetryLogic:
-    """Failed _send gets one retry after 5s delay, then dropped."""
+    """Failed transport.send gets one retry after 5s delay, then dropped."""
 
     @pytest.mark.asyncio
     async def test_retry_on_failure(self) -> None:
-        alerter = _make_alerter()
-        # Phase 57-02: _send returns ``tuple[bool, uuid.UUID | None]``
-        alerter._send = AsyncMock(side_effect=[(False, None), (True, None)])  # type: ignore[assignment]
-        queue = TelegramMessageQueue(alerter)
-        with patch("finalayze.core.alerts.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        loop = asyncio.get_running_loop()
+        queue, mock_send = _make_queue(loop)
+        mock_send.side_effect = [(False, None), (True, None)]
+        with patch("finalayze.api.alerts.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             result = await queue._send_with_retry("test msg")
-            assert result is True
-            retry_delay = 5
-            mock_sleep.assert_called_once_with(retry_delay)
+        assert result is True
+        retry_delay = 5
+        mock_sleep.assert_called_once_with(retry_delay)
 
     @pytest.mark.asyncio
     async def test_drop_after_second_failure(self) -> None:
-        alerter = _make_alerter()
-        # Phase 57-02: _send returns ``tuple[bool, uuid.UUID | None]``
-        alerter._send = AsyncMock(return_value=(False, None))  # type: ignore[assignment]
-        queue = TelegramMessageQueue(alerter)
-        with patch("finalayze.core.alerts.asyncio.sleep", new_callable=AsyncMock):
+        loop = asyncio.get_running_loop()
+        queue, mock_send = _make_queue(loop)
+        mock_send.return_value = (False, None)
+        with patch("finalayze.api.alerts.asyncio.sleep", new_callable=AsyncMock):
             result = await queue._send_with_retry("test msg")
-            assert result is False
-            call_count = 2
-            assert alerter._send.call_count == call_count
+        assert result is False
+        call_count = 2
+        assert mock_send.call_count == call_count
 
 
 class TestFIFOWithinTier:
@@ -127,10 +118,11 @@ class TestFIFOWithinTier:
 
     @pytest.mark.asyncio
     async def test_fifo_within_same_priority(self) -> None:
-        alerter = _make_alerter()
-        queue = TelegramMessageQueue(alerter)
-        await queue.enqueue("first", AlertPriority.INFO)
-        await queue.enqueue("second", AlertPriority.INFO)
+        loop = asyncio.get_running_loop()
+        queue, _ = _make_queue(loop)
+        queue.post("first", AlertPriority.INFO)
+        queue.post("second", AlertPriority.INFO)
+        await asyncio.sleep(0.01)
         msg1 = await queue._queue.get()
         msg2 = await queue._queue.get()
         assert msg1.timestamp <= msg2.timestamp
@@ -143,8 +135,8 @@ class TestStartStop:
 
     @pytest.mark.asyncio
     async def test_start_creates_drain_task(self) -> None:
-        alerter = _make_alerter()
-        queue = TelegramMessageQueue(alerter)
+        loop = asyncio.get_running_loop()
+        queue, _ = _make_queue(loop)
         await queue.start()
         assert queue._drain_task is not None
         assert not queue._drain_task.done()
@@ -152,8 +144,8 @@ class TestStartStop:
 
     @pytest.mark.asyncio
     async def test_stop_cancels_drain_task(self) -> None:
-        alerter = _make_alerter()
-        queue = TelegramMessageQueue(alerter)
+        loop = asyncio.get_running_loop()
+        queue, _ = _make_queue(loop)
         await queue.start()
         task = queue._drain_task
         await queue.stop()

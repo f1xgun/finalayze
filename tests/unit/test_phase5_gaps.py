@@ -711,7 +711,7 @@ class TestBotHandlerEdgeCases:
         from finalayze.core.telegram_bot import TelegramBotHandler
 
         alerter = MagicMock()
-        alerter._send = AsyncMock(return_value=True)
+        alerter.send_async = AsyncMock(return_value=(True, None))
         settings = MagicMock()
         settings.telegram_allowed_chat_ids = allowed_chat_ids or ["123456"]
 
@@ -759,7 +759,7 @@ class TestBotHandlerEdgeCases:
         )
         assert result == {"ok": "processed"}
         # Should have called _send with "unavailable" in text
-        text = handler._alerter._send.call_args[0][0]
+        text = handler._alerter.send_async.call_args[0][0]
         assert "unavailable" in text
 
     @pytest.mark.asyncio
@@ -771,7 +771,7 @@ class TestBotHandlerEdgeCases:
             {"message": {"chat": {"id": 123456}, "text": "/status"}}
         )
         assert result == {"ok": "processed"}
-        text = handler._alerter._send.call_args[0][0]
+        text = handler._alerter.send_async.call_args[0][0]
         assert "Bond Layers" not in text
 
     @pytest.mark.asyncio
@@ -787,7 +787,7 @@ class TestBotHandlerEdgeCases:
             {"message": {"chat": {"id": 123456}, "text": "/breakers"}}
         )
         assert result == {"ok": "processed"}
-        text = handler._alerter._send.call_args[0][0]
+        text = handler._alerter.send_async.call_args[0][0]
         assert "Bond Layer Breakers" not in text
 
     @pytest.mark.asyncio
@@ -817,7 +817,7 @@ class TestWebhookEdgeCases:
         from finalayze.core.telegram_bot import TelegramBotHandler
 
         alerter = MagicMock()
-        alerter._send = AsyncMock(return_value=True)
+        alerter.send_async = AsyncMock(return_value=(True, None))
         settings = MagicMock()
         settings.telegram_allowed_chat_ids = ["123456"]
 

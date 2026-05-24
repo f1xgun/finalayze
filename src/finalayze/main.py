@@ -206,9 +206,11 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
                     from finalayze.api.alerts import AlertQueue  # noqa: PLC0415
                     from finalayze.api.telegram_transport import TelegramTransport  # noqa: PLC0415
 
+                    _loop_persistence = getattr(_trading_loop_instance, "_persistence", None)
                     _alert_transport = TelegramTransport(
                         bot_token=_settings.telegram_bot_token or "",
                         chat_id=_settings.telegram_chat_id or "",
+                        persistence=_loop_persistence,
                     )
                     _alert_queue = AlertQueue(loop=_main_loop, transport=_alert_transport)
                     await _alert_queue.start()
