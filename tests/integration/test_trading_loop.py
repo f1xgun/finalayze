@@ -18,7 +18,7 @@ from finalayze.core.schemas import (
     Signal,
     SignalDirection,
 )
-from finalayze.core.trading_loop import TradingLoop
+from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 from finalayze.data.fetchers.newsapi import NewsApiFetcher
 from finalayze.execution.broker_base import OrderResult
 from finalayze.execution.broker_router import BrokerRouter
@@ -159,18 +159,20 @@ class TestStrategyIntegration:
         alerter = MagicMock(spec=TelegramAlerter)
 
         loop = TradingLoop(
-            settings=settings,
-            fetchers={MARKET_US: fetcher},
-            news_fetcher=news_fetcher,
-            news_analyzer=news_analyzer,
-            event_classifier=event_classifier,
-            impact_estimator=impact_estimator,
-            strategy=strategy,
-            broker_router=broker_router,
-            circuit_breakers={MARKET_US: cb},
-            cross_market_breaker=cmcb,
-            alerter=alerter,
-            instrument_registry=registry,
+            TradingLoopDeps(
+                settings=settings,
+                fetchers={MARKET_US: fetcher},
+                news_fetcher=news_fetcher,
+                news_analyzer=news_analyzer,
+                event_classifier=event_classifier,
+                impact_estimator=impact_estimator,
+                strategy=strategy,
+                broker_router=broker_router,
+                circuit_breakers={MARKET_US: cb},
+                cross_market_breaker=cmcb,
+                alerter=alerter,
+                instrument_registry=registry,
+            )
         )
         # Freeze time to a market-open weekday so market hours check passes
         loop._now = MagicMock(return_value=MARKET_OPEN_DT)  # type: ignore[method-assign]

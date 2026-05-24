@@ -12,7 +12,7 @@ import pytest
 
 def _make_trading_loop(**overrides: object) -> object:
     """Create a TradingLoop with minimal mock dependencies."""
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     defaults = {
         "settings": MagicMock(
@@ -42,7 +42,7 @@ def _make_trading_loop(**overrides: object) -> object:
         "fx_service": None,
     }
     defaults.update(overrides)
-    return TradingLoop(**defaults)  # type: ignore[arg-type]
+    return TradingLoop(TradingLoopDeps(**defaults))  # type: ignore[arg-type]
 
 
 class TestStopLossLock:

@@ -38,7 +38,10 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
             Instrument,
             InstrumentRegistry,
         )
-        from finalayze.orchestration.trading_loop import TradingLoop  # noqa: PLC0415
+        from finalayze.orchestration.trading_loop import (  # noqa: PLC0415
+            TradingLoop,
+            TradingLoopDeps,
+        )
         from finalayze.risk.circuit_breaker import (  # noqa: PLC0415
             CircuitBreaker,
             CrossMarketCircuitBreaker,
@@ -292,25 +295,27 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
 
         # ── Build TradingLoop ────────────────────────────────────────────
         loop = TradingLoop(
-            settings=settings,
-            fetchers=fetchers,
-            news_fetcher=news_fetcher,
-            news_analyzer=news_analyzer,
-            event_classifier=event_classifier,
-            impact_estimator=impact_estimator,
-            strategy=combiner,
-            broker_router=broker_router,
-            circuit_breakers=circuit_breakers,
-            cross_market_breaker=cross_market_breaker,
-            alerter=alerter,
-            instrument_registry=registry,
-            rss_fetcher=rss_fetcher,
-            telegram_reader=telegram_reader,
-            news_impact_analyzer=news_impact_analyzer,
-            sector_ticker_mapper=sector_ticker_mapper,
-            sandbox_monitor=sandbox_monitor,
-            metrics_collector=MetricsCollector,
-            meta_agent_runner=meta_agent_runner,
+            TradingLoopDeps(
+                settings=settings,
+                fetchers=fetchers,
+                news_fetcher=news_fetcher,
+                news_analyzer=news_analyzer,
+                event_classifier=event_classifier,
+                impact_estimator=impact_estimator,
+                strategy=combiner,
+                broker_router=broker_router,
+                circuit_breakers=circuit_breakers,
+                cross_market_breaker=cross_market_breaker,
+                alerter=alerter,
+                instrument_registry=registry,
+                rss_fetcher=rss_fetcher,
+                telegram_reader=telegram_reader,
+                news_impact_analyzer=news_impact_analyzer,
+                sector_ticker_mapper=sector_ticker_mapper,
+                sandbox_monitor=sandbox_monitor,
+                metrics_collector=MetricsCollector,
+                meta_agent_runner=meta_agent_runner,
+            )
         )
         # Wire persistence into alerter so persist-before-send envelope works.
         alerter._persistence = loop._persistence

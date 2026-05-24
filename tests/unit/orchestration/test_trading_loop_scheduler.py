@@ -28,7 +28,7 @@ import pytest
 
 def _make_trading_loop() -> object:
     """Create a TradingLoop with all deps mocked (jobstore-pattern parity)."""
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     settings = MagicMock()
     settings.mode = MagicMock()
@@ -51,18 +51,20 @@ def _make_trading_loop() -> object:
     settings.meta_agent_enabled = False
 
     return TradingLoop(
-        settings=settings,
-        fetchers={},
-        news_fetcher=MagicMock(),
-        news_analyzer=MagicMock(),
-        event_classifier=MagicMock(),
-        impact_estimator=MagicMock(),
-        strategy=MagicMock(),
-        broker_router=MagicMock(),
-        circuit_breakers={},
-        cross_market_breaker=MagicMock(),
-        alerter=MagicMock(),
-        instrument_registry=MagicMock(),
+        TradingLoopDeps(
+            settings=settings,
+            fetchers={},
+            news_fetcher=MagicMock(),
+            news_analyzer=MagicMock(),
+            event_classifier=MagicMock(),
+            impact_estimator=MagicMock(),
+            strategy=MagicMock(),
+            broker_router=MagicMock(),
+            circuit_breakers={},
+            cross_market_breaker=MagicMock(),
+            alerter=MagicMock(),
+            instrument_registry=MagicMock(),
+        )
     )
 
 
@@ -142,7 +144,7 @@ class TestPortfolioReviewCronRegistration:
 
 def _make_tl_for_async() -> object:
     """Create a bare TradingLoop instance (no __init__) for async-method tests."""
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     return object.__new__(TradingLoop)
 

@@ -14,7 +14,7 @@ from finalayze.analysis.impact_estimator import SegmentImpact
 from finalayze.core.alerts import TelegramAlerter
 from finalayze.core.modes import WorkMode
 from finalayze.core.schemas import Candle, NewsArticle, SentimentResult, Signal, SignalDirection
-from finalayze.core.trading_loop import TradingLoop
+from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 from finalayze.execution.broker_base import OrderResult
 from finalayze.markets.instruments import Instrument, InstrumentRegistry
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
@@ -208,18 +208,20 @@ def _make_trading_loop(
     registry = _make_registry()
 
     return TradingLoop(
-        settings=settings,  # type: ignore[arg-type]
-        fetchers={MARKET_US: fetcher},
-        news_fetcher=news_fetcher,
-        news_analyzer=news_analyzer,
-        event_classifier=event_classifier,
-        impact_estimator=impact_estimator,
-        strategy=strategy,
-        broker_router=broker_router,
-        circuit_breakers={MARKET_US: cb},
-        cross_market_breaker=cmcb,
-        alerter=alerter,
-        instrument_registry=registry,
+        TradingLoopDeps(
+            settings=settings,  # type: ignore[arg-type]
+            fetchers={MARKET_US: fetcher},
+            news_fetcher=news_fetcher,
+            news_analyzer=news_analyzer,
+            event_classifier=event_classifier,
+            impact_estimator=impact_estimator,
+            strategy=strategy,
+            broker_router=broker_router,
+            circuit_breakers={MARKET_US: cb},
+            cross_market_breaker=cmcb,
+            alerter=alerter,
+            instrument_registry=registry,
+        )
     )
 
 
@@ -762,19 +764,21 @@ class TestSandboxMonitorIntegration:
         monitor = MagicMock()
         settings = _make_settings()
         loop = TradingLoop(
-            settings=settings,  # type: ignore[arg-type]
-            fetchers={MARKET_US: MagicMock()},
-            news_fetcher=MagicMock(),
-            news_analyzer=MagicMock(),
-            event_classifier=MagicMock(),
-            impact_estimator=MagicMock(),
-            strategy=MagicMock(),
-            broker_router=MagicMock(),
-            circuit_breakers={},
-            cross_market_breaker=MagicMock(spec=CrossMarketCircuitBreaker),
-            alerter=MagicMock(spec=TelegramAlerter),
-            instrument_registry=_make_registry(),
-            sandbox_monitor=monitor,
+            TradingLoopDeps(
+                settings=settings,  # type: ignore[arg-type]
+                fetchers={MARKET_US: MagicMock()},
+                news_fetcher=MagicMock(),
+                news_analyzer=MagicMock(),
+                event_classifier=MagicMock(),
+                impact_estimator=MagicMock(),
+                strategy=MagicMock(),
+                broker_router=MagicMock(),
+                circuit_breakers={},
+                cross_market_breaker=MagicMock(spec=CrossMarketCircuitBreaker),
+                alerter=MagicMock(spec=TelegramAlerter),
+                instrument_registry=_make_registry(),
+                sandbox_monitor=monitor,
+            )
         )
         assert loop._sandbox_monitor is monitor  # type: ignore[attr-defined]
 

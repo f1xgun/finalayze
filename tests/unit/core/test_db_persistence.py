@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
-from finalayze.orchestration.trading_loop import TradingLoop
+from finalayze.orchestration.trading_loop import TradingLoop, TradingLoopDeps
 
 if TYPE_CHECKING:
     import pytest
@@ -34,18 +34,20 @@ def _make_loop() -> TradingLoop:
     settings.kelly_fraction = 0.5
 
     return TradingLoop(
-        settings=settings,
-        fetchers={},
-        news_fetcher=MagicMock(),
-        news_analyzer=MagicMock(),
-        event_classifier=MagicMock(),
-        impact_estimator=MagicMock(),
-        strategy=MagicMock(),
-        broker_router=MagicMock(),
-        circuit_breakers={},
-        cross_market_breaker=MagicMock(),
-        alerter=MagicMock(),
-        instrument_registry=MagicMock(),
+        TradingLoopDeps(
+            settings=settings,
+            fetchers={},
+            news_fetcher=MagicMock(),
+            news_analyzer=MagicMock(),
+            event_classifier=MagicMock(),
+            impact_estimator=MagicMock(),
+            strategy=MagicMock(),
+            broker_router=MagicMock(),
+            circuit_breakers={},
+            cross_market_breaker=MagicMock(),
+            alerter=MagicMock(),
+            instrument_registry=MagicMock(),
+        )
     )
 
 

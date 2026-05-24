@@ -16,7 +16,7 @@ from config.settings import Settings
 from finalayze.core.alerts import TelegramAlerter
 from finalayze.core.modes import WorkMode
 from finalayze.core.schemas import Candle, PortfolioState, Signal, SignalDirection
-from finalayze.core.trading_loop import TradingLoop
+from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 from finalayze.markets.instruments import InstrumentRegistry
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
 
@@ -91,18 +91,20 @@ def _make_loop() -> TradingLoop:
     registry = InstrumentRegistry()
 
     return TradingLoop(
-        settings=settings,
-        fetchers=fetchers,
-        news_fetcher=news_fetcher,
-        news_analyzer=news_analyzer,
-        event_classifier=event_classifier,
-        impact_estimator=impact_estimator,
-        strategy=strategy,
-        broker_router=broker_router,
-        circuit_breakers=circuit_breakers,
-        cross_market_breaker=cross_market,
-        alerter=alerter,
-        instrument_registry=registry,
+        TradingLoopDeps(
+            settings=settings,
+            fetchers=fetchers,
+            news_fetcher=news_fetcher,
+            news_analyzer=news_analyzer,
+            event_classifier=event_classifier,
+            impact_estimator=impact_estimator,
+            strategy=strategy,
+            broker_router=broker_router,
+            circuit_breakers=circuit_breakers,
+            cross_market_breaker=cross_market,
+            alerter=alerter,
+            instrument_registry=registry,
+        )
     )
 
 

@@ -28,7 +28,7 @@ def test_load_stop_snapshots_returns_empty_when_no_db_url() -> None:
 
 
 def _make_loop_with_mocked_persistence() -> object:
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     settings = MagicMock()
     settings.mode = MagicMock()
@@ -48,18 +48,20 @@ def _make_loop_with_mocked_persistence() -> object:
     settings.meta_agent_enabled = False
 
     return TradingLoop(
-        settings=settings,
-        fetchers={"moex": MagicMock()},
-        news_fetcher=MagicMock(),
-        news_analyzer=MagicMock(),
-        event_classifier=MagicMock(),
-        impact_estimator=MagicMock(),
-        strategy=MagicMock(),
-        broker_router=MagicMock(),
-        circuit_breakers={"moex": MagicMock()},
-        cross_market_breaker=MagicMock(),
-        alerter=MagicMock(),
-        instrument_registry=MagicMock(),
+        TradingLoopDeps(
+            settings=settings,
+            fetchers={"moex": MagicMock()},
+            news_fetcher=MagicMock(),
+            news_analyzer=MagicMock(),
+            event_classifier=MagicMock(),
+            impact_estimator=MagicMock(),
+            strategy=MagicMock(),
+            broker_router=MagicMock(),
+            circuit_breakers={"moex": MagicMock()},
+            cross_market_breaker=MagicMock(),
+            alerter=MagicMock(),
+            instrument_registry=MagicMock(),
+        )
     )
 
 
@@ -119,7 +121,7 @@ def test_restore_stop_states_called_in_start() -> None:
     _reconcile_inflight_orders and _preflight_check."""
     import inspect
 
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     src = inspect.getsource(TradingLoop.start)
     reconcile_idx = src.find("_reconcile_inflight_orders")

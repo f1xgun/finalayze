@@ -33,14 +33,14 @@ def _patch_trading_loop_init(monkeypatch: pytest.MonkeyPatch) -> None:
     This prevents Decimal conversion errors when tests pass MagicMock settings
     that don't have effective_risk_limits() returning real RolloutLimits.
     """
-    from finalayze.orchestration.trading_loop import TradingLoop
+    from finalayze.orchestration.trading_loop import TradingLoop, TradingLoopDeps
 
     _original_init = TradingLoop.__init__
 
     def _patched_init(self: TradingLoop, *args: object, **kwargs: object) -> None:
-        settings = args[0] if args else kwargs.get("settings")
-        if isinstance(settings, MagicMock):
-            patch_settings_with_rollout(settings)
+        deps = args[0] if args else kwargs.get("deps")
+        if isinstance(deps, TradingLoopDeps) and isinstance(deps.settings, MagicMock):
+            patch_settings_with_rollout(deps.settings)
         _original_init(self, *args, **kwargs)  # type: ignore[misc]
 
     monkeypatch.setattr(TradingLoop, "__init__", _patched_init)

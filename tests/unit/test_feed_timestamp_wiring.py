@@ -17,7 +17,7 @@ def _make_trading_loop_with_health_monitor(
     health_monitor: object | None = None,
 ) -> object:
     """Create a minimal TradingLoop with health_monitor for feed timestamp testing."""
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     mock_settings = MagicMock()
     mock_settings.segment_ids = ["us_tech"]
@@ -26,19 +26,21 @@ def _make_trading_loop_with_health_monitor(
     mock_settings.kelly_fraction = 0.5
 
     return TradingLoop(
-        settings=mock_settings,
-        fetchers={"us": MagicMock()},
-        news_fetcher=MagicMock(),
-        news_analyzer=MagicMock(),
-        event_classifier=MagicMock(),
-        impact_estimator=MagicMock(),
-        strategy=MagicMock(),
-        broker_router=MagicMock(),
-        circuit_breakers={"us": MagicMock()},
-        cross_market_breaker=MagicMock(),
-        alerter=MagicMock(),
-        instrument_registry=MagicMock(),
-        health_monitor=health_monitor,
+        TradingLoopDeps(
+            settings=mock_settings,
+            fetchers={"us": MagicMock()},
+            news_fetcher=MagicMock(),
+            news_analyzer=MagicMock(),
+            event_classifier=MagicMock(),
+            impact_estimator=MagicMock(),
+            strategy=MagicMock(),
+            broker_router=MagicMock(),
+            circuit_breakers={"us": MagicMock()},
+            cross_market_breaker=MagicMock(),
+            alerter=MagicMock(),
+            instrument_registry=MagicMock(),
+            health_monitor=health_monitor,
+        )
     )
 
 
@@ -70,7 +72,7 @@ class TestFeedTimestampWiring:
         # We test the actual code path by checking the source doesn't use getattr
         import inspect
 
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         source = inspect.getsource(TradingLoop._process_instrument)
 
@@ -85,7 +87,7 @@ class TestFeedTimestampWiring:
         import inspect
         import re
 
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         source = inspect.getsource(TradingLoop._process_instrument)
 

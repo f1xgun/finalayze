@@ -166,7 +166,7 @@ class TestMarketCycleMetrics:
     """Verify portfolio equity and circuit breaker level metrics are set."""
 
     def test_equity_and_cb_level_set(self) -> None:
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
         from finalayze.risk.circuit_breaker import CircuitLevel
 
         mc = MagicMock()
@@ -224,7 +224,7 @@ def _make_loop_stub(*, metrics: MagicMock | None = None) -> MagicMock:
     """Create a MagicMock that acts as a TradingLoop instance with enough attributes."""
     import threading
 
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
     from finalayze.execution.broker_base import OrderRequest
     from finalayze.risk.circuit_breaker import CircuitLevel
 
@@ -313,7 +313,7 @@ class TestStrategyCyclePersistsEquitySnapshot:
         TradingLoop._strategy_cycle_impl() right after the per-market loop and
         the existing position_tracker.snapshot_all_stops_to_db() call.
         """
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         loop = self._make_strategy_cycle_stub()
 
@@ -339,7 +339,7 @@ class TestStrategyCyclePersistsEquitySnapshot:
         Per Pitfall 6 in 56-RESEARCH: halt-path early returns must skip the
         snapshot writer (a halted cycle did not complete normally).
         """
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         loop = self._make_strategy_cycle_stub()
         loop._loss_limit_tracker.is_halted.return_value = True
@@ -350,7 +350,7 @@ class TestStrategyCyclePersistsEquitySnapshot:
 
     def test_strategy_cycle_skips_persist_on_cross_market_halt(self) -> None:
         """When cross-market breaker trips, persist_cycle_snapshot must NOT be called."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         loop = self._make_strategy_cycle_stub()
         loop._cross_market_breaker.check.return_value = True
@@ -361,7 +361,7 @@ class TestStrategyCyclePersistsEquitySnapshot:
 
     def test_strategy_cycle_swallows_persist_failure(self) -> None:
         """When persist_cycle_snapshot raises, the cycle must NOT propagate (PERSIST-05)."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         loop = self._make_strategy_cycle_stub()
         loop._daily_reporter.persist_cycle_snapshot.side_effect = RuntimeError("DB down")

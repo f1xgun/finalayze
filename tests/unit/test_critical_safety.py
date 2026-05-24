@@ -147,7 +147,7 @@ def _make_trading_loop(
     settings: MagicMock | None = None,
 ) -> object:
     from finalayze.core.alerts import TelegramAlerter
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     if settings is None:
         settings = _make_settings()
@@ -204,18 +204,20 @@ def _make_trading_loop(
     registry = _make_registry()
 
     return TradingLoop(
-        settings=settings,  # type: ignore[arg-type]
-        fetchers={MARKET_US: fetcher},
-        news_fetcher=news_fetcher,
-        news_analyzer=news_analyzer,
-        event_classifier=event_classifier,
-        impact_estimator=impact_estimator,
-        strategy=strategy,
-        broker_router=broker_router,
-        circuit_breakers={MARKET_US: cb},
-        cross_market_breaker=cmcb,
-        alerter=alerter,
-        instrument_registry=registry,
+        TradingLoopDeps(
+            settings=settings,  # type: ignore[arg-type]
+            fetchers={MARKET_US: fetcher},
+            news_fetcher=news_fetcher,
+            news_analyzer=news_analyzer,
+            event_classifier=event_classifier,
+            impact_estimator=impact_estimator,
+            strategy=strategy,
+            broker_router=broker_router,
+            circuit_breakers={MARKET_US: cb},
+            cross_market_breaker=cmcb,
+            alerter=alerter,
+            instrument_registry=registry,
+        )
     )
 
 
@@ -430,7 +432,7 @@ class TestPreTradeCheckerAllChecks:
 
 class TestStrategyCycleCallsPreTradeChecker:
     def test_pre_trade_checker_called_when_signal_generated(self) -> None:
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         signal = _make_buy_signal()
         loop = _make_trading_loop(signal=signal)
@@ -479,7 +481,7 @@ class TestStrategyCycleCallsPreTradeChecker:
 class TestStrategyCycleUsesRollingKelly:
     def test_rolling_kelly_used_not_raw_confidence(self) -> None:
         """_build_order must use kelly_sizer.optimal_fraction(), not signal.confidence."""
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         signal = _make_buy_signal()
         loop = _make_trading_loop(signal=signal)
@@ -512,7 +514,7 @@ class TestStrategyCycleUsesRollingKelly:
 
 class TestLossLimitTrackerWired:
     def test_trading_loop_has_loss_limit_tracker(self) -> None:
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
@@ -563,7 +565,7 @@ class TestCrossMarketExposureEnforced:
 
 class TestMarketHoursCheck:
     def test_is_market_open_us_weekday_during_hours(self) -> None:
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
@@ -572,7 +574,7 @@ class TestMarketHoursCheck:
         assert loop._is_market_open(MARKET_US, dt) is True  # type: ignore[attr-defined]
 
     def test_is_market_open_us_weekend(self) -> None:
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
@@ -581,7 +583,7 @@ class TestMarketHoursCheck:
         assert loop._is_market_open(MARKET_US, dt) is False  # type: ignore[attr-defined]
 
     def test_is_market_open_us_before_open(self) -> None:
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
@@ -590,7 +592,7 @@ class TestMarketHoursCheck:
         assert loop._is_market_open(MARKET_US, dt) is False  # type: ignore[attr-defined]
 
     def test_is_market_open_us_after_close(self) -> None:
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
@@ -606,7 +608,7 @@ class TestMarketHoursCheck:
 
 class TestStopLossMonitoring:
     def test_trading_loop_has_stop_loss_state(self) -> None:
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         loop = _make_trading_loop()
         assert isinstance(loop, TradingLoop)
@@ -614,7 +616,7 @@ class TestStopLossMonitoring:
         assert hasattr(loop._position_tracker, "_stop_states")  # type: ignore[attr-defined]
 
     def test_check_stop_losses_submits_sell_when_price_at_stop(self) -> None:
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
         from finalayze.execution.simulated_broker import StopLossState
 
         loop = _make_trading_loop()
@@ -646,7 +648,7 @@ class TestStopLossMonitoring:
         assert call_args.symbol == SYMBOL_AAPL
 
     def test_check_stop_losses_does_not_sell_above_stop(self) -> None:
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
         from finalayze.execution.simulated_broker import StopLossState
 
         loop = _make_trading_loop()

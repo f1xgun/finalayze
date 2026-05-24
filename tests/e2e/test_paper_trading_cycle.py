@@ -26,7 +26,7 @@ from finalayze.analysis.impact_estimator import ImpactEstimator
 from finalayze.analysis.news_analyzer import NewsAnalyzer
 from finalayze.core.alerts import TelegramAlerter
 from finalayze.core.schemas import Candle, NewsArticle, PortfolioState, SentimentResult
-from finalayze.core.trading_loop import TradingLoop
+from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 from finalayze.execution.broker_base import OrderRequest, OrderResult
 from finalayze.execution.broker_router import BrokerRouter
 from finalayze.markets.instruments import InstrumentRegistry, build_default_registry
@@ -287,18 +287,20 @@ def trading_loop(
     impact_estimator = MagicMock(spec=ImpactEstimator)
 
     loop = TradingLoop(
-        settings=test_settings,
-        fetchers=fetchers,  # type: ignore[arg-type]
-        news_fetcher=news_fetcher,  # type: ignore[arg-type]
-        news_analyzer=news_analyzer,  # type: ignore[arg-type]
-        event_classifier=event_classifier,
-        impact_estimator=impact_estimator,
-        strategy=strategy_combiner,
-        broker_router=broker_router,
-        circuit_breakers=circuit_breakers,
-        cross_market_breaker=cross_market_breaker,
-        alerter=alerter,
-        instrument_registry=instrument_registry,
+        TradingLoopDeps(
+            settings=test_settings,
+            fetchers=fetchers,  # type: ignore[arg-type]
+            news_fetcher=news_fetcher,  # type: ignore[arg-type]
+            news_analyzer=news_analyzer,  # type: ignore[arg-type]
+            event_classifier=event_classifier,
+            impact_estimator=impact_estimator,
+            strategy=strategy_combiner,
+            broker_router=broker_router,
+            circuit_breakers=circuit_breakers,
+            cross_market_breaker=cross_market_breaker,
+            alerter=alerter,
+            instrument_registry=instrument_registry,
+        )
     )
     # Freeze time to a market-open weekday so market hours check passes
     loop._now = MagicMock(return_value=MARKET_OPEN_DT)  # type: ignore[method-assign]

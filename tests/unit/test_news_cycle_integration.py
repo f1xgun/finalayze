@@ -60,7 +60,7 @@ def _make_loop(
     settings: object | None = None,
 ) -> object:
     """Build a TradingLoop with mocked dependencies."""
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     mock_settings = settings or MagicMock()
     if settings is None:
@@ -79,22 +79,24 @@ def _make_loop(
     mock_news_fetcher = news_fetcher or MagicMock()
 
     loop = TradingLoop(
-        settings=mock_settings,
-        fetchers={},
-        news_fetcher=mock_news_fetcher,
-        news_analyzer=MagicMock(),
-        event_classifier=MagicMock(),
-        impact_estimator=MagicMock(),
-        strategy=MagicMock(),
-        broker_router=MagicMock(),
-        circuit_breakers={},
-        cross_market_breaker=MagicMock(),
-        alerter=MagicMock(),
-        instrument_registry=MagicMock(),
-        rss_fetcher=rss_fetcher,
-        telegram_reader=telegram_reader,
-        news_impact_analyzer=news_impact_analyzer,
-        sector_ticker_mapper=sector_ticker_mapper,
+        TradingLoopDeps(
+            settings=mock_settings,
+            fetchers={},
+            news_fetcher=mock_news_fetcher,
+            news_analyzer=MagicMock(),
+            event_classifier=MagicMock(),
+            impact_estimator=MagicMock(),
+            strategy=MagicMock(),
+            broker_router=MagicMock(),
+            circuit_breakers={},
+            cross_market_breaker=MagicMock(),
+            alerter=MagicMock(),
+            instrument_registry=MagicMock(),
+            rss_fetcher=rss_fetcher,
+            telegram_reader=telegram_reader,
+            news_impact_analyzer=news_impact_analyzer,
+            sector_ticker_mapper=sector_ticker_mapper,
+        )
     )
     # Pre-set event_driven guard so news cycle tests proceed without reading YAMLs
     loop._sentiment_mgr._event_driven_active = True  # type: ignore[attr-defined]

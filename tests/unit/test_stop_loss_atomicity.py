@@ -44,7 +44,7 @@ def _make_trading_loop(
     with patch.dict("sys.modules", {}):
         pass
 
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     mock_settings = MagicMock()
     mock_settings.effective_risk_limits.return_value = MagicMock(
@@ -71,18 +71,20 @@ def _make_trading_loop(
     mock_router.route.return_value = mock_broker
 
     loop = TradingLoop(
-        settings=mock_settings,
-        fetchers={"us": MagicMock()},
-        news_fetcher=MagicMock(),
-        news_analyzer=MagicMock(),
-        event_classifier=MagicMock(),
-        impact_estimator=MagicMock(),
-        strategy=MagicMock(),
-        broker_router=mock_router,
-        circuit_breakers={"us": MagicMock()},
-        cross_market_breaker=MagicMock(),
-        alerter=MagicMock(),
-        instrument_registry=MagicMock(),
+        TradingLoopDeps(
+            settings=mock_settings,
+            fetchers={"us": MagicMock()},
+            news_fetcher=MagicMock(),
+            news_analyzer=MagicMock(),
+            event_classifier=MagicMock(),
+            impact_estimator=MagicMock(),
+            strategy=MagicMock(),
+            broker_router=mock_router,
+            circuit_breakers={"us": MagicMock()},
+            cross_market_breaker=MagicMock(),
+            alerter=MagicMock(),
+            instrument_registry=MagicMock(),
+        )
     )
 
     return loop, mock_broker

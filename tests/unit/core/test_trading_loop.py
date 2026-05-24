@@ -26,7 +26,7 @@ def _make_loop(
     settings: object | None = None,
 ) -> object:
     """Build a TradingLoop with mocked dependencies."""
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     mock_settings = settings or MagicMock()
     if settings is None:
@@ -46,22 +46,24 @@ def _make_loop(
     mock_news_fetcher = news_fetcher or MagicMock()
 
     return TradingLoop(
-        settings=mock_settings,
-        fetchers={},
-        news_fetcher=mock_news_fetcher,
-        news_analyzer=MagicMock(),
-        event_classifier=MagicMock(),
-        impact_estimator=MagicMock(),
-        strategy=MagicMock(),
-        broker_router=MagicMock(),
-        circuit_breakers={},
-        cross_market_breaker=MagicMock(),
-        alerter=MagicMock(),
-        instrument_registry=MagicMock(),
-        rss_fetcher=rss_fetcher,
-        telegram_reader=telegram_reader,
-        news_impact_analyzer=news_impact_analyzer,
-        sector_ticker_mapper=sector_ticker_mapper,
+        TradingLoopDeps(
+            settings=mock_settings,
+            fetchers={},
+            news_fetcher=mock_news_fetcher,
+            news_analyzer=MagicMock(),
+            event_classifier=MagicMock(),
+            impact_estimator=MagicMock(),
+            strategy=MagicMock(),
+            broker_router=MagicMock(),
+            circuit_breakers={},
+            cross_market_breaker=MagicMock(),
+            alerter=MagicMock(),
+            instrument_registry=MagicMock(),
+            rss_fetcher=rss_fetcher,
+            telegram_reader=telegram_reader,
+            news_impact_analyzer=news_impact_analyzer,
+            sector_ticker_mapper=sector_ticker_mapper,
+        )
     )
 
 
@@ -426,14 +428,14 @@ class TestStalenessThreshold:
 
     def test_not_stale_within_threshold(self) -> None:
         """Candle 50h old is within 72h threshold — not stale."""
-        from finalayze.orchestration.trading_loop import TradingLoop
+        from finalayze.orchestration.trading_loop import TradingLoop, TradingLoopDeps
 
         latest = datetime.now(UTC) - timedelta(hours=50)
         assert TradingLoop._is_candle_stale(latest, 72.0) is False
 
     def test_stale_on_wednesday_genuine(self) -> None:
         """Candle 100h old on a Wednesday with no holidays — genuinely stale."""
-        from finalayze.orchestration.trading_loop import TradingLoop
+        from finalayze.orchestration.trading_loop import TradingLoop, TradingLoopDeps
 
         # Wednesday 2026-04-08 10:00 UTC, candle from Saturday 2026-04-04 06:00 UTC
         # That's 100h gap, but Sat+Sun = 2 non-trading days = 48h subtracted
@@ -445,7 +447,7 @@ class TestStalenessThreshold:
 
     def test_not_stale_monday_morning_weekend_gap(self) -> None:
         """Friday candle checked Monday morning — weekend excluded, not stale."""
-        from finalayze.orchestration.trading_loop import TradingLoop
+        from finalayze.orchestration.trading_loop import TradingLoop, TradingLoopDeps
 
         # Friday 15:00 UTC → Monday 07:00 UTC = 64 hours
         # 64h < 72h threshold → quick path returns False (not stale)
@@ -457,7 +459,7 @@ class TestStalenessThreshold:
 
     def test_not_stale_moex_new_year_holidays(self) -> None:
         """Candle from Dec 30 checked Jan 9 — 10 days but holidays excluded."""
-        from finalayze.orchestration.trading_loop import TradingLoop
+        from finalayze.orchestration.trading_loop import TradingLoop, TradingLoopDeps
 
         # Dec 30 to Jan 9 = 10 calendar days = 240 hours
         # Non-trading: Dec 31 (holiday), Jan 1-8 (holidays), plus any weekends in range
@@ -583,7 +585,7 @@ class TestGrpcLoopIsolation:
         import asyncio
         import threading
 
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
         grpc_loop = asyncio.new_event_loop()
         thread = threading.Thread(target=grpc_loop.run_forever, daemon=True)
@@ -602,19 +604,21 @@ class TestGrpcLoopIsolation:
             mock_settings.telegram_channels = []
 
             loop_obj = TradingLoop(
-                settings=mock_settings,
-                fetchers={},
-                news_fetcher=MagicMock(),
-                news_analyzer=MagicMock(),
-                event_classifier=MagicMock(),
-                impact_estimator=MagicMock(),
-                strategy=MagicMock(),
-                broker_router=MagicMock(),
-                circuit_breakers={},
-                cross_market_breaker=MagicMock(),
-                alerter=MagicMock(),
-                instrument_registry=MagicMock(),
-                grpc_loop=grpc_loop,
+                TradingLoopDeps(
+                    settings=mock_settings,
+                    fetchers={},
+                    news_fetcher=MagicMock(),
+                    news_analyzer=MagicMock(),
+                    event_classifier=MagicMock(),
+                    impact_estimator=MagicMock(),
+                    strategy=MagicMock(),
+                    broker_router=MagicMock(),
+                    circuit_breakers={},
+                    cross_market_breaker=MagicMock(),
+                    alerter=MagicMock(),
+                    instrument_registry=MagicMock(),
+                    grpc_loop=grpc_loop,
+                )
             )
             assert loop_obj._grpc_loop is grpc_loop
         finally:
@@ -629,7 +633,7 @@ class TestGrpcLoopIsolation:
 
 def _make_loop_with_broker() -> object:
     """Build a TradingLoop with a configurable mock broker_router."""
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.core.trading_loop import TradingLoop, TradingLoopDeps
 
     mock_settings = MagicMock()
     mock_settings.news_cycle_minutes = 15
@@ -645,18 +649,20 @@ def _make_loop_with_broker() -> object:
     mock_settings.weekly_digest_hour_utc = 10
 
     return TradingLoop(
-        settings=mock_settings,
-        fetchers={},
-        news_fetcher=MagicMock(),
-        news_analyzer=MagicMock(),
-        event_classifier=MagicMock(),
-        impact_estimator=MagicMock(),
-        strategy=MagicMock(),
-        broker_router=MagicMock(),
-        circuit_breakers={},
-        cross_market_breaker=MagicMock(),
-        alerter=MagicMock(),
-        instrument_registry=MagicMock(),
+        TradingLoopDeps(
+            settings=mock_settings,
+            fetchers={},
+            news_fetcher=MagicMock(),
+            news_analyzer=MagicMock(),
+            event_classifier=MagicMock(),
+            impact_estimator=MagicMock(),
+            strategy=MagicMock(),
+            broker_router=MagicMock(),
+            circuit_breakers={},
+            cross_market_breaker=MagicMock(),
+            alerter=MagicMock(),
+            instrument_registry=MagicMock(),
+        )
     )
 
 
