@@ -25,7 +25,6 @@ class BaseStrategy(ABC):
         segment_id: str,
         sentiment_score: float = 0.0,
         has_open_position: bool = False,
-        **kwargs: object,
     ) -> Signal | None: ...
 
     @abstractmethod

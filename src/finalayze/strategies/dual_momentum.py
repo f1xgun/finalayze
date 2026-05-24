@@ -127,7 +127,6 @@ class DualMomentumStrategy(BaseStrategy):
         segment_id: str,
         sentiment_score: float = 0.0,  # noqa: ARG002
         has_open_position: bool = False,
-        **kwargs: object,  # noqa: ARG002
     ) -> Signal | None:
         """Generate dual momentum signal.
 
