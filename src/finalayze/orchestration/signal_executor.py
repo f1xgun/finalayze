@@ -26,6 +26,7 @@ import structlog
 
 from finalayze.core.schemas import SignalDirection
 from finalayze.orchestration.cycle_stats import CycleStats
+from finalayze.risk.exposure import ExposureCalculator
 
 if TYPE_CHECKING:
     from config.settings import Settings
@@ -338,37 +339,21 @@ class SignalExecutor:
         order_value = order.quantity * (candles[-1].close if candles else _ZERO)
         open_position_count = len([q for q in portfolio.positions.values() if q > _ZERO])
 
-        # 6A.4: Aggregate invested value across ALL markets for cross-market exposure
-        from finalayze.markets.currency import CurrencyConverter  # noqa: PLC0415
-
-        fx = CurrencyConverter(base_currency="USD")
-        total_equity = self._compute_total_equity_base(fx)
-        total_invested = _ZERO
-        for m_id in (
+        # 6A.4: Cross-market exposure via ExposureCalculator (Phase 2b extraction)
+        symbol_limit_markets = (
             self._pre_trade_checker._symbol_limits.keys()
             if hasattr(self._pre_trade_checker, "_symbol_limits")
             else []
-        ):
-            m_equity = self._get_market_equity(m_id)
-            if m_equity is None:
-                continue
-            m_broker = self._broker_router.route(m_id)
-            m_portfolio = m_broker.get_portfolio()
-            m_invested = max(m_equity - m_portfolio.cash, _ZERO)
-            currency = _MARKET_CURRENCY.get(m_id, "USD")
-            total_invested += fx.to_base(m_invested, currency)
-
-        order_currency = _MARKET_CURRENCY.get(market_id, "USD")
-        order_value_base = fx.to_base(order_value, order_currency)
-        prospective_invested = total_invested + order_value_base
-        cross_exposure: Decimal = (
-            prospective_invested / total_equity if total_equity > _ZERO else _ZERO
         )
-        try:
-            _raw_max_exp = getattr(self._settings, "max_cross_market_exposure_pct", 0.80)
-            max_exposure = Decimal(str(float(_raw_max_exp)))
-        except (TypeError, ValueError):
-            max_exposure = Decimal("0.80")
+        exposure_calc = ExposureCalculator(
+            broker_router=self._broker_router,
+            symbol_limit_markets=symbol_limit_markets,
+            settings=self._settings,
+            get_market_equity=self._get_market_equity,
+        )
+        cross_exposure, max_exposure = exposure_calc.compute(
+            market_id=market_id, order_value=order_value
+        )
 
         # 6A.7: Detect day trades for PDT compliance
         is_day_trade = self._is_day_trade(order.symbol, order.side, market_id)
@@ -918,14 +903,3 @@ class SignalExecutor:
             return Decimal(str(portfolio.equity))
         except Exception:
             return None
-
-    def _compute_total_equity_base(self, fx: object) -> Decimal:
-        """Sum equities across all markets, converting to base currency (USD)."""
-        total = _ZERO
-        for m_id in ["us", "moex"]:  # Inject known markets or use a parameter
-            equity = self._get_market_equity(m_id)
-            if equity is None:
-                continue
-            currency = _MARKET_CURRENCY.get(m_id, "USD")
-            total += fx.to_base(equity, currency)  # type: ignore[attr-defined]
-        return total
