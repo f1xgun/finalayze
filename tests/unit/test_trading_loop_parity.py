@@ -23,7 +23,6 @@ from finalayze.markets.instruments import InstrumentRegistry
 from finalayze.risk.circuit_breaker import CircuitBreaker, CircuitLevel, CrossMarketCircuitBreaker
 from finalayze.risk.position_sizing_pipeline import (
     HardCapsStep,
-    KellyStep,
     MetaLabelStep,
     PositionSizingPipeline,
     RegimeStep,
@@ -346,11 +345,15 @@ class TestPipelineSizing:
         assert order is not None
 
     def test_pipeline_includes_core_steps(self) -> None:
-        """Pipeline includes KellyStep, VolTargetStep, RegimeStep, MetaLabelStep, HardCapsStep."""
+        """Pipeline includes VolTargetStep, RegimeStep, MetaLabelStep, HardCapsStep.
+
+        Kelly sizing is pre-applied to ``SizingContext.base_position`` upstream
+        of the pipeline (see ``SignalExecutor._compute_kelly_fraction``), so the
+        pipeline itself no longer needs a dedicated KellyStep.
+        """
         loop = _make_loop()
         pipeline = loop._build_sizing_pipeline("us_tech")
         step_types = [type(s) for s in pipeline._steps]
-        assert KellyStep in step_types
         assert VolTargetStep in step_types
         assert RegimeStep in step_types
         assert MetaLabelStep in step_types

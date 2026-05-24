@@ -12,7 +12,6 @@ from finalayze.backtest.config import (
 )
 from finalayze.risk.position_sizing_pipeline import (
     HardCapsStep,
-    KellyStep,
     PositionSizingPipeline,
     RegimeStep,
     SizingContext,

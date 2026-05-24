@@ -1,6 +1,7 @@
 """Unified position sizing pipeline (Layer 4).
 
-Applies a chain of sizing adjustments: Kelly -> VolTarget -> Regime -> HardCaps.
+Applies a chain of sizing adjustments: VolTarget -> Regime -> HardCaps.
+Kelly sizing is already factored into ``SizingContext.base_position`` upstream.
 All calculations use Decimal for financial precision.
 """
 
@@ -58,14 +59,6 @@ class PositionSizingStep(Protocol):
     """Protocol for a single step in the sizing pipeline."""
 
     def adjust(self, size: Decimal, context: SizingContext) -> Decimal: ...
-
-
-class KellyStep:
-    """Pass-through step: base_position already includes Kelly sizing."""
-
-    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:  # noqa: ARG002
-        """Kelly is already factored into base_position; return as-is."""
-        return size
 
 
 class VolTargetStep:
@@ -255,13 +248,13 @@ class MetaLabelStep:
 class PositionSizingPipeline:
     """Ordered pipeline of position sizing adjustments.
 
-    Default step order: KellyStep -> VolTargetStep -> RegimeStep -> HardCapsStep.
+    Default step order: VolTargetStep -> RegimeStep -> HardCapsStep.
+    Kelly sizing is already factored into SizingContext.base_position upstream.
     After all steps, positions below min_position_size are eliminated (return 0).
     """
 
     def __init__(self, steps: list[PositionSizingStep] | None = None) -> None:
         self._steps: list[PositionSizingStep] = steps or [
-            KellyStep(),
             VolTargetStep(),
             RegimeStep(),
             HardCapsStep(),
