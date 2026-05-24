@@ -281,7 +281,10 @@ class StrategyCombiner:
         """Compute the effective confidence threshold, lowering for exit signals."""
         threshold = min_confidence
         if has_open_position and net < _ZERO:
-            exit_conf = Decimal(str(config.get("min_exit_confidence", _MIN_EXIT_CONFIDENCE)))
+            try:
+                exit_conf = Decimal(str(config.get("min_exit_confidence", _MIN_EXIT_CONFIDENCE)))
+            except InvalidOperation:
+                exit_conf = _MIN_EXIT_CONFIDENCE
             threshold = min(min_confidence, exit_conf)
         return threshold
 
@@ -295,6 +298,11 @@ class StrategyCombiner:
         for strategy in self._strategies.values():
             if hasattr(strategy, "set_market_context"):
                 strategy.set_market_context(ctx)
+
+    @property
+    def presets_dir(self) -> Path:
+        """Directory the combiner reads segment YAML presets from."""
+        return self._presets_dir
 
     # ── Hooks for subclass extension (JournalingStrategyCombiner) ──────────
 
