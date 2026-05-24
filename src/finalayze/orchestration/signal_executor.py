@@ -544,8 +544,9 @@ class SignalExecutor:
     def _build_sizing_pipeline(self, segment_id: str) -> PositionSizingPipeline:
         """Build position sizing pipeline matching backtest engine step order.
 
-        Pipeline order: Kelly -> VolTarget -> Regime -> [RubOilRegime] -> [BrentGate]
+        Pipeline order: VolTarget -> Regime -> [RubOilRegime] -> [BrentGate]
             -> [CBRRegime] -> [SectorAllocation] -> [Copula] -> [EVT] -> MetaLabel -> HardCaps
+        (Kelly sizing is pre-applied to SizingContext.base_position upstream.)
         """
         from finalayze.risk.position_sizing_pipeline import (  # noqa: PLC0415
             BrentGateStep,
@@ -553,7 +554,6 @@ class SignalExecutor:
             CopulaStep,
             EVTStep,
             HardCapsStep,
-            KellyStep,
             MetaLabelStep,
             PositionSizingPipeline,
             RegimeStep,
@@ -562,7 +562,7 @@ class SignalExecutor:
             VolTargetStep,
         )
 
-        steps: list[object] = [KellyStep(), VolTargetStep(), RegimeStep()]
+        steps: list[object] = [VolTargetStep(), RegimeStep()]
 
         # Add MOEX-specific steps when macro_cache provides data
         if self._macro_cache is not None and segment_id.startswith("ru_"):

@@ -100,7 +100,6 @@ class TestMetaLabelSizingStep:
         """MetaLabelStep works correctly within the full pipeline."""
         from finalayze.risk.position_sizing_pipeline import (
             HardCapsStep,
-            KellyStep,
             PositionSizingPipeline,
             RegimeStep,
             VolTargetStep,
@@ -108,7 +107,6 @@ class TestMetaLabelSizingStep:
 
         pipeline = PositionSizingPipeline(
             steps=[
-                KellyStep(),
                 VolTargetStep(),
                 RegimeStep(),
                 MetaLabelStep(),
@@ -124,7 +122,6 @@ class TestMetaLabelSizingStep:
         """Low ML confidence in pipeline -> veto -> final position = 0."""
         from finalayze.risk.position_sizing_pipeline import (
             HardCapsStep,
-            KellyStep,
             PositionSizingPipeline,
             RegimeStep,
             VolTargetStep,
@@ -132,7 +129,6 @@ class TestMetaLabelSizingStep:
 
         pipeline = PositionSizingPipeline(
             steps=[
-                KellyStep(),
                 VolTargetStep(),
                 RegimeStep(),
                 MetaLabelStep(),

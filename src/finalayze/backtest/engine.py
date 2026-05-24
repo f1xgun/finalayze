@@ -35,7 +35,6 @@ from finalayze.risk.position_sizing_pipeline import (
     CopulaStep,
     EVTStep,
     HardCapsStep,
-    KellyStep,
     MetaLabelStep,
     PositionSizingPipeline,
     RegimeStep,
@@ -170,11 +169,12 @@ class BacktestEngine:
         RegimeStep and before Copula/EVT/MetaLabel/HardCaps. They require segment_id
         which is only available at run() time.
 
-        Pipeline order: Kelly -> VolTarget -> Regime -> [RubOilRegime] -> [BrentGate]
+        Pipeline order: VolTarget -> Regime -> [RubOilRegime] -> [BrentGate]
             -> [Copula] -> [EVT] -> MetaLabel -> HardCaps
+        (Kelly sizing is pre-applied to SizingContext.base_position upstream.)
         """
         cfg = self._config
-        steps: list[object] = [KellyStep(), VolTargetStep(), RegimeStep()]
+        steps: list[object] = [VolTargetStep(), RegimeStep()]
         # MOEX regime steps (Phase 9: Strategy Wiring)
         if cfg.rub_oil_regime_signal is not None:
             steps.append(RubOilRegimeStep(cfg.rub_oil_regime_signal, segment_id))  # type: ignore[arg-type]

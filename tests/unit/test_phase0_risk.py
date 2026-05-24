@@ -9,7 +9,6 @@ from finalayze.risk.circuit_breaker import CircuitLevel
 from finalayze.risk.kelly import RollingKelly, TradeRecord
 from finalayze.risk.position_sizing_pipeline import (
     HardCapsStep,
-    KellyStep,
     PositionSizingPipeline,
     RegimeStep,
     SizingContext,
@@ -170,9 +169,13 @@ class TestPositionSizingPipeline:
         assert crisis_size < normal_size
 
     def test_pipeline_steps_order(self) -> None:
-        """Pipeline applies steps in defined order: Kelly, VolTarget, Regime, HardCaps."""
+        """Pipeline applies steps in defined order: VolTarget, Regime, HardCaps.
+
+        Kelly sizing is pre-applied to ``SizingContext.base_position`` upstream,
+        so no KellyStep is needed in the pipeline itself.
+        """
         pipeline = PositionSizingPipeline()
-        expected_types = [KellyStep, VolTargetStep, RegimeStep, HardCapsStep]
+        expected_types = [VolTargetStep, RegimeStep, HardCapsStep]
         actual_types = [type(s) for s in pipeline.steps]
         assert actual_types == expected_types
 

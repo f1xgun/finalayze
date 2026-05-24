@@ -19,7 +19,6 @@ from finalayze.risk.position_sizing_pipeline import (
     CopulaStep,
     EVTStep,
     HardCapsStep,
-    KellyStep,
     PositionSizingPipeline,
     RubOilRegimeStep,
     SizingContext,
@@ -232,10 +231,9 @@ class TestEVTStep:
 
 class TestPipelineWithEVTAndCopula:
     def test_pipeline_with_evt_and_copula_steps(self) -> None:
-        """Pipeline with [KellyStep, VolTargetStep, CopulaStep, EVTStep, HardCapsStep]
+        """Pipeline with [VolTargetStep, CopulaStep, EVTStep, HardCapsStep]
         should run without error and return a non-negative Decimal."""
         steps = [
-            KellyStep(),
             VolTargetStep(),
             CopulaStep(),
             EVTStep(),
