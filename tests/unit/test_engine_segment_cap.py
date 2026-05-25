@@ -41,7 +41,7 @@ def _make_signal() -> Signal:
         symbol="TEST",
         market_id="us",
         segment_id="us_tech",
-        features={},
+        strategy_payload={},
         reasoning="test",
     )
 
@@ -179,7 +179,7 @@ class TestMoexMinPositionSize:
             symbol="TEST",
             market_id="moex" if segment_id.startswith("ru_") else "us",
             segment_id=segment_id,
-            features={},
+            strategy_payload={},
             reasoning="test",
         )
 

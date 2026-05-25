@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from finalayze.core.schemas import Signal, SignalDirection
+from finalayze.core.schemas import EventType, Signal, SignalDirection, SignalMetadata
 from finalayze.strategies.base import BaseStrategy
 
 if TYPE_CHECKING:
@@ -151,10 +151,9 @@ class EventDrivenStrategy(BaseStrategy):
         direction = SignalDirection.BUY if sentiment_score > 0 else SignalDirection.SELL
         confidence = min(1.0, abs_sent * credibility)
 
-        features: dict[str, float] = {
+        strategy_payload: dict[str, float] = {
             "sentiment": sentiment_score,
             "credibility": credibility,
-            "event_type_code": event_type_code,
         }
 
         # Apply sanctions proximity scaling for segments with sanctions/geopolitical events.
@@ -163,7 +162,7 @@ class EventDrivenStrategy(BaseStrategy):
         if event_types_set & _SANCTIONS_EVENT_TYPES:
             proximity = _SANCTIONS_PROXIMITY.get(symbol, 0.0)
             confidence *= 1.0 - proximity * 0.5
-            features["sanctions_proximity"] = proximity
+            strategy_payload["sanctions_proximity"] = proximity
 
         return Signal(
             strategy_name=self.name,
@@ -172,6 +171,7 @@ class EventDrivenStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features=features,
+            metadata=SignalMetadata(event_type=EventType(int(event_type_code))),
+            strategy_payload=strategy_payload,
             reasoning=f"News sentiment {sentiment_score:+.2f} (credibility={credibility:.2f})",
         )

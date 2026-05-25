@@ -41,7 +41,7 @@ def _make_signal(direction: SignalDirection = SignalDirection.BUY) -> Signal:
         symbol="AAPL",
         market_id="us",
         segment_id="us_tech",
-        features={},
+        strategy_payload={},
         reasoning="test signal",
     )
 

@@ -909,7 +909,7 @@ class TestMeanReversionExitAtMean:
         sig2 = strategy.generate_signal("AAPL", candles_mean, "us_tech")
         assert sig2 is not None, "Expected SELL exit signal when price returns to mean"
         assert sig2.direction == SignalDirection.SELL
-        assert sig2.features.get("exit_at_mean") == 1.0
+        assert sig2.strategy_payload.get("exit_at_mean") == 1.0
 
     def test_exit_at_mean_generates_buy_after_sell(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Price above upper BB (SELL), then returns to mean -> exit BUY."""

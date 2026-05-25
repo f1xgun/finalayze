@@ -178,7 +178,7 @@ class TestSignalInstrumentType:
             segment_id="us_tech",
             direction=SignalDirection.BUY,
             confidence=SIGNAL_CONFIDENCE,
-            features={"rsi": 65.0},
+            strategy_payload={"rsi": 65.0},
             reasoning="test",
         )
         assert signal.instrument_type == "stock"
@@ -191,7 +191,7 @@ class TestSignalInstrumentType:
             segment_id="ru_bonds",
             direction=SignalDirection.BUY,
             confidence=SIGNAL_CONFIDENCE,
-            features={},
+            strategy_payload={},
             reasoning="OFZ carry",
             instrument_type="bond",
         )

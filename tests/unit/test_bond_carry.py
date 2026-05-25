@@ -180,8 +180,8 @@ class TestMaturityRotation:
             bar_idx=10,
         )
         assert signal is not None
-        assert "months_to_maturity" in signal.features
-        assert signal.features["months_to_maturity"] < _MATURITY_ROTATION_MONTHS
+        assert "months_to_maturity" in signal.strategy_payload
+        assert signal.strategy_payload["months_to_maturity"] < _MATURITY_ROTATION_MONTHS
 
     def test_no_sell_if_not_held(self) -> None:
         """Even if near maturity, no SELL if the bond is not in open_positions."""

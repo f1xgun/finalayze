@@ -159,7 +159,7 @@ class MLStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={"ml_prob": round(prob, 4)},
+            strategy_payload={"ml_prob": round(prob, 4)},
             reasoning=f"ML ensemble prob={prob:.3f} (threshold={threshold})",
         )
 

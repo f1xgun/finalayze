@@ -164,7 +164,7 @@ class DividendGapStrategy(BaseStrategy):
                     segment_id=segment_id,
                     direction=SignalDirection.SELL,
                     confidence=_MAX_CONFIDENCE,
-                    features={
+                    strategy_payload={
                         "gap_pct": round(tracker.gap_pct, 2),
                         "bars_held": float(tracker.bars_since_entry),
                         "recovery_pct": 100.0,
@@ -194,7 +194,7 @@ class DividendGapStrategy(BaseStrategy):
                     segment_id=segment_id,
                     direction=SignalDirection.SELL,
                     confidence=_CONFIDENCE_BASE,
-                    features={
+                    strategy_payload={
                         "gap_pct": round(tracker.gap_pct, 2),
                         "bars_held": float(tracker.bars_since_entry),
                         "recovery_pct": round(recovery_pct, 2),
@@ -264,7 +264,7 @@ class DividendGapStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=SignalDirection.BUY,
             confidence=confidence,
-            features={
+            strategy_payload={
                 "gap_pct": round(gap_pct, 2),
                 "dividend_amount": matching_div.amount,
                 "pre_exdiv_close": round(pre_exdiv_close, 2),

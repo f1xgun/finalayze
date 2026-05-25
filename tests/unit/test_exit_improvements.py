@@ -81,7 +81,7 @@ class BuyOnceStrategy(BaseStrategy):
                 segment_id=segment_id,
                 direction=SignalDirection.BUY,
                 confidence=0.8,
-                features={"test": 1.0},
+                strategy_payload={"test": 1.0},
                 reasoning="Test buy",
             )
         return None

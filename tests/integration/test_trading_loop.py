@@ -118,7 +118,7 @@ class TestStrategyIntegration:
                 segment_id=SEGMENT_US_TECH,
                 direction=SignalDirection.BUY,
                 confidence=0.80,
-                features={},
+                strategy_payload={},
                 reasoning="integration test signal",
             )
         )

@@ -358,7 +358,8 @@ class SignalExecutor:
             segment=seg_id,
             has_position=has_open_position,
             reasoning=signal.reasoning,
-            features={k: round(v, 4) for k, v in signal.features.items()} or None,
+            strategy_payload={k: round(v, 4) for k, v in signal.strategy_payload.items()} or None,
+            contributions={k: round(v, 4) for k, v in signal.contributions.items()} or None,
         )
 
         return _SignalContext(
@@ -663,7 +664,7 @@ class SignalExecutor:
         pipeline = self._build_sizing_pipeline(seg_id)
         asset_vol = self._compute_asset_vol(candles)
         regime_scale = self._get_regime_scale()
-        ml_confidence = signal.features.get("ml_confidence") if signal.features else None
+        ml_confidence = signal.metadata.ml_confidence
 
         _limits = self._settings.effective_risk_limits()
         min_pos = max(portfolio_equity * Decimal("0.005"), Decimal(500))
@@ -745,17 +746,11 @@ class SignalExecutor:
     ) -> list[tuple[str, float]]:
         """Return [(name, confidence)] sorted descending by confidence.
 
-        Reads the per-strategy ``{name}_confidence`` keys that
-        ``StrategyCombiner`` writes onto ``signal.features``. Excludes the ADX
-        routing keys (``adx_*_confidence``) which are not contributing
-        strategies. ALRT-02 D-14: caller (TelegramAlerter.on_signal_generated)
-        truncates to top-3 + "(+N more)".
+        Reads ``signal.contributions`` (per-strategy confidence written by
+        ``StrategyCombiner``). ALRT-02 D-14: caller
+        (TelegramAlerter.on_signal_generated) truncates to top-3 + "(+N more)".
         """
-        contribs: list[tuple[str, float]] = []
-        for key, val in (signal.features or {}).items():
-            if key.endswith("_confidence") and not key.startswith("adx_"):
-                name = key[: -len("_confidence")]
-                contribs.append((name, float(val)))
+        contribs = [(name, float(val)) for name, val in signal.contributions.items()]
         contribs.sort(key=lambda t: -t[1])
         return contribs
 

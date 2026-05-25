@@ -13,7 +13,14 @@ import yaml
 if TYPE_CHECKING:
     from pathlib import Path
 
-from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.core.schemas import (
+    AdxRegime,
+    Candle,
+    EventType,
+    Signal,
+    SignalDirection,
+    SignalMetadata,
+)
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.combiner import StrategyCombiner
 
@@ -61,7 +68,7 @@ def _make_signal(
         segment_id=segment_id,
         direction=direction,
         confidence=confidence,
-        features={"mock_feature": confidence},
+        strategy_payload={"mock_feature": confidence},
         reasoning=f"Mock signal: {direction} at {confidence}",
     )
 
@@ -260,8 +267,8 @@ class TestStrategyCombiner:
         with patch.object(combiner, "_load_config", return_value=single_strategy_config):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
         assert signal is not None
-        assert "momentum_confidence" in signal.features
-        assert "momentum_direction" in signal.features
+        assert "momentum" in signal.contributions
+        assert "momentum_direction" in signal.strategy_payload
 
 
 class TestStrategyCombinerYAMLErrorHandling:
@@ -469,7 +476,7 @@ class TestADXRouting:
     """Tests for ADX-based regime routing in the combiner (replaced Hurst)."""
 
     def test_adx_features_present_in_signal(self) -> None:
-        """Combined signal features contain adx_value and adx_regime."""
+        """Combined signal metadata carries adx_value and adx_regime."""
         config: dict[str, Any] = {
             "strategies": {
                 "momentum": {"enabled": True, "weight": 1.0},
@@ -491,8 +498,8 @@ class TestADXRouting:
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
 
         assert signal is not None
-        assert "adx_value" in signal.features
-        assert "adx_regime" in signal.features
+        assert signal.metadata.adx_value is not None
+        assert signal.metadata.adx_regime is not None
 
     def test_adx_regime_trend_only_momentum_fires(self) -> None:
         """In trending regime (ADX > 35), MR strategies are gated out."""
@@ -521,9 +528,9 @@ class TestADXRouting:
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
 
         assert signal is not None
-        assert signal.features["adx_regime"] == 1.0  # trend
-        # MR signal should NOT appear in features (was gated out)
-        assert "mean_reversion_confidence" not in signal.features
+        assert signal.metadata.adx_regime == AdxRegime.TREND
+        # MR signal should NOT contribute (was gated out)
+        assert "mean_reversion" not in signal.contributions
 
     def test_adx_regime_mr_only_mr_fires(self) -> None:
         """In MR regime (ADX < 15), momentum strategies are gated out."""
@@ -552,9 +559,9 @@ class TestADXRouting:
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
 
         assert signal is not None
-        assert signal.features["adx_regime"] == -1.0  # mr
-        # Momentum signal should NOT appear in features (was gated out)
-        assert "momentum_confidence" not in signal.features
+        assert signal.metadata.adx_regime == AdxRegime.MR
+        # Momentum signal should NOT contribute (was gated out)
+        assert "momentum" not in signal.contributions
 
 
 class TestTurnOfMonth:
@@ -616,7 +623,7 @@ class TestTurnOfMonth:
         with patch.object(combiner, "_load_config", return_value=config):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
         assert signal is not None
-        assert signal.features["turn_of_month"] == 1.0
+        assert signal.strategy_payload["turn_of_month"] == 1.0
 
     def test_tom_mid_month(self) -> None:
         """Candle on Jan 15 -> turn_of_month=0.0 in features."""
@@ -625,7 +632,7 @@ class TestTurnOfMonth:
         with patch.object(combiner, "_load_config", return_value=config):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
         assert signal is not None
-        assert signal.features["turn_of_month"] == 0.0
+        assert signal.strategy_payload["turn_of_month"] == 0.0
 
     def test_tom_last_day_of_month(self) -> None:
         """Candle on Jan 31 -> turn_of_month=1.0 in features."""
@@ -634,7 +641,7 @@ class TestTurnOfMonth:
         with patch.object(combiner, "_load_config", return_value=config):
             signal = combiner.generate_signal("AAPL", candles, "us_broad")
         assert signal is not None
-        assert signal.features["turn_of_month"] == 1.0
+        assert signal.strategy_payload["turn_of_month"] == 1.0
 
     def test_tom_boosts_buy_confidence(self) -> None:
         """BUY signal on TOM day has higher confidence than same signal on non-TOM day."""
@@ -1168,7 +1175,7 @@ class TestEventStrategyBypass:
             result = combiner.generate_signal("AAPL", candles, "us_broad")
 
         assert result is not None
-        assert "dividend_gap_confidence" in result.features
+        assert "dividend_gap" in result.contributions
 
     def test_event_strategy_fires_in_mr_regime(self) -> None:
         """cbr_calendar should NOT be skipped in mr regime (ADX bypass)."""
@@ -1194,7 +1201,7 @@ class TestEventStrategyBypass:
             result = combiner.generate_signal("AAPL", candles, "us_broad")
 
         assert result is not None
-        assert "cbr_calendar_confidence" in result.features
+        assert "cbr_calendar" in result.contributions
 
     def test_non_event_mr_still_skipped_in_trend(self) -> None:
         """mean_reversion should still be skipped in trend regime."""
@@ -1280,17 +1287,13 @@ class TestDedupEventSignals:
     """Tests for CBR/dividend duplicate-signal suppression (EVNT-02)."""
 
     def test_dedup_zeroes_lower_weight_on_same_event_code(self) -> None:
-        """Two strategies with same event_type_code: lower weight is zeroed."""
+        """Two strategies with same event_type: lower weight is zeroed."""
         from finalayze.strategies.combiner import _dedup_event_signals
 
         sig1 = _make_signal(SignalDirection.BUY, 0.8, "event_driven")
-        sig1 = Signal(
-            **{**sig1.model_dump(), "features": {"event_type_code": 1.0}},
-        )
+        sig1 = sig1.model_copy(update={"metadata": SignalMetadata(event_type=EventType.CBR)})
         sig2 = _make_signal(SignalDirection.BUY, 0.8, "cbr_calendar")
-        sig2 = Signal(
-            **{**sig2.model_dump(), "features": {"event_type_code": 1.0}},
-        )
+        sig2 = sig2.model_copy(update={"metadata": SignalMetadata(event_type=EventType.CBR)})
         collected = {
             "event_driven": (sig1, Decimal("0.15")),
             "cbr_calendar": (sig2, Decimal("0.05")),
@@ -1300,17 +1303,13 @@ class TestDedupEventSignals:
         assert "event_driven" not in zeroed
 
     def test_dedup_no_action_for_different_event_codes(self) -> None:
-        """Two strategies with different event_type_codes: no dedup."""
+        """Two strategies with different event_types: no dedup."""
         from finalayze.strategies.combiner import _dedup_event_signals
 
         sig1 = _make_signal(SignalDirection.BUY, 0.8, "event_driven")
-        sig1 = Signal(
-            **{**sig1.model_dump(), "features": {"event_type_code": 1.0}},
-        )
+        sig1 = sig1.model_copy(update={"metadata": SignalMetadata(event_type=EventType.CBR)})
         sig2 = _make_signal(SignalDirection.BUY, 0.8, "cbr_calendar")
-        sig2 = Signal(
-            **{**sig2.model_dump(), "features": {"event_type_code": 2.0}},
-        )
+        sig2 = sig2.model_copy(update={"metadata": SignalMetadata(event_type=EventType.DIVIDEND)})
         collected = {
             "event_driven": (sig1, Decimal("0.15")),
             "cbr_calendar": (sig2, Decimal("0.05")),
@@ -1319,7 +1318,7 @@ class TestDedupEventSignals:
         assert len(zeroed) == 0
 
     def test_dedup_ignores_zero_event_code(self) -> None:
-        """Strategies with event_type_code=0.0 are never deduped."""
+        """Strategies with event_type=NONE are never deduped."""
         from finalayze.strategies.combiner import _dedup_event_signals
 
         sig1 = _make_signal(SignalDirection.BUY, 0.8, "momentum")
@@ -1344,7 +1343,7 @@ def test_signal_schema_default_signal_price_is_none() -> None:
         segment_id="ru_blue_chips",
         direction=SignalDirection.BUY,
         confidence=HIGH_CONFIDENCE,
-        features={},
+        strategy_payload={},
         reasoning="test",
     )
     assert sig.signal_price is None
@@ -1359,7 +1358,7 @@ def test_signal_schema_signal_price_preserves_decimal() -> None:
         segment_id="ru_blue_chips",
         direction=SignalDirection.BUY,
         confidence=HIGH_CONFIDENCE,
-        features={},
+        strategy_payload={},
         reasoning="test",
         signal_price=Decimal("280.5000"),
     )
@@ -1439,9 +1438,11 @@ def test_signal_price_none_when_build_result_called_directly() -> None:
     combiner = StrategyCombiner([MockStrategy("momentum", None)])
     result = combiner._build_result(
         Decimal("0.6"),
-        {"momentum_confidence": 0.6, "momentum_direction": 1.0},
-        "AAPL",
-        "us",
-        "us_broad",
+        metadata=SignalMetadata(),
+        contributions={"momentum": 0.6},
+        strategy_payload={"momentum_direction": 1.0},
+        symbol="AAPL",
+        market_id="us",
+        segment_id="us_broad",
     )
     assert result.signal_price is None

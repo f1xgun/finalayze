@@ -138,7 +138,7 @@ def _make_signal(
         segment_id="ru_ofz_pd",
         direction=direction,
         confidence=0.70,
-        features={},
+        strategy_payload={},
         reasoning="test signal",
         instrument_type="bond",
     )

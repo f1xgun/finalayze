@@ -74,7 +74,7 @@ class StubBuyStrategy(BaseStrategy):
                 segment_id=segment_id,
                 direction=SignalDirection.BUY,
                 confidence=0.8,
-                features={"momentum": 1.0},
+                strategy_payload={"momentum": 1.0},
                 reasoning="Test buy signal",
             )
         return None
@@ -108,7 +108,7 @@ class AlwaysBuyStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=SignalDirection.BUY,
             confidence=0.9,
-            features={},
+            strategy_payload={},
             reasoning="Always buy",
         )
 

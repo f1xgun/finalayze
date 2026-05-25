@@ -68,7 +68,7 @@ class _BuySellStrategy(BaseStrategy):
                 segment_id=segment_id,
                 direction=SignalDirection.BUY,
                 confidence=0.8,
-                features={"m": 1.0},
+                strategy_payload={"m": 1.0},
                 reasoning="buy",
             )
         if idx == _SELL_BAR:
@@ -79,7 +79,7 @@ class _BuySellStrategy(BaseStrategy):
                 segment_id=segment_id,
                 direction=SignalDirection.SELL,
                 confidence=0.8,
-                features={"m": -1.0},
+                strategy_payload={"m": -1.0},
                 reasoning="sell",
             )
         return None

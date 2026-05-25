@@ -288,7 +288,7 @@ class BondDurationRotationStrategy:
             direction=direction,
             confidence=confidence,
             instrument_type="bond",
-            features={
+            strategy_payload={
                 "regime": float(regime),
                 "duration": duration,
                 "target_duration_low": float(dur_low),

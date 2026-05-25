@@ -132,14 +132,16 @@ class TestMomentumSignalFeatures:
         assert signal is not None, "Expected a BUY signal"
         assert signal.direction == SignalDirection.BUY
 
-        # Required feature keys
-        for key in ("rsi_value", "macd_hist", "sma_trend", "adx_value", "volume_ratio"):
-            assert key in signal.features, f"Missing feature key: {key}"
+        # Required strategy_payload keys
+        for key in ("rsi_value", "macd_hist", "sma_trend", "volume_ratio"):
+            assert key in signal.strategy_payload, f"Missing feature key: {key}"
+        # adx_value lives on Signal.metadata (cross-module field) as a typed slot
+        assert hasattr(signal.metadata, "adx_value")
 
         # rsi_value should be a number
-        assert isinstance(signal.features["rsi_value"], float)
+        assert isinstance(signal.strategy_payload["rsi_value"], float)
         # macd_hist should be a number
-        assert isinstance(signal.features["macd_hist"], float)
+        assert isinstance(signal.strategy_payload["macd_hist"], float)
 
     def test_sell_signal_features_include_indicators(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A SELL signal also includes indicator features."""
@@ -150,8 +152,9 @@ class TestMomentumSignalFeatures:
         candles = _make_candles(_sell_prices())
         signal = strategy.generate_signal("AAPL", candles, "us_tech")
         assert signal is not None, "Expected a SELL signal"
-        for key in ("rsi_value", "macd_hist", "sma_trend", "adx_value", "volume_ratio"):
-            assert key in signal.features, f"Missing feature key: {key}"
+        for key in ("rsi_value", "macd_hist", "sma_trend", "volume_ratio"):
+            assert key in signal.strategy_payload, f"Missing feature key: {key}"
+        assert hasattr(signal.metadata, "adx_value")
 
     def test_last_skip_reason_set_on_insufficient_data(
         self, monkeypatch: pytest.MonkeyPatch
@@ -205,10 +208,10 @@ class TestMeanReversionSignalFeatures:
         assert signal.direction == SignalDirection.BUY
 
         for key in ("bb_pct_b", "rsi_value", "squeeze_active", "band_distance"):
-            assert key in signal.features, f"Missing feature key: {key}"
+            assert key in signal.strategy_payload, f"Missing feature key: {key}"
 
         # bb_pct_b below 0 for below lower band
-        assert signal.features["bb_pct_b"] < 0.0
+        assert signal.strategy_payload["bb_pct_b"] < 0.0
 
     def test_sell_signal_features_include_bb_indicators(
         self, monkeypatch: pytest.MonkeyPatch
@@ -228,10 +231,10 @@ class TestMeanReversionSignalFeatures:
         assert signal.direction == SignalDirection.SELL
 
         for key in ("bb_pct_b", "rsi_value", "squeeze_active", "band_distance"):
-            assert key in signal.features, f"Missing feature key: {key}"
+            assert key in signal.strategy_payload, f"Missing feature key: {key}"
 
         # bb_pct_b > 1.0 for above upper band
-        assert signal.features["bb_pct_b"] > 1.0
+        assert signal.strategy_payload["bb_pct_b"] > 1.0
 
 
 # ===================================================================
@@ -350,7 +353,7 @@ class TestJournalingCombinerFeatures:
         name: str,
         direction: SignalDirection = SignalDirection.BUY,
         confidence: float = 0.8,
-        features: dict[str, float] | None = None,
+        strategy_payload: dict[str, float] | None = None,
     ) -> Signal:
         return Signal(
             strategy_name=name,
@@ -359,7 +362,7 @@ class TestJournalingCombinerFeatures:
             segment_id="us_tech",
             direction=direction,
             confidence=confidence,
-            features=features or {},
+            strategy_payload=strategy_payload or {},
             reasoning="test",
         )
 
@@ -367,11 +370,13 @@ class TestJournalingCombinerFeatures:
         """last_features aggregates features from each strategy, prefixed by name."""
         from finalayze.backtest.journaling_combiner import JournalingStrategyCombiner
 
-        sig_a = self._make_signal("momentum", features={"rsi_value": 25.0, "macd_hist": 0.5})
+        sig_a = self._make_signal(
+            "momentum", strategy_payload={"rsi_value": 25.0, "macd_hist": 0.5}
+        )
         sig_b = self._make_signal(
             "mean_reversion",
             direction=SignalDirection.BUY,
-            features={"bb_pct_b": -0.1, "band_distance": 0.05},
+            strategy_payload={"bb_pct_b": -0.1, "band_distance": 0.05},
         )
         strat_a = _MockStrategy("momentum", sig_a)
         strat_b = _MockStrategy("mean_reversion", sig_b)
@@ -420,7 +425,7 @@ class TestJournalingCombinerFeatures:
         from finalayze.backtest.journaling_combiner import JournalingStrategyCombiner
 
         # Create a mock MLStrategy with a mock ensemble that has last_model_probas
-        mock_ml_sig = self._make_signal("ml_ensemble", features={"ml_prob": 0.75})
+        mock_ml_sig = self._make_signal("ml_ensemble", strategy_payload={"ml_prob": 0.75})
         ml_strat = _MockStrategy("ml_ensemble", mock_ml_sig)
 
         # Simulate that MLStrategy has a _registry with get() returning an ensemble

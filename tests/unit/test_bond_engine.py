@@ -125,7 +125,7 @@ def _buy_at_bar_strategy(buy_bar: int, confidence: float = 0.8):
                 segment_id="ru_ofz_strategic",
                 direction=SignalDirection.BUY,
                 confidence=confidence,
-                features={"bar_idx": float(bar_idx)},
+                strategy_payload={"bar_idx": float(bar_idx)},
                 reasoning="Test buy signal",
                 instrument_type="bond",
             )
@@ -763,7 +763,7 @@ class TestBondEngineMacroWiring:
                     segment_id="ru_ofz_pd",
                     direction=SignalDirection.BUY,
                     confidence=0.8,
-                    features={},
+                    strategy_payload={},
                     reasoning="test",
                     instrument_type="bond",
                 )

@@ -291,5 +291,5 @@ class TestGenerateCBRSignal:
         for sym in DEFAULT_AFFECTED_SYMBOLS:
             sig = signals[sym]
             assert sig is not None
-            assert "surprise_bps" in sig.features
-            assert sig.features["surprise_bps"] == float(SURPRISE_HIKE_BPS)
+            assert "surprise_bps" in sig.strategy_payload
+            assert sig.strategy_payload["surprise_bps"] == float(SURPRISE_HIKE_BPS)

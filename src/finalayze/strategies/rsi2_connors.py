@@ -170,7 +170,7 @@ class RSI2ConnorsStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=confidence,
-            features={
+            strategy_payload={
                 "rsi2": round(current_rsi, 2),
                 "sma_trend": round(current_sma_trend, 2),
                 "close": round(current_close, 2),

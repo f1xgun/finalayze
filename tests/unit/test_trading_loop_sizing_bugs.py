@@ -121,7 +121,7 @@ def _make_signal(
         direction=direction,
         confidence=confidence,
         reasoning="test signal",
-        features={},
+        strategy_payload={},
     )
 
 

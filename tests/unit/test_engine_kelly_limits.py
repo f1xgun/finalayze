@@ -81,7 +81,7 @@ class _AlwaysBuyStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=SignalDirection.BUY,
             confidence=0.8,
-            features={},
+            strategy_payload={},
             reasoning="test",
         )
 
@@ -121,7 +121,7 @@ class _AlternatingStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=direction,
             confidence=0.8,
-            features={},
+            strategy_payload={},
             reasoning="test",
         )
 

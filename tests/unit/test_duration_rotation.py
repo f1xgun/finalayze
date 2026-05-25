@@ -428,8 +428,8 @@ class TestBondDurationRotationStrategy:
             last_cbr_decision="cut",
         )
         assert signal is not None
-        assert "regime" in signal.features
-        assert signal.features["regime"] == float(CBRRegime.DOVISH)
+        assert "regime" in signal.strategy_payload
+        assert signal.strategy_payload["regime"] == float(CBRRegime.DOVISH)
 
     def test_unknown_bond_no_signal(self) -> None:
         """A bond not in the strategy's bond_durations dict gets no signal."""

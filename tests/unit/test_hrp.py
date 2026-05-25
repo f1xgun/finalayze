@@ -72,7 +72,7 @@ def _make_signal(
         segment_id=segment_id,
         direction=direction,
         confidence=confidence,
-        features={"mock_feature": confidence},
+        strategy_payload={"mock_feature": confidence},
         reasoning=f"Mock signal: {direction} at {confidence}",
     )
 
@@ -273,6 +273,6 @@ class TestCombinerHRPIntegration:
 
         assert signal is not None
         # HRP should give momentum higher weight (lower vol)
-        assert signal.features.get("hrp_weight_momentum", 0) > signal.features.get(
+        assert signal.strategy_payload.get("hrp_weight_momentum", 0) > signal.strategy_payload.get(
             "hrp_weight_mean_reversion", 0
         )

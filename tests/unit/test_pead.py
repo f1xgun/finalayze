@@ -157,8 +157,8 @@ class TestBuyOnPositiveSurprise:
         )
 
         assert signal is not None
-        assert "sue_score" in signal.features
-        assert signal.features["sue_score"] == _HIGH_SUE
+        assert "sue_score" in signal.strategy_payload
+        assert signal.strategy_payload["sue_score"] == _HIGH_SUE
 
     def test_buy_signal_us_market(self) -> None:
         strategy = _make_strategy()
@@ -237,7 +237,7 @@ class TestSellOnNegativeSurprise:
         )
 
         assert signal is not None
-        assert signal.features["sue_score"] == _LOW_SUE
+        assert signal.strategy_payload["sue_score"] == _LOW_SUE
 
 
 # ===================================================================

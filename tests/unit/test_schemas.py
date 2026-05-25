@@ -165,7 +165,7 @@ class TestSignal:
             segment_id="large_cap",
             direction=SignalDirection.BUY,
             confidence=SIGNAL_CONFIDENCE,
-            features={"rsi": 65.0, "macd": 1.2},
+            strategy_payload={"rsi": 65.0, "macd": 1.2},
             reasoning="Strong upward momentum with RSI above 60",
         )
 
@@ -179,8 +179,8 @@ class TestSignal:
         assert signal.reasoning == "Strong upward momentum with RSI above 60"
 
     def test_features_dict(self, signal: Signal) -> None:
-        assert "rsi" in signal.features
-        assert "macd" in signal.features
+        assert "rsi" in signal.strategy_payload
+        assert "macd" in signal.strategy_payload
 
     def test_frozen(self, signal: Signal) -> None:
         with pytest.raises(ValidationError):
@@ -198,7 +198,7 @@ class TestSignal:
                 segment_id="large_cap",
                 direction=SignalDirection.BUY,
                 confidence=1.5,  # out of range
-                features={},
+                strategy_payload={},
                 reasoning="test",
             )
 
@@ -211,7 +211,7 @@ class TestSignal:
                 segment_id="large_cap",
                 direction=SignalDirection.BUY,
                 confidence=-0.1,  # negative
-                features={},
+                strategy_payload={},
                 reasoning="test",
             )
 

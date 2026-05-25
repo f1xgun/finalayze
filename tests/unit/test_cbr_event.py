@@ -472,8 +472,8 @@ class TestSignalFields:
         assert result.segment_id == "ru_ofz_pd"
         assert result.symbol == PREFERRED_SYMBOL
         assert CONFIDENCE_MIN <= result.confidence <= CONFIDENCE_MAX
-        assert "days_to_meeting" in result.features
-        assert "ruonia_gap" in result.features
+        assert "days_to_meeting" in result.strategy_payload
+        assert "ruonia_gap" in result.strategy_payload
 
     def test_sell_signal_fields(self) -> None:
         """Exit signal also has correct fields."""
@@ -509,7 +509,7 @@ class TestSignalFields:
         assert result.strategy_name == EXPECTED_STRATEGY_NAME
         assert result.instrument_type == EXPECTED_INSTRUMENT_TYPE
         assert result.direction == SignalDirection.SELL
-        assert "exit_type" in result.features
+        assert "exit_type" in result.strategy_payload
 
 
 # ── Test: Look-ahead check ────────────────────────────────────────────────────
@@ -539,7 +539,7 @@ class TestLookAheadCheck:
                 f"Entry reasoning contains look-ahead word '{forbidden_word}': {result.reasoning}"
             )
         # Features should NOT contain decision-related keys
-        for key in result.features:
+        for key in result.strategy_payload:
             assert "decision" not in key.lower()
             assert "rate_after" not in key.lower()
 

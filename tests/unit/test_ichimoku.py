@@ -292,8 +292,8 @@ class TestMomentumIchimokuFilter:
         candles = _make_candles(prices, highs=highs, lows=lows)
         signal = strategy.generate_signal("AAPL", candles, "us_tech")
         assert signal is not None
-        assert "ichimoku_bullish" in signal.features
-        assert "ichimoku_cloud_thickness" in signal.features
+        assert "ichimoku_bullish" in signal.strategy_payload
+        assert "ichimoku_cloud_thickness" in signal.strategy_payload
 
     def test_ichimoku_cloud_thickness_modifies_confidence(
         self, monkeypatch: pytest.MonkeyPatch

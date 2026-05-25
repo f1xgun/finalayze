@@ -262,7 +262,7 @@ class TestTradingLoopStrategyCycle:
             segment_id=SEGMENT_US_TECH,
             direction=SignalDirection.BUY,
             confidence=0.75,
-            features={},
+            strategy_payload={},
             reasoning="test signal",
         )
 
@@ -330,7 +330,7 @@ class TestHasOpenPositionPassthrough:
             segment_id=SEGMENT_US_TECH,
             direction=SignalDirection.BUY,
             confidence=0.75,
-            features={},
+            strategy_payload={},
             reasoning="test signal",
         )
 
@@ -374,7 +374,7 @@ class TestModeGate:
             segment_id=SEGMENT_US_TECH,
             direction=SignalDirection.BUY,
             confidence=0.75,
-            features={},
+            strategy_payload={},
             reasoning="test signal",
         )
 
@@ -405,7 +405,7 @@ class TestBuildOrder:
             segment_id=SEGMENT_US_TECH,
             direction=SignalDirection.BUY,
             confidence=0.75,
-            features={},
+            strategy_payload={},
             reasoning="test signal",
         )
         loop = _make_trading_loop(signal=signal)
@@ -430,7 +430,7 @@ class TestBuildOrder:
             segment_id=SEGMENT_US_TECH,
             direction=SignalDirection.BUY,
             confidence=0.75,
-            features={},
+            strategy_payload={},
             reasoning="test signal",
         )
         loop = _make_trading_loop(signal=signal)
@@ -458,7 +458,7 @@ class TestCrossMarketExposure:
             segment_id=SEGMENT_US_TECH,
             direction=SignalDirection.BUY,
             confidence=0.75,
-            features={},
+            strategy_payload={},
             reasoning="test signal",
         )
 
@@ -637,7 +637,7 @@ class TestPDTTrackerWiring:
             segment_id=SEGMENT_US_TECH,
             direction=SignalDirection.BUY,
             confidence=0.75,
-            features={},
+            strategy_payload={},
             reasoning="test signal",
         )
 
@@ -667,7 +667,7 @@ class TestPDTTrackerWiring:
             segment_id=SEGMENT_US_TECH,
             direction=SignalDirection.SELL,
             confidence=0.75,
-            features={},
+            strategy_payload={},
             reasoning="test signal",
         )
         loop = _make_trading_loop(signal=signal)
@@ -750,7 +750,7 @@ class TestSandboxMonitorIntegration:
             segment_id=SEGMENT_US_TECH,
             direction=SignalDirection.BUY,
             confidence=0.75,
-            features={},
+            strategy_payload={},
             reasoning="test signal",
         )
 
@@ -830,7 +830,7 @@ class TestConsecutiveCycleErrors:
             segment_id=SEGMENT_US_TECH,
             direction=SignalDirection.BUY,
             confidence=0.75,
-            features={},
+            strategy_payload={},
             reasoning="test signal",
         )
 
