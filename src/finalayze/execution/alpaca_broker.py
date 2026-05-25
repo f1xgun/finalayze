@@ -74,6 +74,9 @@ class AlpacaBroker(BrokerBase):
             qty=float(order.quantity),
             side=side,
             time_in_force=tif,
+            # S1.1: idempotency key — retry on transient error must not
+            # double-submit. Alpaca dedups orders by client_order_id.
+            client_order_id=order.client_order_id,
         )
         try:
             result = self._call(lambda: self._client.submit_order(order_data=request))
@@ -92,12 +95,14 @@ class AlpacaBroker(BrokerBase):
             if result.filled_avg_price  # type: ignore[union-attr]
             else None
         )
+        broker_order_id = str(getattr(result, "id", "") or "")
         return OrderResult(
             filled=fill_price is not None,
             fill_price=fill_price,
             symbol=order.symbol,
             side=order.side,
             quantity=Decimal(str(result.filled_qty)) if result.filled_qty else Decimal(0),  # type: ignore[union-attr]
+            order_id=broker_order_id,
         )
 
     def get_portfolio(self) -> PortfolioState:

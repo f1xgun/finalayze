@@ -50,9 +50,12 @@ class TestGetOpenOrders:
         """get_open_orders() should return only non-terminal orders."""
         broker = _make_broker()
         mock_response = MagicMock()
+        # S1.1: status codes match SDK enum OrderExecutionReportStatus
+        # (REJECTED=2, PARTIALLYFILL=5). Previous map in tinkoff_broker.py had
+        # these swapped, so old tests used status=2 for "partial fill".
         mock_response.orders = [
             _make_order_mock("ord-new", status=4),  # new
-            _make_order_mock("ord-partial", status=2, lots_executed=5, price_units=100),  # partial
+            _make_order_mock("ord-partial", status=5, lots_executed=5, price_units=100),
             _make_order_mock("ord-filled", status=1, lots_executed=10, price_units=200),  # fill
             _make_order_mock("ord-cancelled", status=3),  # cancelled
         ]
@@ -110,7 +113,7 @@ class TestGetOpenOrders:
         mock_response.orders = [
             _make_order_mock(
                 "ord-p",
-                status=2,
+                status=5,  # S1.1: PARTIALLYFILL=5 (was wrongly 2 in old map)
                 lots_executed=5,
                 price_units=150,
                 price_nano=500_000_000,

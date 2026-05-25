@@ -319,6 +319,7 @@ class SimulatedBroker(BrokerBase):
             symbol=order.symbol,
             side=order.side,
             quantity=order.quantity,
+            order_id=order.client_order_id,
         )
 
     def _execute_sell(
@@ -355,4 +356,5 @@ class SimulatedBroker(BrokerBase):
             symbol=order.symbol,
             side=order.side,
             quantity=actual_qty,
+            order_id=order.client_order_id,
         )
