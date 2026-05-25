@@ -9,6 +9,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -20,9 +21,14 @@ from finalayze.core.schemas import BondInfo, CouponEvent
 from finalayze.markets.instruments import Instrument
 
 if TYPE_CHECKING:
-    from finalayze.core.events import EventBus
     from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher
     from finalayze.markets.instruments import InstrumentRegistry
+
+# S1.3: synchronous handler invoked with each emitted CouponEvent. Replaces
+# the previous Redis-Streams EventBus (publisher existed, no consumer ever
+# did). Production wiring supplies a handler that credits coupon_cash on the
+# LayerLedger holding the bond. Tests inject a Mock.
+CouponHandler = Callable[[CouponEvent], None]
 
 _log = structlog.get_logger()
 
@@ -62,11 +68,11 @@ class BondDiscoveryService:
         self,
         fetcher: TinkoffFetcher,
         registry: InstrumentRegistry,
-        event_bus: EventBus | None = None,
+        coupon_handler: CouponHandler | None = None,
     ) -> None:
         self._fetcher = fetcher
         self._registry = registry
-        self._event_bus = event_bus
+        self._coupon_handler = coupon_handler
 
     async def discover(self, *, today: date | None = None) -> DiscoveryResult:
         """Fetch all MOEX bonds, apply filters, classify into segments.
@@ -241,7 +247,7 @@ class BondDiscoveryService:
         coupon_schedules: dict[str, list[dict[str, Any]]],
         today: date | None = None,
     ) -> int:
-        """Emit CouponEvent for bonds with record_date == today.
+        """Invoke the coupon handler for bonds with record_date == today.
 
         Args:
             discovered_bonds: List of discovered BondInfo objects.
@@ -249,9 +255,10 @@ class BondDiscoveryService:
             today: Override for current date.
 
         Returns:
-            Count of emitted coupon events.
+            Count of CouponEvents passed to the handler. 0 when no handler is
+            configured.
         """
-        if self._event_bus is None:
+        if self._coupon_handler is None:
             return 0
 
         if today is None:
@@ -276,9 +283,7 @@ class BondDiscoveryService:
                         coupon_number=sched["coupon_number"],
                         is_floating=sched.get("is_floating", False),
                     )
-                    from finalayze.core.events import EventBus  # noqa: PLC0415
-
-                    await self._event_bus.publish(EventBus.STREAM_COUPONS, event)
+                    self._coupon_handler(event)
                     _log.info(
                         "coupon_event_emitted",
                         bond_ticker=bond_info.ticker,

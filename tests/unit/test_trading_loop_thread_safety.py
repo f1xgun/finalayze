@@ -38,7 +38,6 @@ def _make_trading_loop(**overrides: object) -> object:
         "instrument_registry": MagicMock(),
         "cache": None,
         "ml_registry": None,
-        "event_bus": None,
         "fx_service": None,
     }
     defaults.update(overrides)
@@ -133,7 +132,7 @@ class TestSentimentLockScope:
 
 
 class TestShutdownCleanup:
-    """6D.5: Verify stop() closes cache and event_bus."""
+    """6D.5: Verify stop() closes cache and FX service."""
 
     def test_stop_closes_redis_cache(self) -> None:
         mock_cache = AsyncMock()
@@ -149,20 +148,7 @@ class TestShutdownCleanup:
         loop.stop()
         mock_cache.close.assert_called_once()
 
-    def test_stop_closes_event_bus(self) -> None:
-        mock_bus = AsyncMock()
-        loop = _make_trading_loop(event_bus=mock_bus)
-
-        real_loop = asyncio.new_event_loop()
-        t = threading.Thread(target=real_loop.run_forever, daemon=True)
-        t.start()
-        loop._async_loop = real_loop
-        loop._async_thread = t
-
-        loop.stop()
-        mock_bus.close.assert_called_once()
-
-    def test_stop_without_cache_or_bus(self) -> None:
-        """stop() should not crash when cache and event_bus are None."""
+    def test_stop_without_cache(self) -> None:
+        """stop() should not crash when cache is None."""
         loop = _make_trading_loop()
         loop.stop()  # Should not raise
