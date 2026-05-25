@@ -561,60 +561,6 @@ class TestADXHysteresis:
         assert combiner._adx_regimes["MSFT"] == "mr"
 
 
-# ── TOM US-only tests ────────────────────────────────────────────────────────
-
-TOM_BOOST = Decimal("0.05")
-
-
-class TestTOMUSOnly:
-    """Turn-of-month boost should only apply to US segments."""
-
-    @staticmethod
-    def _make_candles_ending_at(dt: datetime, count: int = CANDLE_COUNT) -> list[Candle]:
-        return [
-            Candle(
-                symbol="AAPL",
-                market_id="us",
-                timeframe="1d",
-                timestamp=dt - timedelta(days=count - 1 - i),
-                open=BASE_PRICE,
-                high=BASE_PRICE + CANDLE_HIGH_OFFSET,
-                low=BASE_PRICE - CANDLE_LOW_OFFSET,
-                close=BASE_PRICE,
-                volume=VOLUME,
-            )
-            for i in range(count)
-        ]
-
-    def test_tom_us_only(self) -> None:
-        """TOM boost applies for us_tech but NOT for ru_blue_chips."""
-        config: dict[str, Any] = {
-            "strategies": {
-                "momentum": {"enabled": True, "weight": 1.0},
-            },
-            "min_combined_confidence": 0.0,
-        }
-        buy_signal = _make_signal(SignalDirection.BUY, HIGH_CONFIDENCE, "momentum")
-
-        # TOM day: Jan 1
-        tom_dt = datetime(2024, 1, 1, tzinfo=UTC)
-        candles = self._make_candles_ending_at(tom_dt)
-
-        # US segment: TOM boost should apply
-        combiner_us = StrategyCombiner([MockStrategy("momentum", buy_signal)])
-        with patch.object(combiner_us, "_load_config", return_value=config):
-            sig_us = combiner_us.generate_signal("AAPL", candles, "us_tech")
-        assert sig_us is not None
-        assert sig_us.strategy_payload["turn_of_month"] == 1.0
-
-        # RU segment: TOM boost should NOT apply
-        combiner_ru = StrategyCombiner([MockStrategy("momentum", buy_signal)])
-        with patch.object(combiner_ru, "_load_config", return_value=config):
-            sig_ru = combiner_ru.generate_signal("SBER", candles, "ru_blue_chips")
-        assert sig_ru is not None
-        assert sig_ru.strategy_payload["turn_of_month"] == 0.0
-
-
 # ── Dual momentum SELL signal tests ──────────────────────────────────────────
 
 

@@ -26,6 +26,8 @@ def _get_segment_for_symbol(symbol: str) -> str:
             from config.segments import DEFAULT_SEGMENTS  # noqa: PLC0415
 
             for seg in DEFAULT_SEGMENTS:
+                if not seg.enabled:
+                    continue
                 for sym in seg.symbols:
                     _symbol_to_segment[sym] = seg.segment_id
         except Exception:  # noqa: S110

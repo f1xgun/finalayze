@@ -13,7 +13,7 @@ and gate thresholds. Sits at Layer 1 — may import from `core/` (Layer 0) only.
 |---|---|
 | `settings.py` | `Settings` (Pydantic BaseSettings, env prefix `FINALAYZE_`). Everything downstream reads this. |
 | `modes.py` | `WorkMode` enum (DEBUG/SANDBOX/TEST/REAL), `RolloutPhase`, mode-derived flags. |
-| `segments.py` | `SegmentConfig` dataclass + 9 segments (us_tech, us_broad, us_finance, us_healthcare, us_losers, ru_blue_chips, ru_energy, ru_finance, ru_tech). |
+| `segments.py` | `SegmentConfig` dataclass (with `enabled: bool` flag) + 17 segments. **US segments (`us_tech`, `us_broad`, `us_finance`, `us_healthcare`) are frozen** (`enabled=False`) — no foreign broker access from RF + regulatory uncertainty. MOEX segments remain active. Iterators must filter `s.enabled`. |
 | `logging.py` | structlog setup — must be called before any `structlog.get_logger()` at module level (cache_logger_on_first_use=True). |
 | `pipelines.yaml` | Autonomous pipeline config: daily review, weekly deep dive, go-live scorecard. |
 | `gate_thresholds.yaml` | Go/no-go thresholds consumed by `monitoring/go_no_go.py`. |

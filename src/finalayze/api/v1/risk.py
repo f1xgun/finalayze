@@ -114,9 +114,11 @@ async def risk_exposure(request: Request) -> ExposureResponse:
 
         from config.segments import DEFAULT_SEGMENTS  # noqa: PLC0415
 
-        # Build symbol→segment lookup
+        # Build symbol→segment lookup (skip disabled segments — see S1.2)
         sym_to_seg: dict[str, str] = {}
         for seg in DEFAULT_SEGMENTS:
+            if not seg.enabled:
+                continue
             for sym in seg.symbols:
                 sym_to_seg[sym] = seg.segment_id
 

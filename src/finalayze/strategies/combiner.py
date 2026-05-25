@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import calendar
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -27,8 +26,6 @@ from finalayze.strategies.hrp import compute_hrp_weights
 logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from finalayze.strategies.base import BaseStrategy
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
@@ -57,9 +54,6 @@ _EVENT_STRATEGIES = frozenset({"dividend_gap", "cbr_calendar"})
 _EVENT_MIN_CONFIDENCE = Decimal("0.40")
 _ADX_TREND_THRESHOLD = 35
 _ADX_MR_THRESHOLD = 15
-
-# Turn-of-month effect: boost BUY confidence during last 1 + first 3 calendar days
-_TOM_BUY_BOOST = Decimal("0.05")
 
 # HRP allocation constants
 _HRP_MIN_HISTORY = 20
@@ -147,15 +141,6 @@ class StrategyCombiner:
         raw_weights = compute_hrp_weights(returns_matrix, names)
         self._hrp_weights = {k: Decimal(str(v)) for k, v in raw_weights.items()}
         return self._hrp_weights
-
-    @staticmethod
-    def _is_turn_of_month(timestamp: datetime) -> bool:
-        """Return True if the date falls in the last 1 or first 3 calendar days of the month."""
-        day = timestamp.day
-        if day <= 3:  # noqa: PLR2004
-            return True
-        _, last_day = calendar.monthrange(timestamp.year, timestamp.month)
-        return day >= last_day
 
     @staticmethod
     def _resolve_weight(
@@ -518,17 +503,6 @@ class StrategyCombiner:
             self._on_final_signal(None, strategy_payload)
             return None
         net = weighted_score / denominator
-
-        # Turn-of-month effect: boost BUY confidence during the window (US segments only)
-        if (
-            segment_id.startswith("us_")
-            and self._is_turn_of_month(candles[-1].timestamp)
-            and net > _ZERO
-        ):
-            net += _TOM_BUY_BOOST
-            strategy_payload["turn_of_month"] = 1.0
-        else:
-            strategy_payload["turn_of_month"] = 0.0
 
         # Add HRP weight features when using HRP allocation
         if hrp_overrides is not None:
