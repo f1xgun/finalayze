@@ -35,49 +35,22 @@ DEFAULT_STRATEGY_HOLD_BARS: dict[str, int] = {
 
 _DEFAULT_HOLD_BARS_FALLBACK = 30
 
-# Per-strategy ATR stop-loss multipliers (wider stops for mean-reversion).
-# NOTE: These are candidates for walk-forward optimization (M5 issue).
-# Each value could be tuned per-fold in WalkForwardOptimizer via param_grid
-# rather than being hardcoded constants.
-DEFAULT_STRATEGY_STOP_ATR: dict[str, float] = {
-    "momentum": 2.5,
-    "dual_momentum": 3.0,
-    "mean_reversion": 3.5,
-    "ou_mean_reversion": 3.5,
-    "pairs": 3.0,
-    "event_driven": 3.0,
-    "rsi2_connors": 2.5,
-    "ml_ensemble": 2.0,
-    "dividend_gap": 3.0,
-    "pead": 3.0,
-    "cbr_calendar": 3.0,
-}
+# S1.4: ATR stop-loss multiplier source of truth moved to risk/stops.py
+# (Layer 4) so backtest and live paths read the same numbers. Re-exports
+# kept here to avoid breaking existing imports.
+from finalayze.risk.stops import (  # noqa: E402
+    DEFAULT_STRATEGY_STOP_ATR,
+    resolve_stop_atr_multiplier,
+)
 
-_DEFAULT_STOP_ATR_FALLBACK = 3.0
-
-
-def resolve_stop_atr_multiplier(
-    strategy_name: str,
-    *,
-    segment_id: str = "",
-) -> Decimal:
-    """Resolve the ATR stop-loss multiplier for a strategy.
-
-    This function is called by ``BacktestEngine`` to set the trailing/chandelier
-    stop distance when opening a position.  MOEX segments (``ru_*``) get a 1.2x
-    uplift due to higher ATR/price ratios.
-
-    Precedence note:
-        The engine uses **this function** to determine the stop ATR multiplier.
-        Individual strategies may define ``params.stop_atr_multiplier`` in their
-        YAML preset, but that value is consumed only inside the strategy itself
-        (e.g. for sizing or signal strength) -- it does NOT override the engine
-        stop.  To change the engine stop, update ``DEFAULT_STRATEGY_STOP_ATR``.
-    """
-    base = DEFAULT_STRATEGY_STOP_ATR.get(strategy_name, _DEFAULT_STOP_ATR_FALLBACK)
-    if segment_id.startswith("ru_"):
-        base *= 1.2
-    return Decimal(str(base))
+__all__ = [
+    "DEFAULT_STRATEGY_HOLD_BARS",
+    "DEFAULT_STRATEGY_STOP_ATR",
+    "MOEX_2022_BREAK",
+    "BacktestConfig",
+    "resolve_max_hold_bars",
+    "resolve_stop_atr_multiplier",
+]
 
 
 _MOEX_HOLD_BARS_UPLIFT = 1.3

@@ -141,10 +141,11 @@ class TestStopLossWiring:
         assert "AAPL" not in loop._position_tracker._stop_states
 
     def test_moex_uses_higher_multiplier(self) -> None:
-        """MOEX BUY fills should use the 2.5x ATR multiplier (wider stop)."""
-        loop = _make_trading_loop()
-
+        """MOEX BUY fills must use the unified resolver, applying the MOEX uplift."""
         from finalayze.execution.broker_base import OrderRequest, OrderResult
+        from finalayze.risk.stops import resolve_stop_atr_multiplier
+
+        loop = _make_trading_loop()
 
         order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(10))
         result = OrderResult(
@@ -159,11 +160,14 @@ class TestStopLossWiring:
 
         with patch("finalayze.risk.stop_loss.compute_atr_stop_loss") as mock_stop:
             mock_stop.return_value = Decimal("100.0")
-            loop._submit_order(order, "moex", candles=candles)
+            loop._submit_order(order, "moex", candles=candles, strategy_name="momentum")
 
-            # Verify 2.5 multiplier was used for MOEX
+            # S1.4: multiplier comes from the unified resolver (per-strategy + MOEX uplift),
+            # not the old flat 2.5 constant. momentum -> 2.5 * 1.2 = 3.0.
             call_kwargs = mock_stop.call_args
-            assert call_kwargs[1]["atr_multiplier"] == Decimal("2.5")
+            expected = resolve_stop_atr_multiplier("momentum", market_id="moex")
+            assert call_kwargs[1]["atr_multiplier"] == expected
+            assert expected > resolve_stop_atr_multiplier("momentum", market_id="us")
 
     def test_buy_without_candles_no_crash(self) -> None:
         """BUY fill with no candles should not crash or set stop-loss."""

@@ -30,9 +30,11 @@ if TYPE_CHECKING:
 _log = structlog.get_logger(__name__)
 _ZERO = Decimal(0)
 
-# Retroactive stop ATR multipliers (matches signal_executor defaults).
-_RETRO_ATR_MULT_US = Decimal("2.0")
-_RETRO_ATR_MULT_MOEX = Decimal("2.5")
+# S1.4: retroactive stop multiplier resolved via risk.stops.resolve_stop_atr_multiplier
+# (shared with backtest + BUY-fill paths). Strategy comes from
+# PositionTracker._entry_strategy (populated on the BUY fill that opened the
+# position); falls back to "retroactive" when the position was reconciled from
+# the broker after a restart and we have no entry record.
 _RETRO_GRACE_FRACTION = Decimal("0.5")  # 0.5 ATR below current when already underwater
 _RETRO_ACTIVATION_ATR = Decimal("1.0")
 _RETRO_TRAIL_ATR = Decimal("1.5")
@@ -308,11 +310,13 @@ class PositionTracker:
         """
         from finalayze.execution.simulated_broker import StopLossState  # noqa: PLC0415
         from finalayze.risk.stop_loss import compute_atr_stop_loss  # noqa: PLC0415
+        from finalayze.risk.stops import resolve_stop_atr_multiplier  # noqa: PLC0415
 
         if not candles or self.has_stop(symbol):
             return False
 
-        mult = _RETRO_ATR_MULT_MOEX if market_id == "moex" else _RETRO_ATR_MULT_US
+        strategy = self._entry_strategy.get(symbol, "retroactive")
+        mult = resolve_stop_atr_multiplier(strategy, market_id=market_id)
         cur = Decimal(str(candles[-1].close))
         entry = self._entry_prices.get(symbol, cur)
         natural_stop = compute_atr_stop_loss(entry, candles, atr_multiplier=mult)
