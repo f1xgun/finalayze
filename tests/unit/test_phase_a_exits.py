@@ -234,12 +234,16 @@ class TestEngineChandelierMode:
         total_bars = BUY_BAR + 40
         candles = _make_flat_candles(total_bars)
 
+        # S5.3: the assertion is "at least the end-of-backtest close" — keep
+        # the legacy forced-close path so the position materialises as a
+        # trade record.
         config = BacktestConfig(
             initial_cash=INITIAL_CASH,
             stop_loss_mode="chandelier",
-            profit_target_atr=Decimal(0),  # disable profit target
-            max_hold_bars=0,  # disable time exit
-            trail_activation_atr=Decimal(100),  # disable trailing
+            profit_target_atr=Decimal(0),
+            max_hold_bars=0,
+            trail_activation_atr=Decimal(100),
+            force_close_at_end=True,
         )
         engine = BacktestEngine(
             strategy=NamedBuyOnceStrategy(),
@@ -412,11 +416,13 @@ class TestStrategySpecificTimeExitMomentum:
         total_bars = BUY_BAR + 12
         candles = _make_flat_candles(total_bars)
 
+        # S5.3: assertion counts the forced end-of-backtest close — opt in.
         config = BacktestConfig(
             initial_cash=INITIAL_CASH,
             max_hold_bars={"mean_reversion": 8, "momentum": 40},
             profit_target_atr=Decimal(0),
             trail_activation_atr=Decimal(100),
+            force_close_at_end=True,
         )
         engine = BacktestEngine(
             strategy=NamedBuyOnceStrategy(strategy_name="momentum"),

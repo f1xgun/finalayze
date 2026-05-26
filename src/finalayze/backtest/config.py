@@ -152,6 +152,15 @@ class BacktestConfig:
     # CBR direction for SectorAllocationStep ("cut", "hold", "hike", "" = missing)
     cbr_direction: str = ""
 
+    # S5.3: end-of-data close-out behaviour. ``False`` (default) leaves
+    # positions open at the last bar — equity snapshots already reflect their
+    # mark-to-market via the broker so Sharpe / max-DD remain honest, the
+    # trade list omits a synthetic "exit at last close" that would otherwise
+    # inflate Sharpe by skipping spread/slippage.  Set to ``True`` to recover
+    # the old behaviour (every open position is closed at the last candle's
+    # close price; useful for tooling that requires fully realised PnL).
+    force_close_at_end: bool = False
+
 
 # MOEX was closed Feb 28 - Mar 24 2022 with extreme dislocation before/after.
 # This period distorts vol estimates 3-5x and teaches false mean-reversion patterns.

@@ -109,15 +109,32 @@ class NewsApiFetcher:
             msg = f"NewsAPI error: {data.get('message', 'unknown')}"
             raise DataFetchError(msg)
 
-        return [self._parse_article(raw) for raw in data.get("articles", [])]
+        parsed = [self._parse_article(raw) for raw in data.get("articles", [])]
+        # S5.1: drop articles with un-parseable timestamps (we'd otherwise
+        # silently tag them with "now" and contaminate sentiment/signals).
+        return [a for a in parsed if a is not None]
 
-    def _parse_article(self, raw: dict[str, object]) -> NewsArticle:
-        """Convert a raw NewsAPI article dict to a NewsArticle schema."""
+    def _parse_article(self, raw: dict[str, object]) -> NewsArticle | None:
+        """Convert a raw NewsAPI article dict to a NewsArticle schema.
+
+        Returns ``None`` (and logs ``news_invalid_published_at``) when the
+        ``publishedAt`` field is missing or unparseable.  The caller filters
+        Nones — historically we substituted ``datetime.now(UTC)`` here, which
+        meant stale or undated items poisoned the same-day pipeline.
+        """
         source_obj = raw.get("source") or {}
         source_name = (
             source_obj.get("name", "unknown") if isinstance(source_obj, dict) else "unknown"
         )
         published_raw = raw.get("publishedAt", "")
+        if not published_raw:
+            _log.warning(
+                "news_invalid_published_at",
+                source=str(source_name),
+                url=str(raw.get("url") or ""),
+                reason="missing",
+            )
+            return None
         try:
             # NewsAPI returns RFC 3339 timestamps like "2024-01-03T10:00:00Z"
             published_at = datetime.fromisoformat(str(published_raw))
@@ -125,7 +142,14 @@ class NewsApiFetcher:
             if published_at.tzinfo is None:
                 published_at = published_at.replace(tzinfo=UTC)
         except (ValueError, TypeError):
-            published_at = datetime.now(UTC)
+            _log.warning(
+                "news_invalid_published_at",
+                source=str(source_name),
+                url=str(raw.get("url") or ""),
+                raw=str(published_raw),
+                reason="unparseable",
+            )
+            return None
 
         try:
             return NewsArticle(

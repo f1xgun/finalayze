@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     from finalayze.data.rate_limiter import RateLimiter
 
 log = structlog.get_logger(__name__)
+# Module-private alias used by S5.1 logging hooks (mirrors the project-wide
+# ``_log`` convention while keeping the legacy ``log`` name in callers).
+_log = log
 
 _MAX_SEEN_SIZE = 5000
 
@@ -96,6 +99,12 @@ class RssNewsFetcher:
         title = entry.get("title", "")
         content = entry.get("summary", "") or entry.get("description", "")
         published_at = self._parse_published(entry)
+        # S5.1: skip entries whose timestamp can't be parsed instead of
+        # tagging them with "now". Otherwise stale or undated feed items
+        # silently contaminate sentiment / signal generation.
+        if published_at is None:
+            _log.warning("news_invalid_published_at", url=link)
+            return None
 
         return NewsArticle(
             id=uuid4(),
@@ -108,10 +117,12 @@ class RssNewsFetcher:
             scope="russia",
         )
 
-    def _parse_published(self, entry: Any) -> datetime:
+    def _parse_published(self, entry: Any) -> datetime | None:
         """Extract publication datetime from a feedparser entry.
 
-        Falls back to ``datetime.now(UTC)`` if parsing fails.
+        Returns ``None`` when neither ``published_parsed`` nor ``published``
+        yields a valid timestamp — the caller drops the entry rather than
+        substituting ``datetime.now(UTC)`` (S5.1).
         """
         tp = entry.get("published_parsed")
         if tp is not None:
@@ -139,4 +150,4 @@ class RssNewsFetcher:
             except (ValueError, TypeError):
                 pass
 
-        return datetime.now(UTC)
+        return None
