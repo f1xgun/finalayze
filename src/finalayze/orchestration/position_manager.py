@@ -127,6 +127,20 @@ class PositionTracker:
             if state is None:
                 return
 
+            # S3.1: Grace bar — on the first cycle after entry the latest
+            # candle may not yet reflect post-fill price action, so a stop
+            # trigger here would mirror the backtest's "fill-candle low"
+            # footgun. Skip the regular check unless the move is
+            # catastrophic (>= 15 % drop from entry, same threshold as the
+            # backtest engine, defined in ``risk.stops.CATASTROPHIC_DROP_PCT``).
+            from finalayze.risk.stops import CATASTROPHIC_DROP_PCT  # noqa: PLC0415
+
+            grace_active = self._current_cycle_index == state.entry_cycle_index + 1
+            if grace_active and current_price >= state.entry_price * (
+                Decimal(1) - CATASTROPHIC_DROP_PCT
+            ):
+                return
+
             # Step 1: Update high-water mark
             state.highest_price = max(state.highest_price, current_price)
 

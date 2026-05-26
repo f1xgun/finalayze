@@ -2,13 +2,23 @@
 
 Resamples trade returns with replacement to estimate the distribution of
 key performance metrics (total return, Sharpe, drawdown, win rate, profit factor).
+
+S3.3 — block bootstrap.  IID resampling preserves the marginal distribution
+of returns but destroys serial dependence (vol clustering, momentum/reversion
+regimes).  For *daily equity returns* that produces optimistic max-drawdown
+CIs because long-streak draw downs are blown apart.  The stationary block
+bootstrap of Politis-Romano (1994) draws geometrically-distributed-length
+blocks with wrap-around, preserving short-range dependence while still
+delivering a valid asymptotic distribution.  Trade-level returns are
+typically much closer to iid (each trade clears the autocorrelation), so
+``bootstrap_metrics`` continues to use plain iid resampling.
 """
 
 from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -18,6 +28,13 @@ if TYPE_CHECKING:
 # Annualisation factor for daily returns.
 _TRADING_DAYS_PER_YEAR = 252
 _MAX_PROFIT_FACTOR = 100.0
+
+# Politis-White (2004) automatic block-length selection lands in 5-15 for
+# typical daily-return series of length 250-2500.  A fixed default of 10
+# is a defensible compromise that's robust without auto-detection overhead.
+_DEFAULT_MEAN_BLOCK_LEN = 10
+
+BootstrapMethod = Literal["iid", "stationary_block"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,22 +184,125 @@ def bootstrap_metrics(
     )
 
 
+def stationary_block_sample(
+    data: np.ndarray[tuple[int, ...], np.dtype[np.float64]],
+    n_samples: int,
+    mean_block_length: int,
+    rng: np.random.Generator,
+) -> np.ndarray[tuple[int, ...], np.dtype[np.float64]]:
+    """Draw a single Politis-Romano stationary block bootstrap sample.
+
+    Algorithm (Politis & Romano, 1994):
+      1. Pick a uniformly-random start index in [0, n).
+      2. At each step, with probability ``1/L`` (L = mean_block_length)
+         restart at a fresh uniformly-random index; otherwise advance one
+         step from the previous index (wrapping around the series).
+      3. Continue until ``n_samples`` indices are produced.
+
+    The expected block length is ``L``.  Each block is drawn with
+    wrap-around (circular series), which keeps the sample stationary and
+    gives every observation equal probability of being picked.
+
+    Args:
+        data: 1-D source series (will be indexed circularly).
+        n_samples: Number of indices to draw.
+        mean_block_length: Expected geometric block length (must be >= 1).
+        rng: NumPy Generator for reproducibility.
+
+    Returns:
+        A 1-D NumPy array of length ``n_samples`` with values drawn from
+        ``data`` preserving short-range serial dependence.
+    """
+    n = len(data)
+    if n == 0 or n_samples == 0:
+        return np.empty(0, dtype=data.dtype)
+    if mean_block_length < 1:
+        msg = f"mean_block_length must be >= 1, got {mean_block_length}"
+        raise ValueError(msg)
+
+    p_restart = 1.0 / mean_block_length
+    indices = np.empty(n_samples, dtype=np.int64)
+    indices[0] = rng.integers(0, n)
+    # Pre-draw the restart booleans + restart indices for vectorisation.
+    restarts = rng.random(n_samples - 1) < p_restart
+    fresh = rng.integers(0, n, size=n_samples - 1)
+    for t in range(1, n_samples):
+        if restarts[t - 1]:
+            indices[t] = fresh[t - 1]
+        else:
+            indices[t] = (indices[t - 1] + 1) % n
+    return data[indices]
+
+
+def _bootstrap_metric_arrays(
+    pnl_array: np.ndarray[tuple[int, ...], np.dtype[np.float64]],
+    *,
+    n_simulations: int,
+    method: BootstrapMethod,
+    mean_block_length: int,
+    rng: np.random.Generator,
+) -> tuple[list[float], list[float], list[float], list[float], list[float]]:
+    """Shared bootstrap loop used by iid + block paths."""
+    n = len(pnl_array)
+    total_returns: list[float] = []
+    sharpes: list[float] = []
+    max_drawdowns: list[float] = []
+    win_rates: list[float] = []
+    profit_factors: list[float] = []
+
+    if method == "iid":
+        # Vectorised iid draws (cheaper than per-iter sampling).
+        indices = rng.choice(n, size=(n_simulations, n), replace=True)
+        for sim_indices in indices:
+            sample = pnl_array[sim_indices].tolist()
+            tr, sh, dd, wr, pf = _compute_sample_metrics(sample)
+            total_returns.append(tr)
+            sharpes.append(sh)
+            max_drawdowns.append(dd)
+            win_rates.append(wr)
+            profit_factors.append(pf)
+    else:
+        for _ in range(n_simulations):
+            sample = stationary_block_sample(pnl_array, n, mean_block_length, rng).tolist()
+            tr, sh, dd, wr, pf = _compute_sample_metrics(sample)
+            total_returns.append(tr)
+            sharpes.append(sh)
+            max_drawdowns.append(dd)
+            win_rates.append(wr)
+            profit_factors.append(pf)
+
+    return total_returns, sharpes, max_drawdowns, win_rates, profit_factors
+
+
 def bootstrap_from_snapshots(
     snapshots: list[PortfolioState],
     n_simulations: int = 10_000,
     confidence_level: float = 0.95,
     seed: int | None = None,
+    *,
+    method: BootstrapMethod = "stationary_block",
+    mean_block_length: int = _DEFAULT_MEAN_BLOCK_LEN,
 ) -> BootstrapResult:
     """Bootstrap confidence intervals from bar-level equity snapshots.
 
     Extracts daily returns from the equity curve and resamples those
     (not per-trade PnL), making ``sqrt(252)`` annualisation correct.
 
+    S3.3: the default ``method='stationary_block'`` preserves the daily
+    return series' serial dependence (volatility clustering, momentum
+    regimes).  Pass ``method='iid'`` to recover the classic naive
+    bootstrap when comparing against literature or unit-testing.
+
     Args:
         snapshots: Bar-level PortfolioState snapshots with equity values.
         n_simulations: Number of bootstrap samples.
         confidence_level: CI level (default 0.95).
         seed: Random seed for reproducibility.
+        method: ``'stationary_block'`` (default, Politis-Romano) or
+            ``'iid'`` (naive, autocorrelation-destroying).
+        mean_block_length: Expected block length for the stationary
+            bootstrap; ignored when ``method='iid'``.  Default 10 covers
+            the typical Politis-White optimal range for daily returns.
 
     Returns:
         BootstrapResult with CIs computed from daily return distribution.
@@ -219,10 +339,28 @@ def bootstrap_from_snapshots(
             n_trades=0,
         )
 
-    # Delegate to bootstrap_metrics which handles the resampling
-    return bootstrap_metrics(
-        daily_returns,
+    rng = np.random.default_rng(seed=seed)
+    pnl_array = np.asarray(daily_returns, dtype=np.float64)
+    n = len(pnl_array)
+
+    total_returns, sharpes, max_drawdowns, win_rates, profit_factors = _bootstrap_metric_arrays(
+        pnl_array,
         n_simulations=n_simulations,
-        confidence_level=confidence_level,
-        seed=seed,
+        method=method,
+        mean_block_length=mean_block_length,
+        rng=rng,
+    )
+
+    actual_total, actual_sharpe, actual_dd, actual_wr, actual_pf = _compute_sample_metrics(
+        daily_returns
+    )
+
+    return BootstrapResult(
+        total_return=_make_ci(total_returns, actual_total, confidence_level),
+        sharpe_ratio=_make_ci(sharpes, actual_sharpe, confidence_level),
+        max_drawdown=_make_ci(max_drawdowns, actual_dd, confidence_level),
+        win_rate=_make_ci(win_rates, actual_wr, confidence_level),
+        profit_factor=_make_ci(profit_factors, actual_pf, confidence_level),
+        n_simulations=n_simulations,
+        n_trades=n,
     )

@@ -53,6 +53,14 @@ _DEFAULT_STOP_ATR_FALLBACK = 3.0
 # tuned in v9.1 walk-forward (Phase 47, asymmetric barriers).
 _MOEX_UPLIFT = 1.2
 
+# S3.1: Catastrophic-drop threshold that overrides the post-entry grace bar
+# in both backtest (``BacktestEngine._iter_bars``) and live
+# (``PositionTracker.check_stop_losses``). Quant-validated: 10 % is too tight
+# for earnings/macro gaps; 15 % corresponds to a 3+ sigma daily move and is
+# big enough that we accept the (probably fair) stop trigger even on the
+# very first post-entry bar.
+CATASTROPHIC_DROP_PCT = Decimal("0.15")
+
 
 def resolve_stop_atr_multiplier(
     strategy_name: str,

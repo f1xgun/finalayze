@@ -44,6 +44,7 @@ from finalayze.risk.position_sizing_pipeline import (
 )
 from finalayze.risk.pre_trade_check import PreTradeChecker
 from finalayze.risk.stop_loss import filter_candles_by_exclusion
+from finalayze.risk.stops import CATASTROPHIC_DROP_PCT
 
 if TYPE_CHECKING:
     from finalayze.backtest.costs import TransactionCosts
@@ -61,9 +62,10 @@ logger = structlog.get_logger(__name__)
 # so grep can find every reference and the meaning is self-documenting.
 _NO_ENTRY_BAR = -2
 
-# 15% intraday drop forces stop even on grace bar.  Quant-validated: 10% is
-# too tight for earnings gaps; 15% corresponds to a 3+ sigma daily move.
-_CATASTROPHIC_DROP_PCT = Decimal("0.15")
+# S3.1: catastrophic-drop override threshold is defined in risk.stops so the
+# live PositionTracker can apply the same gating. Local alias keeps the
+# existing call sites untouched.
+_CATASTROPHIC_DROP_PCT = CATASTROPHIC_DROP_PCT
 
 # Default market open time (US 9:30 ET = 14:30 UTC) used to adjust daily
 # candle timestamps so the pre-trade market-hours check passes during backtest.
