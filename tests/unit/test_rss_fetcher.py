@@ -145,13 +145,14 @@ class TestMalformedEntries:
         assert articles == []
 
     @patch("finalayze.data.fetchers.rss_fetcher.feedparser")
-    def test_missing_published_parsed_uses_fallback(
+    def test_missing_published_parsed_drops_entry(
         self, mock_fp: MagicMock, fetcher: RssNewsFetcher
     ) -> None:
+        """S5.1: entries with no parseable timestamp are dropped, not tagged
+        with ``datetime.now(UTC)``. Stale items must not leak into the
+        same-day signal pipeline as if they were fresh."""
         entry = _make_entry(link="https://rbc.ru/nopub", published_parsed=None)
         mock_fp.parse.return_value = _make_feed([entry])
 
         articles = fetcher.fetch_news()
-        assert len(articles) == 1
-        # Should have a valid datetime (fallback to now)
-        assert articles[0].published_at.tzinfo is not None
+        assert articles == []

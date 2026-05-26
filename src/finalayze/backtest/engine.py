@@ -615,22 +615,39 @@ class BacktestEngine:
                 if prev_equity > 0:
                     self._portfolio_returns.append((curr_equity - prev_equity) / prev_equity)
 
-        # Close any remaining open positions at the last candle's close price
+        # S5.3: end-of-data positions are left OPEN by default.  Closing
+        # them at the final candle's close systematically inflated Sharpe
+        # (synthetic exit at mid with no spread/slippage = costless realised
+        # PnL).  Equity snapshots already carry MTM via the broker, so the
+        # equity curve / Sharpe / max-DD remain honest without the forced
+        # close.  Set ``force_close_at_end=True`` on BacktestConfig to keep
+        # the legacy behaviour (e.g. for tooling that needs fully realised PnL).
+        unclosed_at_end = 0
         if candles:
-            last_candle = candles[-1]
-            _last_bar = len(candles) - 1
-            for open_symbol, qty in broker.get_positions().items():
-                executor.close_position(
-                    symbol=open_symbol,
-                    exit_price=last_candle.close,
-                    quantity=qty,
-                    entry_prices=entry_prices,
-                    entry_bars=entry_bars,
-                    entry_strategies=entry_strategies,
-                    chandelier_stops=chandelier_stops,
-                    bar_index=_last_bar,
-                    trades=trades,
-                )
+            open_positions = list(broker.get_positions().items())
+            if self._config.force_close_at_end:
+                last_candle = candles[-1]
+                _last_bar = len(candles) - 1
+                for open_symbol, qty in open_positions:
+                    executor.close_position(
+                        symbol=open_symbol,
+                        exit_price=last_candle.close,
+                        quantity=qty,
+                        entry_prices=entry_prices,
+                        entry_bars=entry_bars,
+                        entry_strategies=entry_strategies,
+                        chandelier_stops=chandelier_stops,
+                        bar_index=_last_bar,
+                        trades=trades,
+                    )
+            else:
+                unclosed_at_end = sum(1 for _, qty in open_positions if qty > 0)
+                if unclosed_at_end:
+                    logger.info(
+                        "backtest_unclosed_at_end",
+                        symbol=symbol,
+                        count=unclosed_at_end,
+                    )
 
         # Log per-symbol strategy activity summary
         self._last_run_summary = {
@@ -640,6 +657,7 @@ class BacktestEngine:
             "combined_above_threshold": combined_above_threshold,
             "strategy_signals": dict(strategy_signal_counts),
             "strategy_nones": dict(strategy_none_counts),
+            "unclosed_at_end": unclosed_at_end,
         }
         logger.info(
             "backtest_symbol_summary",
@@ -920,8 +938,12 @@ class BacktestEngine:
             snapshots.append(broker.get_portfolio())
             ts_index += 1
 
-        # Close remaining open positions
-        if candles_by_symbol:
+        # S5.3: end-of-data positions are left OPEN by default.  Same
+        # rationale as the single-symbol path: forced close at last bar's
+        # close inflates Sharpe by pretending we can exit at mid without
+        # spread / slippage.  Equity snapshots already carry the MTM via
+        # broker.  ``force_close_at_end=True`` recovers legacy behaviour.
+        if candles_by_symbol and self._config.force_close_at_end:
             for sym in symbols:
                 sym_candles = candles_by_symbol.get(sym, [])
                 if not sym_candles:
@@ -940,6 +962,10 @@ class BacktestEngine:
                     bar_index=bar_counts.get(sym, 0),
                     trades=trades,
                 )
+        elif candles_by_symbol:
+            unclosed = sum(1 for q in broker.get_positions().values() if q > 0)
+            if unclosed:
+                logger.info("portfolio_backtest_unclosed_at_end", count=unclosed)
 
         return trades, snapshots
 

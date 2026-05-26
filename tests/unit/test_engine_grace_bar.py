@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from finalayze.backtest.config import BacktestConfig
 from finalayze.backtest.engine import _CATASTROPHIC_DROP_PCT, _NO_ENTRY_BAR, BacktestEngine
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.strategies.base import BaseStrategy
@@ -110,11 +111,14 @@ class TestGraceBarSkipsStop:
         """Fill candle with low < stop but above catastrophic -> grace bar holds."""
         # low=105 is below trailing stop (~109) but above catastrophic (~102.85)
         candles = _make_candle_series(fill_candle_low=_GRACE_BAR_LOW)
-        engine = BacktestEngine(
-            strategy=_BuyOnceStrategy(),
+        # S5.3: opt into legacy end-of-data close so the surviving position
+        # materialises as a trade record whose hold_bars we can inspect.
+        cfg = BacktestConfig(
             initial_cash=INITIAL_CASH,
             atr_multiplier=Decimal("1.5"),
+            force_close_at_end=True,
         )
+        engine = BacktestEngine(strategy=_BuyOnceStrategy(), config=cfg)
         trades, _ = engine.run(symbol=SYMBOL, segment_id=SEGMENT, candles=candles)
         # Position should survive past the fill candle (hold_bars > 1)
         assert len(trades) >= 1, "Should have at least one trade"
@@ -170,11 +174,14 @@ class TestPortfolioGraceBar:
     def test_portfolio_grace_bar_skips_stop(self) -> None:
         """Portfolio mode: fill candle low < stop but above catastrophic -> grace bar holds."""
         candles = _make_candle_series(fill_candle_low=_GRACE_BAR_LOW)
-        engine = BacktestEngine(
-            strategy=_BuyOnceStrategy(),
+        # S5.3: opt into legacy end-of-data close so the open position
+        # appears as a trade record whose hold_bars we can inspect.
+        cfg = BacktestConfig(
             initial_cash=INITIAL_CASH,
             atr_multiplier=Decimal("1.5"),
+            force_close_at_end=True,
         )
+        engine = BacktestEngine(strategy=_BuyOnceStrategy(), config=cfg)
         trades, _ = engine.run_portfolio(
             symbols=[SYMBOL],
             candles_by_symbol={SYMBOL: candles},

@@ -21,8 +21,19 @@ if TYPE_CHECKING:
 
 import structlog
 
-from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.core.schemas import (
+    Candle,
+    EventType,
+    Signal,
+    SignalDirection,
+    SignalMetadata,
+)
 from finalayze.strategies.base import BaseStrategy
+
+# S5.2: every dividend_gap signal carries this metadata so the combiner's
+# _dedup_event_signals (which gates on EventType.DIVIDEND) collapses
+# duplicate same-cycle signals on the same ticker / event.
+_DIVIDEND_META = SignalMetadata(event_type=EventType.DIVIDEND)
 
 logger = structlog.get_logger(__name__)
 
@@ -164,6 +175,7 @@ class DividendGapStrategy(BaseStrategy):
                     segment_id=segment_id,
                     direction=SignalDirection.SELL,
                     confidence=_MAX_CONFIDENCE,
+                    metadata=_DIVIDEND_META,
                     strategy_payload={
                         "gap_pct": round(tracker.gap_pct, 2),
                         "bars_held": float(tracker.bars_since_entry),
@@ -194,6 +206,7 @@ class DividendGapStrategy(BaseStrategy):
                     segment_id=segment_id,
                     direction=SignalDirection.SELL,
                     confidence=_CONFIDENCE_BASE,
+                    metadata=_DIVIDEND_META,
                     strategy_payload={
                         "gap_pct": round(tracker.gap_pct, 2),
                         "bars_held": float(tracker.bars_since_entry),
@@ -264,6 +277,7 @@ class DividendGapStrategy(BaseStrategy):
             segment_id=segment_id,
             direction=SignalDirection.BUY,
             confidence=confidence,
+            metadata=_DIVIDEND_META,
             strategy_payload={
                 "gap_pct": round(gap_pct, 2),
                 "dividend_amount": matching_div.amount,
