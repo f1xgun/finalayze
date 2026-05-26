@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import pytest
 
+from finalayze.backtest.config import BacktestConfig
 from finalayze.backtest.engine import BacktestEngine
 from finalayze.core.schemas import Candle, Signal, SignalDirection
 from finalayze.execution.simulated_broker import SimulatedBroker
@@ -155,15 +156,18 @@ class TestProfitTarget:
         # One more to close out at end
         candles.append(_make_candle(len(candles), price=BASE_PRICE + Decimal(4)))
 
-        engine = BacktestEngine(
-            strategy=BuyOnceStrategy(),
+        # S5.3: this test asserts via the end-of-backtest forced close, so
+        # opt into the legacy realisation path explicitly.
+        cfg = BacktestConfig(
             initial_cash=INITIAL_CASH,
             atr_multiplier=Decimal("3.0"),
             profit_target_atr=Decimal("3.0"),
-            max_hold_bars=0,  # disable time exit
-            trail_activation_atr=Decimal(100),  # disable trailing stop
+            max_hold_bars=0,
+            trail_activation_atr=Decimal(100),
             trail_distance_atr=Decimal("1.5"),
+            force_close_at_end=True,
         )
+        engine = BacktestEngine(strategy=BuyOnceStrategy(), config=cfg)
         trades, _ = engine.run("TEST", "us_test", candles)
 
         # Should only have the end-of-backtest close, no profit target exit
@@ -199,15 +203,17 @@ class TestTimeExit:
         total_bars = BUY_BAR + 23  # only ~20 bars after entry
         candles = _make_flat_candles(total_bars)
 
-        engine = BacktestEngine(
-            strategy=BuyOnceStrategy(),
+        # S5.3: assertion is on the forced end-of-backtest close; opt in.
+        cfg = BacktestConfig(
             initial_cash=INITIAL_CASH,
             atr_multiplier=Decimal("3.0"),
-            profit_target_atr=Decimal(0),  # disable profit target
+            profit_target_atr=Decimal(0),
             max_hold_bars=30,
-            trail_activation_atr=Decimal(100),  # disable trailing
+            trail_activation_atr=Decimal(100),
             trail_distance_atr=Decimal("1.5"),
+            force_close_at_end=True,
         )
+        engine = BacktestEngine(strategy=BuyOnceStrategy(), config=cfg)
         trades, _ = engine.run("TEST", "us_test", candles)
 
         # Should only have end-of-backtest close (no time exit)
