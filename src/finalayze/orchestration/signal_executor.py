@@ -60,9 +60,8 @@ _MIN_CONFIDENCE_BOOST = 1.2  # raise required confidence 20% at CAUTION
 _MIN_ALERT_CONFIDENCE = 0.5  # ALRT-02 D-13: skip noise below this threshold
 _ZERO = Decimal(0)
 _STALENESS_THRESHOLD_HOURS: float = 72.0  # 3x daily; covers weekends + calendar-aware holidays
-# BUY-fill stop wiring; retroactive stops use the equivalents in PositionTracker.
-_ATR_MULTIPLIER_US = Decimal("2.0")
-_ATR_MULTIPLIER_MOEX = Decimal("2.5")
+# S1.4: BUY-fill stop multiplier is resolved via risk.stops.resolve_stop_atr_multiplier
+# (shared with backtest path). Previously hardcoded _ATR_MULTIPLIER_US/_MOEX here.
 _MARKET_CURRENCY: dict[str, str] = {"us": "USD", "moex": "RUB"}
 
 _log = structlog.get_logger(__name__)
@@ -881,9 +880,11 @@ class SignalExecutor:
                         from finalayze.execution.simulated_broker import (  # noqa: PLC0415
                             StopLossState,
                         )
+                        from finalayze.risk.stops import (  # noqa: PLC0415
+                            resolve_stop_atr_multiplier,
+                        )
 
-                        is_moex = market_id == "moex"
-                        multiplier = _ATR_MULTIPLIER_MOEX if is_moex else _ATR_MULTIPLIER_US
+                        multiplier = resolve_stop_atr_multiplier(strategy_name, market_id=market_id)
                         stop = compute_atr_stop_loss(
                             result.fill_price, candles, atr_multiplier=multiplier
                         )

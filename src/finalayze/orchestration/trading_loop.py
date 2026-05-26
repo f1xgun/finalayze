@@ -57,7 +57,6 @@ if TYPE_CHECKING:
     from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
     from finalayze.api.alerts import TelegramAlerter
     from finalayze.api.metrics import MetricsCollector
-    from finalayze.core.events import EventBus
     from finalayze.data.cache import RedisCache
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
     from finalayze.data.fetchers.rss_fetcher import RssNewsFetcher
@@ -156,7 +155,6 @@ class TradingLoopDeps:
     instrument_registry: InstrumentRegistry
     cache: RedisCache | None = None
     ml_registry: MLModelRegistry | None = None
-    event_bus: EventBus | None = None
     fx_service: FXRateService | None = None
     bond_cycle_processor: BondCycleProcessor | None = None
     macro_cache: MacroCacheService | None = None
@@ -220,7 +218,6 @@ class TradingLoop:
         instrument_registry = deps.instrument_registry
         cache = deps.cache
         ml_registry = deps.ml_registry
-        event_bus = deps.event_bus
         fx_service = deps.fx_service
         bond_cycle_processor = deps.bond_cycle_processor
         macro_cache = deps.macro_cache
@@ -252,7 +249,6 @@ class TradingLoop:
         self._alerter = alerter
         self._registry = instrument_registry
         self._cache = cache
-        self._event_bus = event_bus
         self._fx_service = fx_service
         self._bond_processor = bond_cycle_processor
         self._macro_cache = macro_cache
@@ -887,7 +883,7 @@ class TradingLoop:
             self._metrics.set_drawdown(market_id, 0.0)
         _log.info("metrics_initialized", markets=list(self._fetchers.keys()))
 
-    def stop(self) -> None:  # noqa: PLR0912 — orderly shutdown of multiple subsystems incl. meta_agent killswitch (Phase 58-05)
+    def stop(self) -> None:
         """Gracefully shut down scheduler, async/gRPC loops, and connections."""
         # Phase 58-05-06 (META-08, SPEC AC #15): cancel the meta-agent
         # killswitch poller BEFORE shutting down the async loop (otherwise
@@ -916,13 +912,6 @@ class TradingLoop:
                     )
                 except Exception:
                     _log.debug("Failed to close RedisCache on shutdown")
-            if self._event_bus is not None:
-                try:
-                    asyncio.run_coroutine_threadsafe(
-                        self._event_bus.close(), self._async_loop
-                    ).result(timeout=5)
-                except Exception:
-                    _log.debug("Failed to close EventBus on shutdown")
             if self._fx_service is not None:
                 try:
                     asyncio.run_coroutine_threadsafe(

@@ -55,16 +55,6 @@ class TestCouponEventSchema:
             event.bond_figi = "BBG456"  # type: ignore[misc]
 
 
-class TestStreamCouponsConstant:
-    """EventBus must have STREAM_COUPONS constant."""
-
-    def test_stream_coupons_exists(self) -> None:
-        from finalayze.core.events import EventBus
-
-        assert hasattr(EventBus, "STREAM_COUPONS")
-        assert EventBus.STREAM_COUPONS == "coupons"
-
-
 class TestBondCandleModel:
     """BondCandleModel ORM must have correct fields."""
 

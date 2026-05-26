@@ -50,6 +50,7 @@ class TestTinkoffBrokerSubmitOrder:
         mock_result.executed_order_price.units = 270
         mock_result.executed_order_price.nano = 0
         mock_result.lots_executed = 1
+        mock_result.execution_report_status = 1  # S1.1: FILL
 
         broker = _make_broker()
         # Mock _run_async to return fake gRPC responses (accounts + order)
@@ -86,6 +87,7 @@ class TestTinkoffBrokerSubmitOrder:
         mock_result.executed_order_price.units = 270
         mock_result.executed_order_price.nano = 0
         mock_result.lots_executed = 1
+        mock_result.execution_report_status = 1  # S1.1: FILL
 
         broker = _make_broker()
         broker._account_id = "acc-sandbox-001"
@@ -104,6 +106,7 @@ class TestTinkoffBrokerSubmitOrder:
         mock_result.executed_order_price.units = 270
         mock_result.executed_order_price.nano = 0
         mock_result.lots_executed = 1
+        mock_result.execution_report_status = 1  # S1.1: FILL
 
         broker = _make_broker()
         broker._account_id = "acc-sandbox-001"
@@ -124,6 +127,7 @@ class TestTinkoffBrokerSubmitOrderSell:
         mock_result.executed_order_price.units = 270
         mock_result.executed_order_price.nano = 0
         mock_result.lots_executed = 1
+        mock_result.execution_report_status = 1  # S1.1: FILL
 
         broker = _make_broker()
         broker._account_id = "acc-sandbox-001"
@@ -442,7 +446,8 @@ class TestTinkoffBrokerGetOrderState:
     def test_get_order_state_partially_filled(self) -> None:
         """get_order_state returns partial fill with filled quantity."""
         mock_state = MagicMock()
-        mock_state.execution_report_status = 2  # PARTIALLY_FILL
+        # S1.1: PARTIALLYFILL=5 in SDK (was wrongly 2 in old map).
+        mock_state.execution_report_status = 5
         mock_state.lots_executed = 3
         mock_state.executed_order_price.units = 96
         mock_state.executed_order_price.nano = 0
@@ -467,6 +472,7 @@ class TestTinkoffBrokerSubmitOrderReturnsOrderId:
         mock_result.executed_order_price.units = 270
         mock_result.executed_order_price.nano = 0
         mock_result.lots_executed = 1
+        mock_result.execution_report_status = 1  # S1.1: FILL
 
         broker = _make_broker()
         broker._account_id = "acc-sandbox-001"

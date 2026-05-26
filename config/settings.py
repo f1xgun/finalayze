@@ -70,7 +70,8 @@ class Settings(BaseSettings):
 
     # Risk
     kelly_fraction: float = 0.5
-    stop_loss_atr_multiplier: float = 2.0
+    # S1.4: stop_loss_atr_multiplier removed (was orphan — no consumer).
+    # Stop-loss multipliers now live in risk/stops.py keyed by strategy + market.
     circuit_breaker_l1: float = 0.05
     circuit_breaker_l2: float = 0.10
     circuit_breaker_l3: float = 0.15

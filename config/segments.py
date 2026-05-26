@@ -25,10 +25,15 @@ class SegmentConfig:
     news_languages: list[str] = field(default_factory=lambda: ["en"])
     max_allocation_pct: float = 0.30
     trading_hours: str = ""
+    enabled: bool = True
 
 
 # Default segment definitions -- loaded at startup, overridable via DB
 DEFAULT_SEGMENTS: list[SegmentConfig] = [
+    # ── US segments — frozen 2026-05-25 ─────────────────────────────────
+    # Kept in DEFAULT_SEGMENTS for history; filtered out by every consumer
+    # via `enabled=False`. Reason: no foreign card from RF + non-RF exchanges
+    # are unavailable to RF residents in the current regulatory regime.
     SegmentConfig(
         segment_id="us_tech",
         market="us",
@@ -39,6 +44,7 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         news_languages=["en"],
         max_allocation_pct=0.30,
         trading_hours="14:30-21:00 UTC",
+        enabled=False,
     ),
     SegmentConfig(
         segment_id="us_healthcare",
@@ -50,6 +56,7 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         news_languages=["en"],
         max_allocation_pct=0.25,
         trading_hours="14:30-21:00 UTC",
+        enabled=False,
     ),
     SegmentConfig(
         segment_id="us_finance",
@@ -61,6 +68,7 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         news_languages=["en"],
         max_allocation_pct=0.25,
         trading_hours="14:30-21:00 UTC",
+        enabled=False,
     ),
     SegmentConfig(
         segment_id="us_broad",
@@ -72,6 +80,7 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         news_languages=["en"],
         max_allocation_pct=0.30,
         trading_hours="14:30-21:00 UTC",
+        enabled=False,
     ),
     SegmentConfig(
         segment_id="ru_blue_chips",

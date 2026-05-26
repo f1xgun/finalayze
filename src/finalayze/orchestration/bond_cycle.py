@@ -272,8 +272,10 @@ class BondCycleProcessor:
         # Step 1: Yield stop evaluation on existing positions
         exit_count = self._process_yield_stops(layer, ledger, yield_stop, macro)
 
-        # Step 2: Coupon reinvestment (use accumulated coupon cash for BUY signals)
-        coupon_cash = getattr(ledger, "coupon_cash", Decimal(0))
+        # Step 2: Coupon reinvestment (use accumulated coupon cash for BUY signals).
+        # coupon_cash is populated synchronously by the BondDiscoveryService
+        # coupon handler at record_date (S1.3).
+        coupon_cash = ledger.coupon_cash
         if coupon_cash > 0:
             _log.info("bond_coupon_reinvestment", layer=layer.value, coupon_cash=str(coupon_cash))
             self._alerter.on_coupon_received(
@@ -282,8 +284,7 @@ class BondCycleProcessor:
                 currency="RUB",
             )
             ledger.credit_cash(coupon_cash)
-            if hasattr(ledger, "coupon_cash"):
-                ledger.coupon_cash = Decimal(0)
+            ledger.coupon_cash = Decimal(0)
 
         # Step 3: Generate new strategy signals
         new_signals: list[Signal] = []

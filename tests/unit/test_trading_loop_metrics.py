@@ -240,7 +240,6 @@ def _make_loop_stub(*, metrics: MagicMock | None = None) -> MagicMock:
     loop._sentiment_mgr._sentiment_lock = threading.Lock()
     loop._sentiment_mgr._sentiment_cache = {}
     loop._cache = None
-    loop._event_bus = None
     loop._fx_service = None
     loop._metrics = metrics
     loop._alerter = MagicMock()

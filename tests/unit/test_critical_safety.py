@@ -930,6 +930,7 @@ class TestTinkoffBrokerAccountId:
         mock_result.order_id = "ord-123"
         mock_result.executed_order_price.units = 270
         mock_result.executed_order_price.nano = 0
+        mock_result.execution_report_status = 1  # S1.1: FILL
 
         broker = TinkoffBroker(
             token="fake_token",  # noqa: S106

@@ -16,12 +16,12 @@ EXPECTED_LOOKBACK_6M = 126
 EXPECTED_MIN_CONFIDENCE = 0.65
 
 # Segments that define a dual_momentum section in their YAML preset
+# us_industrial removed in S1.2 (orphan preset; no corresponding segment).
 US_SEGMENTS_WITH_DUAL_MOMENTUM = [
     "us_tech",
     "us_broad",
     "us_finance",
     "us_healthcare",
-    "us_industrial",
 ]
 
 

@@ -115,3 +115,30 @@ class TestRuFinance:
     def test_sberp_not_in_ru_finance(self) -> None:
         seg = _get("ru_finance")
         assert "SBERP" not in seg.symbols
+
+
+# ---------------------------------------------------------------------------
+# S1.2 — US segments frozen, RU segments enabled
+# ---------------------------------------------------------------------------
+
+
+class TestSegmentEnabledFlag:
+    def test_enabled_field_defaults_to_true(self) -> None:
+        cfg = SegmentConfig(
+            segment_id="test",
+            market="moex",
+            broker="tinkoff",
+            currency="RUB",
+        )
+        assert cfg.enabled is True
+
+    def test_all_us_segments_disabled(self) -> None:
+        us = [s for s in DEFAULT_SEGMENTS if s.market == "us"]
+        assert us, "expected at least one US segment to be present (kept for history)"
+        for seg in us:
+            assert seg.enabled is False, f"US segment {seg.segment_id} must be disabled"
+
+    def test_all_moex_segments_enabled(self) -> None:
+        moex = [s for s in DEFAULT_SEGMENTS if s.market == "moex"]
+        for seg in moex:
+            assert seg.enabled is True, f"MOEX segment {seg.segment_id} must be enabled"

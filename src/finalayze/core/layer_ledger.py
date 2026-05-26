@@ -41,6 +41,12 @@ class LayerLedger:
     bond_positions: dict[str, BondPositionRecord] = field(default_factory=dict)
     peak_equity: Decimal = Decimal(0)
     current_equity: Decimal = Decimal(0)
+    # S1.3: accumulated coupon income credited by the coupon handler at
+    # record_date; the bond cycle reinvests it on the next BUY signal.
+    # Prior to S1.3 this field was used only by getattr() fallback in
+    # bond_cycle.py and never set anywhere because the old EventBus publish
+    # had no consumer.
+    coupon_cash: Decimal = Decimal(0)
 
     def __post_init__(self) -> None:
         if self.peak_equity == 0:
@@ -89,6 +95,10 @@ class LayerLedger:
     def credit_cash(self, amount: Decimal) -> None:
         """Credit cash."""
         self.cash += amount
+
+    def credit_coupon(self, amount: Decimal) -> None:
+        """Accumulate coupon income; reinvested on the next BUY signal (S1.3)."""
+        self.coupon_cash += amount
 
     # ── Bond position management ──────────────────────────────────────────
 

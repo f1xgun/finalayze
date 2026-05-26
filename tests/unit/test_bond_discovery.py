@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -92,10 +92,9 @@ def _make_mock_fetcher(bonds: list[dict] | None = None) -> MagicMock:
     return fetcher
 
 
-def _make_mock_event_bus() -> MagicMock:
-    bus = MagicMock()
-    bus.publish = AsyncMock(return_value="msg-id-1")
-    return bus
+def _make_mock_coupon_handler() -> MagicMock:
+    """S1.3: coupon handler is a synchronous callable, not an async bus."""
+    return MagicMock()
 
 
 class TestBondDiscoveryFilters:
@@ -348,17 +347,20 @@ class TestCouponEventEmission:
             ]
         }
 
-        bus = _make_mock_event_bus()
+        handler = _make_mock_coupon_handler()
         fetcher = _make_mock_fetcher()
         registry = InstrumentRegistry()
-        service = BondDiscoveryService(fetcher, registry, event_bus=bus)
+        service = BondDiscoveryService(fetcher, registry, coupon_handler=handler)
         import asyncio
 
         count = asyncio.run(
             service.check_and_emit_coupon_events([bond_info], coupon_schedules, today=TODAY)
         )
         assert count == 1
-        bus.publish.assert_called_once()
+        handler.assert_called_once()
+        event = handler.call_args.args[0]
+        assert event.bond_figi == OFZ_FIGI
+        assert event.amount_per_bond == Decimal("35.50")
 
     def test_no_emit_on_non_matching_date(self) -> None:
         from finalayze.data.bond_discovery import BondDiscoveryService
@@ -385,19 +387,19 @@ class TestCouponEventEmission:
             ]
         }
 
-        bus = _make_mock_event_bus()
+        handler = _make_mock_coupon_handler()
         fetcher = _make_mock_fetcher()
         registry = InstrumentRegistry()
-        service = BondDiscoveryService(fetcher, registry, event_bus=bus)
+        service = BondDiscoveryService(fetcher, registry, coupon_handler=handler)
         import asyncio
 
         count = asyncio.run(
             service.check_and_emit_coupon_events([bond_info], coupon_schedules, today=TODAY)
         )
         assert count == 0
-        bus.publish.assert_not_called()
+        handler.assert_not_called()
 
-    def test_no_emit_when_no_event_bus(self) -> None:
+    def test_no_emit_when_no_handler(self) -> None:
         from finalayze.data.bond_discovery import BondDiscoveryService
 
         bond_info = BondInfo(
@@ -424,7 +426,7 @@ class TestCouponEventEmission:
 
         fetcher = _make_mock_fetcher()
         registry = InstrumentRegistry()
-        service = BondDiscoveryService(fetcher, registry, event_bus=None)
+        service = BondDiscoveryService(fetcher, registry, coupon_handler=None)
         import asyncio
 
         count = asyncio.run(

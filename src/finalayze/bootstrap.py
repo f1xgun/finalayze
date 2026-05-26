@@ -68,7 +68,7 @@ def build_trading_loop(settings: Any) -> Any | None:  # noqa: PLR0912, PLR0915
         from config.segments import DEFAULT_SEGMENTS  # noqa: PLC0415
 
         registry = InstrumentRegistry()
-        moex_segments = [s for s in DEFAULT_SEGMENTS if s.market == "moex"]
+        moex_segments = [s for s in DEFAULT_SEGMENTS if s.enabled and s.market == "moex"]
         for seg in moex_segments:
             for sym in seg.symbols:
                 registry.register(

@@ -45,14 +45,19 @@ _NANO_DIVISOR = Decimal(1_000_000_000)
 _TBANK_GRPC_TARGET = "invest-public-api.tbank.ru:443"
 _TBANK_GRPC_SANDBOX_TARGET = "sandbox-invest-public-api.tbank.ru:443"
 
-# T-Invest execution report status codes -> human-readable names
+# T-Invest execution report status codes -> human-readable names.
+# S1.1: values verified against the SDK enum
+# t_tech.invest.schemas.OrderExecutionReportStatus. The previous map had two
+# values swapped (REJECTED=5/PARTIALLYFILL=2 in code vs. actual REJECTED=2/
+# PARTIALLYFILL=5 in the SDK) which is why submit_order never observed a
+# real rejection — it was reading the wrong int and falling through.
 _EXECUTION_STATUS_MAP: dict[int, str] = {
     0: "unspecified",
     1: "fill",
-    2: "partially_fill",
+    2: "rejected",
     3: "cancelled",
     4: "new",
-    5: "rejected",
+    5: "partially_fill",
 }
 _TERMINAL_STATUSES = frozenset({"fill", "cancelled", "rejected"})
 
@@ -295,7 +300,14 @@ class TinkoffBroker(BrokerBase):
         try:
             self._ensure_account_id()
             result = self._call(
-                lambda: self._run_async(self._post_order_async(figi, actual_qty, direction))
+                lambda: self._run_async(
+                    self._post_order_async(
+                        figi=figi,
+                        quantity=actual_qty,
+                        direction=direction,
+                        order_id=order.client_order_id,
+                    )
+                )
             )
         except InstrumentNotFoundError:
             raise
@@ -310,33 +322,100 @@ class TinkoffBroker(BrokerBase):
             msg = f"Tinkoff order failed for {order.symbol}: {exc}"
             raise BrokerError(msg) from exc
 
+        # S1.1: inspect execution_report_status. Previously the broker
+        # returned filled=True for every successful gRPC response, even when
+        # the order was rejected, cancelled, or merely queued (NEW).
+        status_int: int = getattr(result, "execution_report_status", 0)
+        status_name = _EXECUTION_STATUS_MAP.get(status_int, "unknown")
         fill_price = self._quotation_to_decimal(result.executed_order_price)  # type: ignore[attr-defined]
         result_order_id: str = getattr(result, "order_id", "")
-        _log.info(
-            "order_filled",
+        lots_executed: int = int(getattr(result, "lots_executed", 0) or 0)
+
+        if status_name == "fill":
+            _log.info(
+                "order_filled",
+                symbol=order.symbol,
+                side=order.side,
+                qty=actual_qty,
+                fill_price=float(fill_price),
+                figi=figi,
+                order_id=result_order_id,
+                client_order_id=order.client_order_id,
+            )
+            return OrderResult(
+                filled=True,
+                fill_price=fill_price,
+                symbol=order.symbol,
+                side=order.side,
+                quantity=Decimal(actual_qty),
+                order_id=result_order_id,
+            )
+
+        if status_name == "partially_fill":
+            partial_qty = Decimal(lots_executed * lot_size)
+            _log.warning(
+                "order_partially_filled",
+                symbol=order.symbol,
+                side=order.side,
+                requested_qty=actual_qty,
+                filled_qty=int(partial_qty),
+                fill_price=float(fill_price),
+                figi=figi,
+                order_id=result_order_id,
+                client_order_id=order.client_order_id,
+            )
+            return OrderResult(
+                filled=True,
+                fill_price=fill_price,
+                symbol=order.symbol,
+                side=order.side,
+                quantity=partial_qty,
+                order_id=result_order_id,
+                reason=f"partial fill: {partial_qty} of {actual_qty}",
+            )
+
+        # Non-fill terminal / pending status — log and return filled=False.
+        # Includes: rejected, cancelled, new (queued at exchange), unspecified.
+        reason_map = {
+            "rejected": "rejected by exchange",
+            "cancelled": "cancelled before fill",
+            "new": "queued (new) — not yet executed",
+            "unspecified": "unspecified status from broker",
+        }
+        reason = reason_map.get(status_name, f"non-fill status: {status_name}")
+        _log.warning(
+            "order_not_filled",
             symbol=order.symbol,
             side=order.side,
             qty=actual_qty,
-            fill_price=float(fill_price),
             figi=figi,
             order_id=result_order_id,
+            client_order_id=order.client_order_id,
+            execution_status=status_name,
         )
         return OrderResult(
-            filled=True,
-            fill_price=fill_price,
+            filled=False,
             symbol=order.symbol,
             side=order.side,
-            quantity=Decimal(actual_qty),
+            quantity=Decimal(0),
             order_id=result_order_id,
+            reason=reason,
         )
 
     async def _post_order_async(
         self,
+        *,
         figi: str,
         quantity: int,
         direction: OrderDirection,
+        order_id: str = "",
     ) -> object:
-        """Async call to Tinkoff SDK post_order."""
+        """Async call to Tinkoff SDK post_order.
+
+        S1.1: passes ``order_id`` (caller's client_order_id) so the request
+        is idempotent. The Tinkoff API will return the existing order's
+        response on retry instead of opening a duplicate.
+        """
         client = await self._get_services_async()
         return await self._auto_reconnect(
             client.orders.post_order(  # type: ignore[attr-defined]
@@ -345,6 +424,7 @@ class TinkoffBroker(BrokerBase):
                 direction=direction,
                 order_type=OrderType.ORDER_TYPE_MARKET,
                 account_id=self._account_id,
+                order_id=order_id,
             )
         )
 

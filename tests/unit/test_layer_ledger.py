@@ -268,6 +268,24 @@ def _make_bond_record(
     )
 
 
+class TestLayerLedgerCouponCash:
+    """S1.3: coupon_cash is a typed field credited by the BondDiscoveryService
+    coupon handler; bond_cycle.reinvests it on the next BUY signal."""
+
+    def test_coupon_cash_initially_zero(self) -> None:
+        ledger = LayerLedger(layer_id="core", cash=INITIAL_CASH)
+        assert ledger.coupon_cash == Decimal(0)
+
+    def test_credit_coupon_accumulates(self) -> None:
+        ledger = LayerLedger(layer_id="core", cash=INITIAL_CASH)
+        ledger.credit_coupon(Decimal("35.50"))
+        ledger.credit_coupon(Decimal("12.30"))
+        assert ledger.coupon_cash == Decimal("47.80")
+        # credit_coupon does NOT touch primary cash — bond_cycle does the
+        # transfer + reset.
+        assert ledger.cash == INITIAL_CASH
+
+
 class TestLayerLedgerBondPositions:
     def test_bond_positions_initially_empty(self) -> None:
         ledger = LayerLedger(layer_id="core", cash=INITIAL_CASH)

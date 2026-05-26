@@ -74,14 +74,14 @@ class TestPairsStrategyWiring:
 
     def test_pairs_strategy_skipped_when_no_pairs_in_preset(self) -> None:
         """_setup_pairs_strategy returns None when preset has no pairs config."""
-        # us_industrial has no pairs section in the YAML
+        # ru_tech has no pairs section in the YAML (was us_industrial pre-S1.2)
         from run_evaluation import _setup_pairs_strategy
 
         mock_fetcher = MagicMock()
         start = _BASE_TS
         end = _BASE_TS + timedelta(days=365)
 
-        result = _setup_pairs_strategy("us_industrial", mock_fetcher, start, end)
+        result = _setup_pairs_strategy("ru_tech", mock_fetcher, start, end)
         assert result is None
 
     def test_pairs_strategy_created_for_us_tech(self) -> None:
@@ -144,7 +144,10 @@ class TestMLEnsemblePresets:
 
     def test_ml_ensemble_present_in_all_presets(self) -> None:
         """All equity segment YAML presets should have ml_ensemble section."""
-        expected_preset_count = 9
+        # 4 US (us_tech, us_broad, us_finance, us_healthcare — frozen but presets kept)
+        # + 4 RU (ru_blue_chips, ru_energy, ru_finance, ru_tech).
+        # us_industrial preset removed in S1.2 as orphan (no segment).
+        expected_preset_count = 8
         # Filter to equity segment presets (have segment_id key, instrument_type != bond)
         preset_files = sorted(_PRESETS_DIR.glob("*.yaml"))
         segment_presets = []
