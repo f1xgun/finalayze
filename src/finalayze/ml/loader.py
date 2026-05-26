@@ -57,12 +57,28 @@ def load_registry(model_dir: Path, segments: list[str]) -> MLModelRegistry:
     return registry
 
 
-def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:  # noqa: PLR0915
+def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:  # noqa: PLR0912, PLR0915
     """Load individual model files and assemble an EnsembleModel."""
     from finalayze.ml.models.catboost_model import CatBoostModel  # noqa: PLC0415
     from finalayze.ml.models.ensemble import EnsembleModel  # noqa: PLC0415
     from finalayze.ml.models.lightgbm_model import LightGBMModel  # noqa: PLC0415
     from finalayze.ml.models.xgboost_model import XGBoostModel  # noqa: PLC0415
+
+    # S2.3: warn loudly if the segment was force-saved or its quality gate
+    # failed. Logged BEFORE any model loading so the warning fires even when
+    # downstream loads raise (e.g. missing files).
+    gate_results_path = segment_dir / "wf_gate_results.json"
+    if gate_results_path.exists():
+        gate_data = json.loads(gate_results_path.read_text())
+        if gate_data.get("force_saved") is True or gate_data.get("overall_passed") is False:
+            _log.warning(
+                "ml_force_saved_artifact_loaded",
+                segment_id=segment_id,
+                overall_passed=gate_data.get("overall_passed"),
+                bh_passed=gate_data.get("bh_passed"),
+                best_accuracy=gate_data.get("best_accuracy"),
+                force_saved=gate_data.get("force_saved", False),
+            )
 
     models: list[BaseMLModel] = []
 
