@@ -59,6 +59,7 @@ class TestOrderLifecycle:
     def test_buy_order_lot_rounding(self, broker: TinkoffBroker) -> None:
         mock_result = MagicMock()
         mock_result.executed_order_price = _make_quotation(250, 500_000_000)
+        mock_result.execution_report_status = 1  # S1.1: FILL
 
         with patch.object(broker, "_run_async", return_value=mock_result):
             order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(15))
@@ -78,6 +79,7 @@ class TestOrderLifecycle:
     def test_sell_order_filled(self, broker: TinkoffBroker) -> None:
         mock_result = MagicMock()
         mock_result.executed_order_price = _make_quotation(260, 0)
+        mock_result.execution_report_status = 1  # S1.1: FILL
 
         with patch.object(broker, "_run_async", return_value=mock_result):
             order = OrderRequest(symbol="SBER", side="SELL", quantity=Decimal(20))
@@ -104,6 +106,7 @@ class TestReconnection:
     def test_retry_on_connection_error(self, broker_with_retry: TinkoffBroker) -> None:
         mock_result = MagicMock()
         mock_result.executed_order_price = _make_quotation(100, 0)
+        mock_result.execution_report_status = 1  # S1.1: FILL
 
         with (
             patch.object(
