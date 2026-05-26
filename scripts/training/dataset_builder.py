@@ -49,8 +49,14 @@ LABEL_MODE_TRIPLE_BARRIER = "triple_barrier"
 LABEL_MODE_DIRECTION = "direction"
 LABEL_MODE_TREND_SCANNING = "trend_scanning"
 
-# Purge gap between splits
-PURGE_GAP = _WINDOW_SIZE + TB_MAX_HOLD  # 80 bars: feature window + label horizon
+# Purge gap between train / calibration / test splits.
+# S2.2: name carries the unit ("BARS") to prevent the latent footgun that
+# walk_forward.py was applying this value as `timedelta(days=...)`. Sample-
+# index callers (model_trainer.py) keep using it; day-based callers
+# (walk_forward.py) now have their own day-typed constants.
+PURGE_GAP_BARS = _WINDOW_SIZE + TB_MAX_HOLD  # 80 bars: feature window + label horizon
+# Back-compat alias (kept until external scripts are migrated).
+PURGE_GAP = PURGE_GAP_BARS
 
 
 def get_barrier_params(segment_id: str) -> tuple[float, float]:

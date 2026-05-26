@@ -53,10 +53,15 @@ MOEX_WF_TRAIN_MONTHS = 8
 MOEX_WF_CAL_MONTHS = 1
 MOEX_WF_TEST_MONTHS = 3
 MOEX_WF_STEP_MONTHS = 2
-MOEX_PURGE_GAP = 40  # half the US purge gap (less data available)
 
-# US purge gap
-from scripts.training.dataset_builder import PURGE_GAP as _US_PURGE_GAP
+# S2.2: WF purge gap is measured in CALENDAR DAYS (timedelta below), distinct
+# from PURGE_GAP_BARS in dataset_builder.py which is a sample-index offset.
+# Safety: max label horizon is TB_MAX_HOLD = 20 bars ≈ 30 calendar days on
+# daily candles; both values below leave a margin above that.
+MOEX_PURGE_GAP_DAYS = 40
+_US_PURGE_GAP_DAYS = 80
+# Back-compat alias for tests that imported MOEX_PURGE_GAP.
+MOEX_PURGE_GAP = MOEX_PURGE_GAP_DAYS
 
 # BH correction (D3)
 BH_FDR = 0.10
@@ -86,7 +91,7 @@ def generate_walk_forward_folds(
     cal_months = MOEX_WF_CAL_MONTHS if is_moex else WF_CAL_MONTHS
     test_months = MOEX_WF_TEST_MONTHS if is_moex else WF_TEST_MONTHS
     step_months = MOEX_WF_STEP_MONTHS if is_moex else WF_STEP_MONTHS
-    purge_gap = MOEX_PURGE_GAP if is_moex else _US_PURGE_GAP
+    purge_gap = MOEX_PURGE_GAP_DAYS if is_moex else _US_PURGE_GAP_DAYS
 
     start_date = timestamps[0]
     end_date = timestamps[-1]
@@ -286,10 +291,31 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
 
     print(f"[{segment_id}] {len(folds)} walk-forward folds")
 
+    # S2.1 (Phase-46 stability): select features ONCE on the union of all
+    # fold training indices, not per-fold. Per-fold selection makes the
+    # final saved feature list represent only the last fold and introduces
+    # spurious model churn. Selection still excludes every test row → no
+    # look-ahead. Equivalent fix already lives in auto_ml_research.py:787-805.
+    import pandas as pd  # noqa: PLC0415
+
+    union_train_indices: set[int] = set()
+    for _train_idx, _cal_idx, _test_idx in folds:
+        union_train_indices.update(_train_idx)
+    sorted_train_indices = sorted(union_train_indices)
+    union_train_df = pd.DataFrame([features[i] for i in sorted_train_indices])
+    union_train_series = pd.Series([labels[i] for i in sorted_train_indices])
+    max_feats = get_max_features(segment_id)
+    selected = select_features(union_train_df, union_train_series, max_feats, mode=feat_sel_mode)
+    print(
+        f"[{segment_id}] feature_selection_stable: "
+        f"{len(selected) if selected else 0} features from {len(sorted_train_indices)} "
+        f"union-of-train rows"
+    )
+
     all_fold_results = []
     last_acc = 0.0
     best_models: list[XGBoostModel | LightGBMModel | CatBoostModel] | None = None
-    best_selected_features: list[str] | None = None
+    best_selected_features: list[str] | None = selected or None
     best_test_f: list[dict[str, float]] = []
     best_test_l: list[int] = []
     best_train_l: list[int] = []
@@ -305,14 +331,6 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         if len(train_f) < _WINDOW_SIZE:
             print(f"[{segment_id}] Fold {fold_idx}: too few train ({len(train_f)}), skip.")
             continue
-
-        # Feature selection on train data only
-        import pandas as pd  # noqa: PLC0415
-
-        train_df = pd.DataFrame(train_f)
-        train_series = pd.Series(train_l)
-        max_feats = get_max_features(segment_id)
-        selected = select_features(train_df, train_series, max_feats, mode=feat_sel_mode)
 
         if selected:
             train_f = [{k: row[k] for k in selected} for row in train_f]
@@ -460,6 +478,11 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
         segment_dir = output_dir / segment_id
         segment_dir.mkdir(parents=True, exist_ok=True)
 
+        # S2.3: mark force-saved artefacts so the loader can warn at runtime
+        # and audit tools can spot bypassed gates without re-reading
+        # overall_passed.
+        will_force_save = not overall_passed and force_save
+
         gate_results_path = segment_dir / "wf_gate_results.json"
         gate_results_path.write_text(
             json.dumps(
@@ -468,6 +491,7 @@ def train_walk_forward(  # noqa: PLR0912, PLR0915
                     "gate_pass_rates": gate_pass_rates,
                     "n_folds": len(all_fold_results),
                     "best_accuracy": last_acc,
+                    "force_saved": will_force_save,
                 },
                 indent=2,
             )
