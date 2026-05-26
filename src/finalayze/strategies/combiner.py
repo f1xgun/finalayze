@@ -342,9 +342,10 @@ class StrategyCombiner:
         """Generate a combined signal by weighting enabled strategy signals.
 
         Uses ADX regime routing to gate strategy pools:
-        - trend regime (ADX > 30): only momentum strategies fire
-        - mr regime (ADX < 20): only mean-reversion strategies fire
-        - ambiguous regime (20 <= ADX <= 30): both pools fire, dominant pool wins
+        - trend regime (ADX > _ADX_TREND_THRESHOLD, default 35): momentum only
+        - mr regime (ADX < _ADX_MR_THRESHOLD, default 15): mean-reversion only
+        - ambiguous (in-between): both pools fire, dominant pool wins
+        Per-segment YAML can override the thresholds via ``adx_routing``.
 
         Args:
             weight_overrides: When provided, these weights are used instead of

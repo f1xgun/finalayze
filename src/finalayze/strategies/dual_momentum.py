@@ -8,7 +8,13 @@ from pathlib import Path
 import yaml
 
 from finalayze.core.schemas import Candle, Signal, SignalDirection
-from finalayze.risk.position_sizer import compute_realized_vol as _compute_rv
+
+# S4.2: previously imported compute_realized_vol from risk.position_sizer,
+# which mixes position-sizing concerns with the pure vol calc. risk.regime
+# carries the same annualised stdev-of-log-returns helper; it returns
+# Decimal(0) for insufficient data which is falsy in the ``or Decimal("0.15")``
+# fallback below, matching the previous None semantics.
+from finalayze.risk.regime import compute_realized_vol as _compute_rv
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.vol_targeting import compute_vol_scale
 

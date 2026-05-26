@@ -1760,6 +1760,64 @@ class TradingLoop:
         self._daily_reporter._now = self._now
         updated_baselines = self._daily_reporter.daily_reset(self._baseline_equities)
         self._baseline_equities.update(updated_baselines)
+        # S4.1: stock-side reconcile + equity-drift check (wires S3.2). Bonds
+        # have their own reconcile via bond_processor.reconcile_with_broker.
+        self._run_stock_reconcile()
+
+    def _run_stock_reconcile(self) -> None:
+        """S4.1: per-market stock reconcile + equity-drift via the daily hook.
+
+        Iterates equity markets (skips bond-only markets — those reconcile
+        through ``bond_processor.reconcile_with_broker``). For each market:
+
+        1. ``reconcile_stocks`` flags broker positions the tracker doesn't
+           know about + tracker entries the broker no longer reports.
+           ``apply=False`` — the daily hook only *alerts*; an operator
+           decides whether to clear stale state (a manual SELL might be
+           intentional during a halt, for instance).
+        2. ``reconcile_equity_drift`` compares broker-reported equity vs
+           locally-computed MTM. Out-of-tolerance gaps imply coupon accrual,
+           stale prices, or a real divergence — alerts via Telegram.
+
+        Failures per market are caught + logged so a single broker outage
+        doesn't suppress reconcile across the rest of the portfolio.
+        """
+        # Lazy import — keeps trading_loop import-time graph thin.
+        from finalayze.orchestration.equity_reconcile import (  # noqa: PLC0415
+            reconcile_equity_drift,
+            reconcile_stocks,
+        )
+
+        last_prices: dict[str, Any] = getattr(self._signal_executor, "_last_prices", {})
+        for market_id in self._circuit_breakers:
+            try:
+                broker = self._broker_router.route(market_id)
+                portfolio = broker.get_portfolio()
+            except Exception:
+                _log.exception("stock_reconcile_broker_fetch_failed", market_id=market_id)
+                continue
+
+            try:
+                reconcile_stocks(
+                    broker,
+                    self._position_tracker,
+                    market_id=market_id,
+                    registry=self._registry,
+                    alerter=self._alerter,
+                    apply=False,
+                )
+            except Exception:
+                _log.exception("stock_reconcile_failed", market_id=market_id)
+
+            try:
+                reconcile_equity_drift(
+                    portfolio,
+                    last_prices,
+                    alerter=self._alerter,
+                    market_id=market_id,
+                )
+            except Exception:
+                _log.exception("equity_drift_check_failed", market_id=market_id)
 
     def _compute_top_movers(self) -> list[tuple[str, float]]:
         """Compute top 3 movers by absolute P&L % across all markets.
