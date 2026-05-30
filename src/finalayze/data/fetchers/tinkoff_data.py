@@ -38,6 +38,7 @@ from finalayze.core.schemas import (  # noqa: E402
     Candle,
     CouponPayment,
     FundamentalSnapshot,
+    ReportEvent,
 )
 from finalayze.data.fetchers.base import BaseFetcher  # noqa: E402
 
@@ -365,6 +366,78 @@ class TinkoffFetcher(BaseFetcher):
         elif as_of.tzinfo is None:
             as_of = as_of.replace(tzinfo=UTC)
         return self._map_fundamentals(stat, symbol, as_of)
+
+    # ── Report calendar (EARN-01, calendar-only) ───────────────────────────
+
+    def fetch_reports(self, symbol: str) -> list[ReportEvent]:
+        """Fetch the earnings/report *calendar* for a MOEX symbol.
+
+        ``get_asset_reports`` returns calendar events only (report_date +
+        period metadata) — NO actual EPS/financials. The ``instrument_id`` is
+        the registry FIGI (``_symbol_to_figi``), the same identifier every other
+        Tinkoff instrument call in this fetcher uses; whether reports instead
+        require the asset_uid is UNCONFIRMED and is the live-token MANUAL check
+        (see 59-VALIDATION.md). Returns [] on an unknown symbol (no raise).
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            figi = self._symbol_to_figi(symbol)
+        except InstrumentNotFoundError:
+            _log.debug("reports_unknown_symbol", symbol=symbol)
+            return []
+        try:
+            result = self._run_async(self._fetch_reports_async(figi, symbol))
+        except Exception as exc:
+            _log.exception("reports_fetch_failed", symbol=symbol, error_type=type(exc).__name__)
+            msg = f"Tinkoff gRPC error fetching reports for {symbol}: {exc}"
+            raise DataFetchError(msg) from exc
+        _log.debug("reports_fetched", symbol=symbol, count=len(result))  # type: ignore[arg-type]
+        return result  # type: ignore[return-value]
+
+    async def _fetch_reports_async(self, figi: str, symbol: str) -> list[ReportEvent]:
+        """Async worker: get_asset_reports keyed on the registry FIGI."""
+        from datetime import timedelta  # noqa: PLC0415
+
+        from t_tech.invest.schemas import GetAssetReportsRequest  # noqa: PLC0415
+
+        now = datetime.now(tz=UTC)
+        services = await self._get_services_async()
+        # Registry FIGI is the DEFAULT instrument_id (live MANUAL check confirms).
+        resp = await services.instruments.get_asset_reports(  # type: ignore[attr-defined]
+            GetAssetReportsRequest(
+                instrument_id=figi,
+                from_=now - timedelta(days=730),
+                to=now + timedelta(days=90),
+            ),
+        )
+        return [self._map_report(ev, symbol) for ev in resp.events]
+
+    def _map_report(self, ev: Any, symbol: str) -> ReportEvent:
+        """Map a calendar GetAssetReportsEvent to a ReportEvent.
+
+        period_year / period_num arrive as datetimes; period_num's quarter is
+        derived from its month. period_type is the SDK enum name with the
+        ``PERIOD_TYPE_`` prefix stripped. NO actuals are read (none exist).
+        """
+        report_date = ev.report_date
+        if report_date.tzinfo is None:
+            report_date = report_date.replace(tzinfo=UTC)
+        period_year = (
+            ev.period_year.year if hasattr(ev.period_year, "year") else int(ev.period_year)
+        )
+        if hasattr(ev.period_num, "month"):
+            period_num = (ev.period_num.month - 1) // 3 + 1
+        else:
+            period_num = int(ev.period_num)
+        period_type = ev.period_type.name.removeprefix("PERIOD_TYPE_")
+        return ReportEvent(
+            symbol=symbol,
+            report_date=report_date,
+            period_year=period_year,
+            period_num=period_num,
+            period_type=period_type,
+        )
 
     @staticmethod
     def _business_days_before(d: date, n: int) -> date:
