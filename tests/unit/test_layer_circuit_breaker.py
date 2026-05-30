@@ -48,24 +48,35 @@ def _equity_at_dd(peak: Decimal, dd_pct: Decimal) -> Decimal:
 
 
 class TestCircuitLevel:
-    """Test CircuitLevel enum values and ordering."""
+    """Test the re-exported CircuitLevel enum.
 
-    def test_normal_is_zero(self) -> None:
-        assert CircuitLevel.NORMAL == 0
+    S6.1 (Sprint 6): the in-module IntEnum was removed; ``layer_circuit_breaker``
+    now re-exports the canonical StrEnum from ``risk.circuit_breaker`` so
+    layered-portfolio and equity-side breakers cannot silently disagree under
+    ``==``. Tests now assert string values (NORMAL/CAUTION/HALTED/LIQUIDATE)
+    and identity with the canonical type.
+    """
 
-    def test_caution_is_one(self) -> None:
-        assert CircuitLevel.CAUTION == 1
+    def test_canonical_identity(self) -> None:
+        from finalayze.risk.circuit_breaker import CircuitLevel as Canonical
 
-    def test_halt_is_two(self) -> None:
-        assert CircuitLevel.HALT == 2
+        assert CircuitLevel is Canonical
 
-    def test_liquidate_is_three(self) -> None:
-        assert CircuitLevel.LIQUIDATE == 3
+    def test_normal_value(self) -> None:
+        assert CircuitLevel.NORMAL.value == "normal"
 
-    def test_ordering(self) -> None:
-        assert (
-            CircuitLevel.NORMAL < CircuitLevel.CAUTION < CircuitLevel.HALT < CircuitLevel.LIQUIDATE
-        )
+    def test_caution_value(self) -> None:
+        assert CircuitLevel.CAUTION.value == "caution"
+
+    def test_halted_value(self) -> None:
+        assert CircuitLevel.HALTED.value == "halted"
+
+    def test_liquidate_value(self) -> None:
+        assert CircuitLevel.LIQUIDATE.value == "liquidate"
+
+    def test_no_legacy_halt_member(self) -> None:
+        # Regression guard: the old IntEnum member ``HALT`` must not reappear.
+        assert not hasattr(CircuitLevel, "HALT")
 
 
 class TestLayerCircuitBreakerNormal:
@@ -129,21 +140,21 @@ class TestLayerCircuitBreakerHalt:
         breaker = LayerCircuitBreaker(config)
         breaker.update(INITIAL_EQUITY)
         level = breaker.update(_equity_at_dd(INITIAL_EQUITY, TACTICAL_L2_PCT))
-        assert level == CircuitLevel.HALT
+        assert level == CircuitLevel.HALTED
 
     def test_strategic_l2_at_threshold(self) -> None:
         config = LAYER_CIRCUIT_CONFIGS["strategic"]
         breaker = LayerCircuitBreaker(config)
         breaker.update(INITIAL_EQUITY)
         level = breaker.update(_equity_at_dd(INITIAL_EQUITY, STRATEGIC_L2_PCT))
-        assert level == CircuitLevel.HALT
+        assert level == CircuitLevel.HALTED
 
     def test_short_l2_at_threshold(self) -> None:
         config = LAYER_CIRCUIT_CONFIGS["short"]
         breaker = LayerCircuitBreaker(config)
         breaker.update(INITIAL_EQUITY)
         level = breaker.update(_equity_at_dd(INITIAL_EQUITY, SHORT_L2_PCT))
-        assert level == CircuitLevel.HALT
+        assert level == CircuitLevel.HALTED
 
 
 class TestLayerCircuitBreakerLiquidate:
@@ -255,7 +266,7 @@ class TestLayerCircuitBreakerReset:
         breaker = LayerCircuitBreaker(config)
         breaker.update(INITIAL_EQUITY)
         breaker.update(_equity_at_dd(INITIAL_EQUITY, TACTICAL_L2_PCT))
-        assert breaker.level == CircuitLevel.HALT
+        assert breaker.level == CircuitLevel.HALTED
         breaker.reset()
         assert breaker.level == CircuitLevel.NORMAL
 

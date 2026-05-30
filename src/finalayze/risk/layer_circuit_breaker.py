@@ -22,12 +22,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from enum import IntEnum
 from typing import TYPE_CHECKING
 
 import structlog
 
 from finalayze.core.schemas import PortfolioLayer
+from finalayze.risk.circuit_breaker import CircuitLevel
 
 if TYPE_CHECKING:
     from finalayze.core.layer_ledger import LayerLedger
@@ -35,14 +35,20 @@ if TYPE_CHECKING:
 
 _log = structlog.get_logger()
 
-
-class CircuitLevel(IntEnum):
-    """Circuit breaker alert level."""
-
-    NORMAL = 0
-    CAUTION = 1  # L1: reduce sizing by 50%
-    HALT = 2  # L2: no new positions
-    LIQUIDATE = 3  # L3: close all positions
+# Re-export so historical ``from finalayze.risk.layer_circuit_breaker import
+# CircuitLevel`` keeps working. S6.1 (Sprint 6) collapsed the duplicate
+# IntEnum defined here into the canonical StrEnum in ``risk.circuit_breaker``;
+# legacy member ``HALT`` was renamed to ``HALTED`` to match.
+__all__ = [
+    "LAYER_CIRCUIT_CONFIGS",
+    "PORTFOLIO_L3_THRESHOLD",
+    "AggregateBondBreaker",
+    "BondLayerBreaker",
+    "CircuitLevel",
+    "LayerCircuitBreaker",
+    "LayerCircuitConfig",
+    "PortfolioCircuitBreaker",
+]
 
 
 @dataclass(frozen=True)
@@ -119,7 +125,7 @@ class LayerCircuitBreaker:
         if self._config.l3_threshold_pct is not None and dd >= self._config.l3_threshold_pct:
             self._current_level = CircuitLevel.LIQUIDATE
         elif self._config.l2_threshold_pct is not None and dd >= self._config.l2_threshold_pct:
-            self._current_level = CircuitLevel.HALT
+            self._current_level = CircuitLevel.HALTED
         elif self._config.l1_threshold_pct is not None and dd >= self._config.l1_threshold_pct:
             self._current_level = CircuitLevel.CAUTION
         else:

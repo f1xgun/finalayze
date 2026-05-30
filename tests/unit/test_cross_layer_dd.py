@@ -122,7 +122,7 @@ class TestSingleLayerDDContained:
             _make_equities(strategic=_equity_at_dd(STRATEGIC_EQUITY, STRATEGIC_L2_PCT))
         )
 
-        assert status.layer_levels["strategic"] == CircuitLevel.HALT
+        assert status.layer_levels["strategic"] == CircuitLevel.HALTED
         assert status.sizing_multipliers["strategic"] == ZERO_SIZE
         # Others remain NORMAL
         assert status.layer_levels["core"] == CircuitLevel.NORMAL
@@ -218,7 +218,7 @@ class TestMultiLayerStressNoPortfolioBreach:
         )
 
         # Each layer at its expected level
-        assert status.layer_levels["strategic"] == CircuitLevel.HALT
+        assert status.layer_levels["strategic"] == CircuitLevel.HALTED
         assert status.layer_levels["tactical"] == CircuitLevel.CAUTION
         assert status.layer_levels["short"] == CircuitLevel.CAUTION
         assert status.layer_levels["core"] == CircuitLevel.NORMAL
@@ -246,8 +246,8 @@ class TestMultiLayerStressNoPortfolioBreach:
             )
         )
 
-        assert status.layer_levels["strategic"] == CircuitLevel.HALT
-        assert status.layer_levels["tactical"] == CircuitLevel.HALT
+        assert status.layer_levels["strategic"] == CircuitLevel.HALTED
+        assert status.layer_levels["tactical"] == CircuitLevel.HALTED
         assert status.portfolio_breach is False
 
         # Portfolio DD = (90k + 60k) / 10M = 1.5%
@@ -362,7 +362,7 @@ class TestPortfolioLevelCascade:
         status_step1 = monitor.update(
             _make_equities(strategic=_equity_at_dd(STRATEGIC_EQUITY, STRATEGIC_L2_PCT))
         )
-        assert status_step1.layer_levels["strategic"] == CircuitLevel.HALT
+        assert status_step1.layer_levels["strategic"] == CircuitLevel.HALTED
         assert status_step1.portfolio_breach is False
         # Strategic is at HALT from its own layer breaker
         assert status_step1.sizing_multipliers["strategic"] == ZERO_SIZE
@@ -509,8 +509,8 @@ class TestRealisticScenarios:
         # Layer levels
         assert status.layer_levels["core"] == CircuitLevel.NORMAL
         assert status.layer_levels["strategic"] == CircuitLevel.LIQUIDATE
-        assert status.layer_levels["tactical"] == CircuitLevel.HALT
-        assert status.layer_levels["short"] == CircuitLevel.HALT
+        assert status.layer_levels["tactical"] == CircuitLevel.HALTED
+        assert status.layer_levels["short"] == CircuitLevel.HALTED
 
         # Sizing: layer-level only (no portfolio breach)
         assert status.sizing_multipliers["core"] == FULL_SIZE
@@ -576,9 +576,9 @@ class TestRealisticScenarios:
         # Strategic: -18% exceeds L3 (5%) => LIQUIDATE
         assert status.layer_levels["strategic"] == CircuitLevel.LIQUIDATE
         # Tactical: -15% exceeds L2 (3%) but tactical has no L3 => HALT
-        assert status.layer_levels["tactical"] == CircuitLevel.HALT
+        assert status.layer_levels["tactical"] == CircuitLevel.HALTED
         # Short: -20% exceeds L2 (3%) but short has no L3 => HALT
-        assert status.layer_levels["short"] == CircuitLevel.HALT
+        assert status.layer_levels["short"] == CircuitLevel.HALTED
 
 
 # =============================================================================

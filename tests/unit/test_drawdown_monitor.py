@@ -126,7 +126,7 @@ class TestLayerHaltBlocksNewPositions:
         status = monitor.update(
             _make_equities(strategic=_equity_at_dd(STRATEGIC_EQUITY, STRATEGIC_L2_PCT))
         )
-        assert status.layer_levels["strategic"] == CircuitLevel.HALT
+        assert status.layer_levels["strategic"] == CircuitLevel.HALTED
         assert status.sizing_multipliers["strategic"] == ZERO_SIZE
 
     def test_tactical_halt(self) -> None:
@@ -135,7 +135,7 @@ class TestLayerHaltBlocksNewPositions:
         status = monitor.update(
             _make_equities(tactical=_equity_at_dd(TACTICAL_EQUITY, TACTICAL_L2_PCT))
         )
-        assert status.layer_levels["tactical"] == CircuitLevel.HALT
+        assert status.layer_levels["tactical"] == CircuitLevel.HALTED
         assert status.sizing_multipliers["tactical"] == ZERO_SIZE
 
 
