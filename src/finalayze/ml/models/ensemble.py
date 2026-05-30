@@ -120,14 +120,17 @@ class EnsembleModel:
                 raise PredictionError("All ensemble sub-models failed to produce a prediction")
             return _DEFAULT_PROB
 
-        # Use stacking XOR meta-learner XOR calibrator (not multiple — double-calibration risk)
+        # Stacking output is *already* calibrated -- never pass it through the
+        # EnsembleCalibrator (would double-calibrate). Meta-learner output is
+        # NOT pre-calibrated (audit #20), so it must go through the calibrator
+        # just like the raw-average path.
         if self._stacking is not None and self._stacking.is_fitted:
-            return self._stacking.predict_proba(probs)  # already calibrated
+            return self._stacking.predict_proba(probs)
 
         if self._meta_learner is not None:
-            return self._predict_via_meta_learner(probs)
-
-        raw = self._compute_raw_average(probs, model_probas)
+            raw = self._predict_via_meta_learner(probs)
+        else:
+            raw = self._compute_raw_average(probs, model_probas)
 
         if self._calibrator is not None and self._calibrator.is_fitted:
             if getattr(self._calibrator, "calibrator_bypassed", False):
