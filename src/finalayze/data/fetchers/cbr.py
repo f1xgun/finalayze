@@ -386,6 +386,10 @@ CPI_PUBLICATION_DATES: dict[str, date] = {
     "2025-10": date(2025, 11, 14),
     "2025-11": date(2025, 12, 12),
     "2025-12": date(2026, 1, 16),
+    # 2026 (Rosstat publishes ~mid of the following month)
+    "2026-01": date(2026, 2, 13),
+    "2026-02": date(2026, 3, 13),
+    "2026-03": date(2026, 4, 10),
 }
 
 
@@ -499,7 +503,57 @@ _CPI_DATA: dict[str, Decimal] = {
     "2025-04": Decimal("9.7"),
     "2025-05": Decimal("9.4"),
     "2025-06": Decimal("9.1"),
+    # 2025-H2 → 2026-Q1 extension (sourced rateinflation.com / CBR commentary,
+    # cross-checked TradingEconomics; trailing-12m YoY %). Refreshed 2026-05-30.
+    # NOTE: this dict is the single source of truth for CPI — ml/features/macro.py
+    # reads it via get_cpi_yoy_fraction(). Do not reintroduce a parallel table.
+    # TODO(data-epic): replace this static table with a live Rosstat/CBR feed.
+    "2025-07": Decimal("8.8"),
+    "2025-08": Decimal("8.1"),
+    "2025-09": Decimal("8.0"),
+    "2025-10": Decimal("7.8"),
+    "2025-11": Decimal("6.6"),
+    "2025-12": Decimal("5.6"),
+    # 2026
+    "2026-01": Decimal("6.0"),
+    "2026-02": Decimal("5.1"),
+    "2026-03": Decimal("5.9"),
 }
+
+
+# Rosstat publishes monthly CPI ~2 weeks after month end; allow that lag before
+# considering the static table "stale".
+_CPI_PUBLICATION_LAG_MONTHS = 2
+
+
+def get_cpi_yoy_fraction(year: int, month: int) -> float | None:
+    """Return trailing-12m CPI for *year*/*month* as a decimal fraction.
+
+    Single source of truth for CPI across the codebase. ``_CPI_DATA`` stores
+    percentages (``9.1`` = 9.1%); this returns the fraction (``0.091``) expected
+    by the ML real-rate feature. Returns ``None`` if the month is not covered.
+    """
+    value = _CPI_DATA.get(f"{year:04d}-{month:02d}")
+    return float(value) / 100.0 if value is not None else None
+
+
+def latest_cpi_month() -> str:
+    """Return the most recent month covered by ``_CPI_DATA`` as ``YYYY-MM``."""
+    return max(_CPI_DATA)
+
+
+def cpi_data_staleness_months(as_of: date) -> int:
+    """Months by which the static CPI table lags *as_of*, net of publication lag.
+
+    0 means the table is current enough (the latest covered month is within the
+    normal Rosstat publication lag of *as_of*). A positive value is the number of
+    months of genuinely missing data — callers should log/alert on it so the
+    table never silently rots again (see ml/features/macro.py).
+    """
+    latest = latest_cpi_month()
+    latest_year, latest_month = int(latest[:4]), int(latest[5:7])
+    diff = (as_of.year - latest_year) * 12 + (as_of.month - latest_month)
+    return max(0, diff - _CPI_PUBLICATION_LAG_MONTHS)
 
 
 _YIELD_CURVE_SLOPE_BPS: dict[str, float] = {

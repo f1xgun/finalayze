@@ -5,13 +5,20 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pandas as pd
+import structlog
 
+from finalayze.data.fetchers.cbr import (
+    cpi_data_staleness_months,
+    get_cpi_yoy_fraction,
+)
 from finalayze.ml.features.zscore import rolling_zscore_clipped
 
 if TYPE_CHECKING:
     from datetime import datetime
 
     from finalayze.core.schemas import MoexMarketData
+
+_log = structlog.get_logger()
 
 # MOEX-specific feature constants
 EXTERNAL_DATA_LAG_BARS = 2  # All external data lagged by 2 bars to avoid look-ahead
@@ -20,37 +27,37 @@ MOEX_MACRO_ZSCORE_WINDOW = 252  # 252 trading days (~1 year)
 # CBR rate comparison epsilon (avoid float equality issues)
 _CBR_RATE_EPSILON = 1e-10
 
-# Trailing 12-month CPI (Росстат), annualized as decimal fraction.
-# 6-month fallback in compute_macro_features if exact month missing.
-TRAILING_CPI: dict[tuple[int, int], float] = {
-    (2023, 1): 0.1184,
-    (2023, 2): 0.1002,
-    (2023, 3): 0.0360,
-    (2023, 4): 0.0253,
-    (2023, 5): 0.0234,
-    (2023, 6): 0.0329,
-    (2023, 7): 0.0400,
-    (2023, 8): 0.0513,
-    (2023, 9): 0.0600,
-    (2023, 10): 0.0672,
-    (2023, 11): 0.0748,
-    (2023, 12): 0.0736,
-    (2024, 1): 0.0744,
-    (2024, 2): 0.0769,
-    (2024, 3): 0.0772,
-    (2024, 4): 0.0784,
-    (2024, 5): 0.0824,
-    (2024, 6): 0.0858,
-    (2024, 7): 0.0913,
-    (2024, 8): 0.0909,
-    (2024, 9): 0.0863,
-    (2024, 10): 0.0834,
-    (2024, 11): 0.0874,
-    (2024, 12): 0.0972,
-    (2025, 1): 0.1001,
-    (2025, 2): 0.1003,
-    (2025, 3): 0.1005,
-}
+# Months of missing CPI before we warn that the static table has silently rotted.
+# CPI now comes from the single source of truth in data/fetchers/cbr.py
+# (get_cpi_yoy_fraction); macro.py no longer keeps its own table.
+_CPI_STALE_WARN_MONTHS = 3
+
+
+def _warn_if_cpi_stale(
+    moex_data: MoexMarketData,
+    candle_timestamps: list[datetime] | None,
+) -> None:
+    """Emit a structured warning if the static CPI table lags the scored data.
+
+    Picks the most recent reference date available (candle timestamps preferred,
+    else the latest key-rate record) and checks it against the CPI coverage.
+    """
+    ref: datetime | None = None
+    if candle_timestamps:
+        ref = max(candle_timestamps)
+    elif moex_data.key_rates:
+        ref = max(r.timestamp for r in moex_data.key_rates)
+    if ref is None:
+        return
+
+    stale_months = cpi_data_staleness_months(ref.date())
+    if stale_months >= _CPI_STALE_WARN_MONTHS:
+        _log.warning(
+            "cpi_data_stale",
+            stale_months=stale_months,
+            reference_date=ref.date().isoformat(),
+            hint="extend _CPI_DATA in data/fetchers/cbr.py or wire a live CPI feed",
+        )
 
 
 def compute_macro_features(
@@ -71,6 +78,11 @@ def compute_macro_features(
     if moex_data is None or not moex_data.key_rates:
         return _default
 
+    # Observability: warn (don't fail) if the static CPI table has fallen behind
+    # the data we're scoring against. Without this the feature silently collapses
+    # to 0.0 once CPI lookups start missing (the May-2026 stale-table incident).
+    _warn_if_cpi_stale(moex_data, candle_timestamps)
+
     # Build sparse real_rate series: key_rate - CPI
     sparse: dict[datetime, float] = {}
     for record in moex_data.key_rates:
@@ -85,7 +97,7 @@ def compute_macro_features(
             while cpi_mo < 1:
                 cpi_mo += 12
                 cpi_yr -= 1
-            cpi = TRAILING_CPI.get((cpi_yr, cpi_mo))
+            cpi = get_cpi_yoy_fraction(cpi_yr, cpi_mo)
             if cpi is not None:
                 break
 
