@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "name": "phase60-ru_energy-wired",
+  "description": "Phase-60 SUE + CPI + fundamental-gate wired on ru_energy; MEAS-01 causal gate vs phase59-ru_energy-fund",
+  "created_at": "2026-05-30T14:31:26.298865Z",
+  "git_describe": "v10.0-333-g8a2044f-dirty",
+  "git_sha": "8a2044f49f455d6ec449ca70d3e0b5ec23eb2946",
+  "git_dirty": true,
+  "config_hash": "b793d891bf60e734ee0aa4b0a3641d993bb5512fba6186e57a079185e647a1b1",
+  "strategy_configs": {
+    "ru_energy": {
+      "segment_id": "ru_energy",
+      "normalize_mode": "firing",
+      "min_combined_confidence": 0.38,
+      "min_exit_confidence": 0.24,
+      "regime_routing": {
+        "enabled": true,
+        "adx_period": 14,
+        "trend_threshold": 28,
+        "mr_threshold": 12
+      },
+      "strategies": {
+        "momentum": {
+          "enabled": true,
+          "weight": 0.17,
+          "params": {
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "macd_fast": 10,
+            "macd_slow": 22,
+            "macd_hist_lookback": 3,
+            "min_confidence": 0.4,
+            "lookback_bars": 5,
+            "stop_atr_multiplier": 3.5,
+            "trail_activation_atr": 1.5,
+            "trail_distance_atr": 2.0,
+            "trend_filter": true,
+            "trend_sma_period": 100,
+            "trend_sma_buffer_pct": 2.0,
+            "adx_filter": false,
+            "adx_period": 14,
+            "adx_threshold": 20,
+            "volume_filter": false,
+            "volume_sma_period": 20,
+            "volume_min_ratio": 0.8,
+            "neutral_reset_bars": 8,
+            "vol_target_enabled": true,
+            "vol_target": 0.2
+          }
+        },
+        "event_driven": {
+          "enabled": true,
+          "weight": 0.15,
+          "params": {
+            "min_sentiment": 0.6,
+            "event_types": [
+              "opec",
+              "oil_price",
+              "sanctions",
+              "commodity_price",
+              "geopolitical"
+            ]
+          }
+        },
+        "mean_reversion": {
+          "enabled": true,
+          "weight": 0.1,
+          "params": {
+            "bb_period": 20,
+            "bb_std_dev": 2.8,
+            "min_confidence": 0.4,
+            "exit_at_mean": true,
+            "trend_filter": true,
+            "trend_sma_period": 100,
+            "trend_sma_buffer_pct": 3.0,
+            "rsi_oversold_mr": 25,
+            "rsi_overbought_mr": 75
+          }
+        },
+        "pairs": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "pairs": [],
+            "z_entry": 1.5,
+            "z_exit": 0.0,
+            "min_confidence": 0.4
+          }
+        },
+        "dividend_gap": {
+          "enabled": true,
+          "weight": 0.19,
+          "params": {
+            "min_gap_pct": 3.0,
+            "max_hold_bars": 60,
+            "min_confidence": 0.4
+          }
+        },
+        "cbr_calendar": {
+          "enabled": true,
+          "weight": 0.08,
+          "params": {
+            "min_confidence": 0.3
+          }
+        },
+        "ml_ensemble": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "threshold": 0.1,
+            "min_confidence": 0.3
+          }
+        },
+        "rsi2_connors": {
+          "enabled": true,
+          "weight": 0.13,
+          "params": {
+            "rsi_period": 2,
+            "rsi_buy_threshold": 15.0,
+            "rsi_sell_threshold": 91.9,
+            "sma_trend_period": 100,
+            "sma_exit_period": 5,
+            "min_confidence": 0.45
+          }
+        },
+        "dual_momentum": {
+          "enabled": true,
+          "weight": 0.2,
+          "params": {
+            "lookback_1m": 21,
+            "lookback_3m": 63,
+            "lookback_6m": 126,
+            "min_confidence": 0.5,
+            "vol_target_enabled": true,
+            "vol_target": 0.2
+          }
+        },
+        "ou_mean_reversion": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "ou_window": 60,
+            "entry_threshold": 1.8,
+            "exit_threshold": 0.3,
+            "use_mle": true,
+            "min_confidence": 0.45
+          }
+        }
+      }
+    }
+  },
+  "backtest_config": {
+    "initial_cash": "100000",
+    "max_positions": 10,
+    "kelly_fraction": "0.5",
+    "atr_multiplier": "3.0",
+    "regime_provider": "none",
+    "stop_loss_mode": "chandelier",
+    "max_hold_bars": "per_strategy"
+  },
+  "metrics": {
+    "wf_sharpe": -0.0139,
+    "wf_max_drawdown": 0.16,
+    "profit_factor": 0.8031,
+    "calmar_ratio": 0.0,
+    "trade_count": 86,
+    "avg_hold_bars": 2.1,
+    "segment_pnl_share": {
+      "ru_energy": 90.0
+    },
+    "sortino_ratio": 0.0,
+    "win_rate_by_segment": {
+      "ru_energy": 0.5581395348837209
+    },
+    "information_ratio": null,
+    "mc_5th_pct_sharpe": -0.7034888556595909,
+    "model_disagreement": 0.0,
+    "turnover_adjusted_return": -0.0001,
+    "gross_sharpe": -0.0139,
+    "net_sharpe": -0.0139,
+    "param_stability_cv": 0.0,
+    "per_model_proba_mean": {}
+  },
+  "gate_results": [
+    {
+      "name": "S1",
+      "gate_type": "safety",
+      "passed": false,
+      "value": -0.0139,
+      "threshold": 0.0,
+      "message": "WF Sharpe -0.0139 < 0.0"
+    },
+    {
+      "name": "S2",
+      "gate_type": "safety",
+      "passed": true,
+      "value": 0.16,
+      "threshold": 15.0,
+      "message": "Max DD within ceiling"
+    },
+    {
+      "name": "S3",
+      "gate_type": "safety",
+      "passed": false,
+      "value": -0.7034888556595909,
+      "threshold": 0.0,
+      "message": "MC 5th-pct Sharpe -0.7035 < 0.0"
+    },
+    {
+      "name": "C1",
+      "gate_type": "calibration",
+      "passed": true,
+      "value": 0.0003,
+      "threshold": 0.05,
+      "message": "Sharpe regression within tolerance"
+    },
+    {
+      "name": "C2",
+      "gate_type": "calibration",
+      "passed": true,
+      "value": 0.05,
+      "threshold": 2.0,
+      "message": "DD regression within tolerance"
+    },
+    {
+      "name": "C3",
+      "gate_type": "calibration",
+      "passed": true,
+      "value": 86.0,
+      "threshold": 60.0,
+      "message": "Sufficient trades"
+    },
+    {
+      "name": "C4",
+      "gate_type": "calibration",
+      "passed": false,
+      "value": 90.0,
+      "threshold": 0.35,
+      "message": "Max segment share 9000.0% > 35%"
+    },
+    {
+      "name": "C5",
+      "gate_type": "calibration",
+      "passed": true,
+      "value": -0.7034888556595909,
+      "threshold": -0.7686326121170195,
+      "message": "MC robustness maintained"
+    },
+    {
+      "name": "C6",
+      "gate_type": "calibration",
+      "passed": true,
+      "value": 0.0,
+      "threshold": 0.3,
+      "message": "Param stability OK"
+    }
+  ],
+  "verdict": "REJECT",
+  "tags": []
+}
