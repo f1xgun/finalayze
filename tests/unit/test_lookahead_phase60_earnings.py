@@ -30,11 +30,22 @@ Covered look-ahead invariants:
 
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from unittest.mock import patch
 
 from finalayze.core.schemas import Candle, EventType, SignalDirection
 from finalayze.strategies.event_driven import EventDrivenStrategy
 from finalayze.strategies.pead import EarningsSurprise, compute_sue_proxy
+
+# Ensure project root is importable so the run_iteration loader can be exercised.
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+with patch("sys.argv", ["run_iteration.py", "--name", "test", "--description", "test"]):
+    import scripts.run_iteration as ri  # noqa: E402
 
 # ── Shared constants (ruff PLR2004: no magic numbers) ────────────────────────
 _SYMBOL = "LKOH"
@@ -202,3 +213,28 @@ def test_lookahead_earnings_seeded_proxy_is_labelled() -> None:
 
     assert surprise.is_proxy is True
     assert surprise.symbol == _SYMBOL
+
+
+# ── run_iteration loader (Task 3) ────────────────────────────────────────────
+_RU_ENERGY_SYMBOLS = ["LKOH", "ROSN"]
+
+
+def test_lookahead_earnings_loader_registers_seeded_ru_energy() -> None:
+    """_setup_event_driven_earnings seeds >=1 labelled ru_energy surprise."""
+    strategy = EventDrivenStrategy()
+    count = ri._setup_event_driven_earnings("ru_energy", _RU_ENERGY_SYMBOLS, None, strategy)
+
+    assert count >= 1
+    # Every seeded surprise is labelled is_proxy (Phase-59 D-01).
+    for surprises in strategy._surprises.values():
+        for surprise in surprises:
+            assert surprise.is_proxy is True
+
+
+def test_lookahead_earnings_loader_skips_non_ru_segment() -> None:
+    """The loader is ru_-gated: a us_ segment registers nothing."""
+    strategy = EventDrivenStrategy()
+    count = ri._setup_event_driven_earnings("us_tech", ["AAPL"], None, strategy)
+
+    assert count == 0
+    assert strategy._surprises == {}

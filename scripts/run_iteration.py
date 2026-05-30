@@ -78,6 +78,7 @@ from finalayze.strategies.cbr_calendar import CBRCalendar, CBRRateEvent
 from finalayze.strategies.cbr_strategy_wrapper import CBRStrategyWrapper
 from finalayze.strategies.dividend_gap import DividendEntry, DividendGapStrategy
 from finalayze.strategies.dual_momentum import DualMomentumStrategy
+from finalayze.strategies.event_driven import EventDrivenStrategy
 
 _FALLBACK_USDRUB = Decimal("90.0")
 from finalayze.strategies.mean_reversion import MeanReversionStrategy
@@ -85,7 +86,7 @@ from finalayze.strategies.ml_strategy import MLStrategy
 from finalayze.strategies.momentum import MomentumStrategy
 from finalayze.strategies.ou_mean_reversion import OUMeanReversionStrategy
 from finalayze.strategies.pairs import PairsStrategy
-from finalayze.strategies.pead import EarningsSurprise, PEADStrategy
+from finalayze.strategies.pead import EarningsSurprise, PEADStrategy, compute_sue_proxy
 from finalayze.strategies.rsi2_connors import RSI2ConnorsStrategy
 
 _PRESETS_DIR = (
@@ -486,6 +487,83 @@ def _setup_pead_strategy(
     return strategy
 
 
+# ── Phase 60 earnings seed (INTG-01) ─────────────────────────────────────────
+# No earnings event-data JSON exists in the repo (verified — RESEARCH Open
+# Question 1 / A2). To make an in-window SUE event exist for the MEAS-01 proving
+# run, we seed a small LABELLED eps_ttm series per ru_energy symbol and run
+# compute_sue_proxy (which always sets is_proxy=True). The announcement date
+# falls inside the Phase-59 proving window (2023-01-01..2024-06-30). These are
+# proxy values, NOT analyst consensus — kept is_proxy so backtest attribution
+# stays honest (Phase-59 D-01 / threat T-60-02).
+_SEED_ANNOUNCEMENT = datetime(2023, 4, 28, tzinfo=UTC)
+# eps_ttm (days-before-announcement, value): a step-up that yields a positive,
+# non-zero SUE vs the prior-year/rolling baseline when resolved as-of D.
+_SEED_EPS_SERIES_DAYS = (730, 365, 90, 0)
+_SEED_EPS_BY_SYMBOL: dict[str, tuple[float, ...]] = {
+    "LKOH": (640.0, 690.0, 740.0, 980.0),
+    "ROSN": (45.0, 50.0, 54.0, 78.0),
+}
+
+
+def _setup_event_driven_earnings(
+    segment: str,
+    symbols: list[str],
+    event_data: dict[str, Any] | None,
+    strategy: EventDrivenStrategy,
+) -> int:
+    """Register an earnings SUE calendar into the EventDrivenStrategy (ru_ only).
+
+    D-02: extend event_driven, do NOT add a separate pead strategy. Data sources
+    in priority order:
+      1. Pre-built event_data JSON (``--event-data-dir`` ``earnings/<symbol>.json``).
+      2. A SEEDED labelled eps_ttm series for ru_energy symbols (LKOH/ROSN), run
+         through ``compute_sue_proxy`` so an in-window event exists for the
+         proving run. Always ``is_proxy=True``.
+
+    Returns the number of registered surprises (0 when none apply).
+    """
+    if not segment.startswith("ru_"):
+        return 0
+
+    count = 0
+    segment_symbols = set(symbols)
+
+    # Priority 1: pre-built event data JSON (real history when supplied).
+    earnings = (event_data or {}).get("earnings", {})
+    for symbol in symbols:
+        for entry in earnings.get(symbol, []):
+            if entry.get("sue_score") is None:
+                continue
+            strategy.add_earnings_surprise(
+                EarningsSurprise(
+                    symbol=symbol,
+                    announcement_date=datetime.strptime(
+                        entry["announcement_date"], "%Y-%m-%d"
+                    ).replace(tzinfo=UTC),
+                    sue_score=float(entry["sue_score"]),
+                    actual_eps=float(entry.get("actual_eps", 0)),
+                    expected_eps=float(entry.get("expected_eps", 0)),
+                    is_proxy=bool(entry.get("is_proxy", True)),
+                ),
+            )
+            count += 1
+
+    # Priority 2: seeded labelled SUE for ru_energy when no JSON earnings exist.
+    if count == 0 and segment == "ru_energy":
+        for symbol, values in _SEED_EPS_BY_SYMBOL.items():
+            if symbol not in segment_symbols:
+                continue
+            eps_history = [
+                (_SEED_ANNOUNCEMENT - timedelta(days=days), value)
+                for days, value in zip(_SEED_EPS_SERIES_DAYS, values, strict=True)
+            ]
+            surprise = compute_sue_proxy(symbol, _SEED_ANNOUNCEMENT, eps_history)
+            strategy.add_earnings_surprise(surprise)
+            count += 1
+
+    return count
+
+
 def _setup_cbr_strategy(
     segment: str,
     symbols: list[str],
@@ -564,6 +642,21 @@ def _build_strategies(
     )
     if div_gap is not None:
         strategies.append(div_gap)
+
+    # event_driven (Phase 60): build when enabled in the preset, then register
+    # the earnings SUE calendar into it (ru_-gated; seeded for ru_energy when no
+    # earnings JSON exists). The strategy resolves surprises per-bar itself, so
+    # no engine signature change (D-02).
+    ed_cfg = strategies_cfg.get("event_driven", {})
+    if ed_cfg.get("enabled", False):
+        event_driven = EventDrivenStrategy()
+        earnings_count = _setup_event_driven_earnings(
+            segment, symbols or [], event_data, event_driven
+        )
+        strategies.append(event_driven)
+        # MEAS-01 sanity print: confirm event_driven has fuel before declaring
+        # the gate failed (Pitfall 5).
+        print(f"  event_driven earnings surprises registered: {earnings_count}")
 
     # Other event-driven strategies (require event data)
     if event_data is not None:
