@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from finalayze.analysis.news_impact_analyzer import NewsImpactResult
-    from finalayze.core.schemas import NewsArticle
+    from finalayze.core.schemas import FundamentalSnapshot, NewsArticle
     from finalayze.execution.broker_base import OrderRequest
     from finalayze.execution.simulated_broker import StopLossState
 
@@ -343,6 +343,56 @@ class TradingPersistence:
         self._persist_to_db(
             self._persist_news_article_async(article, impact_result),
             table="news_articles",
+        )
+
+    async def persist_fundamental_snapshot_async(self, snap: FundamentalSnapshot) -> None:
+        """Idempotent upsert of a fundamental snapshot keyed by (as_of, symbol) — CAPTURE-02.
+
+        Uses Postgres ``INSERT ... ON CONFLICT (as_of, symbol) DO UPDATE`` so a daily
+        re-run of unchanged fundamentals is a no-op-equivalent upsert (no duplicate-PK
+        crash — RESEARCH Pitfall 1). This is the one writer that cannot use the plain
+        ``session.add()`` append-only pattern.
+        """
+        from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: PLC0415
+
+        from finalayze.core.models import FundamentalSnapshotModel  # noqa: PLC0415
+
+        def _dec(x: float | None) -> Decimal | None:
+            return Decimal(str(x)) if x is not None else None
+
+        values: dict[str, Any] = {
+            "as_of": snap.as_of,
+            "symbol": snap.symbol[:30],
+            "pe_ratio": _dec(snap.pe_ratio),
+            "ev_ebitda": _dec(snap.ev_ebitda),
+            "revenue_ttm": _dec(snap.revenue_ttm),
+            "net_margin": _dec(snap.net_margin),
+            "roe": _dec(snap.roe),
+            "eps_ttm": _dec(snap.eps_ttm),
+            "dividend_yield": _dec(snap.dividend_yield),
+            "market_cap": _dec(snap.market_cap),
+            "currency": snap.currency,
+        }
+        stmt = pg_insert(FundamentalSnapshotModel).values(**values)
+        update_cols = {c: stmt.excluded[c] for c in values if c not in ("as_of", "symbol")}
+        stmt = stmt.on_conflict_do_update(index_elements=["as_of", "symbol"], set_=update_cols)
+
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            await session.execute(stmt)
+            await session.commit()
+
+    def persist_fundamental_snapshot(self, snap: FundamentalSnapshot) -> None:
+        """Fire-and-forget guarded wrapper for the fundamental upsert (D-04 fail-safe).
+
+        Routes through ``_persist_to_db`` so a table-absent / DB error is swallowed
+        (``db_persist_failed`` logged, ``db_write_failures`` incremented) and never
+        crashes the capture cycle.
+        """
+        self._persist_to_db(
+            self.persist_fundamental_snapshot_async(snap),
+            table="fundamental_snapshots",
+            symbol=snap.symbol,
         )
 
     def persist_sentiment_batch(
