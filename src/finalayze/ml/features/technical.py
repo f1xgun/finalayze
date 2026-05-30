@@ -15,6 +15,7 @@ from finalayze.core.exceptions import InsufficientDataError
 from finalayze.core.schemas import MarketContext
 from finalayze.ml.features.calendar import compute_calendar_features
 from finalayze.ml.features.cross_asset import compute_cross_asset_features
+from finalayze.ml.features.fundamental import compute_fundamental_features
 from finalayze.ml.features.macro import (
     EXTERNAL_DATA_LAG_BARS as _EXTERNAL_DATA_LAG_BARS,  # noqa: F401  # re-export
 )
@@ -186,6 +187,7 @@ def compute_features(
     fx_features = compute_fx_features(_moex)
     commodity_features = compute_commodity_features(_moex)
     macro_features = compute_macro_features(_moex, candle_timestamps=candle_timestamps)
+    fundamental_features = compute_fundamental_features(_moex, as_of=candles[-1].timestamp)
     turnover_features = compute_turnover_features(_moex)
     cbr_features = compute_cbr_features(_moex, candle_timestamps=candle_timestamps)
     fx_return_features = compute_fx_return_features(_moex)
@@ -202,6 +204,7 @@ def compute_features(
         **fx_features,
         **commodity_features,
         **macro_features,
+        **fundamental_features,
         **turnover_features,
         **cbr_features,
         **fx_return_features,

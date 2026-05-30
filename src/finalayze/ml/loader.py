@@ -22,8 +22,9 @@ _log = structlog.get_logger()
 # Saved models whose feature_schema_version differs from this value will be
 # rejected at load time (graceful degradation — registry returns None for
 # that segment rather than producing silently wrong predictions).
-# History: 1 = original; 2 = +4 MOEX features; 3 = +7 MOEX macro (cbr/fx/brent).
-FEATURE_SCHEMA_VERSION: int = 3
+# History: 1 = original; 2 = +4 MOEX features; 3 = +7 MOEX macro (cbr/fx/brent);
+#          4 = +5 fundamental features (FUND-02).
+FEATURE_SCHEMA_VERSION: int = 4
 
 
 def load_registry(model_dir: Path, segments: list[str]) -> MLModelRegistry:
