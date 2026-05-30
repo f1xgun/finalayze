@@ -337,6 +337,31 @@ class DailyEquitySnapshot(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
 
 
+class FundamentalSnapshotModel(Base):
+    """Point-in-time fundamental snapshot per symbol, persisted to TimescaleDB (FUND-01).
+
+    Composite PK ``(as_of, symbol)`` partitions the hypertable on ``as_of`` so a
+    point-in-time read is ``WHERE as_of <= :D ORDER BY as_of DESC LIMIT 1`` — the
+    look-ahead control (D-02). All fundamental columns are nullable (None =
+    unavailable; values are never fabricated). Column SQL types MUST match
+    migration ``011`` byte-for-byte (RESEARCH Pitfall 3).
+    """
+
+    __tablename__ = "fundamental_snapshots"
+
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(30), primary_key=True)
+    pe_ratio: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    ev_ebitda: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    revenue_ttm: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
+    net_margin: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    roe: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    eps_ttm: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    dividend_yield: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    market_cap: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+
+
 class StopLossEventModel(Base):
     """Append-only stop-loss state event log, persisted to TimescaleDB hypertable.
 

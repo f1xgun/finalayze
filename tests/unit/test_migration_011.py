@@ -7,12 +7,15 @@ These tests do not require a live DB — they inspect the module source + ORM.
 
 from __future__ import annotations
 
-import importlib
-import inspect
+import importlib.util
+from pathlib import Path
+from types import ModuleType
 
 from finalayze.core.models import FundamentalSnapshotModel
 
-_MIGRATION_MODULE = "alembic.versions.011_fundamental_snapshots"
+_MIGRATION_PATH = (
+    Path(__file__).resolve().parents[2] / "alembic" / "versions" / "011_fundamental_snapshots.py"
+)
 
 _EXPECTED_COLUMNS = {
     "as_of",
@@ -29,16 +32,26 @@ _EXPECTED_COLUMNS = {
 }
 
 
+def _load_migration() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        "migration_011_fundamental_snapshots", _MIGRATION_PATH
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _migration_source() -> str:
-    module = importlib.import_module(_MIGRATION_MODULE)
-    return inspect.getsource(module)
+    return _MIGRATION_PATH.read_text(encoding="utf-8")
 
 
 class TestMigration011Revision:
     """Revision chaining."""
 
     def test_revision_and_down_revision(self) -> None:
-        module = importlib.import_module(_MIGRATION_MODULE)
+        module = _load_migration()
         assert module.revision == "011"
         assert module.down_revision == "010"
 
