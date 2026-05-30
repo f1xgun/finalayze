@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover
 from finalayze.data.moex_calendar import is_moex_holiday
 from finalayze.markets.currency import CurrencyConverter
 from finalayze.markets.schedule import SCHEDULES
+from finalayze.orchestration.anomaly_handler import AnomalyHandler
 from finalayze.orchestration.async_runtime import AsyncRuntime
 from finalayze.orchestration.sentiment_manager import SentimentManager
 from finalayze.orchestration.signal_executor import (
@@ -83,13 +84,6 @@ _US_CLOSE_UTC = (21, 0)
 _MOEX_OPEN_UTC = (7, 0)
 _MOEX_CLOSE_UTC = (15, 45)
 
-_ANOMALY_SYSTEM_PROMPT = (
-    "You are a financial market analyst. Explain the likely cause of "
-    "the following statistical anomaly in 2-3 sentences. Be specific "
-    "about potential catalysts (earnings, macro events, sector rotation). "
-    "Do not give trading advice."
-)
-_ANOMALY_LLM_TIMEOUT = 30.0
 _MAX_ARTICLES_PER_CYCLE = 20  # budget cap: prevent LLM cost explosion on busy news days
 
 SOURCE_CREDIBILITY: dict[str, float] = {
@@ -384,6 +378,13 @@ class TradingLoop:
         self._ml_retrainer = _services.ml_retrainer
         self._daily_reporter = _services.daily_reporter
         self._news_pipeline = _services.news_pipeline
+
+        # Anomaly handler extracted to improve modularity (Phase 57-04 D-04)
+        # Reads _llm_client lazily via lambda so late initialization is supported
+        self._anomaly_handler = AnomalyHandler(
+            alerter,
+            lambda: getattr(self, "_llm_client", None),
+        )
 
         self._ml_registry = ml_registry
         self._scheduler: BackgroundScheduler | None = None
@@ -1506,45 +1507,14 @@ class TradingLoop:
         anomaly: object,
         raw_text: str,
     ) -> uuid.UUID | None:
-        """Orchestrate the anomaly raw + LLM-enrichment pair (Phase 57-04 D-04).
-
-        Sends the raw alert via ``_send(alert_type='anomaly_raw')`` to capture
-        ``raw_alert_id``, then schedules the async LLM follow-up via
-        ``asyncio.create_task(self._enrich_anomaly_async(..., parent_id=
-        raw_alert_id))`` so the follow-up's persisted row carries the
-        parent_id FK (Plan 57-01 schema). Returns the captured raw alert id
-        for caller-side tracking; never raises.
-        """
-        try:
-            _ok, raw_alert_id = await self._alerter.send_async(
-                raw_text,
-                alert_type="anomaly_raw",
-                symbol=symbol,
-                market_id=market_id,
-                parent_id=None,
+        """Delegate to AnomalyHandler.handle (test compat)."""
+        # Lazy-initialize handler for tests using object.__new__()
+        if not hasattr(self, "_anomaly_handler"):
+            self._anomaly_handler = AnomalyHandler(
+                self._alerter,
+                lambda: getattr(self, "_llm_client", None),
             )
-        except Exception:
-            _log.warning(
-                "anomaly_raw_send_failed",
-                symbol=symbol,
-                market_id=market_id,
-            )
-            return None
-
-        if self._llm_client is not None:
-            # Fire-and-forget: store the task on the instance so the asyncio
-            # GC doesn't drop it mid-flight (ruff RUF006). The reference is
-            # purposely overwritten on the next anomaly so we don't leak a
-            # growing list across cycles.
-            self._anomaly_enrich_task = asyncio.create_task(
-                self._enrich_anomaly_async(
-                    symbol,
-                    market_id,
-                    anomaly,
-                    parent_id=raw_alert_id,
-                ),
-            )
-        return raw_alert_id
+        return await self._anomaly_handler.handle(symbol, market_id, anomaly, raw_text)
 
     async def _enrich_anomaly_async(
         self,
@@ -1554,41 +1524,14 @@ class TradingLoop:
         *,
         parent_id: uuid.UUID | None = None,
     ) -> None:
-        """Fire-and-forget LLM enrichment -- never raises, never blocks raw alert.
-
-        Phase 57-04 (D-04): when ``parent_id`` is supplied (the alert_id
-        returned by the prior raw-alert ``_send`` call), the LLM follow-up
-        ``_send`` threads it through ``alert_type='anomaly_llm'`` so the
-        persisted child row's FK to the parent anomaly_raw row is populated
-        at insert time.
-        """
-        try:
-            prompt = (
-                f"Ticker: {symbol} ({market_id})\n"
-                f"Price move: {anomaly.price_move_pct:+.1f}%\n"  # type: ignore[attr-defined]
-                f"Sigma: {anomaly.sigma:.1f}\n"  # type: ignore[attr-defined]
-                f"Volume ratio: {anomaly.volume_ratio:.1f}x average\n"  # type: ignore[attr-defined]
-                f"Anomaly type: {anomaly.anomaly_type}"  # type: ignore[attr-defined]
+        """Delegate to AnomalyHandler.enrich (test compat)."""
+        # Lazy-initialize handler for tests using object.__new__()
+        if not hasattr(self, "_anomaly_handler"):
+            self._anomaly_handler = AnomalyHandler(
+                self._alerter,
+                lambda: getattr(self, "_llm_client", None),
             )
-            assert self._llm_client is not None  # guarded by caller
-            explanation = await asyncio.wait_for(
-                self._llm_client.complete(prompt, _ANOMALY_SYSTEM_PROMPT),
-                timeout=_ANOMALY_LLM_TIMEOUT,
-            )
-            follow_up = f"AI interpretation (unverified): {explanation}"
-            await self._alerter.send_async(
-                follow_up,
-                alert_type="anomaly_llm",
-                symbol=symbol,
-                market_id=market_id,
-                parent_id=parent_id,
-            )
-        except Exception:
-            _log.warning(
-                "anomaly_llm_failure",
-                symbol=symbol,
-                market_id=market_id,
-            )
+        await self._anomaly_handler.enrich(symbol, market_id, anomaly, parent_id=parent_id)
 
     # ---- Process instrument delegation (test compat) ----
 

@@ -61,7 +61,7 @@ def _make_anomaly_result() -> AnomalyResult:
 
 def _make_tl() -> object:
     """Create a minimal TradingLoop instance for testing _enrich_anomaly_async."""
-    from finalayze.core.trading_loop import TradingLoop
+    from finalayze.orchestration.trading_loop import TradingLoop
 
     return object.__new__(TradingLoop)
 
@@ -120,22 +120,22 @@ class TestOrderingGuarantee:
         )
 
     def test_anomaly_detection_calls_send_async(self) -> None:
-        """Verify _enrich_anomaly_async uses send_async (direct async transport), not send_alert.
+        """Verify AnomalyHandler.enrich uses send_async (direct async transport), not send_alert.
 
-        _enrich_anomaly_async sends the LLM follow-up via send_async so the
+        AnomalyHandler.enrich sends the LLM follow-up via send_async so the
         returned alert_id threads as parent_id FK. send_alert (fire-and-forget
         queue) must NOT be used here because we need the id.
         """
         import inspect
 
-        from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.anomaly_handler import AnomalyHandler
 
-        source = inspect.getsource(TradingLoop._enrich_anomaly_async)
+        source = inspect.getsource(AnomalyHandler.enrich)
         assert "send_async(" in source, (
-            "_enrich_anomaly_async must use send_async for async follow-up"
+            "AnomalyHandler.enrich must use send_async for async follow-up"
         )
         assert "send_alert(" not in source, (
-            "_enrich_anomaly_async must NOT use sync send_alert (that's the caller's job)"
+            "AnomalyHandler.enrich must NOT use sync send_alert (that's the caller's job)"
         )
 
 
