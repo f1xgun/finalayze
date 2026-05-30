@@ -4,7 +4,7 @@ min_combined_confidence: 0.40
 strategies:
   momentum:
     enabled: true
-    weight: 0.20
+    weight: 0.31
     params:
       rsi_period: 14
       rsi_oversold: 28
@@ -28,7 +28,7 @@ strategies:
       neutral_reset_bars: 8
   mean_reversion:
     enabled: true
-    weight: 0.35
+    weight: 0.54
     params:
       bb_period: 20
       bb_std_dev: 2.5
@@ -43,8 +43,8 @@ strategies:
       min_sentiment: 0.65
       event_types: [regulatory, earnings, product_launch]
   ml_ensemble:
-    enabled: true
-    weight: 0.25
+    enabled: false
+    weight: 0.00
     params:
       threshold: 0.10
       min_confidence: 0.30
