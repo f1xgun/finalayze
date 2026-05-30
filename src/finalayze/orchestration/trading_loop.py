@@ -19,7 +19,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from finalayze.analysis.sector_ticker_mapper import SectorTickerMapper
     from finalayze.api.alerts import TelegramAlerter
     from finalayze.api.metrics import MetricsCollector
+    from finalayze.core.schemas import FundamentalSnapshot
     from finalayze.data.cache import RedisCache
     from finalayze.data.fetchers.newsapi import NewsApiFetcher
     from finalayze.data.fetchers.rss_fetcher import RssNewsFetcher
@@ -75,6 +76,19 @@ if TYPE_CHECKING:
         CrossMarketCircuitBreaker,
     )
     from finalayze.strategies.combiner import StrategyCombiner
+
+
+class _SupportsFetchFundamentals(Protocol):
+    """Structural type for a fetcher exposing the Phase-59 fundamentals call.
+
+    The heterogeneous ``self._fetchers`` map is typed ``dict[str, object]``; the
+    MOEX entry (TinkoffFetcher) provides ``fetch_fundamentals``. Casting to this
+    Protocol narrows the type for the capture cycle without importing the concrete
+    data-tier class into orchestration.
+    """
+
+    def fetch_fundamentals(self, symbol: str) -> FundamentalSnapshot | None: ...
+
 
 # ── Constants ──────────────────────────────────────────────────────────────
 _ZERO = Decimal(0)
@@ -423,6 +437,13 @@ class TradingLoop:
         # Per-instrument last price cache: symbol -> Decimal (built during strategy cycle)
         self._last_prices: dict[str, Decimal] = {}
 
+        # Fundamental-capture liveness markers (Phase 63 CAPTURE-01 / D-03).
+        # Set by _fundamental_capture_cycle after each successful run; read by the
+        # freshness check (plan 63-03) to alert when the "data clock" stops. None
+        # until the first run so freshness has a defined initial state.
+        self._last_fundamental_capture_at: datetime | None = None
+        self._last_fundamental_coverage_ratio: float | None = None
+
         # Segment min_combined_confidence cache: seg_id -> float
         self._segment_min_confidence: dict[str, float] = {}
 
@@ -649,6 +670,22 @@ class TradingLoop:
             _PRCronTrigger(hour=15, minute=50, timezone="UTC"),
             id="portfolio_review",
             replace_existing=True,
+        )
+        # CAPTURE-01 (Phase 63 D-01, Pitfall 6): register the daily MOEX
+        # fundamental-capture cron alongside its method (land both together).
+        # Default 07:00 UTC = 10:00 MSK pre-open; coalesce + max_instances=1
+        # prevent a slow full-universe run from stacking (T-63-05).
+        self._scheduler.add_job(
+            self._fundamental_capture_cycle,
+            _PRCronTrigger(
+                hour=getattr(self._settings, "fundamental_capture_hour_utc", 7),
+                minute=0,
+                timezone="UTC",
+            ),
+            id="fundamental_capture",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
         )
         # Phase 58-02-07: meta-agent (cron-driven autonomous monitor).
         # Guarded by meta_agent_enabled (SPEC AC #6 — disabled → no job).
@@ -1032,6 +1069,53 @@ class TradingLoop:
                 from finalayze.api.metrics import MetricsCollector  # noqa: PLC0415
 
                 MetricsCollector.set_usd_rub_rate(float(rate))
+
+    def _fundamental_capture_cycle(self) -> None:
+        """Daily: capture fundamentals for the MOEX universe -> idempotent persist (CAPTURE-01).
+
+        Synchronous cycle (mirrors _fx_update_cycle): runs on the APScheduler thread
+        executor. ``fetch_fundamentals`` is already synchronous and rate-limited, so it
+        is called directly per symbol (no _run_grpc wrapper — RESEARCH Pitfall 6). One
+        failing/empty symbol must NOT abort the run (per-symbol try/except, D-02). Each
+        non-None snapshot is persisted through the fire-and-forget guard so a table-absent
+        DB never crashes the loop (D-04). On completion the liveness markers the freshness
+        check (plan 63-03) reads are set.
+        """
+        raw_fetcher = self._fetchers.get("moex")
+        if raw_fetcher is None or self._persistence is None:
+            _log.info(
+                "fundamental_capture_skipped",
+                reason="no moex fetcher or persistence",
+            )
+            return
+        fetcher = cast("_SupportsFetchFundamentals", raw_fetcher)
+
+        universe = self._registry.list_by_market("moex")
+        universe_size = len(universe)
+        captured = 0
+        for instr in universe:
+            try:
+                snap = fetcher.fetch_fundamentals(instr.symbol)
+            except Exception:  # degrade per-symbol (D-02): one bad symbol must not abort the run
+                _log.warning(
+                    "fundamental_capture_fetch_failed",
+                    symbol=instr.symbol,
+                    exc_info=True,
+                )
+                continue
+            if snap is None:
+                continue
+            self._persistence.persist_fundamental_snapshot(snap)
+            captured += 1
+
+        self._last_fundamental_capture_at = self._now()
+        self._last_fundamental_coverage_ratio = captured / max(1, universe_size)
+        _log.info(
+            "fundamental_capture_done",
+            captured=captured,
+            universe=universe_size,
+            coverage_ratio=round(self._last_fundamental_coverage_ratio, 4),
+        )
 
     def _now(self) -> datetime:
         """Return current UTC datetime. Extracted for testability."""

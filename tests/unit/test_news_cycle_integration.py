@@ -447,6 +447,7 @@ class TestNewsCycleInterval:
         mock_settings.strategy_cycle_minutes = 30
         mock_settings.daily_reset_hour_utc = 0
         mock_settings.weekly_digest_hour_utc = 10
+        mock_settings.fundamental_capture_hour_utc = 7  # Phase 63 CAPTURE-01 cron knob
         mock_settings.max_position_pct = 0.1
         mock_settings.max_positions_per_market = 10
         mock_settings.daily_loss_limit_pct = 0.05

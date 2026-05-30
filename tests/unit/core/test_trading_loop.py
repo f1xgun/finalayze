@@ -34,6 +34,7 @@ def _make_loop(
         mock_settings.news_poll_interval_minutes = 5
         mock_settings.strategy_cycle_minutes = 30
         mock_settings.daily_reset_hour_utc = 0
+        mock_settings.fundamental_capture_hour_utc = 7  # Phase 63 CAPTURE-01 cron knob
         mock_settings.max_position_pct = 0.1
         mock_settings.max_positions_per_market = 10
         mock_settings.daily_loss_limit_pct = 0.05
@@ -596,6 +597,7 @@ class TestGrpcLoopIsolation:
             mock_settings.news_poll_interval_minutes = 5
             mock_settings.strategy_cycle_minutes = 30
             mock_settings.daily_reset_hour_utc = 0
+            mock_settings.fundamental_capture_hour_utc = 7  # Phase 63 CAPTURE-01 cron knob
             mock_settings.max_position_pct = 0.1
             mock_settings.max_positions_per_market = 10
             mock_settings.daily_loss_limit_pct = 0.05
@@ -640,6 +642,7 @@ def _make_loop_with_broker() -> object:
     mock_settings.news_poll_interval_minutes = 5
     mock_settings.strategy_cycle_minutes = 30
     mock_settings.daily_reset_hour_utc = 0
+    mock_settings.fundamental_capture_hour_utc = 7  # Phase 63 CAPTURE-01 cron knob
     mock_settings.max_position_pct = 0.1
     mock_settings.max_positions_per_market = 10
     mock_settings.daily_loss_limit_pct = 0.05

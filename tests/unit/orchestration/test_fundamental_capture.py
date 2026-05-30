@@ -62,6 +62,19 @@ def _make_loop() -> TradingLoop:
         daily_loss_limit_pct=0.02,
     )
     settings.kelly_fraction = 0.5
+    # Numeric scheduler knobs: APScheduler interval/cron triggers reject MagicMock
+    # numerics, so _setup_scheduler() needs real ints to register every job and
+    # reach the fundamental_capture add_job. Enable-flags are False so the optional
+    # (meta-agent / ML / bond) branches stay off in the unit harness.
+    settings.news_cycle_minutes = 2
+    settings.news_poll_interval_minutes = 5
+    settings.strategy_cycle_minutes = 60
+    settings.daily_reset_hour_utc = 0
+    settings.weekly_digest_hour_utc = 16
+    settings.fundamental_capture_hour_utc = 7
+    settings.meta_agent_enabled = False
+    settings.ml_enabled = False
+    settings.bond_cycle_enabled = False
 
     return TradingLoop(
         TradingLoopDeps(

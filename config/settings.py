@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     news_cycle_minutes: int = 2  # FINALAYZE_NEWS_CYCLE_MINUTES  # TODO: revert to 30
     strategy_cycle_minutes: int = 60  # FINALAYZE_STRATEGY_CYCLE_MINUTES
     daily_reset_hour_utc: int = 0  # FINALAYZE_DAILY_RESET_HOUR_UTC
+    # Phase 63 CAPTURE-01: daily MOEX fundamental-capture run hour (10:00 MSK pre-open).
+    fundamental_capture_hour_utc: int = 7  # FINALAYZE_FUNDAMENTAL_CAPTURE_HOUR_UTC
 
     # Telegram alerting
     telegram_bot_token: str = ""  # FINALAYZE_TELEGRAM_BOT_TOKEN
