@@ -687,6 +687,19 @@ class TradingLoop:
             coalesce=True,
             max_instances=1,
         )
+        # CAPTURE-03 (Phase 63 D-03, Pitfall 6): register the freshness/coverage
+        # monitor alongside its method. Runs daily a few hours after the capture job
+        # (default 09:00 UTC = 12:00 MSK) so a stalled "data clock" or a gRPC-wide
+        # coverage collapse is surfaced the same morning via an IMPORTANT alert.
+        _freshness_hour = getattr(self._settings, "fundamental_freshness_hour_utc", 9)
+        if not isinstance(_freshness_hour, int):
+            _freshness_hour = 9  # MagicMock-settings unit harness: use the default hour
+        self._scheduler.add_job(
+            self._fundamental_freshness_cycle,
+            _PRCronTrigger(hour=_freshness_hour, minute=0, timezone="UTC"),
+            id="fundamental_freshness",
+            replace_existing=True,
+        )
         # Phase 58-02-07: meta-agent (cron-driven autonomous monitor).
         # Guarded by meta_agent_enabled (SPEC AC #6 — disabled → no job).
         if getattr(self._settings, "meta_agent_enabled", False):
@@ -1116,6 +1129,68 @@ class TradingLoop:
             universe=universe_size,
             coverage_ratio=round(self._last_fundamental_coverage_ratio, 4),
         )
+
+    def _fundamental_freshness_cycle(self) -> None:
+        """Daily: alert when the fundamental-capture data clock has stopped (CAPTURE-03).
+
+        D-03 refinement: staleness is *job-run liveness* — the age of the last
+        successful capture RUN (``_last_fundamental_capture_at``), NOT the as_of-age of
+        the newest snapshot. Point-in-time fundamentals legitimately stay constant for
+        weeks, so as_of-age would false-alarm; a stopped scheduler is the real risk.
+
+        Two independent alert conditions, either trips a single IMPORTANT alert:
+          * Stale run: marker is None (never ran) OR run-age > fundamental_staleness_hours.
+          * Low coverage: ratio is None OR < fundamental_coverage_floor — catches a
+            gRPC-wide outage the per-symbol degrade (D-02) would silently swallow.
+
+        A healthy run (recent AND coverage above floor) produces NO alert. The message
+        carries only counts/ages/thresholds — never a token or DB URL (T-63-08).
+        """
+        if self._alerter is None:
+            return
+
+        _default_staleness_hours = 36
+        _default_coverage_floor = 0.5
+
+        def _num(name: str, default: float) -> float:
+            # Read a real numeric setting; a MagicMock-settings test (no real value set)
+            # yields an auto-attribute whose __float__ returns junk, so accept only a
+            # genuine int/float (bool excluded) and otherwise fall back to the default.
+            value = getattr(self._settings, name, default)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return default
+            return float(value)
+
+        staleness_hours = _num("fundamental_staleness_hours", _default_staleness_hours)
+        coverage_floor = _num("fundamental_coverage_floor", _default_coverage_floor)
+
+        last_run = self._last_fundamental_capture_at
+        coverage = self._last_fundamental_coverage_ratio
+
+        reasons: list[str] = []
+
+        if last_run is None:
+            reasons.append(f"no successful capture run yet (threshold {staleness_hours}h)")
+        else:
+            age_hours = (self._now() - last_run).total_seconds() / 3600.0
+            if age_hours > staleness_hours:
+                reasons.append(
+                    f"last capture run was {age_hours:.1f}h ago (threshold {staleness_hours}h)"
+                )
+
+        if coverage is None:
+            reasons.append(f"no coverage ratio recorded (floor {coverage_floor:.0%})")
+        elif coverage < coverage_floor:
+            reasons.append(f"coverage {coverage:.0%} below floor {coverage_floor:.0%}")
+
+        if not reasons:
+            return
+
+        from finalayze.api.alerts import AlertPriority  # noqa: PLC0415
+
+        message = "Fundamental capture freshness alert: " + "; ".join(reasons)
+        self._alerter.send_alert(message, priority=AlertPriority.IMPORTANT)
+        _log.warning("fundamental_freshness_alert", reasons=reasons)
 
     def _now(self) -> datetime:
         """Return current UTC datetime. Extracted for testability."""

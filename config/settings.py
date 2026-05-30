@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     daily_reset_hour_utc: int = 0  # FINALAYZE_DAILY_RESET_HOUR_UTC
     # Phase 63 CAPTURE-01: daily MOEX fundamental-capture run hour (10:00 MSK pre-open).
     fundamental_capture_hour_utc: int = 7  # FINALAYZE_FUNDAMENTAL_CAPTURE_HOUR_UTC
+    # Phase 63 CAPTURE-03 (D-03): freshness/coverage monitor knobs. Staleness is
+    # job-run liveness (age of last successful capture RUN), NOT snapshot as_of-age —
+    # point-in-time fundamentals legitimately stay constant for weeks.
+    fundamental_staleness_hours: int = 36  # FINALAYZE_FUNDAMENTAL_STALENESS_HOURS
+    fundamental_coverage_floor: float = 0.5  # FINALAYZE_FUNDAMENTAL_COVERAGE_FLOOR
+    fundamental_freshness_hour_utc: int = 9  # FINALAYZE_FUNDAMENTAL_FRESHNESS_HOUR_UTC
 
     # Telegram alerting
     telegram_bot_token: str = ""  # FINALAYZE_TELEGRAM_BOT_TOKEN
