@@ -62,12 +62,34 @@ US_COSTS = TransactionCosts(
 # MOEX (Tinkoff Invest): 0.04% (4 bps) commission as fraction of trade value,
 # using the Trader tariff. Commission is purely percentage-based (no per-share fee).
 # MOEX typical costs: 0.04% commission + 10 bps spread + 7 bps slippage.
+#
+# S7.3 (audit #13): retail accounts running the "Инвестор" tariff pay
+# ~7.5x more (~0.3% commission). Pick the constant that matches the
+# account you will actually trade with. ``MOEX_COSTS`` stays = Trader for
+# backwards compatibility; use ``MOEX_RETAIL_COSTS`` to mirror retail.
 MOEX_COSTS = TransactionCosts(
     commission_per_share=Decimal(0),  # Not used for MOEX
     commission_rate=Decimal("0.0004"),  # 0.04% of trade value (Tinkoff Invest Trader tariff)
     min_commission=Decimal("0.10"),  # Very low min (ruble markets have small ticks)
     spread_bps=Decimal(10),  # Wider spreads on MOEX
     slippage_bps=Decimal(7),  # Higher slippage on less liquid MOEX
+)
+
+# Explicit alias so consumers can spell "Trader tariff" out loud rather
+# than relying on the historical ``MOEX_COSTS`` name.
+MOEX_TRADER_COSTS = MOEX_COSTS
+
+# Retail tariff ("Инвестор" on Tinkoff / similar on other brokers):
+# - Commission: 0.30% of trade value (~7.5x the Trader rate)
+# - min_commission: 1.00 RUB minimum (typical retail floor)
+# - Wider effective spread + slippage because retail tickets sit further
+#   from the inside quote and are more often crossed against the book.
+MOEX_RETAIL_COSTS = TransactionCosts(
+    commission_per_share=Decimal(0),  # Rate-based, not per-share
+    commission_rate=Decimal("0.003"),  # 0.30% (30 bps) — Investor tariff
+    min_commission=Decimal("1.00"),
+    spread_bps=Decimal(15),  # Retail typically pays at least 1.5x the inside spread
+    slippage_bps=Decimal(10),  # Smaller tickets land on the wider side of the book
 )
 
 # MOEX OFZ bonds (Tinkoff Invest Trader tariff):
