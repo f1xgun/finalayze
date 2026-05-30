@@ -14,11 +14,13 @@ Strategy logic:
 
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
-    from datetime import datetime
+    from collections.abc import Sequence
 
 import structlog
 
@@ -35,13 +37,139 @@ _MAX_CONFIDENCE = 0.90
 
 @dataclass(frozen=True, slots=True)
 class EarningsSurprise:
-    """A single earnings surprise event for a symbol."""
+    """A single earnings surprise event for a symbol.
+
+    ``is_proxy`` flags a surprise whose ``expected_eps`` is a trend/prior-year
+    proxy derived from an ``eps_ttm`` time-series rather than a true analyst
+    consensus. MOEX has no consensus feed (D-01 / RESEARCH Q1), so
+    :func:`compute_sue_proxy` always sets ``is_proxy=True``. Backtest
+    attribution MUST discount a proxy surprise so it is not over-credited as a
+    real consensus beat/miss.
+    """
 
     symbol: str
     announcement_date: datetime
     sue_score: float  # Standardized Unexpected Earnings
     actual_eps: float
     expected_eps: float
+    is_proxy: bool = False  # True when expected_eps is a trend proxy, not consensus
+
+
+# Prior-year same-period lookup window: an eps_ttm point within this many days
+# of (D - 365d) counts as the "prior-year same-period" baseline.
+_PRIOR_YEAR_DAYS = 365
+_PRIOR_YEAR_TOLERANCE_DAYS = 60
+_MIN_HISTORY_FOR_STD = 2
+
+
+def compute_sue_proxy(
+    symbol: str,
+    announcement_date: datetime,
+    eps_history: Sequence[tuple[datetime, float]],
+) -> EarningsSurprise:
+    """Build a LABELLED, point-in-time SUE proxy from an ``eps_ttm`` series.
+
+    The proxy is NOT a true consensus surprise: ``get_asset_reports`` carries no
+    actual EPS (RESEARCH Q1), so ``actual`` comes from the ``eps_ttm``
+    fundamental time-series and ``expected`` from the prior-year same-period
+    ``eps_ttm`` (falling back to a rolling-trend mean). The returned
+    ``EarningsSurprise`` always has ``is_proxy=True`` so backtest attribution
+    stays honest (D-01).
+
+    Point-in-time (RESEARCH Assumption A4): ``announcement_date`` IS the as-of
+    cutoff D. The history is first filtered to entries dated ``<= D`` so a
+    future ``report_date`` can never leak into a SUE computed as-of D.
+
+    Degenerate input (empty / single point / zero dispersion) yields a guarded
+    ``sue_score == 0.0`` fallback — never a raise, never NaN/inf.
+    """
+    # A4 look-ahead guard: drop any entry dated AFTER the as-of cutoff D.
+    # A future report_date must never contribute to an as-of-D SUE.
+    usable = sorted(
+        ((dt, v) for (dt, v) in eps_history if dt <= announcement_date),
+        key=lambda p: p[0],
+    )
+
+    if not usable:
+        return EarningsSurprise(
+            symbol=symbol,
+            announcement_date=announcement_date,
+            sue_score=0.0,
+            actual_eps=0.0,
+            expected_eps=0.0,
+            is_proxy=True,
+        )
+
+    # actual = latest eps_ttm at/<= D (the as-of point).
+    actual_dt, actual = usable[-1]
+
+    # expected = prior-year same-period eps_ttm (nearest point to D - 365d
+    # within tolerance); fall back to the rolling-trend mean of prior points,
+    # finally to the actual itself (zero surprise) when no history precedes D.
+    expected = _prior_year_expected(usable, actual_dt)
+    if expected is None:
+        expected = actual
+
+    # historical surprises = series of (eps_i - prior_year(eps_i)) over usable.
+    surprises = _historical_surprises(usable)
+
+    std = statistics.stdev(surprises) if len(surprises) >= _MIN_HISTORY_FOR_STD else 0.0
+
+    sue_score = (actual - expected) / std if std > 0.0 else 0.0
+
+    return EarningsSurprise(
+        symbol=symbol,
+        announcement_date=announcement_date,
+        sue_score=sue_score,
+        actual_eps=actual,
+        expected_eps=expected,
+        is_proxy=True,
+    )
+
+
+def _prior_year_expected(
+    usable: Sequence[tuple[datetime, float]],
+    as_of_dt: datetime,
+) -> float | None:
+    """Prior-year same-period eps_ttm, or rolling-trend fallback.
+
+    ``usable`` is already filtered to date <= D and sorted ascending. Returns
+    ``None`` when NO eps point precedes ``as_of_dt`` (no prior-year partner and
+    no prior trend) — callers decide the terminal fallback. Only points strictly
+    before ``as_of_dt`` are considered, so the as-of point never expects itself.
+    """
+    target = as_of_dt - timedelta(days=_PRIOR_YEAR_DAYS)
+    best: tuple[float, float] | None = None  # (abs_days_diff, value)
+    prior: list[float] = []
+    for dt, v in usable:
+        if dt >= as_of_dt:
+            continue
+        prior.append(v)
+        diff_days = abs((dt - target).days)
+        if diff_days <= _PRIOR_YEAR_TOLERANCE_DAYS and (best is None or diff_days < best[0]):
+            best = (float(diff_days), v)
+    if best is not None:
+        return best[1]
+    # Fallback: rolling-trend mean of all prior points (excludes the as-of point).
+    if prior:
+        return statistics.fmean(prior)
+    # No point precedes as_of_dt -> no prior-year partner.
+    return None
+
+
+def _historical_surprises(usable: Sequence[tuple[datetime, float]]) -> list[float]:
+    """(eps_i - prior_year(eps_i)) for each point WITH a genuine prior partner.
+
+    Points with no preceding eps datum (e.g. the oldest entry) contribute no
+    surprise — they have no prior-year baseline to be measured against.
+    """
+    surprises: list[float] = []
+    for dt, v in usable:
+        prior = _prior_year_expected(usable, dt)
+        if prior is None:
+            continue
+        surprises.append(v - prior)
+    return surprises
 
 
 class PEADStrategy(BaseStrategy):
