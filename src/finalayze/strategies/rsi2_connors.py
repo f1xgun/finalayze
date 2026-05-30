@@ -143,10 +143,10 @@ class RSI2ConnorsStrategy(BaseStrategy):
 
         if current_rsi < rsi_buy_threshold and current_close > current_sma_trend:
             direction = SignalDirection.BUY
-            confidence = self._compute_buy_confidence(current_rsi)
+            confidence = self._compute_buy_confidence(current_rsi, threshold=rsi_buy_threshold)
         elif current_rsi > rsi_sell_threshold and current_close < current_sma_trend:
             direction = SignalDirection.SELL
-            confidence = self._compute_sell_confidence(current_rsi)
+            confidence = self._compute_sell_confidence(current_rsi, threshold=rsi_sell_threshold)
 
         if direction is None:
             return None
@@ -184,20 +184,29 @@ class RSI2ConnorsStrategy(BaseStrategy):
             ),
         )
 
-    def _compute_buy_confidence(self, rsi2: float) -> float:
-        """Compute BUY confidence from RSI(2) value.
+    def _compute_buy_confidence(self, rsi2: float, *, threshold: float) -> float:
+        """Compute BUY confidence from RSI(2) value, scaled against the trigger threshold.
 
-        Formula: (10 - rsi2) / 10 * 0.8 + 0.2
-        Range: [0.2, 1.0] for rsi2 in [0, 10]
+        Formula: (threshold - rsi2) / threshold * 0.8 + 0.2
+        Range: [0.2, 1.0] for rsi2 in [0, threshold].
+
+        Audit #18 (S7.2): threshold used to be hardcoded to 10.0; presets
+        that loosened ``rsi_buy_threshold`` triggered signals whose
+        confidence then clamped to 0.0 and got dropped by ``min_confidence``.
         """
-        raw = (10.0 - rsi2) / 10.0
+        if threshold <= 0:
+            return 0.2
+        raw = (threshold - rsi2) / threshold
         return min(1.0, max(0.0, raw * 0.8 + 0.2))
 
-    def _compute_sell_confidence(self, rsi2: float) -> float:
-        """Compute SELL confidence from RSI(2) value.
+    def _compute_sell_confidence(self, rsi2: float, *, threshold: float) -> float:
+        """Compute SELL confidence from RSI(2) value, scaled against the trigger threshold.
 
-        Formula: (rsi2 - 90) / 10 * 0.8 + 0.2
-        Range: [0.2, 1.0] for rsi2 in [90, 100]
+        Formula: (rsi2 - threshold) / (100 - threshold) * 0.8 + 0.2
+        Range: [0.2, 1.0] for rsi2 in [threshold, 100].
         """
-        raw = (rsi2 - 90.0) / 10.0
+        span = 100.0 - threshold
+        if span <= 0:
+            return 0.2
+        raw = (rsi2 - threshold) / span
         return min(1.0, max(0.0, raw * 0.8 + 0.2))

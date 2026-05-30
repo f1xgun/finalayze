@@ -198,7 +198,9 @@ class TestRSI2ConnorsStrategy:
         # so we test that the confidence formula works correctly by directly testing
         # the _compute_confidence method.
         # confidence = (10 - 9) / 10 * 0.8 + 0.2 = 0.1 * 0.8 + 0.2 = 0.28
-        confidence = strategy._compute_buy_confidence(9.0)
+        # S7.2: confidence helpers now take an explicit threshold so the
+        # scaling matches the preset's rsi_buy_threshold (audit #18).
+        confidence = strategy._compute_buy_confidence(9.0, threshold=10.0)
         assert abs(confidence - 0.28) < 0.01, f"Expected ~0.28, got {confidence}"
 
     def test_min_confidence_filter(self, monkeypatch: pytest.MonkeyPatch) -> None:
