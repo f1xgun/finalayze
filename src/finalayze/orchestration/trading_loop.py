@@ -33,16 +33,16 @@ except ImportError:  # pragma: no cover
 from finalayze.data.moex_calendar import is_moex_holiday
 from finalayze.markets.currency import CurrencyConverter
 from finalayze.markets.schedule import SCHEDULES
-from finalayze.orchestration.daily_reporting import DailyReportingService
-from finalayze.orchestration.db_persistence import TradingPersistence
-from finalayze.orchestration.ml_retraining import MLRetrainingService
-from finalayze.orchestration.news_pipeline import NewsPipeline
-from finalayze.orchestration.position_manager import PositionTracker
+from finalayze.orchestration.anomaly_handler import AnomalyHandler
+from finalayze.orchestration.async_runtime import AsyncRuntime
+from finalayze.orchestration.broker_reconnect import (
+    attempt_grpc_reconnect,
+    reconcile_inflight_orders,
+)
 from finalayze.orchestration.sentiment_manager import SentimentManager
 from finalayze.orchestration.signal_executor import (
     _CANDLE_LOOKBACK,  # noqa: F401  # re-export for tests
     _STALENESS_THRESHOLD_HOURS,  # noqa: F401  # re-export for tests
-    SignalExecutor,
 )
 
 if TYPE_CHECKING:
@@ -88,13 +88,6 @@ _US_CLOSE_UTC = (21, 0)
 _MOEX_OPEN_UTC = (7, 0)
 _MOEX_CLOSE_UTC = (15, 45)
 
-_ANOMALY_SYSTEM_PROMPT = (
-    "You are a financial market analyst. Explain the likely cause of "
-    "the following statistical anomaly in 2-3 sentences. Be specific "
-    "about potential catalysts (earnings, macro events, sector rotation). "
-    "Do not give trading advice."
-)
-_ANOMALY_LLM_TIMEOUT = 30.0
 _MAX_ARTICLES_PER_CYCLE = 20  # budget cap: prevent LLM cost explosion on busy news days
 
 SOURCE_CREDIBILITY: dict[str, float] = {
@@ -187,14 +180,79 @@ class TradingLoop:
     _sentiment_mgr: Any = None
     _persistence: Any = None
     _llm_client: Any = None
-    _async_loop: Any = None
-    _async_thread: Any = None
-    _grpc_loop: Any = None
-    _grpc_thread: Any = None
+    _scheduler: BackgroundScheduler | None = None
+    _async_runtime: AsyncRuntime | None = None
     # Post-construction wiring slot used by api/lifespan to reach the alerter
     # without traversing every sub-component (bootstrap.py sets this after
     # constructing the loop and circuit breakers).
     _alerter_ref: Any = None
+
+    # ── Event loop property proxies (delegate to AsyncRuntime) ──────────────
+    # These properties allow tests and internal code to read/write loop attributes
+    # directly on TradingLoop while delegating to the single source of truth in
+    # AsyncRuntime. This preserves backward compatibility without mirroring state.
+    # If _async_runtime is None (e.g., when created with object.__new__ in tests),
+    # the setters will create a lazy AsyncRuntime instance.
+
+    @property
+    def _async_loop(self) -> asyncio.AbstractEventLoop | None:
+        """Get the async event loop from AsyncRuntime."""
+        if self._async_runtime is None:
+            return None
+        return self._async_runtime.async_loop
+
+    @_async_loop.setter
+    def _async_loop(self, value: asyncio.AbstractEventLoop | None) -> None:
+        """Set the async event loop on AsyncRuntime."""
+        # Lazy-create AsyncRuntime if needed (for tests using object.__new__)
+        if self._async_runtime is None:
+            self._async_runtime = AsyncRuntime()
+        self._async_runtime.async_loop = value
+
+    @property
+    def _async_thread(self) -> threading.Thread | None:
+        """Get the async thread from AsyncRuntime."""
+        if self._async_runtime is None:
+            return None
+        return self._async_runtime.async_thread
+
+    @_async_thread.setter
+    def _async_thread(self, value: threading.Thread | None) -> None:
+        """Set the async thread on AsyncRuntime."""
+        # Lazy-create AsyncRuntime if needed (for tests using object.__new__)
+        if self._async_runtime is None:
+            self._async_runtime = AsyncRuntime()
+        self._async_runtime.async_thread = value
+
+    @property
+    def _grpc_loop(self) -> asyncio.AbstractEventLoop | None:
+        """Get the gRPC event loop from AsyncRuntime."""
+        if self._async_runtime is None:
+            return None
+        return self._async_runtime.grpc_loop
+
+    @_grpc_loop.setter
+    def _grpc_loop(self, value: asyncio.AbstractEventLoop | None) -> None:
+        """Set the gRPC event loop on AsyncRuntime."""
+        # Lazy-create AsyncRuntime if needed (for tests using object.__new__)
+        if self._async_runtime is None:
+            self._async_runtime = AsyncRuntime()
+        self._async_runtime.grpc_loop = value
+
+    @property
+    def _grpc_thread(self) -> threading.Thread | None:
+        """Get the gRPC thread from AsyncRuntime."""
+        if self._async_runtime is None:
+            return None
+        return self._async_runtime.grpc_thread
+
+    @_grpc_thread.setter
+    def _grpc_thread(self, value: threading.Thread | None) -> None:
+        """Set the gRPC thread on AsyncRuntime."""
+        # Lazy-create AsyncRuntime if needed (for tests using object.__new__)
+        if self._async_runtime is None:
+            self._async_runtime = AsyncRuntime()
+        self._async_runtime.grpc_thread = value
 
     def __init__(self, deps: TradingLoopDeps) -> None:  # noqa: PLR0915
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
@@ -295,55 +353,45 @@ class TradingLoop:
             fraction=getattr(settings, "kelly_fraction", 0.5),
         )
 
-        # Persistent background event loop for non-gRPC async calls (HTTP, DB, Telegram).
-        # Actual loop is created in start(); None until then.
-        self._async_loop: asyncio.AbstractEventLoop | None = None
-        self._async_thread: threading.Thread | None = None
+        # AsyncRuntime: manages persistent event loops for async and gRPC operations.
+        # Inject a callback to wire the newly created async loop to persistence.
+        def _on_async_loop_created(loop: asyncio.AbstractEventLoop) -> None:
+            if hasattr(self, "_persistence") and self._persistence is not None:
+                self._persistence._async_loop = loop
 
-        # Database persistence (fire-and-forget writes to avoid crashing trading loop).
-        # Must be constructed BEFORE PositionTracker so we can inject it (STOP-03).
-        db_url = getattr(settings, "database_url", None)
-        self._persistence = TradingPersistence(db_url, self._async_loop, settings)
-
-        # Position tracker (Phase 1.6): stop-loss, entry prices, strategy ownership.
-        # Accepts self._persistence so it can fire entry/trigger/snapshot events
-        # into the stop_loss_events table (STOP-03, D-06).
-        self._position_tracker = PositionTracker(
-            kelly_sizer=self._kelly_sizer,
-            broker_router=broker_router,
-            alerter=alerter,
-            persistence=self._persistence,
+        self._async_runtime = AsyncRuntime(
+            grpc_loop=grpc_loop,
+            on_async_loop_created=_on_async_loop_created,
         )
 
-        # Signal executor (Phase 1.7): signal generation, order building, submission
-        self._signal_executor = SignalExecutor(
-            strategy=strategy,
-            broker_router=broker_router,
-            position_tracker=self._position_tracker,
+        # Construct all 6 service collaborators in dependency order (STOP-03).
+        # TradingPersistence must be first, then PositionTracker, then the rest.
+        from finalayze.orchestration.loop_services import build_loop_services  # noqa: PLC0415
+
+        _services = build_loop_services(
+            deps,
             sentiment_mgr=self._sentiment_mgr,
-            persistence=self._persistence,
+            kelly_sizer=self._kelly_sizer,
             pre_trade_checker=self._pre_trade_checker,
             loss_limit_tracker=self._loss_limit_tracker,
-            macro_cache=macro_cache,
-            health_monitor=health_monitor,
-            sandbox_monitor=sandbox_monitor,
-            metrics=metrics_collector,
-            alerter=alerter,
-            registry=instrument_registry,
-            ml_registry=ml_registry,
-            settings=settings,
+            now_fn=self._now,
+            run_async_fn=self._run_async,
+        )
+        self._persistence = _services.persistence
+        self._position_tracker = _services.position_tracker
+        self._signal_executor = _services.signal_executor
+        self._ml_retrainer = _services.ml_retrainer
+        self._daily_reporter = _services.daily_reporter
+        self._news_pipeline = _services.news_pipeline
+
+        # Anomaly handler extracted to improve modularity (Phase 57-04 D-04)
+        # Reads _llm_client lazily via lambda so late initialization is supported
+        self._anomaly_handler = AnomalyHandler(
+            alerter,
+            lambda: getattr(self, "_llm_client", None),
         )
 
         self._ml_registry = ml_registry
-        self._ml_retrainer = MLRetrainingService(
-            fetchers=fetchers,
-            registry=instrument_registry,
-            ml_registry=ml_registry,
-            settings=settings,
-            alerter=alerter,
-            collect_segments_fn=self._sentiment_mgr.collect_active_segments,
-            now_fn=self._now,
-        )
         self._scheduler: BackgroundScheduler | None = None
         self._stop_event = threading.Event()
 
@@ -360,42 +408,6 @@ class TradingLoop:
         # Populated at the start of each strategy cycle, cleared at the end.
         self._cycle_portfolio_cache: dict[str, Any] = {}
 
-        # Daily reporting service (extracted Phase 1.4)
-        self._daily_reporter = DailyReportingService(
-            broker_router=broker_router,
-            circuit_breakers=circuit_breakers,
-            cross_market_breaker=cross_market_breaker,
-            loss_limit_tracker=self._loss_limit_tracker,
-            alerter=alerter,
-            persistence=self._persistence,
-            bond_processor=bond_cycle_processor,
-            fx_service=fx_service,
-            metrics_collector=metrics_collector,
-            settings=settings,
-            now_fn=self._now,
-        )
-
-        # News pipeline service (extracted Phase 1.5)
-        self._news_pipeline = NewsPipeline(
-            rss_fetcher=rss_fetcher,
-            telegram_reader=telegram_reader,
-            news_fetcher=news_fetcher,
-            news_impact_analyzer=news_impact_analyzer,
-            sector_ticker_mapper=sector_ticker_mapper,
-            sentiment_mgr=self._sentiment_mgr,
-            persistence=self._persistence,
-            registry=instrument_registry,
-            cache=cache,
-            settings=settings,
-            alerter=alerter,
-            async_loop_fn=self._run_async,
-        )
-
-        # Dedicated gRPC event loop -- isolates PollerCompletionQueue from general
-        # async work. Prevents BlockingIOError contention causing 60-min cycle drift.
-        self._grpc_loop: asyncio.AbstractEventLoop | None = grpc_loop
-        self._grpc_thread: threading.Thread | None = None
-
         # asyncio.Lock for gRPC client serialization (equity + bond don't overlap)
         self._grpc_lock = asyncio.Lock()
 
@@ -403,7 +415,7 @@ class TradingLoop:
         self._bond_enabled: bool = True
 
         # gRPC reconnection backoff delays in seconds
-        self._reconnect_delays = [30, 60, 120, 240, 300]
+        self._reconnect_delays = [30.0, 60.0, 120.0, 240.0, 300.0]
 
         # Structured cycle validation logger
         self._validation_logger = ValidationLogger()
@@ -477,18 +489,10 @@ class TradingLoop:
     def _attempt_grpc_reconnect(self, broker_name: str) -> bool:
         """Try to reconnect gRPC channel with exponential backoff.
 
-        Attempts up to 5 reconnections with delays [30, 60, 120, 240, 300]s
-        (jittered 0.8-1.2x). Sends Telegram alert on each attempt.
-
-        Args:
-            broker_name: Market identifier (e.g. "moex") for logging/alerts.
-
-        Returns:
-            True if reconnection succeeded, False if all attempts exhausted
-            (sets _stop_event to halt trading).
+        Thin delegator to broker_reconnect.attempt_grpc_reconnect.
+        Handles early-exit for non-Tinkoff brokers before forwarding
+        attributes to avoid test-compatibility issues when mocking.
         """
-        import random  # noqa: PLC0415
-
         from finalayze.execution.tinkoff_broker import TinkoffBroker  # noqa: PLC0415
 
         broker = self._broker_router.route(broker_name)
@@ -496,146 +500,62 @@ class TradingLoop:
             _log.warning("reconnect_not_tinkoff", broker_name=broker_name)
             return False
 
-        for attempt, delay in enumerate(self._reconnect_delays, 1):
-            jitter = random.uniform(0.8, 1.2)  # noqa: S311
-            actual_delay = delay * jitter
-            _log.warning(
-                "grpc_reconnect_attempt",
-                broker=broker_name,
-                attempt=attempt,
-                max_attempts=len(self._reconnect_delays),
-                delay_s=round(actual_delay, 1),
-            )
-            self._alerter.on_error(
-                "TradingLoop",
-                f"gRPC reconnect attempt {attempt}/{len(self._reconnect_delays)} "
-                f"for {broker_name} (delay {round(actual_delay)}s)",
-            )
-
-            if self._stop_event.wait(timeout=actual_delay):
-                _log.info("grpc_reconnect_cancelled", broker=broker_name)
-                return False
-
-            if broker.reconnect_client():
-                _log.info("grpc_reconnected", broker=broker_name, attempt=attempt)
-                return True
-
-        _log.error("grpc_reconnect_exhausted", broker=broker_name)
-        self._alerter.on_error(
-            "TradingLoop",
-            f"gRPC reconnection exhausted for {broker_name} -- halting trading",
+        return attempt_grpc_reconnect(
+            broker_router=self._broker_router,
+            alerter=self._alerter,
+            stop_event=self._stop_event,
+            reconnect_delays=self._reconnect_delays,
+            broker_name=broker_name,
         )
-        self._stop_event.set()
-        return False
 
     # ── In-flight order reconciliation ───────────────────────────────────
 
     def _reconcile_inflight_orders(self) -> None:
         """Query open orders from all TinkoffBrokers, cancel stale ones, log fills.
 
-        Stale orders: non-terminal orders older than 2 minutes (fill timeout).
-        Called on startup before scheduler begins.
+        Thin delegator to broker_reconnect.reconcile_inflight_orders.
+        Forwards self's attributes to the pure function.
         """
-        from finalayze.execution.tinkoff_broker import TinkoffBroker  # noqa: PLC0415
-
-        _fill_timeout_seconds = 120  # 2 minutes
-
-        for market_id in list(self._circuit_breakers.keys()):
-            try:
-                broker = self._broker_router.route(market_id)
-            except Exception:  # noqa: S112
-                continue
-            if not isinstance(broker, TinkoffBroker):
-                continue
-
-            try:
-                open_orders = broker.get_open_orders()
-            except Exception:
-                _log.warning("reconcile_get_orders_failed", market=market_id)
-                continue
-
-            if not open_orders:
-                _log.info("reconcile_no_inflight", market=market_id)
-                continue
-
-            for order in open_orders:
-                _log.info(
-                    "reconcile_inflight_order",
-                    market=market_id,
-                    order_id=order.order_id,
-                    status=order.execution_status,
-                    filled_qty=str(order.filled_quantity),
-                )
-                # Log any partial fills
-                if order.filled_quantity > 0:
-                    _log.warning(
-                        "reconcile_partial_fill_detected",
-                        order_id=order.order_id,
-                        filled_qty=str(order.filled_quantity),
-                        filled_price=str(order.filled_price),
-                    )
-                # Cancel stale orders (all open orders on startup are stale)
-                cancelled = broker.cancel_order_safe(order.order_id)
-                if cancelled:
-                    _log.info("reconcile_cancelled_stale", order_id=order.order_id)
-                else:
-                    _log.warning("reconcile_cancel_failed", order_id=order.order_id)
+        reconcile_inflight_orders(
+            broker_router=self._broker_router,
+            circuit_breakers=self._circuit_breakers,
+        )
 
     # ── Async helper ────────────────────────────────────────────────────────
 
     def _run_async(self, coro: Any, *, timeout: int = 30) -> Any:
         """Run an async coroutine on a persistent background event loop.
 
-        Lazily creates a daemon thread with its own event loop on first call.
+        Delegates to AsyncRuntime.run_async. Lazily creates a daemon thread
+        with its own event loop on first call. The callback registered with
+        AsyncRuntime automatically wires the loop to persistence.
+
         Default 30-second timeout; batch operations may pass a larger value.
         """
-        if self._async_loop is None or self._async_loop.is_closed():
-            loop = asyncio.new_event_loop()
-            self._async_loop = loop
-            if hasattr(self, "_persistence") and self._persistence is not None:
-                self._persistence._async_loop = loop  # Update persistence's loop reference
-            thread = threading.Thread(target=loop.run_forever, daemon=True)
-            thread.start()
-            self._async_thread = thread
-        future = asyncio.run_coroutine_threadsafe(coro, self._async_loop)
-        return future.result(timeout=timeout)
+        assert self._async_runtime is not None
+        return self._async_runtime.run_async(coro, timeout=timeout)
 
     # ── gRPC loop helpers ─────────────────────────────────────────────────────
 
     def _init_grpc_loop(self) -> asyncio.AbstractEventLoop:
         """Create a dedicated background event loop for all gRPC operations.
 
-        Isolated from _async_loop to prevent PollerCompletionQueue BlockingIOError
-        from starving HTTP/DB/Telegram coroutines and causing strategy cycle drift.
+        Delegates to AsyncRuntime.init_grpc_loop. Isolated from async_loop
+        to prevent PollerCompletionQueue BlockingIOError from starving
+        HTTP/DB/Telegram coroutines and causing strategy cycle drift.
         """
-        loop = asyncio.new_event_loop()
-
-        # Suppress benign BlockingIOError from gRPC PollerCompletionQueue
-        def _grpc_exception_handler(
-            loop: asyncio.AbstractEventLoop, context: dict[str, Any]
-        ) -> None:
-            exc = context.get("exception")
-            if isinstance(exc, BlockingIOError):
-                return  # benign EAGAIN from PollerCompletionQueue
-            loop.default_exception_handler(context)
-
-        loop.set_exception_handler(_grpc_exception_handler)
-        thread = threading.Thread(target=loop.run_forever, daemon=True, name="grpc-loop")
-        thread.start()
-        self._grpc_loop = loop
-        self._grpc_thread = thread
-        return loop
+        assert self._async_runtime is not None
+        return self._async_runtime.init_grpc_loop()
 
     def _run_grpc(self, coro: Any, *, timeout: int = 30) -> Any:
         """Run a gRPC coroutine on the dedicated gRPC event loop.
 
-        Use this for all TinkoffBroker and TinkoffFetcher calls.
-        Non-gRPC async work (HTTP, DB, Telegram) should use _run_async().
+        Delegates to AsyncRuntime.run_grpc. Use this for all TinkoffBroker
+        and TinkoffFetcher calls. Non-gRPC async work (HTTP, DB, Telegram)
+        should use _run_async().
         """
-        if self._grpc_loop is None or self._grpc_loop.is_closed():
-            self._init_grpc_loop()
-        future = asyncio.run_coroutine_threadsafe(coro, self._grpc_loop)
-        return future.result(timeout=timeout)
+        assert self._async_runtime is not None
+        return self._async_runtime.run_grpc(coro, timeout=timeout)
 
     @property
     def total_cycles(self) -> int:
@@ -644,15 +564,23 @@ class TradingLoop:
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
-    def start(self) -> None:  # noqa: PLR0915 — wires many subsystems incl. meta_agent (Phase 58-05)
-        """Start the APScheduler and block until stop() is called."""
-        if (
-            self._kill_switch is not None
-            and hasattr(self._kill_switch, "is_killed")
-            and self._kill_switch.is_killed
-        ):
-            raise RuntimeError("Kill switch active -- clear flag before restarting")
+    def _setup_scheduler(self) -> None:
+        """Construct APScheduler and register all scheduled jobs.
 
+        Initializes:
+          - BackgroundScheduler with thread pool executors (default, retrain, news)
+          - News cycle job (interval-based)
+          - Strategy cycle job (interval-based)
+          - Daily reset job (cron-based)
+          - Portfolio review job (cron-based at 15:50 UTC)
+          - Meta-agent job (if enabled)
+          - ML retrain job (if enabled)
+          - FX update job (if enabled)
+          - Bond cycle jobs: macro_refresh, bond_cycle, cbr_day_refresh (if bond cycle enabled)
+          - Weekly digest job (cron-based on Sunday)
+
+        All jobs use replace_existing=True so multiple calls to start() are safe.
+        """
         from apscheduler.executors.pool import (  # noqa: PLC0415
             ThreadPoolExecutor as APSThreadPoolExecutor,
         )
@@ -747,14 +675,10 @@ class TradingLoop:
             # to attach to (mirrors the lazy init in _run_async()).
             # Always ensure async_loop is initialized when meta_agent is enabled
             # so persist_decision / persist_alert work from the very first tick.
+            # ensure_async_loop lazily creates the loop + fires the persistence callback.
             if self._async_loop is None or self._async_loop.is_closed():
-                _loop = asyncio.new_event_loop()
-                self._async_loop = _loop
-                if hasattr(self, "_persistence") and self._persistence is not None:
-                    self._persistence._async_loop = _loop
-                _t = threading.Thread(target=_loop.run_forever, daemon=True)
-                _t.start()
-                self._async_thread = _t
+                assert self._async_runtime is not None
+                self._async_runtime.ensure_async_loop()
             # Phase 58-05-06 (META-08, SPEC AC #15): launch killswitch poller.
             if (
                 self._meta_agent_runner is not None
@@ -814,6 +738,19 @@ class TradingLoop:
             id="weekly_digest",
             replace_existing=True,
         )
+
+    def start(self) -> None:
+        """Start the APScheduler and block until stop() is called."""
+        if (
+            self._kill_switch is not None
+            and hasattr(self._kill_switch, "is_killed")
+            and self._kill_switch.is_killed
+        ):
+            raise RuntimeError("Kill switch active -- clear flag before restarting")
+
+        self._setup_scheduler()
+        assert self._scheduler is not None
+
         # Load equity baselines from DB before starting scheduler
         # so daily P&L calculations use persisted start-of-day values
         self._load_baseline_from_db()
@@ -903,8 +840,8 @@ class TradingLoop:
                 _log.debug("meta_agent_killswitch_stop_failed_during_shutdown")
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=True)
+        # Close Redis and FX connections on the async loop before stopping it
         if self._async_loop is not None and not self._async_loop.is_closed():
-            # Close Redis connections on the async loop before stopping it
             if self._cache is not None:
                 try:
                     asyncio.run_coroutine_threadsafe(self._cache.close(), self._async_loop).result(
@@ -919,16 +856,9 @@ class TradingLoop:
                     ).result(timeout=5)
                 except Exception:
                     _log.debug("Failed to close FXRateService on shutdown")
-            self._async_loop.call_soon_threadsafe(self._async_loop.stop)
-            if self._async_thread is not None:
-                self._async_thread.join(timeout=5)
-        # Stop dedicated gRPC event loop
-        if self._grpc_loop is not None and not self._grpc_loop.is_closed():
-            self._grpc_loop.call_soon_threadsafe(self._grpc_loop.stop)
-            if self._grpc_thread is not None:
-                self._grpc_thread.join(timeout=5)
-            self._grpc_loop = None
-            self._grpc_thread = None
+        # Shut down both event loops via AsyncRuntime's public method
+        assert self._async_runtime is not None
+        self._async_runtime.shutdown()
         self._stop_event.set()
 
     # ── Bond cycle methods ───────────────────────────────────────────────
@@ -1531,45 +1461,14 @@ class TradingLoop:
         anomaly: object,
         raw_text: str,
     ) -> uuid.UUID | None:
-        """Orchestrate the anomaly raw + LLM-enrichment pair (Phase 57-04 D-04).
-
-        Sends the raw alert via ``_send(alert_type='anomaly_raw')`` to capture
-        ``raw_alert_id``, then schedules the async LLM follow-up via
-        ``asyncio.create_task(self._enrich_anomaly_async(..., parent_id=
-        raw_alert_id))`` so the follow-up's persisted row carries the
-        parent_id FK (Plan 57-01 schema). Returns the captured raw alert id
-        for caller-side tracking; never raises.
-        """
-        try:
-            _ok, raw_alert_id = await self._alerter.send_async(
-                raw_text,
-                alert_type="anomaly_raw",
-                symbol=symbol,
-                market_id=market_id,
-                parent_id=None,
+        """Delegate to AnomalyHandler.handle (test compat)."""
+        # Lazy-initialize handler for tests using object.__new__()
+        if not hasattr(self, "_anomaly_handler"):
+            self._anomaly_handler = AnomalyHandler(
+                self._alerter,
+                lambda: getattr(self, "_llm_client", None),
             )
-        except Exception:
-            _log.warning(
-                "anomaly_raw_send_failed",
-                symbol=symbol,
-                market_id=market_id,
-            )
-            return None
-
-        if self._llm_client is not None:
-            # Fire-and-forget: store the task on the instance so the asyncio
-            # GC doesn't drop it mid-flight (ruff RUF006). The reference is
-            # purposely overwritten on the next anomaly so we don't leak a
-            # growing list across cycles.
-            self._anomaly_enrich_task = asyncio.create_task(
-                self._enrich_anomaly_async(
-                    symbol,
-                    market_id,
-                    anomaly,
-                    parent_id=raw_alert_id,
-                ),
-            )
-        return raw_alert_id
+        return await self._anomaly_handler.handle(symbol, market_id, anomaly, raw_text)
 
     async def _enrich_anomaly_async(
         self,
@@ -1579,41 +1478,14 @@ class TradingLoop:
         *,
         parent_id: uuid.UUID | None = None,
     ) -> None:
-        """Fire-and-forget LLM enrichment -- never raises, never blocks raw alert.
-
-        Phase 57-04 (D-04): when ``parent_id`` is supplied (the alert_id
-        returned by the prior raw-alert ``_send`` call), the LLM follow-up
-        ``_send`` threads it through ``alert_type='anomaly_llm'`` so the
-        persisted child row's FK to the parent anomaly_raw row is populated
-        at insert time.
-        """
-        try:
-            prompt = (
-                f"Ticker: {symbol} ({market_id})\n"
-                f"Price move: {anomaly.price_move_pct:+.1f}%\n"  # type: ignore[attr-defined]
-                f"Sigma: {anomaly.sigma:.1f}\n"  # type: ignore[attr-defined]
-                f"Volume ratio: {anomaly.volume_ratio:.1f}x average\n"  # type: ignore[attr-defined]
-                f"Anomaly type: {anomaly.anomaly_type}"  # type: ignore[attr-defined]
+        """Delegate to AnomalyHandler.enrich (test compat)."""
+        # Lazy-initialize handler for tests using object.__new__()
+        if not hasattr(self, "_anomaly_handler"):
+            self._anomaly_handler = AnomalyHandler(
+                self._alerter,
+                lambda: getattr(self, "_llm_client", None),
             )
-            assert self._llm_client is not None  # guarded by caller
-            explanation = await asyncio.wait_for(
-                self._llm_client.complete(prompt, _ANOMALY_SYSTEM_PROMPT),
-                timeout=_ANOMALY_LLM_TIMEOUT,
-            )
-            follow_up = f"AI interpretation (unverified): {explanation}"
-            await self._alerter.send_async(
-                follow_up,
-                alert_type="anomaly_llm",
-                symbol=symbol,
-                market_id=market_id,
-                parent_id=parent_id,
-            )
-        except Exception:
-            _log.warning(
-                "anomaly_llm_failure",
-                symbol=symbol,
-                market_id=market_id,
-            )
+        await self._anomaly_handler.enrich(symbol, market_id, anomaly, parent_id=parent_id)
 
     # ---- Process instrument delegation (test compat) ----
 

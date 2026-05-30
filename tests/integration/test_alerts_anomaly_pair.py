@@ -52,7 +52,7 @@ def _make_anomaly() -> SimpleNamespace:
 
 def _make_tl() -> Any:
     """Construct an uninitialised TradingLoop just enough to exercise its methods."""
-    from finalayze.core.trading_loop import TradingLoop  # noqa: PLC0415
+    from finalayze.orchestration.trading_loop import TradingLoop  # noqa: PLC0415
 
     return object.__new__(TradingLoop)
 
@@ -84,7 +84,7 @@ async def test_raw_alert_passes_anomaly_raw_type() -> None:
 
 @pytest.mark.asyncio
 async def test_enrich_receives_parent_id() -> None:
-    """The orchestration scheduler passes parent_id=<raw_id> to _enrich_anomaly_async."""
+    """The orchestration scheduler passes parent_id=<raw_id> to handler.enrich."""
     raw_uuid = uuid.uuid4()
     alerter = MagicMock(spec=TelegramAlerter)
     alerter.send_async = AsyncMock(return_value=(True, raw_uuid))
@@ -92,6 +92,14 @@ async def test_enrich_receives_parent_id() -> None:
     tl = _make_tl()
     tl._alerter = alerter
     tl._llm_client = MagicMock()
+
+    # Construct the anomaly handler (which is normally done in __init__)
+    from finalayze.orchestration.anomaly_handler import AnomalyHandler  # noqa: PLC0415
+
+    tl._anomaly_handler = AnomalyHandler(
+        alerter,
+        lambda: tl._llm_client,
+    )
 
     captured: dict[str, Any] = {}
 
@@ -107,7 +115,8 @@ async def test_enrich_receives_parent_id() -> None:
         captured["anomaly"] = anomaly
         captured["parent_id"] = parent_id
 
-    tl._enrich_anomaly_async = _capture_enrich  # type: ignore[method-assign]
+    # Patch the handler's enrich method (the actual orchestration point)
+    tl._anomaly_handler.enrich = _capture_enrich  # type: ignore[method-assign]
 
     anomaly = _make_anomaly()
     raw_text = "ANOMALY raw"

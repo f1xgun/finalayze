@@ -156,7 +156,9 @@ class TestWeeklyDigest:
 
     def test_weekly_digest_scheduled_via_cron(self) -> None:
         """Weekly digest is scheduled via CronTrigger on Sunday."""
-        source = inspect.getsource(TradingLoop.start)
+        # Since _setup_scheduler() was extracted from start() in increment #4,
+        # check the source of _setup_scheduler() where job registration lives.
+        source = inspect.getsource(TradingLoop._setup_scheduler)
         assert "weekly_digest" in source
         assert "sun" in source.lower() or "day_of_week" in source
 
