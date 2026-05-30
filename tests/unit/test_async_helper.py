@@ -12,6 +12,7 @@ import pytest
 def _make_loop() -> MagicMock:
     """Create a minimal TradingLoop-like object with _run_async bound."""
     from finalayze.core.trading_loop import TradingLoop
+    from finalayze.orchestration.async_runtime import AsyncRuntime
 
     settings = MagicMock()
     settings.news_cycle_minutes = 30
@@ -24,8 +25,8 @@ def _make_loop() -> MagicMock:
     settings.kelly_fraction = 0.5
 
     loop = MagicMock(spec=TradingLoop)
-    loop._async_loop = None
-    loop._async_thread = None
+    # Use a real AsyncRuntime instead of mocking it
+    loop._async_runtime = AsyncRuntime()
     loop._meta_agent_runner = None
     loop._run_async = TradingLoop._run_async.__get__(loop)
     return loop
@@ -40,13 +41,17 @@ class TestRunAsync:
             return 42
 
         result1 = loop._run_async(simple())
-        first_async_loop = loop._async_loop
+        # Read the real source of truth (AsyncRuntime), not the spec'd-mock
+        # attribute: with property proxies removed from mock specs, only the
+        # runtime reflects the actual loop.
+        first_async_loop = loop._async_runtime.async_loop
 
         result2 = loop._run_async(simple())
-        second_async_loop = loop._async_loop
+        second_async_loop = loop._async_runtime.async_loop
 
         assert result1 == 42
         assert result2 == 42
+        assert first_async_loop is not None
         assert first_async_loop is second_async_loop
 
     def test_propagates_exceptions(self) -> None:
@@ -100,9 +105,13 @@ class TestRunAsync:
             return 1
 
         loop._run_async(simple())
-        assert loop._async_loop is not None
-        assert loop._async_loop.is_running()
+        running_loop = loop._async_runtime.async_loop
+        assert running_loop is not None
+        assert running_loop.is_running()
 
         loop.stop()
-        # After stop, the loop thread should have been joined
-        assert loop._async_thread is not None
+        # stop() delegates teardown to AsyncRuntime.shutdown(), which stops the
+        # loop, joins the daemon thread, and resets both references to None.
+        assert not running_loop.is_running()
+        assert loop._async_runtime.async_loop is None
+        assert loop._async_runtime.async_thread is None

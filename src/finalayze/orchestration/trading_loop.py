@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover
 from finalayze.data.moex_calendar import is_moex_holiday
 from finalayze.markets.currency import CurrencyConverter
 from finalayze.markets.schedule import SCHEDULES
+from finalayze.orchestration.async_runtime import AsyncRuntime
 from finalayze.orchestration.daily_reporting import DailyReportingService
 from finalayze.orchestration.db_persistence import TradingPersistence
 from finalayze.orchestration.ml_retraining import MLRetrainingService
@@ -187,14 +188,78 @@ class TradingLoop:
     _sentiment_mgr: Any = None
     _persistence: Any = None
     _llm_client: Any = None
-    _async_loop: Any = None
-    _async_thread: Any = None
-    _grpc_loop: Any = None
-    _grpc_thread: Any = None
+    _async_runtime: AsyncRuntime | None = None
     # Post-construction wiring slot used by api/lifespan to reach the alerter
     # without traversing every sub-component (bootstrap.py sets this after
     # constructing the loop and circuit breakers).
     _alerter_ref: Any = None
+
+    # ── Event loop property proxies (delegate to AsyncRuntime) ──────────────
+    # These properties allow tests and internal code to read/write loop attributes
+    # directly on TradingLoop while delegating to the single source of truth in
+    # AsyncRuntime. This preserves backward compatibility without mirroring state.
+    # If _async_runtime is None (e.g., when created with object.__new__ in tests),
+    # the setters will create a lazy AsyncRuntime instance.
+
+    @property
+    def _async_loop(self) -> asyncio.AbstractEventLoop | None:
+        """Get the async event loop from AsyncRuntime."""
+        if self._async_runtime is None:
+            return None
+        return self._async_runtime.async_loop
+
+    @_async_loop.setter
+    def _async_loop(self, value: asyncio.AbstractEventLoop | None) -> None:
+        """Set the async event loop on AsyncRuntime."""
+        # Lazy-create AsyncRuntime if needed (for tests using object.__new__)
+        if self._async_runtime is None:
+            self._async_runtime = AsyncRuntime()
+        self._async_runtime.async_loop = value
+
+    @property
+    def _async_thread(self) -> threading.Thread | None:
+        """Get the async thread from AsyncRuntime."""
+        if self._async_runtime is None:
+            return None
+        return self._async_runtime.async_thread
+
+    @_async_thread.setter
+    def _async_thread(self, value: threading.Thread | None) -> None:
+        """Set the async thread on AsyncRuntime."""
+        # Lazy-create AsyncRuntime if needed (for tests using object.__new__)
+        if self._async_runtime is None:
+            self._async_runtime = AsyncRuntime()
+        self._async_runtime.async_thread = value
+
+    @property
+    def _grpc_loop(self) -> asyncio.AbstractEventLoop | None:
+        """Get the gRPC event loop from AsyncRuntime."""
+        if self._async_runtime is None:
+            return None
+        return self._async_runtime.grpc_loop
+
+    @_grpc_loop.setter
+    def _grpc_loop(self, value: asyncio.AbstractEventLoop | None) -> None:
+        """Set the gRPC event loop on AsyncRuntime."""
+        # Lazy-create AsyncRuntime if needed (for tests using object.__new__)
+        if self._async_runtime is None:
+            self._async_runtime = AsyncRuntime()
+        self._async_runtime.grpc_loop = value
+
+    @property
+    def _grpc_thread(self) -> threading.Thread | None:
+        """Get the gRPC thread from AsyncRuntime."""
+        if self._async_runtime is None:
+            return None
+        return self._async_runtime.grpc_thread
+
+    @_grpc_thread.setter
+    def _grpc_thread(self, value: threading.Thread | None) -> None:
+        """Set the gRPC thread on AsyncRuntime."""
+        # Lazy-create AsyncRuntime if needed (for tests using object.__new__)
+        if self._async_runtime is None:
+            self._async_runtime = AsyncRuntime()
+        self._async_runtime.grpc_thread = value
 
     def __init__(self, deps: TradingLoopDeps) -> None:  # noqa: PLR0915
         from finalayze.execution.broker_base import OrderRequest  # noqa: PLC0415
@@ -295,15 +360,22 @@ class TradingLoop:
             fraction=getattr(settings, "kelly_fraction", 0.5),
         )
 
-        # Persistent background event loop for non-gRPC async calls (HTTP, DB, Telegram).
-        # Actual loop is created in start(); None until then.
-        self._async_loop: asyncio.AbstractEventLoop | None = None
-        self._async_thread: threading.Thread | None = None
+        # AsyncRuntime: manages persistent event loops for async and gRPC operations.
+        # Inject a callback to wire the newly created async loop to persistence.
+        def _on_async_loop_created(loop: asyncio.AbstractEventLoop) -> None:
+            if hasattr(self, "_persistence") and self._persistence is not None:
+                self._persistence._async_loop = loop
+
+        self._async_runtime = AsyncRuntime(
+            grpc_loop=grpc_loop,
+            on_async_loop_created=_on_async_loop_created,
+        )
 
         # Database persistence (fire-and-forget writes to avoid crashing trading loop).
         # Must be constructed BEFORE PositionTracker so we can inject it (STOP-03).
+        # Note: _async_loop is None here; it will be wired via callback when first created.
         db_url = getattr(settings, "database_url", None)
-        self._persistence = TradingPersistence(db_url, self._async_loop, settings)
+        self._persistence = TradingPersistence(db_url, None, settings)
 
         # Position tracker (Phase 1.6): stop-loss, entry prices, strategy ownership.
         # Accepts self._persistence so it can fire entry/trigger/snapshot events
@@ -390,11 +462,6 @@ class TradingLoop:
             alerter=alerter,
             async_loop_fn=self._run_async,
         )
-
-        # Dedicated gRPC event loop -- isolates PollerCompletionQueue from general
-        # async work. Prevents BlockingIOError contention causing 60-min cycle drift.
-        self._grpc_loop: asyncio.AbstractEventLoop | None = grpc_loop
-        self._grpc_thread: threading.Thread | None = None
 
         # asyncio.Lock for gRPC client serialization (equity + bond don't overlap)
         self._grpc_lock = asyncio.Lock()
@@ -586,56 +653,36 @@ class TradingLoop:
     def _run_async(self, coro: Any, *, timeout: int = 30) -> Any:
         """Run an async coroutine on a persistent background event loop.
 
-        Lazily creates a daemon thread with its own event loop on first call.
+        Delegates to AsyncRuntime.run_async. Lazily creates a daemon thread
+        with its own event loop on first call. The callback registered with
+        AsyncRuntime automatically wires the loop to persistence.
+
         Default 30-second timeout; batch operations may pass a larger value.
         """
-        if self._async_loop is None or self._async_loop.is_closed():
-            loop = asyncio.new_event_loop()
-            self._async_loop = loop
-            if hasattr(self, "_persistence") and self._persistence is not None:
-                self._persistence._async_loop = loop  # Update persistence's loop reference
-            thread = threading.Thread(target=loop.run_forever, daemon=True)
-            thread.start()
-            self._async_thread = thread
-        future = asyncio.run_coroutine_threadsafe(coro, self._async_loop)
-        return future.result(timeout=timeout)
+        assert self._async_runtime is not None
+        return self._async_runtime.run_async(coro, timeout=timeout)
 
     # ── gRPC loop helpers ─────────────────────────────────────────────────────
 
     def _init_grpc_loop(self) -> asyncio.AbstractEventLoop:
         """Create a dedicated background event loop for all gRPC operations.
 
-        Isolated from _async_loop to prevent PollerCompletionQueue BlockingIOError
-        from starving HTTP/DB/Telegram coroutines and causing strategy cycle drift.
+        Delegates to AsyncRuntime.init_grpc_loop. Isolated from async_loop
+        to prevent PollerCompletionQueue BlockingIOError from starving
+        HTTP/DB/Telegram coroutines and causing strategy cycle drift.
         """
-        loop = asyncio.new_event_loop()
-
-        # Suppress benign BlockingIOError from gRPC PollerCompletionQueue
-        def _grpc_exception_handler(
-            loop: asyncio.AbstractEventLoop, context: dict[str, Any]
-        ) -> None:
-            exc = context.get("exception")
-            if isinstance(exc, BlockingIOError):
-                return  # benign EAGAIN from PollerCompletionQueue
-            loop.default_exception_handler(context)
-
-        loop.set_exception_handler(_grpc_exception_handler)
-        thread = threading.Thread(target=loop.run_forever, daemon=True, name="grpc-loop")
-        thread.start()
-        self._grpc_loop = loop
-        self._grpc_thread = thread
-        return loop
+        assert self._async_runtime is not None
+        return self._async_runtime.init_grpc_loop()
 
     def _run_grpc(self, coro: Any, *, timeout: int = 30) -> Any:
         """Run a gRPC coroutine on the dedicated gRPC event loop.
 
-        Use this for all TinkoffBroker and TinkoffFetcher calls.
-        Non-gRPC async work (HTTP, DB, Telegram) should use _run_async().
+        Delegates to AsyncRuntime.run_grpc. Use this for all TinkoffBroker
+        and TinkoffFetcher calls. Non-gRPC async work (HTTP, DB, Telegram)
+        should use _run_async().
         """
-        if self._grpc_loop is None or self._grpc_loop.is_closed():
-            self._init_grpc_loop()
-        future = asyncio.run_coroutine_threadsafe(coro, self._grpc_loop)
-        return future.result(timeout=timeout)
+        assert self._async_runtime is not None
+        return self._async_runtime.run_grpc(coro, timeout=timeout)
 
     @property
     def total_cycles(self) -> int:
@@ -747,14 +794,10 @@ class TradingLoop:
             # to attach to (mirrors the lazy init in _run_async()).
             # Always ensure async_loop is initialized when meta_agent is enabled
             # so persist_decision / persist_alert work from the very first tick.
+            # ensure_async_loop lazily creates the loop + fires the persistence callback.
             if self._async_loop is None or self._async_loop.is_closed():
-                _loop = asyncio.new_event_loop()
-                self._async_loop = _loop
-                if hasattr(self, "_persistence") and self._persistence is not None:
-                    self._persistence._async_loop = _loop
-                _t = threading.Thread(target=_loop.run_forever, daemon=True)
-                _t.start()
-                self._async_thread = _t
+                assert self._async_runtime is not None
+                self._async_runtime.ensure_async_loop()
             # Phase 58-05-06 (META-08, SPEC AC #15): launch killswitch poller.
             if (
                 self._meta_agent_runner is not None
@@ -903,8 +946,8 @@ class TradingLoop:
                 _log.debug("meta_agent_killswitch_stop_failed_during_shutdown")
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=True)
+        # Close Redis and FX connections on the async loop before stopping it
         if self._async_loop is not None and not self._async_loop.is_closed():
-            # Close Redis connections on the async loop before stopping it
             if self._cache is not None:
                 try:
                     asyncio.run_coroutine_threadsafe(self._cache.close(), self._async_loop).result(
@@ -919,16 +962,9 @@ class TradingLoop:
                     ).result(timeout=5)
                 except Exception:
                     _log.debug("Failed to close FXRateService on shutdown")
-            self._async_loop.call_soon_threadsafe(self._async_loop.stop)
-            if self._async_thread is not None:
-                self._async_thread.join(timeout=5)
-        # Stop dedicated gRPC event loop
-        if self._grpc_loop is not None and not self._grpc_loop.is_closed():
-            self._grpc_loop.call_soon_threadsafe(self._grpc_loop.stop)
-            if self._grpc_thread is not None:
-                self._grpc_thread.join(timeout=5)
-            self._grpc_loop = None
-            self._grpc_thread = None
+        # Shut down both event loops via AsyncRuntime's public method
+        assert self._async_runtime is not None
+        self._async_runtime.shutdown()
         self._stop_event.set()
 
     # ── Bond cycle methods ───────────────────────────────────────────────

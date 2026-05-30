@@ -500,6 +500,7 @@ class TestTradingLoopStop:
 
     def test_stop_joins_async_thread(self) -> None:
         from finalayze.core.trading_loop import TradingLoop
+        from finalayze.orchestration.async_runtime import AsyncRuntime
 
         mock_loop = MagicMock()
         mock_loop.is_closed.return_value = False
@@ -507,15 +508,19 @@ class TestTradingLoopStop:
 
         loop = MagicMock(spec=TradingLoop)
         loop._scheduler = None
-        loop._async_loop = mock_loop
-        loop._async_thread = mock_thread
         loop._meta_agent_runner = None
         loop._cache = None
         loop._event_bus = None
         loop._fx_service = None
-        loop._grpc_loop = None
-        loop._grpc_thread = None
         loop._stop_event = threading.Event()
+
+        # Set up a real AsyncRuntime with mock loops
+        runtime = AsyncRuntime()
+        runtime.async_loop = mock_loop
+        runtime.async_thread = mock_thread
+        runtime.grpc_loop = None
+        runtime.grpc_thread = None
+        loop._async_runtime = runtime
 
         TradingLoop.stop(loop)
         mock_thread.join.assert_called_once_with(timeout=5)
