@@ -79,6 +79,7 @@ from finalayze.strategies.cbr_strategy_wrapper import CBRStrategyWrapper
 from finalayze.strategies.dividend_gap import DividendEntry, DividendGapStrategy
 from finalayze.strategies.dual_momentum import DualMomentumStrategy
 from finalayze.strategies.event_driven import EventDrivenStrategy
+from finalayze.strategies.fundamental_gate import earnings_yield_gate
 
 _FALLBACK_USDRUB = Decimal("90.0")
 from finalayze.strategies.mean_reversion import MeanReversionStrategy
@@ -835,6 +836,42 @@ def _compute_moex_sizing_data(
     return brent_rub_price, regime_signal, yield_slope, cbr_dir
 
 
+def _resolve_fundamental_scale(
+    segment: str,
+    candles: list[Any],
+    market_context: MarketContext | None,
+) -> tuple[Decimal, float]:
+    """Resolve the Plan-03 ``earnings_yield_gate`` boost for ru_ segments (INTG-02).
+
+    Wires the orphaned fundamental stream into the proving run's decision path: the
+    rule-based ``earnings_yield_gate`` consumes ``market_context.moex_data`` (the
+    point-in-time ``FundamentalSnapshot`` series) and returns a boost-only verdict
+    (``BOOST_SCALE`` when cheap, ``NEUTRAL_SCALE`` otherwise — it never cuts).
+
+    Look-ahead safety: ``as_of`` is pinned to the LAST candle's timestamp (the run's
+    most recent bar, never ``now()``), and the gate delegates the ``as_of <= D`` filter
+    to ``compute_fundamental_features._filter_as_of``, so a snapshot dated after the
+    final bar cannot leak in.
+
+    A3 / D-03 caveat: T-Bank ``get_asset_fundamentals`` is point-in-time only (no
+    history — see ``test_lookahead_phase60_fundamental``), so this snapshot is CONSTANT
+    across the backtest window. The fundamental gate therefore COMPLETES the INTG-02
+    decision-path wiring but is NOT the MEAS-01 causal lever — the non-zero trade_count
+    delta is driven by SUE (event_driven) and CPI (CpiRiskOffStep), both per-bar.
+
+    Returns ``(scale, earnings_yield)``; ``(NEUTRAL_SCALE, 0.0)`` when the gate is
+    inapplicable (non-ru_ segment, no moex_data, or no candles).
+    """
+    if not segment.startswith("ru_") or market_context is None or not candles:
+        return Decimal("1.0"), 0.0
+    moex_data = market_context.moex_data
+    if moex_data is None:
+        return Decimal("1.0"), 0.0
+    as_of = getattr(candles[-1], "timestamp", None)
+    verdict = earnings_yield_gate(moex_data, as_of=as_of)
+    return verdict.scale, verdict.earnings_yield
+
+
 def _run_symbol(
     symbol: str,
     segment: str,
@@ -856,6 +893,12 @@ def _run_symbol(
     """Run backtest for a single symbol. Returns (trades, snapshots, summary)."""
     sym_dir = output_dir / segment / symbol.replace(".", "_")
     sym_dir.mkdir(parents=True, exist_ok=True)
+
+    # INTG-02: wire the Plan-03 fundamental gate into the decision path. The boost-only
+    # earnings_yield verdict tilts the symbol's risk capital (constant-in-window per A3;
+    # completes the wiring, not the MEAS-01 causal lever — SUE/CPI drive the delta).
+    fundamental_scale, fundamental_ey = _resolve_fundamental_scale(segment, candles, market_context)
+    cash = (cash * fundamental_scale).quantize(Decimal("0.01"))
 
     try:
         combiner = JournalingStrategyCombiner(
@@ -903,6 +946,8 @@ def _run_symbol(
             "segment": segment,
             "total_candles": len(candles),
             "total_trades": len(trades),
+            "fundamental_gate_scale": str(fundamental_scale),
+            "fundamental_earnings_yield": fundamental_ey,
             "metrics": result.model_dump(mode="json") if result else None,
             "journal_summary": journal.summary(),
         }
@@ -917,6 +962,14 @@ def _run_symbol(
             f"WR {wr:5.1%} | "
             f"Ret {ret:+7.3%}"
         )
+
+        # INTG-02 visibility: report when the fundamental gate boosted this symbol's
+        # risk capital (constant-in-window per A3; see _resolve_fundamental_scale).
+        if fundamental_scale != Decimal("1.0"):
+            print(
+                f"      Fundamental gate: scale={fundamental_scale} "
+                f"(earnings_yield={fundamental_ey:.4f})"
+            )
 
         # Print per-strategy signal counts from engine summary
         run_summary = engine.last_run_summary
@@ -1429,6 +1482,25 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     )
 
     result_path = tracker.save(metadata)
+
+    # D-04: log the full economic delta vs the named baseline either way (the
+    # trade_count delta is the MEAS-01 gate; wf_sharpe/profit_factor are the stretch
+    # and must be recorded regardless of sign). Guarded: tracker.compare() needs the
+    # baseline metadata.json on disk, so only run it for an explicit, loadable baseline.
+    if baseline_name and args.baseline not in ("latest", "none"):
+        try:
+            comparison = tracker.compare(args.name, baseline_name)
+            md = comparison.metric_deltas
+            print("\n  Baseline delta (D-04):")
+            print(f"    trade_count delta   = {md['trade_count']:+.0f}")
+            print(f"    wf_sharpe delta     = {md['wf_sharpe']:+.4f}")
+            print(f"    profit_factor delta = {md['profit_factor']:+.4f}")
+            if md["trade_count"] != 0.0:
+                print("    OK MEAS-01: >=1 trade changed vs baseline")
+            else:
+                print("    WARN MEAS-01: trade_count delta is 0 — wiring may be inert")
+        except (FileNotFoundError, KeyError) as exc:
+            print(f"\n  Baseline delta (D-04): unavailable ({type(exc).__name__}: {exc})")
 
     # Save experiment result and link to experiment registry
     if experiment_mgr and args.hypothesis:
