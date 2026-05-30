@@ -59,7 +59,12 @@ _ADX_MR_THRESHOLD = 15
 _HRP_MIN_HISTORY = 20
 
 # Event types that trigger duplicate-signal suppression (EVNT-02). NONE is excluded.
-_DEDUP_EVENT_TYPES: frozenset[EventType] = frozenset({EventType.CBR, EventType.DIVIDEND})
+# EARNINGS (Phase 60, INTG-01) is keyed here for clean dedup; event_driven stays
+# ADX-neutral (NOT added to _EVENT_STRATEGIES) per RESEARCH A1 — revisit only if
+# the proving run shows a trend/MR conflict.
+_DEDUP_EVENT_TYPES: frozenset[EventType] = frozenset(
+    {EventType.CBR, EventType.DIVIDEND, EventType.EARNINGS}
+)
 
 
 def _dedup_event_signals(

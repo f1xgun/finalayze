@@ -151,6 +151,10 @@ class BacktestConfig:
     yield_slope_bps: float = 0.0
     # CBR direction for SectorAllocationStep ("cut", "hold", "hike", "" = missing)
     cbr_direction: str = ""
+    # Phase 60 (INTG-03): CPI YoY (decimal fraction) for the live/non-per-bar
+    # CpiRiskOffStep caller (0.0 = missing/disabled). The backtest path resolves CPI
+    # per-bar from the candle date instead; this field documents the live default.
+    cpi_yoy_fraction: float = 0.0
 
     # S5.3: end-of-data close-out behaviour. ``False`` (default) leaves
     # positions open at the last bar — equity snapshots already reflect their

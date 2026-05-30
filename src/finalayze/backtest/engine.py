@@ -33,6 +33,7 @@ from finalayze.risk.position_sizing_pipeline import (
     BrentGateStep,
     CBRRegimeStep,
     CopulaStep,
+    CpiRiskOffStep,
     EVTStep,
     HardCapsStep,
     MetaLabelStep,
@@ -172,7 +173,8 @@ class BacktestEngine:
         which is only available at run() time.
 
         Pipeline order: VolTarget -> Regime -> [RubOilRegime] -> [BrentGate]
-            -> [Copula] -> [EVT] -> MetaLabel -> HardCaps
+            -> [CBRRegime] -> [CpiRiskOff] -> [SectorAllocation] -> [Copula] -> [EVT]
+            -> MetaLabel -> HardCaps
         (Kelly sizing is pre-applied to SizingContext.base_position upstream.)
         """
         cfg = self._config
@@ -185,6 +187,10 @@ class BacktestEngine:
         # Phase 10: Macro regime steps
         if cfg.yield_slope_bps != 0.0 or segment_id.startswith("ru_"):
             steps.append(CBRRegimeStep(cfg.yield_slope_bps, segment_id))
+        # Phase 60 (INTG-03): CPI risk-off overlay. ru_-gated; resolves CPI per-bar
+        # from SizingContext.bar_date (no value baked at build time -> no look-ahead).
+        if cfg.cpi_yoy_fraction != 0.0 or segment_id.startswith("ru_"):
+            steps.append(CpiRiskOffStep(segment_id, cfg.cpi_yoy_fraction))
         if cfg.cbr_direction:
             steps.append(SectorAllocationStep(cfg.brent_rub_price, cfg.cbr_direction, segment_id))
         if cfg.use_copula_scaling:

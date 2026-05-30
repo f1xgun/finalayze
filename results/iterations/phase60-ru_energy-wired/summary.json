@@ -1,0 +1,210 @@
+[
+  {
+    "symbol": "LKOH",
+    "segment": "ru_energy",
+    "total_candles": 378,
+    "total_trades": 2,
+    "fundamental_gate_scale": "1.0",
+    "fundamental_earnings_yield": 0.0,
+    "metrics": {
+      "sharpe": "0.4565",
+      "max_drawdown": "0.0001",
+      "win_rate": "1.0000",
+      "profit_factor": "999.0000",
+      "total_return": "0.0001",
+      "total_trades": 2,
+      "sortino_ratio": "0.678",
+      "calmar_ratio": "0.7516",
+      "turnover_ratio": "0.0133",
+      "sharpe_n_samples": 377,
+      "sharpe_t_statistic": "0.5583",
+      "sharpe_p_value": "0.5766",
+      "alpha": "0.0001",
+      "beta": "0.0",
+      "information_ratio": "-1.9243",
+      "max_relative_drawdown": "0.4954",
+      "benchmark_return": "0.4518"
+    },
+    "journal_summary": {
+      "total_decisions": 378,
+      "action_counts": {
+        "SKIP": 376,
+        "BUY": 2
+      },
+      "top_skip_reasons": {
+        "no_signal": 288,
+        "quantity_zero": 76,
+        "no_position_held": 9,
+        "profit_target": 2,
+        "position_already_open": 1
+      }
+    }
+  },
+  {
+    "symbol": "ROSN",
+    "segment": "ru_energy",
+    "total_candles": 378,
+    "total_trades": 29,
+    "fundamental_gate_scale": "1.0",
+    "fundamental_earnings_yield": 0.0,
+    "metrics": {
+      "sharpe": "0.0162",
+      "max_drawdown": "0.0012",
+      "win_rate": "0.5862",
+      "profit_factor": "1.0125",
+      "total_return": "0.0000",
+      "total_trades": 29,
+      "sortino_ratio": "0.0214",
+      "calmar_ratio": "0.0151",
+      "turnover_ratio": "0.2820",
+      "sharpe_n_samples": 377,
+      "sharpe_t_statistic": "0.0198",
+      "sharpe_p_value": "0.9842",
+      "alpha": "-0.0005",
+      "beta": "0.0013",
+      "information_ratio": "-1.927",
+      "max_relative_drawdown": "0.495",
+      "benchmark_return": "0.4518"
+    },
+    "journal_summary": {
+      "total_decisions": 378,
+      "action_counts": {
+        "SKIP": 348,
+        "BUY": 29,
+        "SELL": 1
+      },
+      "top_skip_reasons": {
+        "no_signal": 286,
+        "profit_target": 28,
+        "position_already_open": 27,
+        "no_position_held": 6,
+        "no_stop_loss_data": 1
+      }
+    }
+  },
+  {
+    "symbol": "NVTK",
+    "segment": "ru_energy",
+    "total_candles": 378,
+    "total_trades": 14,
+    "fundamental_gate_scale": "1.0",
+    "fundamental_earnings_yield": 0.0,
+    "metrics": {
+      "sharpe": "-0.6837",
+      "max_drawdown": "0.0001",
+      "win_rate": "0.3571",
+      "profit_factor": "0.5571",
+      "total_return": "-0.0001",
+      "total_trades": 14,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0216",
+      "sharpe_n_samples": 377,
+      "sharpe_t_statistic": "-0.8363",
+      "sharpe_p_value": "0.403",
+      "alpha": "-0.0001",
+      "beta": "0.0",
+      "information_ratio": "-1.9253",
+      "max_relative_drawdown": "0.4956",
+      "benchmark_return": "0.4518"
+    },
+    "journal_summary": {
+      "total_decisions": 377,
+      "action_counts": {
+        "SKIP": 362,
+        "BUY": 14,
+        "SELL": 1
+      },
+      "top_skip_reasons": {
+        "no_signal": 336,
+        "profit_target": 11,
+        "no_position_held": 10,
+        "position_already_open": 4,
+        "time_exit": 1
+      }
+    }
+  },
+  {
+    "symbol": "TATN",
+    "segment": "ru_energy",
+    "total_candles": 378,
+    "total_trades": 28,
+    "fundamental_gate_scale": "1.0",
+    "fundamental_earnings_yield": 0.0,
+    "metrics": {
+      "sharpe": "-0.9772",
+      "max_drawdown": "0.0009",
+      "win_rate": "0.6429",
+      "profit_factor": "0.4560",
+      "total_return": "-0.0007",
+      "total_trades": 28,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.1292",
+      "sharpe_n_samples": 377,
+      "sharpe_t_statistic": "-1.1952",
+      "sharpe_p_value": "0.232",
+      "alpha": "-0.0009",
+      "beta": "0.0005",
+      "information_ratio": "-1.9293",
+      "max_relative_drawdown": "0.4963",
+      "benchmark_return": "0.4518"
+    },
+    "journal_summary": {
+      "total_decisions": 374,
+      "action_counts": {
+        "SKIP": 343,
+        "BUY": 28,
+        "SELL": 3
+      },
+      "top_skip_reasons": {
+        "no_signal": 308,
+        "profit_target": 21,
+        "no_position_held": 8,
+        "position_already_open": 6
+      }
+    }
+  },
+  {
+    "symbol": "TRNFP",
+    "segment": "ru_energy",
+    "total_candles": 378,
+    "total_trades": 13,
+    "fundamental_gate_scale": "1.0",
+    "fundamental_earnings_yield": 0.0,
+    "metrics": {
+      "sharpe": "-0.4881",
+      "max_drawdown": "0.0001",
+      "win_rate": "0.4615",
+      "profit_factor": "0.6052",
+      "total_return": "-0.0001",
+      "total_trades": 13,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0198",
+      "sharpe_n_samples": 377,
+      "sharpe_t_statistic": "-0.5971",
+      "sharpe_p_value": "0.5505",
+      "alpha": "-0.0",
+      "beta": "-0.0001",
+      "information_ratio": "-1.925",
+      "max_relative_drawdown": "0.4956",
+      "benchmark_return": "0.4518"
+    },
+    "journal_summary": {
+      "total_decisions": 378,
+      "action_counts": {
+        "SKIP": 363,
+        "BUY": 13,
+        "SELL": 2
+      },
+      "top_skip_reasons": {
+        "no_signal": 341,
+        "profit_target": 11,
+        "no_position_held": 7,
+        "quantity_zero": 3,
+        "position_value_zero": 1
+      }
+    }
+  }
+]

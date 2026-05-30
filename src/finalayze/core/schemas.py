@@ -73,6 +73,7 @@ class EventType(IntEnum):
     NONE = 0
     CBR = 1
     DIVIDEND = 2
+    EARNINGS = 3
 
 
 class AdxRegime(StrEnum):
