@@ -113,7 +113,9 @@ def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:  # noqa:
     if features_path.exists():
         selected_features = json.loads(features_path.read_text())
 
-    # Load fitted EnsembleCalibrator if available
+    # Load fitted EnsembleCalibrator if available. S6.2: warn when missing so
+    # operators can spot segments running uncalibrated inference (the meta-
+    # learner path used to silently bypass the calibrator before Sprint 6).
     from finalayze.ml.calibration import EnsembleCalibrator  # noqa: PLC0415
 
     calibrator: EnsembleCalibrator | None = None
@@ -125,6 +127,18 @@ def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:  # noqa:
         if isinstance(loaded_cal, EnsembleCalibrator) and loaded_cal.is_fitted:
             calibrator = loaded_cal
             _log.debug("Loaded fitted calibrator for segment %s", segment_id)
+        else:
+            _log.warning(
+                "ml_calibrator_unfit",
+                segment_id=segment_id,
+                reason="calibrator.pkl present but not fitted; inference will be uncalibrated",
+            )
+    else:
+        _log.warning(
+            "ml_calibrator_missing",
+            segment_id=segment_id,
+            reason="no calibrator.pkl; inference probabilities are uncalibrated",
+        )
 
     # Load performance-weighted model weights if available
     model_weights: dict[str, float] | None = None
