@@ -13,6 +13,7 @@ from finalayze.strategies.base import BaseStrategy
 
 if TYPE_CHECKING:
     from finalayze.core.schemas import Candle
+    from finalayze.strategies.pead import EarningsSurprise
 
 _PRESETS_DIR = Path(__file__).parent / "presets"
 _DEFAULT_MIN_SENTIMENT = 0.5
@@ -20,6 +21,27 @@ _DEFAULT_WEIGHT = Decimal("0.4")
 # Maximum price move (as a fraction) since last candle before signal is suppressed.
 # If news is already fully priced in, trading on it is futile.
 _DEFAULT_MAX_PRICE_MOVE = 0.05
+
+# ── Earnings SUE path (Phase 60, INTG-01, D-02) ──────────────────────────────
+# A self-resolving earnings event type mirroring PEADStrategy's calendar: the
+# strategy resolves the active surprise from its own registered calendar by the
+# latest candle's date, so neither the engine nor the combiner signature
+# changes. This path is INDEPENDENT of sentiment_score (the backtest engine
+# passes 0.0, so the news path is dead in backtest — Pitfall 1).
+#
+# SUE gate (Claude's discretion per D-04): a |sue_score| at/above this clears
+# the gate. 0.75 is below the seeded ru_energy surprise (|sue| ~ 2.0) so an
+# in-window event fires, yet high enough to ignore near-zero proxy noise.
+_DEFAULT_SUE_THRESHOLD = 0.75
+# Post-announcement drift window (bars), mirroring PEADStrategy (60d ≈ 1 quarter
+# of trading days). A surprise older than this is no longer actionable.
+_DEFAULT_DRIFT_WINDOW_BARS = 60
+# Confidence scaling for the earnings signal. Tuned so a seeded |sue| ~ 2.0 at
+# weight 0.15 clears ru_energy's min_combined_confidence (0.38) under "firing"
+# renormalisation: confidence = min(_MAX, _BASE + (|sue| - threshold) * _SCALE).
+_SUE_CONFIDENCE_BASE = 0.55
+_SUE_CONFIDENCE_SCALE = 0.20
+_SUE_MAX_CONFIDENCE = 0.95
 
 # Sanctions proximity scores for Russian-listed equities.
 # Higher values indicate greater exposure to sanctions-related risk,
@@ -55,10 +77,96 @@ class EventDrivenStrategy(BaseStrategy):
     Falls back gracefully to None when sentiment == 0.
     """
 
+    def __init__(
+        self,
+        sue_threshold: float = _DEFAULT_SUE_THRESHOLD,
+        drift_window_bars: int = _DEFAULT_DRIFT_WINDOW_BARS,
+    ) -> None:
+        # Earnings SUE calendar (symbol -> list of surprises), resolved
+        # per-bar exactly like PEADStrategy. Empty until a loader registers
+        # surprises via add_earnings_surprise (run_iteration, ru_-gated).
+        self._surprises: dict[str, list[EarningsSurprise]] = {}
+        self._sue_threshold = sue_threshold
+        self._drift_window_bars = drift_window_bars
+
     @property
     def name(self) -> str:
         """Strategy name."""
         return "event_driven"
+
+    def add_earnings_surprise(self, surprise: EarningsSurprise) -> None:
+        """Register an earnings surprise event (self-resolving calendar)."""
+        self._surprises.setdefault(surprise.symbol, []).append(surprise)
+
+    def reset(self) -> None:
+        """Clear earnings calendar state between backtest runs."""
+        self._surprises.clear()
+
+    def _resolve_earnings_signal(
+        self,
+        symbol: str,
+        candles: list[Candle],
+        segment_id: str,
+    ) -> Signal | None:
+        """Resolve the active earnings surprise as-of the latest candle.
+
+        Mirrors PEADStrategy's drift-window discipline verbatim (look-ahead
+        guard): a future announcement (announcement_date > bar date) is
+        skipped, and an event older than the drift window is skipped. This path
+        does NOT read sentiment_score (D-02 / Pitfall 1). The emitted Signal
+        carries the Phase-59 D-01 ``is_proxy`` label forward.
+        """
+        if not candles:
+            return None
+        surprises = self._surprises.get(symbol)
+        if not surprises:
+            return None
+
+        current_candle = candles[-1]
+        current_date = current_candle.timestamp
+
+        best: EarningsSurprise | None = None
+        for surprise in surprises:
+            # Future event: silent (look-ahead guard).
+            if current_date.date() < surprise.announcement_date.date():
+                continue
+            bars_since = sum(
+                1 for c in candles if c.timestamp.date() > surprise.announcement_date.date()
+            )
+            # Out-of-drift-window: silent.
+            if bars_since > self._drift_window_bars:
+                continue
+            if best is None or surprise.announcement_date > best.announcement_date:
+                best = surprise
+
+        if best is None:
+            return None
+
+        # Gate on SUE magnitude (independent of sentiment_score).
+        if abs(best.sue_score) < self._sue_threshold:
+            return None
+
+        direction = SignalDirection.BUY if best.sue_score > 0 else SignalDirection.SELL
+        excess = abs(best.sue_score) - self._sue_threshold
+        confidence = min(
+            _SUE_MAX_CONFIDENCE,
+            _SUE_CONFIDENCE_BASE + excess * _SUE_CONFIDENCE_SCALE,
+        )
+
+        return Signal(
+            strategy_name=self.name,
+            symbol=symbol,
+            market_id=current_candle.market_id,
+            segment_id=segment_id,
+            direction=direction,
+            confidence=confidence,
+            metadata=SignalMetadata(event_type=EventType.EARNINGS),
+            strategy_payload={
+                "sue_score": best.sue_score,
+                "is_proxy": float(best.is_proxy),
+            },
+            reasoning=(f"earnings SUE proxy={best.sue_score:+.2f} (is_proxy={best.is_proxy})"),
+        )
 
     def supported_segments(self) -> list[str]:
         """Return segment IDs where event_driven strategy is enabled."""
@@ -122,6 +230,14 @@ class EventDrivenStrategy(BaseStrategy):
         Returns:
             Signal or None if sentiment is within neutral range.
         """
+        # Earnings SUE path (Phase 60, D-02): self-resolving from the registered
+        # calendar by the latest candle's date. Checked FIRST and independent of
+        # sentiment_score (the engine passes 0.0, so the news path below is dead
+        # in backtest). Returns None when no in-window surprise clears the gate.
+        earnings_signal = self._resolve_earnings_signal(symbol, candles, segment_id)
+        if earnings_signal is not None:
+            return earnings_signal
+
         params = self.get_parameters(segment_id)
         raw_min = params.get("min_sentiment", _DEFAULT_MIN_SENTIMENT)
         min_sentiment: float = (

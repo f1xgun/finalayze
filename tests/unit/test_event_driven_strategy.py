@@ -11,6 +11,7 @@ import pytest
 
 from finalayze.core.schemas import Candle, EventType, SignalDirection
 from finalayze.strategies.event_driven import EventDrivenStrategy
+from finalayze.strategies.pead import EarningsSurprise
 
 _CANDLE = Candle(
     symbol="AAPL",
@@ -211,3 +212,72 @@ class TestEventTypeCode:
         )
         assert signal is not None
         assert signal.confidence == pytest.approx(0.56, abs=0.01)
+
+
+class TestEarningsPathIndependentOfSentiment:
+    """The Phase-60 earnings SUE path (D-02) must not depend on sentiment_score."""
+
+    _ANN_DATE = datetime(2024, 1, 1, tzinfo=UTC)
+    _SUE_ABOVE_THRESHOLD = 2.0
+
+    def _candles_two_days(self) -> list[Candle]:
+        # Two daily candles ending 2024-01-02 (announcement was 2024-01-01).
+        prior = Candle(
+            symbol="GAZP",
+            market_id="moex",
+            timeframe="1d",
+            timestamp=datetime(2024, 1, 1, tzinfo=UTC),
+            open=Decimal(170),
+            high=Decimal(175),
+            low=Decimal(168),
+            close=Decimal(172),
+            volume=5000,
+        )
+        return [prior, _CANDLE_RU]
+
+    def test_news_path_still_fires_on_sentiment(self) -> None:
+        """The existing sentiment-driven news path remains intact."""
+        strategy = EventDrivenStrategy()
+        signal = strategy.generate_signal("AAPL", _CANDLES, _SEGMENT, sentiment_score=0.8)
+        assert signal is not None
+        assert signal.metadata.event_type == EventType.NONE
+
+    def test_earnings_path_fires_with_zero_sentiment(self) -> None:
+        """A registered in-window SUE fires even when sentiment_score=0.0."""
+        strategy = EventDrivenStrategy()
+        strategy.add_earnings_surprise(
+            EarningsSurprise(
+                symbol="GAZP",
+                announcement_date=self._ANN_DATE,
+                sue_score=self._SUE_ABOVE_THRESHOLD,
+                actual_eps=10.0,
+                expected_eps=5.0,
+                is_proxy=True,
+            ),
+        )
+        signal = strategy.generate_signal(
+            "GAZP", self._candles_two_days(), _SEGMENT_RU, sentiment_score=0.0
+        )
+        assert signal is not None
+        assert signal.direction == SignalDirection.BUY
+        assert signal.metadata.event_type == EventType.EARNINGS
+        assert signal.strategy_payload["is_proxy"] == 1.0
+
+    def test_earnings_reset_clears_calendar(self) -> None:
+        """reset() clears the registered earnings calendar."""
+        strategy = EventDrivenStrategy()
+        strategy.add_earnings_surprise(
+            EarningsSurprise(
+                symbol="GAZP",
+                announcement_date=self._ANN_DATE,
+                sue_score=self._SUE_ABOVE_THRESHOLD,
+                actual_eps=10.0,
+                expected_eps=5.0,
+                is_proxy=True,
+            ),
+        )
+        strategy.reset()
+        signal = strategy.generate_signal(
+            "GAZP", self._candles_two_days(), _SEGMENT_RU, sentiment_score=0.0
+        )
+        assert signal is None
