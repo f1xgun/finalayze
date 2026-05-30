@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from finalayze.api.metrics import MetricsCollector
     from finalayze.core.schemas import Candle, PortfolioState, Signal
     from finalayze.data.macro_cache import MacroCacheService
-    from finalayze.execution.broker_base import OrderRequest
+    from finalayze.execution.broker_base import BrokerBase, OrderRequest
     from finalayze.execution.broker_router import BrokerRouter
     from finalayze.markets.instruments import InstrumentRegistry
     from finalayze.ml.registry import MLModelRegistry
@@ -80,7 +80,7 @@ class _SignalContext:
     symbol: str
     sentiment_score: float
     has_open_position: bool
-    broker: Any  # routed broker for downstream alert/submit
+    broker: BrokerBase  # routed broker for downstream alert/submit
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +90,7 @@ class _OrderContext:
     candles: list[Candle]
     seg_id: str
     symbol: str
-    broker: Any
+    broker: BrokerBase
     is_day_trade: bool
     kelly_fraction: Decimal
 
