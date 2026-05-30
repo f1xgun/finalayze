@@ -284,6 +284,9 @@ class BacktestPositionExecutor:
             correlation_scale=Decimal("1.0"),
             returns_history=tuple(self._portfolio_returns),
             ml_confidence=ml_confidence,
+            # Phase 60 (INTG-03): per-bar date for look-ahead-safe macro resolution
+            # (CpiRiskOffStep reads the latest CPI month published on/before this bar).
+            bar_date=fill_candle.timestamp.date(),
         )
         if self._sizing_pipeline is None:
             return

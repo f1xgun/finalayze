@@ -16,12 +16,17 @@ from __future__ import annotations
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
+from finalayze.backtest.config import BacktestConfig
+from finalayze.backtest.engine import BacktestEngine
+from finalayze.core.schemas import Candle, Signal
 from finalayze.risk.position_sizing_pipeline import (
     _FOUR_DP,
     CpiRiskOffStep,
+    PositionSizingPipeline,
     RegimeStep,
     SizingContext,
 )
+from finalayze.strategies.base import BaseStrategy
 
 # ── Shared constants (ruff PLR2004: no magic numbers) ───────────────────────
 _TEST_SIZE = Decimal("100000.0000")
@@ -166,3 +171,66 @@ class TestLookaheadCpiPerBar:
         step = CpiRiskOffStep(segment_id=_US_SEG)
         result = step.adjust(_TEST_SIZE, _make_context(bar_date=_AFTER_DEC24_PUB))
         assert result == _TEST_SIZE
+
+
+class _NoopStrategy(BaseStrategy):
+    """Minimal strategy stub for engine wiring tests (no signals)."""
+
+    @property
+    def name(self) -> str:
+        return "noop"
+
+    def supported_segments(self) -> list[str]:
+        return ["ru_energy"]
+
+    def generate_signal(
+        self,
+        symbol: str,
+        candles: list[Candle],
+        segment_id: str,
+        sentiment_score: float = 0.0,
+        has_open_position: bool = False,
+    ) -> Signal | None:
+        _ = (symbol, candles, segment_id, sentiment_score, has_open_position)
+        return None
+
+    def get_parameters(self, segment_id: str) -> dict[str, object]:
+        _ = segment_id
+        return {}
+
+
+def _build_engine_pipeline(segment_id: str) -> PositionSizingPipeline:
+    engine = BacktestEngine(strategy=_NoopStrategy(), config=BacktestConfig())
+    return engine._build_sizing_pipeline(segment_id)
+
+
+class TestCpiRiskOffEngineWiring:
+    """CpiRiskOffStep is wired into the backtest sizing pipeline, per-bar."""
+
+    def test_cpi_step_present_for_ru_segment(self) -> None:
+        """A ru_ segment pipeline contains a CpiRiskOffStep (after CBRRegimeStep)."""
+        steps = _build_engine_pipeline(_RU_SEG).steps
+        types = [type(s).__name__ for s in steps]
+        assert "CpiRiskOffStep" in types
+        # ordered after CBRRegimeStep and before HardCapsStep
+        assert types.index("CBRRegimeStep") < types.index("CpiRiskOffStep")
+        assert types.index("CpiRiskOffStep") < types.index("HardCapsStep")
+
+    def test_lookahead_cpi_engine_step_resolves_per_bar(self) -> None:
+        """The engine-built CpiRiskOffStep resolves CPI per-bar: an early bar is
+        neutral, a late bar (past the 2024-12 publication) is risk-off."""
+        steps = _build_engine_pipeline(_RU_SEG).steps
+        cpi_step = next(s for s in steps if type(s).__name__ == "CpiRiskOffStep")
+        early = cpi_step.adjust(_TEST_SIZE, _make_context(bar_date=_EARLY_BAR))
+        late = cpi_step.adjust(_TEST_SIZE, _make_context(bar_date=_AFTER_DEC24_PUB))
+        assert early == (_TEST_SIZE * _NEUTRAL_SCALE).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+        assert late == (_TEST_SIZE * _HIGH_INFLATION_SCALE).quantize(
+            _FOUR_DP, rounding=ROUND_HALF_UP
+        )
+        assert late < early
+
+    def test_cpi_step_absent_for_non_ru_without_config(self) -> None:
+        """A non-ru_ segment with cpi_yoy_fraction=0.0 gets no CpiRiskOffStep."""
+        steps = _build_engine_pipeline("us_tech").steps
+        types = [type(s).__name__ for s in steps]
+        assert "CpiRiskOffStep" not in types
