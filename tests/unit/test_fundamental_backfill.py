@@ -47,15 +47,17 @@ def _read(name: str) -> str:
 
 def _make_smartlab_fetcher(symbol: str, fixture: str) -> MagicMock:
     """A SmartlabFundamentalsFetcher stand-in whose parse_html returns fixture snapshots."""
-    fetcher = MagicMock()
-    fetcher.fetch_html.return_value = _read(fixture)
-    fetcher.assert_robots_allowed.return_value = None
-    # build_snapshots is expected to call parse_html(content, symbol); delegate to the
-    # real parser via the production import once Plan 02 lands (RED until then).
     from finalayze.data.fetchers.smartlab_fundamentals import (  # noqa: PLC0415
         SmartlabFundamentalsFetcher,
     )
 
+    # spec the mock against the real class so ``assert_robots_allowed`` is a
+    # recognised attribute (MagicMock otherwise rejects ``assert*`` names).
+    fetcher = MagicMock(spec=SmartlabFundamentalsFetcher)
+    fetcher.fetch_html.return_value = _read(fixture)
+    fetcher.assert_robots_allowed.return_value = None
+    # build_snapshots is expected to call parse_html(content, symbol); delegate to the
+    # real parser via the production import once Plan 02 lands (RED until then).
     real = SmartlabFundamentalsFetcher()
     fetcher.parse_html.side_effect = lambda content, sym=symbol: real.parse_html(content, sym)
     return fetcher

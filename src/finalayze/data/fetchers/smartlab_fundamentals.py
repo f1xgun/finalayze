@@ -111,23 +111,33 @@ class SmartlabFundamentalsFetcher:
 
     # ── Fetch (polite + cached) ───────────────────────────────────────────────
 
-    def fetch(self, symbol: str, statement: str = "MSFO") -> list[FundamentalSnapshot]:
-        """Fetch and parse *symbol*'s per-quarter fundamentals.
+    def fetch_html(self, symbol: str, statement: str = "MSFO") -> str:
+        """Fetch *symbol*'s raw fundamentals HTML (robots-gated + cached).
 
-        Robots gate runs FIRST (hard-stop before any pull). On-disk cache short-
-        circuits a re-run so it does not re-hit the network (D-02).
+        Robots gate runs FIRST (hard-stop before any pull, BACKFILL-H-04). On-disk
+        cache short-circuits a re-run so it does not re-hit the network (D-02).
+        Returns the HTML string; parsing is the caller's concern (see :meth:`fetch`
+        and the Plan-04 backfill driver, which composes ``fetch_html`` + ``parse_html``).
         """
         path = f"/q/{symbol}/f/q/{statement}/"
         self.assert_robots_allowed(path)
 
         cached = self._read_cache(symbol, statement)
         if cached is not None:
-            return self.parse_html(cached, symbol)
+            return cached
 
         url = _URL_TMPL.format(symbol=symbol, statement=statement)
         content = self._request("GET", url).decode("utf-8", errors="replace")
         self._write_cache(symbol, statement, content)
-        return self.parse_html(content, symbol)
+        return content
+
+    def fetch(self, symbol: str, statement: str = "MSFO") -> list[FundamentalSnapshot]:
+        """Fetch and parse *symbol*'s per-quarter fundamentals.
+
+        Thin composition of :meth:`fetch_html` (robots gate + cache + GET) and
+        :meth:`parse_html`.
+        """
+        return self.parse_html(self.fetch_html(symbol, statement), symbol)
 
     def _cache_path(self, symbol: str, statement: str) -> Path:
         return _CACHE_DIR / f"{symbol}_{statement}.html"
