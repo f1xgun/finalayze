@@ -34,16 +34,10 @@ from finalayze.data.moex_calendar import is_moex_holiday
 from finalayze.markets.currency import CurrencyConverter
 from finalayze.markets.schedule import SCHEDULES
 from finalayze.orchestration.async_runtime import AsyncRuntime
-from finalayze.orchestration.daily_reporting import DailyReportingService
-from finalayze.orchestration.db_persistence import TradingPersistence
-from finalayze.orchestration.ml_retraining import MLRetrainingService
-from finalayze.orchestration.news_pipeline import NewsPipeline
-from finalayze.orchestration.position_manager import PositionTracker
 from finalayze.orchestration.sentiment_manager import SentimentManager
 from finalayze.orchestration.signal_executor import (
     _CANDLE_LOOKBACK,  # noqa: F401  # re-export for tests
     _STALENESS_THRESHOLD_HOURS,  # noqa: F401  # re-export for tests
-    SignalExecutor,
 )
 
 if TYPE_CHECKING:
@@ -371,51 +365,27 @@ class TradingLoop:
             on_async_loop_created=_on_async_loop_created,
         )
 
-        # Database persistence (fire-and-forget writes to avoid crashing trading loop).
-        # Must be constructed BEFORE PositionTracker so we can inject it (STOP-03).
-        # Note: _async_loop is None here; it will be wired via callback when first created.
-        db_url = getattr(settings, "database_url", None)
-        self._persistence = TradingPersistence(db_url, None, settings)
+        # Construct all 6 service collaborators in dependency order (STOP-03).
+        # TradingPersistence must be first, then PositionTracker, then the rest.
+        from finalayze.orchestration.loop_services import build_loop_services  # noqa: PLC0415
 
-        # Position tracker (Phase 1.6): stop-loss, entry prices, strategy ownership.
-        # Accepts self._persistence so it can fire entry/trigger/snapshot events
-        # into the stop_loss_events table (STOP-03, D-06).
-        self._position_tracker = PositionTracker(
-            kelly_sizer=self._kelly_sizer,
-            broker_router=broker_router,
-            alerter=alerter,
-            persistence=self._persistence,
-        )
-
-        # Signal executor (Phase 1.7): signal generation, order building, submission
-        self._signal_executor = SignalExecutor(
-            strategy=strategy,
-            broker_router=broker_router,
-            position_tracker=self._position_tracker,
+        _services = build_loop_services(
+            deps,
             sentiment_mgr=self._sentiment_mgr,
-            persistence=self._persistence,
+            kelly_sizer=self._kelly_sizer,
             pre_trade_checker=self._pre_trade_checker,
             loss_limit_tracker=self._loss_limit_tracker,
-            macro_cache=macro_cache,
-            health_monitor=health_monitor,
-            sandbox_monitor=sandbox_monitor,
-            metrics=metrics_collector,
-            alerter=alerter,
-            registry=instrument_registry,
-            ml_registry=ml_registry,
-            settings=settings,
+            now_fn=self._now,
+            run_async_fn=self._run_async,
         )
+        self._persistence = _services.persistence
+        self._position_tracker = _services.position_tracker
+        self._signal_executor = _services.signal_executor
+        self._ml_retrainer = _services.ml_retrainer
+        self._daily_reporter = _services.daily_reporter
+        self._news_pipeline = _services.news_pipeline
 
         self._ml_registry = ml_registry
-        self._ml_retrainer = MLRetrainingService(
-            fetchers=fetchers,
-            registry=instrument_registry,
-            ml_registry=ml_registry,
-            settings=settings,
-            alerter=alerter,
-            collect_segments_fn=self._sentiment_mgr.collect_active_segments,
-            now_fn=self._now,
-        )
         self._scheduler: BackgroundScheduler | None = None
         self._stop_event = threading.Event()
 
@@ -431,37 +401,6 @@ class TradingLoop:
         # Per-cycle portfolio cache: market_id -> PortfolioState
         # Populated at the start of each strategy cycle, cleared at the end.
         self._cycle_portfolio_cache: dict[str, Any] = {}
-
-        # Daily reporting service (extracted Phase 1.4)
-        self._daily_reporter = DailyReportingService(
-            broker_router=broker_router,
-            circuit_breakers=circuit_breakers,
-            cross_market_breaker=cross_market_breaker,
-            loss_limit_tracker=self._loss_limit_tracker,
-            alerter=alerter,
-            persistence=self._persistence,
-            bond_processor=bond_cycle_processor,
-            fx_service=fx_service,
-            metrics_collector=metrics_collector,
-            settings=settings,
-            now_fn=self._now,
-        )
-
-        # News pipeline service (extracted Phase 1.5)
-        self._news_pipeline = NewsPipeline(
-            rss_fetcher=rss_fetcher,
-            telegram_reader=telegram_reader,
-            news_fetcher=news_fetcher,
-            news_impact_analyzer=news_impact_analyzer,
-            sector_ticker_mapper=sector_ticker_mapper,
-            sentiment_mgr=self._sentiment_mgr,
-            persistence=self._persistence,
-            registry=instrument_registry,
-            cache=cache,
-            settings=settings,
-            alerter=alerter,
-            async_loop_fn=self._run_async,
-        )
 
         # asyncio.Lock for gRPC client serialization (equity + bond don't overlap)
         self._grpc_lock = asyncio.Lock()
