@@ -51,6 +51,34 @@ _DEFAULT_AVG_WIN_RATIO = Decimal("1.5")
 # execution desks; larger orders get split over multiple bars.
 _DEFAULT_MAX_ORDER_VOLUME_PCT = Decimal("0.05")
 
+# Minimum tradeable position ("dust floor"), currency-aware. The floor MUST
+# stay strictly below the Kelly sizing band (Kelly returns 0.5-1% of equity in
+# cold-start / negative-expectancy windows). The previous MOEX coefficient was
+# 2% -- dead code masked by the 5000-RUB cap -- which at a 1M-RUB book produced
+# a flat 5000-RUB floor sitting *inside* the Kelly band, so VolTarget/Regime
+# down-scaling tipped legitimately-sized positions below it and the pipeline
+# zeroed them (skip_reason="position_value_zero"). 0.1% keeps the floor a true
+# dust threshold below Kelly; the 5000-RUB cap preserves whole-lot sizing for
+# expensive names on a large book.
+_MOEX_MIN_POS_CAP = Decimal(5000)
+_MOEX_MIN_POS_ABS = Decimal(1000)
+_MOEX_MIN_POS_PCT = Decimal("0.001")
+_US_MIN_POS_CAP = Decimal(500)
+_US_MIN_POS_ABS = Decimal(100)
+_US_MIN_POS_PCT = Decimal("0.005")
+
+
+def compute_min_position_floor(equity: Decimal, segment_id: str) -> Decimal:
+    """Return the minimum tradeable position value (dust floor), currency-aware.
+
+    Kept strictly below the Kelly sizing band so it never collides with and
+    zeroes out a legitimately-sized position. See module constants for the
+    rationale behind the MOEX recalibration (audit #16 second sizing floor).
+    """
+    if segment_id.startswith("ru_"):
+        return min(_MOEX_MIN_POS_CAP, max(_MOEX_MIN_POS_ABS, equity * _MOEX_MIN_POS_PCT))
+    return min(_US_MIN_POS_CAP, max(_US_MIN_POS_ABS, equity * _US_MIN_POS_PCT))
+
 
 class BacktestPositionExecutor:
     """Handles BUY / SELL order execution and trade recording.
@@ -236,11 +264,9 @@ class BacktestPositionExecutor:
             )
 
         asset_vol = compute_realized_vol(history) or Decimal("0.20")
-        # Currency-aware min position: original thresholds scaled down for small portfolios
-        if segment_id.startswith("ru_"):
-            min_pos = min(Decimal(5000), max(Decimal(1000), portfolio.equity * Decimal("0.02")))
-        else:
-            min_pos = min(Decimal(500), max(Decimal(100), portfolio.equity * Decimal("0.005")))
+        # Currency-aware dust floor, kept below the Kelly sizing band so it does
+        # not zero out legitimately-sized positions (audit #16 second floor).
+        min_pos = compute_min_position_floor(portfolio.equity, segment_id)
 
         # Compute ML confidence from MetaLabeler if available
         ml_confidence: float | None = None
@@ -339,15 +365,32 @@ class BacktestPositionExecutor:
             return
         quantity = (position_value / fill_price).to_integral_value(rounding=ROUND_DOWN)
         if quantity <= 0:
-            self._journal.record_skip(
-                timestamp=fill_candle.timestamp,
-                symbol=symbol,
-                segment_id=segment_id,
-                broker=broker,
-                history=history,
-                skip_reason="quantity_zero",
-            )
-            return
+            # Backtest realism: the sized allocation (already >= min_position_size)
+            # is smaller than one whole share, so it floors to 0 -- common for
+            # expensive MOEX names (e.g. AKRN ~19000 RUB). Round to the *nearest*
+            # whole share at this 0->1 boundary: if at least half a share was
+            # wanted AND one share fits inside the hard position cap and available
+            # cash, take the minimum tradeable size of 1 share rather than silently
+            # dropping a valid positive-expectancy signal. Floor stays for qty >= 1.
+            one_share_cost = fill_price
+            max_position_value = portfolio.equity * self._max_position_pct
+            rounds_up = position_value * 2 >= one_share_cost
+            if (
+                rounds_up
+                and one_share_cost <= portfolio.cash
+                and one_share_cost <= max_position_value
+            ):
+                quantity = Decimal(1)
+            else:
+                self._journal.record_skip(
+                    timestamp=fill_candle.timestamp,
+                    symbol=symbol,
+                    segment_id=segment_id,
+                    broker=broker,
+                    history=history,
+                    skip_reason="quantity_zero",
+                )
+                return
 
         # Liquidity cap: never exceed max_order_volume_pct of the fill bar's volume.
         # Large orders relative to ADV are unrealistic at the open price; we clamp

@@ -199,10 +199,15 @@ class TestMoexMinPositionSize:
         return captured_context["min_position_size"]
 
     def test_moex_segment_scales_min_pos_with_equity(self) -> None:
-        """MOEX min_pos scales with equity: min(5000, max(1000, equity * 0.02))."""
+        """MOEX dust floor: min(5000, max(1000, equity * 0.001)).
+
+        Recalibrated (audit #16): the coefficient was 0.02, which at a 1M-RUB
+        book collided with the Kelly sizing band and zeroed thin positions
+        (position_value_zero). 0.1% keeps the floor below Kelly.
+        """
         min_pos = self._run_handle_buy_and_get_min_pos("ru_blue_chips")
-        # With 100K equity: min(5000, max(1000, 2000)) = 2000
-        expected = Decimal(2000)
+        # With 100K equity: min(5000, max(1000, 100)) = 1000 (absolute minimum).
+        expected = Decimal(1000)
         assert min_pos == expected
 
     def test_us_segment_uses_500_usd_min_pos(self) -> None:

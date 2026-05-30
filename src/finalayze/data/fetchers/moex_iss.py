@@ -48,6 +48,10 @@ _WEEKEND_WEEKDAY_MIN = 5
 # ISS VALTODAY is reported in millions of RUB; multiply by this to get raw RUB
 _VALTODAY_MULTIPLIER = Decimal(1000000)
 
+# Emit a turnover-backfill progress log every N weekdays (only for ranges large
+# enough to be slow); keeps long cold-cache fetches observable.
+_TURNOVER_PROGRESS_EVERY = 60
+
 _log = structlog.get_logger()
 
 
@@ -140,12 +144,34 @@ class MoexISSFetcher(BaseFetcher):
         url = f"{_BASE_URL}/engines/stock/turnovers.json"
         records: list[TurnoverRecord] = []
 
+        # Progress accounting: one rate-limited request per weekday, so a cold
+        # multi-year range is slow and otherwise silent. Log every N weekdays so
+        # callers (e.g. backtest runner) can track a long backfill.
+        total_weekdays = sum(
+            1
+            for d in range((end - start).days)
+            if (start + timedelta(days=d)).weekday() < _WEEKEND_WEEKDAY_MIN
+        )
+        processed = 0
+
         current = start.replace(hour=0, minute=0, second=0, microsecond=0)
         while current < end:
             # §17-M1: Skip weekends
             if current.weekday() >= _WEEKEND_WEEKDAY_MIN:
                 current += timedelta(days=1)
                 continue
+
+            processed += 1
+            if (
+                total_weekdays >= _TURNOVER_PROGRESS_EVERY
+                and processed % _TURNOVER_PROGRESS_EVERY == 0
+            ):
+                _log.info(
+                    "moex_turnover_fetch_progress",
+                    processed=processed,
+                    total=total_weekdays,
+                    date=current.strftime("%Y-%m-%d"),
+                )
 
             date_str = current.strftime("%Y-%m-%d")
             data = self._get_json(url, params={"date": date_str})
