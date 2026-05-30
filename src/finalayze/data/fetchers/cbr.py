@@ -50,6 +50,12 @@ _KEY_RATE_PERCENT_DIVISOR = Decimal(100)  # CBR returns percentage points
 _ZCYC_URL = "https://www.cbr.ru/hd_base/zcyc_params/"
 _ZCYC_MATURITIES = ("0.25", "0.50", "0.75", "1", "2", "3", "5", "7", "10", "15", "20", "30")
 _INDEXATION_URL = "https://www.cbr.ru/hd_base/ostat_depo_new/"
+# CBR inflation dynamics page (YoY CPI). RESEARCH A2: the live HTML table layout is
+# UNCONFIRMED (the page may be JS-rendered/PDF); _parse_inflation_html's xpath is a
+# best-known guess and may need a one-off MANUAL-verify pass — see the single
+# clearly-commented xpath block in _parse_inflation_html and 59-VALIDATION.md
+# "Manual-Only Verifications" (CPI-01).
+_INFLATION_URL = "https://www.cbr.ru/eng/analytics/dkp/dinamic/"
 
 
 class CBRFetcher:
@@ -187,6 +193,65 @@ class CBRFetcher:
             return Decimal(coeff_str)
         except (ValueError, ArithmeticError):
             return None
+
+    def fetch_cpi_yoy(self, as_of: date) -> dict[str, Decimal] | None:
+        """Fetch YoY CPI from CBR for *as_of*, mirroring fetch_yield_curve.
+
+        Returns a dict of covered-month (``YYYY-MM``) -> YoY value in **percentage
+        points** (the ``_CPI_DATA`` unit), or ``None`` if the page is unreachable /
+        unparseable (no fabrication — ``_CPI_DATA`` stays the seeded fallback).
+
+        NO unit conversion here: ``get_cpi_yoy_fraction`` already does the ``/ 100``
+        fraction conversion at its read boundary; do NOT double-convert.
+
+        Sync only — call from async via ``asyncio.to_thread`` (CBRFetcher is sync).
+        """
+        params = {"DateReq": as_of.strftime("%d.%m.%Y")}
+        try:
+            content = self._request("GET", _INFLATION_URL, params=params)
+        except DataFetchError:
+            _log.warning("cbr_cpi_fetch_failed", as_of=str(as_of))
+            return None
+        return self._parse_inflation_html(content.decode("utf-8", errors="replace"))
+
+    @staticmethod
+    def _parse_inflation_html(content: str) -> dict[str, Decimal] | None:
+        """Parse the CBR inflation HTML table into covered-month -> YoY pct points.
+
+        Mirrors ``_parse_zcyc_html``: ``lxml_html.fromstring`` -> the ``data`` table ->
+        per-row (covered_month, YoY) extraction -> ``Decimal(val.replace(",", "."))``.
+        Returns ``None`` if no data rows are found (mirrors the "no rows -> None" rule).
+
+        RESEARCH A2: the live table layout is UNCONFIRMED — the row/cell xpath below is
+        kept as a single, clearly-commented, easily-adjustable block (the MANUAL-verify
+        seam). If the live HTML differs, adjust THIS block and re-run Plan 02 tests.
+        """
+        doc = lxml_html.fromstring(content)
+        tables: Any = doc.xpath("//table[contains(@class, 'data')]")
+        if not tables:
+            return None
+
+        table: Any = tables[0]
+        rows: Any = table.xpath(".//tr")
+        if len(rows) < 2:  # noqa: PLR2004 -- header + at least 1 data row
+            return None
+
+        # ── MANUAL-verify xpath seam (A2): covered_month in col 0, YoY % in col 1 ──
+        result: dict[str, Decimal] = {}
+        for row in rows[1:]:  # skip header
+            cells: list[str] = [c.text_content().strip() for c in row.xpath("td")]
+            if len(cells) < 2:  # noqa: PLR2004 -- need month + value
+                continue
+            month_key, val_str = cells[0], cells[1]
+            if not month_key or not val_str:
+                continue
+            try:
+                result[month_key] = Decimal(val_str.replace(",", "."))
+            except (ValueError, ArithmeticError):
+                continue
+        # ──────────────────────────────────────────────────────────────────────────
+
+        return result or None
 
     def fetch_key_rate(self, start: datetime, end: datetime) -> list[KeyRateRecord]:
         """Fetch CBR key rate history via SOAP. Rate normalized to decimal fraction."""
@@ -554,6 +619,67 @@ def cpi_data_staleness_months(as_of: date) -> int:
     latest_year, latest_month = int(latest[:4]), int(latest[5:7])
     diff = (as_of.year - latest_year) * 12 + (as_of.month - latest_month)
     return max(0, diff - _CPI_PUBLICATION_LAG_MONTHS)
+
+
+def _effective_cpi_publication_date(covered_month: str) -> date:
+    """Effective publication date for a fetched CPI month with no recorded entry.
+
+    Mirrors the lag ``cpi_data_staleness_months`` already uses: month-end of
+    *covered_month* plus ``_CPI_PUBLICATION_LAG_MONTHS`` months. Used as the
+    look-ahead boundary for newly-fetched months absent from ``CPI_PUBLICATION_DATES``.
+    """
+    year, month = int(covered_month[:4]), int(covered_month[5:7])
+    # Publication lands in (covered_month + lag); use day 1 of that month as the
+    # effective availability date (conservative within the month).
+    total = (year * 12 + (month - 1)) + _CPI_PUBLICATION_LAG_MONTHS
+    pub_year, pub_month = divmod(total, 12)
+    return date(pub_year, pub_month + 1, 1)
+
+
+def refresh_cpi_data(fetched: dict[str, Decimal], as_of: date) -> int:
+    """Overlay publication-eligible fetched CPI months into the single ``_CPI_DATA`` source.
+
+    IN-MEMORY overlay only (D-04 backtest-first: no persistence / live-loop scheduler
+    this phase). ``_CPI_DATA`` stays the seeded FALLBACK for any month not overlaid —
+    no fabrication. Feeding the single source means ``get_cpi_yoy_fraction`` /
+    ``latest_cpi_month`` / ``cpi_data_staleness_months`` reflect live data with NO
+    change to their bodies.
+
+    Look-ahead safety (T-59-04): a fetched month is overlaid ONLY when its publication
+    date is on or before *as_of*. If the month already has a ``CPI_PUBLICATION_DATES``
+    entry, that date is used; otherwise an effective publication date is derived as
+    month-end + ``_CPI_PUBLICATION_LAG_MONTHS`` and recorded into ``CPI_PUBLICATION_DATES``
+    so the existing ``get_latest_published_cpi_month`` machinery stays consistent.
+
+    Returns the count of months actually overlaid.
+    """
+    overlaid = 0
+    for covered_month, yoy_pct in fetched.items():
+        recorded = CPI_PUBLICATION_DATES.get(covered_month)
+        if recorded is not None:
+            pub_date = recorded
+        else:
+            pub_date = _effective_cpi_publication_date(covered_month)
+        if pub_date > as_of:
+            continue  # not yet publication-eligible — stays unavailable (look-ahead safe)
+        if recorded is None:
+            CPI_PUBLICATION_DATES[covered_month] = pub_date
+        _CPI_DATA[covered_month] = yoy_pct
+        overlaid += 1
+    return overlaid
+
+
+def refresh_cpi_from_cbr(fetcher: CBRFetcher, as_of: date) -> int:
+    """Fetch live CPI via *fetcher* and overlay publication-eligible months into ``_CPI_DATA``.
+
+    Thin convenience seam a future live-loop (deferred per D-04) would call. Returns the
+    overlaid count, or 0 when the fetch returns ``None`` (the seeded ``_CPI_DATA`` is left
+    intact — no fabrication on a fetch miss). No scheduler is wired this phase.
+    """
+    fetched = fetcher.fetch_cpi_yoy(as_of)
+    if fetched is None:
+        return 0
+    return refresh_cpi_data(fetched, as_of)
 
 
 _YIELD_CURVE_SLOPE_BPS: dict[str, float] = {

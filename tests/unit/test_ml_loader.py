@@ -588,3 +588,47 @@ class TestFeatureSchemaVersion:
         assert meta_path.exists()
         meta = json.loads(meta_path.read_text())
         assert meta["feature_schema_version"] == FEATURE_SCHEMA_VERSION
+
+
+# ---------------------------------------------------------------------------
+# Plan 59-04 (FUND-02): FEATURE_SCHEMA_VERSION 3 -> 4 + signature guard
+# ---------------------------------------------------------------------------
+
+
+class TestFeatureSchemaVersionV4:
+    """FUND-02: version bumped to 4; v3 artifacts rejected; signature unchanged."""
+
+    def test_feature_schema_version_is_4(self) -> None:
+        from finalayze.ml.loader import FEATURE_SCHEMA_VERSION
+
+        assert FEATURE_SCHEMA_VERSION == 4
+
+    def test_v3_artifact_rejected(self, tmp_path: Path) -> None:
+        """A segment_meta with feature_schema_version=3 is rejected at load."""
+        segment_dir = tmp_path / "ru_energy"
+        segment_dir.mkdir(parents=True)
+
+        xgb = XGBoostModel(segment_id="ru_energy")
+        xgb.fit([{"a": 1.0, "b": 2.0}] * 20, [1, 0] * 10)
+        joblib.dump(xgb, segment_dir / "xgb.pkl")
+
+        meta = {"feature_schema_version": 3, "base_rate": 0.5}
+        (segment_dir / "segment_meta.json").write_text(json.dumps(meta))
+
+        registry = load_registry(tmp_path, ["ru_energy"])
+        assert registry.get("ru_energy") is None
+
+    def test_compute_features_signature_unchanged(self) -> None:
+        """BLOCKER 2 guard: compute_features must not gain a segment/sector_peers param."""
+        import inspect
+
+        from finalayze.ml.features.technical import compute_features
+
+        params = tuple(inspect.signature(compute_features).parameters)
+        assert params == (
+            "candles",
+            "sentiment_score",
+            "market_context",
+            "benchmark_candles",
+            "vix_candles",
+        )

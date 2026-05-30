@@ -87,6 +87,14 @@ _FEATURE_NAMES = {
     "brent_return",
     "brent_ret_5d",
     "brent_ret_21d",
+    # Fundamental features (Phase 59 Plan 04, FUND-02; default 0.0 when no
+    # MOEX fundamentals provided). Registered into compute_features via the
+    # technical.py dict-spread — see test_ml_features.py::TestTotalFeatureCount.
+    "earnings_yield",
+    "pe_zscore_vs_sector",
+    "revenue_growth_yoy",
+    "net_margin_trend",
+    "dividend_yield_z",
 }
 _N_FEATURES = len(_FEATURE_NAMES)
 
