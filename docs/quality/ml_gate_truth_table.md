@@ -124,3 +124,135 @@ loaded and produced trades (trade_count = 12 > 0; firing strategies observed:
 in the pool, confirming the disable took effect). The REJECT verdict reflects baseline
 MOEX economics, not a defect (consistent with the prior `phase60-ru_energy-wired` REJECT).
 The Stage-0 gate criterion — preset still loads and trades after the ML disable — is met.
+
+---
+
+## Phase 62 — Stage 1 verdicts (legitimate retrain, no force-save)
+
+**Date:** 2026-05-30
+**Phase:** 62 (Stage 1 of the v10.3 retrain milestone)
+**Requirements:** RETRAIN-01, RETRAIN-02, RETRAIN-03
+
+Stage 0 (Phase 61, above) was **disable-only** and is preserved verbatim as the *before*
+state. Stage 1 (this section) is the one place ML is permitted to be turned back ON — but
+only for a segment whose model **legitimately passes** the walk-forward gate with **NO
+`--force-save`**. Each of the 4 trainable `ru_*` segments was retrained through the fixed
+pipeline (`triple_barrier --walk-forward --excess-returns --sequential-bootstrap`, **no
+`--force-save`**); the 13 sector/bond segments have no `SEGMENT_SYMBOLS` mapping and are
+recorded as "not trainable", not as failures.
+
+**Honest framing (D-04):** success = legitimate verdicts recorded without force-save, even
+if **zero** segments pass. v9.1 found ru_finance / ru_tech DISC due to data limitation and
+ru_energy KEEP under the *old* (pre-tightening, ultimately force-saved) regime. The Stage-1
+re-run produced **DISC for all four** under the current tightened gate. **Net result: zero
+segments enabled; zero force-save debt remaining** for any MOEX segment.
+
+## What un-degraded `--excess-returns` (the enabling fix)
+
+Plan 62-02 found and fixed a blocking bug: `scripts/training/data_loader.py::fetch_moex_benchmark`
+routed the **IMOEX index** through `TinkoffFetcher` (share-registry FIGI lookup), which does
+not resolve a non-tradeable index → the benchmark fetch silently failed and the pipeline fell
+back to **absolute returns** (Pitfall 2 — NOT the fixed pipeline). The fix routes IMOEX
+through `MoexISSFetcher` (the MOEX-native ISS source the production `MarketDataLoader._load_moex`
+already uses; distinct from yfinance, which is never used for MOEX). After the fix, every
+Stage-1 run printed `Fetched 509 benchmark candles (IMOEX)` and computed genuine
+**excess-return** triple-barrier labels — so all four verdicts below are honest fixed-pipeline
+results (committed in `f55a920`).
+
+## Stage-1 verdict table — all 17 `ru_*` segments
+
+Columns: trainable (has `SEGMENT_SYMBOLS`)? · preset YAML? · in `run_iteration` UNIVERSE
+(backtest-gateable)? · data source used · n_folds · `overall_passed` · `force_saved` ·
+Stage-1 verdict · `ml_ensemble.enabled` before (Phase 61) · action taken · `ml_ensemble.enabled`
+after · conservative weight (only if enabled).
+
+| segment | trainable? | preset? | in UNIVERSE? | data source used | n_folds | overall_passed | force_saved | Stage-1 verdict | enabled (before) | action taken | enabled (after) | cons. weight |
+|---------|-----------|---------|--------------|------------------|---------|----------------|-------------|-----------------|------------------|--------------|-----------------|--------------|
+| **ru_blue_chips** | yes | yes | yes | live Tinkoff gRPC (7/8 syms; TCSG skipped <500d) + IMOEX via MoexISS | 3 | **false** | false | **DISC** (model-quality; BH p=0.1632, best_acc 0.5307) | false (0.00) | retrained, no force-save; gate failed → no enable | false (0.00) | — |
+| **ru_energy** | yes | yes | yes | live Tinkoff gRPC (6/6 syms) + IMOEX via MoexISS | 3 | **false** | false | **DISC** (model-quality; BH p=0.9984, best_acc 0.4167; v9.1 KEEP does NOT survive tightened gate) | false (0.00) | retrained, no force-save; gate failed → no enable | false (0.00) | — |
+| **ru_finance** | yes | yes | yes | live Tinkoff gRPC (3/5 syms contribute; TCSG skipped <500d, VTBR 0 barriers) + IMOEX via MoexISS | 3 | **false** | false | **DISC** (mixed insufficient-data + model-quality; per-gate min_ratio 34% not met, best_acc 0.5297; gate-file bh_passed:false despite stdout BH p=0.0162) | false (0.00) | retrained, no force-save; gate failed → no enable | false (0.00) | — |
+| **ru_tech** | yes | yes | **no** | live Tinkoff gRPC (2/4 syms: OZON 515c→197s, VKCO 606c→419s; YNDX 11c & CIAN 0c skipped <500d) + IMOEX via MoexISS | 3 | **false** | false | **DISC (train-only)** — not in UNIVERSE → not backtest-gateable; best_acc 0.3243, BH p=1.0000 | false (0.00) | retrained train-only, no force-save; **not enabled** (DISC + no UNIVERSE entry); preset untouched | false (0.00) | — |
+| ru_metals | no | no | no | — | — | — | — | not trainable (no SEGMENT_SYMBOLS) | n/a | none | n/a | — |
+| ru_consumer | no | no | no | — | — | — | — | not trainable (no SEGMENT_SYMBOLS) | n/a | none | n/a | — |
+| ru_telecom | no | no | no | — | — | — | — | not trainable (no SEGMENT_SYMBOLS) | n/a | none | n/a | — |
+| ru_utilities | no | no | no | — | — | — | — | not trainable (no SEGMENT_SYMBOLS) | n/a | none | n/a | — |
+| ru_construction | no | no | no | — | — | — | — | not trainable (no SEGMENT_SYMBOLS) | n/a | none | n/a | — |
+| ru_chemicals | no | no | no | — | — | — | — | not trainable (no SEGMENT_SYMBOLS) | n/a | none | n/a | — |
+| ru_transport | no | no | no | — | — | — | — | not trainable (no SEGMENT_SYMBOLS) | n/a | none | n/a | — |
+| ru_ofz_pd | no | yes (bond) | no | — | — | — | — | bond preset, n/a (no `ml_ensemble` block) | n/a | none | n/a | — |
+| ru_ofz_pk | no | yes (bond) | no | — | — | — | — | bond preset, n/a (no `ml_ensemble` block) | n/a | none | n/a | — |
+
+> The 13 non-trainable rows (7 sector segments + 2 bond presets, plus the 4 trainable rows
+> = the full `DEFAULT_SEGMENTS` `ru_*` set) are classified for completeness. Bond presets
+> (`ru_ofz_pd`, `ru_ofz_pk`) declare no `ml_ensemble` block at all (guarded by
+> `test_ru_ofz_presets_have_no_ml_ensemble`); the 7 sector segments lack a `SEGMENT_SYMBOLS`
+> mapping in `scripts/training/cli.py` and pass `[]` → "No samples, skipping".
+
+## Per-segment notes
+
+### ru_blue_chips → DISC (Plan 62-02)
+Retrained; `overall_passed:false`, BH-corrected p=0.1632, best_accuracy 0.5307, n_folds 3.
+7 of 8 symbols survived the 500-day gate (TCSG skipped — delisted/rebranded TCS→T, no FIGI).
+Fold accuracies 0.563 / 0.535 / 0.531; accuracy & brier each cleared only 1/3 folds.
+`ml_ensemble` stays disabled (was already `false` weight 0.00 from Phase 61). No preset edit.
+
+### ru_energy → DISC (Plan 62-03)
+The only segment with an asymmetric `SEGMENT_BARRIER_CONFIG = (1.5, 2.0)` (×1.2 MOEX uplift
+⇒ (1.8, 2.4), applied automatically by the dataset builder — no CLI flag). Retrained;
+`overall_passed:false`, BH-corrected p=0.9984, best_accuracy 0.4167, n_folds 3. All 6/6
+symbols survived the 500-day gate → a genuine **model-quality** DISC, not insufficient-data.
+**This is the headline reconciliation:** v9.1's sole KEEP predated the gate-tightening and was
+ultimately force-saved with `gate_passed=False`; under the current gate ru_energy does **not**
+pass. The Phase-61 "KEEP-but-disabled discrepancy" is now resolved as a legitimate DISC.
+`ml_ensemble` stays disabled. No preset edit.
+
+### ru_finance → DISC (Plan 62-04)
+Retrained; `overall_passed:false`, per-gate min_ratio 34% not met (accuracy / brier_score /
+profit_factor each cleared only 1/3 folds), best_accuracy 0.5297, n_folds 3. 3 of 5 symbols
+contributed usable triple-barrier samples (SBER, MOEX, CBOM); **TCSG skipped** (<500d,
+delisted) and **VTBR produced 0 triple-barrier samples** (illiquid kopeck-priced, near-flat
+excess returns) → a **mixed insufficient-data + model-quality** DISC. Note: the stdout BH
+block printed `p=0.0162 [PASS]`, but the authoritative gate file records `overall_passed:false`
+AND `bh_passed:false`; `legit_pass` keys strictly off `overall_passed`, so the segment stays
+DISC. `ml_ensemble` stays disabled. No preset edit.
+
+### ru_tech → DISC, train-only (Plan 62-05, this plan)
+**Train-only** by design: ru_tech has a preset and is trainable, but is **not in the
+`run_iteration` UNIVERSE**, so it cannot be backtest-gated (RETRAIN-02 N/A). It is therefore
+never a candidate for enable in Stage 1 and stays `ml_ensemble.enabled:false` (its Phase-61
+state, which already satisfies the reconciliation invariant by staying disabled).
+Despite its lead symbol **YNDX being delisted (now YDEX, 11 candles → skipped <500d)** and
+**CIAN unavailable (0 candles → skipped <500d)**, the segment was **NOT** a no-samples skip:
+the two surviving newer listings trained it —
+**OZON** (515 candles → 197 triple-barrier samples, 69.5% positive) and
+**VKCO** (606 candles → 419 triple-barrier samples, 41.3% positive),
+616 market-neutral labels (50.3% positive). The model legitimately **FAILED** the gate:
+`overall_passed:false`, `force_saved:false`, best_accuracy 0.3243, n_folds 3, BH p=1.0000.
+Per-gate pass-rates: accuracy 33.3% [FAIL], brier_score 33.3% [FAIL], class_balance 33.3%
+[FAIL], degenerate_predictor 33.3% [FAIL], profit_factor 66.7% [PASS], sensitivity 66.7%
+[PASS], signal_count 100% [PASS], specificity 66.7% [PASS]. Fold accuracies 0.558 / 0.909 /
+0.324 — the strong middle fold did not survive the min-ratio / BH correction.
+**Deferred (out of this phase):** adding ru_tech to UNIVERSE and fixing the delisted
+YNDX→YDEX symbol in `SEGMENT_SYMBOLS`. The preset, UNIVERSE, and symbol map were left untouched.
+
+## Stage-1 conclusion (per D-04)
+
+- **Segments enabled:** **0.** No model passed the tightened walk-forward gate.
+- **Force-save debt remaining:** **0.** Every Stage-1 verdict was produced with NO
+  `--force-save`; each `models/ru_*/wf_gate_results.json` records `force_saved:false`.
+  The stale Mar-7/Mar-21 force-saved `.pkl` artefacts were **not** overwritten (gate failed,
+  force-save not passed) and are inert — every preset keeps `ml_ensemble.enabled:false`, so
+  the loader never loads them. Cleaning the stale `.pkl`s is a later housekeeping concern.
+- **Reconciliation invariant:** still green — no preset enables `ml_ensemble` on an
+  unpassed/force-saved model (`tests/unit/test_ml_gate_reconciliation.py`).
+- **Loader legitimacy:** no enabled segment, so `ml_force_saved_artifact_loaded` cannot fire
+  for any live ru_ segment.
+- **Backtest-iteration:** no enable occurred, so no Stage-1 backtest-iteration was required
+  (CLAUDE.md #4 fires only on an `ml_ensemble` enable). The only ru_ backtest-iteration on
+  record is the Phase-61 Stage-0 `phase61-stage0-ru_blue_chips-ml-disabled` (REJECT,
+  trade_count 12), documented above.
+
+**This is the honest Stage-1 outcome and a VALID success per D-04:** legitimate per-segment
+gate verdicts recorded across all 17 `ru_*` segments, with zero segments force-passed and
+zero force-save debt remaining. The MOEX ML truth is now re-established honestly; any future
+enable must earn a genuine gate pass.
