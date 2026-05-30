@@ -1,0 +1,10 @@
+{
+  "description": {
+    "columns": ["name", "title", "value", "type"],
+    "data": [
+      ["ISSUESIZE", "Объем выпуска", "21586948000", "number"],
+      ["FACEUNIT", "Валюта номинала", "SUR", "string"],
+      ["ISIN", "ISIN код", "RU0009029540", "string"]
+    ]
+  }
+}
