@@ -26,7 +26,7 @@ UNKNOWN_MARKET = "unknown"
 
 EXPECTED_DEFAULT_SYMBOLS = {"AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "SPY", "QQQ"}
 EXPECTED_DEFAULT_US_COUNT = 7
-EXPECTED_DEFAULT_COUNT = 76  # 7 US + 57 MOEX stocks + 12 OFZ bonds
+EXPECTED_DEFAULT_COUNT = 77  # 7 US + 58 MOEX stocks + 12 OFZ bonds
 EXPECTED_COUNT_AFTER_TWO = 2
 
 
@@ -113,11 +113,12 @@ def test_len() -> None:
     assert len(registry) == EXPECTED_COUNT_AFTER_TWO
 
 
-EXPECTED_MOEX_STOCK_COUNT = 57
+EXPECTED_MOEX_STOCK_COUNT = 58
 EXPECTED_MOEX_OFZ_COUNT = 12
-EXPECTED_MOEX_INSTRUMENT_COUNT = 69  # 57 stocks + 12 OFZ bonds
+EXPECTED_MOEX_INSTRUMENT_COUNT = 70  # 58 stocks + 12 OFZ bonds
 # Number of statically-defined instruments with hardcoded FIGIs
-EXPECTED_MOEX_WITH_FIGI = 44  # 32 stocks with FIGI + 12 OFZ bonds
+# Sprint 8 / audit #16: backfilled FIGIs for 20 sector tickers + added X5.
+EXPECTED_MOEX_WITH_FIGI = 65  # 53 stocks with FIGI + 12 OFZ bonds
 EXPECTED_MOEX_SYMBOLS = {
     # Original blue chips
     "SBER",
@@ -160,6 +161,7 @@ EXPECTED_MOEX_SYMBOLS = {
     "MTLR",
     # Consumer / Telecom / Utilities
     "FIVE",
+    "X5",
     "FIXP",
     "LENT",
     "MTSS",
@@ -409,3 +411,31 @@ def test_ofz_instruments_all_have_face_value() -> None:
         assert inst.face_value == BOND_FACE_VALUE, (
             f"{inst.symbol} face_value={inst.face_value}, expected {BOND_FACE_VALUE}"
         )
+
+
+def test_all_moex_equity_segment_symbols_have_figi() -> None:
+    """Sprint 8 / audit #16: every MOEX equity segment symbol must resolve to a
+    registered instrument carrying a Tinkoff FIGI.
+
+    Without a FIGI the TinkoffFetcher raises InstrumentNotFoundError and the
+    symbol cannot be backtested or traded — so a sector preset on such a segment
+    is dead weight. This guard ties the segment universe (config) to the
+    instrument registry (markets) so a newly declared symbol can't slip through
+    without a FIGI.
+    """
+    from config.segments import DEFAULT_SEGMENTS
+
+    registry = build_default_registry()
+    missing: list[str] = []
+    for seg in DEFAULT_SEGMENTS:
+        if seg.market != "moex" or "bond_carry" in seg.active_strategies:
+            continue
+        for sym in seg.symbols:
+            try:
+                inst = registry.get(sym, "moex")
+            except InstrumentNotFoundError:
+                missing.append(f"{seg.segment_id}:{sym} (unregistered)")
+                continue
+            if not inst.figi:
+                missing.append(f"{seg.segment_id}:{sym} (no FIGI)")
+    assert not missing, f"MOEX equity symbols without a FIGI: {missing}"
