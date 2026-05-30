@@ -508,6 +508,65 @@ class MultiTimeframeContext:
     monthly_trend_direction: int | None = dc_field(default=None)  # +1, 0, -1
 
 
+class FundamentalSnapshot(BaseModel):
+    """Point-in-time fundamental snapshot for one symbol (FUND-01).
+
+    ``as_of`` is the publication/fetch date and is the look-ahead filter key
+    (downstream: ``as_of <= D``). Every fundamental field is Optional and
+    defaults to ``None`` (unavailable) — values are never fabricated.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    as_of: datetime
+    pe_ratio: float | None = None
+    ev_ebitda: float | None = None
+    revenue_ttm: float | None = None
+    net_margin: float | None = None
+    roe: float | None = None
+    eps_ttm: float | None = None
+    dividend_yield: float | None = None
+    market_cap: float | None = None
+    currency: str | None = None
+
+    @field_validator("as_of")
+    @classmethod
+    def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; ``as_of`` must be UTC-aware."""
+        if v.tzinfo is None:
+            msg = "as_of must be timezone-aware (UTC)"
+            raise ValueError(msg)
+        return v
+
+
+class ReportEvent(BaseModel):
+    """Earnings/report calendar event (EARN-01).
+
+    Calendar-only: ``get_asset_reports`` carries no actuals. ``report_date`` is
+    the publication date and is usable as an ``as_of`` look-ahead key.
+    ``period_type`` is a plain string mapped from the SDK enum's ``.name``
+    ("ANNUAL" | "QUARTER" | "SEMIANNUAL" | "UNSPECIFIED").
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    report_date: datetime
+    period_year: int
+    period_num: int
+    period_type: str
+
+    @field_validator("report_date")
+    @classmethod
+    def must_be_utc_aware(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; ``report_date`` must be UTC-aware."""
+        if v.tzinfo is None:
+            msg = "report_date must be timezone-aware (UTC)"
+            raise ValueError(msg)
+        return v
+
+
 @dataclass(frozen=True)
 class MoexMarketData:
     """MOEX-specific ambient data. None = unavailable."""
@@ -516,6 +575,7 @@ class MoexMarketData:
     key_rates: tuple[KeyRateRecord, ...] | None = dc_field(default=None)
     commodity_candles: dict[str, tuple[Candle, ...]] | None = dc_field(default=None)
     turnover: tuple[TurnoverRecord, ...] | None = dc_field(default=None)
+    fundamentals: tuple[FundamentalSnapshot, ...] | None = dc_field(default=None)
 
 
 @dataclass(frozen=True)
