@@ -1114,7 +1114,12 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         from finalayze.data.fetchers.cbr import CBRFetcher  # noqa: PLC0415
         from finalayze.data.fetchers.moex_iss import MoexISSFetcher  # noqa: PLC0415
 
-        _moex_iss = MoexISSFetcher(rate_limiter=RateLimiter("moex_iss", rate=0.5, capacity=5))
+        # Turnover is fetched one ISS call per weekday over the whole window, so a
+        # cold cache on a multi-year backtest means ~250 calls/year. rate=0.5
+        # (1 req / 2s) made a 5-year backfill take ~40 min. 3 req/s keeps a
+        # one-time backfill to a few minutes and is well within ISS tolerance;
+        # results are cached under .cache/turnover so subsequent runs are instant.
+        _moex_iss = MoexISSFetcher(rate_limiter=RateLimiter("moex_iss", rate=3.0, capacity=10))
         _loader = MarketDataLoader(
             moex_iss_candles=CachingFetcher(_moex_iss, cache_dir=Path(".cache/moex_iss")),
             moex_iss_raw=_moex_iss,
