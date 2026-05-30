@@ -262,6 +262,16 @@ def _make_moex_fetcher() -> BaseFetcher:
     return _MoexYFinanceFetcher()
 
 
+def _resolve_segment_cash(segment_id: str, us_cash: Decimal, moex_cash: Decimal) -> Decimal:
+    """Return starting capital for a segment.
+
+    MOEX (``ru_*``) segments are RUB-denominated and use ``moex_cash``; every
+    other (US) segment uses ``us_cash``. Keeps the currencies separate so a
+    single ``--cash`` value can't silently apply a USD figure to a RUB book.
+    """
+    return moex_cash if segment_id.startswith("ru_") else us_cash
+
+
 def _load_preset(segment: str) -> dict[str, Any]:
     """Load YAML preset for a segment, returning empty dict on failure."""
     preset_path = _PRESETS_DIR / f"{segment}.yaml"
@@ -969,6 +979,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--start-date", default="2023-01-01")
     parser.add_argument("--end-date", default="2024-12-31")
     parser.add_argument("--cash", type=int, default=100_000, help="Initial cash per symbol")
+    parser.add_argument(
+        "--moex-cash",
+        type=int,
+        default=1_000_000,
+        help="Initial RUB capital for MOEX (ru_*) segments (default: 1,000,000)",
+    )
     parser.add_argument("--models-dir", default="models/", help="Directory with trained ML models")
     parser.add_argument(
         "--event-data-dir", default=None, help="Directory with event data JSON files"
@@ -1046,6 +1062,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     start = datetime.strptime(args.start_date, "%Y-%m-%d").replace(tzinfo=UTC)
     end = datetime.strptime(args.end_date, "%Y-%m-%d").replace(tzinfo=UTC)
     cash = Decimal(args.cash)
+    moex_cash = Decimal(args.moex_cash)
     models_dir = Path(args.models_dir) if args.models_dir else None
     event_data_dir = Path(args.event_data_dir) if args.event_data_dir else None
     event_data: dict[str, Any] | None = None
@@ -1119,7 +1136,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     print(f"\nRunning iteration '{args.name}'")
     print(f"  Period: {args.start_date} to {args.end_date}")
     print(f"  Segments: {', '.join(segments)}")
-    print(f"  Cash: ${cash:,.0f} (MOEX: ₽1,000,000)")
+    print(f"  Cash: ${cash:,.0f} (MOEX: ₽{moex_cash:,.0f})")
     print()
 
     try:
@@ -1195,8 +1212,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                     print(f"  CBR direction: {cbr_direction}")
 
             segment_trades[segment] = []
-            # 1M RUB starting capital for MOEX segments (per user decision)
-            segment_cash = Decimal(1_000_000) if segment.startswith("ru_") else cash
+            # MOEX segments use RUB capital (--moex-cash, default 1M); US uses --cash
+            segment_cash = _resolve_segment_cash(segment, cash, moex_cash)
 
             for symbol in symbols:
                 # Fetch candles

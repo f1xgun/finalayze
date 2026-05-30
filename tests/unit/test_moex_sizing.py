@@ -2,33 +2,48 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime, time
 from decimal import Decimal
+from pathlib import Path
+
+# scripts/ is not a package on the default path; add it so the run_iteration
+# helpers (e.g. _resolve_segment_cash) can be imported and tested directly.
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
 
 # ---------------------------------------------------------------------------
 # Test 1: MOEX segment_cash is 1M RUB
 # ---------------------------------------------------------------------------
 
 
-def test_moex_segment_cash_is_1m_rub() -> None:
-    """MOEX segments must use 1,000,000 RUB starting capital."""
-    segment = "ru_blue_chips"
-    cash = Decimal(100_000)  # USD default
+def test_moex_segment_cash_defaults_to_1m_rub() -> None:
+    """MOEX segments default to 1,000,000 RUB starting capital."""
+    from run_iteration import _resolve_segment_cash
 
-    # Replicate the logic from run_iteration.py
-    segment_cash = Decimal(1_000_000) if segment.startswith("ru_") else cash
+    segment_cash = _resolve_segment_cash("ru_blue_chips", Decimal(100_000), Decimal(1_000_000))
 
     assert segment_cash == Decimal(1_000_000)
 
 
 def test_us_segment_cash_unchanged() -> None:
-    """US segments must keep original cash value."""
-    segment = "us_tech"
-    cash = Decimal(100_000)
+    """US segments must use the US cash value, not the MOEX one."""
+    from run_iteration import _resolve_segment_cash
 
-    segment_cash = Decimal(1_000_000) if segment.startswith("ru_") else cash
+    segment_cash = _resolve_segment_cash("us_tech", Decimal(100_000), Decimal(1_000_000))
 
-    assert segment_cash == cash
+    assert segment_cash == Decimal(100_000)
+
+
+def test_moex_cash_is_parametrizable() -> None:
+    """--moex-cash overrides the MOEX starting capital independently of --cash."""
+    from run_iteration import _resolve_segment_cash
+
+    # e.g. operator runs --moex-cash 10000000 to afford expensive shares
+    segment_cash = _resolve_segment_cash("ru_chemicals", Decimal(100_000), Decimal(10_000_000))
+
+    assert segment_cash == Decimal(10_000_000)
 
 
 # ---------------------------------------------------------------------------
