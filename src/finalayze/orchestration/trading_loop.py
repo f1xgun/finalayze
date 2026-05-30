@@ -176,6 +176,7 @@ class TradingLoop:
     _sentiment_mgr: Any = None
     _persistence: Any = None
     _llm_client: Any = None
+    _scheduler: BackgroundScheduler | None = None
     _async_runtime: AsyncRuntime | None = None
     # Post-construction wiring slot used by api/lifespan to reach the alerter
     # without traversing every sub-component (bootstrap.py sets this after
@@ -631,15 +632,23 @@ class TradingLoop:
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
-    def start(self) -> None:  # noqa: PLR0915 — wires many subsystems incl. meta_agent (Phase 58-05)
-        """Start the APScheduler and block until stop() is called."""
-        if (
-            self._kill_switch is not None
-            and hasattr(self._kill_switch, "is_killed")
-            and self._kill_switch.is_killed
-        ):
-            raise RuntimeError("Kill switch active -- clear flag before restarting")
+    def _setup_scheduler(self) -> None:
+        """Construct APScheduler and register all scheduled jobs.
 
+        Initializes:
+          - BackgroundScheduler with thread pool executors (default, retrain, news)
+          - News cycle job (interval-based)
+          - Strategy cycle job (interval-based)
+          - Daily reset job (cron-based)
+          - Portfolio review job (cron-based at 15:50 UTC)
+          - Meta-agent job (if enabled)
+          - ML retrain job (if enabled)
+          - FX update job (if enabled)
+          - Bond cycle jobs: macro_refresh, bond_cycle, cbr_day_refresh (if bond cycle enabled)
+          - Weekly digest job (cron-based on Sunday)
+
+        All jobs use replace_existing=True so multiple calls to start() are safe.
+        """
         from apscheduler.executors.pool import (  # noqa: PLC0415
             ThreadPoolExecutor as APSThreadPoolExecutor,
         )
@@ -797,6 +806,19 @@ class TradingLoop:
             id="weekly_digest",
             replace_existing=True,
         )
+
+    def start(self) -> None:
+        """Start the APScheduler and block until stop() is called."""
+        if (
+            self._kill_switch is not None
+            and hasattr(self._kill_switch, "is_killed")
+            and self._kill_switch.is_killed
+        ):
+            raise RuntimeError("Kill switch active -- clear flag before restarting")
+
+        self._setup_scheduler()
+        assert self._scheduler is not None
+
         # Load equity baselines from DB before starting scheduler
         # so daily P&L calculations use persisted start-of-day values
         self._load_baseline_from_db()
