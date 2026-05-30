@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Protocol
 from finalayze.risk.evt import EVTRiskEstimator
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from finalayze.risk.rub_oil_regime import RubOilRegimeSignal
 
 _VOL_TARGET_LOWER = Decimal("0.25")
@@ -41,6 +43,9 @@ class SizingContext:
         correlation_scale: Correlation-based scale (0.30 to 1.0).
         returns_history: Historical portfolio returns for EVT step.
         ml_confidence: P(profitable) from MetaLabeler [0, 1], or None if ML unavailable.
+        bar_date: Current backtest bar date for per-bar macro resolution (e.g. the
+            publication-lag-safe CPI lookup in CpiRiskOffStep). ``None`` outside the
+            per-bar backtest path; steps that need it degrade gracefully when absent.
     """
 
     equity: Decimal
@@ -53,6 +58,7 @@ class SizingContext:
     correlation_scale: Decimal
     returns_history: tuple[float, ...] = ()
     ml_confidence: float | None = None  # P(profitable) from MetaLabeler [0, 1]
+    bar_date: date | None = None  # current backtest bar date for per-bar macro resolution
 
 
 class PositionSizingStep(Protocol):
@@ -185,6 +191,76 @@ class CBRRegimeStep:
         else:
             scale = Decimal("1.0")
         return (size * scale).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+
+
+_CPI_HIGH_INFLATION_CUT = 0.09  # YoY fraction; >= this -> risk-off (D-04 discretion)
+_CPI_RISK_OFF_SCALE = Decimal("0.6")  # high-inflation position scale-down
+
+
+class CpiRiskOffStep:
+    """Scale ru_* positions down under a high-inflation (CPI) regime (INTG-03).
+
+    Mirrors ``CBRRegimeStep``: ru_-prefix gate, missing-data passthrough, a single
+    tier scale-down, Decimal-quantized to ``_FOUR_DP``, and NO own floor (RegimeStep's
+    0.15 floor is upstream). When CPI YoY (as a decimal fraction) is at or above the
+    high-inflation cut (>= 0.09 = 9% YoY) the ru_* position is scaled to 0.6x; below
+    the cut it passes through unchanged.
+
+    CPI resolution is per-bar and look-ahead-safe (Pitfall 3 / T-60-04):
+      * If constructed with a fixed ``cpi_yoy_fraction`` > 0 (the non-per-bar / live
+        caller) that value is used directly.
+      * Otherwise (the backtest path) the value is resolved per ``context.bar_date``
+        via ``get_latest_published_cpi_month(bar_date)`` -> ``get_cpi_yoy_fraction``,
+        so a CPI month published AFTER the bar date is never visible.
+      * If neither a fixed value nor a usable ``context.bar_date`` is available, the
+        step passes through (graceful degradation, ``cpi <= 0.0``).
+    """
+
+    def __init__(
+        self,
+        segment_id: str,
+        cpi_yoy_fraction: float = 0.0,
+        high_inflation_cut: float = _CPI_HIGH_INFLATION_CUT,
+        scale_high: Decimal = _CPI_RISK_OFF_SCALE,
+    ) -> None:
+        self._segment_id = segment_id
+        self._cpi_yoy_fraction = cpi_yoy_fraction
+        self._high_inflation_cut = high_inflation_cut
+        self._scale_high = scale_high
+
+    def _resolve_cpi(self, context: SizingContext) -> float:
+        """Return the CPI YoY fraction to use, look-ahead-safe.
+
+        Fixed value (live caller) takes precedence; otherwise resolve per-bar from
+        ``context.bar_date``. Returns ``0.0`` (missing -> passthrough) when neither is
+        available.
+        """
+        if self._cpi_yoy_fraction > 0.0:
+            return self._cpi_yoy_fraction
+        if context.bar_date is None:
+            return 0.0
+        # Layer 4 -> Layer 2 downward import (allowed); local to avoid import cost on
+        # the non-per-bar path and to keep the module's top-level imports minimal.
+        from finalayze.data.fetchers.cbr import (  # noqa: PLC0415
+            get_cpi_yoy_fraction,
+            get_latest_published_cpi_month,
+        )
+
+        month = get_latest_published_cpi_month(context.bar_date)
+        if month is None:
+            return 0.0
+        resolved = get_cpi_yoy_fraction(int(month[:4]), int(month[5:7]))
+        return resolved if resolved is not None else 0.0
+
+    def adjust(self, size: Decimal, context: SizingContext) -> Decimal:
+        if not self._segment_id.startswith("ru_"):
+            return size
+        cpi = self._resolve_cpi(context)
+        if cpi <= 0.0:
+            return size  # graceful degradation: missing data -> no risk-off
+        if cpi >= self._high_inflation_cut:
+            return (size * self._scale_high).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+        return (size * Decimal("1.0")).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
 
 
 class SectorAllocationStep:
