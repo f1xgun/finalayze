@@ -161,24 +161,32 @@ def fetch_benchmark_candles(
 
 
 def fetch_moex_benchmark(segment_id: str) -> list[Candle] | None:
-    """Fetch IMOEX benchmark for MOEX segments via Tinkoff API."""
+    """Fetch IMOEX benchmark for MOEX segments via MOEX ISS.
+
+    IMOEX is the Moscow Exchange *index* (not a tradeable share), so it is
+    fetched from the MOEX ISS REST API -- the same source the production
+    ``MarketDataLoader._load_moex`` uses (``moex_iss.IMOEX``). It cannot be
+    resolved through ``TinkoffFetcher`` because that path requires a registered
+    FIGI for a tradeable instrument, and the index is not in the instrument
+    registry. MOEX ISS is the canonical MOEX-native source for the index and is
+    distinct from yfinance (never used for MOEX data per project policy).
+
+    The Tinkoff token is still required for the segment candle pipeline (D-02);
+    we keep a token presence check so a degraded run is loud rather than silent.
+    """
     token = os.environ.get("FINALAYZE_TINKOFF_TOKEN")
     if not token:
         print(f"  [{segment_id}] FINALAYZE_TINKOFF_TOKEN not set, skipping MOEX benchmark (IMOEX).")
         return None
     try:
-        from finalayze.data.fetchers.tinkoff_data import (  # noqa: PLC0415
-            TinkoffFetcher,
-        )
-        from finalayze.markets.instruments import (  # noqa: PLC0415
-            build_default_registry,
+        from finalayze.data.fetchers.moex_iss import (  # noqa: PLC0415
+            MoexISSFetcher,
         )
 
-        registry = build_default_registry()
-        fetcher = TinkoffFetcher(token=token, registry=registry, sandbox=False)
         end = datetime.now(tz=UTC)
         start = end - timedelta(days=MOEX_LOOKBACK_DAYS)
-        candles = fetcher.fetch_candles(MOEX_BENCHMARK, start, end)
+        with MoexISSFetcher() as fetcher:
+            candles = fetcher.fetch_candles(MOEX_BENCHMARK, start, end)
         if candles:
             print(f"  [{segment_id}] Fetched {len(candles)} benchmark candles ({MOEX_BENCHMARK}).")
             return candles
