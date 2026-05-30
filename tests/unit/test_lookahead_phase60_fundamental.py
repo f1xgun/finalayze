@@ -157,3 +157,41 @@ class TestLookaheadFundamentalGate:
                 imported_names.extend(alias.name for alias in node.names)
         assert not any("technical" in name for name in imported_names)
         assert not any("compute_features" in name for name in imported_names)
+
+
+# ===========================================================================
+# (b) BACKFILL CEILING: SDK proves fundamentals are point-in-time (no history)
+# ===========================================================================
+# NOTE (BACKFILL-01 / D-03, A3): pure point-in-time fundamentals are LIVE-FORWARD
+# ONLY. ``get_asset_fundamentals`` returns a single CURRENT snapshot with no date
+# range, so an ``earnings_yield`` gate built on it is CONSTANT across any historical
+# backtest window and therefore cannot causally change which historical bar trades —
+# it is NOT the MEAS-01 causal lever (SUE/CPI are). This ceiling is verified
+# Manual-Only per 60-VALIDATION.md; never fabricate a fundamental back-history from a
+# point-in-time snapshot (RESEARCH Pitfall 2). Earnings *dates* (get_asset_reports)
+# ARE rangeable and remain backtestable.
+
+# Field-count expectations for the SDK request schemas (ruff PLR2004).
+_FUND_REQUEST_FIELD_COUNT = 1  # {'assets'} only -> no date range -> no history
+
+
+class TestLookaheadBackfillCeiling:
+    """Assert the verified D-03 ceiling directly against the installed t_tech SDK."""
+
+    def test_lookahead_backfill_ceiling_fundamentals_have_no_date_range(self) -> None:
+        """``GetAssetFundamentalsRequest`` carries NO date range (point-in-time only)."""
+        schemas = pytest.importorskip("t_tech.invest.schemas")
+        field_names = {f.name for f in dataclasses.fields(schemas.GetAssetFundamentalsRequest)}
+        assert field_names == {"assets"}
+        assert len(field_names) == _FUND_REQUEST_FIELD_COUNT
+        # No look-ahead "from/to/date" range -> fundamentals cannot be backfilled.
+        assert not any(
+            key in name for name in field_names for key in ("from", "to", "date", "period")
+        )
+
+    def test_lookahead_backfill_ceiling_reports_are_rangeable(self) -> None:
+        """``GetAssetReportsRequest`` HAS ``from_``/``to`` -> earnings DATES are rangeable."""
+        schemas = pytest.importorskip("t_tech.invest.schemas")
+        field_names = {f.name for f in dataclasses.fields(schemas.GetAssetReportsRequest)}
+        assert "from_" in field_names
+        assert "to" in field_names
