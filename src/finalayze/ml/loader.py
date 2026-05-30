@@ -147,9 +147,19 @@ def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:  # noqa:
         model_weights = json.loads(weights_path.read_text())
         _log.debug("Loaded model_weights for segment %s", segment_id)
 
-    # Load segment metadata (base_rate, feature_schema_version, etc.) if available
+    # Load segment metadata (base_rate, feature_schema_version, etc.) if available.
+    # S6.3: emit a loud WARNING when the meta file is missing. Loading still
+    # proceeds with base_rate=None so legacy/test setups keep working, but the
+    # version guard never fires without metadata — operators need to see this.
     base_rate: float | None = None
     meta_path = segment_dir / "segment_meta.json"
+    if not meta_path.exists():
+        _log.warning(
+            "ml_segment_meta_missing",
+            segment_id=segment_id,
+            reason="no segment_meta.json; feature_schema_version guard inactive",
+            remedy="run scripts/restore_segment_meta.py to regenerate",
+        )
     if meta_path.exists():
         meta = json.loads(meta_path.read_text())
 
