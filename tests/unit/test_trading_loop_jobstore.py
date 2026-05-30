@@ -21,6 +21,7 @@ class TestTradingLoopJobStore:
         settings.news_cycle_minutes = 30
         settings.strategy_cycle_minutes = 15
         settings.daily_reset_hour_utc = 0
+        settings.fundamental_capture_hour_utc = 7  # Phase 63 CAPTURE-01 cron knob
         settings.max_position_pct = 0.10
         settings.max_positions_per_market = 10
         settings.daily_loss_limit_pct = 0.05
