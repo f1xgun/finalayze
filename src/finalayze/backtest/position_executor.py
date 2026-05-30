@@ -51,6 +51,34 @@ _DEFAULT_AVG_WIN_RATIO = Decimal("1.5")
 # execution desks; larger orders get split over multiple bars.
 _DEFAULT_MAX_ORDER_VOLUME_PCT = Decimal("0.05")
 
+# Minimum tradeable position ("dust floor"), currency-aware. The floor MUST
+# stay strictly below the Kelly sizing band (Kelly returns 0.5-1% of equity in
+# cold-start / negative-expectancy windows). The previous MOEX coefficient was
+# 2% -- dead code masked by the 5000-RUB cap -- which at a 1M-RUB book produced
+# a flat 5000-RUB floor sitting *inside* the Kelly band, so VolTarget/Regime
+# down-scaling tipped legitimately-sized positions below it and the pipeline
+# zeroed them (skip_reason="position_value_zero"). 0.1% keeps the floor a true
+# dust threshold below Kelly; the 5000-RUB cap preserves whole-lot sizing for
+# expensive names on a large book.
+_MOEX_MIN_POS_CAP = Decimal(5000)
+_MOEX_MIN_POS_ABS = Decimal(1000)
+_MOEX_MIN_POS_PCT = Decimal("0.001")
+_US_MIN_POS_CAP = Decimal(500)
+_US_MIN_POS_ABS = Decimal(100)
+_US_MIN_POS_PCT = Decimal("0.005")
+
+
+def compute_min_position_floor(equity: Decimal, segment_id: str) -> Decimal:
+    """Return the minimum tradeable position value (dust floor), currency-aware.
+
+    Kept strictly below the Kelly sizing band so it never collides with and
+    zeroes out a legitimately-sized position. See module constants for the
+    rationale behind the MOEX recalibration (audit #16 second sizing floor).
+    """
+    if segment_id.startswith("ru_"):
+        return min(_MOEX_MIN_POS_CAP, max(_MOEX_MIN_POS_ABS, equity * _MOEX_MIN_POS_PCT))
+    return min(_US_MIN_POS_CAP, max(_US_MIN_POS_ABS, equity * _US_MIN_POS_PCT))
+
 
 class BacktestPositionExecutor:
     """Handles BUY / SELL order execution and trade recording.
@@ -236,11 +264,9 @@ class BacktestPositionExecutor:
             )
 
         asset_vol = compute_realized_vol(history) or Decimal("0.20")
-        # Currency-aware min position: original thresholds scaled down for small portfolios
-        if segment_id.startswith("ru_"):
-            min_pos = min(Decimal(5000), max(Decimal(1000), portfolio.equity * Decimal("0.02")))
-        else:
-            min_pos = min(Decimal(500), max(Decimal(100), portfolio.equity * Decimal("0.005")))
+        # Currency-aware dust floor, kept below the Kelly sizing band so it does
+        # not zero out legitimately-sized positions (audit #16 second floor).
+        min_pos = compute_min_position_floor(portfolio.equity, segment_id)
 
         # Compute ML confidence from MetaLabeler if available
         ml_confidence: float | None = None

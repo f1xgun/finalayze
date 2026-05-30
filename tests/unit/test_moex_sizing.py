@@ -47,6 +47,53 @@ def test_moex_cash_is_parametrizable() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Test 1b: Minimum-position dust floor (second sizing floor)
+# ---------------------------------------------------------------------------
+#
+# The MOEX dust floor must stay BELOW the Kelly sizing band (>=0.5% of equity).
+# At a 1M-RUB book the old flat 5000-RUB floor (the dead 2% coefficient masked
+# by the 5000 cap) landed inside the Kelly band and zeroed out thin/cheap MOEX
+# names with skip_reason="position_value_zero". New floor: 0.1% of equity,
+# capped at 5000 RUB, so it never collides with Kelly sizing.
+
+_MOEX_FLOOR_AT_1M = Decimal(1000)
+_MOEX_FLOOR_CAP = Decimal(5000)
+
+
+def test_moex_min_floor_at_1m_is_below_kelly_band() -> None:
+    """At a 1M-RUB book the MOEX dust floor is 0.1% (1000 RUB), not the old 5000."""
+    from finalayze.backtest.position_executor import compute_min_position_floor
+
+    assert compute_min_position_floor(Decimal(1_000_000), "ru_blue_chips") == _MOEX_FLOOR_AT_1M
+
+
+def test_moex_min_floor_caps_at_5000_for_large_book() -> None:
+    """The MOEX dust floor is capped at 5000 RUB even for a large book."""
+    from finalayze.backtest.position_executor import compute_min_position_floor
+
+    assert compute_min_position_floor(Decimal(10_000_000), "ru_energy") == _MOEX_FLOOR_CAP
+    # 5M: 0.1% = 5000 lands exactly on the cap.
+    assert compute_min_position_floor(Decimal(5_000_000), "ru_energy") == _MOEX_FLOOR_CAP
+
+
+def test_moex_min_floor_absolute_minimum_for_tiny_book() -> None:
+    """Below ~1M RUB the floor holds at its 1000-RUB absolute minimum."""
+    from finalayze.backtest.position_executor import compute_min_position_floor
+
+    assert compute_min_position_floor(Decimal(250_000), "ru_finance") == Decimal(1000)
+
+
+def test_us_min_floor_unchanged() -> None:
+    """US dust floor is untouched: min(500, max(100, equity*0.005))."""
+    from finalayze.backtest.position_executor import compute_min_position_floor
+
+    # 100k USD-book equivalent: 0.5% = 500 -> capped at 500.
+    assert compute_min_position_floor(Decimal(100_000), "us_tech") == Decimal(500)
+    # 50k: 0.5% = 250 -> 250.
+    assert compute_min_position_floor(Decimal(50_000), "us_tech") == Decimal(250)
+
+
+# ---------------------------------------------------------------------------
 # Test 2: Pre-trade check_dt market open times
 # ---------------------------------------------------------------------------
 
