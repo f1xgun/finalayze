@@ -339,15 +339,32 @@ class BacktestPositionExecutor:
             return
         quantity = (position_value / fill_price).to_integral_value(rounding=ROUND_DOWN)
         if quantity <= 0:
-            self._journal.record_skip(
-                timestamp=fill_candle.timestamp,
-                symbol=symbol,
-                segment_id=segment_id,
-                broker=broker,
-                history=history,
-                skip_reason="quantity_zero",
-            )
-            return
+            # Backtest realism: the sized allocation (already >= min_position_size)
+            # is smaller than one whole share, so it floors to 0 -- common for
+            # expensive MOEX names (e.g. AKRN ~19000 RUB). Round to the *nearest*
+            # whole share at this 0->1 boundary: if at least half a share was
+            # wanted AND one share fits inside the hard position cap and available
+            # cash, take the minimum tradeable size of 1 share rather than silently
+            # dropping a valid positive-expectancy signal. Floor stays for qty >= 1.
+            one_share_cost = fill_price
+            max_position_value = portfolio.equity * self._max_position_pct
+            rounds_up = position_value * 2 >= one_share_cost
+            if (
+                rounds_up
+                and one_share_cost <= portfolio.cash
+                and one_share_cost <= max_position_value
+            ):
+                quantity = Decimal(1)
+            else:
+                self._journal.record_skip(
+                    timestamp=fill_candle.timestamp,
+                    symbol=symbol,
+                    segment_id=segment_id,
+                    broker=broker,
+                    history=history,
+                    skip_reason="quantity_zero",
+                )
+                return
 
         # Liquidity cap: never exceed max_order_volume_pct of the fill bar's volume.
         # Large orders relative to ADV are unrealistic at the open price; we clamp
