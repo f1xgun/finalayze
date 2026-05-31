@@ -38,6 +38,13 @@ class Instrument:
     coupon_frequency: int | None = None  # payments per year
     maturity_date: date | None = None
     floating_coupon: bool = False
+    # NEW (additive, all default) -- per-class metadata for futures/currency (D-06)
+    isin: str | None = None
+    class_code: str | None = None  # board code: TQBR / TQTF / SPBFUT / ...
+    expiration_date: date | None = None  # futures
+    basic_asset: str | None = None  # futures underlying ticker
+    asset_uid: str | None = None  # used by the fundamentals path
+    short_history: bool = False  # D-05 flag; set False for now (sub-area 3 fills)
 
 
 class InstrumentRegistry:

@@ -17,7 +17,7 @@ from uuid import UUID  # noqa: TC003
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-type InstrumentType = Literal["stock", "etf", "bond"]
+type InstrumentType = Literal["stock", "etf", "bond", "future", "currency"]
 
 
 class SignalDirection(StrEnum):
