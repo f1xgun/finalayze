@@ -53,6 +53,32 @@ class TestInstrumentType:
         value: InstrumentType = "bond"
         assert value == "bond"
 
+    def test_future_is_valid(self) -> None:
+        value: InstrumentType = "future"
+        assert value == "future"
+
+    def test_currency_is_valid(self) -> None:
+        value: InstrumentType = "currency"
+        assert value == "currency"
+
+
+# ── Instrument dataclass (additive per-class metadata, D-06) ─────────────
+
+
+class TestInstrumentAdditiveFields:
+    """The 6 new Instrument fields are all defaulted — additive proof."""
+
+    def test_minimal_construction_still_works(self) -> None:
+        from finalayze.markets.instruments import Instrument
+
+        inst = Instrument(symbol="X", market_id="moex", name="X")
+        assert inst.isin is None
+        assert inst.class_code is None
+        assert inst.expiration_date is None
+        assert inst.basic_asset is None
+        assert inst.asset_uid is None
+        assert inst.short_history is False
+
 
 # ── BondInfo ────────────────────────────────────────────────────────────
 
