@@ -7,8 +7,9 @@ from decimal import Decimal
 
 import pytest
 
-from finalayze.core.exceptions import InstrumentNotFoundError
+from finalayze.core.exceptions import ConfigurationError, InstrumentNotFoundError
 from finalayze.markets.instruments import (
+    DEFAULT_MOEX_INSTRUMENTS,
     DEFAULT_MOEX_OFZ_INSTRUMENTS,
     Instrument,
     InstrumentRegistry,
@@ -439,3 +440,63 @@ def test_all_moex_equity_segment_symbols_have_figi() -> None:
             if not inst.figi:
                 missing.append(f"{seg.segment_id}:{sym} (no FIGI)")
     assert not missing, f"MOEX equity symbols without a FIGI: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Snapshot-loader contract (Plan 65-03)
+# ---------------------------------------------------------------------------
+SBER_SYMBOL = "SBER"
+MOEX_MARKET = "moex"
+CORRUPT_SNAPSHOT_BODY = "{ this is not valid json ::: ]"
+
+
+def test_build_default_registry_fail_closed_on_missing_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """A missing snapshot file makes build_default_registry raise ConfigurationError
+    (no silent fallback to a stale hand-list -- UNIV-04 / D-04)."""
+    from pathlib import Path
+
+    import finalayze.markets.instruments as instruments_mod
+
+    missing = Path(str(tmp_path)) / "does_not_exist" / "moex_universe.json"
+    monkeypatch.setattr(instruments_mod, "_SNAPSHOT", missing)
+    with pytest.raises(ConfigurationError):
+        build_default_registry()
+
+
+def test_build_default_registry_fail_closed_on_corrupt_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """A corrupt snapshot file makes build_default_registry raise ConfigurationError
+    (no silent fallback -- UNIV-04 / D-04)."""
+    from pathlib import Path
+
+    import finalayze.markets.instruments as instruments_mod
+
+    corrupt = Path(str(tmp_path)) / "moex_universe.json"
+    corrupt.write_text(CORRUPT_SNAPSHOT_BODY, encoding="utf-8")
+    monkeypatch.setattr(instruments_mod, "_SNAPSHOT", corrupt)
+    with pytest.raises(ConfigurationError):
+        build_default_registry()
+
+
+def test_build_default_registry_has_us_and_moex(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default registry resolves both the US set (AAPL) and the MOEX snapshot (SBER) -- UNIV-01."""
+    registry = build_default_registry()
+    assert registry.get(AAPL_SYMBOL, US_MARKET).market_id == US_MARKET
+    assert registry.get(SBER_SYMBOL, MOEX_MARKET).market_id == MOEX_MARKET
+
+
+def test_default_moex_compat_shims_are_nonempty_instrument_lists() -> None:
+    """DEFAULT_MOEX_INSTRUMENTS / _OFZ_ survive as snapshot-derived module-level lists
+    so the ~10 direct importers need zero edits -- UNIV-07 compat shim."""
+    assert len(DEFAULT_MOEX_INSTRUMENTS) > 0
+    assert len(DEFAULT_MOEX_OFZ_INSTRUMENTS) > 0
+    assert all(isinstance(i, Instrument) for i in DEFAULT_MOEX_INSTRUMENTS)
+    assert all(isinstance(i, Instrument) for i in DEFAULT_MOEX_OFZ_INSTRUMENTS)
+    # the direct-importer contract: iterate-and-register works
+    registry = InstrumentRegistry()
+    for inst in DEFAULT_MOEX_INSTRUMENTS:
+        registry.register(inst)
+    assert len(registry) == len(DEFAULT_MOEX_INSTRUMENTS)
