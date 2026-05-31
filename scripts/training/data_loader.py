@@ -20,6 +20,8 @@ from finalayze.data.loader import MarketDataLoader
 if TYPE_CHECKING:
     from config.settings import Settings
 
+    from finalayze.core.schemas import FundamentalSnapshot
+
 # Lookback windows
 LOOKBACK_DAYS = 1825  # 5 years of history for US segments
 MOEX_LOOKBACK_DAYS = 730  # 2 years for MOEX (post-sanctions structural break)
@@ -72,6 +74,32 @@ async def fetch_from_db(symbol: str, market_id: str, settings: Settings) -> list
             return [orm_to_candle(row) for row in rows]
     except Exception:
         return []
+
+
+async def fetch_fundamental_snapshots(
+    peer_symbols: list[str], end_dt: datetime, settings: Settings
+) -> tuple[FundamentalSnapshot, ...]:
+    """Read the FULL look-back window of fundamental snapshots for a peer set.
+
+    Reads every snapshot with ``as_of <= end_dt`` for the given peer symbols
+    (per-window slicing is downstream in ``_slice_market_context``; do NOT
+    pre-filter to a single point here). Returns ``()`` on any DB failure
+    (graceful-degrade, mirroring ``fetch_from_db``).
+
+    Delegates to the Layer-2 reader ``read_fundamental_snapshots_async`` in
+    ``finalayze.data.loader`` so the DB-read logic lives in exactly one place
+    (the same reader ``MarketDataLoader._load_moex`` uses).
+    """
+    from finalayze.data.loader import read_fundamental_snapshots_async  # noqa: PLC0415
+
+    return await read_fundamental_snapshots_async(peer_symbols, end_dt, settings)
+
+
+def fetch_fundamental_snapshots_sync(
+    peer_symbols: list[str], end_dt: datetime, settings: Settings
+) -> tuple[FundamentalSnapshot, ...]:
+    """Synchronous wrapper around :func:`fetch_fundamental_snapshots`."""
+    return asyncio.run(fetch_fundamental_snapshots(peer_symbols, end_dt, settings))
 
 
 def align_benchmark_candles(
@@ -332,11 +360,18 @@ def build_market_data_loader(segment_ids: list[str]) -> MarketDataLoader:
 
     MOEX-specific fetchers (ISS + CBR) are only instantiated when at least one
     segment is MOEX, to avoid importing heavy gRPC deps unnecessarily.
+
+    The loader is handed a ``Settings`` instance so the MOEX path can read
+    ``fundamental_snapshots`` from the DB (FUNDML-01); a DB failure degrades to
+    no fundamentals via the loader's ``_safe_fetch`` guard.
     """
+    from config.settings import Settings as _Settings  # noqa: PLC0415
+
     from finalayze.data.fetchers._cache_utils import GenericFileCache  # noqa: PLC0415
     from finalayze.data.fetchers.caching import CachingFetcher  # noqa: PLC0415
     from finalayze.data.rate_limiter import RateLimiter  # noqa: PLC0415
 
+    settings = _Settings()
     has_moex = any(sid.startswith("ru_") for sid in segment_ids)
     if has_moex:
         from finalayze.data.fetchers.cbr import CBRFetcher  # noqa: PLC0415
@@ -350,7 +385,9 @@ def build_market_data_loader(segment_ids: list[str]) -> MarketDataLoader:
             yfinance_fetcher=CachingFetcher(YFinanceFetcher(market_id="us")),
             turnover_cache=GenericFileCache(Path(".cache/turnover")),
             cbr_cache=GenericFileCache(Path(".cache/cbr")),
+            settings=settings,
         )
     return MarketDataLoader(
         yfinance_fetcher=CachingFetcher(YFinanceFetcher(market_id="us")),
+        settings=settings,
     )
