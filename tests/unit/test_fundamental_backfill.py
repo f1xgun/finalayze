@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -20,6 +20,7 @@ import pytest
 from scripts.backfill_fundamentals import (  # noqa: E402
     SHORT_HISTORY_SYMBOLS,
     build_snapshots,
+    run_backfill,
 )
 
 from finalayze.core.schemas import FundamentalSnapshot
@@ -118,3 +119,54 @@ class TestShortHistoryFlag:
 def test_blue_chips_not_flagged_short(symbol: str) -> None:
     """Blue chips are NOT in the short-history set."""
     assert symbol not in SHORT_HISTORY_SYMBOLS
+
+
+class TestRunBackfillPersists:
+    """Regression: run_backfill must persist via the ASYNC upsert under its own loop.
+
+    The one-shot script has no background async loop, so the sync fire-and-forget
+    ``persist_fundamental_snapshot`` raises "async_loop not available" and silently
+    drops every row. The driver must drive ``persist_fundamental_snapshot_async``
+    under ``asyncio.run`` instead. This test pins that contract — it FAILS on the
+    pre-fix code (which called the sync wrapper, awaiting the async path 0 times).
+    """
+
+    def test_run_backfill_awaits_async_upsert(self) -> None:
+        smartlab = _make_smartlab_fetcher(_SBER, "smartlab_sber_msfo_q.html")
+        expected = build_snapshots(_SBER, smartlab, _make_iss_fetcher())
+        assert expected, "fixture should yield snapshots"
+
+        persistence = MagicMock()
+        persistence.persist_fundamental_snapshot_async = AsyncMock(return_value=None)
+
+        persisted = run_backfill(
+            persistence,
+            smartlab,
+            _make_iss_fetcher(),
+            symbols=(_SBER,),
+            statement="MSFO",
+            dry_run=False,
+        )
+
+        # Persisted via the async path exactly once per snapshot...
+        assert persistence.persist_fundamental_snapshot_async.await_count == len(expected)
+        assert persisted == len(expected)
+        # ...and NOT via the loop-requiring sync wrapper (the pre-fix bug path).
+        persistence.persist_fundamental_snapshot.assert_not_called()
+
+    def test_dry_run_persists_nothing(self) -> None:
+        smartlab = _make_smartlab_fetcher(_SBER, "smartlab_sber_msfo_q.html")
+        persistence = MagicMock()
+        persistence.persist_fundamental_snapshot_async = AsyncMock(return_value=None)
+
+        persisted = run_backfill(
+            persistence,
+            smartlab,
+            _make_iss_fetcher(),
+            symbols=(_SBER,),
+            statement="MSFO",
+            dry_run=True,
+        )
+
+        assert persisted == 0
+        persistence.persist_fundamental_snapshot_async.assert_not_awaited()
