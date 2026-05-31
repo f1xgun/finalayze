@@ -117,12 +117,30 @@ def validate(snapshot_symbols: set[str]) -> None:
 # ── Coupon-rate derivation (Pitfall 1 / UNIV-06) ───────────────────────────────
 
 
+# Plausible annual coupon band (%) for a traded OFZ. A derived rate outside this
+# band almost certainly came from a stub/partial first period (WR-04) rather than a
+# full regular coupon, and is logged for operator review. Wide on purpose: it is a
+# sanity tripwire, not a tight validation gate.
+_COUPON_RATE_MIN_PCT = Decimal("0.10")
+_COUPON_RATE_MAX_PCT = Decimal(30)
+
+
 def derive_coupon_rate(
     pay_one_bond: Decimal,
     coupon_quantity_per_year: int,
     nominal: Decimal,
 ) -> Decimal:
-    """coupon_rate = pay_one_bond * coupon_quantity_per_year / nominal * 100 (annual %)."""
+    """coupon_rate = pay_one_bond * coupon_quantity_per_year / nominal * 100 (annual %).
+
+    APPROXIMATION (WR-04): this back-computes the annual rate from a SINGLE coupon
+    payment (`coupons[0]` -- the next coupon in a one-year-forward window). If that
+    coupon is a short/long stub period (common right after issue or near amortization),
+    `pay_one_bond` is not `annual_rate * nominal / coupon_qty`, so the derived rate
+    over- or under-states the true annual coupon by a fraction of a percentage point.
+    The caller cross-checks the result against `_COUPON_RATE_MIN_PCT/_MAX_PCT` and
+    logs `coupon_rate_out_of_tolerance` when the derivation looks like a stub artefact;
+    the value itself is preserved (no clamping) so the committed snapshot is unchanged.
+    """
     return pay_one_bond * Decimal(coupon_quantity_per_year) / nominal * _PERCENT_SCALE
 
 
@@ -173,15 +191,30 @@ def _bond_row(
 
     coupon_rate: Decimal | None = None
     if symbol in traded_ofz:
-        if floating and symbol in _OFZ_PK_HANDLIST_RATE:
-            # OFZ-PK: preserve hand-list spread over RUONIA (A3), do NOT derive a fixed rate.
-            coupon_rate = _OFZ_PK_HANDLIST_RATE[symbol]
+        if floating:
+            # OFZ-PK floater: ONLY use the hand-list spread over RUONIA (A3). Do NOT
+            # derive a fixed rate from a single coupon -- the coupon resets, so a
+            # back-computed annual rate would be a misleading constant (WR-02). An
+            # unknown floater leaves coupon_rate None and trips the fail-closed
+            # _assert_ofz_yieldable, forcing the operator to add the spread (WR-03).
+            if symbol in _OFZ_PK_HANDLIST_RATE:
+                coupon_rate = _OFZ_PK_HANDLIST_RATE[symbol]
         elif face_value is not None and coupon_qty:
             figi = row.get("figi")
             coupons = coupon_lookup(figi) if figi else []
             if coupons:
                 pay_one_bond = coupons[0].amount_per_bond
                 coupon_rate = derive_coupon_rate(pay_one_bond, int(coupon_qty), face_value)
+                # WR-04 tolerance tripwire: flag (do NOT clamp) a rate that looks like
+                # it was back-computed from a stub/partial first period.
+                if not (_COUPON_RATE_MIN_PCT <= coupon_rate <= _COUPON_RATE_MAX_PCT):
+                    _log.warning(
+                        "coupon_rate_out_of_tolerance",
+                        symbol=symbol,
+                        derived_rate=str(coupon_rate),
+                        min_pct=str(_COUPON_RATE_MIN_PCT),
+                        max_pct=str(_COUPON_RATE_MAX_PCT),
+                    )
 
     out["face_value"] = _jsonable(face_value)
     out["coupon_rate"] = _jsonable(coupon_rate)
@@ -223,6 +256,32 @@ def build_rows(
     return rows, counts
 
 
+def _warn_duplicate_symbols(rows: list[dict[str, Any]]) -> None:
+    """Log a warning when two rows share a `symbol` but differ in `figi` (WR-01).
+
+    The registry is keyed on (symbol, market_id); a duplicate ticker that maps to a
+    distinct FIGI is silently dropped (last-write-wins) at registration time. This
+    generation-time guard surfaces the collision to the operator before the snapshot
+    is written (it does NOT abort — the duplicate is a data-quality signal, not a
+    fail-closed safety violation).
+    """
+    seen: dict[str, str] = {}
+    for row in rows:
+        symbol = row.get("symbol")
+        figi = row.get("figi")
+        if not symbol or not figi:
+            continue
+        prior = seen.get(symbol)
+        if prior is not None and prior != figi:
+            _log.warning(
+                "duplicate_symbol_distinct_figi",
+                symbol=symbol,
+                figi_a=prior,
+                figi_b=figi,
+            )
+        seen[symbol] = figi
+
+
 def _assert_ofz_yieldable(rows: list[dict[str, Any]]) -> None:
     """Every traded OFZ row must carry the four YTM fields non-None (UNIV-06)."""
     traded_ofz = traded_ofz_symbols()
@@ -235,6 +294,15 @@ def _assert_ofz_yieldable(rows: list[dict[str, Any]]) -> None:
     for row in rows:
         if row["symbol"] not in traded_ofz:
             continue
+        # A traded floating OFZ MUST carry a hand-list RUONIA spread -- there is no
+        # safe way to derive a fixed rate for a floater (A3 / WR-02). Emit the targeted
+        # fix instruction rather than the generic "missing coupon_rate" message (WR-03).
+        if row.get("floating_coupon") and row["symbol"] not in _OFZ_PK_HANDLIST_RATE:
+            raise SystemExit(
+                f"REFUSING to write snapshot — floating OFZ {row['symbol']} has no "
+                f"RUONIA spread in _OFZ_PK_HANDLIST_RATE; add the RUONIA spread "
+                f"for it to the hand-list (A3)."
+            )
         for field in ("coupon_rate", "coupon_frequency", "face_value", "maturity_date"):
             if row.get(field) is None:
                 raise SystemExit(
@@ -256,6 +324,7 @@ def build_and_write(
 
     _log.info("moex_universe_enumerated", sdk_universe_counts=counts, total=len(rows))
 
+    _warn_duplicate_symbols(rows)  # WR-01 -- surface (symbol, figi) collisions before write
     validate(snapshot_symbols)  # UNIV-08 / D-04 -- raises SystemExit on any missing symbol
     _assert_ofz_yieldable(rows)  # UNIV-06 -- traded OFZ must be YTM-able
 
@@ -311,7 +380,16 @@ def _live_coupon_lookup(fetcher: Any) -> Callable[[str], list[_CouponLike]]:
                 )
             return out
 
-        result: list[_CouponLike] = fetcher._run_async(_async())
+        # WR-05: isolate a single bond's gRPC failure (transient timeout, one delisted
+        # FIGI) so it logs and yields [] instead of aborting the whole 1500+ bond
+        # enumeration. A traded OFZ that returns [] still fails the fail-closed
+        # _assert_ofz_yieldable (correct outcome); a non-traded bond is simply
+        # written without a coupon_rate.
+        try:
+            result: list[_CouponLike] = fetcher._run_async(_async())
+        except Exception as exc:  # operator one-shot: isolate a single bond's failure
+            _log.warning("coupon_lookup_failed", figi=figi, error_type=type(exc).__name__)
+            return []
         return result
 
     return lookup

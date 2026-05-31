@@ -15,10 +15,14 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from finalayze.core.exceptions import ConfigurationError, InstrumentNotFoundError
 
 if TYPE_CHECKING:
     from finalayze.core.schemas import InstrumentType
+
+_log = structlog.get_logger()
 
 
 @dataclass(frozen=True)
@@ -56,8 +60,22 @@ class InstrumentRegistry:
         self._instruments: dict[tuple[str, str], Instrument] = {}
 
     def register(self, instrument: Instrument) -> None:
-        """Register an instrument. Overwrites if already exists."""
+        """Register an instrument. Overwrites if already exists.
+
+        Logs a warning (WR-01) when the overwrite drops a DISTINCT instrument
+        (different FIGI) under the same (symbol, market_id) key -- last-write-wins
+        silently loses the prior row otherwise.
+        """
         key = (instrument.symbol, instrument.market_id)
+        prior = self._instruments.get(key)
+        if prior is not None and prior.figi != instrument.figi:
+            _log.warning(
+                "instrument_overwrite_distinct_figi",
+                symbol=instrument.symbol,
+                market_id=instrument.market_id,
+                figi_a=prior.figi,
+                figi_b=instrument.figi,
+            )
         self._instruments[key] = instrument
 
     def get(self, symbol: str, market_id: str) -> Instrument:
