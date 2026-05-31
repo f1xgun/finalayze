@@ -105,7 +105,12 @@ def _bond_row(ticker: str, figi: str, *, floating: bool) -> dict[str, object]:
 
 
 def _complete_rows() -> dict[str, list[dict[str, object]]]:
-    """Build mock SDK rows covering EVERY required symbol + the traded OFZ."""
+    """Build mock SDK rows covering EVERY required symbol + the traded OFZ.
+
+    Each of the 5 asset classes carries at least one row so the IN-02
+    `_assert_classes_non_empty` guard passes (a real live run always enumerates
+    every class; an empty class signals an auth/cert/DNS failure).
+    """
     req = gen.required_symbols()
     shares = [_share_row(sym, f"FIGI{sym}") for sym in sorted(req) if not sym.startswith("SU")]
     bonds = [
@@ -118,10 +123,10 @@ def _complete_rows() -> dict[str, list[dict[str, object]]]:
     bonds.append(_bond_row(_OFZ_PK_SYMBOL, _OFZ_PK_FIGI, floating=True))
     return {
         "shares": shares,
-        "etfs": [],
+        "etfs": [_share_row("TMOS", "FIGITMOS")],
         "bonds": bonds,
-        "futures": [],
-        "currencies": [],
+        "futures": [_share_row("SBRF-12.25", "FIGISBRFFUT")],
+        "currencies": [_share_row("USD000UTSTOM", "FIGIUSDRUB")],
     }
 
 
@@ -291,3 +296,39 @@ def test_coupon_lookup_failure_isolated_per_bond() -> None:
     # The failure is swallowed: returns [] rather than propagating (which would abort
     # the whole 1500+ bond enumeration in build_rows).
     assert lookup(_UNKNOWN_FLOATER_FIGI) == []
+
+
+# ── IN-02: an empty asset class fails before the misleading "missing symbols" ───
+
+
+def test_empty_asset_class_refuses_with_clear_cause(tmp_path: Path) -> None:
+    """build_and_write raises a clear empty-class SystemExit, not "missing symbols" (IN-02).
+
+    Simulates a gRPC/auth failure on ONE class (shares -> []). Each fetch_all_*
+    returns [] on error (contract preserved); the new guard surfaces the real
+    empty-class cause before validate()'s misleading "missing required symbols".
+    """
+    rows = _complete_rows()
+    rows["shares"] = []  # simulate a shares enumeration that hit an auth/cert/DNS error
+    fetcher = _StubFetcher(rows)
+    out = tmp_path / "moex_universe.json"
+
+    with pytest.raises(SystemExit) as exc_info:
+        gen.build_and_write(
+            fetcher=fetcher,
+            coupon_lookup=_coupon_lookup,
+            out_path=out,
+            dry_run=False,
+        )
+
+    message = str(exc_info.value)
+    assert "0 rows" in message
+    assert "shares" in message
+    assert "missing required symbols" not in message
+    assert not out.exists()
+
+
+def test_assert_classes_non_empty_passes_when_all_present() -> None:
+    """_assert_classes_non_empty returns None when every class has >= 1 row (no raise)."""
+    counts = {"shares": 5, "etfs": 1, "bonds": 10, "futures": 1, "currencies": 1}
+    assert gen._assert_classes_non_empty(counts) is None

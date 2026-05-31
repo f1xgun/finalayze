@@ -23,7 +23,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -51,6 +51,11 @@ _log = structlog.get_logger()
 _ALIAS: dict[str, str] = {"TCSG": "T"}
 
 _PERCENT_SCALE = Decimal(100)
+
+# Coupon-lookup window: one coupon year forward from today. timedelta (not
+# now.replace(year=now.year + 1)) avoids a Feb-29 ValueError (IN-03), consistent
+# with the timedelta-based windows in tinkoff_data._fetch_reports_async.
+_COUPON_WINDOW = timedelta(days=365)
 
 # Committed snapshot location (package-relative committed data asset, like presets/*.yaml).
 _DEFAULT_OUT_PATH = (
@@ -311,6 +316,27 @@ def _assert_ofz_yieldable(rows: list[dict[str, Any]]) -> None:
                 )
 
 
+def _assert_classes_non_empty(counts: dict[str, int]) -> None:
+    """Refuse to proceed if any of the 5 asset classes enumerated to 0 rows (IN-02).
+
+    Each fetch_all_* returns [] on a gRPC/auth/cert/DNS failure (the contract the 65-01
+    tests and the T-65-01/T-65-02 threat mitigations depend on -- do NOT change it). But
+    if ALL five return [], build_rows produces zero rows and the only backstop is
+    validate()'s "missing required symbols: [everything]" message -- which hides the real
+    root cause (e.g. "shares enumeration returned 0 -- check auth/cert/DNS"). Asserting
+    each class is non-empty here surfaces the true empty-class cause to the operator before
+    the misleading downstream message fires.
+    """
+    empty = sorted(name for name, n in counts.items() if n == 0)
+    if empty:
+        raise SystemExit(
+            "REFUSING to write snapshot -- asset class(es) enumerated to 0 rows: "
+            f"{empty}. A T-Bank gRPC enumeration returned empty (each fetch_all_* "
+            "returns [] on auth/cert/DNS/transport failure); check the token, the gRPC "
+            "cert (certs/grpc_roots.pem), and DNS (GRPC_DNS_RESOLVER=native) before re-running."
+        )
+
+
 def build_and_write(
     fetcher: _FetcherLike,
     coupon_lookup: Callable[[str], list[_CouponLike]],
@@ -324,6 +350,7 @@ def build_and_write(
 
     _log.info("moex_universe_enumerated", sdk_universe_counts=counts, total=len(rows))
 
+    _assert_classes_non_empty(counts)  # IN-02 -- surface an empty class before "missing symbols"
     _warn_duplicate_symbols(rows)  # WR-01 -- surface (symbol, figi) collisions before write
     validate(snapshot_symbols)  # UNIV-08 / D-04 -- raises SystemExit on any missing symbol
     _assert_ofz_yieldable(rows)  # UNIV-06 -- traded OFZ must be YTM-able
@@ -357,8 +384,9 @@ def _live_coupon_lookup(fetcher: Any) -> Callable[[str], list[_CouponLike]]:
 
     def lookup(figi: str) -> list[_CouponLike]:
         now = datetime.now(UTC)
-        # One year forward captures at least one upcoming coupon for the rate derivation.
-        end = now.replace(year=now.year + 1)
+        # One coupon year forward captures at least one upcoming coupon for the rate
+        # derivation. timedelta avoids a Feb-29 crash (IN-03).
+        end = now + _COUPON_WINDOW
 
         async def _async() -> list[CouponPayment]:
             services = await fetcher._get_services_async()
