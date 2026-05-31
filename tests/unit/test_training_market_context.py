@@ -14,7 +14,20 @@ from decimal import Decimal
 
 import pytest
 
-from finalayze.core.schemas import Candle, FXRate, KeyRateRecord, MarketContext, MoexMarketData
+from finalayze.core.schemas import (
+    Candle,
+    FundamentalSnapshot,
+    FXRate,
+    KeyRateRecord,
+    MarketContext,
+    MoexMarketData,
+)
+
+# Fundamental-slice constants (ruff PLR2004: no magic numbers)
+_FUND_SYMBOL = "SBER"
+_FUND_PE_PAST = 8.0
+_FUND_PE_FUTURE = 9.0
+_FUND_PE_BOUNDARY = 7.0
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -297,6 +310,64 @@ class TestSliceMarketContext:
         assert sliced.moex_data is not None
         assert sliced.moex_data.fx_rates is not None
         assert len(sliced.moex_data.fx_rates) == 1
+
+    # ── fundamentals slice (FUNDML-01, T-64-01 look-ahead guard) ─────────────
+
+    def test_future_fundamental_excluded(self) -> None:
+        """A fundamental snapshot dated after max_ts must be dropped (Test B)."""
+        from finalayze.ml.training import _slice_market_context  # noqa: PLC0415
+
+        max_ts = datetime(2024, 6, 1, tzinfo=UTC)
+        past = FundamentalSnapshot(
+            symbol=_FUND_SYMBOL,
+            as_of=datetime(2024, 1, 1, tzinfo=UTC),
+            pe_ratio=_FUND_PE_PAST,
+        )
+        future = FundamentalSnapshot(
+            symbol=_FUND_SYMBOL,
+            as_of=datetime(2024, 7, 1, tzinfo=UTC),  # after max_ts
+            pe_ratio=_FUND_PE_FUTURE,
+        )
+        moex = MoexMarketData(fundamentals=(past, future))
+        ctx = MarketContext(moex_data=moex)
+
+        sliced = _slice_market_context(ctx, max_ts)
+
+        assert sliced.moex_data is not None
+        assert sliced.moex_data.fundamentals is not None
+        assert len(sliced.moex_data.fundamentals) == 1
+        assert sliced.moex_data.fundamentals[0].as_of == datetime(2024, 1, 1, tzinfo=UTC)
+
+    def test_exact_max_ts_boundary_fundamental_is_inclusive(self) -> None:
+        """A fundamental snapshot exactly at max_ts must be INCLUDED (Test C)."""
+        from finalayze.ml.training import _slice_market_context  # noqa: PLC0415
+
+        max_ts = datetime(2024, 6, 1, tzinfo=UTC)
+        boundary = FundamentalSnapshot(
+            symbol=_FUND_SYMBOL,
+            as_of=max_ts,
+            pe_ratio=_FUND_PE_BOUNDARY,
+        )
+        moex = MoexMarketData(fundamentals=(boundary,))
+        ctx = MarketContext(moex_data=moex)
+
+        sliced = _slice_market_context(ctx, max_ts)
+
+        assert sliced.moex_data is not None
+        assert sliced.moex_data.fundamentals is not None
+        assert len(sliced.moex_data.fundamentals) == 1
+
+    def test_none_fundamentals_preserved(self) -> None:
+        """fundamentals=None must stay None after slicing (Test D)."""
+        from finalayze.ml.training import _slice_market_context  # noqa: PLC0415
+
+        moex = MoexMarketData(fundamentals=None)
+        ctx = MarketContext(moex_data=moex)
+
+        sliced = _slice_market_context(ctx, datetime(2024, 6, 1, tzinfo=UTC))
+
+        assert sliced.moex_data is not None
+        assert sliced.moex_data.fundamentals is None
 
 
 # ── build_windows with market_context tests ──────────────────────────────────
