@@ -489,3 +489,37 @@ def test_default_moex_compat_shims_are_nonempty_instrument_lists() -> None:
     for inst in DEFAULT_MOEX_INSTRUMENTS:
         registry.register(inst)
     assert len(registry) == len(DEFAULT_MOEX_INSTRUMENTS)
+
+
+# ── IN-05: the loader validates instrument_type against the InstrumentType Literal ──
+
+
+def test_row_to_instrument_rejects_unknown_instrument_type() -> None:
+    """A corrupt/attacker-influenced snapshot row with an unknown instrument_type
+    raises ConfigurationError (fail-closed trust boundary) rather than being accepted
+    and silently dropped from list_by_type queries (IN-05)."""
+    from finalayze.markets.instruments import _row_to_instrument
+
+    row = {"symbol": "EVIL", "instrument_type": "stonk", "name": "corrupt"}
+    with pytest.raises(ConfigurationError) as exc_info:
+        _row_to_instrument(row)
+    assert "stonk" in str(exc_info.value)
+    assert "EVIL" in str(exc_info.value)
+
+
+def test_row_to_instrument_accepts_every_valid_type() -> None:
+    """All five InstrumentType literals are accepted (no false rejection) -- IN-05."""
+    from finalayze.markets.instruments import _VALID_INSTRUMENT_TYPES, _row_to_instrument
+
+    assert set(_VALID_INSTRUMENT_TYPES) == {"stock", "etf", "bond", "future", "currency"}
+    for itype in _VALID_INSTRUMENT_TYPES:
+        inst = _row_to_instrument({"symbol": "X", "instrument_type": itype, "name": "x"})
+        assert inst.instrument_type == itype
+
+
+def test_build_default_registry_accepts_current_committed_snapshot() -> None:
+    """The IN-05 type validation must NOT reject the CURRENT committed snapshot
+    (it carries only valid types) -- regression guard for the live data path."""
+    registry = build_default_registry()
+    # SBER resolves -> the snapshot loaded without a ConfigurationError on any row.
+    assert registry.get(SBER_SYMBOL, MOEX_MARKET).market_id == MOEX_MARKET

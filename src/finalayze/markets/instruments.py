@@ -13,16 +13,20 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any, get_args
 
 import structlog
 
 from finalayze.core.exceptions import ConfigurationError, InstrumentNotFoundError
-
-if TYPE_CHECKING:
-    from finalayze.core.schemas import InstrumentType
+from finalayze.core.schemas import InstrumentType
 
 _log = structlog.get_logger()
+
+# Valid instrument types, derived from the InstrumentType Literal alias (single
+# source of truth -- never hardcode a duplicate list that can drift). Used by the
+# fail-closed snapshot loader to reject an unknown type from the committed file
+# (IN-05: the loader is the trust boundary for the attacker-influenceable file).
+_VALID_INSTRUMENT_TYPES: frozenset[str] = frozenset(get_args(InstrumentType.__value__))
 
 
 @dataclass(frozen=True)
@@ -195,12 +199,24 @@ def _row_to_instrument(row: dict[str, Any]) -> Instrument:
         val = row.get(key)
         return None if val is None else date.fromisoformat(str(val))
 
+    # IN-05: validate instrument_type against the InstrumentType Literal (fail-closed).
+    # The frozen dataclass does no runtime validation, so a corrupt/attacker-influenced
+    # snapshot row with an unknown type would otherwise be accepted and silently dropped
+    # from every list_by_type query. The committed file is the trust boundary -- raise.
+    itype = row.get("instrument_type", "stock")
+    if itype not in _VALID_INSTRUMENT_TYPES:
+        msg = (
+            f"unknown instrument_type {itype!r} for {row.get('symbol')!r} "
+            f"(valid: {sorted(_VALID_INSTRUMENT_TYPES)})"
+        )
+        raise ConfigurationError(msg)
+
     currency = row.get("currency") or "RUB"
     return Instrument(
         symbol=row["symbol"],
         market_id=row.get("market_id", "moex"),
         name=row.get("name", ""),
-        instrument_type=row.get("instrument_type", "stock"),
+        instrument_type=itype,
         figi=row.get("figi") or None,
         lot_size=row.get("lot_size", 1),
         currency=str(currency).upper(),
