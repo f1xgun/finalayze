@@ -256,3 +256,93 @@ YNDX→YDEX symbol in `SEGMENT_SYMBOLS`. The preset, UNIVERSE, and symbol map we
 gate verdicts recorded across all 17 `ru_*` segments, with zero segments force-passed and
 zero force-save debt remaining. The MOEX ML truth is now re-established honestly; any future
 enable must earn a genuine gate pass.
+
+---
+
+## Phase 64 — Stage 3 Round-1 verdicts (fundamental-features A/B, no force-save)
+
+**Date:** 2026-05-31
+**Phase:** 64 (Stage 3 — fundamental features in ML, gated on data maturity)
+**Requirements:** FUNDML-02, FUNDML-03
+
+Stage 3 Round-1 asks a single causal question: **does real, now-populated fundamental DATA
+move the walk-forward gate?** Plan 64-01 made the loader/feature slice carry fundamentals
+(proven LIVE by its GREEN guard test — `compute_features` emits a non-zero `earnings_yield`
+on a backfilled `as_of`). Round-1 changes **only the data** — same `label_mode`, WF params,
+`--sequential-bootstrap`, `--excess-returns`, feature selection, and gate thresholds as
+Phase 62. Two segments were retrained against the live `finalayze-db` (real MOEX candles via
+Tinkoff gRPC — SBER=606 bars etc.) to a **separate** `models_fund/` dir with **NO
+`--force-save`**; the Phase-62 baseline in `models/` was left UNTOUCHED (D-05/D-07/D-08).
+
+**Honest framing (D-09):** confirming fundamentals do **not** move the gate is a valid,
+valuable result and is recorded here either way. **Net Round-1 result: zero segments passed,
+zero segments kept, zero preset edits, zero force-save debt.**
+
+### Per-segment A/B — Phase-62 baseline (`models/`) vs Round-1 fundamental run (`models_fund/`)
+
+| segment | baseline overall_passed / best_accuracy | fundamental-run overall_passed / bh_passed / best_accuracy | n_folds | key gate_pass_rates (fundamental run) | selected fundamental features | KEEP/DISC | force-save debt |
+|---------|------------------------------------------|------------------------------------------------------------|---------|----------------------------------------|-------------------------------|-----------|-----------------|
+| **ru_blue_chips** | false / 0.5307 | **false** / (stdout BH p=0.0033 [PASS]; `bh_passed` NOT persisted in gate file) / 0.5818 | 3 | accuracy 0.333, brier_score 0.333, profit_factor 0.333 (each < 0.34 min_ratio → FAIL); class_balance 1.0, degenerate_predictor 1.0, sensitivity 1.0, signal_count 1.0, specificity 1.0 | NOT written — model only saved on a gate pass; gate FAILED so `selected_features.json` was not emitted. Fundamental data path proven LIVE by 64-01 GREEN guard test, not from this artefact. | **DISC** | 0 (`force_saved: false`) |
+| **ru_energy** | false / 0.4167 | **false** / **false** (stdout BH p=0.9935 [FAIL]) / 0.4310 | 3 | accuracy 0.0, brier_score 0.0 (FAIL); profit_factor 0.667, sensitivity 0.333; class_balance 1.0, degenerate_predictor 1.0, signal_count 1.0, specificity 1.0 | NOT written — gate FAILED (same as above). | **DISC** | 0 (`force_saved: false`) |
+
+### KEEP rule (D-07) application
+
+KEEP iff `overall_passed` flips false→true **AND** `bh_passed: true` (DISC→KEEP), or a
+passing segment improves without regression. **Neither segment met the rule:**
+
+- **ru_blue_chips** — `overall_passed` stayed **false**. `best_accuracy` improved
+  0.5307 → 0.5818 and the standalone stdout BH printed `p=0.0033 [PASS]`, but the
+  authoritative WF gate still **FAILS**: accuracy / brier_score / profit_factor each clear
+  only 1/3 folds (pass-rate 0.333 < `MOEX_MIN_PASSING_FOLDS_RATIO` 0.34). Per Pitfall 4
+  (only 3 MOEX folds), a marginal accuracy bump that does **not** flip the gate is **not a
+  keep** — the gate, not the headline accuracy, is the arbiter. **DISC.**
+- **ru_energy** — `overall_passed` stayed **false** and `bh_passed: false` (BH p=0.9935).
+  accuracy / brier_score pass-rates are 0.0 (0/3 folds). Clear model-quality **DISC**.
+
+### Data-maturity context (Assumption A1 — per-symbol `fundamental_snapshots` depth)
+
+Operator DB query (`SELECT symbol, count(*), min(as_of), max(as_of) FROM fundamental_snapshots GROUP BY symbol`):
+
+- **ru_blue_chips peers (7/8 have fundamentals):** SBER=10, LKOH=9, GMKN=9, ROSN=9,
+  NVTK=7, MGNT=8, TATN=9, **TCSG=MISSING (0 rows)**.
+- **ru_energy peers (6/6):** ROSN=9, TATN=9, NVTK=7, LKOH=9, SNGS=9, SIBN=9.
+- Range ~2022-02 to ~2026-04; **7–10 annual/semi-annual snapshots per symbol (thin)**.
+
+The ≥4-peer co-existence requirement for the z-score features (Pitfall 2) is satisfied for
+both segments, so the DISC is **not** a "too few peers" artefact — it is a genuine
+no-improvement result on thin (annual/semi-annual) point-in-time fundamental history.
+
+### Round-1 conclusion (per D-09)
+
+- **Segments kept (Round-1 KEEP):** **0.** Neither `ru_blue_chips` nor `ru_energy` flipped
+  the gate false→true.
+- **Preset edits:** **none.** Both `src/finalayze/strategies/presets/ru_blue_chips.yaml` and
+  `ru_energy.yaml` keep `ml_ensemble.enabled: false`, `weight: 0.00` — revert by omission.
+  No artefact was copied from `models_fund/` into `models/`.
+- **Force-save debt:** **0.** Both Round-1 runs used NO `--force-save`; each
+  `models_fund/<seg>/wf_gate_results.json` records `force_saved: false`. `models_fund/` is
+  throwaway A/B evidence and is **not** committed.
+- **Reconciliation invariant:** still green (`tests/unit/test_ml_gate_reconciliation.py`,
+  5 passed) — no preset enables `ml_ensemble`, so the unpassed-model invariant holds trivially.
+- **Loader legitimacy:** no enabled segment → `ml_force_saved_artifact_loaded` cannot fire;
+  `tests/unit -k force_saved` green (6 passed).
+- **Backtest-iteration:** no segment enabled → no backtest-iteration required (CLAUDE.md #4
+  fires only on an `ml_ensemble` enable). `results/iterations/history.jsonl` is unchanged.
+
+**This is the honest Round-1 outcome and a VALID result per D-09:** real fundamental data,
+proven live in the feature path, did **not** move either WF gate past the threshold on the
+current thin point-in-time history. **Round-1 KEEP = NONE (0/2 segments passed the WF gate.)**
+This gates the conditional Plan 03 (Round-2 derived fundamental features) **OUT** — Plan 03
+executes only if Round 1 kept ≥1 segment.
+
+### Phase 64 Round 2 — deferred (per D-01)
+
+Phase 64 Round 2 (derived multi-year fundamental features + schema `4`→`5`) is **deferred per
+D-01** — Round 1 found no segment improvement (**KEEP = NONE**), so Round 2 was **not attempted**
+in Phase 64. The conditional Plan 64-03 took its documented-skip branch: **no source under
+`src/` was modified** and `FEATURE_SCHEMA_VERSION` **stays at `4`** (bumping to `5` with no
+passing v5 artefact would deadlock the loader — every v4 artefact would be rejected at load with
+no replacement to load). The unchanged schema-4 feature set stays green
+(`tests/unit/test_fundamental_features.py`, 10 passed). Revisit Round 2 only if/when a future
+fundamental retrain (e.g. on deeper fundamental history) produces a Round-1 KEEP; it is not an
+automatic continuation.

@@ -208,7 +208,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             lookback_days = get_lookback_days(segment_id)
             end_date = datetime.now(tz=UTC).date()
             start_date = (datetime.now(tz=UTC) - timedelta(days=lookback_days)).date()
-            _seg_cfg = SimpleNamespace(market=market_id)
+            _seg_cfg = SimpleNamespace(market=market_id, symbols=symbols)
             try:
                 market_context: MarketContext | None = loader.load(_seg_cfg, start_date, end_date)
                 if loader.fetch_failures:

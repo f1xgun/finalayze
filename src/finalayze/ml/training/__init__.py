@@ -77,11 +77,17 @@ def _slice_market_context(ctx: MarketContext, max_ts: datetime) -> MarketContext
             if md.turnover is not None
             else None
         )
+        sliced_fund = (
+            tuple(s for s in md.fundamentals if s.as_of <= max_ts)
+            if md.fundamentals is not None
+            else None
+        )
         sliced_moex = MoexMarketData(
             fx_rates=sliced_fx,
             key_rates=sliced_kr,
             commodity_candles=sliced_commodities,
             turnover=sliced_turnover,
+            fundamentals=sliced_fund,
         )
 
     return MarketContext(
