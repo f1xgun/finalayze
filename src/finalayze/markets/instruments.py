@@ -8,12 +8,14 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from finalayze.core.exceptions import InstrumentNotFoundError
+from finalayze.core.exceptions import ConfigurationError, InstrumentNotFoundError
 
 if TYPE_CHECKING:
     from finalayze.core.schemas import InstrumentType
@@ -150,707 +152,90 @@ DEFAULT_US_INSTRUMENTS: list[Instrument] = [
 ]
 
 
-# Default MOEX instruments for Phase 2
-# FIGI identifiers from Tinkoff Invest API instrument catalogue.
+# ---------------------------------------------------------------------------
+# MOEX universe -- loaded fail-closed from the committed snapshot (Plan 65-03)
+# ---------------------------------------------------------------------------
+# The runtime loader reads a committed JSON snapshot ONLY -- no network, no DB,
+# no `scripts.*` import (Layer-2 rule, CLAUDE.md invariant #1). A missing or
+# corrupt snapshot raises ConfigurationError (fail-closed, D-04) -- there is no
+# silent fallback to a stale hand-maintained list.
+_SNAPSHOT = Path(__file__).parent / "data" / "moex_universe.json"
+
+
+def _row_to_instrument(row: dict[str, Any]) -> Instrument:
+    """Re-hydrate one JSON snapshot row into an Instrument.
+
+    JSON serializes Decimal -> str and date -> ISO string, so we coerce them
+    back; currency is upper-cased (Pitfall 3); absent keys stay None.
+    """
+
+    def _dec(key: str) -> Decimal | None:
+        val = row.get(key)
+        return None if val is None else Decimal(str(val))
+
+    def _date(key: str) -> date | None:
+        val = row.get(key)
+        return None if val is None else date.fromisoformat(str(val))
+
+    currency = row.get("currency") or "RUB"
+    return Instrument(
+        symbol=row["symbol"],
+        market_id=row.get("market_id", "moex"),
+        name=row.get("name", ""),
+        instrument_type=row.get("instrument_type", "stock"),
+        figi=row.get("figi") or None,
+        lot_size=row.get("lot_size", 1),
+        currency=str(currency).upper(),
+        is_active=row.get("is_active", True),
+        segment_id=row.get("segment_id", ""),
+        face_value=_dec("face_value"),
+        coupon_rate=_dec("coupon_rate"),
+        coupon_frequency=row.get("coupon_frequency"),
+        maturity_date=_date("maturity_date"),
+        floating_coupon=row.get("floating_coupon", False),
+        isin=row.get("isin") or None,
+        class_code=row.get("class_code") or None,
+        expiration_date=_date("expiration_date"),
+        basic_asset=row.get("basic_asset") or None,
+        asset_uid=row.get("asset_uid") or None,
+        short_history=row.get("short_history", False),
+    )
+
+
+def _load_moex_snapshot() -> list[Instrument]:
+    """Read the committed MOEX universe snapshot, fail-closed.
+
+    Raises ConfigurationError on a missing or corrupt snapshot -- never falls
+    back to a stale hand-list (D-04 / T-65-08).
+    """
+    try:
+        raw = json.loads(_SNAPSHOT.read_text(encoding="utf-8"))
+        rows = raw["instruments"]
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        msg = f"MOEX universe snapshot missing/corrupt at {_SNAPSHOT}: {exc}"
+        raise ConfigurationError(msg) from exc  # NO fallback to a stale hand-list (D-04)
+    return [_row_to_instrument(r) for r in rows]
+
+
+# Compat shims (UNIV-07): the ~10 direct importers iterate these module-level
+# lists. They are computed ONCE at import from the real committed snapshot so
+# those importers need zero edits. build_default_registry does NOT iterate
+# these -- it reads the snapshot lazily so a monkeypatched _SNAPSHOT (UNIV-04
+# fail-closed test) is honoured.
+_ALL_MOEX_SNAPSHOT: list[Instrument] = _load_moex_snapshot()
 DEFAULT_MOEX_INSTRUMENTS: list[Instrument] = [
-    Instrument(
-        symbol="SBER",
-        market_id="moex",
-        name="Sberbank",
-        instrument_type="stock",
-        figi="BBG004730N88",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="GAZP",
-        market_id="moex",
-        name="Gazprom",
-        instrument_type="stock",
-        figi="BBG004730RP0",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="LKOH",
-        market_id="moex",
-        name="Lukoil",
-        instrument_type="stock",
-        figi="BBG004731032",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="GMKN",
-        market_id="moex",
-        name="Norilsk Nickel",
-        instrument_type="stock",
-        figi="BBG004731489",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="YNDX",
-        market_id="moex",
-        name="Yandex",
-        instrument_type="stock",
-        figi="BBG006L8G4H1",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="NVTK",
-        market_id="moex",
-        name="Novatek",
-        instrument_type="stock",
-        figi="BBG00475KKY8",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="ROSN",
-        market_id="moex",
-        name="Rosneft",
-        instrument_type="stock",
-        figi="BBG004731354",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="VTBR",
-        market_id="moex",
-        name="VTB Bank",
-        instrument_type="stock",
-        figi="BBG004730ZJ9",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="TATN",
-        market_id="moex",
-        name="Tatneft",
-        instrument_type="stock",
-        figi="BBG004RVFFC0",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="SBERP",
-        market_id="moex",
-        name="Sberbank Preferred",
-        instrument_type="stock",
-        figi="BBG0047315Y7",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="MGNT",
-        market_id="moex",
-        name="Magnit",
-        instrument_type="stock",
-        figi="BBG004RVFCY3",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="POLY",
-        market_id="moex",
-        name="Polymetal International",
-        instrument_type="stock",
-        figi="BBG004PYF2N3",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="ALRS",
-        market_id="moex",
-        name="Alrosa",
-        instrument_type="stock",
-        figi="BBG004S68B31",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="SNGS",
-        market_id="moex",
-        name="Surgutneftegas",
-        instrument_type="stock",
-        figi="BBG004S681W1",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="TRNFP",
-        market_id="moex",
-        name="Transneft Preferred",
-        instrument_type="stock",
-        figi="BBG00475K6C3",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="IRAO",
-        market_id="moex",
-        name="Inter RAO",
-        instrument_type="stock",
-        figi="BBG004S68473",
-        lot_size=100,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="OZON",
-        market_id="moex",
-        name="Ozon Holdings",
-        instrument_type="stock",
-        figi="TCS80A10CW95",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="MOEX",
-        market_id="moex",
-        name="Moscow Exchange",
-        instrument_type="stock",
-        figi="BBG004730JJ5",
-        lot_size=10,
-        currency="RUB",
-    ),
-    # ── Additional MOEX instruments ──────────────────────────────────────
-    Instrument(
-        symbol="T",
-        market_id="moex",
-        name="T-Technologies (ex TCS Group)",
-        instrument_type="stock",
-        figi="TCS80A107UL4",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="TCSG",
-        market_id="moex",
-        name="T-Bank (TCS Group, legacy ticker)",
-        instrument_type="stock",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="VKCO",
-        market_id="moex",
-        name="VK Company",
-        instrument_type="stock",
-        figi="TCS00A106YF0",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="CHMF",
-        market_id="moex",
-        name="Severstal",
-        instrument_type="stock",
-        figi="BBG00475K6C3",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="NLMK",
-        market_id="moex",
-        name="NLMK Group",
-        instrument_type="stock",
-        figi="BBG004S681B4",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="MAGN",
-        market_id="moex",
-        name="MMK (Magnitogorsk Iron & Steel)",
-        instrument_type="stock",
-        figi="BBG004S68507",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="PLZL",
-        market_id="moex",
-        name="Polyus Gold",
-        instrument_type="stock",
-        figi="BBG000R607Y3",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="RUAL",
-        market_id="moex",
-        name="Rusal",
-        instrument_type="stock",
-        figi="BBG008F2T3T2",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="MTLR",
-        market_id="moex",
-        name="Mechel",
-        instrument_type="stock",
-        figi="BBG004S68598",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="FIVE",
-        market_id="moex",
-        name="X5 Retail Group",
-        instrument_type="stock",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        # New MOEX listing of X5 (ticker X5, relisted 2024); FIVE above is the
-        # old delisted GDR. ru_consumer trades the current X5 line.
-        symbol="X5",
-        market_id="moex",
-        name="Korporativny Tsentr IKS 5",
-        instrument_type="stock",
-        figi="TCS03A108X38",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="FIXP",
-        market_id="moex",
-        name="Fix Price",
-        instrument_type="stock",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="LENT",
-        market_id="moex",
-        name="Lenta",
-        instrument_type="stock",
-        figi="BBG0063FKTD9",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="MTSS",
-        market_id="moex",
-        name="MTS (Mobile TeleSystems)",
-        instrument_type="stock",
-        figi="BBG004S681W1",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="RTKM",
-        market_id="moex",
-        name="Rostelecom",
-        instrument_type="stock",
-        figi="BBG004S682Z6",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="HYDR",
-        market_id="moex",
-        name="RusHydro",
-        instrument_type="stock",
-        figi="BBG00475K2X9",
-        lot_size=1000,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="FEES",
-        market_id="moex",
-        name="FGC UES (Federal Grid)",
-        instrument_type="stock",
-        figi="BBG00475JZZ6",
-        lot_size=10000,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="MSNG",
-        market_id="moex",
-        name="Mosenergo",
-        instrument_type="stock",
-        figi="BBG004S687W8",
-        lot_size=1000,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="UPRO",
-        market_id="moex",
-        name="Unipro",
-        instrument_type="stock",
-        figi="BBG004S686W0",
-        lot_size=1000,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="PIKK",
-        market_id="moex",
-        name="PIK Group",
-        instrument_type="stock",
-        figi="BBG004S68BH6",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="SMLT",
-        market_id="moex",
-        name="Samolet Group",
-        instrument_type="stock",
-        figi="BBG00F6NKQX3",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="PHOR",
-        market_id="moex",
-        name="PhosAgro",
-        instrument_type="stock",
-        figi="BBG004S689R0",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="AKRN",
-        market_id="moex",
-        name="Acron",
-        instrument_type="stock",
-        figi="BBG004S688G4",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="AFLT",
-        market_id="moex",
-        name="Aeroflot",
-        instrument_type="stock",
-        figi="BBG004S683W7",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="FLOT",
-        market_id="moex",
-        name="Sovcomflot",
-        instrument_type="stock",
-        figi="BBG000R04X57",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="NMTP",
-        market_id="moex",
-        name="NCSP (Novorossiysk Commercial Sea Port)",
-        instrument_type="stock",
-        figi="BBG004S68BR5",
-        lot_size=100,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="SNGSP",
-        market_id="moex",
-        name="Surgutneftegas Preferred",
-        instrument_type="stock",
-        lot_size=100,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="SIBN",
-        market_id="moex",
-        name="Gazprom Neft",
-        instrument_type="stock",
-        figi="BBG004S684M6",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="TATNP",
-        market_id="moex",
-        name="Tatneft Preferred",
-        instrument_type="stock",
-        figi="BBG004S68CP5",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="CBOM",
-        market_id="moex",
-        name="MKB (Moscow Credit Bank)",
-        instrument_type="stock",
-        figi="BBG009GSYN76",
-        lot_size=100,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="BSPB",
-        market_id="moex",
-        name="Bank Saint Petersburg",
-        instrument_type="stock",
-        figi="BBG000QJW156",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="HHRU",
-        market_id="moex",
-        name="HeadHunter Group",
-        instrument_type="stock",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="POSI",
-        market_id="moex",
-        name="Positive Technologies",
-        instrument_type="stock",
-        figi="TCS00A103X66",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="YDEX",
-        market_id="moex",
-        name="Yandex (YDEX)",
-        instrument_type="stock",
-        figi="TCS00A107T19",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="HEAD",
-        market_id="moex",
-        name="HeadHunter",
-        instrument_type="stock",
-        figi="TCS20A107662",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="AFKS",
-        market_id="moex",
-        name="AFK Sistema",
-        instrument_type="stock",
-        figi="BBG004S68614",
-        lot_size=100,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="RENI",
-        market_id="moex",
-        name="Renaissance Insurance",
-        instrument_type="stock",
-        figi="BBG00QKJSX05",
-        lot_size=10,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="ASTR",
-        market_id="moex",
-        name="Astra Group",
-        instrument_type="stock",
-        figi="RU000A106T36",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="DIAS",
-        market_id="moex",
-        name="Diasoft",
-        instrument_type="stock",
-        figi="TCS00A107ER5",
-        lot_size=1,
-        currency="RUB",
-    ),
-    Instrument(
-        symbol="SOFL",
-        market_id="moex",
-        name="Softline",
-        instrument_type="stock",
-        figi="TCS00A0ZZBC2",
-        lot_size=10,
-        currency="RUB",
-    ),
+    i for i in _ALL_MOEX_SNAPSHOT if i.instrument_type != "bond"
 ]
-
-
-# Default OFZ bond instruments (Phase 0 validated via T-Bank API 2026-03-11)
-# FIGIs confirmed via services.instruments.bond_by()
 DEFAULT_MOEX_OFZ_INSTRUMENTS: list[Instrument] = [
-    # OFZ-PD (Fixed Coupon) — Strategic/Tactical layers
-    Instrument(
-        symbol="SU26238RMFS4",
-        market_id="moex",
-        name="ОФЗ 26238",
-        instrument_type="bond",
-        figi="BBG011FJ4HS6",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("7.10"),
-        coupon_frequency=2,
-        maturity_date=date(2041, 5, 15),
-    ),
-    Instrument(
-        symbol="SU26239RMFS2",
-        market_id="moex",
-        name="ОФЗ 26239",
-        instrument_type="bond",
-        figi="BBG011FHF1F7",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("6.90"),
-        coupon_frequency=2,
-        maturity_date=date(2031, 7, 23),
-    ),
-    Instrument(
-        symbol="SU26241RMFS8",
-        market_id="moex",
-        name="ОФЗ 26241",
-        instrument_type="bond",
-        figi="BBG01BJBR2W0",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("9.50"),
-        coupon_frequency=2,
-        maturity_date=date(2032, 11, 17),
-    ),
-    Instrument(
-        symbol="SU26243RMFS4",
-        market_id="moex",
-        name="ОФЗ 26243",
-        instrument_type="bond",
-        figi="TCS00A106E90",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("9.80"),
-        coupon_frequency=2,
-        maturity_date=date(2038, 5, 19),
-    ),
-    Instrument(
-        symbol="SU26244RMFS2",
-        market_id="moex",
-        name="ОФЗ 26244",
-        instrument_type="bond",
-        figi="TCS00A1074G2",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("11.25"),
-        coupon_frequency=2,
-        maturity_date=date(2034, 3, 15),
-    ),
-    Instrument(
-        symbol="SU26246RMFS7",
-        market_id="moex",
-        name="ОФЗ 26246",
-        instrument_type="bond",
-        figi="BBG01N0CVG83",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("12.00"),
-        coupon_frequency=2,
-        maturity_date=date(2036, 3, 12),
-    ),
-    Instrument(
-        symbol="SU26252RMFS5",
-        market_id="moex",
-        name="ОФЗ 26252",
-        instrument_type="bond",
-        figi="TCS00A10D4Y2",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("12.50"),
-        coupon_frequency=2,
-        maturity_date=date(2033, 10, 12),
-    ),
-    Instrument(
-        symbol="SU26253RMFS3",
-        market_id="moex",
-        name="ОФЗ 26253",
-        instrument_type="bond",
-        figi="TCS00A10D517",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("13.00"),
-        coupon_frequency=2,
-        maturity_date=date(2038, 10, 6),
-    ),
-    # OFZ-PK (Floating Coupon) — Core layer
-    Instrument(
-        symbol="SU29007RMFS0",
-        market_id="moex",
-        name="ОФЗ 29007",
-        instrument_type="bond",
-        figi="BBG007Z5DF79",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("1.30"),  # spread over RUONIA
-        coupon_frequency=2,
-        maturity_date=date(2027, 3, 3),
-        floating_coupon=True,
-    ),
-    Instrument(
-        symbol="SU29008RMFS8",
-        market_id="moex",
-        name="ОФЗ 29008",
-        instrument_type="bond",
-        figi="BBG007Z5DZS2",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("1.40"),
-        coupon_frequency=2,
-        maturity_date=date(2029, 10, 3),
-        floating_coupon=True,
-    ),
-    Instrument(
-        symbol="SU29009RMFS6",
-        market_id="moex",
-        name="ОФЗ 29009",
-        instrument_type="bond",
-        figi="BBG007Z5F748",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("1.50"),
-        coupon_frequency=2,
-        maturity_date=date(2032, 5, 5),
-        floating_coupon=True,
-    ),
-    Instrument(
-        symbol="SU29010RMFS4",
-        market_id="moex",
-        name="ОФЗ 29010",
-        instrument_type="bond",
-        figi="BBG007Z5FFL1",
-        lot_size=1,
-        currency="RUB",
-        face_value=Decimal(1000),
-        coupon_rate=Decimal("1.60"),
-        coupon_frequency=2,
-        maturity_date=date(2034, 12, 6),
-        floating_coupon=True,
-    ),
+    i for i in _ALL_MOEX_SNAPSHOT if i.instrument_type == "bond"
 ]
 
 
 def build_default_registry() -> InstrumentRegistry:
     """Build and return a registry pre-populated with default instruments."""
     registry = InstrumentRegistry()
-    for instrument in DEFAULT_US_INSTRUMENTS:
+    for instrument in DEFAULT_US_INSTRUMENTS:  # KEEP unchanged (D-04, US out of scope)
         registry.register(instrument)
-    for instrument in DEFAULT_MOEX_INSTRUMENTS:
-        registry.register(instrument)
-    for instrument in DEFAULT_MOEX_OFZ_INSTRUMENTS:
-        registry.register(instrument)
+    for inst in _load_moex_snapshot():  # LAZY read -- honours a patched _SNAPSHOT;
+        registry.register(inst)  # fail-closed ConfigurationError reachable (UNIV-04)
     return registry
