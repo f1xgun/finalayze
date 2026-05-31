@@ -1,0 +1,18 @@
+{
+  "history": {
+    "columns": [
+      "BOARDID",
+      "TRADEDATE",
+      "SECID",
+      "OPEN",
+      "LOW",
+      "HIGH",
+      "CLOSE",
+      "VOLUME",
+      "VALUE"
+    ],
+    "data": [
+      ["TQBR", "2025-07-18", "SBER", 284.0, 282.5, 286.0, 285.5, 12000000, 3426000000.0]
+    ]
+  }
+}

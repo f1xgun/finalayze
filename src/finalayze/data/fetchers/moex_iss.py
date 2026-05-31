@@ -13,7 +13,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo
@@ -218,6 +218,200 @@ class MoexISSFetcher(BaseFetcher):
             current += timedelta(days=1)
 
         return records
+
+    def fetch_dividends(self, secid: str) -> list[tuple[date, Decimal, str]]:
+        """Fetch the dividend history for a MOEX security via ISS.
+
+        Reads ``securities/{SECID}/dividends.json`` and returns one tuple per
+        declared dividend keyed on ``registryclosedate`` — the record (cut-off)
+        date, which is the look-ahead-safe ``as_of`` for dividend-yield
+        backfill (RESEARCH Pitfall 7: this is the record date, NOT the
+        declaration date). Rows missing a record date are skipped; banks and
+        instruments with no dividend block yield ``[]``.
+
+        Args:
+            secid: MOEX security id (e.g. "SBER").
+
+        Returns:
+            List of ``(registryclosedate, value, currencyid)`` tuples.
+
+        Raises:
+            DataFetchError: On HTTP errors or timeouts.
+        """
+        url = f"{_BASE_URL}/securities/{secid}/dividends.json"
+        data = self._get_json(url, params={"iss.meta": "off"})
+
+        block = data.get("dividends", {})
+        columns: list[str] = block.get("columns", [])
+        rows: list[list[Any]] = block.get("data", [])
+        if not columns or not rows:
+            return []
+
+        col = {name: idx for idx, name in enumerate(columns)}
+        try:
+            date_idx = col["registryclosedate"]
+            value_idx = col["value"]
+            currency_idx = col["currencyid"]
+        except KeyError:
+            return []
+
+        dividends: list[tuple[date, Decimal, str]] = []
+        for row in rows:
+            raw_date = row[date_idx]
+            raw_value = row[value_idx]
+            # Skip rows missing the look-ahead-safe record date or value
+            # (T-63.1-07: only Decimal-ify non-None cells).
+            if not raw_date or raw_value is None:
+                continue
+            try:
+                as_of = date.fromisoformat(str(raw_date))
+            except ValueError:
+                continue
+            value = Decimal(str(raw_value))
+            currency = str(row[currency_idx]) if row[currency_idx] is not None else ""
+            dividends.append((as_of, value, currency))
+
+        return dividends
+
+    def fetch_issuesize(self, secid: str) -> int | None:
+        """Fetch the outstanding share count (ISSUESIZE) for a MOEX security.
+
+        Reads the ``description`` block of ``securities/{SECID}.json``. Returns
+        ``None`` when ISS reports no ISSUESIZE (e.g. CIAN — RESEARCH Pitfall 6),
+        never fabricating a count.
+
+        Args:
+            secid: MOEX security id (e.g. "SBER").
+
+        Returns:
+            The current share count as ``int``, or ``None`` when unavailable.
+
+        Raises:
+            DataFetchError: On HTTP errors or timeouts.
+        """
+        url = f"{_BASE_URL}/securities/{secid}.json"
+        data = self._get_json(url, params={"iss.meta": "off", "iss.only": "description"})
+
+        block = data.get("description", {})
+        columns: list[str] = block.get("columns", [])
+        rows: list[list[Any]] = block.get("data", [])
+        if not columns or not rows:
+            return None
+
+        col = {name: idx for idx, name in enumerate(columns)}
+        try:
+            name_idx = col["name"]
+            value_idx = col["value"]
+        except KeyError:
+            return None
+
+        for row in rows:
+            if row[name_idx] == "ISSUESIZE":
+                raw_value = row[value_idx]
+                if not raw_value:
+                    return None
+                try:
+                    return int(raw_value)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def fetch_close_history(
+        self,
+        secid: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[tuple[date, Decimal]]:
+        """Fetch daily CLOSE prices for a MOEX share from the TQBR board.
+
+        Reads ``history/.../boards/TQBR/securities/{SECID}.json`` (the shares
+        board), which carries a ``CLOSE`` column but NO capitalization column —
+        so market_cap must be reconstructed via :meth:`reconstruct_market_cap`.
+        Used as the SmartLab market_cap cross-check / gap-fill (BACKFILL-H-03).
+
+        Args:
+            secid: MOEX security id (e.g. "SBER").
+            start: Start of the date range (inclusive, UTC-aware).
+            end: End of the date range (exclusive, UTC-aware).
+
+        Returns:
+            List of ``(TRADEDATE, CLOSE)`` tuples; rows with a None CLOSE are
+            skipped (T-63.1-07).
+
+        Raises:
+            DataFetchError: On HTTP errors or timeouts.
+        """
+        url = (
+            f"{_BASE_URL}/history/engines/stock/markets/shares/boards/TQBR/securities/{secid}.json"
+        )
+        # §19-M1: ISS `till` is INCLUSIVE — subtract 1 day from the exclusive `end`.
+        from_str = start.strftime("%Y-%m-%d")
+        till_str = (end - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        closes: list[tuple[date, Decimal]] = []
+        offset = 0
+
+        while True:
+            params: dict[str, Any] = {
+                "from": from_str,
+                "till": till_str,
+                "start": offset,
+                "iss.meta": "off",
+            }
+            data = self._get_json(url, params=params)
+            block = data.get("history", {})
+            columns: list[str] = block.get("columns", [])
+            rows: list[list[Any]] = block.get("data", [])
+
+            if not columns or not rows:
+                break
+
+            col = {name: idx for idx, name in enumerate(columns)}
+            try:
+                date_idx = col["TRADEDATE"]
+                close_idx = col["CLOSE"]
+            except KeyError:
+                break
+
+            for row in rows:
+                raw_date = row[date_idx]
+                raw_close = row[close_idx]
+                if not raw_date or raw_close is None:
+                    continue
+                try:
+                    trade_date = date.fromisoformat(str(raw_date))
+                except ValueError:
+                    continue
+                closes.append((trade_date, Decimal(str(raw_close))))
+
+            if len(rows) < _PAGE_SIZE:
+                break
+            offset += len(rows)
+
+        return closes
+
+    @staticmethod
+    def reconstruct_market_cap(close: Decimal, issuesize: int | None) -> Decimal | None:
+        """Reconstruct an APPROXIMATE market_cap as ``CLOSE * ISSUESIZE``.
+
+        Pure (no I/O). Returns ``None`` when ``issuesize`` is None so the
+        gap-fill path can flag the value as unavailable rather than fabricate it.
+
+        WARNING (RESEARCH Pitfall 5): ISS exposes only the *current* ISSUESIZE,
+        so applying it to an older CLOSE over-/under-states historical market_cap
+        across share-count changes. This reconstruction is the flagged-approximate
+        gap-fill / cross-check; SmartLab's per-quarter market_cap is primary.
+
+        Args:
+            close: Daily CLOSE price.
+            issuesize: Current outstanding share count, or None.
+
+        Returns:
+            ``close * issuesize`` as Decimal, or None when issuesize is None.
+        """
+        if issuesize is None:
+            return None
+        return close * issuesize
 
     # ── Private helpers ──────────────────────────────────────────────────────
 
