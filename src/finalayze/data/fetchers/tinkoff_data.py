@@ -571,6 +571,187 @@ class TinkoffFetcher(BaseFetcher):
             )
         return result
 
+    # ── All-asset-class discovery (UNIV-03) ────────────────────────────────
+
+    def fetch_all_shares(self) -> list[dict[str, Any]]:
+        """Fetch all MOEX shares from T-Invest API (sibling of fetch_all_bonds).
+
+        Each dict carries figi, ticker, isin, class_code, name, lot, currency,
+        asset_uid, first_1day_candle_date. Filtered to real_exchange == MOEX.
+        Handles gRPC errors gracefully (logs and returns empty list).
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            return self._run_async(self._fetch_all_shares_async())  # type: ignore[return-value]
+        except Exception as exc:
+            _log.exception("fetch_all_shares_failed", error_type=type(exc).__name__)
+            return []
+
+    def fetch_all_etfs(self) -> list[dict[str, Any]]:
+        """Fetch all MOEX ETFs from T-Invest API (sibling of fetch_all_bonds).
+
+        Same field shape as fetch_all_shares. Filtered to real_exchange == MOEX.
+        Handles gRPC errors gracefully (logs and returns empty list).
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            return self._run_async(self._fetch_all_etfs_async())  # type: ignore[return-value]
+        except Exception as exc:
+            _log.exception("fetch_all_etfs_failed", error_type=type(exc).__name__)
+            return []
+
+    def fetch_all_futures(self) -> list[dict[str, Any]]:
+        """Fetch all MOEX futures from T-Invest API (sibling of fetch_all_bonds).
+
+        Each dict carries figi, ticker, class_code, name, lot, currency,
+        basic_asset, expiration_date. Futures have no isin. Filtered to
+        real_exchange == MOEX. Handles gRPC errors gracefully (returns []).
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            return self._run_async(self._fetch_all_futures_async())  # type: ignore[return-value]
+        except Exception as exc:
+            _log.exception("fetch_all_futures_failed", error_type=type(exc).__name__)
+            return []
+
+    def fetch_all_currencies(self) -> list[dict[str, Any]]:
+        """Fetch all MOEX currencies from T-Invest API (sibling of fetch_all_bonds).
+
+        Each dict carries figi, ticker, class_code, name, lot, currency, isin,
+        nominal. Filtered to real_exchange == MOEX. Handles gRPC errors
+        gracefully (logs and returns empty list).
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            return self._run_async(self._fetch_all_currencies_async())  # type: ignore[return-value]
+        except Exception as exc:
+            _log.exception("fetch_all_currencies_failed", error_type=type(exc).__name__)
+            return []
+
+    @staticmethod
+    def _to_date(value: Any) -> date | None:
+        """Normalize an SDK datetime/date to date (mirrors fetch_all_bonds)."""
+        if not value:
+            return None
+        result: date = value.date() if hasattr(value, "date") else value
+        return result
+
+    async def _fetch_all_shares_async(self) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK shares()."""
+        from t_tech.invest.schemas import InstrumentStatus, RealExchange  # noqa: PLC0415
+
+        services = await self._get_services_async()
+        resp = await services.instruments.shares(  # type: ignore[attr-defined]
+            instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
+        )
+        result: list[dict[str, Any]] = []
+        for inst in resp.instruments:
+            if inst.real_exchange != RealExchange.REAL_EXCHANGE_MOEX:
+                continue  # MOEX filter -- one stable enum across all 5 classes
+            result.append(
+                {
+                    "figi": getattr(inst, "figi", None),
+                    "ticker": getattr(inst, "ticker", None),
+                    "isin": getattr(inst, "isin", None),
+                    "class_code": getattr(inst, "class_code", None),
+                    "name": getattr(inst, "name", None),
+                    "lot": getattr(inst, "lot", None),
+                    "currency": getattr(inst, "currency", None),
+                    "asset_uid": getattr(inst, "asset_uid", None),
+                    "first_1day_candle_date": self._to_date(
+                        getattr(inst, "first_1day_candle_date", None)
+                    ),
+                }
+            )
+        return result
+
+    async def _fetch_all_etfs_async(self) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK etfs()."""
+        from t_tech.invest.schemas import InstrumentStatus, RealExchange  # noqa: PLC0415
+
+        services = await self._get_services_async()
+        resp = await services.instruments.etfs(  # type: ignore[attr-defined]
+            instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
+        )
+        result: list[dict[str, Any]] = []
+        for inst in resp.instruments:
+            if inst.real_exchange != RealExchange.REAL_EXCHANGE_MOEX:
+                continue  # MOEX filter
+            result.append(
+                {
+                    "figi": getattr(inst, "figi", None),
+                    "ticker": getattr(inst, "ticker", None),
+                    "isin": getattr(inst, "isin", None),
+                    "class_code": getattr(inst, "class_code", None),
+                    "name": getattr(inst, "name", None),
+                    "lot": getattr(inst, "lot", None),
+                    "currency": getattr(inst, "currency", None),
+                    "asset_uid": getattr(inst, "asset_uid", None),
+                    "first_1day_candle_date": self._to_date(
+                        getattr(inst, "first_1day_candle_date", None)
+                    ),
+                }
+            )
+        return result
+
+    async def _fetch_all_futures_async(self) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK futures()."""
+        from t_tech.invest.schemas import InstrumentStatus, RealExchange  # noqa: PLC0415
+
+        services = await self._get_services_async()
+        resp = await services.instruments.futures(  # type: ignore[attr-defined]
+            instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
+        )
+        result: list[dict[str, Any]] = []
+        for inst in resp.instruments:
+            if inst.real_exchange != RealExchange.REAL_EXCHANGE_MOEX:
+                continue  # MOEX filter
+            result.append(
+                {
+                    "figi": getattr(inst, "figi", None),
+                    "ticker": getattr(inst, "ticker", None),
+                    "class_code": getattr(inst, "class_code", None),
+                    "name": getattr(inst, "name", None),
+                    "lot": getattr(inst, "lot", None),
+                    "currency": getattr(inst, "currency", None),
+                    "basic_asset": getattr(inst, "basic_asset", None),
+                    "expiration_date": self._to_date(getattr(inst, "expiration_date", None)),
+                }
+            )
+        return result
+
+    async def _fetch_all_currencies_async(self) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK currencies()."""
+        from t_tech.invest.schemas import InstrumentStatus, RealExchange  # noqa: PLC0415
+
+        services = await self._get_services_async()
+        resp = await services.instruments.currencies(  # type: ignore[attr-defined]
+            instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
+        )
+        result: list[dict[str, Any]] = []
+        for inst in resp.instruments:
+            if inst.real_exchange != RealExchange.REAL_EXCHANGE_MOEX:
+                continue  # MOEX filter
+            nominal_raw = getattr(inst, "nominal", None)
+            nominal = self._money_to_decimal(nominal_raw) if nominal_raw is not None else None
+            result.append(
+                {
+                    "figi": getattr(inst, "figi", None),
+                    "ticker": getattr(inst, "ticker", None),
+                    "class_code": getattr(inst, "class_code", None),
+                    "name": getattr(inst, "name", None),
+                    "lot": getattr(inst, "lot", None),
+                    "currency": getattr(inst, "currency", None),
+                    "isin": getattr(inst, "isin", None),
+                    "nominal": nominal,
+                }
+            )
+        return result
+
     def fetch_amortization_schedule(self, instrument_id: str) -> list[dict[str, Any]]:
         """Fetch amortization schedule for a bond.
 
