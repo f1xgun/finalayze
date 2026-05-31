@@ -289,7 +289,7 @@ def run_backfill(
     # H-04: single robots gate before any pull (T-63.1-10).
     smartlab_fetcher.assert_robots_allowed(f"/q/SBER/f/q/{statement}/")
 
-    persisted = 0
+    pending: list[FundamentalSnapshot] = []
     for symbol in symbols:
         try:
             snapshots = build_snapshots(symbol, smartlab_fetcher, iss_fetcher, statement)
@@ -307,13 +307,46 @@ def run_backfill(
             if dry_run:
                 _log.info("backfill_dry_run", symbol=snap.symbol, as_of=snap.as_of.isoformat())
                 continue
-            persistence.persist_fundamental_snapshot(snap)
-            persisted += 1
+            pending.append(snap)
 
         _log.info("backfill_symbol_done", symbol=symbol, snapshots=len(snapshots))
 
+    persisted = 0 if dry_run else _persist_all(persistence, pending)
     _log.info("backfill_complete", symbols=len(symbols), persisted=persisted, dry_run=dry_run)
     return persisted
+
+
+def _persist_all(persistence: TradingPersistence, snaps: list[FundamentalSnapshot]) -> int:
+    """Persist *snaps* via the async upsert under a single event loop.
+
+    The one-shot script has no background async loop, so the fire-and-forget sync
+    ``persist_fundamental_snapshot`` (which requires ``async_loop``) cannot be used
+    here — it raises "async_loop not available" and would silently drop every row.
+    We drive the underlying ``persist_fundamental_snapshot_async`` upsert directly
+    under a single ``asyncio.run`` (one loop → one engine via the persistence layer's
+    per-loop session-factory cache). Per-row try/except so one bad row never aborts
+    the batch, and failures are SURFACED (logged), not silently swallowed.
+
+    Returns the count of rows actually persisted.
+    """
+    import asyncio  # noqa: PLC0415
+
+    async def _run() -> int:
+        ok = 0
+        for snap in snaps:
+            try:
+                await persistence.persist_fundamental_snapshot_async(snap)
+                ok += 1
+            except Exception as exc:
+                _log.warning(
+                    "backfill_persist_failed",
+                    symbol=snap.symbol,
+                    as_of=snap.as_of.isoformat(),
+                    error=str(exc),
+                )
+        return ok
+
+    return asyncio.run(_run())
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
