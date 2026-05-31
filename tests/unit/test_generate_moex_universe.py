@@ -34,6 +34,12 @@ _OFZ_PD_FIGI = "BBG011FHF1F7"
 _OFZ_PK_SYMBOL = "SU29007RMFS0"
 _OFZ_PK_FIGI = "BBG007Z5DF79"
 
+# A HYPOTHETICAL new floating OFZ-PK that is traded but NOT yet in the hand-list.
+# Used to exercise the WR-02/WR-03 unknown-floater paths (no live impact today --
+# all 4 current floaters are in _OFZ_PK_HANDLIST_RATE).
+_UNKNOWN_FLOATER_SYMBOL = "SU29099RMFS0"
+_UNKNOWN_FLOATER_FIGI = "BBG00UNKNOWNPK"
+
 
 class _StubCoupon:
     """Minimal stand-in for a CouponPayment with amount_per_bond."""
@@ -201,3 +207,87 @@ def test_happy_path_dry_run_writes_nothing(tmp_path: Path) -> None:
     )
 
     assert not out.exists()
+
+
+# ── WR-02: unknown traded floater derives NO fixed coupon rate ──────────────────
+
+
+def test_unknown_floater_derives_no_fixed_rate() -> None:
+    """A traded floating OFZ outside the hand-list leaves coupon_rate None (WR-02).
+
+    The derive branch is gated on `not floating`, so an unknown floater must NOT
+    back-compute a (misleading, constant) fixed rate from a single coupon. The
+    coupon_lookup would return a payment if reached -- proving it is NOT reached.
+    """
+    row = _bond_row(_UNKNOWN_FLOATER_SYMBOL, _UNKNOWN_FLOATER_FIGI, floating=True)
+    traded = {_UNKNOWN_FLOATER_SYMBOL}
+
+    out = gen._bond_row(row, _coupon_lookup, traded)
+
+    assert out["floating_coupon"] is True
+    assert out["coupon_rate"] is None  # WR-02: no fixed rate fabricated for a floater
+
+
+def test_known_floater_uses_handlist_rate() -> None:
+    """A traded floater IN the hand-list still gets its RUONIA spread (behavior-preserving)."""
+    row = _bond_row(_OFZ_PK_SYMBOL, _OFZ_PK_FIGI, floating=True)
+    traded = {_OFZ_PK_SYMBOL}
+
+    out = gen._bond_row(row, _coupon_lookup, traded)
+
+    assert out["coupon_rate"] == str(gen._OFZ_PK_HANDLIST_RATE[_OFZ_PK_SYMBOL])
+
+
+# ── WR-03: unknown traded floater trips the targeted A3 error ────────────────────
+
+
+def test_unknown_traded_floater_refuses_with_a3_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_assert_ofz_yieldable raises a targeted A3 SystemExit for an unknown floater (WR-03)."""
+    monkeypatch.setattr(gen, "traded_ofz_symbols", lambda: {_UNKNOWN_FLOATER_SYMBOL})
+    rows = [
+        {
+            "symbol": _UNKNOWN_FLOATER_SYMBOL,
+            "figi": _UNKNOWN_FLOATER_FIGI,
+            "floating_coupon": True,
+            "coupon_rate": None,
+            "coupon_frequency": _COUPON_QTY_PER_YEAR,
+            "face_value": str(_FACE_VALUE),
+            "maturity_date": "2031-07-23",
+        }
+    ]
+
+    with pytest.raises(SystemExit) as exc_info:
+        gen._assert_ofz_yieldable(rows)
+
+    message = str(exc_info.value)
+    assert _UNKNOWN_FLOATER_SYMBOL in message
+    assert "_OFZ_PK_HANDLIST_RATE" in message
+    assert "A3" in message
+
+
+# ── WR-05: a single bond's coupon-lookup failure does not abort enumeration ─────
+
+
+def test_coupon_lookup_failure_isolated_per_bond() -> None:
+    """One bond's gRPC failure logs and yields [] instead of aborting build_rows (WR-05)."""
+
+    class _BoomFetcher:
+        """Stub whose _run_async raises -- simulates a transient gRPC error per bond."""
+
+        def _get_services_async(self) -> object:  # pragma: no cover - never awaited
+            raise AssertionError("should not be reached in the failure path")
+
+        def _money_to_decimal(self, _m: object) -> Decimal:  # pragma: no cover
+            return Decimal(0)
+
+        def _run_async(self, _coro: object) -> list[object]:
+            # Close the un-awaited coroutine to avoid a RuntimeWarning, then fail.
+            if hasattr(_coro, "close"):
+                _coro.close()
+            raise RuntimeError("transient gRPC timeout")
+
+    lookup = gen._live_coupon_lookup(_BoomFetcher())
+
+    # The failure is swallowed: returns [] rather than propagating (which would abort
+    # the whole 1500+ bond enumeration in build_rows).
+    assert lookup(_UNKNOWN_FLOATER_FIGI) == []
