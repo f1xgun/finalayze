@@ -279,6 +279,7 @@ class TinkoffFetcher(BaseFetcher):
         returns ``instrument.asset_uid``. Returns None on an unknown symbol
         (share_by raises for every class_code) — no raise.
         """
+        from t_tech.invest.exceptions import AioRequestError, RequestError  # noqa: PLC0415
         from t_tech.invest.schemas import InstrumentIdType  # noqa: PLC0415
 
         for class_code in ("TQBR", "TQTF", "TQPI"):
@@ -290,12 +291,26 @@ class TinkoffFetcher(BaseFetcher):
                 )
                 return str(resp.instrument.asset_uid)
             except Exception as exc:  # try next class_code; None if all fail
-                _log.debug(
-                    "asset_uid_lookup_miss",
-                    symbol=ticker,
-                    class_code=class_code,
-                    error_type=type(exc).__name__,
-                )
+                # IN-06: a "ticker not on this board" gRPC error is the expected
+                # not-found signal (SDK RequestError/AioRequestError) -> debug + continue.
+                # Anything else (e.g. an AttributeError from an SDK API change) is a
+                # genuine bug masquerading as "symbol not found" and would silently
+                # drop fundamentals -- log it at warning so real breakage is visible.
+                # The "returns None when not found on any board" contract is unchanged.
+                if isinstance(exc, (AioRequestError, RequestError)):
+                    _log.debug(
+                        "asset_uid_lookup_miss",
+                        symbol=ticker,
+                        class_code=class_code,
+                        error_type=type(exc).__name__,
+                    )
+                else:
+                    _log.warning(
+                        "asset_uid_lookup_unexpected_error",
+                        symbol=ticker,
+                        class_code=class_code,
+                        error_type=type(exc).__name__,
+                    )
                 continue
         return None
 
@@ -525,9 +540,21 @@ class TinkoffFetcher(BaseFetcher):
         )
         result: list[dict[str, Any]] = []
         for bond in resp.instruments:
-            nominal = self._money_to_decimal(bond.nominal)
-            initial_nom = self._money_to_decimal(bond.initial_nominal)
-            aci = self._money_to_decimal(bond.aci_value)
+            # Guard each money field (IN-01): the SDK can return None for these on
+            # exotic instruments, and _money_to_decimal would AttributeError on None.
+            # Consistent with the currency path (_fetch_all_currencies_async). Without
+            # the guard, one malformed bond would propagate out and the broad
+            # `except Exception: return []` in fetch_all_bonds would zero the whole list.
+            nominal_raw = getattr(bond, "nominal", None)
+            nominal = self._money_to_decimal(nominal_raw) if nominal_raw is not None else None
+            initial_nominal_raw = getattr(bond, "initial_nominal", None)
+            initial_nom = (
+                self._money_to_decimal(initial_nominal_raw)
+                if initial_nominal_raw is not None
+                else None
+            )
+            aci_raw = getattr(bond, "aci_value", None)
+            aci = self._money_to_decimal(aci_raw) if aci_raw is not None else None
 
             maturity = None
             if hasattr(bond, "maturity_date") and bond.maturity_date:

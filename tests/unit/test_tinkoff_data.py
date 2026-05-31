@@ -445,3 +445,69 @@ class TestFetchAllAssetClasses:
             assert fetcher.fetch_all_shares() == []
             mock_log.exception.assert_called_once()
             assert mock_log.exception.call_args[1].get("error_type") == "ConnectionError"
+
+
+# ── IN-01: a bond with a None money field does not nuke the whole bond list ─────
+
+
+def _make_fake_bond(
+    ticker: str, *, nominal: object, initial_nominal: object, aci_value: object
+) -> MagicMock:
+    """Build a fake T-Bank bond, controlling the three money fields explicitly."""
+    bond = MagicMock(
+        spec=[
+            "figi",
+            "ticker",
+            "isin",
+            "name",
+            "lot",
+            "currency",
+            "nominal",
+            "initial_nominal",
+            "aci_value",
+            "coupon_quantity_per_year",
+            "maturity_date",
+            "floating_coupon_flag",
+            "amortization_flag",
+            "class_code",
+        ]
+    )
+    bond.figi = f"BBG_{ticker}"
+    bond.ticker = ticker
+    bond.isin = ticker
+    bond.name = ticker
+    bond.lot = 1
+    bond.currency = "rub"
+    bond.nominal = nominal
+    bond.initial_nominal = initial_nominal
+    bond.aci_value = aci_value
+    bond.coupon_quantity_per_year = 0
+    bond.maturity_date = None
+    bond.floating_coupon_flag = False
+    bond.amortization_flag = False
+    bond.class_code = "TQCB"
+    return bond
+
+
+class TestFetchAllBondsMoneyFieldGuard:
+    """IN-01: a malformed money field (None) must not abort the entire bond list."""
+
+    def test_none_money_fields_yield_none_not_attribute_error(self) -> None:
+        fetcher = _make_fetcher()
+        money = MagicMock()
+        money.units = 1000
+        money.nano = 0
+        good = _make_fake_bond("RU000GOOD", nominal=money, initial_nominal=money, aci_value=money)
+        # An exotic bond the SDK returns with None for every money field.
+        bad = _make_fake_bond("RU000EXOTIC", nominal=None, initial_nominal=None, aci_value=None)
+        services = _patch_services_with("bonds", [good, bad])
+        with patch.object(fetcher, "_get_services_async", AsyncMock(return_value=services)):
+            result = fetcher.fetch_all_bonds()
+        # Both bonds survive -- the bad row does NOT raise and zero out the whole list.
+        assert len(result) == 2
+        good_row = next(r for r in result if r["ticker"] == "RU000GOOD")
+        assert good_row["nominal"] == Decimal(1000)
+        bad_row = next(r for r in result if r["ticker"] == "RU000EXOTIC")
+        assert bad_row["nominal"] is None
+        assert bad_row["initial_nominal"] is None
+        assert bad_row["aci_value"] is None
