@@ -10,7 +10,7 @@ Every test runs against the saved fixture HTML — no live network (T-63.1-01).
 
 from __future__ import annotations
 
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,7 +24,9 @@ from finalayze.data.fetchers.smartlab_fundamentals import (  # noqa: E402
     SmartlabFundamentalsFetcher,
 )
 from finalayze.data.fundamental_publication_dates import (  # noqa: E402
+    _ANNUAL_DISCLOSURE_LAG_DAYS,
     _FUNDAMENTAL_DISCLOSURE_LAG_DAYS,
+    get_effective_annual_disclosure_date,
     get_effective_disclosure_date,
 )
 
@@ -43,6 +45,14 @@ _FLOAT_TOL = 1e-9
 _LAG_DAYS = 75
 _SBER_Q1_DISCLOSURE = date(2025, 4, 28)  # "28.04.2025"
 _LKOH_Q1_QUARTER_END = date(2025, 3, 31)
+
+# --- Annual (/f/y/) named constants (ruff PLR2004) ---------------------------
+_ANNUAL_LAG_DAYS = 120
+_LKOH_FY2024_DISCLOSURE = date(2025, 3, 28)  # "28.03.2025" for FY2024
+_EXPECTED_ANNUAL_YEARS = 4  # 2021..2024 (LTM excluded)
+_ANNUAL_FY_YEARS = (2021, 2022, 2023, 2024)
+_FY_ENDS = frozenset({date(y, 12, 31) for y in _ANNUAL_FY_YEARS})
+_FY2021_EMPTY_YEAR = 2021  # date cell empty -> +120d fallback
 
 
 @pytest.fixture
@@ -158,3 +168,82 @@ class TestRobotsGate:
             patch("urllib.robotparser.RobotFileParser.can_fetch", return_value=True),
         ):
             fetcher.assert_robots_allowed("/q/SBER/f/q/MSFO/")
+
+
+class TestSmartlabAnnualParse:
+    """Annual /f/y/ parse: one snapshot per 4-digit fiscal year, LTM excluded."""
+
+    def test_annual_parse_one_per_year(self, fetcher: SmartlabFundamentalsFetcher) -> None:
+        """LKOH annual fixture -> one snapshot per year (LTM excluded), fields populated."""
+        snaps = fetcher.parse_html_annual(_read("smartlab_lkoh_msfo_y.html"), _LKOH_SYMBOL)
+
+        assert len(snaps) == _EXPECTED_ANNUAL_YEARS
+        assert all(isinstance(s, FundamentalSnapshot) for s in snaps)
+        assert all(s.symbol == _LKOH_SYMBOL for s in snaps)
+        # Every as_of's fiscal year is a real year (LTM column excluded). Disclosure
+        # dates land in the year AFTER the FY, so the as_of years are {2022..2025}.
+        as_of_years = {s.as_of.year for s in snaps}
+        assert as_of_years <= {y + 1 for y in _ANNUAL_FY_YEARS}
+        # The full-data FY2024 column must populate the industrial fields.
+        fy2024 = next(s for s in snaps if s.as_of.date() == _LKOH_FY2024_DISCLOSURE)
+        assert fy2024.pe_ratio is not None
+        assert fy2024.revenue_ttm is not None
+        assert fy2024.ev_ebitda is not None
+        assert fy2024.net_margin is not None
+        assert fy2024.roe is not None
+        assert fy2024.eps_ttm is not None
+        assert fy2024.market_cap is not None
+
+    def test_annual_bank_fields_none(self, fetcher: SmartlabFundamentalsFetcher) -> None:
+        """SBER bank annual fixture (no revenue/ev_ebitda rows) -> those fields None."""
+        snaps = fetcher.parse_html_annual(_read("smartlab_sber_msfo_y.html"), _SBER_SYMBOL)
+
+        assert snaps, "expected at least one annual snapshot"
+        assert len(snaps) == _EXPECTED_ANNUAL_YEARS
+        for snap in snaps:
+            assert snap.revenue_ttm is None
+            assert snap.ev_ebitda is None
+
+    def test_annual_year_regex_not_index(self, fetcher: SmartlabFundamentalsFetcher) -> None:
+        """Year columns are located by header regex, not a fixed index.
+
+        The fixture has a leading "Показатель" label column; index-based parsing
+        would pick the wrong column. Recovering exactly {2021..2024} from the
+        fallback-lag periods proves the header-scan locator.
+        """
+        snaps = fetcher.parse_html_annual(_read("smartlab_lkoh_msfo_y.html"), _LKOH_SYMBOL)
+        # Reconstruct fiscal years from the FY2021 fallback (as_of = FY-end + 120d)
+        # and the real disclosure dates (which fall in FY+1). Year set must be exact.
+        recovered_years: set[int] = set()
+        for snap in snaps:
+            d = snap.as_of.date()
+            if d == date(_FY2021_EMPTY_YEAR, 12, 31) + timedelta(days=_ANNUAL_LAG_DAYS):
+                recovered_years.add(_FY2021_EMPTY_YEAR)
+            else:
+                recovered_years.add(d.year - 1)  # real disclosure lands in FY+1
+        assert recovered_years == set(_ANNUAL_FY_YEARS)
+
+
+class TestAnnualDisclosureDate:
+    """Annual look-ahead: as_of is real date else FY-end + 120d, never bare FY-end."""
+
+    def test_annual_lookahead_real_date(self, fetcher: SmartlabFundamentalsFetcher) -> None:
+        """A real "Дата отчёта" cell -> as_of == that date (UTC-aware)."""
+        snaps = fetcher.parse_html_annual(_read("smartlab_lkoh_msfo_y.html"), _LKOH_SYMBOL)
+        fy2024 = next(s for s in snaps if s.as_of.date() == _LKOH_FY2024_DISCLOSURE)
+        assert fy2024.as_of == datetime(2025, 3, 28, tzinfo=UTC)
+
+    def test_annual_lookahead_fallback_120d(self, fetcher: SmartlabFundamentalsFetcher) -> None:
+        """An EMPTY date cell (FY2021) -> as_of == FY-end + 120d, never the bare FY-end."""
+        snaps = fetcher.parse_html_annual(_read("smartlab_lkoh_msfo_y.html"), _LKOH_SYMBOL)
+        expected = date(_FY2021_EMPTY_YEAR, 12, 31) + timedelta(days=_ANNUAL_LAG_DAYS)
+        fy2021 = next(s for s in snaps if s.as_of.date() == expected)
+        assert fy2021.as_of.date() == expected
+        assert fy2021.as_of.date() not in _FY_ENDS
+        assert fy2021.as_of.tzinfo is not None
+
+    def test_annual_lag_helper_120_days(self) -> None:
+        """The annual disclosure-lag constant and helper use +120 days."""
+        assert _ANNUAL_DISCLOSURE_LAG_DAYS == _ANNUAL_LAG_DAYS
+        effective = get_effective_annual_disclosure_date(_LKOH_SYMBOL, "2023")
+        assert effective == date(2023, 12, 31) + timedelta(days=_ANNUAL_LAG_DAYS)

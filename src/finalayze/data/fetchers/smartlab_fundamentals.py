@@ -34,7 +34,10 @@ from lxml import html as lxml_html
 
 from finalayze.core.exceptions import DataFetchError
 from finalayze.core.schemas import FundamentalSnapshot
-from finalayze.data.fundamental_publication_dates import get_effective_disclosure_date
+from finalayze.data.fundamental_publication_dates import (
+    get_effective_annual_disclosure_date,
+    get_effective_disclosure_date,
+)
 
 if TYPE_CHECKING:
     from finalayze.data.rate_limiter import RateLimiter
@@ -44,6 +47,9 @@ _log = structlog.get_logger()
 _BASE_URL = "https://smart-lab.ru"
 _ROBOTS_URL = f"{_BASE_URL}/robots.txt"
 _URL_TMPL = "https://smart-lab.ru/q/{symbol}/f/q/{statement}/"  # statement in {MSFO, RSBU}
+# Annual route mirrors the quarterly one but on /f/y/ — exposes ~10 fiscal years
+# of DEPTH vs the quarterly page's ~5 recent quarters (BACKFILL-Y-01).
+_URL_TMPL_ANNUAL = "https://smart-lab.ru/q/{symbol}/f/y/{statement}/"
 _FINANCIALS_XPATH = "//table[contains(@class,'financials')]"
 
 _HEADERS = {
@@ -63,6 +69,10 @@ _CACHE_DIR = Path(".cache/smartlab")
 # Fiscal quarter / LTM column labels. Only the 4 fiscal quarters become snapshots;
 # the LTM column is not a point-in-time fiscal period.
 _QUARTER_RE = re.compile(r"^\d{4}Q[1-4]$")
+
+# Annual column header: a bare 4-digit fiscal year. The trailing LTM/TTM column
+# is NOT a fiscal year (it fails ^\d{4}$) and is therefore excluded.
+_YEAR_RE = re.compile(r"^\d{4}$")
 
 # Billions-of-rubles labelled cells (label "mlrd rub") scale to raw RUB for the
 # schema's Numeric(20,2) fields (revenue_ttm, market_cap).
@@ -139,17 +149,39 @@ class SmartlabFundamentalsFetcher:
         """
         return self.parse_html(self.fetch_html(symbol, statement), symbol)
 
-    def _cache_path(self, symbol: str, statement: str) -> Path:
-        return _CACHE_DIR / f"{symbol}_{statement}.html"
+    def fetch_html_annual(self, symbol: str, statement: str = "MSFO") -> str:
+        """Fetch *symbol*'s raw ANNUAL fundamentals HTML (robots-gated + cached).
 
-    def _read_cache(self, symbol: str, statement: str) -> str | None:
-        path = self._cache_path(symbol, statement)
+        Mirrors :meth:`fetch_html` but on the ``/f/y/`` annual route. The ``/f/y/``
+        robots gate runs FIRST, before any pull (BACKFILL-Y-04) — the quarterly
+        gate only covered ``/f/q/``. The annual cache key is namespaced (``period="y"``)
+        so it never clobbers the quarterly cache file (RESEARCH Pitfall 1).
+        """
+        path = f"/q/{symbol}/f/y/{statement}/"
+        self.assert_robots_allowed(path)
+
+        cached = self._read_cache(symbol, statement, period="y")
+        if cached is not None:
+            return cached
+
+        url = _URL_TMPL_ANNUAL.format(symbol=symbol, statement=statement)
+        content = self._request("GET", url).decode("utf-8", errors="replace")
+        self._write_cache(symbol, statement, content, period="y")
+        return content
+
+    def _cache_path(self, symbol: str, statement: str, period: str = "q") -> Path:
+        # Quarterly stays "SBER_MSFO.html"; annual becomes "SBER_MSFO_y.html".
+        suffix = "" if period == "q" else f"_{period}"
+        return _CACHE_DIR / f"{symbol}_{statement}{suffix}.html"
+
+    def _read_cache(self, symbol: str, statement: str, period: str = "q") -> str | None:
+        path = self._cache_path(symbol, statement, period)
         if path.is_file():
             return path.read_text(encoding="utf-8")
         return None
 
-    def _write_cache(self, symbol: str, statement: str, content: str) -> None:
-        path = self._cache_path(symbol, statement)
+    def _write_cache(self, symbol: str, statement: str, content: str, period: str = "q") -> None:
+        path = self._cache_path(symbol, statement, period)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
 
@@ -242,6 +274,63 @@ class SmartlabFundamentalsFetcher:
             )
         return snapshots
 
+    def parse_html_annual(self, content: str, symbol: str) -> list[FundamentalSnapshot]:
+        """Parse SmartLab ANNUAL fundamentals HTML into one snapshot per fiscal year.
+
+        Mirrors :meth:`parse_html` but locates columns with the bare-year regex
+        (``_YEAR_RE``) instead of the quarter regex, keys each ``period`` on the
+        4-digit year token, and resolves ``as_of`` via the annual +120d helper.
+        The trailing LTM column is excluded (it fails ``^\\d{4}$``). Banks lack
+        ``revenue``/``ev_ebitda`` rows → those fields stay ``None`` (Pitfall 5,
+        guaranteed by the shared ``.get()`` extractors).
+        """
+        doc = lxml_html.fromstring(content)
+        tables: Any = doc.xpath(_FINANCIALS_XPATH)
+        if not tables:
+            return []
+        rows: Any = tables[0].xpath(".//tr")
+
+        # Locate the year-header row defensively by year-regex (NOT a fixed index):
+        # the leading "Показатель" label column would break index-based parsing.
+        year_cols: dict[int, str] = {}
+        for row in rows:
+            cells = [self._cell_text(c) for c in row.xpath("./th|./td")]
+            candidate = {i: lbl for i, lbl in enumerate(cells) if _YEAR_RE.match(lbl)}
+            if candidate:
+                year_cols = candidate
+                break
+        if not year_cols:
+            return []
+
+        by_field: dict[str, list[str]] = {}
+        for row in rows:
+            field = row.get("field")
+            if not field:
+                continue
+            by_field[field] = [self._cell_text(c) for c in row.xpath("./th|./td")]
+
+        date_cells = by_field.get("date", [])
+
+        snapshots: list[FundamentalSnapshot] = []
+        for col_idx, period in year_cols.items():
+            as_of = self._resolve_annual_as_of(date_cells, col_idx, symbol, period)
+            snapshots.append(
+                FundamentalSnapshot(
+                    symbol=symbol,
+                    as_of=as_of,
+                    pe_ratio=self._number(by_field, "p_e", col_idx),
+                    ev_ebitda=self._number(by_field, "ev_ebitda", col_idx),
+                    revenue_ttm=self._billions(by_field, "revenue", col_idx),
+                    net_margin=self._percent(by_field, "net_margin", col_idx),
+                    roe=self._percent(by_field, "roe", col_idx),
+                    eps_ttm=self._number(by_field, "eps", col_idx),
+                    dividend_yield=self._yield(by_field, "div_yield", col_idx),
+                    market_cap=self._billions(by_field, "market_cap", col_idx),
+                    currency=self._text(by_field, "currency", col_idx),
+                )
+            )
+        return snapshots
+
     @staticmethod
     def _cell_text(cell: Any) -> str:
         """First non-empty line of a cell's text content, stripped."""
@@ -264,6 +353,25 @@ class SmartlabFundamentalsFetcher:
         # Empty / unparseable date cell → conservative publication-lag fallback.
         _log.info("smartlab_lag_approximated", symbol=symbol, period=period)
         effective = get_effective_disclosure_date(symbol, period)
+        return datetime(effective.year, effective.month, effective.day, tzinfo=UTC)
+
+    def _resolve_annual_as_of(
+        self, date_cells: list[str], col_idx: int, symbol: str, period: str
+    ) -> datetime:
+        """Resolve an annual column's ``as_of``: the explicit date cell or +120d fallback.
+
+        Mirrors :meth:`_resolve_as_of` but uses the annual +120d helper. NEVER
+        returns a bare fiscal-year-end date (look-ahead trap, BACKFILL-Y-02).
+        """
+        raw = date_cells[col_idx] if col_idx < len(date_cells) else ""
+        if raw:
+            try:
+                return datetime.strptime(raw, "%d.%m.%Y").replace(tzinfo=UTC)
+            except ValueError:
+                _log.warning("smartlab_bad_date_cell", symbol=symbol, period=period, raw=raw)
+        # Empty / unparseable date cell → conservative annual publication-lag fallback.
+        _log.info("smartlab_lag_approximated", symbol=symbol, period=period, route="annual")
+        effective = get_effective_annual_disclosure_date(symbol, period)
         return datetime(effective.year, effective.month, effective.day, tzinfo=UTC)
 
     @staticmethod

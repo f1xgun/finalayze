@@ -22,6 +22,11 @@ from datetime import date, timedelta
 # pattern, expressed in days for per-quarter granularity).
 _FUNDAMENTAL_DISCLOSURE_LAG_DAYS = 75
 
+# Russian annual-IFRS regulatory disclosure ceiling: issuers must disclose annual
+# IFRS within 120 days of fiscal-year end (MOEX listing rules / Bank of Russia).
+# +120d is therefore the look-ahead-safe FLOOR for an annual as_of (D-01, BACKFILL-Y-02).
+_ANNUAL_DISCLOSURE_LAG_DAYS = 120
+
 # Fiscal-quarter -> (month, day) of the quarter-end.
 _QUARTER_END: dict[int, tuple[int, int]] = {
     1: (3, 31),
@@ -63,3 +68,29 @@ def get_effective_disclosure_date(symbol: str, period: str) -> date:
     year, quarter = int(period[:4]), int(period[5])
     month, day = _QUARTER_END[quarter]
     return date(year, month, day) + timedelta(days=_FUNDAMENTAL_DISCLOSURE_LAG_DAYS)
+
+
+def get_effective_annual_disclosure_date(symbol: str, period: str) -> date:
+    """Effective disclosure date for *symbol*'s fiscal *year* (period = ``"YYYY"``).
+
+    Returns the real recorded date if one is present in
+    ``FUNDAMENTAL_PUBLICATION_DATES``, otherwise fiscal-year-end (Dec 31) + 120
+    days. NEVER the bare fiscal-year-end — that would leak future information into
+    a backtest (look-ahead trap, BACKFILL-Y-02).
+
+    The annual helper shares the SAME ``FUNDAMENTAL_PUBLICATION_DATES`` dict as the
+    quarterly helper: annual keys use period ``"YYYY"`` while quarterly keys use
+    ``"YYYYQN"``, so the period strings never collide.
+
+    Args:
+        symbol: Ticker, e.g. ``"LKOH"``.
+        period: Fiscal year as ``"YYYY"``, e.g. ``"2023"``.
+
+    Returns:
+        The effective annual disclosure ``date``.
+    """
+    recorded = FUNDAMENTAL_PUBLICATION_DATES.get((symbol, period))
+    if recorded is not None:
+        return recorded
+    year = int(period[:4])
+    return date(year, 12, 31) + timedelta(days=_ANNUAL_DISCLOSURE_LAG_DAYS)

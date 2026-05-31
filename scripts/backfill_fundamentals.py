@@ -29,14 +29,20 @@ UNIT SCALE (Open Q1 / Assumption A1) — RESOLVED:
     found to expect billions, flip this constant to ``Decimal("1e-9")`` and update
     this note — DO NOT silently mismatch the live-capture unit.
 
-HISTORY DEPTH (Open Q2) — RESOLVED (honest note):
+HISTORY DEPTH (Open Q2) — RESOLVED + IMPLEMENTED (Phase 63.2):
     SmartLab's default quarterly view ``/q/{T}/f/q/MSFO/`` exposes only the most
     recent window (probes showed ~5 recent quarters); it does NOT accept a
     page/offset parameter that reliably deepens the quarterly history. Multi-year
-    depth therefore requires the ANNUAL view ``/q/{T}/f/y/MSFO/`` as a supplement
-    (operator-run, network-bound). This offline/quarterly driver captures only the
-    realistically-reachable recent quarters per blue chip — it does NOT claim deep
-    multi-year history. Deep history is an operator follow-up via the annual page.
+    depth therefore comes from the ANNUAL view ``/q/{T}/f/y/MSFO/``, which IS now
+    wired into this driver as a TWO-PASS merge (no longer an operator follow-up):
+    :func:`build_annual_snapshots` builds the deep annual history and
+    :func:`run_backfill` persists ANNUAL rows FIRST, then QUARTERLY rows SECOND.
+    Because the Phase-63 upsert is an UNCONDITIONAL last-writer-wins
+    ``on_conflict_do_update``, the more-granular quarterly TTM row is authoritative
+    on any shared ``(as_of, symbol)`` (D-02), while deep annual years with no
+    quarterly counterpart are pure additions (D-03). The LIVE run still requires
+    network + robots gate + DB (operator step); the ordering is the merge mechanism,
+    NOT a new conflict policy or schema change.
 
 DIVIDEND YIELD (Open Q3 / Assumption A4) — RESOLVED:
     SmartLab's ``div_yield`` is 0.0%/absent on some recent quarters (stale "not yet
@@ -70,6 +76,7 @@ from finalayze.core.exceptions import DataFetchError
 from finalayze.core.schemas import FundamentalSnapshot
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import date
 
     from finalayze.orchestration.db_persistence import TradingPersistence
@@ -121,6 +128,10 @@ class _SmartlabLike(Protocol):
     def fetch_html(self, symbol: str, statement: str = ...) -> str: ...
 
     def parse_html(self, content: str, symbol: str) -> list[FundamentalSnapshot]: ...
+
+    def fetch_html_annual(self, symbol: str, statement: str = ...) -> str: ...
+
+    def parse_html_annual(self, content: str, symbol: str) -> list[FundamentalSnapshot]: ...
 
 
 class _IssLike(Protocol):
@@ -222,26 +233,25 @@ def _gap_filled_market_cap(
     return float(approx * _REVENUE_MARKETCAP_SCALE)
 
 
-def build_snapshots(
+def _enrich(
     symbol: str,
-    smartlab_fetcher: _SmartlabLike,
+    base: list[FundamentalSnapshot],
     iss_fetcher: _IssLike,
-    statement: str = "MSFO",
 ) -> list[FundamentalSnapshot]:
-    """Compose SmartLab + ISS into look-ahead-safe snapshots for *symbol*.
+    """Enrich SmartLab base snapshots with ISS dividend-yield + market_cap gap-fill.
 
-    SmartLab provides the base per-quarter snapshots (as_of already the disclosure
-    date / +75d lag — never the fiscal-quarter end). For each snapshot:
+    Shared by the quarterly (:func:`build_snapshots`) and annual
+    (:func:`build_annual_snapshots`) build paths so the dividend-yield / market_cap
+    gap-fill logic is defined ONCE (no duplication across the two routes). The base
+    snapshot's ``as_of`` is already look-ahead-safe (quarterly +75d / annual +120d
+    or the real disclosure cell) and is never altered here. For each snapshot:
       * dividend_yield: prefer the ISS-derived trailing-12m yield over a stale
         SmartLab 0.0%/None (A4 / Open Q3);
-      * market_cap: SmartLab per-quarter primary, ISS reconstruction as a flagged
-        approximate gap-fill (Pitfall 5/6);
+      * market_cap: SmartLab primary, ISS reconstruction as a flagged approximate
+        gap-fill (Pitfall 5/6);
       * revenue_ttm / market_cap: ``_REVENUE_MARKETCAP_SCALE`` applied (identity —
         the SmartLab parser already scaled "mlrd rub" -> raw RUB).
     """
-    content = smartlab_fetcher.fetch_html(symbol, statement)
-    base = smartlab_fetcher.parse_html(content, symbol)
-
     rebuilt: list[FundamentalSnapshot] = []
     for snap in base:
         dividend_yield = snap.dividend_yield
@@ -264,6 +274,42 @@ def build_snapshots(
     return rebuilt
 
 
+def build_snapshots(
+    symbol: str,
+    smartlab_fetcher: _SmartlabLike,
+    iss_fetcher: _IssLike,
+    statement: str = "MSFO",
+) -> list[FundamentalSnapshot]:
+    """Compose SmartLab QUARTERLY + ISS into look-ahead-safe snapshots for *symbol*.
+
+    SmartLab provides the base per-quarter snapshots (as_of already the disclosure
+    date / +75d lag — never the fiscal-quarter end); :func:`_enrich` adds the shared
+    ISS dividend-yield + market_cap gap-fill. Behaviourally unchanged from 63.1 —
+    the enrichment loop is now the shared :func:`_enrich` helper.
+    """
+    content = smartlab_fetcher.fetch_html(symbol, statement)
+    base = smartlab_fetcher.parse_html(content, symbol)
+    return _enrich(symbol, base, iss_fetcher)
+
+
+def build_annual_snapshots(
+    symbol: str,
+    smartlab_fetcher: _SmartlabLike,
+    iss_fetcher: _IssLike,
+    statement: str = "MSFO",
+) -> list[FundamentalSnapshot]:
+    """Compose SmartLab ANNUAL (/f/y/) + ISS into look-ahead-safe snapshots.
+
+    Mirrors :func:`build_snapshots` but uses the Plan-01 annual seams
+    (``fetch_html_annual`` — robots-gated on ``/f/y/`` — and ``parse_html_annual``,
+    year-regex columns with a +120d disclosure-lag ``as_of``) and reuses the SAME
+    :func:`_enrich` ISS gap-fill. Yields one deep-history snapshot per fiscal year.
+    """
+    content = smartlab_fetcher.fetch_html_annual(symbol, statement)
+    base = smartlab_fetcher.parse_html_annual(content, symbol)
+    return _enrich(symbol, base, iss_fetcher)
+
+
 # ── Driver ───────────────────────────────────────────────────────────────────
 
 
@@ -278,42 +324,94 @@ def run_backfill(
 ) -> int:
     """Backfill *symbols* (blue-chips first) through the existing Phase-63 upsert.
 
-    Calls ``assert_robots_allowed`` ONCE up front (H-04 hard gate). Each symbol is
-    wrapped in try/except so one failure never aborts the run (T-63.1-12): a
-    short-history symbol logs ``backfill_short_history_skip``; a blue chip logs
-    ``backfill_symbol_failed``. Persistence uses the existing idempotent
-    ``persist_fundamental_snapshot`` upsert — it is NOT rebuilt here.
+    TWO-PASS annual-first / quarterly-second MERGE (D-02 / D-03, BACKFILL-Y-03):
+    builds ANNUAL deep-history snapshots first and QUARTERLY recent snapshots second,
+    then persists ALL annual rows BEFORE ALL quarterly rows. Because the Phase-63
+    upsert (:meth:`persist_fundamental_snapshot_async`) is an UNCONDITIONAL
+    ``on_conflict_do_update`` (last-writer-wins on ``(as_of, symbol)``), the quarterly
+    row is authoritative on every collision (the more-granular TTM data wins) while
+    deep annual years with no quarterly counterpart are pure additions. Re-running
+    rewrites the same deterministic key set → idempotent.
+
+    Robots HARD-GATES both routes up front (H-04 / BACKFILL-Y-04): the ``/f/q/`` gate
+    AND the ``/f/y/`` gate fire before any pull. Each symbol's annual and quarterly
+    passes are wrapped in try/except so one failure never aborts the run (T-63.1-12):
+    a short-history symbol logs ``backfill_short_history_skip``; a blue chip logs
+    ``backfill_symbol_failed``. The persist primitive is REUSED unchanged — ordering
+    is the merge mechanism, not a new conflict policy.
 
     Returns the number of snapshots persisted (0 under ``dry_run``).
     """
-    # H-04: single robots gate before any pull (T-63.1-10).
+    # H-04 / Y-04: robots gates before any pull. Quarterly route AND annual route.
     smartlab_fetcher.assert_robots_allowed(f"/q/SBER/f/q/{statement}/")
+    smartlab_fetcher.assert_robots_allowed(f"/q/SBER/f/y/{statement}/")
 
-    pending: list[FundamentalSnapshot] = []
+    annual_pending: list[FundamentalSnapshot] = []
+    quarterly_pending: list[FundamentalSnapshot] = []
     for symbol in symbols:
-        try:
-            snapshots = build_snapshots(symbol, smartlab_fetcher, iss_fetcher, statement)
-        except DataFetchError as exc:
-            if symbol in SHORT_HISTORY_SYMBOLS:
-                _log.warning("backfill_short_history_skip", symbol=symbol, error=str(exc))
-            else:
-                _log.warning("backfill_symbol_failed", symbol=symbol, error=str(exc))
+        # PASS 1 build — annual deep history (non-blocking per symbol).
+        annual_snaps = _build_pass(
+            symbol, build_annual_snapshots, smartlab_fetcher, iss_fetcher, statement, route="annual"
+        )
+        # PASS 2 build — recent quarterly TTM (the authoritative window).
+        quarterly_snaps = _build_pass(
+            symbol, build_snapshots, smartlab_fetcher, iss_fetcher, statement, route="quarterly"
+        )
+
+        if dry_run:
+            for snap in (*annual_snaps, *quarterly_snaps):
+                _log.info("backfill_dry_run", symbol=snap.symbol, as_of=snap.as_of.isoformat())
             continue
 
-        if symbol in SHORT_HISTORY_SYMBOLS and not snapshots:
-            _log.warning("backfill_short_history_skip", symbol=symbol, reason="no_snapshots")
+        annual_pending.extend(annual_snaps)
+        quarterly_pending.extend(quarterly_snaps)
+        _log.info(
+            "backfill_symbol_done",
+            symbol=symbol,
+            annual=len(annual_snaps),
+            quarterly=len(quarterly_snaps),
+        )
 
-        for snap in snapshots:
-            if dry_run:
-                _log.info("backfill_dry_run", symbol=snap.symbol, as_of=snap.as_of.isoformat())
-                continue
-            pending.append(snap)
-
-        _log.info("backfill_symbol_done", symbol=symbol, snapshots=len(snapshots))
-
-    persisted = 0 if dry_run else _persist_all(persistence, pending)
+    persisted = 0
+    if not dry_run:
+        # ORDERING IS THE MERGE: ALL annual writes precede ALL quarterly writes, so
+        # the quarterly value is the last writer on any shared (as_of, symbol) (D-02).
+        persisted += _persist_all(persistence, annual_pending)  # PASS 1 — annual FIRST
+        persisted += _persist_all(persistence, quarterly_pending)  # PASS 2 — quarterly OVERWRITES
     _log.info("backfill_complete", symbols=len(symbols), persisted=persisted, dry_run=dry_run)
     return persisted
+
+
+def _build_pass(
+    symbol: str,
+    builder: Callable[[str, _SmartlabLike, _IssLike, str], list[FundamentalSnapshot]],
+    smartlab_fetcher: _SmartlabLike,
+    iss_fetcher: _IssLike,
+    statement: str,
+    *,
+    route: str,
+) -> list[FundamentalSnapshot]:
+    """Run one build *route* (annual|quarterly) non-blocking (T-63.1-12).
+
+    A :class:`DataFetchError` for one symbol/route never aborts the run: a
+    short-history symbol logs ``backfill_short_history_skip``; any other symbol logs
+    ``backfill_symbol_failed``. Returns ``[]`` on failure so the other pass and the
+    remaining symbols still proceed.
+    """
+    try:
+        snaps = builder(symbol, smartlab_fetcher, iss_fetcher, statement)
+    except DataFetchError as exc:
+        if symbol in SHORT_HISTORY_SYMBOLS:
+            _log.warning("backfill_short_history_skip", symbol=symbol, route=route, error=str(exc))
+        else:
+            _log.warning("backfill_symbol_failed", symbol=symbol, route=route, error=str(exc))
+        return []
+
+    if symbol in SHORT_HISTORY_SYMBOLS and not snaps:
+        _log.warning(
+            "backfill_short_history_skip", symbol=symbol, route=route, reason="no_snapshots"
+        )
+    return snaps
 
 
 def _persist_all(persistence: TradingPersistence, snaps: list[FundamentalSnapshot]) -> int:
