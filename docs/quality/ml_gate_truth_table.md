@@ -334,3 +334,15 @@ proven live in the feature path, did **not** move either WF gate past the thresh
 current thin point-in-time history. **Round-1 KEEP = NONE (0/2 segments passed the WF gate.)**
 This gates the conditional Plan 03 (Round-2 derived fundamental features) **OUT** — Plan 03
 executes only if Round 1 kept ≥1 segment.
+
+### Phase 64 Round 2 — deferred (per D-01)
+
+Phase 64 Round 2 (derived multi-year fundamental features + schema `4`→`5`) is **deferred per
+D-01** — Round 1 found no segment improvement (**KEEP = NONE**), so Round 2 was **not attempted**
+in Phase 64. The conditional Plan 64-03 took its documented-skip branch: **no source under
+`src/` was modified** and `FEATURE_SCHEMA_VERSION` **stays at `4`** (bumping to `5` with no
+passing v5 artefact would deadlock the loader — every v4 artefact would be rejected at load with
+no replacement to load). The unchanged schema-4 feature set stays green
+(`tests/unit/test_fundamental_features.py`, 10 passed). Revisit Round 2 only if/when a future
+fundamental retrain (e.g. on deeper fundamental history) produces a Round-1 KEEP; it is not an
+automatic continuation.
