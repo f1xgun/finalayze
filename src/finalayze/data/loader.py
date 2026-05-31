@@ -270,16 +270,19 @@ async def read_fundamental_snapshots_async(
     """Async read of the FULL look-back window of fundamental snapshots.
 
     Selects every snapshot with ``as_of <= end_dt`` for the given peer symbols,
-    ordered by ``as_of`` (per-window slicing is downstream). Returns ``()`` on
-    any DB failure (graceful-degrade, mirroring the candle reader).
+    ordered by ``as_of`` (per-window slicing is downstream). The async engine is
+    always disposed (no connection-pool leak across calls). DB errors propagate
+    to the caller — the live path runs under ``_safe_fetch``, which logs the
+    failure, records it in ``fetch_failures`` and degrades to ``()`` — so a DB
+    misconfiguration is observable rather than silently swallowed.
     """
     from sqlalchemy import select  # noqa: PLC0415
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: PLC0415
 
     from finalayze.core.models import FundamentalSnapshotModel  # noqa: PLC0415
 
+    engine = create_async_engine(settings.database_url, echo=False)
     try:
-        engine = create_async_engine(settings.database_url, echo=False)
         async with AsyncSession(engine) as session:
             result = await session.execute(
                 select(FundamentalSnapshotModel)
@@ -291,8 +294,8 @@ async def read_fundamental_snapshots_async(
             )
             rows = result.scalars().all()
             return tuple(_orm_to_fundamental(row) for row in rows)
-    except Exception:
-        return ()
+    finally:
+        await engine.dispose()
 
 
 def _read_fundamental_snapshots(
