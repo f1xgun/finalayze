@@ -26,9 +26,20 @@ UNKNOWN_SYMBOL = "UNKN"
 UNKNOWN_MARKET = "unknown"
 
 EXPECTED_DEFAULT_SYMBOLS = {"AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "SPY", "QQQ"}
-EXPECTED_DEFAULT_US_COUNT = 7
-EXPECTED_DEFAULT_COUNT = 77  # 7 US + 58 MOEX stocks + 12 OFZ bonds
+EXPECTED_DEFAULT_US_COUNT = 7  # exact (UNIV-05)
 EXPECTED_COUNT_AFTER_TWO = 2
+
+# Per-class FLOORS for the snapshot-derived MOEX universe (UNIV-03/05). The full
+# universe drifts as MOEX lists/delists, so we assert floors, not exact counts
+# (Pitfall 4). Floors sit conservatively below the committed snapshot's counts.
+MIN_MOEX_SHARES = 250  # floors (Pitfall 4 -- universe drifts)
+MIN_MOEX_ETFS = 40
+MIN_MOEX_BONDS = 1400
+MIN_MOEX_FUTURES = 350
+MIN_MOEX_CURRENCIES = 10
+SBER_FIGI = "BBG004730N88"  # UNIV-09
+SBER_SYMBOL = "SBER"
+MOEX_MARKET = "moex"
 
 
 # ---------------------------------------------------------------------------
@@ -90,9 +101,10 @@ def test_build_default_registry_has_us_instruments() -> None:
 
 
 def test_build_default_registry_has_expected_count() -> None:
+    """US count is exact (UNIV-05); MOEX is a floor (UNIV-03/05, universe drifts)."""
     registry = build_default_registry()
-    assert len(registry) == EXPECTED_DEFAULT_COUNT
     assert len(registry.list_by_market(US_MARKET)) == EXPECTED_DEFAULT_US_COUNT
+    assert len(registry.list_by_market(MOEX_MARKET)) >= MIN_MOEX_SHARES + MIN_MOEX_BONDS
 
 
 def test_register_overwrites() -> None:
@@ -114,79 +126,20 @@ def test_len() -> None:
     assert len(registry) == EXPECTED_COUNT_AFTER_TWO
 
 
-EXPECTED_MOEX_STOCK_COUNT = 58
-EXPECTED_MOEX_OFZ_COUNT = 12
-EXPECTED_MOEX_INSTRUMENT_COUNT = 70  # 58 stocks + 12 OFZ bonds
-# Number of statically-defined instruments with hardcoded FIGIs
-# Sprint 8 / audit #16: backfilled FIGIs for 20 sector tickers + added X5.
-EXPECTED_MOEX_WITH_FIGI = 65  # 53 stocks with FIGI + 12 OFZ bonds
-EXPECTED_MOEX_SYMBOLS = {
-    # Original blue chips
+# Snapshot-universe core blue chips that MUST always be present (subset check,
+# not an exact universe -- the full snapshot has 2300+ instruments, UNIV-01/03).
+EXPECTED_MOEX_CORE_SYMBOLS = {
     "SBER",
-    "SBERP",
     "GAZP",
     "LKOH",
     "GMKN",
-    "YNDX",
-    "NVTK",
     "ROSN",
-    "VTBR",
-    "TATN",
-    "SNGS",
-    "ALRS",
-    "MGNT",
-    "POLY",
-    "IRAO",
-    "TRNFP",
-    "OZON",
     "MOEX",
-    # Finance / Tech / Energy expansions
-    "TCSG",
-    "VKCO",
-    "CBOM",
-    "BSPB",
-    "HHRU",
-    "POSI",
-    "YDEX",
-    "HEAD",
     "T",
-    "SNGSP",
-    "SIBN",
-    "TATNP",
-    # Metals & Mining
-    "CHMF",
-    "NLMK",
-    "MAGN",
-    "PLZL",
-    "RUAL",
-    "MTLR",
-    # Consumer / Telecom / Utilities
-    "FIVE",
-    "X5",
-    "FIXP",
-    "LENT",
-    "MTSS",
-    "RTKM",
-    "HYDR",
-    "FEES",
-    "MSNG",
-    "UPRO",
-    # Construction / Chemicals / Transport
-    "PIKK",
-    "SMLT",
-    "PHOR",
-    "AKRN",
-    "AFLT",
-    "FLOT",
-    "NMTP",
-    # v9.1 additions — finance / IT / insurance
-    "AFKS",
-    "RENI",
-    "ASTR",
-    "DIAS",
-    "SOFL",
-    # OFZ bonds
-    "SU26238RMFS4",
+}
+# Traded OFZ derived from config segments (ru_ofz_pd + ru_ofz_pk), TCSG->T n/a.
+# These are the YTM-able bonds the snapshot must carry (UNIV-06 / UNIV-10).
+TRADED_OFZ_SYMBOLS = {
     "SU26239RMFS2",
     "SU26241RMFS8",
     "SU26243RMFS4",
@@ -199,41 +152,73 @@ EXPECTED_MOEX_SYMBOLS = {
     "SU29009RMFS6",
     "SU29010RMFS4",
 }
+OFZ_FLOATING_SYMBOLS = {"SU29007RMFS0", "SU29008RMFS8", "SU29009RMFS6", "SU29010RMFS4"}
+OFZ_FIXED_SYMBOLS = TRADED_OFZ_SYMBOLS - OFZ_FLOATING_SYMBOLS
+OFZ_FACE_VALUE = Decimal(1000)
+TCSG_ALIAS = {"TCSG": "T"}  # historical rebrand reconciliation (Pitfall 2)
 
 
 def test_default_registry_includes_moex_instruments() -> None:
-    """Default registry must include all 16 MOEX instruments."""
+    """Default registry must include the full snapshot MOEX universe (floor, UNIV-03)."""
     registry = build_default_registry()
-    moex_instruments = registry.list_by_market("moex")
-    assert len(moex_instruments) == EXPECTED_MOEX_INSTRUMENT_COUNT
+    moex_instruments = registry.list_by_market(MOEX_MARKET)
+    assert len(moex_instruments) >= MIN_MOEX_SHARES + MIN_MOEX_BONDS
 
 
-def test_moex_instruments_with_static_figi() -> None:
-    """MOEX instruments with hardcoded FIGIs must have non-empty values.
-
-    New instruments added without FIGIs get them resolved at runtime via T-Bank API.
-    """
+def test_moex_core_symbols_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Core MOEX blue chips must always resolve in the snapshot universe (UNIV-01)."""
     registry = build_default_registry()
-    with_figi = [inst for inst in registry.list_by_market("moex") if inst.figi is not None]
-    assert len(with_figi) == EXPECTED_MOEX_WITH_FIGI
+    for sym in EXPECTED_MOEX_CORE_SYMBOLS:
+        inst = registry.get(sym, MOEX_MARKET)
+        assert inst.market_id == MOEX_MARKET
+
+
+def test_moex_instruments_with_figi_nonempty() -> None:
+    """Every snapshot MOEX instrument carrying a FIGI must have a non-empty value."""
+    registry = build_default_registry()
+    with_figi = [inst for inst in registry.list_by_market(MOEX_MARKET) if inst.figi is not None]
+    assert len(with_figi) > 0
     for inst in with_figi:
         assert inst.figi != "", f"{inst.symbol} has empty FIGI"
 
 
-def test_moex_instruments_symbols() -> None:
-    """Default registry must contain exactly the expected MOEX symbols."""
+def test_universe_counts() -> None:
+    """Per-class floors hold for the snapshot universe (UNIV-03, named floors PLR2004)."""
     registry = build_default_registry()
-    symbols = {i.symbol for i in registry.list_by_market("moex")}
-    assert symbols == EXPECTED_MOEX_SYMBOLS
+    assert len(registry.list_by_type(MOEX_MARKET, "stock")) >= MIN_MOEX_SHARES
+    assert len(registry.list_by_type(MOEX_MARKET, "etf")) >= MIN_MOEX_ETFS
+    assert len(registry.list_by_type(MOEX_MARKET, "bond")) >= MIN_MOEX_BONDS
+    assert len(registry.list_by_type(MOEX_MARKET, "future")) >= MIN_MOEX_FUTURES
+    assert len(registry.list_by_type(MOEX_MARKET, "currency")) >= MIN_MOEX_CURRENCIES
 
 
-def test_moex_instruments_currency_is_rub() -> None:
-    """All MOEX instruments must be denominated in RUB."""
+def _required_moex_symbols() -> set[str]:
+    """Derive the enabled-MOEX required-symbol set from config segments (UNIV-02)."""
+    from config.segments import DEFAULT_SEGMENTS
+
+    req: set[str] = set()
+    for seg in DEFAULT_SEGMENTS:
+        if seg.market != "moex" or not seg.enabled:
+            continue
+        req |= {TCSG_ALIAS.get(s, s) for s in seg.symbols}
+    return req
+
+
+def test_required_symbols_resolve() -> None:
+    """Every enabled-MOEX required symbol resolves via the registry (UNIV-02, TCSG->T)."""
     registry = build_default_registry()
-    for inst in registry.list_by_market("moex"):
-        assert inst.currency == "RUB", (
-            f"{inst.symbol} currency is {inst.currency!r}, expected 'RUB'"
-        )
+    required = _required_moex_symbols()
+    assert required  # sanity: derivation is non-empty
+    for sym in required:
+        # raises InstrumentNotFoundError if absent -- the assertion
+        inst = registry.get(sym, MOEX_MARKET)
+        assert inst.symbol == sym
+
+
+def test_get_by_figi_resolves_sber() -> None:
+    """FIGI lookup resolves to SBER from the snapshot (UNIV-09)."""
+    registry = build_default_registry()
+    assert registry.get_by_figi(SBER_FIGI).symbol == SBER_SYMBOL
 
 
 # ---------------------------------------------------------------------------
@@ -296,20 +281,20 @@ def test_stock_has_none_bond_fields() -> None:
 
 
 def test_list_by_type_returns_only_bonds() -> None:
-    """list_by_type('moex', 'bond') should return only bond instruments."""
+    """list_by_type('moex', 'bond') should return only bond instruments (floor)."""
     registry = build_default_registry()
     bonds = registry.list_by_type("moex", "bond")
-    assert len(bonds) == EXPECTED_MOEX_OFZ_COUNT
+    assert len(bonds) >= MIN_MOEX_BONDS
     for bond in bonds:
         assert bond.instrument_type == "bond"
         assert bond.market_id == "moex"
 
 
 def test_list_by_type_returns_only_stocks() -> None:
-    """list_by_type('moex', 'stock') should return only stock instruments."""
+    """list_by_type('moex', 'stock') should return only stock instruments (floor)."""
     registry = build_default_registry()
     stocks = registry.list_by_type("moex", "stock")
-    assert len(stocks) == EXPECTED_MOEX_STOCK_COUNT
+    assert len(stocks) >= MIN_MOEX_SHARES
     for stock in stocks:
         assert stock.instrument_type == "stock"
         assert stock.market_id == "moex"
@@ -348,16 +333,21 @@ def test_list_by_type_sorted_by_symbol() -> None:
 
 
 def test_default_registry_includes_ofz_instruments() -> None:
-    """Default registry must include all 12 OFZ bond instruments."""
+    """Default registry must include the traded OFZ as resolvable bonds (UNIV-10)."""
     registry = build_default_registry()
-    bonds = registry.list_by_type("moex", "bond")
-    assert len(bonds) == EXPECTED_MOEX_OFZ_COUNT
+    for sym in TRADED_OFZ_SYMBOLS:
+        inst = registry.get(sym, MOEX_MARKET)
+        assert inst.instrument_type == "bond"
+
+
+def _ofz_by_symbol() -> dict[str, Instrument]:
+    """Index the snapshot OFZ shim by symbol for the traded-OFZ assertions."""
+    return {i.symbol: i for i in DEFAULT_MOEX_OFZ_INSTRUMENTS}
 
 
 def test_ofz_instruments_have_correct_figis() -> None:
-    """OFZ instruments in DEFAULT_MOEX_OFZ_INSTRUMENTS must have non-empty FIGIs."""
+    """Traded OFZ in the snapshot shim must carry their known non-empty FIGIs."""
     expected_figis = {
-        "SU26238RMFS4": "BBG011FJ4HS6",
         "SU26239RMFS2": "BBG011FHF1F7",
         "SU26241RMFS8": "BBG01BJBR2W0",
         "SU26243RMFS4": "TCS00A106E90",
@@ -370,48 +360,49 @@ def test_ofz_instruments_have_correct_figis() -> None:
         "SU29009RMFS6": "BBG007Z5F748",
         "SU29010RMFS4": "BBG007Z5FFL1",
     }
-    for inst in DEFAULT_MOEX_OFZ_INSTRUMENTS:
-        assert inst.figi == expected_figis[inst.symbol], (
-            f"{inst.symbol}: expected FIGI {expected_figis[inst.symbol]!r}, got {inst.figi!r}"
-        )
+    ofz = _ofz_by_symbol()
+    for sym, figi in expected_figis.items():
+        assert ofz[sym].figi == figi, f"{sym}: expected FIGI {figi!r}, got {ofz[sym].figi!r}"
 
 
 def test_ofz_fixed_coupon_bonds_not_floating() -> None:
-    """OFZ-PD (fixed coupon) bonds should have floating_coupon=False."""
-    fixed_symbols = {
-        "SU26238RMFS4",
-        "SU26239RMFS2",
-        "SU26241RMFS8",
-        "SU26243RMFS4",
-        "SU26244RMFS2",
-        "SU26246RMFS7",
-        "SU26252RMFS5",
-        "SU26253RMFS3",
-    }
-    for inst in DEFAULT_MOEX_OFZ_INSTRUMENTS:
-        if inst.symbol in fixed_symbols:
-            assert inst.floating_coupon is False, (
-                f"{inst.symbol} should be fixed coupon (floating_coupon=False)"
-            )
+    """Traded OFZ-PD (fixed coupon) bonds should have floating_coupon=False."""
+    ofz = _ofz_by_symbol()
+    for sym in OFZ_FIXED_SYMBOLS:
+        assert ofz[sym].floating_coupon is False, (
+            f"{sym} should be fixed coupon (floating_coupon=False)"
+        )
 
 
 def test_ofz_floating_coupon_bonds() -> None:
-    """OFZ-PK (floating coupon) bonds should have floating_coupon=True."""
-    floating_symbols = {"SU29007RMFS0", "SU29008RMFS8", "SU29009RMFS6", "SU29010RMFS4"}
-    for inst in DEFAULT_MOEX_OFZ_INSTRUMENTS:
-        if inst.symbol in floating_symbols:
-            assert inst.floating_coupon is True, (
-                f"{inst.symbol} should be floating coupon (floating_coupon=True)"
-            )
+    """Traded OFZ-PK (floating coupon) bonds should have floating_coupon=True."""
+    ofz = _ofz_by_symbol()
+    for sym in OFZ_FLOATING_SYMBOLS:
+        assert ofz[sym].floating_coupon is True, (
+            f"{sym} should be floating coupon (floating_coupon=True)"
+        )
 
 
 def test_ofz_instruments_all_have_face_value() -> None:
-    """All OFZ instruments must have face_value set."""
-    for inst in DEFAULT_MOEX_OFZ_INSTRUMENTS:
-        assert inst.face_value is not None, f"{inst.symbol} missing face_value"
-        assert inst.face_value == BOND_FACE_VALUE, (
-            f"{inst.symbol} face_value={inst.face_value}, expected {BOND_FACE_VALUE}"
+    """All traded OFZ must have the par face_value set (UNIV-06)."""
+    ofz = _ofz_by_symbol()
+    for sym in TRADED_OFZ_SYMBOLS:
+        inst = ofz[sym]
+        assert inst.face_value is not None, f"{sym} missing face_value"
+        assert inst.face_value == OFZ_FACE_VALUE, (
+            f"{sym} face_value={inst.face_value}, expected {OFZ_FACE_VALUE}"
         )
+
+
+def test_ofz_yieldable() -> None:
+    """Every traded OFZ has the four YTM inputs non-None (UNIV-06 / UNIV-10, D-01)."""
+    registry = build_default_registry()
+    for sym in TRADED_OFZ_SYMBOLS:
+        inst = registry.get(sym, MOEX_MARKET)
+        assert inst.coupon_rate is not None, f"{sym} missing coupon_rate"
+        assert inst.coupon_frequency is not None, f"{sym} missing coupon_frequency"
+        assert inst.face_value is not None, f"{sym} missing face_value"
+        assert inst.maturity_date is not None, f"{sym} missing maturity_date"
 
 
 def test_all_moex_equity_segment_symbols_have_figi() -> None:
@@ -443,10 +434,8 @@ def test_all_moex_equity_segment_symbols_have_figi() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Snapshot-loader contract (Plan 65-03)
+# Snapshot-loader fail-closed contract (Plan 65-03)
 # ---------------------------------------------------------------------------
-SBER_SYMBOL = "SBER"
-MOEX_MARKET = "moex"
 CORRUPT_SNAPSHOT_BODY = "{ this is not valid json ::: ]"
 
 
