@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import traceback
+import warnings
 
 from dotenv import load_dotenv
 
@@ -39,6 +40,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import yaml
+from config.segments import _BOOTSTRAP_SEGMENT_SYMBOLS, DEFAULT_SEGMENTS
 
 from finalayze.backtest.config import DEFAULT_STRATEGY_HOLD_BARS, MOEX_2022_BREAK, BacktestConfig
 from finalayze.backtest.costs import MOEX_COSTS, US_COSTS
@@ -65,6 +67,7 @@ from finalayze.data.fetchers.yfinance import YFinanceFetcher
 from finalayze.data.loader import MarketDataLoader
 from finalayze.data.rate_limiter import RateLimiter
 from finalayze.markets.instruments import build_default_registry
+from finalayze.markets.liquidity import eligible_universe_as_of, select_segment_symbols
 from finalayze.risk.kelly import RollingKelly
 from finalayze.risk.regime import (
     HMMRegimeProvider,
@@ -95,6 +98,41 @@ _PRESETS_DIR = (
 )
 
 # ── Symbol universe ────────────────────────────────────────────────────────────
+# Toxic / sanctioned / structurally-illiquid MOEX names the backtest harness has always
+# excluded from every ru_* segment (pre-66 invariant -- see tests/unit/test_run_iteration_
+# universe.py). The canonical toxic set + the safety post-filter now live in the Layer-2
+# selector (finalayze.markets.liquidity) and are applied UNIVERSALLY to the final selected
+# universe (Plan 66-04) -- so this filter holds for the committed snapshot AND the bootstrap
+# regardless of source. _drop_toxic re-exports the SHARED set (NO divergent duplicate) and
+# is kept as a thin shim for the bootstrap-argument call sites below (defense-in-depth: the
+# selector also re-applies it). Order-preserving (keeps the ranked sequence).
+from finalayze.markets.liquidity import _TOXIC_SYMBOLS
+
+
+def _drop_toxic(symbols: list[str]) -> list[str]:
+    """Return ``symbols`` with toxic/sanctioned names removed, order preserved."""
+    return [s for s in symbols if s not in _TOXIC_SYMBOLS]
+
+
+def _bootstrap_for(segment_id: str) -> list[str]:
+    """Prior-hardcoded bootstrap list for ``segment_id`` (WR-04: missing-key safe).
+
+    A new enabled MOEX stock segment added to ``DEFAULT_SEGMENTS`` without a matching
+    ``_BOOTSTRAP_SEGMENT_SYMBOLS`` key must NOT raise ``KeyError`` at module import time
+    (that would break ``import scripts.run_iteration`` and every consumer before any clear
+    error surfaces). Use ``.get`` with an empty default; once the committed snapshot lands
+    the selector supplies the liquid set regardless. Warn (non-fatal, self-healing) so the
+    missing key is still visible to an operator.
+    """
+    if segment_id not in _BOOTSTRAP_SEGMENT_SYMBOLS:
+        warnings.warn(
+            f"no _BOOTSTRAP_SEGMENT_SYMBOLS key for enabled MOEX segment {segment_id!r}; "
+            "bootstrapping with [] until the liquidity snapshot supplies it",
+            stacklevel=2,
+        )
+    return _BOOTSTRAP_SEGMENT_SYMBOLS.get(segment_id, [])
+
+
 UNIVERSE: dict[str, list[str]] = {
     "us_tech": [
         "AAPL",
@@ -191,31 +229,33 @@ UNIVERSE: dict[str, list[str]] = {
         "WM",
         "RSG",
     ],
-    "ru_blue_chips": [
-        "SBER",
-        "LKOH",
-        "YNDX",
-        "MGNT",
-        "POLY",
-        "NVTK",
-        "MTLR",
-    ],
-    "ru_energy": [
-        "LKOH",
-        "ROSN",
-        "NVTK",
-        "TATN",
-        "TRNFP",
-        "BANEP",
-    ],
-    "ru_finance": [
-        "SBER",
-        "SBERP",
-        "TCSG",
-        "CBOM",
-        "BSPB",
-        "MOEX",
-    ],
+    # ru_* SHARE universes resolve through the liquidity selector (LIQ-08) -- single
+    # source shared with config.segments and training/cli.py. No hardcoded ru_* share
+    # lists (the old YNDX/POLY/TCSG/etc. were delisted/stale). US entries above stay
+    # hardcoded (enabled=False, frozen -- NOT re-pointed at the MOEX selector).
+    #
+    # 66-04: derive a key for EVERY enabled MOEX ru_* SHARE segment directly from
+    # DEFAULT_SEGMENTS (single source -- it can never drift again). This is exactly the
+    # bug that made the Phase-66 iteration skip ru_consumer/ru_telecom/ru_construction/
+    # ru_chemicals/ru_transport (plus ru_metals/ru_utilities): those KEYS simply did not
+    # exist here, even though the selector resolves all of them. Each value is selector-
+    # driven (LIQ-08) so it stays identical to config.segments and training/cli.py.
+    # Prior-list bootstrap (pre-66-04): when the committed snapshot FILE is absent the
+    # selector returns these hardcoded lists (single source: config._BOOTSTRAP_SEGMENT_SYMBOLS)
+    # so this seam stays populated and identical to the other two; once the snapshot lands
+    # the liquid set replaces them. The toxic filter is applied to the BOOTSTRAP ARGUMENT
+    # (defense-in-depth; the selector also re-applies _apply_safety_filters universally):
+    # pre-66 run_iteration always dropped toxic / sanctioned names (e.g. VTBR) from its ru_*
+    # bootstrap, while the generated liquid snapshot is the trust boundary and is returned
+    # post-safety-filter (D-04) -- so the three-seams single-source guarantee holds.
+    **{
+        seg.segment_id: select_segment_symbols(
+            seg.segment_id,
+            bootstrap=_drop_toxic(_bootstrap_for(seg.segment_id)),
+        )
+        for seg in DEFAULT_SEGMENTS
+        if seg.market == "moex" and seg.enabled and seg.instrument_type == "stock"
+    },
 }
 
 
@@ -987,6 +1027,167 @@ def _run_symbol(
         return [], [], None
 
 
+# Synthetic single-sector key for the backtest as-of gate. The cross-NAME Top-N-per-sector
+# ranking already happened at universe SELECTION time (the committed liquidity snapshot ->
+# config.segments .symbols). Within a single-segment backtest run, the as-of gate's live job
+# (D-05) is the point-in-time liquidity / survivorship guard: a name is entered on a bar only if,
+# as of the most recent quarterly rebalance, it had >= 60 visible bars and is not stale. Mapping
+# every segment symbol to one sector with top_n = len(symbols) keeps all names that pass that
+# point-in-time guard while still recomputing AS-OF (<= ts) at each quarterly rebalance.
+#
+# WR-03 (ACCEPTED LIMITATION -- not a defect, do NOT re-architect): because this gate uses one
+# synthetic sector and top_n = len(symbols), it enforces point-in-time 60-bar/staleness
+# ELIGIBILITY only -- it does NOT re-apply the D-03 cross-name Top-N liquidity RANK at each
+# rebalance. That Top-N cut is fixed at snapshot-build time and back-projected onto all history,
+# a softer survivorship guard than a true as-of Top-N: a name liquid recently but thin
+# mid-history is still entered for the whole backtest (subject only to the 60-bar/staleness
+# gate). This is the documented residual gap; see docs/operations/liquidity_universe_runbook.md
+# (D-11 verdict, "Accepted limitation").
+_BACKTEST_GATE_SECTOR = "_segment"
+
+
+def _run_segment_portfolio(
+    symbols: list[str],
+    segment: str,
+    candles_by_symbol: dict[str, list[Candle]],
+    strategies: list[BaseStrategy],
+    cash: Decimal,
+    output_dir: Path,
+    *,
+    benchmark_candles: list[Any] | None = None,
+    use_evt_sizing: bool = False,
+    use_copula_scaling: bool = False,
+    regime_provider: VIXRegimeProvider | HMMRegimeProvider | StaticRegimeProvider | None = None,
+    stop_loss_mode: str = "chandelier",
+    market_context: MarketContext | None = None,
+    brent_rub_price: float = 0.0,
+    rub_oil_regime_signal: object | None = None,
+    yield_slope_bps: float = 0.0,
+    cbr_direction: str = "",
+) -> tuple[list[TradeResult], list[PortfolioState], dict[str, Any] | None]:
+    """Run a SHARED-capital portfolio backtest for one segment (LIQ-07 / LIQ-08 / D-05 / D-09).
+
+    Replaces the per-symbol ``engine.run`` loop: one ``BacktestEngine`` + one shared broker over the
+    whole eligible set, so (a) the per-segment ``max_concurrent_positions`` cap is REAL (it is
+    silently ineffective per-symbol -- each symbol owned its own broker), and (b) the CARDINAL D-05
+    as-of universe gate runs at quarterly rebalances using only candles dated ``<= ts``.
+
+    Candle sourcing is the caller's responsibility (DB-seeded daily candles preferred for
+    determinism; live ``TinkoffFetcher`` is the rate-limited MOEX fallback). Returns
+    ``(trades, snapshots, summary)`` mirroring ``_run_symbol`` so the downstream metrics-recording
+    shape is preserved (one segment-level summary instead of per-symbol summaries).
+    """
+    seg_dir = output_dir / segment
+    seg_dir.mkdir(parents=True, exist_ok=True)
+
+    # INTG-02: the boost-only earnings_yield verdict is a SEGMENT-wide, constant-in-window tilt
+    # (T-Bank fundamentals are point-in-time, A3). Apply it once to the shared capital, using a
+    # single symbol's candles as the as_of proxy (_resolve_fundamental_scale pins as_of to that
+    # symbol's LAST bar timestamp). IN-05: pick the symbol whose last candle has the MAXIMUM
+    # timestamp rather than the first non-empty entry, so the chosen as_of is DETERMINISTIC and
+    # reproducible across symbol sets with ragged end dates (the prior next(...) was dict
+    # insertion-order dependent). Defensive against unsorted candle lists: key on the last bar of
+    # each list (the selector sorts in eligible_universe_as_of, but this seam makes no assumption).
+    proxy_candles = max(
+        (c for c in candles_by_symbol.values() if c),
+        key=lambda c: c[-1].timestamp,
+        default=[],
+    )
+    fundamental_scale, fundamental_ey = _resolve_fundamental_scale(
+        segment, proxy_candles, market_context
+    )
+    cash = (cash * fundamental_scale).quantize(Decimal("0.01"))
+
+    # Per-segment concurrent-position cap (D-09 / LIQ-07) from the curated SegmentConfig.
+    cap: int | None = None
+    for seg_cfg in DEFAULT_SEGMENTS:
+        if seg_cfg.segment_id == segment:
+            cap = seg_cfg.max_concurrent_positions
+            break
+
+    # CARDINAL D-05 as-of gate: recomputed at quarterly rebalances over candles <= ts. The full
+    # candle dict is closed over, but eligible_universe_as_of slices each symbol to <= ts itself.
+    sector_map = dict.fromkeys(symbols, _BACKTEST_GATE_SECTOR)
+    top_n = max(len(symbols), 1)
+
+    def eligible_at(ts: Any) -> set[str]:
+        return eligible_universe_as_of(candles_by_symbol, ts, sector_map, top_n)
+
+    combiner = JournalingStrategyCombiner(
+        strategies=strategies,
+        allocation_mode="hrp",
+        market_context=market_context,
+    )
+    journal = DecisionJournal(output_path=seg_dir / "decision_journal.jsonl")
+
+    engine = BacktestEngine(
+        strategy=combiner,
+        config=BacktestConfig(
+            initial_cash=cash,
+            decision_journal=journal,
+            rolling_kelly=RollingKelly(fraction=0.75)
+            if segment.startswith("ru_")
+            else RollingKelly(),
+            use_impact_model=True,
+            use_evt_sizing=use_evt_sizing,
+            use_copula_scaling=use_copula_scaling,
+            stop_loss_mode=stop_loss_mode,
+            max_hold_bars=DEFAULT_STRATEGY_HOLD_BARS,
+            transaction_costs=MOEX_COSTS if segment.startswith("ru_") else US_COSTS,
+            exclude_periods=MOEX_2022_BREAK if segment.startswith("ru_") else (),
+            brent_rub_price=brent_rub_price,
+            rub_oil_regime_signal=rub_oil_regime_signal,
+            yield_slope_bps=yield_slope_bps,
+            cbr_direction=cbr_direction,
+            max_concurrent_positions=cap,
+        ),
+        regime_provider=regime_provider,
+    )
+    trades, snapshots = engine.run_portfolio(
+        symbols,
+        segment,
+        candles_by_symbol,
+        eligible_at=eligible_at,
+    )
+    journal.flush()
+
+    result = PerformanceAnalyzer().analyze(trades, snapshots, benchmark_candles=benchmark_candles)
+
+    total_bars = sum(len(c) for c in candles_by_symbol.values())
+    summary = {
+        "segment": segment,
+        "symbols": symbols,
+        "total_candles": total_bars,
+        "total_trades": len(trades),
+        "concurrent_position_cap": cap,
+        "fundamental_gate_scale": str(fundamental_scale),
+        "fundamental_earnings_yield": fundamental_ey,
+        "metrics": result.model_dump(mode="json") if result else None,
+        "journal_summary": journal.summary(),
+    }
+
+    sharpe = float(result.sharpe) if result else 0.0
+    wr = float(result.win_rate) if result else 0.0
+    ret = float(result.total_return) if result else 0.0
+    print(
+        f"    PORTFOLIO {segment:14s} | {len(symbols):3d} syms | "
+        f"{len(trades):3d} trades | "
+        f"Sharpe {sharpe:+7.3f} | WR {wr:5.1%} | Ret {ret:+7.3%} | cap={cap}"
+    )
+    if fundamental_scale != Decimal("1.0"):
+        print(
+            f"      Fundamental gate: scale={fundamental_scale} "
+            f"(earnings_yield={fundamental_ey:.4f})"
+        )
+
+    run_summary = engine.last_run_summary
+    above_thresh: int = run_summary.get("combined_above_threshold", 0)  # type: ignore[assignment]
+    if above_thresh:
+        print(f"      combined_above_threshold={above_thresh}")
+
+    return trades, snapshots, summary
+
+
 def _format_comparison_table(
     current_name: str,
     baseline_name: str | None,
@@ -1366,45 +1567,56 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             # MOEX segments use RUB capital (--moex-cash, default 1M); US uses --cash
             segment_cash = _resolve_segment_cash(segment, cash, moex_cash)
 
+            # Fetch candles for the whole segment, then run ONE shared-capital portfolio backtest
+            # (LIQ-08 / Pattern 4). This is what makes the per-segment concurrent-position cap
+            # (D-09) real and runs the CARDINAL D-05 as-of universe gate at quarterly rebalances --
+            # both silently ineffective in the old per-symbol engine.run loop.
+            candles_by_symbol: dict[str, list[Candle]] = {}
             for symbol in symbols:
-                # Fetch candles
                 try:
                     fetcher = CachingFetcher(base_fetcher)
                     candles = fetcher.fetch_candles(symbol, start, end)
                     if not candles:
                         print(f"    {symbol:12s} | no data")
                         continue
+                    candles_by_symbol[symbol] = candles
                 except Exception:
                     print(f"    {symbol:12s} | fetch failed")
                     continue
 
-                iter_dir = output_root / args.name
-                trades, snapshots, summary = _run_symbol(
-                    symbol=symbol,
-                    segment=segment,
-                    candles=candles,
-                    strategies=strategies,
-                    cash=segment_cash,
-                    output_dir=iter_dir,
-                    benchmark_candles=bench_candles,
-                    use_evt_sizing=use_evt_sizing,
-                    use_copula_scaling=use_copula_scaling,
-                    regime_provider=regime_provider,
-                    stop_loss_mode=args.stop_loss_mode,
-                    market_context=ml_market_context,
-                    brent_rub_price=brent_rub_price,
-                    rub_oil_regime_signal=rub_oil_regime_signal,
-                    yield_slope_bps=yield_slope_bps,
-                    cbr_direction=cbr_direction,
-                )
+            if not candles_by_symbol:
+                print("    (no candle data for any symbol in segment)")
+                print()
+                continue
 
-                normalized_trades = _normalize_trades_to_usd(trades, segment)
-                all_trades.extend(normalized_trades)
-                segment_trades[segment].extend(trades)  # keep raw for per-segment metrics
-                if snapshots:
-                    all_snapshots.extend(_normalize_snapshots_to_usd(snapshots, segment))
-                if summary:
-                    all_summaries.append(summary)
+            eligible_symbols = list(candles_by_symbol)
+            iter_dir = output_root / args.name
+            trades, snapshots, summary = _run_segment_portfolio(
+                eligible_symbols,
+                segment,
+                candles_by_symbol,
+                strategies,
+                segment_cash,
+                iter_dir,
+                benchmark_candles=bench_candles,
+                use_evt_sizing=use_evt_sizing,
+                use_copula_scaling=use_copula_scaling,
+                regime_provider=regime_provider,
+                stop_loss_mode=args.stop_loss_mode,
+                market_context=ml_market_context,
+                brent_rub_price=brent_rub_price,
+                rub_oil_regime_signal=rub_oil_regime_signal,
+                yield_slope_bps=yield_slope_bps,
+                cbr_direction=cbr_direction,
+            )
+
+            normalized_trades = _normalize_trades_to_usd(trades, segment)
+            all_trades.extend(normalized_trades)
+            segment_trades[segment].extend(trades)  # keep raw for per-segment metrics
+            if snapshots:
+                all_snapshots.extend(_normalize_snapshots_to_usd(snapshots, segment))
+            if summary:
+                all_summaries.append(summary)
 
             print()
 

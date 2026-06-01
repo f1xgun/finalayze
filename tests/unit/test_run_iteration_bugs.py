@@ -58,10 +58,19 @@ class TestUniverseMOEXTickers:
     """UNIVERSE dict must contain real MOEX symbols, not ETF proxies."""
 
     def test_ru_blue_chips_has_real_moex_tickers(self) -> None:
-        """ru_blue_chips should contain SBER, LKOH, and other MOEX tickers."""
-        symbols = ri.UNIVERSE["ru_blue_chips"]
-        assert "SBER" in symbols
-        assert "LKOH" in symbols
+        """RU segments resolve to real MOEX tickers (sector-driven, Phase 66).
+
+        Phase-66 semantics: ru_* segments are GICS-sector buckets, so the blue chips no longer
+        live in one thematic list -- SBER resolves into ru_finance (banks) and LKOH into
+        ru_energy (oil_gas). The real invariant (real MOEX tickers, not delisted ETF proxies) is
+        asserted across the sector segments where those names now belong; ru_blue_chips itself is
+        the "diversified" bucket and must be non-empty and free of ETF proxies.
+        """
+        bc = ri.UNIVERSE["ru_blue_chips"]
+        assert bc, "ru_blue_chips (diversified bucket) must be non-empty"
+        # SBER / LKOH now live in their sector segments (single-source selector output).
+        assert "SBER" in ri.UNIVERSE["ru_finance"]
+        assert "LKOH" in ri.UNIVERSE["ru_energy"]
 
     def test_ru_blue_chips_no_etf_proxies(self) -> None:
         """ru_blue_chips must NOT contain ETF proxies like RSX, ERUS."""
@@ -108,7 +117,15 @@ class TestBuildStrategiesExpanded:
         assert len(strategies) >= _MIN_BASE_STRATEGIES
 
     def test_ru_segment_has_dividend_gap(self) -> None:
-        strategies = self._build("ru_blue_chips")
+        """RU segments get a DividendGapStrategy (sector-driven, Phase 66).
+
+        Phase-66 semantics: ru_blue_chips is now the small "diversified" bucket whose names may
+        not be in the static dividend YAML, so the invariant is asserted on a sector segment
+        whose selector-resolved symbols ARE dividend-paying (ru_finance -> SBER/MOEX/BSPB). The
+        real invariant -- RU segments wire a DividendGapStrategy when dividend data exists --
+        still holds; it was never specific to the old curated blue-chips list.
+        """
+        strategies = self._build("ru_finance")
         types = [type(s) for s in strategies]
         assert DividendGapStrategy in types
 

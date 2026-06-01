@@ -34,8 +34,11 @@ _US_MAX_FEATURES_EXPECTED = 15
 _RU_EQUITY_SEGMENTS = ["ru_blue_chips", "ru_energy", "ru_tech", "ru_finance"]
 _BOND_SEGMENTS = ["ru_ofz_pd", "ru_ofz_pk"]
 
-# Expected symbols for ru_blue_chips from config/segments.py
-_RU_BLUE_CHIPS_SYMBOLS = ["SBER", "LKOH", "GMKN"]
+# Phase 66 (sector-driven semantics): ru_* segments are now GICS-sector buckets resolved by
+# the liquidity selector from the committed snapshot + the curated SECTOR_TO_SEGMENT map --
+# NOT hardcoded thematic lists. ru_blue_chips == the "diversified" sector bucket (true
+# conglomerates with no single dominant sector). The OLD thematic curated list
+# (["SBER","LKOH","GMKN"]) no longer holds because SBER->banks, LKOH->oil_gas, GMKN->metals.
 
 
 class TestBarrierConfig:
@@ -139,11 +142,25 @@ class TestSegmentSymbols:
         assert "ru_finance" in _SEGMENT_SYMBOLS
 
     def test_ru_blue_chips_symbols_match_config(self) -> None:
-        """_SEGMENT_SYMBOLS['ru_blue_chips'] matches DEFAULT_SEGMENTS symbols."""
+        """_SEGMENT_SYMBOLS['ru_blue_chips'] is sector-driven (single source = the selector).
+
+        Phase-66 semantics: ru_blue_chips == the "diversified" sector bucket resolved by
+        ``select_segment_symbols`` from the committed snapshot, NOT a hardcoded thematic list.
+        The invariant under the new semantics: _SEGMENT_SYMBOLS mirrors the selector output
+        (single source of truth) and is free of toxic/sanctioned names (safety post-filter).
+        """
+        from config.segments import _BOOTSTRAP_SEGMENT_SYMBOLS
         from scripts.auto_ml_research import _SEGMENT_SYMBOLS
 
+        from finalayze.markets.liquidity import _TOXIC_SYMBOLS, select_segment_symbols
+
         symbols = _SEGMENT_SYMBOLS["ru_blue_chips"]
-        assert symbols == _RU_BLUE_CHIPS_SYMBOLS
+        # Single source: matches the live selector for the diversified bucket.
+        assert symbols == select_segment_symbols(
+            "ru_blue_chips", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_blue_chips"]
+        )
+        # Safety invariant survives the semantics change: no toxic/sanctioned names.
+        assert set(symbols) & _TOXIC_SYMBOLS == set()
 
     def test_bond_segment_ofz_pd_excluded(self) -> None:
         """_SEGMENT_SYMBOLS does NOT contain 'ru_ofz_pd' (bond segment)."""

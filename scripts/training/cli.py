@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import warnings
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -19,6 +20,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))  # for config.settings
 
 # torch must be imported before lightgbm to prevent OpenMP thread-pool conflicts
 import torch  # noqa: F401
+from config.segments import _BOOTSTRAP_SEGMENT_SYMBOLS, DEFAULT_SEGMENTS
 from scripts.training.data_loader import (
     build_market_data_loader,
     get_lookback_days,
@@ -34,8 +36,30 @@ from scripts.training.walk_forward import (
     train_walk_forward,
 )
 
+from finalayze.markets.liquidity import select_segment_symbols
+
 # Default output directory
 DEFAULT_OUTPUT_DIR = "models/"
+
+
+def _bootstrap_for(segment_id: str) -> list[str]:
+    """Prior-hardcoded bootstrap list for ``segment_id`` (WR-04: missing-key safe).
+
+    A new enabled MOEX stock segment added to ``DEFAULT_SEGMENTS`` without a matching
+    ``_BOOTSTRAP_SEGMENT_SYMBOLS`` key must NOT raise ``KeyError`` at module import time
+    (that would break ``import scripts.training.cli`` and every consumer before any clear
+    error surfaces). Use ``.get`` with an empty default; once the committed snapshot lands
+    the selector supplies the liquid set regardless. Warn (non-fatal, self-healing) so the
+    missing key is still visible to an operator.
+    """
+    if segment_id not in _BOOTSTRAP_SEGMENT_SYMBOLS:
+        warnings.warn(
+            f"no _BOOTSTRAP_SEGMENT_SYMBOLS key for enabled MOEX segment {segment_id!r}; "
+            "bootstrapping with [] until the liquidity snapshot supplies it",
+            stacklevel=2,
+        )
+    return _BOOTSTRAP_SEGMENT_SYMBOLS.get(segment_id, [])
+
 
 # Map segment_id -> representative symbols for training data
 SEGMENT_SYMBOLS: dict[str, list[str]] = {
@@ -85,10 +109,26 @@ SEGMENT_SYMBOLS: dict[str, list[str]] = {
         "TFC",
     ],
     "us_broad": ["SPY", "QQQ", "DIA", "IWM", "VTI"],
-    "ru_blue_chips": ["SBER", "LKOH", "GMKN", "ROSN", "NVTK", "MGNT", "TATN", "TCSG"],
-    "ru_energy": ["ROSN", "TATN", "NVTK", "LKOH", "SNGS", "SIBN"],
-    "ru_tech": ["YNDX", "OZON", "VKCO", "CIAN"],
-    "ru_finance": ["SBER", "VTBR", "TCSG", "MOEX", "CBOM"],
+    # ru_* SHARE training universes resolve through the liquidity selector (LIQ-08) --
+    # the SAME single source as config.segments and run_iteration.UNIVERSE. The old
+    # hardcoded lists carried DELISTED tickers (YNDX/TCSG/SNGS/CIAN); the selector
+    # supersedes them. train_walk_forward is unchanged (D-10) -- only the set widens.
+    #
+    # 66-04: derive a key for EVERY enabled MOEX ru_* SHARE segment directly from
+    # DEFAULT_SEGMENTS (single source -- it can never drift again, the same missing-keys
+    # bug fixed in run_iteration.UNIVERSE: only ru_blue_chips/ru_energy/ru_tech/ru_finance
+    # had keys here, so the newer sector segments were silently untrainable).
+    # Prior-list bootstrap (pre-66-04): when the committed snapshot FILE is absent the
+    # selector returns these hardcoded lists (single source: config._BOOTSTRAP_SEGMENT_SYMBOLS)
+    # so this seam stays populated and identical to the other two; once the snapshot lands
+    # the liquid set replaces them.
+    **{
+        seg.segment_id: select_segment_symbols(
+            seg.segment_id, bootstrap=_bootstrap_for(seg.segment_id)
+        )
+        for seg in DEFAULT_SEGMENTS
+        if seg.market == "moex" and seg.enabled and seg.instrument_type == "stock"
+    },
 }
 
 

@@ -48,6 +48,8 @@ from finalayze.risk.stop_loss import filter_candles_by_exclusion
 from finalayze.risk.stops import CATASTROPHIC_DROP_PCT
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from finalayze.backtest.costs import TransactionCosts
     from finalayze.backtest.decision_journal import DecisionJournal, FinalAction
     from finalayze.core.schemas import Signal
@@ -124,6 +126,11 @@ class BacktestEngine:
         self._initial_cash = cfg.initial_cash
         self._max_position_pct = cfg.max_position_pct
         self._max_positions = cfg.max_positions
+        # D-09 / LIQ-07 (Phase 66): a per-segment concurrent-position cap, when supplied,
+        # overrides the portfolio-wide ``max_positions`` for the SHARED ``run_portfolio`` broker
+        # (and only there -- it is silently ineffective in the per-symbol ``run`` path where each
+        # symbol owns its own broker). ``None`` preserves prior behaviour for every existing caller.
+        self._max_concurrent_positions = cfg.max_concurrent_positions
         self._kelly_fraction = cfg.kelly_fraction
         self._atr_multiplier = cfg.atr_multiplier
         self._transaction_costs = cfg.transaction_costs
@@ -679,6 +686,8 @@ class BacktestEngine:
         symbols: list[str],
         segment_id: str,
         candles_by_symbol: dict[str, list[Candle]],
+        *,
+        eligible_at: Callable[[datetime], set[str]] | None = None,
     ) -> tuple[list[TradeResult], list[PortfolioState]]:
         """Run a portfolio-level backtest over multiple symbols.
 
@@ -689,6 +698,16 @@ class BacktestEngine:
             symbols: List of ticker symbols to trade.
             segment_id: Market segment identifier.
             candles_by_symbol: Candle data keyed by symbol.
+            eligible_at: Optional CARDINAL D-05 as-of universe gate. When supplied, the eligible
+                universe is recomputed at each QUARTERLY rebalance bar ``T`` via ``eligible_at(T)``
+                -- which the caller backs with ``markets.liquidity.eligible_universe_as_of`` so the
+                set is derived from ONLY the candles dated ``timestamp <= T`` (zero look-ahead,
+                survivorship-safe). New entries are SKIPPED for symbols not in the current eligible
+                set; the set is carried forward between rebalances. EXISTING positions for a name
+                that drops out of the eligible set are NOT force-liquidated -- they are managed and
+                exited normally (stop/profit/time/SELL); the gate only blocks NEW entries. When
+                ``None`` (the default), every passed symbol is always eligible and behaviour is
+                UNCHANGED -- this preserves every existing ``run_portfolio`` caller and test.
 
         Returns:
             A tuple of (trades, portfolio_snapshots).
@@ -696,9 +715,18 @@ class BacktestEngine:
         if not symbols or not candles_by_symbol:
             return [], []
 
+        # D-09 / LIQ-07: a per-segment concurrent-position cap (if configured) overrides the
+        # portfolio-wide ``max_positions`` for the SHARED ``PreTradeChecker``. One checker + one
+        # broker means ``MaxPositionsCheck`` is portfolio-wide here (unlike the per-symbol ``run``
+        # path where each symbol's broker makes the cap silently ineffective -- PATTERNS Pitfall 4).
+        max_positions = (
+            self._max_concurrent_positions
+            if self._max_concurrent_positions is not None
+            else self._max_positions
+        )
         checker = PreTradeChecker(
             max_position_pct=self._max_position_pct,
-            max_positions_per_market=self._max_positions,
+            max_positions_per_market=max_positions,
         )
         # For portfolio mode, use first symbol's candles for impact estimates
         _first_sym = symbols[0]
@@ -731,9 +759,27 @@ class BacktestEngine:
             {c.timestamp for candles in candles_by_symbol.values() for c in candles}
         )
 
+        # CARDINAL D-05 as-of universe gate state. ``current_eligible`` is recomputed only at
+        # quarterly rebalance boundaries (index-reconstitution cadence, D-06) and carried forward
+        # between them. ``None`` means "no gate" -> every symbol is always eligible (unchanged
+        # behaviour). ``_quarter_key`` detects a quarter boundary on the unified timeline.
+        current_eligible: set[str] | None = None
+        last_rebalance_quarter: tuple[int, int] | None = None
+
+        def _quarter_key(when: datetime) -> tuple[int, int]:
+            return (when.year, (when.month - 1) // 3)
+
         ts_index = 0
         for ts in all_timestamps:
             broker.set_timestamp(ts)
+
+            # D-05 / D-06: at the first bar and at every new quarter, re-derive the eligible
+            # universe AS-OF this bar from candles <= ts (the callback enforces the cutoff).
+            if eligible_at is not None:
+                this_quarter = _quarter_key(ts)
+                if last_rebalance_quarter is None or this_quarter != last_rebalance_quarter:
+                    current_eligible = eligible_at(ts)
+                    last_rebalance_quarter = this_quarter
 
             # Update prices for all symbols that have data at this timestamp
             for sym in symbols:
@@ -902,6 +948,14 @@ class BacktestEngine:
                     fill_candle = sym_candles[idx + 1]
 
                     if signal.direction == SignalDirection.BUY:
+                        # CARDINAL D-05: skip NEW entries for symbols not in the current as-of
+                        # eligible universe. ``current_eligible is None`` means no gate (unchanged).
+                        # Existing positions for a now-ineligible name are untouched here -- they
+                        # are managed/exited by the stop/profit/time/SELL paths above, never
+                        # force-liquidated on de-listing from the eligible set.
+                        if current_eligible is not None and sym not in current_eligible:
+                            continue
+
                         # Skip BUY if regime blocks new longs
                         if regime_state is not None and not regime_state.allow_new_longs:
                             continue

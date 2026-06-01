@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
 
 from finalayze.backtest.config import BacktestConfig
 from finalayze.backtest.engine import BacktestEngine
 from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.markets.liquidity import eligible_universe_as_of
 from finalayze.risk.pre_trade_check import PreTradeResult
+from finalayze.strategies.base import BaseStrategy
 
 
 def _make_candle(
@@ -214,3 +216,129 @@ class TestMoexMinPositionSize:
         """US segments should use $500 min_pos (capped)."""
         min_pos = self._run_handle_buy_and_get_min_pos("us_tech")
         assert min_pos == Decimal(500)
+
+
+# ── Cross-symbol concurrent-position cap in run_portfolio (D-09 / LIQ-07) ───────
+_CAP_SECTOR = "oil_gas"
+_CAP_SEGMENT = "ru_energy"
+_CAP_BARS = 120
+_CAP_VOLUME = 5_000_000
+_CAP_START = datetime(2024, 1, 1, 14, 30, tzinfo=UTC)
+
+
+class _AlwaysBuyStrategy(BaseStrategy):
+    """Emits BUY for every symbol with no open position -- maximises entry pressure."""
+
+    @property
+    def name(self) -> str:
+        return "always_buy"
+
+    def supported_segments(self) -> list[str]:
+        return [_CAP_SEGMENT]
+
+    def generate_signal(  # type: ignore[override]
+        self,
+        symbol: str,
+        candles: list[Candle],
+        segment_id: str,
+        **kwargs: object,
+    ) -> Signal | None:
+        if kwargs.get("has_open_position"):
+            return None
+        return Signal(
+            strategy_name=self.name,
+            symbol=symbol,
+            market_id="moex",
+            segment_id=segment_id,
+            direction=SignalDirection.BUY,
+            confidence=0.9,
+            strategy_payload={"momentum": 1.0},
+            reasoning="cap test buy",
+        )
+
+    def get_parameters(self, segment_id: str) -> dict[str, object]:
+        return {}
+
+
+def _cap_series(symbol: str, close: int) -> list[Candle]:
+    return [
+        Candle(
+            symbol=symbol,
+            market_id="moex",
+            timeframe="1d",
+            timestamp=_CAP_START + timedelta(days=i),
+            open=Decimal(close),
+            high=Decimal(close) + Decimal(2),
+            low=Decimal(close) - Decimal(2),
+            close=Decimal(close),
+            volume=_CAP_VOLUME,
+        )
+        for i in range(_CAP_BARS)
+    ]
+
+
+class TestSharedBrokerConcurrentCap:
+    """The per-segment concurrent-position cap holds ACROSS symbols in shared-broker mode.
+
+    In the per-symbol ``run`` path each symbol owns its own broker, so the cap is silently
+    ineffective (PATTERNS Pitfall 4). ``run_portfolio`` shares one broker + one ``PreTradeChecker``,
+    so ``max_concurrent_positions`` is the real portfolio-wide cap. This constructs a scenario that
+    WOULD open more than the cap (every symbol fires BUY) and asserts the simultaneous open count
+    never exceeds the cap.
+    """
+
+    def test_cap_holds_across_symbols_in_run_portfolio(self) -> None:
+        cap = 2
+        n_symbols = 6
+        candles_by_symbol = {f"SYM{i}": _cap_series(f"SYM{i}", 100 + i) for i in range(n_symbols)}
+        engine = BacktestEngine(
+            strategy=_AlwaysBuyStrategy(),
+            config=BacktestConfig(
+                initial_cash=Decimal(1_000_000),
+                max_concurrent_positions=cap,
+                force_close_at_end=True,
+            ),
+        )
+        sector_map = dict.fromkeys(candles_by_symbol, _CAP_SECTOR)
+
+        def eligible_at(ts: datetime) -> set[str]:
+            # Top-N >= n_symbols so the eligible set never limits below the cap -- the cap is the
+            # only thing that can bound the concurrent open count.
+            return eligible_universe_as_of(candles_by_symbol, ts, sector_map, n_symbols)
+
+        _trades, snaps = engine.run_portfolio(
+            list(candles_by_symbol),
+            _CAP_SEGMENT,
+            candles_by_symbol,
+            eligible_at=eligible_at,
+        )
+
+        max_open = max(
+            (sum(1 for q in s.positions.values() if q > 0) for s in snaps),
+            default=0,
+        )
+        assert max_open <= cap
+
+    def test_cap_none_preserves_global_max_positions(self) -> None:
+        """When max_concurrent_positions is None, the portfolio-wide max_positions still applies."""
+        n_symbols = 6
+        candles_by_symbol = {f"SYM{i}": _cap_series(f"SYM{i}", 100 + i) for i in range(n_symbols)}
+        engine = BacktestEngine(
+            strategy=_AlwaysBuyStrategy(),
+            config=BacktestConfig(
+                initial_cash=Decimal(1_000_000),
+                max_positions=3,
+                max_concurrent_positions=None,
+                force_close_at_end=True,
+            ),
+        )
+        _trades, snaps = engine.run_portfolio(
+            list(candles_by_symbol),
+            _CAP_SEGMENT,
+            candles_by_symbol,
+        )
+        max_open = max(
+            (sum(1 for q in s.positions.values() if q > 0) for s in snaps),
+            default=0,
+        )
+        assert max_open <= 3

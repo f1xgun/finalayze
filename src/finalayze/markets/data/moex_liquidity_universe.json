@@ -1,0 +1,83 @@
+{
+  "generated_at": "2026-06-01T08:25:45.738219+00:00",
+  "as_of": "2026-06-01T08:25:45.738219+00:00",
+  "sectors": {
+    "oil_gas": [
+      "LKOH",
+      "ROSN",
+      "NVTK",
+      "TATN",
+      "TRNFP",
+      "SIBN",
+      "RNFT"
+    ],
+    "banks": [
+      "SBER",
+      "T",
+      "MOEX",
+      "BSPB",
+      "AFKS",
+      "RENI",
+      "SVCB"
+    ],
+    "metals_mining": [
+      "PLZL",
+      "CHMF",
+      "MTLR",
+      "GMKN",
+      "ENPG",
+      "MAGN",
+      "RUAL",
+      "NLMK",
+      "VSMO"
+    ],
+    "telecom": [
+      "MTSS",
+      "RTKM",
+      "MGTSP"
+    ],
+    "consumer": [
+      "X5",
+      "MGNT",
+      "BELU",
+      "LENT",
+      "GCHE"
+    ],
+    "transport": [
+      "AFLT",
+      "FESH",
+      "FLOT"
+    ],
+    "chemicals": [
+      "PHOR",
+      "AKRN"
+    ],
+    "tech": [
+      "YDEX",
+      "OZON",
+      "VKCO",
+      "HEAD",
+      "WUSH",
+      "POSI",
+      "ASTR",
+      "DIAS",
+      "SOFL"
+    ],
+    "real_estate": [
+      "SMLT",
+      "PIKK",
+      "ETLN",
+      "LSRG"
+    ],
+    "diversified": [
+      "SFIN"
+    ]
+  },
+  "params": {
+    "top_n": 10,
+    "min_turnover_rub": "1000000",
+    "window": 60,
+    "share_count": 268,
+    "scored_count": 96
+  }
+}
