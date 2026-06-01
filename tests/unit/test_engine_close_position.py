@@ -371,6 +371,107 @@ class TestClosePositionZeroEntry:
         assert trade.pnl == EXIT_PRICE * QUANTITY
 
 
+class TestClosePositionExitReason:
+    """Verify exit_reason and entry_strategy are recorded on closed trades (RUFIN-01)."""
+
+    def test_exit_reason_threaded_through_shim(self) -> None:
+        """The _close_position shim forwards exit_reason to the TradeResult."""
+        engine = _make_engine()
+        entry_prices, entry_bars, entry_strategies, chandelier_stops = _make_state_dicts()
+        trades: list[TradeResult] = []
+
+        trade = engine._close_position(
+            symbol=SYMBOL,
+            exit_price=EXIT_PRICE,
+            quantity=QUANTITY,
+            entry_prices=entry_prices,
+            entry_bars=entry_bars,
+            entry_strategies=entry_strategies,
+            chandelier_stops=chandelier_stops,
+            bar_index=EXIT_BAR,
+            trades=trades,
+            exit_reason="stop",
+        )
+
+        assert trade.exit_reason == "stop"
+
+    def test_each_exit_reason_literal_recorded(self) -> None:
+        """Each of the 5 exit-path literals is stored verbatim on the trade."""
+        for reason in ("stop", "profit_target", "time", "signal", "force_close"):
+            engine = _make_engine()
+            entry_prices, entry_bars, entry_strategies, chandelier_stops = _make_state_dicts()
+            trades: list[TradeResult] = []
+
+            trade = engine._close_position(
+                symbol=SYMBOL,
+                exit_price=EXIT_PRICE,
+                quantity=QUANTITY,
+                entry_prices=entry_prices,
+                entry_bars=entry_bars,
+                entry_strategies=entry_strategies,
+                chandelier_stops=chandelier_stops,
+                bar_index=EXIT_BAR,
+                trades=trades,
+                exit_reason=reason,
+            )
+
+            assert trade.exit_reason == reason
+
+    def test_entry_strategy_captured_not_discarded(self) -> None:
+        """entry_strategy is recorded on the trade (momentum), not popped-and-dropped."""
+        engine = _make_engine()
+        entry_prices, entry_bars, entry_strategies, chandelier_stops = _make_state_dicts(
+            strategy_name="momentum",
+        )
+        trades: list[TradeResult] = []
+
+        trade = engine._close_position(
+            symbol=SYMBOL,
+            exit_price=EXIT_PRICE,
+            quantity=QUANTITY,
+            entry_prices=entry_prices,
+            entry_bars=entry_bars,
+            entry_strategies=entry_strategies,
+            chandelier_stops=chandelier_stops,
+            bar_index=EXIT_BAR,
+            trades=trades,
+        )
+
+        assert trade.entry_strategy == "momentum"
+        # still popped from the tracking dict (state cleanup unchanged)
+        assert SYMBOL not in entry_strategies
+
+    def test_exit_reason_defaults_to_none(self) -> None:
+        """Omitting exit_reason keeps back-compat: field defaults to None."""
+        engine = _make_engine()
+        entry_prices, entry_bars, entry_strategies, chandelier_stops = _make_state_dicts()
+        trades: list[TradeResult] = []
+
+        trade = engine._close_position(
+            symbol=SYMBOL,
+            exit_price=EXIT_PRICE,
+            quantity=QUANTITY,
+            entry_prices=entry_prices,
+            entry_bars=entry_bars,
+            entry_strategies=entry_strategies,
+            chandelier_stops=chandelier_stops,
+            bar_index=EXIT_BAR,
+            trades=trades,
+        )
+
+        assert trade.exit_reason is None
+
+    def test_exit_reason_enum_members_match_literals(self) -> None:
+        """ExitReason StrEnum members equal their stored string values."""
+        from finalayze.core.schemas import ExitReason
+
+        assert ExitReason.STOP == "stop"
+        assert ExitReason.PROFIT_TARGET == "profit_target"
+        assert ExitReason.TIME == "time"
+        assert ExitReason.SIGNAL == "signal"
+        assert ExitReason.FORCE_CLOSE == "force_close"
+
+
 class TestNoEntryBarConstant:
     """Verify _NO_ENTRY_BAR is exported and has the expected value."""
 
