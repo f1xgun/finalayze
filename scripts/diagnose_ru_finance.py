@@ -51,6 +51,8 @@ class Attribution:
     win_rate: float
     exit_reason_counts: dict[str, int]
     exit_reason_pnl: dict[str, Decimal]
+    # Diagnostic-only context (printed, NOT part of the lever verdict -- see
+    # _name_lever, which keys solely on the avg-win/avg-loss payoff asymmetry).
     stop_hit_share: float
     signal_exit_share: float
     per_strategy_pnl: dict[str, Decimal] = field(default_factory=dict)
@@ -77,7 +79,15 @@ def load_trades_jsonl(path: Path) -> list[TradeResult]:
 
 
 def _name_lever(avg_win: Decimal, avg_loss: Decimal) -> str:
-    """Name the lever the asymmetry data implicates (the D-01 deliverable)."""
+    """Name the lever the asymmetry data implicates (the D-01 deliverable).
+
+    NOTE: the verdict is intentionally PAYOFF-DRIVEN -- it keys ONLY on avg-win
+    vs avg-loss magnitude. The ``stop_hit_share`` / ``signal_exit_share`` fields
+    computed in ``compute_attribution`` and printed by ``_print_report`` are
+    DIAGNOSTIC-ONLY context for the human reader; they do NOT gate this verdict.
+    (D-04 ACCEPT was decided on this payoff-driven verdict -- do not fold the
+    shares into the decision without re-running the diagnostic + re-accepting.)
+    """
     loss_mag = abs(avg_loss)
     if loss_mag > avg_win * _LOSS_DOMINANCE_FACTOR:
         return (
