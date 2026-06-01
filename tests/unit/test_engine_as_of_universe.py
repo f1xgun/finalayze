@@ -3,19 +3,25 @@
 Mirrors ``tests/unit/test_pead_sue_proxy.py::TestA4LookAhead`` (the append-future-no-op +
 in-window-changes shape), but proves the property at the BACKTEST-ENGINE level: the as-of
 eligible-universe gate threaded into ``BacktestEngine.run_portfolio`` recomputes the eligible
-set at each quarterly rebalance bar from ONLY the candles dated ``<= ts``.
+set at each QUARTERLY rebalance bar from ONLY the candles dated ``<= ts``.
 
 Two cardinal proofs (D-05 / LIQ-04):
 
 1. ``test_future_candle_does_not_change_entries`` -- appending a FUTURE high-turnover candle to a
-   borderline symbol does NOT change which symbols are entered at a past rebalance bar T (the
-   ``<= ts`` cutoff filtered the future bar -- no look-ahead).
-2. ``test_in_window_candle_changes_eligibility`` -- moving that SAME candle into the ``<= T``
-   window flips the borderline symbol into the eligible set, so it IS now entered at T (proves the
-   gate is LIVE, not a global no-op).
+   borderline (sub-60-bar) symbol does NOT change which symbols are entered (the ``<= ts`` cutoff
+   filtered the future bar -- no look-ahead). The borderline name stays excluded.
+2. ``test_in_window_candle_changes_eligibility`` -- moving that SAME candle into the ``<= T`` window
+   (so the borderline name now has the full 60-bar window) flips it into the eligible set, so it IS
+   entered (proves the gate is LIVE, not a global no-op).
 
-Plus ``test_cap_enforced_across_symbols`` (the shared-broker D-09 cap), which also lives in
-``test_engine_segment_cap.py`` per the plan -- kept here too over the as-of gate path.
+Plus ``test_cap_enforced_across_symbols`` -- the shared-broker D-09 concurrent-position cap (also
+extended in ``test_engine_segment_cap.py`` per the plan), proven here over the as-of gate path.
+
+The mechanism is the Plan-01 ``eligible_universe_as_of`` exclusion rule: a name with < 60 visible
+bars (as of the rebalance) scores ``None`` and is excluded; a name with >= 60 visible bars and the
+highest sector turnover wins the Top-N slot. The borderline symbol sits at exactly 59 visible bars
+so a single in-window-vs-future 60th bar flips eligibility -- a faithful append-future / in-window
+proof at the engine level.
 
 All fixtures are deterministic: no live token, no DB, no network.
 """
@@ -27,21 +33,36 @@ from decimal import Decimal
 
 from finalayze.backtest.config import BacktestConfig
 from finalayze.backtest.engine import BacktestEngine
-from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.core.schemas import Candle, Signal, SignalDirection, TradeResult
 from finalayze.markets.liquidity import eligible_universe_as_of
 from finalayze.strategies.base import BaseStrategy
 
 # ── Named constants (no magic numbers -- ruff PLR2004) ──────────────────────────
 _WINDOW = 60  # D-02 trailing liquidity window (bars)
-_TOP_N = 1  # one name per sector kept -- forces a single eligible winner per sector
-_SECTOR = "oil_gas"  # one shared sector so within-sector ranking is the live lever
+_TOP_N = 2  # keep both names when both are eligible (sector is shared)
+_SECTOR = "oil_gas"  # one shared sector so within-sector eligibility is the lever
 _SEGMENT = "ru_energy"  # the segment oil_gas maps to (config.SECTOR_TO_SEGMENT)
-_BUY_BAR = 30  # the bar at which the test strategy emits BUY (a "rebalance-ish" entry point)
 _BASE_PRICE = 100
-_HIGH_VOLUME = 10_000_000  # borderline symbol's turnover-spike volume
-_LOW_VOLUME = 1_000  # the liquid winner's modest volume (still wins on price*vol? no -- see below)
-_LIQUID_VOLUME = 5_000_000  # the always-eligible liquid name's steady volume
+_HIGH_VOLUME = 10_000_000  # the borderline symbol's turnover on its 60th bar
+_LIQUID_VOLUME = 5_000_000  # the always-eligible liquid name's steady turnover
 _START = datetime(2024, 1, 1, 14, 30, tzinfo=UTC)
+
+# Timeline / borderline-symbol layout (all 2024, only two quarter boundaries occur: 2024-Q1 at
+# day 0 and 2024-Q2 at day 91 = 2024-04-01; the timeline ends at day 120 = 2024-04-30, still Q2,
+# so NO third rebalance fires and the Q2 eligible set is carried forward to the run's end).
+#
+# BORDER carries exactly 59 daily bars dated <= the Q2 rebalance (days 31..89, all 2024-Q1), so as
+# of the day-91 Q2 rebalance it has < _WINDOW visible bars -> scores None -> EXCLUDED. It also
+# trades days 92..120 so that IF the Q2 eligible set admits it, it CAN actually be entered (a
+# symbol can only be entered on bars where it has a candle). The pivotal 60th bar is placed EITHER
+# after the rebalance (day 100, still Q2 -> > 91 so the as-of cutoff filters it -> still 59 visible
+# -> no-op) OR in-window (day 90 -> <= 91 -> 60 visible -> eligible). The day-100 "future" bar stays
+# inside Q2 so it does NOT trigger an extra rebalance that could re-admit BORDER.
+_BORDER_PRE_DAYS = list(range(31, 90))  # 59 bars, all <= the Q2 rebalance
+_BORDER_POST_DAYS = list(range(92, 121))  # tradeable bars AFTER the Q2 rebalance (skip 90, 91)
+_BORDER_FUTURE_DAY = 100  # > the Q2 rebalance (day 91), same quarter -> filtered, no new rebalance
+_BORDER_IN_WINDOW_DAY = 90  # <= the Q2 rebalance -> counted -> 60 visible bars
+_LIQUID_BARS = 121  # days 0..120; spans Q1 + the start of Q2 so a Q2 rebalance occurs
 
 
 def _candle(symbol: str, day: int, *, close: float, volume: int) -> Candle:
@@ -63,17 +84,17 @@ def _series(symbol: str, *, n: int, close: float, volume: int, start_day: int = 
     return [_candle(symbol, start_day + i, close=close, volume=volume) for i in range(n)]
 
 
-class _EligibleAwareStrategy(BaseStrategy):
-    """Emits a BUY for every symbol at ``_BUY_BAR``.
+class _AlwaysBuyStrategy(BaseStrategy):
+    """Emits a BUY for any symbol with no open position, on every bar with >= 1 bar of history.
 
-    The as-of eligible-universe gate in ``run_portfolio`` is what filters these BUYs down to the
-    eligible set -- the strategy itself is universe-agnostic, so any difference in ENTERED symbols
-    is attributable to the gate (not the strategy).
+    Universe-agnostic: the as-of eligible-universe gate in ``run_portfolio`` is the ONLY thing
+    that decides which symbols can actually be entered, so any difference in ENTERED symbols is
+    attributable to the gate, not the strategy.
     """
 
     @property
     def name(self) -> str:
-        return "eligible_aware"
+        return "always_buy"
 
     def supported_segments(self) -> list[str]:
         return [_SEGMENT]
@@ -85,32 +106,31 @@ class _EligibleAwareStrategy(BaseStrategy):
         segment_id: str,
         **kwargs: object,
     ) -> Signal | None:
-        idx = len(candles) - 1
-        if idx == _BUY_BAR:
-            return Signal(
-                strategy_name=self.name,
-                symbol=symbol,
-                market_id="moex",
-                segment_id=segment_id,
-                direction=SignalDirection.BUY,
-                confidence=0.9,
-                strategy_payload={"momentum": 1.0},
-                reasoning="test buy",
-            )
-        return None
+        if kwargs.get("has_open_position"):
+            return None
+        return Signal(
+            strategy_name=self.name,
+            symbol=symbol,
+            market_id="moex",
+            segment_id=segment_id,
+            direction=SignalDirection.BUY,
+            confidence=0.9,
+            strategy_payload={"momentum": 1.0},
+            reasoning="test buy",
+        )
 
     def get_parameters(self, segment_id: str) -> dict[str, object]:
         return {}
 
 
-def _entered_symbols(trades: list, snapshots: list) -> set[str]:
+def _entered_symbols(trades: list[TradeResult]) -> set[str]:
     """The set of symbols that opened a position (i.e. were ENTERED) during the run."""
     return {t.symbol for t in trades}
 
 
 def _build_engine() -> BacktestEngine:
     return BacktestEngine(
-        strategy=_EligibleAwareStrategy(),
+        strategy=_AlwaysBuyStrategy(),
         config=BacktestConfig(
             initial_cash=Decimal(1_000_000),
             max_positions=10,
@@ -122,9 +142,8 @@ def _build_engine() -> BacktestEngine:
 def _eligible_at_factory(candles_by_symbol: dict[str, list[Candle]]):
     """Build the ``eligible_at(ts)`` callback backed by the as-of liquidity primitive.
 
-    The gate sees the FULL candle dict but ``eligible_universe_as_of`` slices each symbol to
-    ``timestamp <= ts`` internally -- the engine must consult this callback at rebalance bars and
-    must NOT pre-filter or pass future bars into entries for non-eligible symbols.
+    ``eligible_universe_as_of`` slices each symbol to ``timestamp <= ts`` internally -- the engine
+    consults this callback at quarterly rebalance bars; it must NOT see future bars for entries.
     """
     sector_map = dict.fromkeys(candles_by_symbol, _SECTOR)
 
@@ -135,17 +154,12 @@ def _eligible_at_factory(candles_by_symbol: dict[str, list[Candle]]):
 
 
 def _base_universe() -> dict[str, list[Candle]]:
-    """A liquid always-winner + a borderline name with only 59 bars up to the BUY bar.
-
-    LIQUID has 60+ steady bars and high turnover -> always eligible.
-    BORDER has only (_BUY_BAR) bars at/below the BUY bar (< _WINDOW after the gate sees them as of
-    the rebalance), so it is NOT eligible at the rebalance until a 60th in-window bar appears.
-    """
-    # LIQUID: 70 bars, steady high turnover -> the Top-1 winner at every rebalance.
-    liquid = _series("LIQUID", n=70, close=_BASE_PRICE, volume=_LIQUID_VOLUME)
-    # BORDER: 59 bars up to (and including) day 58, so at the BUY bar it has < _WINDOW visible
-    # bars -> median_rub_turnover returns None -> excluded. (Needs a 60th in-window bar to rank.)
-    border = _series("BORDER", n=59, close=_BASE_PRICE, volume=_LOW_VOLUME)
+    """Liquid always-winner (days 0..120) + a borderline name (59 bars <= Q2, then trades)."""
+    liquid = _series("LIQUID", n=_LIQUID_BARS, close=_BASE_PRICE, volume=_LIQUID_VOLUME)
+    border = [
+        _candle("BORDER", d, close=_BASE_PRICE, volume=_LIQUID_VOLUME)
+        for d in (*_BORDER_PRE_DAYS, *_BORDER_POST_DAYS)
+    ]
     return {"LIQUID": liquid, "BORDER": border}
 
 
@@ -153,40 +167,40 @@ class TestEngineAsOfNoLookAhead:
     """CARDINAL D-05 proof at the run_portfolio level."""
 
     def test_future_candle_does_not_change_entries(self) -> None:
-        """Appending a FUTURE high-turnover candle must NOT change entries at the past rebalance."""
+        """Appending a FUTURE candle must NOT change which symbols are entered (as-of cutoff)."""
         candles_by_symbol = _base_universe()
-        symbols = list(candles_by_symbol)
 
         engine = _build_engine()
-        trades, snaps = engine.run_portfolio(
-            symbols,
+        trades, _snaps = engine.run_portfolio(
+            list(candles_by_symbol),
             _SEGMENT,
             candles_by_symbol,
             eligible_at=_eligible_at_factory(candles_by_symbol),
         )
-        baseline = _entered_symbols(trades, snaps)
+        baseline = _entered_symbols(trades)
 
-        # BORDER had only 59 bars -> never eligible -> never entered at baseline.
+        # BORDER has only 59 visible bars as of the Q2 rebalance -> excluded -> never entered.
         assert "BORDER" not in baseline
         assert "LIQUID" in baseline
 
-        # Append a FUTURE (day 100, well past the BUY bar) high-turnover candle to BORDER -- its
-        # 60th bar, but dated AFTER the rebalance. The as-of gate must filter it.
+        # Add BORDER's pivotal 60th bar AFTER the Q2 rebalance (day 100 > day 91, same quarter so
+        # no new rebalance fires). The as-of cutoff (<= 91) must filter it -> BORDER stays at 59
+        # visible bars as of the Q2 rebalance -> still excluded for the rest of the run.
         future = dict(candles_by_symbol)
         future["BORDER"] = [
             *candles_by_symbol["BORDER"],
-            _candle("BORDER", 100, close=_BASE_PRICE * 5, volume=_HIGH_VOLUME),
+            _candle("BORDER", _BORDER_FUTURE_DAY, close=_BASE_PRICE, volume=_HIGH_VOLUME),
         ]
         engine2 = _build_engine()
-        trades2, snaps2 = engine2.run_portfolio(
+        trades2, _snaps2 = engine2.run_portfolio(
             list(future),
             _SEGMENT,
             future,
             eligible_at=_eligible_at_factory(future),
         )
-        after_future = _entered_symbols(trades2, snaps2)
+        after_future = _entered_symbols(trades2)
 
-        # Future candle is a NO-OP for entries at the past rebalance (D-05 engine proof).
+        # Future candle is a NO-OP for entries (D-05 engine proof).
         assert "BORDER" not in after_future
         assert after_future == baseline
 
@@ -194,28 +208,26 @@ class TestEngineAsOfNoLookAhead:
         """Moving the SAME candle into the <= T window flips BORDER eligible (gate is live)."""
         candles_by_symbol = _base_universe()
 
-        # Move BORDER's 60th bar INTO the window (day 59, still <= the BUY bar at day 30? No --
-        # the gate is consulted at the rebalance bar; day 59 is within the 60-bar window leading up
-        # to a rebalance at/after day 59). Give it a turnover spike so it ranks into Top-1.
+        # Move BORDER's pivotal 60th bar INTO the window (day 90 <= the Q2 rebalance at day 91).
+        # BORDER now has 60 visible bars as of the Q2 rebalance -> scores a turnover -> eligible.
         in_window = dict(candles_by_symbol)
         in_window["BORDER"] = [
             *candles_by_symbol["BORDER"],
-            _candle("BORDER", 59, close=_BASE_PRICE * 5, volume=_HIGH_VOLUME),
+            _candle("BORDER", _BORDER_IN_WINDOW_DAY, close=_BASE_PRICE, volume=_HIGH_VOLUME),
         ]
-        # LIQUID must run long enough that a rebalance occurs after BORDER's 60th bar lands.
-        in_window["LIQUID"] = _series("LIQUID", n=120, close=_BASE_PRICE, volume=_LIQUID_VOLUME)
 
         engine = _build_engine()
-        trades, snaps = engine.run_portfolio(
+        trades, _snaps = engine.run_portfolio(
             list(in_window),
             _SEGMENT,
             in_window,
             eligible_at=_eligible_at_factory(in_window),
         )
-        entered = _entered_symbols(trades, snaps)
+        entered = _entered_symbols(trades)
 
-        # With the 60th bar IN-WINDOW and a turnover spike, BORDER now has >= _WINDOW visible bars
-        # at the relevant rebalance and ranks into Top-1 -> it becomes eligible and IS entered.
+        # With the 60th bar IN-WINDOW, BORDER now has >= _WINDOW visible bars at the Q2 rebalance
+        # -> eligible -> IS entered. The very same candle that was a no-op in the future is live
+        # in-window: the gate is real, not a global no-op.
         assert "BORDER" in entered
 
     def test_cap_enforced_across_symbols(self) -> None:
@@ -223,11 +235,13 @@ class TestEngineAsOfNoLookAhead:
         cap = 2
         n_symbols = 5
         candles_by_symbol = {
-            f"SYM{i}": _series(f"SYM{i}", n=70, close=_BASE_PRICE + i, volume=_LIQUID_VOLUME)
+            f"SYM{i}": _series(
+                f"SYM{i}", n=_LIQUID_BARS, close=_BASE_PRICE + i, volume=_LIQUID_VOLUME
+            )
             for i in range(n_symbols)
         }
         engine = BacktestEngine(
-            strategy=_EligibleAwareStrategy(),
+            strategy=_AlwaysBuyStrategy(),
             config=BacktestConfig(
                 initial_cash=Decimal(1_000_000),
                 max_concurrent_positions=cap,

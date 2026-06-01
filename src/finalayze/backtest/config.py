@@ -128,6 +128,16 @@ class BacktestConfig:
     # Per-segment position cap (independent of global max_positions)
     max_positions_per_segment: int = 8
 
+    # D-09 / LIQ-07 (Phase 66): per-segment cap on the number of SIMULTANEOUSLY OPEN positions
+    # in a shared-broker ``run_portfolio`` run. ``None`` (default) preserves the prior behaviour
+    # (the portfolio-wide cap stays ``max_positions``). When set, it overrides ``max_positions``
+    # for the shared ``PreTradeChecker`` so a wider universe cannot fragment capital across too
+    # many tiny positions. Sourced from ``config.segments.SegmentConfig.max_concurrent_positions``
+    # by ``scripts/run_iteration.py``; only effective in shared-broker ``run_portfolio`` (the
+    # per-symbol ``run`` path gives each symbol its own broker, so the cap is silently ineffective
+    # there -- see Phase-66 PATTERNS Pitfall 4).
+    max_concurrent_positions: int | None = None
+
     # Ambient market data for cross-asset / regime features (Phase E)
     market_context: MarketContext | None = None
 
