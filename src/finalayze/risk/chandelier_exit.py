@@ -21,11 +21,16 @@ _CHANDELIER_MULTIPLIERS: dict[str, Decimal] = {
     "us_healthcare": Decimal("3.5"),
     "us_finance": Decimal("2.5"),
     "ru_blue_chips": Decimal("4.0"),
-    # RUFIN-02 / D-02: tightened 4.0 -> 3.5 (ru_tech precedent). Plan-67-01
-    # attribution implicated the stop side: avg-loss -1022.83 vs avg-win +566.52
-    # (payoff 0.554) and 23 stop exits summing -25,734.80 -- losers run too far,
-    # so a tighter chandelier cuts the big losers sooner. Stays above the 3.0
-    # us_tech/us_broad floor (anti-curve-fit single bounded step, D-03).
+    # RUFIN-02 / D-02: tightened 4.0 -> 3.5. Two independent justifications:
+    #   (a) 3.5 matches the existing ru_tech multiplier (see ru_tech entry below) --
+    #       so the new value is not a fresh free parameter, it reuses a precedent.
+    #   (b) The DIRECTION of the change is derived from ru_finance's own attribution
+    #       (the phase67 diagnostic run, scripts/diagnose_ru_finance.py on
+    #       results/iterations/phase67-...): avg-loss -1022.83 vs avg-win +566.52
+    #       (payoff 0.554) and 23 stop exits summing -25,734.80 -- losers run too
+    #       far, so a tighter chandelier cuts the big losers sooner.
+    # Stays above the 3.0 us_tech/us_broad floor (anti-curve-fit single bounded
+    # step, D-03).
     "ru_finance": Decimal("3.5"),
     "ru_energy": Decimal("4.5"),
     "ru_tech": Decimal("3.5"),
