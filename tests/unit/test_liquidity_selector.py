@@ -121,24 +121,25 @@ def test_three_seams_resolve_same_set(_patched_snapshot: None) -> None:
     universe = run_iteration_mod.UNIVERSE
     seg_symbols = training_cli_mod.SEGMENT_SYMBOLS
 
-    # Segments present in ALL three seams (run_iteration carries no ru_tech).
-    common_segments = [_SEG_BLUE, _SEG_ENERGY, _SEG_FINANCE]
+    # Segments present in ALL three seams. Post-66 run_iteration.UNIVERSE derives a key for
+    # EVERY enabled MOEX stock segment (including ru_tech), so all four ru_* segments under
+    # test are single-sourced across all three seams (verified at runtime).
+    common_segments = [_SEG_BLUE, _SEG_ENERGY, _SEG_TECH, _SEG_FINANCE]
     for seg in common_segments:
         expected = _EXPECTED[seg]
         assert live_symbols[seg] == expected, f"LIVE {seg}: {live_symbols[seg]} != {expected}"
         assert universe[seg] == expected, f"backtest {seg}: {universe[seg]} != {expected}"
         assert seg_symbols[seg] == expected, f"training {seg}: {seg_symbols[seg]} != {expected}"
 
-    # ru_tech exists in LIVE + training (not in run_iteration.UNIVERSE) -- still single-source.
-    assert live_symbols[_SEG_TECH] == _EXPECTED[_SEG_TECH]
-    assert seg_symbols[_SEG_TECH] == _EXPECTED[_SEG_TECH]
-
     # ── Anti-trivial guard ──────────────────────────────────────────────────────────
     # The fixture (selector) set MUST differ from the old hardcoded list for >= 1 segment
     # in EACH seam, so a seam that still returned its old hardcoded list would FAIL above.
     all_segs = (_SEG_BLUE, _SEG_ENERGY, _SEG_TECH, _SEG_FINANCE)
+    # _OLD_HARDCODED_UNIVERSE captured only the pre-66 run_iteration keys (no ru_tech), so the
+    # anti-trivial guard for the backtest seam iterates only the segments it recorded.
+    old_universe_segs = (_SEG_BLUE, _SEG_ENERGY, _SEG_FINANCE)
     assert any(_EXPECTED[s] != _OLD_HARDCODED_CONFIG[s] for s in all_segs)
-    assert any(_EXPECTED[s] != _OLD_HARDCODED_UNIVERSE[s] for s in common_segments)
+    assert any(_EXPECTED[s] != _OLD_HARDCODED_UNIVERSE[s] for s in old_universe_segs)
     assert any(_EXPECTED[s] != _OLD_HARDCODED_TRAINING[s] for s in all_segs)
 
 
