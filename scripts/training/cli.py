@@ -34,6 +34,8 @@ from scripts.training.walk_forward import (
     train_walk_forward,
 )
 
+from finalayze.markets.liquidity import select_segment_symbols
+
 # Default output directory
 DEFAULT_OUTPUT_DIR = "models/"
 
@@ -85,10 +87,14 @@ SEGMENT_SYMBOLS: dict[str, list[str]] = {
         "TFC",
     ],
     "us_broad": ["SPY", "QQQ", "DIA", "IWM", "VTI"],
-    "ru_blue_chips": ["SBER", "LKOH", "GMKN", "ROSN", "NVTK", "MGNT", "TATN", "TCSG"],
-    "ru_energy": ["ROSN", "TATN", "NVTK", "LKOH", "SNGS", "SIBN"],
-    "ru_tech": ["YNDX", "OZON", "VKCO", "CIAN"],
-    "ru_finance": ["SBER", "VTBR", "TCSG", "MOEX", "CBOM"],
+    # ru_* SHARE training universes resolve through the liquidity selector (LIQ-08) --
+    # the SAME single source as config.segments and run_iteration.UNIVERSE. The old
+    # hardcoded lists carried DELISTED tickers (YNDX/TCSG/SNGS/CIAN); the selector
+    # supersedes them. train_walk_forward is unchanged (D-10) -- only the set widens.
+    "ru_blue_chips": select_segment_symbols("ru_blue_chips"),
+    "ru_energy": select_segment_symbols("ru_energy"),
+    "ru_tech": select_segment_symbols("ru_tech"),
+    "ru_finance": select_segment_symbols("ru_finance"),
 }
 
 

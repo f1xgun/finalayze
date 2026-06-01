@@ -65,6 +65,7 @@ from finalayze.data.fetchers.yfinance import YFinanceFetcher
 from finalayze.data.loader import MarketDataLoader
 from finalayze.data.rate_limiter import RateLimiter
 from finalayze.markets.instruments import build_default_registry
+from finalayze.markets.liquidity import select_segment_symbols
 from finalayze.risk.kelly import RollingKelly
 from finalayze.risk.regime import (
     HMMRegimeProvider,
@@ -191,31 +192,13 @@ UNIVERSE: dict[str, list[str]] = {
         "WM",
         "RSG",
     ],
-    "ru_blue_chips": [
-        "SBER",
-        "LKOH",
-        "YNDX",
-        "MGNT",
-        "POLY",
-        "NVTK",
-        "MTLR",
-    ],
-    "ru_energy": [
-        "LKOH",
-        "ROSN",
-        "NVTK",
-        "TATN",
-        "TRNFP",
-        "BANEP",
-    ],
-    "ru_finance": [
-        "SBER",
-        "SBERP",
-        "TCSG",
-        "CBOM",
-        "BSPB",
-        "MOEX",
-    ],
+    # ru_* SHARE universes resolve through the liquidity selector (LIQ-08) -- single
+    # source shared with config.segments and training/cli.py. No hardcoded ru_* share
+    # lists (the old YNDX/POLY/TCSG/etc. were delisted/stale). US entries above stay
+    # hardcoded (enabled=False, frozen -- NOT re-pointed at the MOEX selector).
+    "ru_blue_chips": select_segment_symbols("ru_blue_chips"),
+    "ru_energy": select_segment_symbols("ru_energy"),
+    "ru_finance": select_segment_symbols("ru_finance"),
 }
 
 
