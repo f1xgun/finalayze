@@ -11,10 +11,11 @@ the frozen ``TradeResult`` schema. It MUST NOT import any broker/data fetcher
 or reference an API token env var -- it never touches the network or any
 secret (the acceptance grep for token symbols is 0).
 
-Usage:
-    uv run python scripts/diagnose_ru_finance.py
-    uv run python scripts/diagnose_ru_finance.py --run phase66-liquidity-expanded-v2
-    uv run python scripts/diagnose_ru_finance.py --segment ru_finance --output results/iterations/
+Usage (``--run`` is REQUIRED -- no default, so a forgotten flag errors loudly
+rather than reading a prior phase's stale sidecar):
+    uv run python scripts/diagnose_ru_finance.py --run phase67-ru-finance-fix
+    uv run python scripts/diagnose_ru_finance.py --run <run> --segment ru_finance \
+        --output results/iterations/
 """
 
 from __future__ import annotations
@@ -190,7 +191,15 @@ def _print_report(attr: Attribution, *, run: str, segment: str) -> None:
 def main() -> None:
     """CLI entry point: read trades.jsonl and print the attribution."""
     parser = argparse.ArgumentParser(description="ru_finance loss-asymmetry attribution")
-    parser.add_argument("--run", default="phase66-liquidity-expanded-v2", help="Iteration run name")
+    parser.add_argument(
+        "--run",
+        required=True,
+        help=(
+            "Iteration run name under --output (e.g. phase67-...). REQUIRED: there is "
+            "no default so a forgotten flag errors loudly instead of silently analyzing "
+            "a prior phase's stale sidecar."
+        ),
+    )
     parser.add_argument("--segment", default="ru_finance", help="Segment to analyze")
     parser.add_argument("--output", default="results/iterations/", help="Iterations root directory")
     args = parser.parse_args()
