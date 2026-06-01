@@ -1081,9 +1081,18 @@ def _run_segment_portfolio(
     seg_dir.mkdir(parents=True, exist_ok=True)
 
     # INTG-02: the boost-only earnings_yield verdict is a SEGMENT-wide, constant-in-window tilt
-    # (T-Bank fundamentals are point-in-time, A3). Apply it once to the shared capital, using the
-    # first symbol's candles as the as-of proxy (any symbol's last bar pins the same as_of).
-    proxy_candles = next((c for c in candles_by_symbol.values() if c), [])
+    # (T-Bank fundamentals are point-in-time, A3). Apply it once to the shared capital, using a
+    # single symbol's candles as the as_of proxy (_resolve_fundamental_scale pins as_of to that
+    # symbol's LAST bar timestamp). IN-05: pick the symbol whose last candle has the MAXIMUM
+    # timestamp rather than the first non-empty entry, so the chosen as_of is DETERMINISTIC and
+    # reproducible across symbol sets with ragged end dates (the prior next(...) was dict
+    # insertion-order dependent). Defensive against unsorted candle lists: key on the last bar of
+    # each list (the selector sorts in eligible_universe_as_of, but this seam makes no assumption).
+    proxy_candles = max(
+        (c for c in candles_by_symbol.values() if c),
+        key=lambda c: c[-1].timestamp,
+        default=[],
+    )
     fundamental_scale, fundamental_ey = _resolve_fundamental_scale(
         segment, proxy_candles, market_context
     )
