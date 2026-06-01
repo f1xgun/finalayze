@@ -114,6 +114,20 @@ def _drop_toxic(symbols: list[str]) -> list[str]:
     return [s for s in symbols if s not in _TOXIC_SYMBOLS]
 
 
+def _write_trades_jsonl(output_path: Path, trades: list[TradeResult]) -> None:
+    """Serialize closed trades to a ``trades.jsonl`` sidecar (RUFIN-01 / D-01).
+
+    Mirrors ``DecisionJournal.flush`` exactly: parent-dir mkdir + one
+    ``model_dump_json()`` per line. The Task-1 exit_reason/entry_strategy
+    fields ride along via ``model_dump_json``. This is the artifact
+    ``scripts/diagnose_ru_finance.py`` reads back for the attribution.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w") as f:
+        for trade in trades:
+            f.write(trade.model_dump_json() + "\n")
+
+
 def _bootstrap_for(segment_id: str) -> list[str]:
     """Prior-hardcoded bootstrap list for ``segment_id`` (WR-04: missing-key safe).
 
@@ -766,17 +780,19 @@ def _normalize_trades_to_usd(
     """Convert MOEX trade values to USD for cross-segment aggregation."""
     if not segment.startswith("ru_"):
         return trades
+    # model_copy(update=...) overrides ONLY the currency-denominated fields and
+    # carries every other field through verbatim. This keeps all current AND
+    # future TradeResult fields (e.g. exit_reason / entry_strategy / instrument_type)
+    # intact, so the cross-segment all_trades aggregation cannot silently drop
+    # attribution data when new fields are added (WR-01).
     return [
-        TradeResult(
-            signal_id=t.signal_id,
-            symbol=t.symbol,
-            side=t.side,
-            quantity=t.quantity,
-            entry_price=t.entry_price / _FALLBACK_USDRUB,
-            exit_price=t.exit_price / _FALLBACK_USDRUB,
-            pnl=t.pnl / _FALLBACK_USDRUB,
-            pnl_pct=t.pnl_pct,  # percentage is currency-agnostic
-            hold_bars=t.hold_bars,
+        t.model_copy(
+            update={
+                "entry_price": t.entry_price / _FALLBACK_USDRUB,
+                "exit_price": t.exit_price / _FALLBACK_USDRUB,
+                "pnl": t.pnl / _FALLBACK_USDRUB,
+                "coupon_income": t.coupon_income / _FALLBACK_USDRUB,
+            }
         )
         for t in trades
     ]
@@ -1150,6 +1166,8 @@ def _run_segment_portfolio(
         eligible_at=eligible_at,
     )
     journal.flush()
+    # RUFIN-01 / D-01: per-segment closed-trade sidecar next to decision_journal.jsonl.
+    _write_trades_jsonl(seg_dir / "trades.jsonl", trades)
 
     result = PerformanceAnalyzer().analyze(trades, snapshots, benchmark_candles=benchmark_candles)
 

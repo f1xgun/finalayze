@@ -12,7 +12,7 @@ from finalayze.backtest.config import (
     resolve_max_hold_bars,
 )
 from finalayze.backtest.engine import BacktestEngine
-from finalayze.core.schemas import Candle, Signal, SignalDirection
+from finalayze.core.schemas import Candle, ExitReason, Signal, SignalDirection
 from finalayze.risk.chandelier_exit import (
     _compute_atr,
     compute_chandelier_stop,
@@ -91,7 +91,7 @@ class NamedBuyOnceStrategy(BaseStrategy):
         return self._strategy_name
 
     def supported_segments(self) -> list[str]:
-        return ["us_test", "us_tech", "ru_energy"]
+        return ["us_test", "us_tech", "ru_energy", "ru_finance"]
 
     def get_parameters(self, segment_id: str) -> dict[str, object]:
         return {}
@@ -210,7 +210,10 @@ class TestChandelierMultiplierBySegment:
         "us_healthcare": Decimal("3.5"),
         "us_finance": Decimal("2.5"),
         "ru_blue_chips": Decimal("4.0"),
-        "ru_finance": Decimal("4.0"),
+        # RUFIN-02 / D-02: tightened 4.0 -> 3.5 (ru_tech precedent). Plan-67-01
+        # attribution named the chandelier stop lever (avg-loss -1022.83 vs
+        # avg-win +566.52; 23 stop exits summed -25,734.80 -- losers run too far).
+        "ru_finance": Decimal("3.5"),
         "ru_energy": Decimal("4.5"),
         "ru_tech": Decimal("3.5"),
     }
@@ -220,6 +223,14 @@ class TestChandelierMultiplierBySegment:
         for segment, expected in self._EXPECTED_MULTIPLIERS.items():
             actual = get_chandelier_multiplier(segment)
             assert actual == expected, f"{segment}: expected {expected}, got {actual}"
+
+    def test_ru_energy_chandelier_unchanged_d05_control(self) -> None:
+        """D-05 segment-local control: ru_energy stop multiplier MUST stay 4.5.
+
+        The Phase-67 ru_finance tuning is segment-local; ru_energy is the
+        no-regression control and must be provably untouched.
+        """
+        assert get_chandelier_multiplier("ru_energy") == Decimal("4.5")
 
     def test_chandelier_multiplier_unknown_segment(self) -> None:
         """Unknown segment returns default 3.0."""
@@ -304,6 +315,86 @@ class TestEngineChandelierMode:
         # Should have a sell trade (stop-loss triggered or end-of-backtest)
         sell_trades = [t for t in trades if t.side == "SELL"]
         assert len(sell_trades) >= 1
+
+    def test_engine_ru_finance_chandelier_stop_trips_at_3_5x(self) -> None:
+        """RUFIN-02 / WR-02 regression: a ru_finance position is closed by the
+        3.5x chandelier stop, and a 4.0x multiplier would NOT have tripped on
+        the same path.
+
+        Flat candles at price=100 (high=102, low=98) give ATR=4 and
+        highest_high=102, so the chandelier candidate stop is:
+
+            stop = 102 - multiplier * 4
+
+        ru_finance (3.5x) -> stop = 88; a 4.0x stop would be 86. We drop the
+        price so the candle low is 87 -- strictly between the two stops -- which
+        trips the 3.5x stop but is above the (counterfactual) 4.0x stop. This
+        guards against a future revert of the 3.5 multiplier or a break in the
+        ru_finance chandelier wiring, both of which would keep the constant-only
+        TestChandelierMultiplierBySegment suite green.
+        """
+        atr = Decimal(4)  # flat candles: high-low = 4
+        highest_high = BASE_PRICE + Decimal(2)  # 102
+        ru_finance_mult = get_chandelier_multiplier("ru_finance")
+        control_mult = Decimal("4.0")
+        ru_finance_stop = highest_high - ru_finance_mult * atr  # 88
+        control_stop = highest_high - control_mult * atr  # 86
+
+        # Sanity: the segment lever is actually 3.5 and the two stops bracket
+        # the drop low we choose below.
+        assert ru_finance_mult == Decimal("3.5")
+        drop_low = Decimal(87)
+        assert control_stop < drop_low < ru_finance_stop
+
+        # Build candles: flat through entry + a few bars to establish the stop.
+        candles = _make_flat_candles(BUY_BAR + 1)
+        candles.append(_make_candle(len(candles), price=BASE_PRICE))  # fill bar
+        for _ in range(3):
+            candles.append(_make_candle(len(candles), price=BASE_PRICE))
+
+        # Drop bar: low == 87 (< 88 trips 3.5x; > 86 would not trip 4.0x).
+        drop_idx = len(candles)
+        drop_ts = _business_day_offset(_BASE_DATE, drop_idx)
+        candles.append(
+            Candle(
+                symbol="TEST",
+                market_id="ru",
+                timeframe="1d",
+                timestamp=drop_ts,
+                open=drop_low + Decimal(2),
+                high=drop_low + Decimal(3),
+                low=drop_low,
+                close=drop_low + Decimal(1),
+                volume=1_000_000,
+            )
+        )
+        # Fill candle after the trigger.
+        candles.append(_make_candle(len(candles), price=drop_low))
+
+        config = BacktestConfig(
+            initial_cash=INITIAL_CASH,
+            stop_loss_mode="chandelier",
+            profit_target_atr=Decimal(0),
+            max_hold_bars=0,
+            trail_activation_atr=Decimal(100),
+        )
+        engine = BacktestEngine(
+            strategy=NamedBuyOnceStrategy(),
+            config=config,
+        )
+        trades, _ = engine.run("TEST", "ru_finance", candles)
+
+        # (a) A stop exit fired and is tagged as such.
+        stop_trades = [t for t in trades if t.exit_reason == ExitReason.STOP]
+        assert len(stop_trades) == 1, (
+            f"expected exactly one 'stop' exit at the 3.5x level, got "
+            f"{[(t.side, t.exit_reason) for t in trades]}"
+        )
+        assert stop_trades[0].side == "SELL"
+
+        # (b) Control: the drop low sits above the 4.0x counterfactual stop, so
+        # the pre-tightening 4.0 multiplier would NOT have tripped on this path.
+        assert drop_low > control_stop
 
     def test_engine_trailing_mode_unchanged(self) -> None:
         """Default trailing mode still works as before."""

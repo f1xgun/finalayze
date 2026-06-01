@@ -352,6 +352,13 @@ _OPT_SHARPE = 0.10
 _OPT_SHARPE_NEG = -0.10
 _HOLDOUT_SHARPE_OK = 0.08  # 80% of opt → pass
 _HOLDOUT_SHARPE_BAD = 0.02  # 20% of opt → fail
+# RUFIN-03 / D-03: pin the binding constant itself. _HOLDOUT_DEGRADATION_THRESHOLD = 0.50, and the
+# guard passes iff ratio >= threshold, so holdout == 0.50 * opt is the last-accepted point and any
+# value below it is rejected. _EPS nudges just under without a magic literal at the call site.
+_HOLDOUT_DEGRADATION_THRESHOLD = 0.50
+_HOLDOUT_SHARPE_ON_BOUNDARY = _OPT_SHARPE * _HOLDOUT_DEGRADATION_THRESHOLD  # exactly 50% → pass
+_EPS = 0.001
+_HOLDOUT_SHARPE_JUST_UNDER = _HOLDOUT_SHARPE_ON_BOUNDARY - _EPS  # just under 50% → fail
 
 _BEST_PARAMS: dict[str, Any] = {
     "min_combined_confidence": 0.30,
@@ -431,6 +438,40 @@ class TestRunHoldoutValidation:
         )
         result = run_holdout_validation("us_tech", _BEST_PARAMS, opt_sharpe=_OPT_SHARPE_NEG)
         assert result["passed"] is True
+
+    def test_exactly_on_degradation_boundary_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Holdout Sharpe == 50% of opt is the last-accepted point (ratio >= threshold)."""
+        import tune_strategy_params as module
+
+        monkeypatch.setattr(
+            module,
+            "run_backtest_for_trial",
+            lambda *_a, **_kw: {
+                "wf_sharpe": _HOLDOUT_SHARPE_ON_BOUNDARY,
+                "trades": 100,
+                "max_dd": 0.05,
+            },
+        )
+        result = run_holdout_validation("us_tech", _BEST_PARAMS, opt_sharpe=_OPT_SHARPE)
+        assert result["passed"] is True
+        assert result["degradation_ratio"] == pytest.approx(_HOLDOUT_DEGRADATION_THRESHOLD)
+
+    def test_just_under_degradation_boundary_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A holdout Sharpe a hair under 50% of opt is rejected as overfit (binding constant)."""
+        import tune_strategy_params as module
+
+        monkeypatch.setattr(
+            module,
+            "run_backtest_for_trial",
+            lambda *_a, **_kw: {
+                "wf_sharpe": _HOLDOUT_SHARPE_JUST_UNDER,
+                "trades": 100,
+                "max_dd": 0.05,
+            },
+        )
+        result = run_holdout_validation("us_tech", _BEST_PARAMS, opt_sharpe=_OPT_SHARPE)
+        assert result["passed"] is False
+        assert result["degradation_ratio"] < _HOLDOUT_DEGRADATION_THRESHOLD
 
 
 class TestRunPerturbationCheck:

@@ -148,6 +148,22 @@ class Signal(BaseModel):
         return v
 
 
+class ExitReason(StrEnum):
+    """Which backtest exit path closed a position.
+
+    Recorded on every closed ``TradeResult`` so post-hoc attribution
+    (RUFIN-01 / D-01) can split realised PnL by exit mechanism. StrEnum
+    members equal their lowercase string value, so the stored field is a
+    plain str.
+    """
+
+    STOP = "stop"
+    PROFIT_TARGET = "profit_target"
+    TIME = "time"
+    SIGNAL = "signal"
+    FORCE_CLOSE = "force_close"
+
+
 class TradeResult(BaseModel):
     """Result of an executed trade."""
 
@@ -164,6 +180,9 @@ class TradeResult(BaseModel):
     hold_bars: int | None = None
     coupon_income: Decimal = Decimal(0)  # bond coupon income during hold
     instrument_type: str = "stock"  # "stock" or "bond"
+    # RUFIN-01 attribution (append-only optional fields; never reorder/require):
+    exit_reason: str | None = None  # ExitReason value (str-compatible StrEnum)
+    entry_strategy: str | None = None  # strategy that opened the position
 
 
 class PortfolioState(BaseModel):

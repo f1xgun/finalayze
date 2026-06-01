@@ -167,6 +167,7 @@ class BacktestPositionExecutor:
         chandelier_stops: dict[str, Decimal],
         bar_index: int,
         trades: list[TradeResult],
+        exit_reason: str | None = None,
     ) -> TradeResult:
         """Close a position and record the trade.
 
@@ -174,10 +175,14 @@ class BacktestPositionExecutor:
         *chandelier_stops* by popping the key for *symbol*.  The resulting
         ``TradeResult`` is appended to *trades* and recorded in the Rolling
         Kelly estimator.
+
+        *exit_reason* records which exit path fired (see ``ExitReason``);
+        the popped *entry_strategy* is captured onto the trade (RUFIN-01)
+        instead of being discarded.
         """
         entry = entry_prices.pop(symbol, exit_price)
         entry_bar = entry_bars.pop(symbol, bar_index)
-        entry_strategies.pop(symbol, None)
+        entry_strategy = entry_strategies.pop(symbol, None)
         chandelier_stops.pop(symbol, None)
 
         pnl = (exit_price - entry) * quantity
@@ -195,6 +200,8 @@ class BacktestPositionExecutor:
             pnl=pnl,
             pnl_pct=pnl_pct,
             hold_bars=bar_index - entry_bar,
+            exit_reason=exit_reason,
+            entry_strategy=entry_strategy,
         )
         trades.append(trade)
         self.record_trade(trade)
@@ -566,6 +573,7 @@ class BacktestPositionExecutor:
                 chandelier_stops=_cs,
                 bar_index=bar_index,
                 trades=trades,
+                exit_reason="signal",
             )
 
             # Journal the successful SELL
