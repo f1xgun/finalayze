@@ -35,6 +35,17 @@ from finalayze.core.schemas import TradeResult
 
 # A loss is materially asymmetric when avg-loss magnitude exceeds avg-win by
 # this factor -- implicating the stop side (chandelier) rather than the entry.
+#
+# Pinned at exactly 1.0 ON PURPOSE: the gate is a bare ``loss_mag > avg_win``,
+# i.e. ANY net loss-magnitude dominance names the chandelier. This is the
+# intended boundary -- in this binary diagnostic the only two outcomes are
+# "losers run too far" (stop/chandelier) vs "winners cut early"
+# (min_exit_confidence), so the natural break-even is the 1:1 payoff line, not
+# an arbitrary margin. The ru_finance case clears it with room to spare
+# (avg-loss 1022.83 vs avg-win 566.52, ratio ~1.8), and the D-04 ACCEPT was
+# decided on this exact bare-`>` verdict. Raising the factor (e.g. 1.2) would
+# silently re-decide marginal future runs -- do not change without re-running
+# the diagnostic and re-accepting the verdict.
 _LOSS_DOMINANCE_FACTOR = Decimal("1.0")
 
 
