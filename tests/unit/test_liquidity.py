@@ -147,24 +147,33 @@ class TestLoaderFailClosed:
 # LIQ-04 / D-05: as-of point-in-time selection (CARDINAL look-ahead proof)
 # ===================================================================
 class TestAsOfLookAhead:
+    # Both names live in the SAME sector so within-sector ranking is what the proof
+    # exercises (a cross-sector top_n=1 would always keep one-per-sector regardless of
+    # turnover and could not demonstrate liveness). THINCO carries only
+    # _WINDOW - 1 bars up to the rebalance -- one short of the 60-bar minimum -- so at
+    # baseline it scores None and is excluded.
     def _candles_by_symbol(self) -> dict[str, list[Candle]]:
-        # One liquid name in oil_gas, one thin name in banks. Both have >= 60 bars
-        # up to the rebalance so the selection is well-defined.
         liquid = _series(_LIQUID_SYMBOL, n_bars=_WINDOW, close=_LIQUID_CLOSE, volume=_LIQUID_VOLUME)
-        thin = _series(_THIN_SYMBOL, n_bars=_WINDOW, close=_THIN_CLOSE, volume=_THIN_VOLUME)
+        thin = _series(
+            _THIN_SYMBOL,
+            n_bars=_WINDOW - 1,
+            close=_LIQUID_CLOSE,
+            volume=_LIQUID_VOLUME,
+        )
         return {_LIQUID_SYMBOL: liquid, _THIN_SYMBOL: thin}
 
     @property
     def _sector_map(self) -> dict[str, str]:
-        return {_LIQUID_SYMBOL: _LIQUID_SECTOR, _THIN_SYMBOL: _BANK_SECTOR}
+        return {_LIQUID_SYMBOL: _LIQUID_SECTOR, _THIN_SYMBOL: _LIQUID_SECTOR}
 
     def test_as_of_no_lookahead(self) -> None:
         candles = self._candles_by_symbol()
         baseline = liquidity.eligible_universe_as_of(
-            candles, _REBALANCE_TS, self._sector_map, top_n=_TOP_N
+            candles, _REBALANCE_TS, self._sector_map, top_n=_TOP_N_TWO
         )
 
-        # Append a FUTURE high-turnover candle to the thin name AFTER the rebalance.
+        # Append the 60th bar to THINCO but date it AFTER the rebalance (the future).
+        # If look-ahead leaked, THINCO would reach 60 visible bars and become eligible.
         future_ts = _REBALANCE_TS + timedelta(days=_FUTURE_OFFSET_DAYS)
         with_future = dict(candles)
         with_future[_THIN_SYMBOL] = [
@@ -172,31 +181,32 @@ class TestAsOfLookAhead:
             _candle(_THIN_SYMBOL, future_ts, _LIQUID_CLOSE, _LIQUID_VOLUME),
         ]
         result = liquidity.eligible_universe_as_of(
-            with_future, _REBALANCE_TS, self._sector_map, top_n=_TOP_N
+            with_future, _REBALANCE_TS, self._sector_map, top_n=_TOP_N_TWO
         )
 
-        # The future-dated candle was filtered by the <= rebalance_ts cutoff: identical.
+        # The future-dated candle was filtered by the <= rebalance_ts cutoff: identical,
+        # and THINCO (still only 59 visible bars) stays excluded.
         assert result == baseline
+        assert _THIN_SYMBOL not in baseline
+        assert _THIN_SYMBOL not in result
 
     def test_as_of_same_candle_in_window_changes(self) -> None:
-        """Moving that candle to <= T (in-window) MUST change the result."""
+        """Moving that 60th candle to <= T (in-window) MUST change the result."""
         candles = self._candles_by_symbol()
         baseline = liquidity.eligible_universe_as_of(
-            candles, _REBALANCE_TS, self._sector_map, top_n=_TOP_N
+            candles, _REBALANCE_TS, self._sector_map, top_n=_TOP_N_TWO
         )
 
-        # Replace the thin name's whole window with high-turnover bars (<= T):
-        # it now out-ranks within its own sector and (with top_n across both
-        # sectors) the eligible set differs from the baseline thin-excluded set.
+        # Same 60th bar, now dated <= T: THINCO reaches the 60-bar minimum and, with
+        # top_n=2 in this sector, joins the eligible set -- the filter is live.
+        in_window_ts = _REBALANCE_TS - timedelta(days=_FUTURE_OFFSET_DAYS)
         in_window = dict(candles)
-        in_window[_THIN_SYMBOL] = _series(
-            _THIN_SYMBOL,
-            n_bars=_WINDOW,
-            close=_LIQUID_CLOSE,
-            volume=_LIQUID_VOLUME,
-        )
+        in_window[_THIN_SYMBOL] = [
+            *candles[_THIN_SYMBOL],
+            _candle(_THIN_SYMBOL, in_window_ts, _LIQUID_CLOSE, _LIQUID_VOLUME),
+        ]
         result = liquidity.eligible_universe_as_of(
-            in_window, _REBALANCE_TS, self._sector_map, top_n=_TOP_N
+            in_window, _REBALANCE_TS, self._sector_map, top_n=_TOP_N_TWO
         )
 
         assert _THIN_SYMBOL not in baseline
