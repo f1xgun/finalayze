@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from config.segments import DEFAULT_SEGMENTS, SegmentConfig
+from config.segments import DEFAULT_SEGMENTS, SECTOR_TO_SEGMENT, SegmentConfig
+
+from finalayze.markets.liquidity import select_segment_symbols
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,11 +94,17 @@ _STOCK_SEGMENT_IDS = [
     "us_healthcare",
     "us_finance",
     "us_broad",
-    "ru_blue_chips",
     "ru_energy",
     "ru_tech",
     "ru_finance",
 ]
+
+# D-05 control: ru_energy resolves the oil_gas sector and is UNAFFECTED by removing
+# ru_blue_chips / retiring the diversified tag. Captured verbatim from the committed
+# snapshot's oil_gas sector AFTER the universal safety filter (no toxic, no preferred
+# duplicate -- TRNFP stays because its common TRNF is not present). Re-asserted byte-
+# identical pre/post the Phase-68 edits to prove the changes are universe-local.
+_RU_ENERGY_CONTROL = ["LKOH", "ROSN", "NVTK", "TATN", "TRNFP", "SIBN", "RNFT"]
 
 
 class TestExistingStockSegments:
@@ -120,6 +128,34 @@ class TestRuFinance:
 # ---------------------------------------------------------------------------
 # S1.2 — US segments frozen, RU segments enabled
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# UNIV-02 — ru_blue_chips removed + diversified retired
+# ---------------------------------------------------------------------------
+
+
+class TestRuBlueChipsRemoved:
+    """ru_blue_chips is gone from the segment set and the sector map (D-02)."""
+
+    def test_not_in_default_segments(self) -> None:
+        assert "ru_blue_chips" not in {s.segment_id for s in DEFAULT_SEGMENTS}
+
+    def test_diversified_tag_retired_from_map(self) -> None:
+        assert "diversified" not in SECTOR_TO_SEGMENT
+        assert "ru_blue_chips" not in SECTOR_TO_SEGMENT.values()
+
+
+# ---------------------------------------------------------------------------
+# UNIV-04 / D-05 — ru_energy byte-identical control pin
+# ---------------------------------------------------------------------------
+
+
+class TestRuEnergyControlPin:
+    """ru_energy selected set is unchanged by the Phase-68 edits (the control)."""
+
+    def test_ru_energy_selected_set_byte_identical(self) -> None:
+        assert select_segment_symbols("ru_energy") == _RU_ENERGY_CONTROL
 
 
 class TestSegmentEnabledFlag:
