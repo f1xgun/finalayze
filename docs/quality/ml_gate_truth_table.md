@@ -385,8 +385,20 @@ The Phase-61/62/64 rows above are the **seeded** truth source this phase builds 
 
 Columns: `Segment | Experiment | knob varied | n_folds | best_acc (avg_accuracy) | overall_passed | binding sub-gate fails | force_saved | status | Verdict`. Every run is appended here with its honest harness verdict. `force_saved` is always `false` (no force-save path exists). `best_acc` is compared against the **0.50 random floor** and the H1 `n_effective` context from Plan 01's reporter (small `n_eff` raises the accuracy-gate threshold sharply).
 
-<!-- E-rows appended by Task 2 (E1) and Task 3 (E2-E5, after the operator gating decision) -->
+<!-- E1 rows appended by Task 2 (gating checkpoint). E2-E5 rows appended by Task 3 after the operator gating decision. -->
 
-| Segment | Experiment | knob varied | n_folds | best_acc | overall_passed | binding sub-gate fails | force_saved | status | Verdict |
-|---------|-----------|-------------|---------|----------|----------------|------------------------|-------------|--------|---------|
-| _(pending E1 runs — Task 2)_ | | | | | | | | | |
+| Segment | Experiment | knob varied | n_folds | best_acc | overall_passed | binding sub-gate fails (pass-rate) | force_saved | status | Verdict |
+|---------|-----------|-------------|---------|----------|----------------|------------------------------------|-------------|--------|---------|
+| ru_blue_chips | E1 baseline | standard MI selection, default MOEX hparams | 10 | 0.4056 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / pf 0.3 / specificity 0.2 / degenerate 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E1 ablate-month_cos | drop `month_cos` (1 feature) | 10 | 0.4318 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / pf 0.3 / specificity 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_energy | E1 baseline | standard MI selection, default MOEX hparams | 10 | 0.5154 | false | accuracy 0.2 / brier 0.1 (< 0.34); class_balance 0.6, degenerate 0.6, pf 0.5, sensitivity 0.5, specificity 0.9 PASS | false | discard | **DISC** |
+| ru_energy | E1 ablate-max_ret_20d | drop `max_ret_20d` (1 feature) | 10 | 0.5302 | false | accuracy 0.2 (< 0.34); brier 0.2; class_balance 0.6, degenerate 0.8, pf 0.5, specificity 0.9 PASS | false | discard | **DISC** |
+
+### E1 gating evidence (read against the 0.50 random floor)
+
+Both E1 runs used the existing `auto_ml_research.py` harness with `--strategy ablation --max-experiments 1 --seed 42`, live Tinkoff/MOEX-ISS data (token via `os.environ`, never logged — T-70-06), and **NO `--force-save`** (no such flag exists; `force_saved` key absent from every JSONL record). Per-experiment honest JSONL: `results/experiments/ru_blue_chips_experiment_log.jsonl` (2 records) and `results/experiments/ru_energy_experiment_log.jsonl` (2 records).
+
+- **ru_blue_chips** — live universe resolves to **SFIN-only** (Phase-66 liquidity selector): 855 candles → 634 triple-barrier samples (56.0% positive), 10 WF folds. **best_acc 0.4056–0.4318 is clearly BELOW the 0.50 random floor.** No separable signal; the accuracy sub-gate clears only 2/10 folds. H3 "no alpha" strongly supported.
+- **ru_energy** — 7 symbols (LKOH/ROSN/NVTK/TATN/TRNFP/SIBN/RNFT, ~855–861 candles each) → 4512 triple-barrier samples (52.0% positive), 10 WF folds. **best_acc 0.5154–0.5302 sits only marginally ABOVE 0.50.** The accuracy sub-gate still clears only 2/10 folds (< 0.34 min-ratio) and brier clears 1–2/10 — `overall_passed:false`. Marginal, not clearly separable.
+
+**Gating recommendation (evidence only — operator decides):** ru_blue_chips is sub-random (no alpha). ru_energy is marginally above 0.50 but does not separate enough to pass any binding sub-gate. This is closer to **short-circuit** (H3 no-alpha largely confirmed; E2–E5 low-value, skip E5) than to a clear **proceed-full** signal. The operator returns the gating decision; Task 3 then runs accordingly.
