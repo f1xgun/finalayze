@@ -408,13 +408,27 @@ def build_and_write(
         return proposed
 
     sectors = top_n_per_sector(scores, sector_map, top_n)
+    # Wholesale-failure guard runs on the PRE-safety-filter result: a sector that scored 0 names
+    # means a gRPC/auth/cert/DNS failure (every fetch_candles raised) -- refuse (T-66-13 / D-04).
+    _assert_sectors_non_empty(sectors)
     # Defense-in-depth: write a snapshot that is ALREADY clean of toxic/sanctioned names and
     # preferred-share duplicates (the SAME universal filter the runtime selector re-applies, so
     # the committed file and the live selection agree). Single source: liquidity._apply_safety_
     # filters. NOTE: dedup is per-sector here -- a preferred share is dropped only when its common
     # is in the SAME sector's ranked list (e.g. SBERP dropped vs SBER in banks).
-    sectors = {sector: _apply_safety_filters(syms) for sector, syms in sectors.items()}
-    _assert_sectors_non_empty(sectors)  # T-66-13 / D-04 -- never write a partial/empty universe
+    filtered = {sector: _apply_safety_filters(syms) for sector, syms in sectors.items()}
+    # A sector emptied ONLY by the safety filter (every liquid name is toxic/sanctioned, e.g.
+    # utilities whose sole liquid name IRAO is sanctioned) is a legitimate "no tradeable non-toxic
+    # name" -- DROP it (warn), do NOT refuse. (Distinct from the wholesale-failure case above.)
+    dropped = sorted(sector for sector, syms in filtered.items() if not syms)
+    sectors = {sector: syms for sector, syms in filtered.items() if syms}
+    if dropped:
+        _log.warning("liquidity_universe_sector_dropped_all_toxic", sectors=dropped)
+    if not sectors:
+        raise SystemExit(
+            "REFUSING to write snapshot -- every sector emptied after safety filtering "
+            "(no tradeable non-toxic name in any sector)."
+        )
 
     payload = {
         "generated_at": now.isoformat(),
