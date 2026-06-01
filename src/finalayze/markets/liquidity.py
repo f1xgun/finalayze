@@ -51,6 +51,44 @@ _MAX_STALENESS_DAYS = _MIN_BARS_FOR_LIQUIDITY * 3
 # mirroring markets/data/moex_universe.json.
 _LIQ_SNAPSHOT = Path(__file__).parent / "data" / "moex_liquidity_universe.json"
 
+# ── Universal safety filters (single source) ─────────────────────────────────────
+# Applied to the FINAL selected universe (snapshot OR bootstrap) so the exclusion holds
+# regardless of source. Pre-66 these filters lived only on the run_iteration bootstrap
+# path; centralising them HERE makes every seam (config.segments.DEFAULT_SEGMENTS,
+# run_iteration.UNIVERSE, training.cli.SEGMENT_SYMBOLS) inherit identical behaviour from
+# the one selector. scripts.run_iteration._drop_toxic re-uses _TOXIC_SYMBOLS (no divergent
+# duplicate). Layer-2 pure: stdlib only, no scripts.* / grpc / DB imports.
+#
+# Toxic / sanctioned / structurally-illiquid MOEX names the backtest harness has always
+# excluded from every ru_* segment (pre-66 invariant -- see tests/unit/test_run_iteration_
+# universe.py and tests/unit/test_config.py::TestToxicSymbolsExcluded). SNGS/SNGSP are the
+# sanctioned Surgutneftegaz pair; GAZP/VTBR/ALRS/IRAO are sanctioned/illiquid.
+_TOXIC_SYMBOLS: frozenset[str] = frozenset({"GAZP", "VTBR", "ALRS", "SNGS", "SNGSP", "IRAO"})
+
+
+# MOEX preferred shares carry a trailing ``P`` on the common ticker (SBERP=SBER pref,
+# TATNP=TATN pref, ...). A preferred share that is rho>0.95-redundant with its common
+# counterpart already in the SAME selected set adds no diversification and degrades ML
+# (Phase-48 rule: SBERP removed from ru_finance because rho>0.95 with SBER). This drops a
+# ``<X>P`` ONLY when its common ``<X>`` is present in the same set -- it does NOT exclude a
+# preferred share whose common is absent (e.g. TRNFP stays when TRNF is not traded), so
+# legitimately-traded standalone preferreds are preserved (objective constraint).
+def _drop_preferred_duplicates(symbols: list[str]) -> list[str]:
+    """Drop ``<X>P`` preferred shares whose common ``<X>`` is in ``symbols`` (order-preserving)."""
+    present = set(symbols)
+    return [s for s in symbols if not (len(s) > 1 and s.endswith("P") and s[:-1] in present)]
+
+
+def _apply_safety_filters(symbols: list[str]) -> list[str]:
+    """Universal post-filter: drop toxic/sanctioned names then preferred-share duplicates.
+
+    Order-preserving (keeps the ranked sequence). Applied to the FINAL selected universe so
+    the exclusion holds whether the symbols came from the committed snapshot or the bootstrap
+    fallback -- the single-source guarantee the three seams rely on.
+    """
+    deduped = _drop_preferred_duplicates(symbols)
+    return [s for s in deduped if s not in _TOXIC_SYMBOLS]
+
 
 def _valid_sectors() -> frozenset[str]:
     """Curated valid-sector set (V5 / IN-05 trust boundary), SINGLE-SOURCED from config.
@@ -127,7 +165,10 @@ def select_segment_symbols(
     map). When ``sector_to_segment`` is ``None`` (the LIVE config-construction call from
     ``config.segments.DEFAULT_SEGMENTS``), the curated map is read lazily from
     ``config.segments.SECTOR_TO_SEGMENT`` -- the single D-08 source. No live calls.
-    Returns the concatenated ranked symbol list for the segment (LIQ-03).
+    Returns the concatenated ranked symbol list for the segment (LIQ-03), AFTER the
+    universal safety post-filter (``_apply_safety_filters``): toxic/sanctioned names and
+    preferred-share duplicates are dropped from the FINAL set regardless of source, so the
+    pre-66 ru_* exclusion invariant holds for both the committed snapshot and the bootstrap.
 
     Bootstrap fallback (pre-66-04 compat shim): the committed snapshot artifact is written
     by ``scripts/generate_liquidity_universe.py`` (Plan 66-04). Until it is generated the
@@ -153,7 +194,7 @@ def select_segment_symbols(
         # hardcoded list (pre-66 behaviour) -- NOT empty, which would clobber every ru_*
         # universe and the Phase-65 generator's required_symbols(). A corrupt/tampered
         # EXISTING file is still fail-closed below (only true ABSENCE bootstraps).
-        fallback = list(bootstrap) if bootstrap is not None else []
+        fallback = _apply_safety_filters(list(bootstrap) if bootstrap is not None else [])
         _log.warning(
             "liquidity_snapshot_absent_bootstrap",
             segment_id=segment_id,
@@ -168,7 +209,11 @@ def select_segment_symbols(
     for sector, symbols in sectors.items():
         if sector_to_segment.get(sector) == segment_id:
             out.extend(symbols)
-    return out
+    # Universal safety post-filter (single source): toxic/sanctioned + preferred-share
+    # duplicates dropped from the FINAL selected set, regardless of source (D-04 trust
+    # boundary returns the snapshot verbatim EXCEPT for these always-on safety filters,
+    # which were a pre-66 invariant on every ru_* universe).
+    return _apply_safety_filters(out)
 
 
 def top_n_per_sector(

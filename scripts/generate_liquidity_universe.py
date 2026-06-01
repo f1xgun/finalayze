@@ -62,7 +62,11 @@ from config.segments import SECTOR_TO_SEGMENT
 
 from finalayze.backtest.config import MOEX_2022_BREAK
 from finalayze.markets.instruments import build_default_registry
-from finalayze.markets.liquidity import median_rub_turnover, top_n_per_sector
+from finalayze.markets.liquidity import (
+    _apply_safety_filters,
+    median_rub_turnover,
+    top_n_per_sector,
+)
 
 if TYPE_CHECKING:
     from finalayze.core.schemas import Candle
@@ -404,6 +408,12 @@ def build_and_write(
         return proposed
 
     sectors = top_n_per_sector(scores, sector_map, top_n)
+    # Defense-in-depth: write a snapshot that is ALREADY clean of toxic/sanctioned names and
+    # preferred-share duplicates (the SAME universal filter the runtime selector re-applies, so
+    # the committed file and the live selection agree). Single source: liquidity._apply_safety_
+    # filters. NOTE: dedup is per-sector here -- a preferred share is dropped only when its common
+    # is in the SAME sector's ranked list (e.g. SBERP dropped vs SBER in banks).
+    sectors = {sector: _apply_safety_filters(syms) for sector, syms in sectors.items()}
     _assert_sectors_non_empty(sectors)  # T-66-13 / D-04 -- never write a partial/empty universe
 
     payload = {

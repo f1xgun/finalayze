@@ -99,11 +99,13 @@ _PRESETS_DIR = (
 # ── Symbol universe ────────────────────────────────────────────────────────────
 # Toxic / sanctioned / structurally-illiquid MOEX names the backtest harness has always
 # excluded from every ru_* segment (pre-66 invariant -- see tests/unit/test_run_iteration_
-# universe.py). The bootstrap fallback (config._BOOTSTRAP_SEGMENT_SYMBOLS, verbatim prior
-# config lists) may carry one of these (e.g. VTBR in config's ru_finance); _drop_toxic
-# filters them out HERE so this seam's prior behaviour is preserved without mutating the
-# shared bootstrap source. Order-preserving (no set() -- keeps the ranked sequence).
-_TOXIC_SYMBOLS: frozenset[str] = frozenset({"GAZP", "VTBR", "ALRS", "SNGS", "SNGSP", "IRAO"})
+# universe.py). The canonical toxic set + the safety post-filter now live in the Layer-2
+# selector (finalayze.markets.liquidity) and are applied UNIVERSALLY to the final selected
+# universe (Plan 66-04) -- so this filter holds for the committed snapshot AND the bootstrap
+# regardless of source. _drop_toxic re-exports the SHARED set (NO divergent duplicate) and
+# is kept as a thin shim for the bootstrap-argument call sites below (defense-in-depth: the
+# selector also re-applies it). Order-preserving (keeps the ranked sequence).
+from finalayze.markets.liquidity import _TOXIC_SYMBOLS
 
 
 def _drop_toxic(symbols: list[str]) -> list[str]:
