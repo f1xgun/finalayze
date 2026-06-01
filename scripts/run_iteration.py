@@ -114,6 +114,20 @@ def _drop_toxic(symbols: list[str]) -> list[str]:
     return [s for s in symbols if s not in _TOXIC_SYMBOLS]
 
 
+def _write_trades_jsonl(output_path: Path, trades: list[TradeResult]) -> None:
+    """Serialize closed trades to a ``trades.jsonl`` sidecar (RUFIN-01 / D-01).
+
+    Mirrors ``DecisionJournal.flush`` exactly: parent-dir mkdir + one
+    ``model_dump_json()`` per line. The Task-1 exit_reason/entry_strategy
+    fields ride along via ``model_dump_json``. This is the artifact
+    ``scripts/diagnose_ru_finance.py`` reads back for the attribution.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w") as f:
+        for trade in trades:
+            f.write(trade.model_dump_json() + "\n")
+
+
 def _bootstrap_for(segment_id: str) -> list[str]:
     """Prior-hardcoded bootstrap list for ``segment_id`` (WR-04: missing-key safe).
 
@@ -1150,6 +1164,8 @@ def _run_segment_portfolio(
         eligible_at=eligible_at,
     )
     journal.flush()
+    # RUFIN-01 / D-01: per-segment closed-trade sidecar next to decision_journal.jsonl.
+    _write_trades_jsonl(seg_dir / "trades.jsonl", trades)
 
     result = PerformanceAnalyzer().analyze(trades, snapshots, benchmark_candles=benchmark_candles)
 
