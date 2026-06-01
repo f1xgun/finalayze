@@ -210,7 +210,10 @@ class TestChandelierMultiplierBySegment:
         "us_healthcare": Decimal("3.5"),
         "us_finance": Decimal("2.5"),
         "ru_blue_chips": Decimal("4.0"),
-        "ru_finance": Decimal("4.0"),
+        # RUFIN-02 / D-02: tightened 4.0 -> 3.5 (ru_tech precedent). Plan-67-01
+        # attribution named the chandelier stop lever (avg-loss -1022.83 vs
+        # avg-win +566.52; 23 stop exits summed -25,734.80 -- losers run too far).
+        "ru_finance": Decimal("3.5"),
         "ru_energy": Decimal("4.5"),
         "ru_tech": Decimal("3.5"),
     }
@@ -220,6 +223,14 @@ class TestChandelierMultiplierBySegment:
         for segment, expected in self._EXPECTED_MULTIPLIERS.items():
             actual = get_chandelier_multiplier(segment)
             assert actual == expected, f"{segment}: expected {expected}, got {actual}"
+
+    def test_ru_energy_chandelier_unchanged_d05_control(self) -> None:
+        """D-05 segment-local control: ru_energy stop multiplier MUST stay 4.5.
+
+        The Phase-67 ru_finance tuning is segment-local; ru_energy is the
+        no-regression control and must be provably untouched.
+        """
+        assert get_chandelier_multiplier("ru_energy") == Decimal("4.5")
 
     def test_chandelier_multiplier_unknown_segment(self) -> None:
         """Unknown segment returns default 3.0."""
