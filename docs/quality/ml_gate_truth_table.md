@@ -346,3 +346,47 @@ no replacement to load). The unchanged schema-4 feature set stays green
 (`tests/unit/test_fundamental_features.py`, 10 passed). Revisit Round 2 only if/when a future
 fundamental retrain (e.g. on deeper fundamental history) produces a Round-1 KEEP; it is not an
 automatic continuation.
+
+---
+
+## Phase 70 — ML failure root-cause spike (MLDIAG-03 controlled experiments)
+
+**Date:** 2026-06-02
+**Phase:** 70 (ML failure root-cause spike — diagnostic, NOT a retrain)
+**Requirements:** MLDIAG-03
+**Plan:** 70-03 (H3+H4 bounded controlled-experiment matrix on the two data-richest segments)
+
+This phase enables **NO** segment and ships **NO** model. It runs a **FIXED** bounded
+experiment matrix (one variable per row) via the existing `scripts/auto_ml_research.py`
+harness — which has **NO `--force-save` path** (the flag does not exist; the honesty
+guardrail is structurally enforced). Every run records its **honest** `overall_passed` /
+`gate_pass_rates` / `status` (`keep` / `discard` / `crash`). DISC / no-alpha is a VALID and
+likely outcome (D-05). The matrix is interpreted, not chased — no tune-until-pass loop.
+
+The Phase-61/62/64 rows above are the **seeded** truth source this phase builds on:
+- **Phase 62 — Stage-1 legitimate retrain: 0/17 `ru_*` segments passed the WF gate, 0 enabled, 0 force-saved.** (`ru_blue_chips` DISC best_acc 0.5307; `ru_energy` DISC best_acc 0.4167; `ru_finance` DISC; `ru_tech` DISC train-only.)
+- **Phase 64 — Stage-3 fundamental A/B Round-1: KEEP = NONE (0/2).** Fundamentals do not move the WF gate on thin point-in-time history.
+
+### Legend
+
+`KEEP = overall_passed:true AND not force_saved` · `DISC = honest fail (overall_passed:false)` · `FORCED = force_saved (never shipped — structurally impossible in this harness)`
+
+### Fixed experiment matrix (one knob per row; E1 is a GATING checkpoint)
+
+| # | Knob (one variable) | Hypothesis | Harness path | Gating |
+|---|---------------------|------------|--------------|--------|
+| E1 | Baseline / no-signal floor | Is `best_acc` distinguishable from the 0.50 random floor? | `--strategy ablation --max-experiments 1` baseline + 0.50/permutation comparison | **GATING** — if `best_acc` ≈ 0.50 for BOTH segments, H3 no-alpha is largely confirmed and E2-E5 become low-value (short-circuit) |
+| E2 | Feature subset / `max_features` | Does feature noise hurt small-N? | `--strategy ablation --max-experiments 3` | mandatory |
+| E3 | Triple-barrier horizon / barriers | Is `TB_MAX_HOLD` / ATR-mult mismatched to the MOEX regime? | controlled `SEGMENT_BARRIER_CONFIG` / `TB_*` variation | mandatory |
+| E4 | Model class / ensemble weights | Is the XGB+LGBM+CatBoost ensemble overfit for small N? | `--strategy ensemble_weights --max-experiments 2` | mandatory |
+| E5 | Hyperparameter regularization | Does heavier regularization lift OOS accuracy? | `--strategy hyperparameter --max-experiments 2` | **CONDITIONAL** on E1 showing non-random signal (proceed-full); SKIPPED if short-circuit |
+
+### Phase 70 experiment rows
+
+Columns: `Segment | Experiment | knob varied | n_folds | best_acc (avg_accuracy) | overall_passed | binding sub-gate fails | force_saved | status | Verdict`. Every run is appended here with its honest harness verdict. `force_saved` is always `false` (no force-save path exists). `best_acc` is compared against the **0.50 random floor** and the H1 `n_effective` context from Plan 01's reporter (small `n_eff` raises the accuracy-gate threshold sharply).
+
+<!-- E-rows appended by Task 2 (E1) and Task 3 (E2-E5, after the operator gating decision) -->
+
+| Segment | Experiment | knob varied | n_folds | best_acc | overall_passed | binding sub-gate fails | force_saved | status | Verdict |
+|---------|-----------|-------------|---------|----------|----------------|------------------------|-------------|--------|---------|
+| _(pending E1 runs — Task 2)_ | | | | | | | | | |
