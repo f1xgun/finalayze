@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import traceback
+import warnings
 
 from dotenv import load_dotenv
 
@@ -111,6 +112,25 @@ from finalayze.markets.liquidity import _TOXIC_SYMBOLS
 def _drop_toxic(symbols: list[str]) -> list[str]:
     """Return ``symbols`` with toxic/sanctioned names removed, order preserved."""
     return [s for s in symbols if s not in _TOXIC_SYMBOLS]
+
+
+def _bootstrap_for(segment_id: str) -> list[str]:
+    """Prior-hardcoded bootstrap list for ``segment_id`` (WR-04: missing-key safe).
+
+    A new enabled MOEX stock segment added to ``DEFAULT_SEGMENTS`` without a matching
+    ``_BOOTSTRAP_SEGMENT_SYMBOLS`` key must NOT raise ``KeyError`` at module import time
+    (that would break ``import scripts.run_iteration`` and every consumer before any clear
+    error surfaces). Use ``.get`` with an empty default; once the committed snapshot lands
+    the selector supplies the liquid set regardless. Warn (non-fatal, self-healing) so the
+    missing key is still visible to an operator.
+    """
+    if segment_id not in _BOOTSTRAP_SEGMENT_SYMBOLS:
+        warnings.warn(
+            f"no _BOOTSTRAP_SEGMENT_SYMBOLS key for enabled MOEX segment {segment_id!r}; "
+            "bootstrapping with [] until the liquidity snapshot supplies it",
+            stacklevel=2,
+        )
+    return _BOOTSTRAP_SEGMENT_SYMBOLS.get(segment_id, [])
 
 
 UNIVERSE: dict[str, list[str]] = {
@@ -231,7 +251,7 @@ UNIVERSE: dict[str, list[str]] = {
     **{
         seg.segment_id: select_segment_symbols(
             seg.segment_id,
-            bootstrap=_drop_toxic(_BOOTSTRAP_SEGMENT_SYMBOLS[seg.segment_id]),
+            bootstrap=_drop_toxic(_bootstrap_for(seg.segment_id)),
         )
         for seg in DEFAULT_SEGMENTS
         if seg.market == "moex" and seg.enabled and seg.instrument_type == "stock"

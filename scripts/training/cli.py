@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import warnings
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -39,6 +40,26 @@ from finalayze.markets.liquidity import select_segment_symbols
 
 # Default output directory
 DEFAULT_OUTPUT_DIR = "models/"
+
+
+def _bootstrap_for(segment_id: str) -> list[str]:
+    """Prior-hardcoded bootstrap list for ``segment_id`` (WR-04: missing-key safe).
+
+    A new enabled MOEX stock segment added to ``DEFAULT_SEGMENTS`` without a matching
+    ``_BOOTSTRAP_SEGMENT_SYMBOLS`` key must NOT raise ``KeyError`` at module import time
+    (that would break ``import scripts.training.cli`` and every consumer before any clear
+    error surfaces). Use ``.get`` with an empty default; once the committed snapshot lands
+    the selector supplies the liquid set regardless. Warn (non-fatal, self-healing) so the
+    missing key is still visible to an operator.
+    """
+    if segment_id not in _BOOTSTRAP_SEGMENT_SYMBOLS:
+        warnings.warn(
+            f"no _BOOTSTRAP_SEGMENT_SYMBOLS key for enabled MOEX segment {segment_id!r}; "
+            "bootstrapping with [] until the liquidity snapshot supplies it",
+            stacklevel=2,
+        )
+    return _BOOTSTRAP_SEGMENT_SYMBOLS.get(segment_id, [])
+
 
 # Map segment_id -> representative symbols for training data
 SEGMENT_SYMBOLS: dict[str, list[str]] = {
@@ -103,7 +124,7 @@ SEGMENT_SYMBOLS: dict[str, list[str]] = {
     # the liquid set replaces them.
     **{
         seg.segment_id: select_segment_symbols(
-            seg.segment_id, bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS[seg.segment_id]
+            seg.segment_id, bootstrap=_bootstrap_for(seg.segment_id)
         )
         for seg in DEFAULT_SEGMENTS
         if seg.market == "moex" and seg.enabled and seg.instrument_type == "stock"
