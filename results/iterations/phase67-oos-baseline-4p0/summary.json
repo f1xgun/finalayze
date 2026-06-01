@@ -1,0 +1,97 @@
+[
+  {
+    "segment": "ru_finance",
+    "symbols": [
+      "SBER",
+      "T",
+      "MOEX",
+      "BSPB",
+      "AFKS",
+      "RENI",
+      "SVCB"
+    ],
+    "total_candles": 924,
+    "total_trades": 6,
+    "concurrent_position_cap": 10,
+    "fundamental_gate_scale": "1.0",
+    "fundamental_earnings_yield": 0.0,
+    "metrics": {
+      "sharpe": "-0.2937",
+      "max_drawdown": "0.0001",
+      "win_rate": "0.3333",
+      "profit_factor": "0.6676",
+      "total_return": "-0.0000",
+      "total_trades": 6,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0062",
+      "sharpe_n_samples": 131,
+      "sharpe_t_statistic": "-0.2117",
+      "sharpe_p_value": "0.8323",
+      "alpha": "-0.0",
+      "beta": "0.0001",
+      "information_ratio": "0.5791",
+      "max_relative_drawdown": "0.1982",
+      "benchmark_return": "-0.0951"
+    },
+    "journal_summary": {
+      "total_decisions": 12,
+      "action_counts": {
+        "BUY": 6,
+        "SELL": 2,
+        "SKIP": 4
+      },
+      "top_skip_reasons": {
+        "no_position_held": 3,
+        "position_already_open": 1
+      }
+    }
+  },
+  {
+    "segment": "ru_energy",
+    "symbols": [
+      "LKOH",
+      "ROSN",
+      "NVTK",
+      "TATN",
+      "TRNFP",
+      "SIBN",
+      "RNFT"
+    ],
+    "total_candles": 924,
+    "total_trades": 9,
+    "concurrent_position_cap": 10,
+    "fundamental_gate_scale": "1.0",
+    "fundamental_earnings_yield": 0.0,
+    "metrics": {
+      "sharpe": "1.2189",
+      "max_drawdown": "0.0000",
+      "win_rate": "0.6667",
+      "profit_factor": "2.2881",
+      "total_return": "0.0001",
+      "total_trades": 9,
+      "sortino_ratio": "3.8229",
+      "calmar_ratio": "999",
+      "turnover_ratio": "0.0098",
+      "sharpe_n_samples": 131,
+      "sharpe_t_statistic": "0.8789",
+      "sharpe_p_value": "0.3795",
+      "alpha": "0.0001",
+      "beta": "0.0",
+      "information_ratio": "0.5797",
+      "max_relative_drawdown": "0.1982",
+      "benchmark_return": "-0.0951"
+    },
+    "journal_summary": {
+      "total_decisions": 19,
+      "action_counts": {
+        "BUY": 9,
+        "SKIP": 10
+      },
+      "top_skip_reasons": {
+        "quantity_zero": 7,
+        "no_position_held": 3
+      }
+    }
+  }
+]
