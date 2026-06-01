@@ -6,9 +6,10 @@ from config.modes import WorkMode
 from config.segments import DEFAULT_SEGMENTS, SegmentConfig
 
 EXPECTED_MODE_COUNT = 4
-EXPECTED_SEGMENT_COUNT = 17  # 4 US + 11 MOEX stock + 2 OFZ bond segments
+# Phase 68 (UNIV-02): ru_blue_chips removed -> 4 US + 10 MOEX stock + 2 OFZ bond = 16.
+EXPECTED_SEGMENT_COUNT = 16  # 4 US + 10 MOEX stock + 2 OFZ bond segments
 EXPECTED_US_SEGMENT_COUNT = 4
-EXPECTED_MOEX_SEGMENT_COUNT = 13  # 11 stock + 2 OFZ bond
+EXPECTED_MOEX_SEGMENT_COUNT = 12  # 10 stock + 2 OFZ bond
 
 
 class TestWorkMode:
@@ -64,7 +65,8 @@ class TestToxicSymbolsExcluded:
         return next(s for s in DEFAULT_SEGMENTS if s.segment_id == segment_id)
 
     def test_toxic_symbols_excluded_from_moex_segments(self) -> None:
-        assert "GAZP" not in self._get_segment("ru_blue_chips").symbols
+        # ru_blue_chips removed in Phase 68 (UNIV-02); GAZP exclusion now proven on ru_energy.
+        assert "GAZP" not in self._get_segment("ru_energy").symbols
         # VTBR reinstated in ru_finance (v9.1)
         assert "SNGS" not in self._get_segment("ru_energy").symbols
         assert "SNGSP" not in self._get_segment("ru_energy").symbols

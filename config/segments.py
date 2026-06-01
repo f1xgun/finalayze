@@ -39,7 +39,6 @@ SECTOR_TO_SEGMENT: dict[str, str] = {
     "chemicals": "ru_chemicals",
     "tech": "ru_tech",
     "real_estate": "ru_construction",
-    "diversified": "ru_blue_chips",
 }
 
 # ── Bootstrap ru_* SHARE universes (pre-66-04 compat shim) ───────────────────────
@@ -54,7 +53,6 @@ SECTOR_TO_SEGMENT: dict[str, str] = {
 # Bond segments (ru_ofz_pd / ru_ofz_pk) and US segments are NOT bootstrapped here -- they
 # keep their own hardcoded lists below.
 _BOOTSTRAP_SEGMENT_SYMBOLS: dict[str, list[str]] = {
-    "ru_blue_chips": ["SBER", "LKOH", "GMKN"],
     "ru_energy": ["ROSN", "TATN", "NVTK", "SIBN", "TATNP", "TRNFP"],
     "ru_tech": ["YDEX", "OZON", "VKCO", "HEAD", "POSI", "ASTR", "DIAS", "SOFL"],
     "ru_finance": ["SBER", "T", "CBOM", "BSPB", "MOEX", "VTBR", "AFKS", "RENI"],
@@ -149,19 +147,6 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         max_allocation_pct=0.30,
         trading_hours="14:30-21:00 UTC",
         enabled=False,
-    ),
-    SegmentConfig(
-        segment_id="ru_blue_chips",
-        market="moex",
-        broker="tinkoff",
-        currency="RUB",
-        symbols=select_segment_symbols(
-            "ru_blue_chips", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_blue_chips"]
-        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
-        active_strategies=["momentum", "event_driven", "mean_reversion"],
-        news_languages=["ru", "en"],
-        max_allocation_pct=0.30,
-        trading_hours="07:00-15:40 UTC",
     ),
     SegmentConfig(
         segment_id="ru_energy",

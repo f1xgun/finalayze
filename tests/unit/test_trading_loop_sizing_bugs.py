@@ -328,10 +328,11 @@ class TestCautionThresholdFromPreset:
             "(min_conf=0.30 * 1.2), but was rejected by hardcoded 0.6"
         )
 
-    def test_ru_blue_chips_caution_threshold(self) -> None:
-        """ru_blue_chips (min_conf=0.38): threshold = 0.38 * 1.2 = 0.456.
+    def test_ru_finance_caution_threshold(self) -> None:
+        """ru_finance (min_conf=0.38): threshold = 0.38 * 1.2 = 0.456.
         Signal with confidence=0.50 should PASS (0.50 >= 0.456).
         With the hardcoded bug (0.5 * 1.2 = 0.6), 0.50 would be rejected.
+        (Phase 68 / UNIV-02: retargeted from the removed ru_blue_chips, same min_conf=0.38.)
         """
         loop = _make_loop()
         candles = _make_candles()
@@ -355,11 +356,11 @@ class TestCautionThresholdFromPreset:
             SYMBOL_AAPL,
             kelly_fraction,
             portfolio=portfolio,
-            seg_id="ru_blue_chips",
+            seg_id="ru_finance",
         )
 
         assert order is not None, (
-            "CAUTION: ru_blue_chips signal with confidence=0.50 should pass threshold 0.456 "
+            "CAUTION: ru_finance signal with confidence=0.50 should pass threshold 0.456 "
             "(min_conf=0.38 * 1.2), but was rejected by hardcoded 0.6"
         )
 

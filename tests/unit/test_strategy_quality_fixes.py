@@ -811,11 +811,8 @@ class TestPerSegmentMACDParameters:
         params = strategy.get_parameters(segment)
         return int(params.get("macd_fast", 12)), int(params.get("macd_slow", 26))  # type: ignore[arg-type]
 
-    def test_ru_blue_chips_macd_faster_than_us_tech(self) -> None:
-        """ru_blue_chips MACD should be MACD(10, 22) — faster than us_tech (12, 26)."""
-        fast, slow = self._get_macd("ru_blue_chips")
-        assert fast == 10, f"Expected macd_fast=10 for ru_blue_chips, got {fast}"
-        assert slow == 22, f"Expected macd_slow=22 for ru_blue_chips, got {slow}"
+    # test_ru_blue_chips_macd_faster_than_us_tech removed in Phase 68 (UNIV-02): preset deleted.
+    # ru_energy below carries the same MACD(10,22) faster-than-us_tech invariant.
 
     def test_ru_energy_macd_faster(self) -> None:
         """ru_energy MACD should be MACD(10, 22)."""
@@ -848,17 +845,8 @@ class TestADXVolumeFiltersDisabled:
         strategy = MomentumStrategy()
         return strategy.get_parameters(segment)
 
-    def test_ru_blue_chips_adx_filter_disabled(self) -> None:
-        params = self._get_params("ru_blue_chips")
-        assert params.get("adx_filter") is False, (
-            "adx_filter should be False for ru_blue_chips (regime routing handles ADX)"
-        )
-
-    def test_ru_blue_chips_volume_filter_disabled(self) -> None:
-        params = self._get_params("ru_blue_chips")
-        assert params.get("volume_filter") is False, (
-            "volume_filter should be False for ru_blue_chips (MOEX volumes naturally lower)"
-        )
+    # ru_blue_chips ADX/volume-filter tests removed in Phase 68 (UNIV-02): preset deleted.
+    # ru_energy below carries the same adx_filter/volume_filter-disabled invariant.
 
     def test_ru_energy_adx_filter_disabled(self) -> None:
         params = self._get_params("ru_energy")
@@ -882,9 +870,8 @@ class TestATRMultiplierPerMarket:
         params = strategy.get_parameters(segment)
         return float(params.get("stop_atr_multiplier", 2.0))  # type: ignore[arg-type]
 
-    def test_ru_blue_chips_atr_multiplier(self) -> None:
-        mult = self._get_atr_multiplier("ru_blue_chips")
-        assert mult >= 2.5, f"Expected atr_multiplier >= 2.5 for ru_blue_chips, got {mult}"
+    # test_ru_blue_chips_atr_multiplier removed in Phase 68 (UNIV-02): preset deleted.
+    # ru_energy / ru_finance below carry the same atr_multiplier >= 2.5 invariant.
 
     def test_ru_energy_atr_multiplier(self) -> None:
         mult = self._get_atr_multiplier("ru_energy")
@@ -895,7 +882,7 @@ class TestATRMultiplierPerMarket:
         assert mult >= 2.5, f"Expected atr_multiplier >= 2.5 for ru_finance, got {mult}"
 
 
-# ── #150 — ru_blue_chips and ru_energy same bb_std_dev ───────────────────────
+# ── #150 — MOEX presets use wider BB bands ───────────────────────────────────
 
 
 class TestBBStdDevDifferentiation:
@@ -912,14 +899,12 @@ class TestBBStdDevDifferentiation:
         std = self._get_bb_std("ru_energy")
         assert std == 2.8, f"Expected bb_std_dev=2.8 for ru_energy, got {std}"  # noqa: PLR2004
 
-    def test_ru_blue_chips_bb_std_dev_is_2_5(self) -> None:
-        std = self._get_bb_std("ru_blue_chips")
-        assert std == 2.5, f"Expected bb_std_dev=2.5 for ru_blue_chips, got {std}"  # noqa: PLR2004
+    # ru_blue_chips bb_std_dev tests removed in Phase 68 (UNIV-02): preset deleted.
 
-    def test_ru_energy_at_least_as_wide_as_ru_blue_chips(self) -> None:
+    def test_ru_energy_wider_than_us(self) -> None:
         energy_std = self._get_bb_std("ru_energy")
-        blue_std = self._get_bb_std("ru_blue_chips")
-        assert energy_std >= blue_std, "ru_energy BB bands should be >= ru_blue_chips"
+        us_std = self._get_bb_std("us_tech")
+        assert energy_std >= us_std, "ru_energy BB bands should be >= us_tech"
 
 
 # ── #131 — Sharpe per-trade not per-bar ──────────────────────────────────────

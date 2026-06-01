@@ -23,9 +23,9 @@ _RSI_OVERBOUGHT_70 = 70
 
 _PRESETS_DIR = Path(__file__).resolve().parents[2] / "src" / "finalayze" / "strategies" / "presets"
 
-_RU_SEGMENTS = ["ru_blue_chips", "ru_energy", "ru_tech", "ru_finance"]
+_RU_SEGMENTS = ["ru_energy", "ru_tech", "ru_finance"]
 # ru_tech uses its own calibration (normalize_mode=total, wider RSI, no rsi2_connors)
-_RU_SEGMENTS_COMMON = ["ru_blue_chips", "ru_energy", "ru_finance"]
+_RU_SEGMENTS_COMMON = ["ru_energy", "ru_finance"]
 
 
 def _load_preset(segment_id: str) -> dict:
@@ -114,11 +114,7 @@ class TestHistogramRisingLogic:
 class TestMOEXPresetRecalibration:
     """Verify updated values in RU preset YAML files."""
 
-    def test_ru_blue_chips_bb_std_dev(self) -> None:
-        """ru_blue_chips bb_std_dev should be 2.5 (wider for MOEX fat tails)."""
-        data = _load_preset("ru_blue_chips")
-        bb_std = data["strategies"]["mean_reversion"]["params"]["bb_std_dev"]
-        assert bb_std == 2.5  # noqa: PLR2004
+    # test_ru_blue_chips_bb_std_dev removed in Phase 68 (UNIV-02): preset/segment deleted.
 
     def test_ru_energy_bb_std_dev(self) -> None:
         """ru_energy bb_std_dev should be 2.8 (widest for commodity-linked stocks)."""
@@ -161,15 +157,7 @@ class TestMOEXPresetRecalibration:
         rsi_expected = 75
         assert mr_params["rsi_overbought_mr"] == rsi_expected
 
-    def test_ru_blue_chips_weights(self) -> None:
-        """ru_blue_chips: momentum enabled, balanced weights."""
-        data = _load_preset("ru_blue_chips")
-        strategies = data["strategies"]
-        assert strategies["momentum"]["enabled"] is True
-        _expected_momentum_weight = 0.09
-        _expected_mr_weight = 0.09
-        assert strategies["momentum"]["weight"] == _expected_momentum_weight
-        assert strategies["mean_reversion"]["weight"] == _expected_mr_weight
+    # test_ru_blue_chips_weights removed in Phase 68 (UNIV-02): preset/segment deleted.
 
     def test_ru_energy_mean_reversion_weight(self) -> None:
         """ru_energy: mean_reversion=0.10."""

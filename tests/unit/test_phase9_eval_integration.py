@@ -145,9 +145,10 @@ class TestMLEnsemblePresets:
     def test_ml_ensemble_present_in_all_presets(self) -> None:
         """All equity segment YAML presets should have ml_ensemble section."""
         # 4 US (us_tech, us_broad, us_finance, us_healthcare — frozen but presets kept)
-        # + 4 RU (ru_blue_chips, ru_energy, ru_finance, ru_tech).
+        # + 3 RU (ru_energy, ru_finance, ru_tech).
         # us_industrial preset removed in S1.2 as orphan (no segment).
-        expected_preset_count = 8
+        # ru_blue_chips preset removed in Phase 68 (UNIV-02 — segment deleted).
+        expected_preset_count = 7
         # Filter to equity segment presets (have segment_id key, instrument_type != bond)
         preset_files = sorted(_PRESETS_DIR.glob("*.yaml"))
         segment_presets = []

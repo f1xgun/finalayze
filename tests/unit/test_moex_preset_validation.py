@@ -26,7 +26,7 @@ _EQUITY_STRATEGIES = [
     "dividend_gap",
 ]
 
-_RU_PRESETS = ["ru_blue_chips", "ru_energy", "ru_finance"]
+_RU_PRESETS = ["ru_energy", "ru_finance"]
 
 _WEIGHT_TOLERANCE = 0.02
 
@@ -100,18 +100,8 @@ def test_ru_finance_mr_tilt() -> None:
     assert mr_weight >= 0.18, f"ru_finance mean_reversion weight {mr_weight} should be >= 0.18"
 
 
-def test_ru_blue_chips_balanced() -> None:
-    """Test 6: ru_blue_chips has balanced weights (no single strategy > 0.20)."""
-    data = _load_preset("ru_blue_chips")
-    strategies = data["strategies"]
-
-    for name, cfg in strategies.items():
-        if not cfg.get("enabled", False):
-            continue
-        weight = cfg.get("weight", 0.0)
-        assert weight <= 0.20, (
-            f"ru_blue_chips {name} weight {weight} exceeds balanced threshold 0.20"
-        )
+# test_ru_blue_chips_balanced removed in Phase 68 (UNIV-02): the ru_blue_chips preset YAML
+# and segment were deleted (the segment collapsed to a single illiquid name, SFIN).
 
 
 @pytest.mark.parametrize("preset_name", _RU_PRESETS)

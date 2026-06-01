@@ -193,8 +193,9 @@ class TestOUStrategy:
 
     def test_ou_ru_wider_thresholds(self) -> None:
         """RU segments use 1.8 entry threshold (relaxed for MOEX volatility)."""
+        # Phase 68 (UNIV-02): retargeted from the removed ru_blue_chips to ru_finance.
         strategy = OUMeanReversionStrategy()
-        params = strategy.get_parameters("ru_blue_chips")
+        params = strategy.get_parameters("ru_finance")
         assert params.get("entry_threshold") == 1.8  # noqa: PLR2004
 
     def test_ou_insufficient_data(self) -> None:
