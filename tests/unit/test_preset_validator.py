@@ -334,11 +334,13 @@ _PRESETS_DIR = Path(__file__).resolve().parents[2] / "src" / "finalayze" / "stra
 # Phase 68 activation presets (Wave 3 liquid + Wave 4 thin). Each must validate
 # with zero ERROR-severity issues (UNIV-03).
 _LIQUID_ACTIVATED_PRESETS = ("ru_metals", "ru_consumer", "ru_construction")
+_THIN_ACTIVATED_PRESETS = ("ru_telecom", "ru_transport", "ru_chemicals")
+_ACTIVATED_PRESETS = _LIQUID_ACTIVATED_PRESETS + _THIN_ACTIVATED_PRESETS
 
 
-@pytest.mark.parametrize("segment_id", _LIQUID_ACTIVATED_PRESETS)
+@pytest.mark.parametrize("segment_id", _ACTIVATED_PRESETS)
 def test_liquid_activation_preset_has_no_errors(segment_id: str) -> None:
-    """UNIV-03: each liquid-tier activation preset yields zero ERROR issues."""
+    """UNIV-03: each activation preset (liquid + thin) yields zero ERROR issues."""
     preset_path = _PRESETS_DIR / f"{segment_id}.yaml"
     assert preset_path.is_file(), f"missing activation preset {preset_path}"
     issues = validate_presets(_PRESETS_DIR)

@@ -82,7 +82,7 @@ class TestActivatedSegmentStrategiesCfg:
     momentum + mean_reversion ON is the entire activation fix.
     """
 
-    @pytest.mark.parametrize("segment_id", _LIQUID_ACTIVATED_SEGMENTS)
+    @pytest.mark.parametrize("segment_id", _ACTIVATED_SEGMENTS)
     def test_liquid_segment_strategies_cfg_is_non_empty(
         self, combiner: StrategyCombiner, segment_id: str
     ) -> None:
