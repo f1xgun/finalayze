@@ -117,7 +117,9 @@ def _load_liquidity_snapshot() -> dict[str, list[str]]:
 
 
 def select_segment_symbols(
-    segment_id: str, sector_to_segment: dict[str, str] | None = None
+    segment_id: str,
+    sector_to_segment: dict[str, str] | None = None,
+    bootstrap: list[str] | None = None,
 ) -> list[str]:
     """Thin LIVE selector: ranked symbols for ``segment_id`` from the committed snapshot.
 
@@ -127,14 +129,19 @@ def select_segment_symbols(
     ``config.segments.SECTOR_TO_SEGMENT`` -- the single D-08 source. No live calls.
     Returns the concatenated ranked symbol list for the segment (LIQ-03).
 
-    Bootstrap tolerance (pre-66-04): the committed snapshot artifact is written by
-    ``scripts/generate_liquidity_universe.py`` (Plan 66-04). Until it is generated the
-    FILE does not exist yet -- this is the expected bootstrap state, NOT tampering. In
-    that single case the selector returns an EMPTY list (an empty live universe trades
-    nothing -- safe) so that ``import config.segments`` and the whole boot path stay
-    importable before the artifact lands. This is NOT a stale-list fallback: a snapshot
-    that EXISTS but is corrupt / has an unknown sector still fails-closed (the loader
-    raises ``ConfigurationError``, propagated here), per D-04 / T-66-08.
+    Bootstrap fallback (pre-66-04 compat shim): the committed snapshot artifact is written
+    by ``scripts/generate_liquidity_universe.py`` (Plan 66-04). Until it is generated the
+    FILE does not exist yet -- this is the expected bootstrap state, NOT tampering. In that
+    single case the selector returns ``bootstrap`` (the segment's PRIOR hardcoded symbol
+    list, supplied by the config-construction call site) so pre-66 behaviour is preserved
+    and the whole boot path -- plus every ``required_symbols()``-derived consumer -- stays
+    intact before the artifact lands. Once 66-04 generates the snapshot, the liquid set
+    replaces the bootstrap (Phase-65 compat-shim philosophy). ``bootstrap`` defaults to
+    ``[]`` only when no list is passed.
+
+    This is NOT a stale-list fallback for tampering: a snapshot that EXISTS but is corrupt
+    / has an unknown sector STILL fails-closed (the loader raises ``ConfigurationError``,
+    propagated here) -- only true FILE ABSENCE bootstraps, per D-04 / T-66-08.
     """
     if sector_to_segment is None:
         from config.segments import SECTOR_TO_SEGMENT  # noqa: PLC0415
@@ -142,15 +149,19 @@ def select_segment_symbols(
         sector_to_segment = SECTOR_TO_SEGMENT
 
     if not _LIQ_SNAPSHOT.exists():
-        # Bootstrap: artifact not yet generated (Plan 66-04). Empty live universe, not a
-        # stale list. A corrupt/tampered EXISTING file is still fail-closed below.
+        # Bootstrap: artifact not yet generated (Plan 66-04). Return the segment's prior
+        # hardcoded list (pre-66 behaviour) -- NOT empty, which would clobber every ru_*
+        # universe and the Phase-65 generator's required_symbols(). A corrupt/tampered
+        # EXISTING file is still fail-closed below (only true ABSENCE bootstraps).
+        fallback = list(bootstrap) if bootstrap is not None else []
         _log.warning(
             "liquidity_snapshot_absent_bootstrap",
             segment_id=segment_id,
             path=str(_LIQ_SNAPSHOT),
-            note="empty live universe until generate_liquidity_universe.py runs (Plan 66-04)",
+            bootstrap_count=len(fallback),
+            note="prior hardcoded list until generate_liquidity_universe.py runs (Plan 66-04)",
         )
-        return []
+        return fallback
 
     sectors = _load_liquidity_snapshot()
     out: list[str] = []

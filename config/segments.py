@@ -42,6 +42,31 @@ SECTOR_TO_SEGMENT: dict[str, str] = {
     "diversified": "ru_blue_chips",
 }
 
+# ── Bootstrap ru_* SHARE universes (pre-66-04 compat shim) ───────────────────────
+# The PRIOR (pre-66-02) hardcoded ru_* SHARE symbol lists, captured verbatim from the
+# segment definitions that existed before the liquidity selector was wired in. These are
+# the bootstrap fallback the selector returns when the committed liquidity snapshot FILE
+# is still ABSENT (Plan 66-04 has not yet generated it). Returning these preserves
+# pre-66 behaviour so DEFAULT_SEGMENTS, run_iteration.UNIVERSE, training.SEGMENT_SYMBOLS
+# and every required_symbols()-derived consumer stay populated. Once the snapshot lands,
+# the liquid selected set replaces this bootstrap (D-07 / Phase-65 compat-shim philosophy).
+# A snapshot that EXISTS but is corrupt still fails-closed -- only ABSENCE bootstraps.
+# Bond segments (ru_ofz_pd / ru_ofz_pk) and US segments are NOT bootstrapped here -- they
+# keep their own hardcoded lists below.
+_BOOTSTRAP_SEGMENT_SYMBOLS: dict[str, list[str]] = {
+    "ru_blue_chips": ["SBER", "LKOH", "GMKN"],
+    "ru_energy": ["ROSN", "TATN", "NVTK", "SIBN", "TATNP", "TRNFP"],
+    "ru_tech": ["YDEX", "OZON", "VKCO", "HEAD", "POSI", "ASTR", "DIAS", "SOFL"],
+    "ru_finance": ["SBER", "T", "CBOM", "BSPB", "MOEX", "VTBR", "AFKS", "RENI"],
+    "ru_metals": ["GMKN", "CHMF", "NLMK", "MAGN", "PLZL", "RUAL", "MTLR"],
+    "ru_consumer": ["MGNT", "X5", "LENT"],
+    "ru_telecom": ["MTSS", "RTKM"],
+    "ru_utilities": ["HYDR", "FEES", "MSNG", "UPRO"],
+    "ru_construction": ["PIKK", "SMLT"],
+    "ru_chemicals": ["PHOR", "AKRN"],
+    "ru_transport": ["AFLT", "FLOT", "NMTP"],
+}
+
 # Downward-wired LIVE selector (see module docstring for the Layer-1<->Layer-2 note).
 # Imported AFTER SECTOR_TO_SEGMENT so liquidity.py's lazy read of that constant is safe.
 from finalayze.markets.liquidity import select_segment_symbols  # noqa: E402
@@ -130,7 +155,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_blue_chips"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_blue_chips", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_blue_chips"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["momentum", "event_driven", "mean_reversion"],
         news_languages=["ru", "en"],
         max_allocation_pct=0.30,
@@ -141,7 +168,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_energy"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_energy", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_energy"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["momentum", "event_driven", "mean_reversion"],
         news_languages=["ru", "en"],
         max_allocation_pct=0.25,
@@ -152,7 +181,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_tech"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_tech", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_tech"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["momentum", "mean_reversion", "event_driven"],
         news_languages=["ru"],
         max_allocation_pct=0.20,
@@ -163,7 +194,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_finance"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_finance", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_finance"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["mean_reversion", "event_driven", "momentum"],
         news_languages=["ru", "en"],
         max_allocation_pct=0.25,
@@ -207,7 +240,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_metals"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_metals", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_metals"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["momentum", "mean_reversion"],
         news_languages=["ru", "en"],
         max_allocation_pct=0.20,
@@ -218,7 +253,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_consumer"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_consumer", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_consumer"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["momentum", "mean_reversion"],
         news_languages=["ru"],
         max_allocation_pct=0.15,
@@ -229,7 +266,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_telecom"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_telecom", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_telecom"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["momentum", "mean_reversion"],
         news_languages=["ru"],
         max_allocation_pct=0.15,
@@ -240,7 +279,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_utilities"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_utilities", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_utilities"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["mean_reversion"],
         news_languages=["ru"],
         max_allocation_pct=0.15,
@@ -251,7 +292,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_construction"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_construction", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_construction"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["momentum", "mean_reversion"],
         news_languages=["ru"],
         max_allocation_pct=0.10,
@@ -262,7 +305,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_chemicals"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_chemicals", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_chemicals"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["momentum", "mean_reversion"],
         news_languages=["ru"],
         max_allocation_pct=0.10,
@@ -273,7 +318,9 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
-        symbols=select_segment_symbols("ru_transport"),  # LIVE seam (D-07): selector-fed
+        symbols=select_segment_symbols(
+            "ru_transport", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_transport"]
+        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
         active_strategies=["momentum", "mean_reversion"],
         news_languages=["ru"],
         max_allocation_pct=0.10,

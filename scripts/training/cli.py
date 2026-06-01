@@ -19,6 +19,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))  # for config.settings
 
 # torch must be imported before lightgbm to prevent OpenMP thread-pool conflicts
 import torch  # noqa: F401
+from config.segments import _BOOTSTRAP_SEGMENT_SYMBOLS
 from scripts.training.data_loader import (
     build_market_data_loader,
     get_lookback_days,
@@ -91,10 +92,20 @@ SEGMENT_SYMBOLS: dict[str, list[str]] = {
     # the SAME single source as config.segments and run_iteration.UNIVERSE. The old
     # hardcoded lists carried DELISTED tickers (YNDX/TCSG/SNGS/CIAN); the selector
     # supersedes them. train_walk_forward is unchanged (D-10) -- only the set widens.
-    "ru_blue_chips": select_segment_symbols("ru_blue_chips"),
-    "ru_energy": select_segment_symbols("ru_energy"),
-    "ru_tech": select_segment_symbols("ru_tech"),
-    "ru_finance": select_segment_symbols("ru_finance"),
+    # Prior-list bootstrap (pre-66-04): when the committed snapshot FILE is absent the
+    # selector returns these hardcoded lists (single source: config._BOOTSTRAP_SEGMENT_SYMBOLS)
+    # so this seam stays populated and identical to the other two; once the snapshot lands
+    # the liquid set replaces them.
+    "ru_blue_chips": select_segment_symbols(
+        "ru_blue_chips", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_blue_chips"]
+    ),
+    "ru_energy": select_segment_symbols(
+        "ru_energy", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_energy"]
+    ),
+    "ru_tech": select_segment_symbols("ru_tech", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_tech"]),
+    "ru_finance": select_segment_symbols(
+        "ru_finance", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_finance"]
+    ),
 }
 
 

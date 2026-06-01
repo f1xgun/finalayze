@@ -39,6 +39,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import yaml
+from config.segments import _BOOTSTRAP_SEGMENT_SYMBOLS
 
 from finalayze.backtest.config import DEFAULT_STRATEGY_HOLD_BARS, MOEX_2022_BREAK, BacktestConfig
 from finalayze.backtest.costs import MOEX_COSTS, US_COSTS
@@ -96,6 +97,20 @@ _PRESETS_DIR = (
 )
 
 # ── Symbol universe ────────────────────────────────────────────────────────────
+# Toxic / sanctioned / structurally-illiquid MOEX names the backtest harness has always
+# excluded from every ru_* segment (pre-66 invariant -- see tests/unit/test_run_iteration_
+# universe.py). The bootstrap fallback (config._BOOTSTRAP_SEGMENT_SYMBOLS, verbatim prior
+# config lists) may carry one of these (e.g. VTBR in config's ru_finance); _drop_toxic
+# filters them out HERE so this seam's prior behaviour is preserved without mutating the
+# shared bootstrap source. Order-preserving (no set() -- keeps the ranked sequence).
+_TOXIC_SYMBOLS: frozenset[str] = frozenset({"GAZP", "VTBR", "ALRS", "SNGS", "SNGSP", "IRAO"})
+
+
+def _drop_toxic(symbols: list[str]) -> list[str]:
+    """Return ``symbols`` with toxic/sanctioned names removed, order preserved."""
+    return [s for s in symbols if s not in _TOXIC_SYMBOLS]
+
+
 UNIVERSE: dict[str, list[str]] = {
     "us_tech": [
         "AAPL",
@@ -196,9 +211,24 @@ UNIVERSE: dict[str, list[str]] = {
     # source shared with config.segments and training/cli.py. No hardcoded ru_* share
     # lists (the old YNDX/POLY/TCSG/etc. were delisted/stale). US entries above stay
     # hardcoded (enabled=False, frozen -- NOT re-pointed at the MOEX selector).
-    "ru_blue_chips": select_segment_symbols("ru_blue_chips"),
-    "ru_energy": select_segment_symbols("ru_energy"),
-    "ru_finance": select_segment_symbols("ru_finance"),
+    # Prior-list bootstrap (pre-66-04): when the committed snapshot FILE is absent the
+    # selector returns these hardcoded lists (single source: config._BOOTSTRAP_SEGMENT_SYMBOLS)
+    # so this seam stays populated and identical to the other two; once the snapshot lands
+    # the liquid set replaces them. The toxic filter is applied to the BOOTSTRAP ARGUMENT
+    # only (not the live selector output): pre-66 run_iteration always dropped toxic /
+    # sanctioned names (e.g. VTBR) from its ru_finance bootstrap, while the generated liquid
+    # snapshot is the trust boundary and is returned verbatim (D-04) -- so the three-seams
+    # single-source guarantee under a present snapshot is unaffected.
+    "ru_blue_chips": select_segment_symbols(
+        "ru_blue_chips",
+        bootstrap=_drop_toxic(_BOOTSTRAP_SEGMENT_SYMBOLS["ru_blue_chips"]),
+    ),
+    "ru_energy": select_segment_symbols(
+        "ru_energy", bootstrap=_drop_toxic(_BOOTSTRAP_SEGMENT_SYMBOLS["ru_energy"])
+    ),
+    "ru_finance": select_segment_symbols(
+        "ru_finance", bootstrap=_drop_toxic(_BOOTSTRAP_SEGMENT_SYMBOLS["ru_finance"])
+    ),
 }
 
 
