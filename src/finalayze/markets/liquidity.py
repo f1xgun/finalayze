@@ -51,6 +51,29 @@ _MAX_STALENESS_DAYS = _MIN_BARS_FOR_LIQUIDITY * 3
 # mirroring markets/data/moex_universe.json.
 _LIQ_SNAPSHOT = Path(__file__).parent / "data" / "moex_liquidity_universe.json"
 
+# ── Top-N / RUB-floor selection parameters (SINGLE SOURCE -- D-03 / D-11) ────────
+# The operator-chosen Top-N-per-sector and RUB turnover sanity floor, derived from the
+# Task-2 live turnover distribution (Plan 66-04) and recorded in
+# docs/operations/liquidity_universe_runbook.md. These live HERE (Layer 2) as named
+# constants so BOTH the runtime selector (``eligible_universe_as_of`` default ``top_n``)
+# AND the one-shot generator (``scripts/generate_liquidity_universe.py`` argparse defaults)
+# read the SAME values -- no magic numbers, no two divergent copies. The committed snapshot
+# was generated with exactly these (see its ``params`` block); a quarterly regeneration that
+# changes N / the floor edits THESE constants (and re-runs the generator), keeping the
+# committed file and the selector in lock-step.
+_TOP_N_PER_SECTOR = 10  # D-03: Top-10 highest-turnover names per sector.
+_MIN_TURNOVER_FLOOR_RUB = Decimal(1_000_000)  # 1M RUB/day median sanity floor (drop below).
+
+# ── D-11 portfolio no-regression acceptance tolerances (SINGLE SOURCE) ───────────
+# The operator-chosen bar the expanded-universe backtest-iteration is judged against vs the
+# current curated baseline (Task-4 checkpoint / LIQ-10). Recorded here so the runbook and the
+# Task-4 acceptance read identical numbers. Relative tolerances: the expanded universe is
+# accepted iff PF is not worse by more than 5%, MaxDD is not worse (larger) by more than 15%,
+# and WF-Sharpe is not worse by more than 10% -- AND the per-segment WF gate still passes.
+_D11_PF_REGRESSION_TOLERANCE_PCT = Decimal(5)  # PF >= -5% vs baseline.
+_D11_MAXDD_REGRESSION_TOLERANCE_PCT = Decimal(15)  # MaxDD <= +15% (relative) vs baseline.
+_D11_WF_SHARPE_REGRESSION_TOLERANCE_PCT = Decimal(10)  # WF-Sharpe >= -10% vs baseline.
+
 # ── Universal safety filters (single source) ─────────────────────────────────────
 # Applied to the FINAL selected universe (snapshot OR bootstrap) so the exclusion holds
 # regardless of source. Pre-66 these filters lived only on the run_iteration bootstrap
@@ -243,7 +266,7 @@ def eligible_universe_as_of(
     candles_by_symbol: dict[str, list[Candle]],
     rebalance_ts: Any,
     sector_map: dict[str, str],
-    top_n: int,
+    top_n: int = _TOP_N_PER_SECTOR,
 ) -> set[str]:
     """CARDINAL point-in-time eligible universe at ``rebalance_ts`` (D-05 / LIQ-04).
 

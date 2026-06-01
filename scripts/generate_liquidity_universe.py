@@ -63,6 +63,8 @@ from config.segments import SECTOR_TO_SEGMENT
 from finalayze.backtest.config import MOEX_2022_BREAK
 from finalayze.markets.instruments import build_default_registry
 from finalayze.markets.liquidity import (
+    _MIN_TURNOVER_FLOOR_RUB,
+    _TOP_N_PER_SECTOR,
     _apply_safety_filters,
     median_rub_turnover,
     top_n_per_sector,
@@ -474,14 +476,21 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--top-n",
         type=int,
-        default=10,
-        help="Top-N highest-turnover names per sector (operator-chosen from the --dry-run dist).",
+        default=_TOP_N_PER_SECTOR,
+        help=(
+            "Top-N highest-turnover names per sector. Defaults to the single-source "
+            f"liquidity._TOP_N_PER_SECTOR ({_TOP_N_PER_SECTOR}), operator-chosen from the "
+            "--dry-run distribution; override only to re-explore the distribution."
+        ),
     )
     parser.add_argument(
         "--min-turnover-rub",
         type=Decimal,
-        default=None,
-        help="Optional RUB turnover floor: drop any name below this median regardless of rank.",
+        default=_MIN_TURNOVER_FLOOR_RUB,
+        help=(
+            "RUB turnover floor: drop any name below this median regardless of rank. Defaults to "
+            f"the single-source liquidity._MIN_TURNOVER_FLOOR_RUB ({_MIN_TURNOVER_FLOOR_RUB})."
+        ),
     )
     parser.add_argument(
         "--sectors-file",

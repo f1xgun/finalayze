@@ -20,10 +20,12 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from config.segments import SECTOR_TO_SEGMENT
 
 from finalayze.core.exceptions import ConfigurationError
 from finalayze.core.schemas import Candle
 from finalayze.markets import liquidity
+from finalayze.markets.instruments import build_default_registry
 
 # ---------------------------------------------------------------------------
 # Constants (ruff PLR2004 -- no magic numbers)
@@ -277,3 +279,44 @@ class TestTopNPerSector:
         result = liquidity.top_n_per_sector(scores, sector_map, top_n=_TOP_N_TWO)
         # Ranked by turnover desc.
         assert result[_LIQUID_SECTOR] == [_LIQUID_SYMBOL, _OTHER_LIQUID_SYMBOL]
+
+
+# ===================================================================
+# LIQ-02 / LIQ-06: the REAL committed snapshot round-trips the loader
+# ===================================================================
+class TestCommittedSnapshotRoundTrips:
+    """The committed moex_liquidity_universe.json (Task 2) must load fail-closed and be valid.
+
+    Unlike ``TestLoaderFailClosed`` (synthetic monkeypatched files), this exercises the ACTUAL
+    committed artifact through the unchanged ``_load_liquidity_snapshot`` -- proving the
+    operator-generated file (Top-N=10, 1M RUB floor, safety-filtered) round-trips the Plan-01
+    loader: every sector key is a curated D-08 sector, every symbol is in the registry, and each
+    surviving sector resolves to >= 1 ranked name (T-66-14 trust boundary, LIQ-02/06).
+    """
+
+    def test_committed_snapshot_loads_and_is_valid(self) -> None:
+        # Load the REAL committed file through the unchanged fail-closed loader.
+        sectors = liquidity._load_liquidity_snapshot()
+
+        assert sectors, "committed liquidity snapshot resolved to no sectors"
+        # Every surviving sector has >= 1 ranked name (no empty sector committed -- T-66-13).
+        assert all(syms for syms in sectors.values()), sectors
+
+        # IN-05: every sector key is in the curated D-08 source.
+        for sector in sectors:
+            assert sector in SECTOR_TO_SEGMENT, f"unknown sector {sector!r}"
+
+        # Every committed symbol resolves in the snapshot-backed registry (no stale ticker).
+        registry = build_default_registry()
+        moex_symbols = {inst.symbol for inst in registry.list_by_type("moex", "stock")}
+        unknown = {sym for syms in sectors.values() for sym in syms if sym not in moex_symbols}
+        assert not unknown, f"committed symbols not in the MOEX share registry: {sorted(unknown)}"
+
+    def test_single_source_top_n_and_floor_constants(self) -> None:
+        """The committed file's params match the single-source N / floor constants (no drift)."""
+        # The loader strips params; read the raw file to assert the committed params equal the
+        # single-source constants the selector + generator now share.
+        raw = json.loads(liquidity._LIQ_SNAPSHOT.read_text(encoding="utf-8"))
+        params = raw["params"]
+        assert params["top_n"] == liquidity._TOP_N_PER_SECTOR
+        assert Decimal(params["min_turnover_rub"]) == liquidity._MIN_TURNOVER_FLOOR_RUB
