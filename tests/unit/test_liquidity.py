@@ -475,3 +475,46 @@ class TestD11Verdict:
         current = {"pf": _PF_FLOOR, "max_dd": _DD_CEILING, "wf_sharpe": _SHARPE_FLOOR}
         passed, _ = liquidity.d11_verdict(current, _D11_BASELINE)
         assert passed is True
+
+    # RUFIN-03 / D-05: pin EACH tolerance edge individually -- one metric sits exactly on its
+    # own boundary while the other two stay comfortably inside, proving the per-metric bar is the
+    # binding constraint (not an accidental aggregate pass). The companion just-past cases above
+    # (test_pf/maxdd/wf_sharpe_regression_fails) already cover the FAIL side per metric.
+    @pytest.mark.parametrize(
+        ("metric", "boundary_value"),
+        [
+            ("pf", _PF_FLOOR),
+            ("max_dd", _DD_CEILING),
+            ("wf_sharpe", _SHARPE_FLOOR),
+        ],
+    )
+    def test_each_metric_on_its_own_boundary_passes(
+        self, metric: str, boundary_value: float
+    ) -> None:
+        # Others well inside their tolerance; only `metric` sits exactly on its boundary.
+        current = {"pf": 1.50, "max_dd": 0.20, "wf_sharpe": 1.00}
+        current[metric] = boundary_value
+        passed, reasons = liquidity.d11_verdict(current, _D11_BASELINE)
+        assert passed is True
+        assert all("PASS" in r for r in reasons)
+
+    # The companion to test_*_regression_fails: prove that nudging a SINGLE metric just past its
+    # own boundary fails the verdict even when the other two are comfortably inside -- so the gate
+    # cannot be passed by averaging a strong metric against a regressed one (the RUFIN-03 honesty
+    # property: an in-sample PF tick alone cannot rescue a WF-Sharpe / MaxDD regression).
+    @pytest.mark.parametrize(
+        ("metric", "just_past_value", "fail_label"),
+        [
+            ("pf", _PF_FLOOR - _EPS, "PF FAIL"),
+            ("max_dd", _DD_CEILING + _EPS, "MaxDD FAIL"),
+            ("wf_sharpe", _SHARPE_FLOOR - _EPS, "WF-Sharpe FAIL"),
+        ],
+    )
+    def test_single_metric_just_past_boundary_fails(
+        self, metric: str, just_past_value: float, fail_label: str
+    ) -> None:
+        current = {"pf": 1.50, "max_dd": 0.20, "wf_sharpe": 1.00}
+        current[metric] = just_past_value
+        passed, reasons = liquidity.d11_verdict(current, _D11_BASELINE)
+        assert passed is False
+        assert any(fail_label in r for r in reasons)
