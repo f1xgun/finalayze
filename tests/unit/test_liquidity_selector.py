@@ -52,12 +52,17 @@ _FIXTURE_SECTORS: dict[str, list[str]] = {
     _SECTOR_BANKS: ["SBER", "VTBR", "MOEX", "BSPB"],  # delisted TCSG gone
 }
 
-# Expected per-segment set = concatenation of the fixture sectors mapped to that segment.
+# Expected per-segment set = concatenation of the fixture sectors mapped to that segment,
+# AFTER the universal safety post-filter (Plan 66-04): toxic/sanctioned names + preferred-share
+# duplicates are dropped from the FINAL set in ALL three seams. The banks fixture deliberately
+# injects VTBR (toxic) -- it MUST be dropped here, so this fixture doubles as cross-seam proof
+# that the safety filter is applied at the single source (the selector), not per seam.
 _EXPECTED: dict[str, list[str]] = {
     _SEG_BLUE: list(_FIXTURE_SECTORS[_SECTOR_DIVERSIFIED]),
     _SEG_ENERGY: list(_FIXTURE_SECTORS[_SECTOR_OIL_GAS]),
     _SEG_TECH: list(_FIXTURE_SECTORS[_SECTOR_TECH]),
-    _SEG_FINANCE: list(_FIXTURE_SECTORS[_SECTOR_BANKS]),
+    # VTBR dropped by the universal toxic filter (was in the banks fixture).
+    _SEG_FINANCE: [s for s in _FIXTURE_SECTORS[_SECTOR_BANKS] if s != "VTBR"],
 }
 
 # Pre-phase HARDCODED ru_* lists (captured verbatim from the three seams BEFORE Plan 02).
@@ -135,6 +140,58 @@ def test_three_seams_resolve_same_set(_patched_snapshot: None) -> None:
     assert any(_EXPECTED[s] != _OLD_HARDCODED_CONFIG[s] for s in all_segs)
     assert any(_EXPECTED[s] != _OLD_HARDCODED_UNIVERSE[s] for s in common_segments)
     assert any(_EXPECTED[s] != _OLD_HARDCODED_TRAINING[s] for s in all_segs)
+
+
+# ---------------------------------------------------------------------------
+# Safety post-filter applied to the selector output (Plan 66-04)
+# ---------------------------------------------------------------------------
+
+# A mocked snapshot whose banks sector carries BOTH a toxic name (VTBR) and a preferred-share
+# duplicate (SBERP, whose common SBER is in the same sector). The selector MUST drop both.
+_SAFETY_FIXTURE_SECTORS: dict[str, list[str]] = {
+    _SECTOR_BANKS: ["SBER", "VTBR", "SBERP", "MOEX", "BSPB"],
+    # oil_gas: TATNP (pref of TATN, present) must drop; TRNFP (no common TRNF) must STAY;
+    # SNGSP is toxic and must drop; GAZP toxic must drop.
+    _SECTOR_OIL_GAS: ["ROSN", "TATN", "TATNP", "TRNFP", "GAZP", "SNGSP"],
+}
+
+_EXPECTED_BANKS_FILTERED = ["SBER", "MOEX", "BSPB"]  # VTBR + SBERP dropped
+_EXPECTED_OIL_GAS_FILTERED = ["ROSN", "TATN", "TRNFP"]  # TATNP/GAZP/SNGSP dropped, TRNFP kept
+
+
+@pytest.fixture
+def _patched_safety_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the selector at a mocked snapshot containing toxic + preferred-duplicate names."""
+    snap = tmp_path / "moex_liquidity_universe.json"
+    snap.write_text(json.dumps({"sectors": _SAFETY_FIXTURE_SECTORS}), encoding="utf-8")
+    monkeypatch.setattr(liquidity, "_LIQ_SNAPSHOT", snap)
+
+
+def test_selector_drops_toxic_and_preferred_duplicates(_patched_safety_snapshot: None) -> None:
+    """``select_segment_symbols`` applies the universal safety filter to the snapshot output.
+
+    Proves the toxic-symbol exclusion + preferred-share-duplicate drop hold at the SINGLE source
+    (the selector), so they apply regardless of how the symbols entered the snapshot. A standalone
+    preferred (TRNFP, no common TRNF in the set) is preserved -- the rule does not over-exclude.
+    """
+    banks = liquidity.select_segment_symbols(_SEG_FINANCE)
+    assert banks == _EXPECTED_BANKS_FILTERED, banks
+    assert "VTBR" not in banks  # toxic
+    assert "SBERP" not in banks  # preferred duplicate of SBER (present)
+
+    oil_gas = liquidity.select_segment_symbols(_SEG_ENERGY)
+    assert oil_gas == _EXPECTED_OIL_GAS_FILTERED, oil_gas
+    assert "GAZP" not in oil_gas and "SNGSP" not in oil_gas  # toxic
+    assert "TATNP" not in oil_gas  # preferred duplicate of TATN (present)
+    assert "TRNFP" in oil_gas  # standalone preferred (no common) preserved
+
+
+def test_apply_safety_filters_unit() -> None:
+    """Direct unit coverage of the order-preserving safety post-filter."""
+    raw = ["SBER", "VTBR", "SBERP", "TATN", "TATNP", "TRNFP", "GAZP"]
+    filtered = liquidity._apply_safety_filters(raw)
+    # VTBR/GAZP toxic; SBERP/TATNP preferred-dupes; SBER/TATN/TRNFP kept (order preserved).
+    assert filtered == ["SBER", "TATN", "TRNFP"]
 
 
 def test_reload_restores_clean_state() -> None:
