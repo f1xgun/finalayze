@@ -99,7 +99,9 @@ class TestTinkoffBrokerSubmitOrder:
     def test_lot_size_rounding(self) -> None:
         """Quantity must be rounded down to nearest lot_size multiple.
 
-        SBER has lot_size=10. Requesting qty=15 -> actual qty=10.
+        GAZP has lot_size=10 in the MOEX universe snapshot. Requesting qty=15
+        -> actual qty=10. (SBER moved to lot_size=1 in the live snapshot, so
+        GAZP is the lot_size=10 fixture, Plan 65-03 UNIV-07.)
         """
         mock_result = MagicMock()
         mock_result.order_id = "ord-789"
@@ -111,7 +113,7 @@ class TestTinkoffBrokerSubmitOrder:
         broker = _make_broker()
         broker._account_id = "acc-sandbox-001"
         broker._run_async = MagicMock(return_value=mock_result)  # type: ignore[method-assign]
-        order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(15))
+        order = OrderRequest(symbol="GAZP", side="BUY", quantity=Decimal(15))
         result = broker.submit_order(order)
 
         # filled=True but actual quantity rounded to 10
@@ -144,9 +146,13 @@ class TestTinkoffBrokerSubmitOrderSell:
         assert OrderDirection.ORDER_DIRECTION_SELL != OrderDirection.ORDER_DIRECTION_BUY
 
     def test_qty_below_lot_size_returns_unfilled(self) -> None:
-        """SBER lot_size=10, qty=5 -> filled=False, quantity=Decimal(0)."""
+        """GAZP lot_size=10, qty=5 -> filled=False, quantity=Decimal(0).
+
+        (SBER moved to lot_size=1 in the live snapshot, so GAZP is the
+        lot_size=10 fixture, Plan 65-03 UNIV-07.)
+        """
         broker = _make_broker()
-        order = OrderRequest(symbol="SBER", side="BUY", quantity=Decimal(5))
+        order = OrderRequest(symbol="GAZP", side="BUY", quantity=Decimal(5))
         result = broker.submit_order(order)
 
         assert result.filled is False

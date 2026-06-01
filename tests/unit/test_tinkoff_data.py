@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -283,3 +283,231 @@ class TestTinkoffFetcherErrorTypeLogging:
             call_kwargs = mock_log.exception.call_args
             assert call_kwargs[1].get("error_type") == "TimeoutError"
             assert call_kwargs[1].get("figi") == "BBG00FAKE123"
+
+
+# ── All-asset-class discovery (UNIV-03) ─────────────────────────────────
+
+
+def _make_fake_inst(*, real_exchange: int, **fields: object) -> MagicMock:
+    """Build a fake T-Bank instrument object with a MOEX/non-MOEX flag.
+
+    ``getattr`` on a MagicMock auto-creates child mocks, so any attribute the
+    fetcher reads via ``getattr(inst, name, None)`` would be truthy. We restrict
+    the mock to an explicit spec so absent fields surface as the default.
+    """
+    inst = MagicMock(spec=[*fields.keys(), "real_exchange"])
+    inst.real_exchange = real_exchange
+    for name, value in fields.items():
+        setattr(inst, name, value)
+    return inst
+
+
+def _patch_services_with(instruments_method: str, resp_instruments: list[MagicMock]) -> object:
+    """Return an AsyncMock services object whose ``instruments.<method>`` resp
+    carries ``resp_instruments``."""
+    resp = MagicMock()
+    resp.instruments = resp_instruments
+    services = MagicMock()
+    setattr(services.instruments, instruments_method, AsyncMock(return_value=resp))
+    return services
+
+
+class TestFetchAllAssetClasses:
+    """fetch_all_shares/etfs/futures/currencies: MOEX-filtered, error-safe."""
+
+    def test_methods_exist(self) -> None:
+        for name in (
+            "fetch_all_shares",
+            "fetch_all_etfs",
+            "fetch_all_futures",
+            "fetch_all_currencies",
+        ):
+            assert hasattr(TinkoffFetcher, name)
+
+    def test_shares_filters_non_moex(self) -> None:
+        from t_tech.invest.schemas import RealExchange
+
+        fetcher = _make_fetcher()
+        moex = _make_fake_inst(
+            real_exchange=int(RealExchange.REAL_EXCHANGE_MOEX),
+            figi="BBG004730N88",
+            ticker="SBER",
+            isin="RU0009029540",
+            class_code="TQBR",
+            name="Sberbank",
+            lot=10,
+            currency="rub",
+            asset_uid="uid-sber",
+            first_1day_candle_date=datetime(2018, 1, 1, tzinfo=UTC),
+        )
+        rts = _make_fake_inst(
+            real_exchange=int(RealExchange.REAL_EXCHANGE_RTS),
+            figi="BBG000NONMOEX",
+            ticker="AAPL",
+            isin="US0378331005",
+            class_code="SPBXM",
+            name="Apple",
+            lot=1,
+            currency="usd",
+            asset_uid="uid-aapl",
+            first_1day_candle_date=None,
+        )
+        services = _patch_services_with("shares", [moex, rts])
+        with patch.object(fetcher, "_get_services_async", AsyncMock(return_value=services)):
+            result = fetcher.fetch_all_shares()
+        assert len(result) == 1
+        row = result[0]
+        assert row["ticker"] == "SBER"
+        for key in ("figi", "ticker", "isin", "class_code", "name", "lot", "currency", "asset_uid"):
+            assert key in row
+
+    def test_etfs_filters_non_moex(self) -> None:
+        from t_tech.invest.schemas import RealExchange
+
+        fetcher = _make_fetcher()
+        moex = _make_fake_inst(
+            real_exchange=int(RealExchange.REAL_EXCHANGE_MOEX),
+            figi="BBG_ETF",
+            ticker="TMOS",
+            isin="RU000A101X76",
+            class_code="TQTF",
+            name="Tinkoff iMOEX",
+            lot=1,
+            currency="rub",
+            asset_uid="uid-tmos",
+            first_1day_candle_date=None,
+        )
+        rts = _make_fake_inst(real_exchange=int(RealExchange.REAL_EXCHANGE_RTS), ticker="SPY")
+        services = _patch_services_with("etfs", [moex, rts])
+        with patch.object(fetcher, "_get_services_async", AsyncMock(return_value=services)):
+            result = fetcher.fetch_all_etfs()
+        assert len(result) == 1
+        assert result[0]["ticker"] == "TMOS"
+        assert result[0]["asset_uid"] == "uid-tmos"
+
+    def test_futures_carry_expiration_and_basic_asset(self) -> None:
+        from t_tech.invest.schemas import RealExchange
+
+        fetcher = _make_fetcher()
+        moex = _make_fake_inst(
+            real_exchange=int(RealExchange.REAL_EXCHANGE_MOEX),
+            figi="FUTSBER",
+            ticker="SBRF-12.25",
+            class_code="SPBFUT",
+            name="Sberbank Futures",
+            lot=1,
+            currency="rub",
+            basic_asset="SBER",
+            expiration_date=datetime(2025, 12, 19, tzinfo=UTC),
+        )
+        services = _patch_services_with("futures", [moex])
+        with patch.object(fetcher, "_get_services_async", AsyncMock(return_value=services)):
+            result = fetcher.fetch_all_futures()
+        assert len(result) == 1
+        row = result[0]
+        assert row["ticker"] == "SBRF-12.25"
+        assert row["basic_asset"] == "SBER"
+        assert row["expiration_date"] == date(2025, 12, 19)
+
+    def test_currencies_carry_isin(self) -> None:
+        from t_tech.invest.schemas import RealExchange
+
+        fetcher = _make_fetcher()
+        nominal = MagicMock()
+        nominal.units = 1
+        nominal.nano = 0
+        moex = _make_fake_inst(
+            real_exchange=int(RealExchange.REAL_EXCHANGE_MOEX),
+            figi="BBG_USD",
+            ticker="USD000UTSTOM",
+            class_code="CETS",
+            name="USD/RUB",
+            lot=1000,
+            currency="rub",
+            isin="",
+            nominal=nominal,
+        )
+        services = _patch_services_with("currencies", [moex])
+        with patch.object(fetcher, "_get_services_async", AsyncMock(return_value=services)):
+            result = fetcher.fetch_all_currencies()
+        assert len(result) == 1
+        row = result[0]
+        assert row["ticker"] == "USD000UTSTOM"
+        for key in ("figi", "ticker", "currency", "lot", "name"):
+            assert key in row
+
+    def test_shares_returns_empty_on_grpc_error(self) -> None:
+        fetcher = _make_fetcher()
+        with (
+            patch.object(fetcher, "_run_async", side_effect=ConnectionError("gRPC down")),
+            patch("finalayze.data.fetchers.tinkoff_data._log") as mock_log,
+        ):
+            assert fetcher.fetch_all_shares() == []
+            mock_log.exception.assert_called_once()
+            assert mock_log.exception.call_args[1].get("error_type") == "ConnectionError"
+
+
+# ── IN-01: a bond with a None money field does not nuke the whole bond list ─────
+
+
+def _make_fake_bond(
+    ticker: str, *, nominal: object, initial_nominal: object, aci_value: object
+) -> MagicMock:
+    """Build a fake T-Bank bond, controlling the three money fields explicitly."""
+    bond = MagicMock(
+        spec=[
+            "figi",
+            "ticker",
+            "isin",
+            "name",
+            "lot",
+            "currency",
+            "nominal",
+            "initial_nominal",
+            "aci_value",
+            "coupon_quantity_per_year",
+            "maturity_date",
+            "floating_coupon_flag",
+            "amortization_flag",
+            "class_code",
+        ]
+    )
+    bond.figi = f"BBG_{ticker}"
+    bond.ticker = ticker
+    bond.isin = ticker
+    bond.name = ticker
+    bond.lot = 1
+    bond.currency = "rub"
+    bond.nominal = nominal
+    bond.initial_nominal = initial_nominal
+    bond.aci_value = aci_value
+    bond.coupon_quantity_per_year = 0
+    bond.maturity_date = None
+    bond.floating_coupon_flag = False
+    bond.amortization_flag = False
+    bond.class_code = "TQCB"
+    return bond
+
+
+class TestFetchAllBondsMoneyFieldGuard:
+    """IN-01: a malformed money field (None) must not abort the entire bond list."""
+
+    def test_none_money_fields_yield_none_not_attribute_error(self) -> None:
+        fetcher = _make_fetcher()
+        money = MagicMock()
+        money.units = 1000
+        money.nano = 0
+        good = _make_fake_bond("RU000GOOD", nominal=money, initial_nominal=money, aci_value=money)
+        # An exotic bond the SDK returns with None for every money field.
+        bad = _make_fake_bond("RU000EXOTIC", nominal=None, initial_nominal=None, aci_value=None)
+        services = _patch_services_with("bonds", [good, bad])
+        with patch.object(fetcher, "_get_services_async", AsyncMock(return_value=services)):
+            result = fetcher.fetch_all_bonds()
+        # Both bonds survive -- the bad row does NOT raise and zero out the whole list.
+        assert len(result) == 2
+        good_row = next(r for r in result if r["ticker"] == "RU000GOOD")
+        assert good_row["nominal"] == Decimal(1000)
+        bad_row = next(r for r in result if r["ticker"] == "RU000EXOTIC")
+        assert bad_row["nominal"] is None
+        assert bad_row["initial_nominal"] is None
+        assert bad_row["aci_value"] is None

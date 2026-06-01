@@ -279,6 +279,7 @@ class TinkoffFetcher(BaseFetcher):
         returns ``instrument.asset_uid``. Returns None on an unknown symbol
         (share_by raises for every class_code) — no raise.
         """
+        from t_tech.invest.exceptions import AioRequestError, RequestError  # noqa: PLC0415
         from t_tech.invest.schemas import InstrumentIdType  # noqa: PLC0415
 
         for class_code in ("TQBR", "TQTF", "TQPI"):
@@ -290,12 +291,26 @@ class TinkoffFetcher(BaseFetcher):
                 )
                 return str(resp.instrument.asset_uid)
             except Exception as exc:  # try next class_code; None if all fail
-                _log.debug(
-                    "asset_uid_lookup_miss",
-                    symbol=ticker,
-                    class_code=class_code,
-                    error_type=type(exc).__name__,
-                )
+                # IN-06: a "ticker not on this board" gRPC error is the expected
+                # not-found signal (SDK RequestError/AioRequestError) -> debug + continue.
+                # Anything else (e.g. an AttributeError from an SDK API change) is a
+                # genuine bug masquerading as "symbol not found" and would silently
+                # drop fundamentals -- log it at warning so real breakage is visible.
+                # The "returns None when not found on any board" contract is unchanged.
+                if isinstance(exc, (AioRequestError, RequestError)):
+                    _log.debug(
+                        "asset_uid_lookup_miss",
+                        symbol=ticker,
+                        class_code=class_code,
+                        error_type=type(exc).__name__,
+                    )
+                else:
+                    _log.warning(
+                        "asset_uid_lookup_unexpected_error",
+                        symbol=ticker,
+                        class_code=class_code,
+                        error_type=type(exc).__name__,
+                    )
                 continue
         return None
 
@@ -525,9 +540,21 @@ class TinkoffFetcher(BaseFetcher):
         )
         result: list[dict[str, Any]] = []
         for bond in resp.instruments:
-            nominal = self._money_to_decimal(bond.nominal)
-            initial_nom = self._money_to_decimal(bond.initial_nominal)
-            aci = self._money_to_decimal(bond.aci_value)
+            # Guard each money field (IN-01): the SDK can return None for these on
+            # exotic instruments, and _money_to_decimal would AttributeError on None.
+            # Consistent with the currency path (_fetch_all_currencies_async). Without
+            # the guard, one malformed bond would propagate out and the broad
+            # `except Exception: return []` in fetch_all_bonds would zero the whole list.
+            nominal_raw = getattr(bond, "nominal", None)
+            nominal = self._money_to_decimal(nominal_raw) if nominal_raw is not None else None
+            initial_nominal_raw = getattr(bond, "initial_nominal", None)
+            initial_nom = (
+                self._money_to_decimal(initial_nominal_raw)
+                if initial_nominal_raw is not None
+                else None
+            )
+            aci_raw = getattr(bond, "aci_value", None)
+            aci = self._money_to_decimal(aci_raw) if aci_raw is not None else None
 
             maturity = None
             if hasattr(bond, "maturity_date") and bond.maturity_date:
@@ -567,6 +594,187 @@ class TinkoffFetcher(BaseFetcher):
                     "call_date": call_d,
                     "perpetual_flag": getattr(bond, "perpetual_flag", False),
                     "api_trade_available_flag": getattr(bond, "api_trade_available_flag", False),
+                }
+            )
+        return result
+
+    # ── All-asset-class discovery (UNIV-03) ────────────────────────────────
+
+    def fetch_all_shares(self) -> list[dict[str, Any]]:
+        """Fetch all MOEX shares from T-Invest API (sibling of fetch_all_bonds).
+
+        Each dict carries figi, ticker, isin, class_code, name, lot, currency,
+        asset_uid, first_1day_candle_date. Filtered to real_exchange == MOEX.
+        Handles gRPC errors gracefully (logs and returns empty list).
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            return self._run_async(self._fetch_all_shares_async())  # type: ignore[return-value]
+        except Exception as exc:
+            _log.exception("fetch_all_shares_failed", error_type=type(exc).__name__)
+            return []
+
+    def fetch_all_etfs(self) -> list[dict[str, Any]]:
+        """Fetch all MOEX ETFs from T-Invest API (sibling of fetch_all_bonds).
+
+        Same field shape as fetch_all_shares. Filtered to real_exchange == MOEX.
+        Handles gRPC errors gracefully (logs and returns empty list).
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            return self._run_async(self._fetch_all_etfs_async())  # type: ignore[return-value]
+        except Exception as exc:
+            _log.exception("fetch_all_etfs_failed", error_type=type(exc).__name__)
+            return []
+
+    def fetch_all_futures(self) -> list[dict[str, Any]]:
+        """Fetch all MOEX futures from T-Invest API (sibling of fetch_all_bonds).
+
+        Each dict carries figi, ticker, class_code, name, lot, currency,
+        basic_asset, expiration_date. Futures have no isin. Filtered to
+        real_exchange == MOEX. Handles gRPC errors gracefully (returns []).
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            return self._run_async(self._fetch_all_futures_async())  # type: ignore[return-value]
+        except Exception as exc:
+            _log.exception("fetch_all_futures_failed", error_type=type(exc).__name__)
+            return []
+
+    def fetch_all_currencies(self) -> list[dict[str, Any]]:
+        """Fetch all MOEX currencies from T-Invest API (sibling of fetch_all_bonds).
+
+        Each dict carries figi, ticker, class_code, name, lot, currency, isin,
+        nominal. Filtered to real_exchange == MOEX. Handles gRPC errors
+        gracefully (logs and returns empty list).
+        """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            return self._run_async(self._fetch_all_currencies_async())  # type: ignore[return-value]
+        except Exception as exc:
+            _log.exception("fetch_all_currencies_failed", error_type=type(exc).__name__)
+            return []
+
+    @staticmethod
+    def _to_date(value: Any) -> date | None:
+        """Normalize an SDK datetime/date to date (mirrors fetch_all_bonds)."""
+        if not value:
+            return None
+        result: date = value.date() if hasattr(value, "date") else value
+        return result
+
+    async def _fetch_all_shares_async(self) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK shares()."""
+        from t_tech.invest.schemas import InstrumentStatus, RealExchange  # noqa: PLC0415
+
+        services = await self._get_services_async()
+        resp = await services.instruments.shares(  # type: ignore[attr-defined]
+            instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
+        )
+        result: list[dict[str, Any]] = []
+        for inst in resp.instruments:
+            if inst.real_exchange != RealExchange.REAL_EXCHANGE_MOEX:
+                continue  # MOEX filter -- one stable enum across all 5 classes
+            result.append(
+                {
+                    "figi": getattr(inst, "figi", None),
+                    "ticker": getattr(inst, "ticker", None),
+                    "isin": getattr(inst, "isin", None),
+                    "class_code": getattr(inst, "class_code", None),
+                    "name": getattr(inst, "name", None),
+                    "lot": getattr(inst, "lot", None),
+                    "currency": getattr(inst, "currency", None),
+                    "asset_uid": getattr(inst, "asset_uid", None),
+                    "first_1day_candle_date": self._to_date(
+                        getattr(inst, "first_1day_candle_date", None)
+                    ),
+                }
+            )
+        return result
+
+    async def _fetch_all_etfs_async(self) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK etfs()."""
+        from t_tech.invest.schemas import InstrumentStatus, RealExchange  # noqa: PLC0415
+
+        services = await self._get_services_async()
+        resp = await services.instruments.etfs(  # type: ignore[attr-defined]
+            instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
+        )
+        result: list[dict[str, Any]] = []
+        for inst in resp.instruments:
+            if inst.real_exchange != RealExchange.REAL_EXCHANGE_MOEX:
+                continue  # MOEX filter
+            result.append(
+                {
+                    "figi": getattr(inst, "figi", None),
+                    "ticker": getattr(inst, "ticker", None),
+                    "isin": getattr(inst, "isin", None),
+                    "class_code": getattr(inst, "class_code", None),
+                    "name": getattr(inst, "name", None),
+                    "lot": getattr(inst, "lot", None),
+                    "currency": getattr(inst, "currency", None),
+                    "asset_uid": getattr(inst, "asset_uid", None),
+                    "first_1day_candle_date": self._to_date(
+                        getattr(inst, "first_1day_candle_date", None)
+                    ),
+                }
+            )
+        return result
+
+    async def _fetch_all_futures_async(self) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK futures()."""
+        from t_tech.invest.schemas import InstrumentStatus, RealExchange  # noqa: PLC0415
+
+        services = await self._get_services_async()
+        resp = await services.instruments.futures(  # type: ignore[attr-defined]
+            instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
+        )
+        result: list[dict[str, Any]] = []
+        for inst in resp.instruments:
+            if inst.real_exchange != RealExchange.REAL_EXCHANGE_MOEX:
+                continue  # MOEX filter
+            result.append(
+                {
+                    "figi": getattr(inst, "figi", None),
+                    "ticker": getattr(inst, "ticker", None),
+                    "class_code": getattr(inst, "class_code", None),
+                    "name": getattr(inst, "name", None),
+                    "lot": getattr(inst, "lot", None),
+                    "currency": getattr(inst, "currency", None),
+                    "basic_asset": getattr(inst, "basic_asset", None),
+                    "expiration_date": self._to_date(getattr(inst, "expiration_date", None)),
+                }
+            )
+        return result
+
+    async def _fetch_all_currencies_async(self) -> list[dict[str, Any]]:
+        """Async call to T-Bank SDK currencies()."""
+        from t_tech.invest.schemas import InstrumentStatus, RealExchange  # noqa: PLC0415
+
+        services = await self._get_services_async()
+        resp = await services.instruments.currencies(  # type: ignore[attr-defined]
+            instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE,
+        )
+        result: list[dict[str, Any]] = []
+        for inst in resp.instruments:
+            if inst.real_exchange != RealExchange.REAL_EXCHANGE_MOEX:
+                continue  # MOEX filter
+            nominal_raw = getattr(inst, "nominal", None)
+            nominal = self._money_to_decimal(nominal_raw) if nominal_raw is not None else None
+            result.append(
+                {
+                    "figi": getattr(inst, "figi", None),
+                    "ticker": getattr(inst, "ticker", None),
+                    "class_code": getattr(inst, "class_code", None),
+                    "name": getattr(inst, "name", None),
+                    "lot": getattr(inst, "lot", None),
+                    "currency": getattr(inst, "currency", None),
+                    "isin": getattr(inst, "isin", None),
+                    "nominal": nominal,
                 }
             )
         return result
