@@ -16,10 +16,12 @@ All inputs are constructed in-test; no live data / token needed.
 from __future__ import annotations
 
 import json
+import random
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+import structlog.testing
 from config.segments import SECTOR_TO_SEGMENT
 
 from finalayze.core.exceptions import ConfigurationError
@@ -55,6 +57,9 @@ _FUTURE_OFFSET_DAYS = 5
 
 _TOP_N = 1
 _TOP_N_TWO = 2
+
+# WR-02: deterministic shuffle seed (no magic number in the test body).
+_SHUFFLE_SEED = 42
 
 # Known per-bar turnover so median is exactly predictable.
 _EXPECTED_MEDIAN_TURNOVER = Decimal(str(float(_LIQUID_CLOSE) * _LIQUID_VOLUME))
@@ -320,3 +325,92 @@ class TestCommittedSnapshotRoundTrips:
         params = raw["params"]
         assert params["top_n"] == liquidity._TOP_N_PER_SECTOR
         assert Decimal(params["min_turnover_rub"]) == liquidity._MIN_TURNOVER_FLOOR_RUB
+
+
+# ===================================================================
+# WR-01: an enabled segment resolving to [] from a PRESENT snapshot warns (no silent dead segment)
+# ===================================================================
+class TestSelectorEmptyFromSnapshotWarns:
+    """A PRESENT snapshot lacking a segment's sector must surface a warning, not silently
+    return [] (the ru_utilities all-toxic case). Distinct from the absent-file bootstrap
+    path, which keeps its own ``liquidity_snapshot_absent_bootstrap`` warning."""
+
+    _EMPTY_SEGMENT = "ru_utilities"
+    _PRESENT_SEGMENT = "ru_energy"
+
+    def _write_snapshot(self, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        # A PRESENT snapshot whose only sector maps to a DIFFERENT segment, so the target
+        # segment resolves to no symbols (mirrors utilities dropped at generate time).
+        present_sector = next(
+            sec for sec, seg in SECTOR_TO_SEGMENT.items() if seg == self._PRESENT_SEGMENT
+        )
+        snap = tmp_path / "liq.json"
+        snap.write_text(
+            json.dumps({"sectors": {present_sector: [_LIQUID_SYMBOL]}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(liquidity, "_LIQ_SNAPSHOT", snap)
+
+    def test_empty_enabled_segment_warns_and_returns_empty(self, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        self._write_snapshot(tmp_path, monkeypatch)
+        with structlog.testing.capture_logs() as captured:
+            result = liquidity.select_segment_symbols(self._EMPTY_SEGMENT)
+        assert result == []
+        warned = [e for e in captured if e["event"] == "segment_resolved_empty_from_snapshot"]
+        assert warned, captured
+        assert warned[0]["segment_id"] == self._EMPTY_SEGMENT
+
+    def test_non_empty_segment_does_not_warn(self, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        self._write_snapshot(tmp_path, monkeypatch)
+        with structlog.testing.capture_logs() as captured:
+            result = liquidity.select_segment_symbols(self._PRESENT_SEGMENT)
+        assert result == [_LIQUID_SYMBOL]
+        assert not [e for e in captured if e["event"] == "segment_resolved_empty_from_snapshot"]
+
+
+# ===================================================================
+# WR-02: turnover/staleness logic is sort-order-independent (no fetcher-order assumption)
+# ===================================================================
+class TestCandleOrderIndependence:
+    """Shuffled candle input must yield identical selection AND turnover to sorted input --
+    the trailing-window / staleness logic sorts by timestamp internally, so no Layer-2 seam
+    has to enforce ascending fetcher order."""
+
+    def test_median_turnover_shuffled_matches_sorted(self) -> None:
+        # Ascending turnover per bar so order matters for WHICH bars are in the trailing window.
+        sorted_candles = [
+            _candle(_LIQUID_SYMBOL, _BASE_TS + timedelta(days=i), _LIQUID_CLOSE, _LIQUID_VOLUME + i)
+            for i in range(_WINDOW + 10)
+        ]
+        shuffled = list(sorted_candles)
+        random.Random(_SHUFFLE_SEED).shuffle(shuffled)
+
+        from_sorted = liquidity.median_rub_turnover(sorted_candles, window=_WINDOW)
+        from_shuffled = liquidity.median_rub_turnover(shuffled, window=_WINDOW)
+        assert from_sorted == from_shuffled
+        assert from_sorted is not None
+
+    def test_as_of_selection_shuffled_matches_sorted(self) -> None:
+        liquid = _series(_LIQUID_SYMBOL, n_bars=_WINDOW, close=_LIQUID_CLOSE, volume=_LIQUID_VOLUME)
+        other = _series(
+            _OTHER_LIQUID_SYMBOL, n_bars=_WINDOW, close=_THIN_CLOSE, volume=_THIN_VOLUME
+        )
+        sector_map = {_LIQUID_SYMBOL: _LIQUID_SECTOR, _OTHER_LIQUID_SYMBOL: _LIQUID_SECTOR}
+
+        sorted_input = {_LIQUID_SYMBOL: liquid, _OTHER_LIQUID_SYMBOL: other}
+        rng = random.Random(_SHUFFLE_SEED)
+        shuffled_input = {}
+        for sym, cs in sorted_input.items():
+            shuf = list(cs)
+            rng.shuffle(shuf)
+            shuffled_input[sym] = shuf
+
+        from_sorted = liquidity.eligible_universe_as_of(
+            sorted_input, _REBALANCE_TS, sector_map, top_n=_TOP_N
+        )
+        from_shuffled = liquidity.eligible_universe_as_of(
+            shuffled_input, _REBALANCE_TS, sector_map, top_n=_TOP_N
+        )
+        assert from_sorted == from_shuffled
+        # Sanity: the higher-turnover name wins Top-1.
+        assert from_sorted == {_LIQUID_SYMBOL}

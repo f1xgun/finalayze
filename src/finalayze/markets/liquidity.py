@@ -141,9 +141,17 @@ def median_rub_turnover(
 
     Returns ``None`` for a short-history name (< ``window`` bars) so the caller excludes
     it (Pitfall 7 / LIQ-01). The caller is responsible for the ``<= as_of`` filter and
-    any ``MOEX_2022_BREAK`` exclusion -- this helper does not look at timestamps.
+    any ``MOEX_2022_BREAK`` exclusion.
+
+    WR-02: the "trailing ``window``" is the window of the most-recent ``window`` bars BY
+    TIMESTAMP, so the candles are sorted ascending by ``timestamp`` here before slicing
+    ``[-window:]``. No Layer-2 seam enforces fetcher sort-order (``TinkoffFetcher`` /
+    ``CachingFetcher`` / yfinance), so relying on positional order would silently pick the
+    wrong bars for an out-of-order list. The median itself is order-independent, but WHICH
+    bars fall in the window is not -- hence the explicit sort.
     """
-    recent = candles[-window:]
+    ordered = sorted(candles, key=lambda c: c.timestamp)
+    recent = ordered[-window:]
     if len(recent) < window:
         return None
     daily = [float(c.close) * c.volume for c in recent]
@@ -236,7 +244,16 @@ def select_segment_symbols(
     # duplicates dropped from the FINAL selected set, regardless of source (D-04 trust
     # boundary returns the snapshot verbatim EXCEPT for these always-on safety filters,
     # which were a pre-66 invariant on every ru_* universe).
-    return _apply_safety_filters(out)
+    result = _apply_safety_filters(out)
+    if not result:
+        # WR-01: the snapshot is PRESENT (not the absent-file bootstrap path above) yet this
+        # segment resolves to ZERO symbols -- e.g. its only liquid sector was all-toxic
+        # (ru_utilities: IRAO was the sole >=1M-RUB utility and is sanctioned). An empty
+        # liquid set is LEGITIMATE (we do NOT raise -- an all-toxic sector is a valid outcome),
+        # but an enabled segment that silently trades nothing must surface so it cannot pass as
+        # a dead-but-"enabled" segment. Distinct from the absent-file bootstrap warning above.
+        _log.warning("segment_resolved_empty_from_snapshot", segment_id=segment_id)
+    return result
 
 
 def top_n_per_sector(
@@ -281,7 +298,15 @@ def eligible_universe_as_of(
     staleness_cutoff = rebalance_ts - timedelta(days=_MAX_STALENESS_DAYS)
     scores: dict[str, Decimal] = {}
     for symbol, candles in candles_by_symbol.items():
-        past = [c for c in candles if c.timestamp <= rebalance_ts]
+        # WR-02: sort the visible (<= rebalance_ts) candles ascending by timestamp so the
+        # staleness guard (``past[-1].timestamp``) and the trailing-window selection are a
+        # CORRECTNESS obligation, not an implicit assumption about fetcher order. No Layer-2
+        # seam enforces ascending-by-timestamp fetcher output; an out-of-order list would
+        # otherwise silently use the wrong "most recent" bar for the survivorship check.
+        past = sorted(
+            (c for c in candles if c.timestamp <= rebalance_ts),
+            key=lambda c: c.timestamp,
+        )
         if not past:
             continue
         # Survivorship guard: a delisted/stale name whose most-recent visible candle is
