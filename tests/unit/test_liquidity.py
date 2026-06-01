@@ -21,7 +21,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-import structlog.testing
 from config.segments import SECTOR_TO_SEGMENT
 
 from finalayze.core.exceptions import ConfigurationError
@@ -351,21 +350,33 @@ class TestSelectorEmptyFromSnapshotWarns:
         )
         monkeypatch.setattr(liquidity, "_LIQ_SNAPSHOT", snap)
 
+    def _capture_warnings(self, monkeypatch) -> list[tuple[str, dict[str, object]]]:  # type: ignore[no-untyped-def]
+        # Monkeypatch the module logger's .warning directly: deterministic regardless of any
+        # global structlog config a prior test installed (structlog.testing.capture_logs can be
+        # bypassed by a cached bound logger -- cache_logger_on_first_use=True per CLAUDE.md).
+        events: list[tuple[str, dict[str, object]]] = []
+
+        def _record(event: str, **kw: object) -> None:
+            events.append((event, kw))
+
+        monkeypatch.setattr(liquidity._log, "warning", _record)
+        return events
+
     def test_empty_enabled_segment_warns_and_returns_empty(self, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
         self._write_snapshot(tmp_path, monkeypatch)
-        with structlog.testing.capture_logs() as captured:
-            result = liquidity.select_segment_symbols(self._EMPTY_SEGMENT)
+        events = self._capture_warnings(monkeypatch)
+        result = liquidity.select_segment_symbols(self._EMPTY_SEGMENT)
         assert result == []
-        warned = [e for e in captured if e["event"] == "segment_resolved_empty_from_snapshot"]
-        assert warned, captured
+        warned = [kw for ev, kw in events if ev == "segment_resolved_empty_from_snapshot"]
+        assert warned, events
         assert warned[0]["segment_id"] == self._EMPTY_SEGMENT
 
     def test_non_empty_segment_does_not_warn(self, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
         self._write_snapshot(tmp_path, monkeypatch)
-        with structlog.testing.capture_logs() as captured:
-            result = liquidity.select_segment_symbols(self._PRESENT_SEGMENT)
+        events = self._capture_warnings(monkeypatch)
+        result = liquidity.select_segment_symbols(self._PRESENT_SEGMENT)
         assert result == [_LIQUID_SYMBOL]
-        assert not [e for e in captured if e["event"] == "segment_resolved_empty_from_snapshot"]
+        assert not [ev for ev, _ in events if ev == "segment_resolved_empty_from_snapshot"]
 
 
 # ===================================================================
