@@ -213,24 +213,29 @@ UNIVERSE: dict[str, list[str]] = {
     # source shared with config.segments and training/cli.py. No hardcoded ru_* share
     # lists (the old YNDX/POLY/TCSG/etc. were delisted/stale). US entries above stay
     # hardcoded (enabled=False, frozen -- NOT re-pointed at the MOEX selector).
+    #
+    # 66-04: derive a key for EVERY enabled MOEX ru_* SHARE segment directly from
+    # DEFAULT_SEGMENTS (single source -- it can never drift again). This is exactly the
+    # bug that made the Phase-66 iteration skip ru_consumer/ru_telecom/ru_construction/
+    # ru_chemicals/ru_transport (plus ru_metals/ru_utilities): those KEYS simply did not
+    # exist here, even though the selector resolves all of them. Each value is selector-
+    # driven (LIQ-08) so it stays identical to config.segments and training/cli.py.
     # Prior-list bootstrap (pre-66-04): when the committed snapshot FILE is absent the
     # selector returns these hardcoded lists (single source: config._BOOTSTRAP_SEGMENT_SYMBOLS)
     # so this seam stays populated and identical to the other two; once the snapshot lands
     # the liquid set replaces them. The toxic filter is applied to the BOOTSTRAP ARGUMENT
-    # only (not the live selector output): pre-66 run_iteration always dropped toxic /
-    # sanctioned names (e.g. VTBR) from its ru_finance bootstrap, while the generated liquid
-    # snapshot is the trust boundary and is returned verbatim (D-04) -- so the three-seams
-    # single-source guarantee under a present snapshot is unaffected.
-    "ru_blue_chips": select_segment_symbols(
-        "ru_blue_chips",
-        bootstrap=_drop_toxic(_BOOTSTRAP_SEGMENT_SYMBOLS["ru_blue_chips"]),
-    ),
-    "ru_energy": select_segment_symbols(
-        "ru_energy", bootstrap=_drop_toxic(_BOOTSTRAP_SEGMENT_SYMBOLS["ru_energy"])
-    ),
-    "ru_finance": select_segment_symbols(
-        "ru_finance", bootstrap=_drop_toxic(_BOOTSTRAP_SEGMENT_SYMBOLS["ru_finance"])
-    ),
+    # (defense-in-depth; the selector also re-applies _apply_safety_filters universally):
+    # pre-66 run_iteration always dropped toxic / sanctioned names (e.g. VTBR) from its ru_*
+    # bootstrap, while the generated liquid snapshot is the trust boundary and is returned
+    # post-safety-filter (D-04) -- so the three-seams single-source guarantee holds.
+    **{
+        seg.segment_id: select_segment_symbols(
+            seg.segment_id,
+            bootstrap=_drop_toxic(_BOOTSTRAP_SEGMENT_SYMBOLS[seg.segment_id]),
+        )
+        for seg in DEFAULT_SEGMENTS
+        if seg.market == "moex" and seg.enabled and seg.instrument_type == "stock"
+    },
 }
 
 
