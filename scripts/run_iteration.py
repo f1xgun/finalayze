@@ -780,17 +780,19 @@ def _normalize_trades_to_usd(
     """Convert MOEX trade values to USD for cross-segment aggregation."""
     if not segment.startswith("ru_"):
         return trades
+    # model_copy(update=...) overrides ONLY the currency-denominated fields and
+    # carries every other field through verbatim. This keeps all current AND
+    # future TradeResult fields (e.g. exit_reason / entry_strategy / instrument_type)
+    # intact, so the cross-segment all_trades aggregation cannot silently drop
+    # attribution data when new fields are added (WR-01).
     return [
-        TradeResult(
-            signal_id=t.signal_id,
-            symbol=t.symbol,
-            side=t.side,
-            quantity=t.quantity,
-            entry_price=t.entry_price / _FALLBACK_USDRUB,
-            exit_price=t.exit_price / _FALLBACK_USDRUB,
-            pnl=t.pnl / _FALLBACK_USDRUB,
-            pnl_pct=t.pnl_pct,  # percentage is currency-agnostic
-            hold_bars=t.hold_bars,
+        t.model_copy(
+            update={
+                "entry_price": t.entry_price / _FALLBACK_USDRUB,
+                "exit_price": t.exit_price / _FALLBACK_USDRUB,
+                "pnl": t.pnl / _FALLBACK_USDRUB,
+                "coupon_income": t.coupon_income / _FALLBACK_USDRUB,
+            }
         )
         for t in trades
     ]
