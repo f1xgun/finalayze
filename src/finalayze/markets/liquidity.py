@@ -51,24 +51,22 @@ _MAX_STALENESS_DAYS = _MIN_BARS_FOR_LIQUIDITY * 3
 # mirroring markets/data/moex_universe.json.
 _LIQ_SNAPSHOT = Path(__file__).parent / "data" / "moex_liquidity_universe.json"
 
-# Curated valid-sector set (V5 / IN-05 trust boundary). Plan 02 replaces this with the
-# keys of config.segments.SECTOR_TO_SEGMENT (single source); until that downward Layer-1
-# import is wired, this module-level fallback keeps the loader independently green.
-_VALID_SECTORS: frozenset[str] = frozenset(
-    {
-        "oil_gas",
-        "banks",
-        "metals_mining",
-        "utilities",
-        "telecom",
-        "consumer",
-        "transport",
-        "chemicals",
-        "tech",
-        "real_estate",
-        "diversified",
-    }
-)
+
+def _valid_sectors() -> frozenset[str]:
+    """Curated valid-sector set (V5 / IN-05 trust boundary), SINGLE-SOURCED from config.
+
+    Plan 02 makes ``config.segments.SECTOR_TO_SEGMENT`` the one authoritative sector
+    source: its keys ARE the set of valid snapshot sectors. The import is done lazily
+    here (not at module top) to avoid a circular import at boot -- ``config.segments``
+    imports ``select_segment_symbols`` from THIS module to populate ``DEFAULT_SEGMENTS``,
+    while THIS module reads ``SECTOR_TO_SEGMENT`` from config. A top-level import either
+    way would form a cycle; the lazy call here runs only after both modules have finished
+    importing. (config Layer 1 <-> markets Layer 2 -- see config/segments.py for the
+    documented layer note.)
+    """
+    from config.segments import SECTOR_TO_SEGMENT  # noqa: PLC0415
+
+    return frozenset(SECTOR_TO_SEGMENT.keys())
 
 
 def median_rub_turnover(
@@ -107,23 +105,53 @@ def _load_liquidity_snapshot() -> dict[str, list[str]]:
 
     # IN-05: validate every sector key against the curated set. The committed file is
     # attacker-influenceable; an unknown sector must surface, not be silently traded.
+    valid = _valid_sectors()
     for sector in sectors:
-        if sector not in _VALID_SECTORS:
+        if sector not in valid:
             msg = (
                 f"unknown sector {sector!r} in liquidity snapshot at {_LIQ_SNAPSHOT} "
-                f"(valid: {sorted(_VALID_SECTORS)})"
+                f"(valid: {sorted(valid)})"
             )
             raise ConfigurationError(msg)
     return sectors
 
 
-def select_segment_symbols(segment_id: str, sector_to_segment: dict[str, str]) -> list[str]:
+def select_segment_symbols(
+    segment_id: str, sector_to_segment: dict[str, str] | None = None
+) -> list[str]:
     """Thin LIVE selector: ranked symbols for ``segment_id`` from the committed snapshot.
 
     Maps each snapshot sector to its segment via ``sector_to_segment`` (the curated D-08
-    map, supplied by the caller -- this Layer-2 module does not import Layer-1 config).
-    No live calls. Returns the concatenated ranked symbol list for the segment (LIQ-03).
+    map). When ``sector_to_segment`` is ``None`` (the LIVE config-construction call from
+    ``config.segments.DEFAULT_SEGMENTS``), the curated map is read lazily from
+    ``config.segments.SECTOR_TO_SEGMENT`` -- the single D-08 source. No live calls.
+    Returns the concatenated ranked symbol list for the segment (LIQ-03).
+
+    Bootstrap tolerance (pre-66-04): the committed snapshot artifact is written by
+    ``scripts/generate_liquidity_universe.py`` (Plan 66-04). Until it is generated the
+    FILE does not exist yet -- this is the expected bootstrap state, NOT tampering. In
+    that single case the selector returns an EMPTY list (an empty live universe trades
+    nothing -- safe) so that ``import config.segments`` and the whole boot path stay
+    importable before the artifact lands. This is NOT a stale-list fallback: a snapshot
+    that EXISTS but is corrupt / has an unknown sector still fails-closed (the loader
+    raises ``ConfigurationError``, propagated here), per D-04 / T-66-08.
     """
+    if sector_to_segment is None:
+        from config.segments import SECTOR_TO_SEGMENT  # noqa: PLC0415
+
+        sector_to_segment = SECTOR_TO_SEGMENT
+
+    if not _LIQ_SNAPSHOT.exists():
+        # Bootstrap: artifact not yet generated (Plan 66-04). Empty live universe, not a
+        # stale list. A corrupt/tampered EXISTING file is still fail-closed below.
+        _log.warning(
+            "liquidity_snapshot_absent_bootstrap",
+            segment_id=segment_id,
+            path=str(_LIQ_SNAPSHOT),
+            note="empty live universe until generate_liquidity_universe.py runs (Plan 66-04)",
+        )
+        return []
+
     sectors = _load_liquidity_snapshot()
     out: list[str] = []
     for sector, symbols in sectors.items():
