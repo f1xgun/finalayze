@@ -391,6 +391,7 @@ class BacktestEngine:
                         chandelier_stops=chandelier_stops,
                         bar_index=i,
                         trades=trades,
+                        exit_reason="stop",
                     )
 
             # After stop-loss exit, skip to next bar (don't re-enter same bar)
@@ -423,6 +424,7 @@ class BacktestEngine:
                                 chandelier_stops=chandelier_stops,
                                 bar_index=i,
                                 trades=trades,
+                                exit_reason="force_close",
                             )
                     snapshots.append(broker.get_portfolio())
                     continue
@@ -483,6 +485,7 @@ class BacktestEngine:
                                     chandelier_stops=chandelier_stops,
                                     bar_index=i,
                                     trades=trades,
+                                    exit_reason="profit_target",
                                 )
                                 self._journal.record_skip(
                                     timestamp=candle.timestamp,
@@ -521,6 +524,7 @@ class BacktestEngine:
                                 chandelier_stops=chandelier_stops,
                                 bar_index=i,
                                 trades=trades,
+                                exit_reason="time",
                             )
                             self._journal.record_skip(
                                 timestamp=candle.timestamp,
@@ -652,6 +656,7 @@ class BacktestEngine:
                         chandelier_stops=chandelier_stops,
                         bar_index=_last_bar,
                         trades=trades,
+                        exit_reason="force_close",
                     )
             else:
                 unclosed_at_end = sum(1 for _, qty in open_positions if qty > 0)
@@ -857,6 +862,7 @@ class BacktestEngine:
                             chandelier_stops=chandelier_stops,
                             bar_index=bar_counts.get(sr.symbol, 0),
                             trades=trades,
+                            exit_reason="stop",
                         )
 
             # Check profit target and time exit for all symbols
@@ -894,6 +900,7 @@ class BacktestEngine:
                                         chandelier_stops=chandelier_stops,
                                         bar_index=bar_counts.get(sym, 0),
                                         trades=trades,
+                                        exit_reason="profit_target",
                                     )
                                 continue
 
@@ -918,6 +925,7 @@ class BacktestEngine:
                                     chandelier_stops=chandelier_stops,
                                     bar_index=bar_counts.get(sym, 0),
                                     trades=trades,
+                                    exit_reason="time",
                                 )
                             continue
 
@@ -1021,6 +1029,7 @@ class BacktestEngine:
                     chandelier_stops=chandelier_stops,
                     bar_index=bar_counts.get(sym, 0),
                     trades=trades,
+                    exit_reason="force_close",
                 )
         elif candles_by_symbol:
             unclosed = sum(1 for q in broker.get_positions().values() if q > 0)
@@ -1070,6 +1079,7 @@ class BacktestEngine:
         chandelier_stops: dict[str, Decimal],
         bar_index: int,
         trades: list[TradeResult],
+        exit_reason: str | None = None,
     ) -> TradeResult:
         """Close a position and record the trade.
 
@@ -1086,6 +1096,7 @@ class BacktestEngine:
             chandelier_stops=chandelier_stops,
             bar_index=bar_index,
             trades=trades,
+            exit_reason=exit_reason,
         )
 
     def _journal_decision(
