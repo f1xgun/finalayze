@@ -425,3 +425,53 @@ class TestCandleOrderIndependence:
         assert from_sorted == from_shuffled
         # Sanity: the higher-turnover name wins Top-1.
         assert from_sorted == {_LIQUID_SYMBOL}
+
+
+# ===================================================================
+# IN-01: d11_verdict -- the single consumer of the D-11 tolerance constants
+# ===================================================================
+# A curated baseline (Task-4 checkpoint) and exactly-on / just-past boundary candidates.
+_D11_BASELINE: dict[str, float] = {"pf": 1.50, "max_dd": 0.20, "wf_sharpe": 1.00}
+# Tolerances live in liquidity._D11_*: PF -5%, MaxDD +15%, WF-Sharpe -10%. Compute the exact
+# boundaries the function applies in Decimal (mirroring d11_verdict) to avoid binary-float drift
+# placing the "exactly on boundary" candidate just under/over the bar.
+_PF_FLOOR = float(Decimal("1.50") * (1 - Decimal(5) / 100))  # 1.425
+_DD_CEILING = float(Decimal("0.20") * (1 + Decimal(15) / 100))  # 0.23
+_SHARPE_FLOOR = float(Decimal("1.00") * (1 - Decimal(10) / 100))  # 0.90
+_EPS = 0.01  # nudge past a boundary without a magic literal at the call site
+
+
+class TestD11Verdict:
+    """``d11_verdict`` evaluates the expanded-universe acceptance bar against the constants."""
+
+    def test_within_all_tolerances_passes(self) -> None:
+        current = {"pf": 1.45, "max_dd": 0.22, "wf_sharpe": 0.95}  # all within bar
+        passed, reasons = liquidity.d11_verdict(current, _D11_BASELINE)
+        assert passed is True
+        assert len(reasons) == 3  # noqa: PLR2004 -- 3 metrics, one line each
+        assert all("PASS" in r for r in reasons)
+
+    def test_pf_regression_fails(self) -> None:
+        current = {"pf": _PF_FLOOR - _EPS, "max_dd": 0.20, "wf_sharpe": 1.00}
+        passed, reasons = liquidity.d11_verdict(current, _D11_BASELINE)
+        assert passed is False
+        assert "PF FAIL" in reasons[0]
+
+    def test_maxdd_regression_fails(self) -> None:
+        # Deeper drawdown beyond +15% relative is a regression (LOWER is better for MaxDD).
+        current = {"pf": 1.50, "max_dd": _DD_CEILING + _EPS, "wf_sharpe": 1.00}
+        passed, reasons = liquidity.d11_verdict(current, _D11_BASELINE)
+        assert passed is False
+        assert "MaxDD FAIL" in reasons[1]
+
+    def test_wf_sharpe_regression_fails(self) -> None:
+        current = {"pf": 1.50, "max_dd": 0.20, "wf_sharpe": _SHARPE_FLOOR - _EPS}
+        passed, reasons = liquidity.d11_verdict(current, _D11_BASELINE)
+        assert passed is False
+        assert "WF-Sharpe FAIL" in reasons[2]
+
+    def test_exactly_on_boundary_passes(self) -> None:
+        # On the boundary is accepted (>= floor / <= ceiling), no float drift via Decimal(str()).
+        current = {"pf": _PF_FLOOR, "max_dd": _DD_CEILING, "wf_sharpe": _SHARPE_FLOOR}
+        passed, _ = liquidity.d11_verdict(current, _D11_BASELINE)
+        assert passed is True

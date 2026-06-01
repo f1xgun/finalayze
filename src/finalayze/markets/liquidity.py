@@ -70,6 +70,8 @@ _MIN_TURNOVER_FLOOR_RUB = Decimal(1_000_000)  # 1M RUB/day median sanity floor (
 # Task-4 acceptance read identical numbers. Relative tolerances: the expanded universe is
 # accepted iff PF is not worse by more than 5%, MaxDD is not worse (larger) by more than 15%,
 # and WF-Sharpe is not worse by more than 10% -- AND the per-segment WF gate still passes.
+# These are CONSUMED by ``d11_verdict`` below (the pure acceptance evaluator the runbook
+# applies), so the single-source claim is real -- the operator/runbook calls the same function.
 _D11_PF_REGRESSION_TOLERANCE_PCT = Decimal(5)  # PF >= -5% vs baseline.
 _D11_MAXDD_REGRESSION_TOLERANCE_PCT = Decimal(15)  # MaxDD <= +15% (relative) vs baseline.
 _D11_WF_SHARPE_REGRESSION_TOLERANCE_PCT = Decimal(10)  # WF-Sharpe >= -10% vs baseline.
@@ -97,7 +99,17 @@ _TOXIC_SYMBOLS: frozenset[str] = frozenset({"GAZP", "VTBR", "ALRS", "SNGS", "SNG
 # preferred share whose common is absent (e.g. TRNFP stays when TRNF is not traded), so
 # legitimately-traded standalone preferreds are preserved (objective constraint).
 def _drop_preferred_duplicates(symbols: list[str]) -> list[str]:
-    """Drop ``<X>P`` preferred shares whose common ``<X>`` is in ``symbols`` (order-preserving)."""
+    """Drop ``<X>P`` preferred shares whose common ``<X>`` is in ``symbols`` (order-preserving).
+
+    IN-02 (documented heuristic assumption): the ``<X>P``-when-``<X>``-present rule is a
+    trailing-``P`` STRING heuristic on the committed snapshot, NOT a verified preferred-share
+    relationship. It holds for the current MOEX preferred-share naming convention (SBERP=SBER
+    pref, TATNP=TATN pref, ...), but a non-preferred ticker that happens to end in ``P`` whose
+    ``[:-1]`` coincidentally matches a present common ticker would be wrongly dropped. Risk is
+    low on the current universe (the convention holds) and the snapshot is operator-curated, but
+    if a sector/instrument-type classification field becomes available (deferred sub-area), gate
+    the drop on actual preferred-share classification rather than this string suffix.
+    """
     present = set(symbols)
     return [s for s in symbols if not (len(s) > 1 and s.endswith("P") and s[:-1] in present)]
 
@@ -135,9 +147,13 @@ def median_rub_turnover(
 ) -> Decimal | None:
     """Median daily RUB turnover (close x volume) over the trailing ``window`` bars.
 
-    ``Candle.close`` is ``Decimal`` and ``Candle.volume`` is ``int``, so the per-bar
-    product is exact RUB turnover. The median is computed in ``float`` for speed and
-    coerced back to ``Decimal`` via ``str`` (avoids binary-float artifacts).
+    ``Candle.close`` is ``Decimal`` and ``Candle.volume`` is ``int``, but the per-bar
+    product and median are computed in ``float`` for speed -- so the returned value is an
+    APPROXIMATE (float-computed) RUB turnover, NOT exact (float rounding occurs before the
+    ``str`` coercion). This is sufficient for the ranking use (D-01/D-03 Top-N ordering);
+    exactness is not relied upon. The float result is coerced back to ``Decimal`` via
+    ``str`` (avoids further binary-float artifacts at the boundary). If an exact turnover is
+    ever required, compute the per-bar product and median in ``Decimal`` instead.
 
     Returns ``None`` for a short-history name (< ``window`` bars) so the caller excludes
     it (Pitfall 7 / LIQ-01). The caller is responsible for the ``<= as_of`` filter and
@@ -324,3 +340,49 @@ def eligible_universe_as_of(
     for symbols in selected.values():
         eligible.update(symbols)
     return eligible
+
+
+def d11_verdict(current: dict[str, float], baseline: dict[str, float]) -> tuple[bool, list[str]]:
+    """Evaluate the D-11 portfolio no-regression acceptance bar (LIQ-10), PURE.
+
+    The single authoritative consumer of the ``_D11_*_REGRESSION_TOLERANCE_PCT`` constants:
+    the expanded-universe backtest is ACCEPTED iff every metric stays within its tolerance vs
+    the curated ``baseline``. Both dicts carry the keys ``"pf"`` (profit factor),
+    ``"max_dd"`` (max drawdown as a POSITIVE magnitude, e.g. ``0.18`` == -18%) and
+    ``"wf_sharpe"`` (walk-forward Sharpe). The relative tolerances:
+
+    - PF: accepted iff ``current >= baseline * (1 - 5%)`` -- higher is better.
+    - MaxDD: accepted iff ``current <= baseline * (1 + 15%)`` -- LOWER (shallower) is better,
+      so a deeper drawdown beyond +15% relative is a regression.
+    - WF-Sharpe: accepted iff ``current >= baseline * (1 - 10%)`` -- higher is better.
+
+    Returns ``(passed, reasons)`` where ``reasons`` lists a per-metric line for EVERY metric
+    (pass or fail), so the operator/runbook records the same evaluation the code applies --
+    turning the "single source" claim true (IN-01). ``passed`` is True iff no metric regressed.
+
+    Pure: no I/O, no globals beyond the module tolerance constants. Decimal-internal to avoid
+    float-comparison drift on the acceptance boundary.
+    """
+    pf_floor = Decimal(str(baseline["pf"])) * (1 - _D11_PF_REGRESSION_TOLERANCE_PCT / 100)
+    dd_ceiling = Decimal(str(baseline["max_dd"])) * (1 + _D11_MAXDD_REGRESSION_TOLERANCE_PCT / 100)
+    sharpe_floor = Decimal(str(baseline["wf_sharpe"])) * (
+        1 - _D11_WF_SHARPE_REGRESSION_TOLERANCE_PCT / 100
+    )
+
+    cur_pf = Decimal(str(current["pf"]))
+    cur_dd = Decimal(str(current["max_dd"]))
+    cur_sharpe = Decimal(str(current["wf_sharpe"]))
+
+    pf_ok = cur_pf >= pf_floor
+    dd_ok = cur_dd <= dd_ceiling
+    sharpe_ok = cur_sharpe >= sharpe_floor
+
+    reasons = [
+        f"PF {'PASS' if pf_ok else 'FAIL'}: {cur_pf} vs floor {pf_floor} "
+        f"(baseline {baseline['pf']}, -{_D11_PF_REGRESSION_TOLERANCE_PCT}%)",
+        f"MaxDD {'PASS' if dd_ok else 'FAIL'}: {cur_dd} vs ceiling {dd_ceiling} "
+        f"(baseline {baseline['max_dd']}, +{_D11_MAXDD_REGRESSION_TOLERANCE_PCT}%)",
+        f"WF-Sharpe {'PASS' if sharpe_ok else 'FAIL'}: {cur_sharpe} vs floor {sharpe_floor} "
+        f"(baseline {baseline['wf_sharpe']}, -{_D11_WF_SHARPE_REGRESSION_TOLERANCE_PCT}%)",
+    ]
+    return (pf_ok and dd_ok and sharpe_ok), reasons
