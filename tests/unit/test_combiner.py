@@ -1,6 +1,8 @@
 """Unit tests for StrategyCombiner hooks and forward-compatibility methods.
 
 APPLY-04: invalidate_segment_cache() is a no-op but callable without error.
+UNIV-03 (68-03/68-04): the combiner must build a NON-EMPTY strategies allow-list
+for the activated liquid + thin sectors (the no_signals -> alive preset fix).
 """
 
 from __future__ import annotations
@@ -11,6 +13,13 @@ import pytest
 
 from finalayze.strategies.base import BaseStrategy
 from finalayze.strategies.combiner import StrategyCombiner
+
+# Sectors activated via per-segment preset YAMLs in Phase 68 Waves 3 (liquid)
+# and 4 (thin). Each must expose a non-empty strategies allow-list keying at
+# least momentum + mean_reversion ON (the activation mechanism — RESEARCH).
+_LIQUID_ACTIVATED_SEGMENTS = ("ru_metals", "ru_consumer", "ru_construction")
+_THIN_ACTIVATED_SEGMENTS = ("ru_telecom", "ru_transport", "ru_chemicals")
+_ACTIVATED_SEGMENTS = _LIQUID_ACTIVATED_SEGMENTS + _THIN_ACTIVATED_SEGMENTS
 
 
 class _MinimalStrategy(BaseStrategy):
@@ -62,3 +71,27 @@ class TestInvalidateSegmentCache:
         """invalidate_segment_cache() returns None (no meaningful return value)."""
         result = combiner.invalidate_segment_cache("us_broad")
         assert result is None
+
+
+class TestActivatedSegmentStrategiesCfg:
+    """UNIV-03: activated sectors must build a non-empty strategies allow-list.
+
+    The combiner reads ONLY the preset ``strategies:`` block (combiner.py:394);
+    an empty block makes ``generate_signal`` return ``None`` on every bar (the
+    ``no_signals`` root cause). Authoring a per-segment preset that keys
+    momentum + mean_reversion ON is the entire activation fix.
+    """
+
+    @pytest.mark.parametrize("segment_id", _LIQUID_ACTIVATED_SEGMENTS)
+    def test_liquid_segment_strategies_cfg_is_non_empty(
+        self, combiner: StrategyCombiner, segment_id: str
+    ) -> None:
+        """The parsed strategies block keys momentum + mean_reversion enabled."""
+        config = combiner._load_config(segment_id)
+        strategies = config.get("strategies")
+        assert isinstance(strategies, dict)
+        assert strategies, f"{segment_id}: empty strategies allow-list (no_signals)"
+        for name in ("momentum", "mean_reversion"):
+            block = strategies.get(name)
+            assert isinstance(block, dict), f"{segment_id}: missing {name} block"
+            assert block.get("enabled") is True, f"{segment_id}: {name} not enabled"
