@@ -1034,6 +1034,15 @@ def _run_symbol(
 # as of the most recent quarterly rebalance, it had >= 60 visible bars and is not stale. Mapping
 # every segment symbol to one sector with top_n = len(symbols) keeps all names that pass that
 # point-in-time guard while still recomputing AS-OF (<= ts) at each quarterly rebalance.
+#
+# WR-03 (ACCEPTED LIMITATION -- not a defect, do NOT re-architect): because this gate uses one
+# synthetic sector and top_n = len(symbols), it enforces point-in-time 60-bar/staleness
+# ELIGIBILITY only -- it does NOT re-apply the D-03 cross-name Top-N liquidity RANK at each
+# rebalance. That Top-N cut is fixed at snapshot-build time and back-projected onto all history,
+# a softer survivorship guard than a true as-of Top-N: a name liquid recently but thin
+# mid-history is still entered for the whole backtest (subject only to the 60-bar/staleness
+# gate). This is the documented residual gap; see docs/operations/liquidity_universe_runbook.md
+# (D-11 verdict, "Accepted limitation").
 _BACKTEST_GATE_SECTOR = "_segment"
 
 

@@ -163,6 +163,20 @@ bar — a **marginal** breach (1.6pp over). That PF dip is **attributable to out
 segment-level `ru_finance` underperformance in-sample**, NOT to liquidity universe
 selection: tightening the universe does not remove it.
 
+> **Accepted limitation (WR-03) — backtest gate enforces point-in-time eligibility only.**
+> The backtest as-of gate (`scripts/run_iteration.py`, `_BACKTEST_GATE_SECTOR`) maps every
+> segment symbol to one synthetic sector with `top_n = len(symbols)`, so it enforces the D-05
+> point-in-time **eligibility** guard (≥ 60 visible bars and non-stale as of each quarterly
+> rebalance) but does **not** re-apply the D-03 cross-name Top-N liquidity **rank** at each
+> rebalance. The Top-N liquidity cut is fixed at snapshot-build time and back-projected onto
+> all history — a softer survivorship guard than a true as-of Top-N. A name that is liquid
+> recently but thin mid-history is still entered for the whole backtest (subject only to the
+> 60-bar/staleness gate). This is an **accepted design limitation**, not a defect: the D-11
+> verdict above is measured against a universe whose liquidity ranking is the current
+> snapshot's, back-projected. Re-architecting the gate to a true as-of Top-N (driving it with
+> the curated `SECTOR_TO_SEGMENT` per-symbol sector and the real `_TOP_N_PER_SECTOR`) is
+> explicitly out of scope for Phase 66.
+
 ### 4c. N=5 tuning re-run (confirms N=10 is the best config)
 
 A tuning re-run at **N=5** (`phase66-liquidity-expanded-n5`, `git_sha=8922850`) was **worse**,
