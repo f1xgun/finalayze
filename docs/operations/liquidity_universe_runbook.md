@@ -221,3 +221,78 @@ Because trading the expanded universe is **not** gated on ML, the **DEFERRED** M
 universe ships rule-based on the strength of the section-4b relative no-regression check
 alone. ML re-gate remains available as the documented bonus whenever an operator chooses to
 run it.
+
+---
+
+## 6. Phase 68 — segment cleanup + sector activation A/B (UNIV-04)
+
+> **Status: COMPLETE (2026-06-02)** — `ru_blue_chips` removed (Wave 2), the no_signals
+> sectors activated via bounded per-segment presets (Waves 3/4), and the genuinely
+> un-revivable / un-tradeable sectors honestly disabled (Wave 5 + the 68-06 retry).
+> **D-11 verdict: ACCEPT.** No `--force-save`; no D-11 tolerance relaxed.
+
+### 6a. Post-68 enabled MOEX-stock roster
+
+| Decision | Segments | Rationale |
+|----------|----------|-----------|
+| **KEEP (enabled)** | `ru_energy`, `ru_finance`, `ru_tech`, `ru_metals`, `ru_construction`, `ru_telecom`, `ru_transport` | controls (energy/finance/tech) + Waves-3/4 activations that trade |
+| **DISABLE — no_symbols** | `ru_utilities` | sole liquid name (IRAO) sanctioned → selector returns empty; structural, revival deferred |
+| **DISABLE — honest (68-06)** | `ru_consumer`, `ru_chemicals` | see 6c |
+| **REMOVED (Wave 2)** | `ru_blue_chips` | redundant (`diversified`→SFIN only); names re-homed to real sectors (D-02) |
+
+### 6b. Pinned-`--segments` portfolio A/B (the UNIV-04 gate)
+
+Both legs pinned to the **identical** explicit KEEP set
+(`ru_energy,ru_finance,ru_tech,ru_metals,ru_construction,ru_telecom,ru_transport`) to avoid
+the Wave-4 contamination pitfall. Baseline leg = frozen pre-68 (the 4 activation presets
+stashed so those sectors run preset-less = no_signals); activated leg = presets restored.
+
+- **Logged iteration ids:** `phase68-activated-baseline` (frozen pre-68, pinned) vs
+  `phase68-activated` (activations applied, pinned); both `git_sha=aa8a779`.
+- **D-11 verdict: ACCEPT.**
+
+| Metric | Baseline | Activated | Δ | Tolerance | Result |
+|--------|---------:|----------:|---:|-----------|:------:|
+| Profit Factor | 1.1931 | 1.1924 | −0.06% | PF ≥ −5% | **PASS** |
+| Max Drawdown | 0.0212 | 0.0212 | +0.00% | MaxDD ≤ +15% | **PASS** |
+| WF-Sharpe | 0.0027 | 0.0037 | +37.0% | WF-Sharpe ≥ −10% | **PASS** |
+| Trade count | 245 | 262 | +17 | — | — |
+
+Activation added 17 trades (`ru_metals` +10, `ru_construction` +3, `ru_telecom` +3,
+`ru_transport` +1); `ru_energy`/`ru_finance`/`ru_tech` unchanged.
+
+**`ru_energy` byte-identical control (D-05):** identical across both legs — 166 trades,
+3566 candles, total_return 0.0136, Sharpe 0.7988, win_rate 0.6084, PF 1.3419, MaxDD 0.0092.
+No global-lever leak; the activation effect is universe-local.
+
+> Pitfall 2 reminder: the per-iteration `history.jsonl` `verdict` field is the **absolute**
+> trading-readiness bar, NOT this **relative** D-11 no-regression verdict. The ACCEPT above
+> is the D-11 relative A/B (the UNIV-04 acceptance gate).
+
+### 6c. Honest-disable rationale (D-03 / D-05 / 68-06 retry)
+
+`ru_consumer` and `ru_chemicals` 0-traded under the first (verbatim-from-`ru_finance`)
+presets. The operator chose "try harder" over honest-disable. A **diagnose-first**
+combiner-level instrumentation pass (per-bar `generate_signal` + the `decision_journal.jsonl`
+skip-reason histogram) found:
+
+- **The 0.38 confidence gate is NOT the killer.** Signals clear it — `ru_consumer` produced
+  18 cleared signals (8 BUY / 10 SELL), `ru_chemicals` 5 — and *zero* signals died at the
+  combiner threshold. (So lowering `min_combined_confidence` would change nothing; it stayed
+  at 0.38, never below the 0.35 floor — D-05.)
+- **Entries die downstream at the position-sizing `quantity_zero` floor.** `ru_consumer`'s 8
+  BUYs (7 from `dividend_gap`, 1 momentum) and `ru_chemicals`'s BUYs size **below one whole
+  share** — these are expensive MOEX names (AKRN ~18–20k ₽, PHOR ~6.5k, MGNT/BELU/GCHE
+  3–6k ₽) in a small shared-capital book, so the sized allocation floors to 0 shares.
+- `mean_reversion` fired **zero** times in both (structurally dead on these names).
+
+**ONE principled alternative applied per sector** (diagnosis-justified, NOT curve-fit):
+emphasize the firing BUY-entry source — `dividend_gap` raised to the band (consumer
+0.10→0.30; **added** to chemicals, justified by PHOR 7 + AKRN 1 dividend records), momentum
+raised, never-firing `mean_reversion` dropped to the 0.10 floor. No threshold change, no
+per-symbol tuning, all weights in [0.10, 0.55]. The retry **did** restore chemicals' missing
+BUY signals (0→3 cleared BUYs) — but the BUYs **still** die as `quantity_zero` (the sizing
+cause is untouched by any preset lever). Per D-03 the bounded retry that still 0-trades is a
+legitimate **honest-disable**; the killing cause is **position sizing / capital-vs-share-price**,
+out of this phase's scope (deferred to the Phase-69 exit/stop/sizing track), NOT fixable
+without banned per-symbol tuning or a risk-engine change.
