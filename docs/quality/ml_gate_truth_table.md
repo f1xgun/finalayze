@@ -456,3 +456,24 @@ Both E1 runs used the existing `auto_ml_research.py` harness with `--strategy ab
 - **ru_energy** — 7 symbols (LKOH/ROSN/NVTK/TATN/TRNFP/SIBN/RNFT, ~855–861 candles each) → 4512 triple-barrier samples (52.0% positive), 10 WF folds. **best_acc 0.5154–0.5302 sits only marginally ABOVE 0.50.** The accuracy sub-gate still clears only 2/10 folds (< 0.34 min-ratio) and brier clears 1–2/10 — `overall_passed:false`. Marginal, not clearly separable.
 
 **Gating recommendation (evidence only — operator decides):** ru_blue_chips is sub-random (no alpha). ru_energy is marginally above 0.50 but does not separate enough to pass any binding sub-gate. This is closer to **short-circuit** (H3 no-alpha largely confirmed; E2–E5 low-value, skip E5) than to a clear **proceed-full** signal. The operator returns the gating decision; Task 3 then runs accordingly.
+
+### Phase 70 closing tally (reconciled against the JSONL logs, 2026-06-02)
+
+Reconciliation note: every experiment recorded in
+`results/experiments/ru_blue_chips_experiment_log.jsonl` (14 records) and
+`results/experiments/ru_energy_experiment_log.jsonl` (14 records) — 28 honest JSONL records
+in total — has a corresponding row above. The 22 distinct one-knob experiment rows in the
+table (11 per segment: E1×2, E2×3, E3×2, E4×2, E5×2) are the varied levers; the remaining
+6 JSONL records are the harness-mandatory `baseline` controls that `run_research_loop` runs
+before each strategy batch (NOT tune-until-pass retries — the harness's fixed control), so
+28 JSONL records map to 22 lever rows + 6 baseline controls. The `force_saved` key is
+**absent entirely** from all 28 records (`grep -c '"force_saved": true' results/experiments/*.jsonl` = 0;
+`grep -c 'force_saved' results/experiments/*.jsonl` = 0) — the honesty guardrail is
+structurally enforced (the harness has no `--force-save` path).
+
+**Phase 70: 22 experiments (11 per segment, both data-richest MOEX segments), 0 honest KEEP / 22 DISC, 0 force-saved.**
+Every row carries `overall_passed:false` and a `discard` status; no row carries
+`force_saved:true`; no E5 short-circuit occurred (the operator returned proceed-full, so the
+full E1–E5 matrix ran). Combined with the seeded Phase-62 (0/17 `ru_*` enabled, 0 force-saved)
+and Phase-64 (0/2 fundamental KEEP) verdicts above, the cumulative MOEX ML truth remains:
+**0 segments legitimately pass the walk-forward gate, 0 enabled, 0 force-save debt.**
