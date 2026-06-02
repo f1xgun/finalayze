@@ -393,6 +393,60 @@ Columns: `Segment | Experiment | knob varied | n_folds | best_acc (avg_accuracy)
 | ru_blue_chips | E1 ablate-month_cos | drop `month_cos` (1 feature) | 10 | 0.4318 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / pf 0.3 / specificity 0.2 (all < 0.34) | false | discard | **DISC** |
 | ru_energy | E1 baseline | standard MI selection, default MOEX hparams | 10 | 0.5154 | false | accuracy 0.2 / brier 0.1 (< 0.34); class_balance 0.6, degenerate 0.6, pf 0.5, sensitivity 0.5, specificity 0.9 PASS | false | discard | **DISC** |
 | ru_energy | E1 ablate-max_ret_20d | drop `max_ret_20d` (1 feature) | 10 | 0.5302 | false | accuracy 0.2 (< 0.34); brier 0.2; class_balance 0.6, degenerate 0.8, pf 0.5, specificity 0.9 PASS | false | discard | **DISC** |
+| ru_blue_chips | E2 ablate-month_cos | drop `month_cos` (feature subset) | 10 | 0.4318 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / degenerate 0.1 / pf 0.3 / specificity 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E2 ablate-min_ret_20d | drop `min_ret_20d` (feature subset) | 10 | 0.4226 | false | accuracy 0.3 / brier 0.2 / class_balance 0.1 / degenerate 0.1 / pf 0.2 / specificity 0.3 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E2 ablate-max_ret_20d | drop `max_ret_20d` (feature subset) | 10 | 0.4111 | false | accuracy 0.2 / brier 0.2 / class_balance 0.2 / degenerate 0.2 / pf 0.3 / specificity 0.3 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E3 barrier-horizon TB_MAX_HOLD=10 | shorter label horizon (20→10 bars) | 10 | 0.4655 | false | accuracy 0.3 / brier 0.1 / class_balance 0.3 / degenerate 0.3 / pf 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E3 barrier-horizon TB_MAX_HOLD=40 | longer label horizon (20→40 bars) | 9 | 0.4864 | false | accuracy 0.222 / brier 0.222 / class_balance 0.222 / degenerate 0.222 / specificity 0.0 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E4 ew-0.1-0.2-0.7 | ensemble weights XGB=0.1 LGBM=0.2 Cat=0.7 | 10 | 0.4801 | false | brier 0.3 / class_balance 0.2 / degenerate 0.3 / pf 0.3 (all < 0.34; accuracy 0.4 PASS) | false | discard | **DISC** |
+| ru_blue_chips | E4 ew-0.1-0.3-0.6 | ensemble weights XGB=0.1 LGBM=0.3 Cat=0.6 | 10 | 0.4777 | false | brier 0.2 / class_balance 0.2 / degenerate 0.2 / pf 0.3 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E5 hp-xgb_max_depth=3 | XGB max_depth 5→3 (regularize) | 10 | 0.4112 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / degenerate 0.2 / pf 0.2 / specificity 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E5 hp-xgb_max_depth=4 | XGB max_depth 5→4 (regularize) | 10 | 0.4112 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / degenerate 0.2 / pf 0.2 / specificity 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_energy | E2 ablate-max_ret_20d | drop `max_ret_20d` (feature subset) | 10 | 0.5191 | false | brier 0.2 (< 0.34); accuracy 0.4, class_balance 0.7, degenerate 0.9, pf 0.5, specificity 0.9 PASS | false | discard | **DISC** |
+| ru_energy | E2 ablate-min_ret_20d | drop `min_ret_20d` (feature subset) | 10 | 0.5329 | false | accuracy 0.3 / brier 0.1 (< 0.34); class_balance 0.9, degenerate 1.0, specificity 0.9 PASS | false | discard | **DISC** |
+| ru_energy | E2 ablate-hist_vol_20 | drop `hist_vol_20` (feature subset) | 10 | 0.5340 | false | brier 0.3 (< 0.34); accuracy 0.4, class_balance 0.7, degenerate 0.9, pf 0.5, specificity 0.8 PASS | false | discard | **DISC** |
+| ru_energy | E3 barrier-horizon TB_MAX_HOLD=10 | shorter label horizon (20→10 bars) | 10 | 0.5051 | false | accuracy 0.0 / brier 0.0 / pf 0.3 (all < 0.34) | false | discard | **DISC** |
+| ru_energy | E3 barrier-horizon TB_MAX_HOLD=40 | longer label horizon (20→40 bars) | 9 | 0.5100 | false | accuracy 0.222 / brier 0.0 / pf 0.333 (all < 0.34) | false | discard | **DISC** |
+| ru_energy | E4 ew-0.1-0.2-0.7 | ensemble weights XGB=0.1 LGBM=0.2 Cat=0.7 | 10 | 0.5299 | false | accuracy 0.2 / brier 0.2 (< 0.34); pf 2.18 raw | false | discard | **DISC** |
+| ru_energy | E4 ew-0.1-0.3-0.6 | ensemble weights XGB=0.1 LGBM=0.3 Cat=0.6 | 10 | 0.5289 | false | accuracy 0.2 / brier 0.2 (< 0.34); pf 3.60 raw | false | discard | **DISC** |
+| ru_energy | E5 hp-xgb_max_depth=3 | XGB max_depth 5→3 (regularize) | 10 | 0.5344 | false | accuracy 0.3 / brier 0.1 (< 0.34) | false | discard | **DISC** |
+| ru_energy | E5 hp-xgb_max_depth=4 | XGB max_depth 5→4 (regularize) | 10 | 0.5341 | false | accuracy 0.2 / brier 0.1 / pf 0.3 (all < 0.34) | false | discard | **DISC** |
+
+> **Harness-mandatory baselines:** `run_research_loop` always runs a `baseline` experiment
+> before the strategy batch, so the JSONL also carries one `baseline` record per E2/E4/E5 invocation
+> (identical to the E1 baseline — `ru_blue_chips` acc 0.4056, `ru_energy` acc 0.5148). These are NOT
+> tune-until-pass retries; they are the harness's fixed control. The E3 runs ARE the baseline (the
+> one varied variable is `_TB_MAX_HOLD`, set at runtime; `--max-experiments 0` ⇒ baseline-only).
+
+### E2–E5 results (proceed-full decision, 2026-06-02)
+
+The operator returned **proceed-full** on the Task 2 E1 gating checkpoint, so the FULL fixed matrix
+ran — E2, E3, E4 mandatory **and E5** (the hyperparameter-regularization grid) — on BOTH segments via
+the existing `scripts/auto_ml_research.py` harness, one variable per row, **NO `--force-save`** (no such
+flag). DB-first cached MOEX candles (token in `os.environ`, never logged — T-70-06). **Every one of the
+18 Task-3 experiment runs landed `overall_passed:false` / DISC; zero crossed any binding sub-gate.**
+
+- **E2 (feature noise, H3):** dropping single features moved `best_acc` only marginally
+  (ru_blue_chips 0.41–0.43 — sub-random; ru_energy 0.52–0.53 — barely above 0.50). No subset crossed the
+  gate. Feature noise is not the binding constraint.
+- **E3 (triple-barrier horizon, H4):** varied the **one** param `_TB_MAX_HOLD` (20→10, 20→40 bars) at
+  runtime through the harness's own `build_full_dataset` (no CLI knob exists — documented per plan). Both
+  shorter and longer horizons stayed DISC on both segments (ru_blue_chips 0.4655/0.4864; ru_energy
+  0.5051/0.5100). Horizon mismatch is not the binding constraint. *(Note: the 40-bar run lost one WF fold
+  — 9 vs 10 — as the longer label window consumes more tail history; expected, not a defect.)*
+- **E4 (model class / ensemble weights, H4):** Cat-heavy mixes (0.6–0.7) raised raw profit-factor
+  (ru_energy pf 2.18/3.60) but `best_acc` stayed below the gate (ru_blue_chips 0.478/0.480; ru_energy
+  0.529/0.530) and accuracy/brier still cleared only ≤ 2/10 folds. Ensemble overfit is not the savior.
+- **E5 (hyperparameter regularization, H4):** heavier regularization (XGB max_depth 5→3, 5→4) did **not**
+  lift OOS accuracy (ru_blue_chips flat at 0.4112; ru_energy 0.534) — no gate crossing. Regularization is
+  not the binding constraint.
+
+**Net Task-3 result: 0/18 experiment runs passed; KEEP = NONE on both segments.** Across E1–E5 the
+binding accuracy and brier sub-gates never cleared the `MOEX_MIN_PASSING_FOLDS_RATIO = 0.34` threshold on
+either segment, regardless of which single lever was varied. This is the honest, expected outcome (D-05):
+no separable predictive edge was found within the bounded, principled matrix — strong evidence for H3
+"no alpha" (corroborated, not chased). No tune-until-pass loop was run; the matrix was fixed up front and
+every verdict recorded as-is. This feeds Plan 04's H1–H4 ranking and the pursue/abandon recommendation.
 
 ### E1 gating evidence (read against the 0.50 random floor)
 
