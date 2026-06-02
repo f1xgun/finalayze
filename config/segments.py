@@ -238,6 +238,14 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
+        # HONEST-DISABLE (68-06 / D-03 / D-05): after the principled retry preset
+        # (dividend_gap raised to the BUY-entry lever), signals still CLEAR the
+        # 0.38 gate (18 cleared) but every BUY dies downstream as quantity_zero --
+        # expensive staples (MGNT/BELU/GCHE) size below one whole share in the
+        # shared-capital portfolio. That is a position-sizing/capital cause (out of
+        # this phase's scope -> Phase 69), not a preset/confidence cause; no
+        # preset lever fixes it without banned per-symbol tuning. Revival deferred.
+        enabled=False,
         symbols=select_segment_symbols(
             "ru_consumer", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_consumer"]
         ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
@@ -264,6 +272,10 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
+        # no_symbols -- the sole liquid utilities name (IRAO) is sanctioned, so the
+        # selector returns an empty set. Structural / un-revivable; revival deferred
+        # to a future phase (D-03). (Was flagged dead-but-enabled in Phase 66 WR-01.)
+        enabled=False,
         symbols=select_segment_symbols(
             "ru_utilities", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_utilities"]
         ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
@@ -290,6 +302,13 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
+        # HONEST-DISABLE (68-06 / D-03 / D-05): the principled retry preset ADDED
+        # dividend_gap (justified by PHOR/AKRN dividends) and DID restore the
+        # missing BUY signals (0 -> 3 cleared BUYs), but those BUYs still die as
+        # quantity_zero: AKRN ~18-20k RUB / PHOR ~6.5k RUB per share floor below
+        # one whole share in the 2-name shared-capital book. Sizing/capital cause
+        # (out of phase scope -> Phase 69); no preset lever fixes it. Revival deferred.
+        enabled=False,
         symbols=select_segment_symbols(
             "ru_chemicals", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_chemicals"]
         ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from config.segments import DEFAULT_SEGMENTS, SECTOR_TO_SEGMENT, SegmentConfig
 
 from finalayze.markets.liquidity import select_segment_symbols
@@ -174,7 +175,44 @@ class TestSegmentEnabledFlag:
         for seg in us:
             assert seg.enabled is False, f"US segment {seg.segment_id} must be disabled"
 
-    def test_all_moex_segments_enabled(self) -> None:
+    def test_most_moex_segments_enabled(self) -> None:
+        """MOEX segments are enabled EXCEPT the Phase-68 honest disables."""
         moex = [s for s in DEFAULT_SEGMENTS if s.market == "moex"]
         for seg in moex:
+            if seg.segment_id in _PHASE68_DISABLED_MOEX:
+                continue
             assert seg.enabled is True, f"MOEX segment {seg.segment_id} must be enabled"
+
+
+# ---------------------------------------------------------------------------
+# UNIV-03 / UNIV-04 — Phase-68 honest disables + activated KEEP set
+# ---------------------------------------------------------------------------
+
+# ru_utilities: no_symbols (IRAO sanctioned). ru_consumer / ru_chemicals:
+# honest-disable after the 68-06 principled retry -- signals fire and clear the
+# 0.38 gate but BUY entries die at the position-sizing quantity_zero floor
+# (expensive names, shared-capital book); a sizing cause out of phase scope.
+_PHASE68_DISABLED_MOEX = frozenset({"ru_utilities", "ru_consumer", "ru_chemicals"})
+
+# The MOEX-stock sectors that survive Waves 3/4 + the controls as the KEEP set.
+_PHASE68_ACTIVATED_KEEP = (
+    "ru_energy",
+    "ru_finance",
+    "ru_tech",
+    "ru_metals",
+    "ru_construction",
+    "ru_telecom",
+    "ru_transport",
+)
+
+
+class TestPhase68SegmentRoster:
+    """The post-68 enabled/disabled segment roster (UNIV-03/04 honest verdict)."""
+
+    @pytest.mark.parametrize("segment_id", sorted(_PHASE68_DISABLED_MOEX))
+    def test_disabled_sector_is_disabled(self, segment_id: str) -> None:
+        assert _get(segment_id).enabled is False, f"{segment_id} must be enabled=False"
+
+    @pytest.mark.parametrize("segment_id", _PHASE68_ACTIVATED_KEEP)
+    def test_keep_sector_is_enabled(self, segment_id: str) -> None:
+        assert _get(segment_id).enabled is True, f"{segment_id} must stay enabled"
