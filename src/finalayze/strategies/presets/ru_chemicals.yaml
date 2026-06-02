@@ -1,8 +1,20 @@
-# Phase 68 (UNIV-03) thin-tier activation preset — chemicals sector.
-# MINIMAL ru_tech archetype: a thin 2-name sector (PHOR, AKRN) — a richer preset
-# is curve-fit surface. Knobs FIXED inside the anti-curve-fit bounds; per-strategy
-# params adopted verbatim from ru_finance.yaml. Chemicals pay dividends ->
-# event_driven (earnings/macro) justified at a small weight.
+# Phase 68 (UNIV-03 / 68-06 retry) activation preset — chemicals sector.
+# Mechanism: the combiner reads ONLY this strategies: block; authoring it flips
+# the sector from no_signals -> alive.
+#
+# 68-06 RETRY (principled, diagnosis-justified — NOT curve-fit):
+# The first thin preset (momentum + mean_reversion + event_driven) 0-traded.
+# Combiner-level instrumentation showed the deadlock: of 5 cleared signals ALL
+# were momentum SELL -- ZERO BUY signals were ever generated, so no position
+# could open (the journal's 7 entries were all no_position_held SELLs on an
+# empty book). mean_reversion fired ZERO times. The first preset OMITTED
+# dividend_gap, which was the ONLY available BUY-entry source for these two
+# names. PRINCIPLED FIX (option a -- change the strategy mix to match the
+# regime): ADD dividend_gap (economically justified -- PHOR has 7 dividend
+# records and AKRN 1 in the 2023-2024 window), giving the sector its missing
+# BUY-entry generator; raise momentum; drop the never-firing mean_reversion to
+# the band floor. No threshold change (the gate is already cleared at 0.38), no
+# per-symbol tuning; all weights in [0.10, 0.55].
 segment_id: ru_chemicals
 normalize_mode: "firing"
 min_combined_confidence: 0.38
@@ -37,7 +49,7 @@ strategies:
       vol_target: 0.20
   mean_reversion:
     enabled: true
-    weight: 0.50
+    weight: 0.10
     params:
       bb_period: 20
       bb_std_dev: 2.5
@@ -54,3 +66,10 @@ strategies:
     params:
       min_sentiment: 0.6
       event_types: [earnings, macro, regulatory]
+  dividend_gap:
+    enabled: true
+    weight: 0.30
+    params:
+      min_gap_pct: 3.0
+      max_hold_bars: 60
+      min_confidence: 0.40
