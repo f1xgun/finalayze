@@ -27,10 +27,12 @@ from finalayze.core.schemas import (
     BondInfo,
     Candle,
     CouponPayment,
+    ExitReason,
     Signal,
     SignalDirection,
 )
 from finalayze.data.fetchers.cbr import MacroContextProvider, MacroSnapshot
+from finalayze.execution.bond_simulated_broker import BondSimulatedBroker
 from finalayze.risk.dv01_sizing import DV01BudgetStep
 from finalayze.risk.yield_stop import YieldStop
 
@@ -947,3 +949,288 @@ class TestBondEngineOFZRotation:
             as_of_date=date(2025, 1, 20),
         )
         assert result.ofz_rotation_active is True
+
+
+# ---------------------------------------------------------------------------
+# Test 15: exit_reason / entry_strategy wiring on closed bond TradeResults
+# (EXITDIAG-02 / D-04) — RED until bond_engine threads the close reason.
+# ---------------------------------------------------------------------------
+
+_ENTRY_BAR = 0
+_CLOSE_BAR = 3
+_QTY = 100
+_CARRY_STRATEGY = "bond_carry"
+_DURATION_STRATEGY = "bond_duration_rotation"
+_MAX_HOLD_FOR_MAPPING = 2
+
+
+def _make_open_position(
+    *,
+    symbol: str = _SYMBOL,
+    quantity: int = _QTY,
+    entry_clean_pct: Decimal = Decimal("85.0"),
+    entry_ytm_pct: Decimal = Decimal("7.5"),
+    entry_bar_idx: int = _ENTRY_BAR,
+    entry_date: date = date(2025, 1, 6),
+    entry_strategy: str | None = None,
+) -> BondPosition:
+    """Build a synthetic open BondPosition for direct _close_position drives."""
+    return BondPosition(
+        symbol=symbol,
+        quantity=quantity,
+        entry_clean_pct=entry_clean_pct,
+        entry_nkd=Decimal(0),
+        entry_ytm_pct=entry_ytm_pct,
+        entry_bar_idx=entry_bar_idx,
+        entry_date=entry_date,
+        entry_strategy=entry_strategy,
+    )
+
+
+def _single_candle_lookup(
+    symbol: str,
+    close_pct: Decimal,
+    when: date,
+) -> dict[str, dict[date, Candle]]:
+    """A candle_lookup with a single bar so _close_position can read an exit price."""
+    candle = Candle(
+        symbol=symbol,
+        market_id="moex",
+        timeframe="1d",
+        timestamp=datetime(when.year, when.month, when.day, tzinfo=UTC),
+        open=close_pct,
+        high=close_pct + Decimal("0.5"),
+        low=close_pct - Decimal("0.5"),
+        close=close_pct,
+        volume=1000,
+    )
+    return {symbol: {when: candle}}
+
+
+class TestBondExitReasonWiring:
+    """Closed bond TradeResults must carry exit_reason + entry_strategy (EXITDIAG-02)."""
+
+    def _close_with(
+        self,
+        *,
+        exit_reason: object | None,
+        entry_strategy: str | None,
+    ) -> Any:
+        """Drive _close_position directly with synthetic state and return the trade."""
+        close_date = date(2025, 1, 9)
+        engine = BondBacktestEngine()
+        broker = BondSimulatedBroker(
+            initial_cash=Decimal(1_000_000),
+            coupon_schedule={_SYMBOL: []},
+            face_value=_FACE_VALUE,
+        )
+        # Open a real broker lot so the closing sell has something to sell.
+        broker.buy_bond(_SYMBOL, _QTY, Decimal("85.0"), Decimal(0), Decimal(0))
+        pos = _make_open_position(entry_strategy=entry_strategy)
+        candle_lookup = _single_candle_lookup(_SYMBOL, Decimal("85.0"), close_date)
+        return engine._close_position(  # noqa: SLF001
+            _SYMBOL,
+            pos,
+            close_date,
+            _CLOSE_BAR,
+            candle_lookup,
+            None,
+            broker,
+            {_SYMBOL: _BOND_INFO},
+            {_SYMBOL: []},
+            exit_reason=exit_reason,
+            entry_strategy=entry_strategy,
+        )
+
+    def test_close_position_records_stop_exit_reason(self) -> None:
+        """yield_stop maps to ExitReason.STOP on the closed TradeResult."""
+        trade = self._close_with(exit_reason=ExitReason.STOP, entry_strategy=_CARRY_STRATEGY)
+        assert trade is not None
+        assert trade.exit_reason == ExitReason.STOP.value
+
+    def test_close_position_records_time_exit_reason(self) -> None:
+        """max_hold maps to ExitReason.TIME on the closed TradeResult."""
+        trade = self._close_with(exit_reason=ExitReason.TIME, entry_strategy=_DURATION_STRATEGY)
+        assert trade is not None
+        assert trade.exit_reason == ExitReason.TIME.value
+
+    def test_close_position_records_force_close_exit_reason(self) -> None:
+        """last-bar force-close maps to ExitReason.FORCE_CLOSE."""
+        trade = self._close_with(exit_reason=ExitReason.FORCE_CLOSE, entry_strategy=_CARRY_STRATEGY)
+        assert trade is not None
+        assert trade.exit_reason == ExitReason.FORCE_CLOSE.value
+
+    def test_close_position_records_entry_strategy(self) -> None:
+        """entry_strategy threads through to the closed TradeResult."""
+        trade = self._close_with(exit_reason=ExitReason.STOP, entry_strategy=_CARRY_STRATEGY)
+        assert trade is not None
+        assert trade.entry_strategy == _CARRY_STRATEGY
+
+    def test_full_run_force_close_at_last_bar_sets_force_close(self) -> None:
+        """A held-to-end position is force-closed with ExitReason.FORCE_CLOSE."""
+        config = BondBacktestConfig(
+            initial_cash=Decimal(1_000_000),
+            dv01_sizer=DV01BudgetStep(
+                max_dd_pct=Decimal("0.05"),
+                expected_max_rate_move_bps=200,
+                max_single_position_pct=Decimal("0.50"),
+            ),
+            yield_stop=YieldStop(threshold_bps=500),  # won't trigger
+            max_hold_bars=200,  # won't trigger
+        )
+        engine = BondBacktestEngine(config=config)
+        prices = [85.0] * 15
+        candles = _make_bond_candles(_SYMBOL, prices, date(2025, 1, 6))
+        coupons = _make_coupon_schedule(_FIGI, [date(2025, 6, 11)])
+
+        result = engine.run(
+            candles_by_symbol={_SYMBOL: candles},
+            bond_info={_SYMBOL: _BOND_INFO},
+            coupon_schedule={_SYMBOL: coupons},
+            strategy_fn=_buy_at_bar_strategy(buy_bar=2),
+        )
+
+        assert result.trade_count == 1
+        assert result.trades[0].exit_reason == ExitReason.FORCE_CLOSE.value
+
+    def test_full_run_max_hold_maps_to_time(self) -> None:
+        """A position closed by max_hold_bars carries ExitReason.TIME."""
+        config = BondBacktestConfig(
+            initial_cash=Decimal(1_000_000),
+            dv01_sizer=DV01BudgetStep(
+                max_dd_pct=Decimal("0.05"),
+                expected_max_rate_move_bps=200,
+                max_single_position_pct=Decimal("0.50"),
+            ),
+            yield_stop=YieldStop(threshold_bps=500),  # won't trigger
+            max_hold_bars=_MAX_HOLD_FOR_MAPPING,
+        )
+        engine = BondBacktestEngine(config=config)
+        prices = [85.0] * 20
+        candles = _make_bond_candles(_SYMBOL, prices, date(2025, 1, 6))
+        coupons = _make_coupon_schedule(_FIGI, [date(2025, 6, 11)])
+
+        result = engine.run(
+            candles_by_symbol={_SYMBOL: candles},
+            bond_info={_SYMBOL: _BOND_INFO},
+            coupon_schedule={_SYMBOL: coupons},
+            strategy_fn=_buy_at_bar_strategy(buy_bar=2),
+        )
+
+        assert result.trade_count >= 1
+        time_closed = result.trades[0]
+        assert time_closed.hold_bars == _MAX_HOLD_FOR_MAPPING
+        assert time_closed.exit_reason == ExitReason.TIME.value
+
+    def test_full_run_yield_stop_maps_to_stop(self) -> None:
+        """A position closed by yield_stop carries ExitReason.STOP."""
+        config = BondBacktestConfig(
+            initial_cash=Decimal(1_000_000),
+            dv01_sizer=DV01BudgetStep(
+                max_dd_pct=Decimal("0.05"),
+                expected_max_rate_move_bps=200,
+                max_single_position_pct=Decimal("0.50"),
+            ),
+            yield_stop=YieldStop(threshold_bps=50),  # tight stop
+            max_hold_bars=200,
+        )
+        engine = BondBacktestEngine(config=config)
+        prices = [85.0] * 5 + [83.0, 82.0, 81.0, 80.0, 79.0]
+        candles = _make_bond_candles(_SYMBOL, prices, date(2025, 1, 6))
+        coupons = _make_coupon_schedule(_FIGI, [date(2025, 6, 11)])
+
+        result = engine.run(
+            candles_by_symbol={_SYMBOL: candles},
+            bond_info={_SYMBOL: _BOND_INFO},
+            coupon_schedule={_SYMBOL: coupons},
+            strategy_fn=_buy_at_bar_strategy(buy_bar=2),
+        )
+
+        assert result.trade_count >= 1
+        assert result.trades[0].exit_reason == ExitReason.STOP.value
+
+    def test_full_run_entry_strategy_recorded(self) -> None:
+        """The opening strategy name is recorded on the closed TradeResult."""
+        config = BondBacktestConfig(
+            initial_cash=Decimal(1_000_000),
+            dv01_sizer=DV01BudgetStep(
+                max_dd_pct=Decimal("0.05"),
+                expected_max_rate_move_bps=200,
+                max_single_position_pct=Decimal("0.50"),
+            ),
+            yield_stop=YieldStop(threshold_bps=500),
+            max_hold_bars=200,
+        )
+        engine = BondBacktestEngine(config=config)
+        prices = [85.0] * 12
+        candles = _make_bond_candles(_SYMBOL, prices, date(2025, 1, 6))
+        coupons = _make_coupon_schedule(_FIGI, [date(2025, 6, 11)])
+
+        # _buy_at_bar_strategy emits strategy_name="test_bond_strategy".
+        result = engine.run(
+            candles_by_symbol={_SYMBOL: candles},
+            bond_info={_SYMBOL: _BOND_INFO},
+            coupon_schedule={_SYMBOL: coupons},
+            strategy_fn=_buy_at_bar_strategy(buy_bar=2),
+        )
+
+        assert result.trade_count == 1
+        assert result.trades[0].entry_strategy == "test_bond_strategy"
+
+
+# ---------------------------------------------------------------------------
+# Test 16: PnL-inertness of the exit_reason / entry_strategy wiring
+# (T-69-07) — populating metadata must not change trade economics.
+# ---------------------------------------------------------------------------
+
+
+class TestBondExitReasonPnLInert:
+    """exit_reason / entry_strategy only populate metadata; PnL is unchanged."""
+
+    def _close_once(
+        self,
+        *,
+        exit_reason: object | None,
+        entry_strategy: str | None,
+    ) -> Any:
+        close_date = date(2025, 1, 9)
+        engine = BondBacktestEngine()
+        broker = BondSimulatedBroker(
+            initial_cash=Decimal(1_000_000),
+            coupon_schedule={_SYMBOL: []},
+            face_value=_FACE_VALUE,
+        )
+        broker.buy_bond(_SYMBOL, _QTY, Decimal("85.0"), Decimal(0), Decimal(0))
+        pos = _make_open_position(entry_strategy=entry_strategy)
+        candle_lookup = _single_candle_lookup(_SYMBOL, Decimal("84.0"), close_date)
+        return engine._close_position(  # noqa: SLF001
+            _SYMBOL,
+            pos,
+            close_date,
+            _CLOSE_BAR,
+            candle_lookup,
+            None,
+            broker,
+            {_SYMBOL: _BOND_INFO},
+            {_SYMBOL: []},
+            exit_reason=exit_reason,
+            entry_strategy=entry_strategy,
+        )
+
+    def test_pnl_unchanged_with_vs_without_exit_reason(self) -> None:
+        """Closing with metadata vs without yields identical economics."""
+        with_meta = self._close_once(exit_reason=ExitReason.STOP, entry_strategy=_CARRY_STRATEGY)
+        without_meta = self._close_once(exit_reason=None, entry_strategy=None)
+
+        assert with_meta is not None
+        assert without_meta is not None
+        # Economics identical -- only metadata differs.
+        assert with_meta.pnl == without_meta.pnl
+        assert with_meta.pnl_pct == without_meta.pnl_pct
+        assert with_meta.exit_price == without_meta.exit_price
+        assert with_meta.hold_bars == without_meta.hold_bars
+        # Metadata is the only difference.
+        assert with_meta.exit_reason == ExitReason.STOP.value
+        assert without_meta.exit_reason is None
+        assert with_meta.entry_strategy == _CARRY_STRATEGY
+        assert without_meta.entry_strategy is None
