@@ -134,6 +134,11 @@ def report_for_candles(
     """
     raw_bar_count = len(candles)
     if candles:
+        # This local sort exists ONLY to extract date_span (first/last timestamp);
+        # build_triple_barrier_dataset re-sorts internally (labeling.py:290), so
+        # the sorted order passed below is NOT a load-bearing invariant. The
+        # redundant double sort is correctness-neutral and out of v1 perf scope
+        # (IN-04).
         sorted_candles = sorted(candles, key=lambda c: c.timestamp)
         date_span: tuple[datetime, datetime] | None = (
             sorted_candles[0].timestamp,
