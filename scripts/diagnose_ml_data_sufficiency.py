@@ -149,6 +149,9 @@ def report_for_candles(
 
     # Mirror the production gate in _build_dataset_triple_barrier: a symbol with
     # < _MIN_HISTORY_DAYS or < min_candles_tb is SKIPPED (contributes 0 samples).
+    # The `< min_candles_tb` (101) clause is subsumed by `< _MIN_HISTORY_DAYS`
+    # (500) and can never be the deciding factor; it is kept VERBATIM to mirror
+    # the two-stage production gate exactly (do NOT "simplify" it away) -- IN-02.
     skipped = raw_bar_count < _MIN_HISTORY_DAYS or raw_bar_count < min_candles_tb
     if skipped:
         return {
@@ -230,7 +233,9 @@ def report_for_segment(
     contributing: list[str] = []
     for symbol, candles in candles_by_symbol.items():
         raw_bar_count = len(candles)
-        # Same two-stage skip gate as report_for_candles / production.
+        # Same two-stage skip gate as report_for_candles / production. The
+        # `< min_candles_tb` (101) clause is subsumed by `< _MIN_HISTORY_DAYS`
+        # (500); kept VERBATIM to mirror the production gate exactly (IN-02).
         if raw_bar_count < _MIN_HISTORY_DAYS or raw_bar_count < min_candles_tb:
             continue
         sorted_candles = sorted(candles, key=lambda c: c.timestamp)
