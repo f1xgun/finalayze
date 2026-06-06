@@ -50,24 +50,29 @@ data.
 
 ## 2. Consolidated severity-ranked table (most-asymmetric first, by payoff ascending)
 
-Ranked by payoff ascending = most adverse loss-asymmetry first. All numbers from
-`exit_asymmetry_report.txt`. (PnL figures are USD-normalized per the run harness.)
+Ranked by payoff ascending = most adverse loss-asymmetry first. No-loss segments (`loss_count == 0`)
+and zero-trade segments are NOT asymmetric, so they are bucketed to the BOTTOM regardless of their
+`payoff = 0.000` placeholder (diagnostic ranking fix WR-02). All numbers from `exit_asymmetry_report.txt`.
+(PnL figures are USD-normalized per the run harness.)
 
 | # | Segment | Type | Trades | Win rate | Avg win | Avg loss | Payoff | Named lever | Thin (<25)? | VERDICT |
 |---|---------|------|-------:|---------:|--------:|---------:|-------:|-------------|:-----------:|---------|
-| 1 | ru_telecom | equity | 3 | 100.0% | +61.81 | +0.00 | 0.000 | min_exit_confidence (winners cut early) | thin | DIAGNOSE-ONLY |
-| 2 | ru_transport | equity | 1 | 100.0% | +73.61 | +0.00 | 0.000 | min_exit_confidence (winners cut early) | thin | DIAGNOSE-ONLY |
-| 3 | ru_construction | equity | 3 | 33.3% | +6.36 | -21.42 | 0.297 | chandelier stop multiplier | thin | DIAGNOSE-ONLY |
-| 4 | ru_metals | equity | 10 | 30.0% | +17.67 | -37.23 | 0.475 | chandelier stop multiplier | thin | DIAGNOSE-ONLY |
-| 5 | ru_finance | equity | 71 | 59.2% | +524.79 | -805.80 | 0.651 | chandelier stop multiplier (3.5→3.0 candidate) | no | **REJECT (A/B failed D-11 MaxDD; reverted, stays 3.5)** |
-| 6 | ru_tech | equity | 8 | 37.5% | +10.07 | -11.85 | 0.849 | chandelier stop multiplier | thin | DIAGNOSE-ONLY |
-| 7 | ru_energy | equity | 166 | 60.8% | +525.10 | -608.03 | 0.864 | chandelier stop multiplier | no | **CONTROL** |
-| 8 | ru_ofz_pd | bond | 33 | 36.4% | +3896.39 | -2191.22 | 1.778 | yield_stop_bps (bond) | no | DEFER |
-| 9 | ru_ofz_pk | bond | 16 | 93.8% | +9352.82 | -19.69 | 475.025 | max_hold bars (bond) | thin | DIAGNOSE-ONLY |
+| 1 | ru_construction | equity | 3 | 33.3% | +6.36 | -21.42 | 0.297 | chandelier stop multiplier | thin | DIAGNOSE-ONLY |
+| 2 | ru_metals | equity | 10 | 30.0% | +17.67 | -37.23 | 0.475 | chandelier stop multiplier | thin | DIAGNOSE-ONLY |
+| 3 | ru_finance | equity | 71 | 59.2% | +524.79 | -805.80 | 0.651 | chandelier stop multiplier (3.5→3.0 candidate) | no | **REJECT (A/B failed D-11 MaxDD; reverted, stays 3.5)** |
+| 4 | ru_tech | equity | 8 | 37.5% | +10.07 | -11.85 | 0.849 | chandelier stop multiplier | thin | DIAGNOSE-ONLY |
+| 5 | ru_energy | equity | 166 | 60.8% | +525.10 | -608.03 | 0.864 | chandelier stop multiplier | no | **CONTROL** |
+| 6 | ru_ofz_pd | bond | 33 | 36.4% | +3896.39 | -2191.22 | 1.778 | yield_stop_bps (bond) | no | DEFER |
+| 7 | ru_ofz_pk | bond | 16 | 93.8% | +9352.82 | -19.69 | 475.025 | max_hold bars (bond) | thin | DIAGNOSE-ONLY |
+| 8 | ru_telecom | equity | 3 | 100.0% | +61.81 | +0.00 | 0.000 | min_exit_confidence (winners cut early) | thin (no-loss → ranked last) | DIAGNOSE-ONLY |
+| 9 | ru_transport | equity | 1 | 100.0% | +73.61 | +0.00 | 0.000 | min_exit_confidence (winners cut early) | thin (no-loss → ranked last) | DIAGNOSE-ONLY |
 
 Note the diagnostic discriminates correctly: the two control-class workhorses (`ru_energy`,
 `ru_finance`) and the one adequate-sample bond (`ru_ofz_pd`) are the only three segments above the
-25-trade floor; everything else is informational only.
+25-trade floor; everything else is informational only. The two 100%-win-rate sectors (`ru_telecom`,
+`ru_transport`) have a `payoff = 0.000` placeholder only because they recorded no losing trades — they
+are the LEAST asymmetric, hence ranked last, not first (the WR-02 fix corrected an earlier ranking that
+misplaced them at the top).
 
 ---
 

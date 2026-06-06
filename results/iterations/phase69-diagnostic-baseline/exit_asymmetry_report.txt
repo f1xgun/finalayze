@@ -1,4 +1,4 @@
-2026-06-06 16:51:08 [warning  ] segment_resolved_empty_from_snapshot segment_id=ru_utilities
+2026-06-06 18:04:36 [warning  ] segment_resolved_empty_from_snapshot segment_id=ru_utilities
 
   exit-asymmetry attribution: ru_energy @ phase69-diagnostic-baseline
   --------------------------------------------
@@ -247,8 +247,6 @@
 
 | Segment | Type | Trades | Win rate | Payoff | Lever verdict | Confidence |
 |---------|------|--------|----------|--------|---------------|------------|
-| ru_telecom | stock | 3 | 100.0% | 0.000 | LEVER VERDICT: ru_telecom min_exit_confidence (avg-win too small -- winners are cut early) | low-confidence -- informational only |
-| ru_transport | stock | 1 | 100.0% | 0.000 | LEVER VERDICT: ru_transport min_exit_confidence (avg-win too small -- winners are cut early) | low-confidence -- informational only |
 | ru_construction | stock | 3 | 33.3% | 0.297 | LEVER VERDICT: ru_construction chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far) | low-confidence -- informational only |
 | ru_metals | stock | 10 | 30.0% | 0.475 | LEVER VERDICT: ru_metals chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far) | low-confidence -- informational only |
 | ru_finance | stock | 71 | 59.2% | 0.651 | LEVER VERDICT: ru_finance chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far) | actionable |
@@ -256,4 +254,6 @@
 | ru_energy | stock | 166 | 60.8% | 0.864 | LEVER VERDICT: ru_energy chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far) | actionable |
 | ru_ofz_pd | bond | 33 | 36.4% | 1.778 | LEVER VERDICT: ru_ofz_pd bond yield_stop_bps (yield-stop exits dominate) | actionable |
 | ru_ofz_pk | bond | 16 | 93.8% | 475.025 | LEVER VERDICT: ru_ofz_pk bond max_hold bars (time exits dominate) | low-confidence -- informational only |
+| ru_telecom | stock | 3 | 100.0% | 0.000 | LEVER VERDICT: ru_telecom min_exit_confidence (avg-win too small -- winners are cut early) | low-confidence -- informational only |
+| ru_transport | stock | 1 | 100.0% | 0.000 | LEVER VERDICT: ru_transport min_exit_confidence (avg-win too small -- winners are cut early) | low-confidence -- informational only |
 
