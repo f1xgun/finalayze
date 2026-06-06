@@ -1,0 +1,259 @@
+2026-06-06 18:04:36 [warning  ] segment_resolved_empty_from_snapshot segment_id=ru_utilities
+
+  exit-asymmetry attribution: ru_energy @ phase69-diagnostic-baseline
+  --------------------------------------------
+  Trades                                  166
+  Win / Loss count                   101 / 65
+  Win rate                              60.8%
+  Avg win                             +525.10
+  Avg loss                            -608.03
+  Payoff (win/|loss|)                   0.864
+
+  Exit-reason share (count | summed PnL):
+    stop                       15 | -14390.38
+    profit_target              139 | +37462.36
+    time                         3 | -3994.16
+    signal                       9 | -5565.16
+
+  Per-strategy PnL:
+    rsi2_connors                     -6510.69
+    dividend_gap                     -1070.67
+    mean_reversion                      -8.50
+    momentum                          +582.46
+    event_driven                     +4124.89
+    dual_momentum                   +16395.17
+
+  Per-symbol PnL:
+    RNFT                             -3189.59
+    NVTK                             -1539.38
+    TRNFP                              +94.62
+    LKOH                             +2440.69
+    TATN                             +3861.26
+    SIBN                             +5157.74
+    ROSN                             +6687.32
+
+  LEVER VERDICT: ru_energy chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far)
+
+
+  exit-asymmetry attribution: ru_tech @ phase69-diagnostic-baseline
+  --------------------------------------------
+  Trades                                    8
+  Win / Loss count                      3 / 5
+  Win rate                              37.5%
+  Avg win                              +10.07
+  Avg loss                             -11.85
+  Payoff (win/|loss|)                   0.849
+
+  Exit-reason share (count | summed PnL):
+    profit_target                  7 | -43.05
+    signal                         1 | +13.98
+
+  Per-strategy PnL:
+    mean_reversion                     -29.07
+
+  Per-symbol PnL:
+    WUSH                               -17.98
+    POSI                               -11.67
+    VKCO                               -11.46
+    YDEX                                -5.09
+    ASTR                                +5.63
+    SOFL                               +11.51
+
+  LEVER VERDICT: ru_tech chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far)
+
+
+  exit-asymmetry attribution: ru_finance @ phase69-diagnostic-baseline
+  --------------------------------------------
+  Trades                                   71
+  Win / Loss count                    42 / 29
+  Win rate                              59.2%
+  Avg win                             +524.79
+  Avg loss                            -805.80
+  Payoff (win/|loss|)                   0.651
+
+  Exit-reason share (count | summed PnL):
+    stop                       30 | -19717.80
+    profit_target              31 | +16517.60
+    time                          2 | +189.08
+    signal                       8 | +1683.86
+
+  Per-strategy PnL:
+    dividend_gap                     -2066.68
+    dual_momentum                    -1366.64
+    mean_reversion                      +8.28
+    rsi2_connors                     +2097.79
+
+  Per-symbol PnL:
+    SBER                             -5392.22
+    SVCB                             -1679.09
+    RENI                             -1460.07
+    T                                 +175.08
+    MOEX                              +214.80
+    BSPB                             +2570.30
+    AFKS                             +4243.94
+
+  LEVER VERDICT: ru_finance chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far)
+
+
+  exit-asymmetry attribution: ru_metals @ phase69-diagnostic-baseline
+  --------------------------------------------
+  Trades                                   10
+  Win / Loss count                      3 / 7
+  Win rate                              30.0%
+  Avg win                              +17.67
+  Avg loss                             -37.23
+  Payoff (win/|loss|)                   0.475
+
+  Exit-reason share (count | summed PnL):
+    stop                          6 | -199.03
+    profit_target                   4 | -8.54
+
+  Per-strategy PnL:
+    dividend_gap                      -179.29
+    mean_reversion                     -28.27
+
+  Per-symbol PnL:
+    RUAL                               -65.87
+    PLZL                               -46.02
+    MAGN                               -40.01
+    CHMF                               -36.94
+    NLMK                               -32.09
+    GMKN                                -8.70
+    ENPG                               +22.06
+
+  LEVER VERDICT: ru_metals chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far)
+
+
+  exit-asymmetry attribution: ru_telecom @ phase69-diagnostic-baseline
+  --------------------------------------------
+  Trades                                    3
+  Win / Loss count                      3 / 0
+  Win rate                             100.0%
+  Avg win                              +61.81
+  Avg loss                              +0.00
+  Payoff (win/|loss|)                   0.000
+
+  Exit-reason share (count | summed PnL):
+    profit_target                 3 | +185.44
+
+  Per-strategy PnL:
+    mean_reversion                    +185.44
+
+  Per-symbol PnL:
+    MTSS                               +82.33
+    MGTSP                             +103.11
+
+  LEVER VERDICT: ru_telecom min_exit_confidence (avg-win too small -- winners are cut early)
+
+
+  exit-asymmetry attribution: ru_construction @ phase69-diagnostic-baseline
+  --------------------------------------------
+  Trades                                    3
+  Win / Loss count                      1 / 2
+  Win rate                              33.3%
+  Avg win                               +6.36
+  Avg loss                             -21.42
+  Payoff (win/|loss|)                   0.297
+
+  Exit-reason share (count | summed PnL):
+    stop                           2 | -42.84
+    profit_target                   1 | +6.36
+
+  Per-strategy PnL:
+    mean_reversion                     -36.48
+
+  Per-symbol PnL:
+    PIKK                               -33.64
+    LSRG                                -2.84
+
+  LEVER VERDICT: ru_construction chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far)
+
+
+  exit-asymmetry attribution: ru_transport @ phase69-diagnostic-baseline
+  --------------------------------------------
+  Trades                                    1
+  Win / Loss count                      1 / 0
+  Win rate                             100.0%
+  Avg win                              +73.61
+  Avg loss                              +0.00
+  Payoff (win/|loss|)                   0.000
+
+  Exit-reason share (count | summed PnL):
+    profit_target                  1 | +73.61
+
+  Per-strategy PnL:
+    mean_reversion                     +73.61
+
+  Per-symbol PnL:
+    FLOT                               +73.61
+
+  LEVER VERDICT: ru_transport min_exit_confidence (avg-win too small -- winners are cut early)
+
+
+  exit-asymmetry attribution: ru_ofz_pd @ phase69-diagnostic-baseline
+  --------------------------------------------
+  Trades                                   33
+  Win / Loss count                    12 / 21
+  Win rate                              36.4%
+  Avg win                            +3896.39
+  Avg loss                           -2191.22
+  Payoff (win/|loss|)                   1.778
+
+  Exit-reason share (count | summed PnL):
+    stop                       24 | -41185.68
+    time                        4 | +35363.14
+    force_close                  5 | +6563.65
+
+  Per-strategy PnL:
+    bond_duration_rotation            +741.11
+
+  Per-symbol PnL:
+    SU26241RMFS8                     -6399.73
+    SU26246RMFS7                       +28.61
+    SU26252RMFS5                       +86.04
+    SU26244RMFS2                      +302.11
+    SU26243RMFS4                     +1992.89
+    SU26239RMFS2                     +4731.19
+
+  LEVER VERDICT: ru_ofz_pd bond yield_stop_bps (yield-stop exits dominate)
+
+
+  exit-asymmetry attribution: ru_ofz_pk @ phase69-diagnostic-baseline
+  --------------------------------------------
+  Trades                                   16
+  Win / Loss count                     15 / 1
+  Win rate                              93.8%
+  Avg win                            +9352.82
+  Avg loss                             -19.69
+  Payoff (win/|loss|)                 475.025
+
+  Exit-reason share (count | summed PnL):
+    time                       12 | +99187.73
+    force_close                 4 | +41084.94
+
+  Per-strategy PnL:
+    bond_carry                     +140272.67
+
+  Per-symbol PnL:
+    SU29010RMFS4                    +10105.02
+    SU29009RMFS6                    +24419.51
+    SU29008RMFS8                    +47557.19
+    SU29007RMFS0                    +58190.95
+
+  LEVER VERDICT: ru_ofz_pk bond max_hold bars (time exits dominate)
+
+
+  Consolidated severity-ranked report (most-asymmetric first):
+
+| Segment | Type | Trades | Win rate | Payoff | Lever verdict | Confidence |
+|---------|------|--------|----------|--------|---------------|------------|
+| ru_construction | stock | 3 | 33.3% | 0.297 | LEVER VERDICT: ru_construction chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far) | low-confidence -- informational only |
+| ru_metals | stock | 10 | 30.0% | 0.475 | LEVER VERDICT: ru_metals chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far) | low-confidence -- informational only |
+| ru_finance | stock | 71 | 59.2% | 0.651 | LEVER VERDICT: ru_finance chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far) | actionable |
+| ru_tech | stock | 8 | 37.5% | 0.849 | LEVER VERDICT: ru_tech chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far) | low-confidence -- informational only |
+| ru_energy | stock | 166 | 60.8% | 0.864 | LEVER VERDICT: ru_energy chandelier stop multiplier (avg-loss magnitude dominates avg-win -- losers run too far) | actionable |
+| ru_ofz_pd | bond | 33 | 36.4% | 1.778 | LEVER VERDICT: ru_ofz_pd bond yield_stop_bps (yield-stop exits dominate) | actionable |
+| ru_ofz_pk | bond | 16 | 93.8% | 475.025 | LEVER VERDICT: ru_ofz_pk bond max_hold bars (time exits dominate) | low-confidence -- informational only |
+| ru_telecom | stock | 3 | 100.0% | 0.000 | LEVER VERDICT: ru_telecom min_exit_confidence (avg-win too small -- winners are cut early) | low-confidence -- informational only |
+| ru_transport | stock | 1 | 100.0% | 0.000 | LEVER VERDICT: ru_transport min_exit_confidence (avg-win too small -- winners are cut early) | low-confidence -- informational only |
+

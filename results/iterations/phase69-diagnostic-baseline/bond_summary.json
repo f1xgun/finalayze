@@ -1,0 +1,44 @@
+{
+  "name": "phase69-diagnostic-baseline",
+  "description": "Phase 69 OFZ paired retry (warm connection then ru_ofz_pd)",
+  "period": {
+    "start": "2022-01-01",
+    "end": "2025-12-31"
+  },
+  "segments": [
+    {
+      "segment": "ru_ofz_pd",
+      "config": {
+        "initial_cash": "1000000",
+        "max_positions": 5,
+        "max_hold_bars": 120,
+        "yield_stop_bps": "50"
+      },
+      "results": {
+        "total_return_pct": -0.6922197508,
+        "max_drawdown_pct": 2.692140247491458,
+        "sharpe_ratio": -0.1347,
+        "trade_count": 33,
+        "win_rate": 0.3636,
+        "profit_factor": 1.0161,
+        "coupon_income_gross": 29647.49,
+        "coupon_income_net": 25793.3163,
+        "tax_paid": 3854.1737
+      },
+      "metrics": {
+        "total_return_pct": -0.6779912628139706,
+        "annualized_return_pct": -0.17111777836134046,
+        "excess_return_pct": -60.261324596147304,
+        "annualized_excess_return_pct": -15.17111777836134,
+        "excess_sharpe": -11.61860422390592,
+        "max_drawdown_pct": 2.692140247491458,
+        "annualized_volatility_pct": 1.217366590963124,
+        "trade_count": 33,
+        "win_rate": 0.36363636363636365,
+        "profit_factor": 1.0161056585682793,
+        "avg_hold_bars": 39.39393939393939,
+        "coupon_contribution_pct": 0.0
+      }
+    }
+  ]
+}

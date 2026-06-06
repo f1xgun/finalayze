@@ -1,0 +1,34 @@
+{
+  "segment": "ru_ofz_pk",
+  "config": {
+    "initial_cash": "1000000",
+    "max_positions": 4,
+    "max_hold_bars": 252,
+    "yield_stop_bps": "0"
+  },
+  "results": {
+    "total_return_pct": 12.0070189097,
+    "max_drawdown_pct": 1.9763188107132832,
+    "sharpe_ratio": 1.2183,
+    "trade_count": 16,
+    "win_rate": 0.9375,
+    "profit_factor": 7125.3685,
+    "coupon_income_gross": 146767.5,
+    "coupon_income_net": 127687.725,
+    "tax_paid": 19079.775
+  },
+  "metrics": {
+    "total_return_pct": 12.023439298710992,
+    "annualized_return_pct": 2.89953919128465,
+    "excess_return_pct": -47.55989403462234,
+    "annualized_excess_return_pct": -12.100460808715349,
+    "excess_sharpe": -4.676204394718103,
+    "max_drawdown_pct": 1.976318810713276,
+    "annualized_volatility_pct": 2.37171290604769,
+    "trade_count": 16,
+    "win_rate": 0.9375,
+    "profit_factor": 7125.368454271589,
+    "avg_hold_bars": 226.375,
+    "coupon_contribution_pct": 106.21457058183006
+  }
+}
