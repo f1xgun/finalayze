@@ -22,11 +22,15 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from scripts.run_bond_iteration import _write_trades_jsonl  # noqa: E402
+from scripts.run_bond_iteration import (  # noqa: E402
+    WalkForwardResult,
+    _write_trades_jsonl,
+)
 
 from finalayze.core.schemas import ExitReason, TradeResult  # noqa: E402
 
 _EXPECTED_TRADE_COUNT = 3
+_EXPECTED_WF_TRADE_COUNT = 2
 _QTY = Decimal(100)
 _CARRY_STRATEGY = "bond_carry"
 _DURATION_STRATEGY = "bond_duration_rotation"
@@ -125,3 +129,43 @@ class TestBondTradesJsonlWriter:
         _write_trades_jsonl(out, [])
         assert out.exists()
         assert out.read_text() == ""
+
+
+class TestWalkForwardResultCarriesTrades:
+    """WR-03: WalkForwardResult surfaces trades so the WF path can emit a sidecar."""
+
+    def _sample_trades(self) -> list[TradeResult]:
+        return [
+            _make_bond_trade(
+                symbol="SU26243RMFS4",
+                pnl=Decimal("-1200.0"),
+                exit_reason=ExitReason.FORCE_CLOSE.value,
+                entry_strategy=_DURATION_STRATEGY,
+            ),
+            _make_bond_trade(
+                symbol="SU26244RMFS2",
+                pnl=Decimal("800.0"),
+                exit_reason=ExitReason.STOP.value,
+                entry_strategy=_DURATION_STRATEGY,
+            ),
+        ]
+
+    def test_default_trades_is_empty_list(self) -> None:
+        """Trades defaults to an empty list (backwards-compatible construction)."""
+        wf = WalkForwardResult()
+        assert wf.trades == []
+
+    def test_trades_round_trip_through_sidecar(self, tmp_path: Path) -> None:
+        """Trades carried on the result write a round-trippable WF sidecar."""
+        wf = WalkForwardResult(trades=self._sample_trades())
+        out = tmp_path / "ru_ofz_pd" / "trades.jsonl"
+        _write_trades_jsonl(out, wf.trades)
+
+        loaded = [
+            TradeResult.model_validate(json.loads(line)) for line in out.read_text().splitlines()
+        ]
+        assert len(loaded) == _EXPECTED_WF_TRADE_COUNT
+        assert [t.exit_reason for t in loaded] == [
+            ExitReason.FORCE_CLOSE.value,
+            ExitReason.STOP.value,
+        ]

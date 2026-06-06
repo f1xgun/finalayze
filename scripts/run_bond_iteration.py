@@ -207,6 +207,11 @@ class WalkForwardResult:
 
     per_fold: list[dict[str, Any]] = field(default_factory=list)
     aggregate: dict[str, Any] = field(default_factory=dict)
+    # WR-03: surface the accumulated trades so the WF path can emit a
+    # trades.jsonl sidecar for the cross-segment exit diagnostic. NOTE: WF folds
+    # are chained and a fold may re-close the same logical position, so these are
+    # PER-FOLD trades -- the diagnostic treats each fold-close as its own row.
+    trades: list[TradeResult] = field(default_factory=list)
 
 
 def _generate_walk_forward_folds(
@@ -315,7 +320,7 @@ def walk_forward_bond_backtest(
     per_fold: list[dict[str, Any]] = []
     oos_equity: list[float] = []
     oos_dates: list[date] = []
-    all_trades: list[Any] = []
+    all_trades: list[TradeResult] = []
     total_coupon_gross = 0.0
     total_coupon_net = 0.0
 
@@ -473,7 +478,9 @@ def walk_forward_bond_backtest(
             "completed_folds": 0,
         }
 
-    return WalkForwardResult(per_fold=per_fold, aggregate=aggregate)
+    # WR-03: carry all_trades so _run_bond_segment_walk_forward can write the
+    # trades.jsonl sidecar (per-fold trades -- see WalkForwardResult.trades note).
+    return WalkForwardResult(per_fold=per_fold, aggregate=aggregate, trades=all_trades)
 
 
 def _build_carry_strategy(
@@ -742,10 +749,28 @@ def _run_bond_segment_walk_forward(
     verdict = _evaluate_wf_verdict(agg)
     _print_wf_verdict(agg, verdict)
 
-    # Save walk-forward results
+    # Save walk-forward results (summary + WR-03 trades.jsonl sidecar)
+    return _write_wf_outputs(output_dir, segment, strategy_name, wf_result, verdict)
+
+
+def _write_wf_outputs(
+    output_dir: Path,
+    segment: str,
+    strategy_name: str,
+    wf_result: WalkForwardResult,
+    verdict: dict[str, bool],
+) -> dict[str, Any]:
+    """Persist the WF summary JSON and the WR-03 per-segment trades.jsonl sidecar.
+
+    WR-03: the WF path must also emit ``trades.jsonl`` so
+    ``diagnose_exit_asymmetry`` is not silently empty when operators run the bond
+    harness with ``--walk-forward`` (a first-class supported mode). NOTE: WF folds
+    are chained and may re-close the same logical position per fold, so these are
+    PER-FOLD trades (the diagnostic counts each fold-close as a row).
+    """
     seg_dir = output_dir / segment
     seg_dir.mkdir(parents=True, exist_ok=True)
-    wf_summary = {
+    wf_summary: dict[str, Any] = {
         "segment": segment,
         "strategy": strategy_name,
         "walk_forward": {
@@ -757,7 +782,7 @@ def _run_bond_segment_walk_forward(
     (seg_dir / "walk_forward_summary.json").write_text(
         json.dumps(wf_summary, indent=2, default=str)
     )
-
+    _write_trades_jsonl(seg_dir / "trades.jsonl", wf_result.trades)
     return wf_summary
 
 
