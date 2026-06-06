@@ -59,7 +59,7 @@ Ranked by payoff ascending = most adverse loss-asymmetry first. All numbers from
 | 2 | ru_transport | equity | 1 | 100.0% | +73.61 | +0.00 | 0.000 | min_exit_confidence (winners cut early) | thin | DIAGNOSE-ONLY |
 | 3 | ru_construction | equity | 3 | 33.3% | +6.36 | -21.42 | 0.297 | chandelier stop multiplier | thin | DIAGNOSE-ONLY |
 | 4 | ru_metals | equity | 10 | 30.0% | +17.67 | -37.23 | 0.475 | chandelier stop multiplier | thin | DIAGNOSE-ONLY |
-| 5 | ru_finance | equity | 71 | 59.2% | +524.79 | -805.80 | 0.651 | chandelier stop multiplier (3.5→3.0) | no | **ACCEPT-tune (candidate, Wave-4 gated)** |
+| 5 | ru_finance | equity | 71 | 59.2% | +524.79 | -805.80 | 0.651 | chandelier stop multiplier (3.5→3.0 candidate) | no | **REJECT (A/B failed D-11 MaxDD; reverted, stays 3.5)** |
 | 6 | ru_tech | equity | 8 | 37.5% | +10.07 | -11.85 | 0.849 | chandelier stop multiplier | thin | DIAGNOSE-ONLY |
 | 7 | ru_energy | equity | 166 | 60.8% | +525.10 | -608.03 | 0.864 | chandelier stop multiplier | no | **CONTROL** |
 | 8 | ru_ofz_pd | bond | 33 | 36.4% | +3896.39 | -2191.22 | 1.778 | yield_stop_bps (bond) | no | DEFER |
@@ -136,29 +136,94 @@ trade, statistically meaningless). These are diagnosed for the record, not actio
 
 ## 4. Honest outcome
 
-**One segment — `ru_finance` — is the sole ACCEPT-tune candidate, and it is gated by the Wave-4 D-11
-A/B no-regression check.** Every other segment is either the byte-identical CONTROL (`ru_energy`), a
-favorable/no-asymmetry DEFER (`ru_ofz_pd`), or a thin DIAGNOSE-ONLY (the remaining six). No tune is
-manufactured to produce a number (D-02).
+**FINAL: the sole ACCEPT-tune candidate (`ru_finance` chandelier 3.5 → 3.0) was REJECTED by the
+Wave-4 D-11 A/B gate (see §6), so THE PHASE OUTCOME IS DIAGNOSE-ONLY (D-02).** `ru_finance` ships
+**UNCHANGED at chandelier 3.5** (the Phase-67 value); the candidate edit was applied and then
+**reverted**, so no unaccepted config change ships. No preset/lever change ships from this phase at
+all — the phase delivers the cross-segment diagnostic + this runbook only.
 
-If the Wave-4 gate **rejects** the ru_finance 3.5 → 3.0 move (a real possibility given the double-tune
-/ curve-fit risk noted in §3), then **the phase is effectively diagnose-only** — which is a
-legitimate, honest recorded result, exactly the Phase-67 / Phase-70 discipline (honest verdict over
-forced pass). A diagnose-only phase outcome is not a failure; it is the diagnostic doing its job.
+Every other segment was, as diagnosed, out-of-scope for tuning: the byte-identical CONTROL
+(`ru_energy`), a favorable/no-asymmetry DEFER (`ru_ofz_pd`), or a thin DIAGNOSE-ONLY (the remaining
+six). No tune was manufactured to produce a number (D-02); the double-tune / curve-fit risk flagged
+in §3 (ru_finance was already tuned 4.0 → 3.5 in Phase 67) **materialized** — the candidate move
+marginally lifted PF (+0.80 %) but materially worsened MaxDD (+17.31 %), so the gate correctly held.
+
+A diagnose-only phase outcome is **not a failure** — it is a legitimate, honest recorded result,
+exactly the Phase-67 / Phase-70 discipline (honest verdict over forced pass: 67 ACCEPT-when-clear,
+70 ABANDON). The diagnostic did its job: it identified the one defensible candidate, the gate tested
+it against the frozen baseline, and the gate said no.
 
 ---
 
 ## 5. Next step
 
-- **If the candidate is pursued (default):** **Plan 05** runs the gated `ru_finance` chandelier
-  **3.5 → 3.0** A/B through the `backtest-iteration` skill against the frozen pre-69 baseline. It
-  holds the D-11 tolerances (PF ≥ −5%, MaxDD ≤ +15%, WF-Sharpe ≥ −10%) and must not materially
-  regress `ru_energy` (the byte-identical control). If it **passes** → ACCEPT (record the tightened
-  multiplier as live). If it **fails D-11** → record **REJECT**; the segment stays at 3.5 and the
-  phase result is diagnose-only.
+- **RESOLVED — no further action in this phase.** The `ru_finance` chandelier **3.5 → 3.0** candidate
+  was run through the `backtest-iteration` D-11 A/B against the frozen pre-69 baseline (§6) and
+  **REJECTED** (MaxDD +17.31 % breached the ≤ +15 % floor). The candidate edit was **reverted** —
+  `ru_finance` stays live at chandelier **3.5** — and **the phase result is diagnose-only**. No
+  preset/lever change ships.
+- **A possible future follow-up** (its own one-segment-at-a-time phase, the Phase-67 model) could
+  re-examine the ru_finance loss tail with a *different* lever than the now-twice-pulled chandelier
+  (e.g. `min_exit_confidence`, or a strategy-mix / sizing change), since the chandelier path has hit
+  diminishing returns (4.0 → 3.5 in 67 lifted PF but not past 1.0; 3.5 → 3.0 here failed the gate).
+  That is out-of-scope for Phase 69.
 - **No other segment is a tune target.** `ru_ofz_pd` (DEFER), `ru_ofz_pk` and the five thin equity
   sectors (DIAGNOSE-ONLY), and `ru_energy` (CONTROL) are all explicitly out-of-scope for tuning in
   this phase. Borderline / multi-lever segments are diagnosed here and deferred to dedicated
-  follow-up phases (the one-segment-at-a-time Phase-67 model).
+  follow-up phases.
 - No segment removed in Phase-68 is referenced or treated as a tune target anywhere in this runbook
-  — only the 9 enabled post-68 segments are diagnosed, and only `ru_finance` is a (gated) candidate.
+  — only the 9 enabled post-68 segments are diagnosed, and `ru_finance` was the sole (gated, now
+  REJECTED) candidate.
+
+---
+
+## 6. Wave-4 A/B gate result — ru_finance chandelier 3.5→3.0: REJECT
+
+The sole candidate tune was run through the `backtest-iteration` D-11 A/B gate. A **matched
+2-segment A/B** (`ru_finance` + the `ru_energy` control anchor) was executed, differing ONLY in the
+`ru_finance` chandelier multiplier. Both runs used `--baseline none`, the default chandelier stop
+mode, period **2023-01-01 .. 2024-12-31**. Numbers are transcribed from
+`results/iterations/phase69-ab-baseline-3p5/` and `results/iterations/phase69-ab-candidate-3p0/`
+(committed), and `results/iterations/history.jsonl` (both entries `verdict: REJECT`).
+
+### A/B numbers (baseline 3.5 vs candidate 3.0)
+
+| Metric | BASELINE `phase69-ab-baseline-3p5` (chandelier 3.5) | CANDIDATE `phase69-ab-candidate-3p0` (chandelier 3.0) | Delta |
+|--------|----------------------------------------------------:|------------------------------------------------------:|------:|
+| PF             | 1.1938  | 1.2034  | **+0.80 %** |
+| WF-Sharpe      | 0.4433  | 0.4396  | **−0.83 %** |
+| MaxDD          | 1.56    | 1.83    | **+17.31 %** |
+| Calmar         | 0.2141  | 0.1825  | −14.76 % |
+| Sortino        | 0.6247  | 0.6175  | −1.15 % |
+| MC-5th-Sharpe  | −0.6488 | −0.7050 | worse |
+| trade_count    | 237 (ru_finance 71 + ru_energy 166) | 242 (ru_finance 76 + ru_energy 166) | +5 (all ru_finance) |
+
+### D-11 floor breakdown (candidate vs baseline)
+
+| Gate metric | Delta | Floor | Result |
+|-------------|------:|-------|:------:|
+| PF        | +0.80 %  | ≥ −5 %  | **PASS** |
+| WF-Sharpe | −0.83 %  | ≥ −10 % | **PASS** |
+| MaxDD     | +17.31 % | ≤ +15 % | **FAIL** |
+
+`scripts/compare_iterations.py` independent verdict: **REJECT** — MaxDD regressed +17.31 % past the
+≤ +15 % floor. Net: the tune marginally lifts PF (+0.80 %) but materially worsens MaxDD (+17.31 %),
+Calmar, Sortino and MC-5th-Sharpe — **not a clear win**. The **double-tune caveat** (ru_finance was
+already tuned 4.0 → 3.5 in Phase 67 on this exact lever; §3) **materialized**: pulling the same lever
+one phase later traded a sliver of PF for a materially deeper drawdown.
+
+### ru_energy control held (D-07)
+
+`ru_energy` is **ECONOMICALLY BYTE-IDENTICAL** between the baseline and candidate runs — **166 trades**
+in both, every field equal except the random per-run `signal_id` UUID (verified by stripping
+`signal_id` and comparing: identical). This proves the `ru_finance` chandelier tune is **segment-local**
+and does not touch `ru_energy` — the control held, exactly as required.
+
+### Action taken
+
+The candidate `chandelier_exit.py` edit (`_CHANDELIER_MULTIPLIERS["ru_finance"]` 3.5 → 3.0) and its
+test updates were **REVERTED** (the tune-then-revert nets to zero on production code — the file is
+byte-identical to its pre-phase-69 state). **`ru_finance` ships UNCHANGED at chandelier 3.5.** No
+global knob (`_MOEX_UPLIFT`, `DEFAULT_STRATEGY_STOP_ATR`, combiner default), no D-11 relaxation, no
+force-save. The honest phase outcome is **diagnose-only (D-02)**, consistent with the Phase-67
+ACCEPT-when-clear and Phase-70 ABANDON discipline.
