@@ -277,12 +277,13 @@ def fetch_segment_candles(
     """Fetch candles per symbol DB-first; escalate to Tinkoff only on DB miss.
 
     Returns ``(candles_by_symbol, db_missed)``. DB-first keeps the run
-    token-free when candles are cached. A symbol the DB lacks is recorded in
-    ``db_missed`` so the summary flags it for a one-time Tinkoff backfill; the
-    Tinkoff escalation reads the token via ``os.environ`` (NOT ``Settings`` /
-    ``source .env``) and the token is NEVER logged or printed (T-70-01). The
-    yfinance fallback in the production loader is deliberately bypassed because
-    it returns EMPTY for MOEX.
+    token-free when candles are cached. ``db_missed`` lists ONLY symbols still
+    pending after escalation -- a symbol the DB lacked but Tinkoff back-filled
+    this run is NOT included (WR-03), so the "needs one-time Tinkoff backfill"
+    summary stays accurate. The Tinkoff escalation reads the token via
+    ``os.environ`` (NOT ``Settings`` / ``source .env``) and the token is NEVER
+    logged or printed (T-70-01). The yfinance fallback in the production loader
+    is deliberately bypassed because it returns EMPTY for MOEX.
     """
     import asyncio  # noqa: PLC0415
 
@@ -300,13 +301,18 @@ def fetch_segment_candles(
         if candles:
             candles_by_symbol[symbol] = candles
             continue
-        # DB miss -- flag it. Escalate to Tinkoff ONLY for MOEX and ONLY when a
-        # token is present (keeps the default run token-free).
-        db_missed.append(symbol)
+        # DB miss. Escalate to Tinkoff ONLY for MOEX and ONLY when a token is
+        # present (keeps the default run token-free). Record the symbol as
+        # still-pending ONLY if the escalation did not produce candles -- a
+        # symbol back-filled this run is NOT a pending backfill (WR-03).
+        db_miss = True
         if is_moex_segment(segment_id) and has_token:
             tinkoff_candles = fetch_tinkoff_candles(symbol)
             if tinkoff_candles:
                 candles_by_symbol[symbol] = tinkoff_candles
+                db_miss = False  # back-filled this run; not pending
+        if db_miss:
+            db_missed.append(symbol)
 
     return candles_by_symbol, db_missed
 
