@@ -47,7 +47,7 @@ PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from finalayze.core.schemas import TradeResult
+from finalayze.core.schemas import ExitReason, TradeResult
 
 # A loss is materially asymmetric when avg-loss magnitude exceeds avg-win by
 # this factor -- implicating the stop side (chandelier) rather than the entry.
@@ -156,29 +156,41 @@ def _name_lever_equity(segment: str, avg_win: Decimal, avg_loss: Decimal) -> str
 
 
 def _name_lever_bond(segment: str, attr: Attribution) -> str:
-    """Name a bond-relevant lever from the exit-reason mix (D-04).
+    """Name a bond-relevant lever from the exit-reason mix (D-04, WR-01).
 
     NEVER emits a chandelier verdict: bonds run ``bond_duration_rotation`` /
     ``bond_carry`` and have no ATR chandelier / exit-confidence levers, so the
     equity payoff verdict does not map. Keys on the dominant exit reason and
     names ONLY honestly-wired bond levers (RESEARCH bond table):
 
-      * STOP share dominant   -> yield_stop_bps (the bond analogue of the stop)
-      * TIME share dominant   -> max_hold bars
-      * SIGNAL share dominant -> rebalance_interval_bars / maturity-rotation cadence
-      * else                  -> max_positions / duration-carry timing (informational)
+      * FORCE_CLOSE share dominant -> max_hold bars / rebalance cadence
+        (positions held to end -- exits dominated by force-close at last bar)
+      * STOP share dominant        -> yield_stop_bps (the bond analogue of the stop)
+      * TIME share dominant        -> max_hold bars
+      * SIGNAL share dominant      -> rebalance_interval_bars / maturity-rotation cadence
+      * dominant == 0 (no trades)  -> max_positions / duration-carry timing (informational)
+
+    ``force_close`` MUST be in the dominance set (WR-01): ``bond_engine.run()``
+    force-closes every position still open at the last bar with
+    ``ExitReason.FORCE_CLOSE``, so in a single-pass OFZ backtest the majority of
+    closes are typically ``force_close``. Excluding it mis-attributed the lever
+    (a lone ``stop`` falsely "dominating", or a clear force-close majority
+    reported as "no dominant exit reason").
     """
     counts = attr.exit_reason_counts
-    stop = counts.get("stop", 0)
-    time_ct = counts.get("time", 0)
-    signal = counts.get("signal", 0)
-    dominant = max(stop, time_ct, signal)
+    stop = counts.get(ExitReason.STOP.value, 0)
+    time_ct = counts.get(ExitReason.TIME.value, 0)
+    signal = counts.get(ExitReason.SIGNAL.value, 0)
+    force = counts.get(ExitReason.FORCE_CLOSE.value, 0)
+    dominant = max(stop, time_ct, signal, force)
 
     prefix = f"LEVER VERDICT: {segment} bond"
     if dominant == 0:
+        return f"{prefix} max_positions / duration-carry exit timing (no trades -- informational)"
+    if force == dominant:
         return (
-            f"{prefix} max_positions / duration-carry exit timing "
-            "(no dominant exit reason -- informational)"
+            f"{prefix} max_hold bars / rebalance cadence "
+            "(positions held to end -- exits dominated by force-close at last bar)"
         )
     if stop == dominant:
         return f"{prefix} yield_stop_bps (yield-stop exits dominate)"
@@ -332,21 +344,59 @@ def _print_report(attr: Attribution, *, run: str, segment: str) -> None:
     print()
 
 
+def _severity_key(d: SegmentDiagnosis) -> tuple[int, Decimal]:
+    """Severity sort key: genuinely-asymmetric segments first (WR-02).
+
+    ``compute_attribution`` collapses two NON-asymmetric cases to
+    ``payoff_ratio == Decimal(0)``: a segment with zero trades, and a segment
+    with no losing trades (``avg_loss == 0``). A naive ascending payoff sort
+    would float both to the TOP ("most asymmetric"), inverting the report's
+    purpose. We bucket those two cases LAST (bucket 1) and rank the genuinely
+    asymmetric segments (real losses, payoff < 1) most-asymmetric-first by
+    payoff ascending within bucket 0.
+    """
+    a = d.attribution
+    bucket = 1 if (a.total_trades == 0 or a.loss_count == 0) else 0
+    return (bucket, a.payoff_ratio)
+
+
 def build_consolidated_report(diagnoses: dict[str, SegmentDiagnosis]) -> str:
-    """Build the severity-ranked consolidated cross-segment report (D-06).
+    """Build the severity-ranked consolidated cross-segment report (D-06, WR-02).
 
     Ranks segments by asymmetry severity (payoff ratio ascending = MOST
     asymmetric first), one markdown row per segment naming the lever and tagging
     thin segments "low-confidence -- informational only". Returns the markdown
     table body (the runbook file itself is written in Plan 04).
+
+    A no-loss segment (``loss_count == 0``) or a zero-trade segment
+    (``total_trades == 0``) is NOT asymmetric, so it sorts to the BOTTOM via
+    ``_severity_key`` rather than the top (WR-02).
     """
-    ordered = sorted(diagnoses.values(), key=lambda d: d.attribution.payoff_ratio)
+    ordered = sorted(diagnoses.values(), key=_severity_key)
     lines = [
         "| Segment | Type | Trades | Win rate | Payoff | Lever verdict | Confidence |",
         "|---------|------|--------|----------|--------|---------------|------------|",
     ]
     lines.extend(d.report_row() for d in ordered)
     return "\n".join(lines)
+
+
+def _resolve_type(seg: str, known: dict[str, str]) -> str:
+    """Resolve a segment's instrument type with a bond-safe fallback (WR-04).
+
+    Defaulting an unknown ``--segments`` id to ``"stock"`` would route a bond
+    segment (disabled, or absent from the enabled-MOEX defaults) through the
+    EQUITY branch and emit a ``chandelier`` verdict -- exactly what the bond
+    branch (D-04) must NEVER emit for bonds. So we infer ``"bond"`` from the
+    ``ru_ofz`` id prefix as a safety net, and warn loudly on any other unknown
+    id instead of silently mislabelling it.
+    """
+    if seg in known:
+        return known[seg]
+    if seg.startswith("ru_ofz"):
+        return "bond"
+    print(f"  WARNING: '{seg}' not in enabled MOEX defaults; assuming stock.")
+    return "stock"
 
 
 def _default_moex_segments() -> list[tuple[str, str]]:
@@ -394,7 +444,10 @@ def main() -> None:
     instrument_by_segment = dict(_default_moex_segments())
     if args.segments:
         requested = [s.strip() for s in args.segments.split(",") if s.strip()]
-        segments = [(s, instrument_by_segment.get(s, "stock")) for s in requested]
+        # WR-04: _resolve_type infers "bond" for ru_ofz* ids absent from the
+        # enabled-MOEX defaults and warns on any other unknown id, instead of
+        # silently routing a bond through the equity/chandelier branch.
+        segments = [(s, _resolve_type(s, instrument_by_segment)) for s in requested]
     else:
         segments = list(instrument_by_segment.items())
 

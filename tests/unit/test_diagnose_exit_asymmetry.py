@@ -14,9 +14,13 @@ from __future__ import annotations
 import sys
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar
 from uuid import uuid4
 
 from finalayze.core.schemas import TradeResult
+
+if TYPE_CHECKING:
+    import pytest
 
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if PROJECT_ROOT not in sys.path:
@@ -26,6 +30,7 @@ from scripts.diagnose_exit_asymmetry import (  # noqa: E402
     _LOSS_DOMINANCE_FACTOR,
     _THIN_TRADE_FLOOR,
     SegmentDiagnosis,
+    _resolve_type,
     build_consolidated_report,
     compute_attribution,
     diagnose_attribution,
@@ -146,6 +151,36 @@ def _bond_trades() -> list[TradeResult]:
     ]
 
 
+# WR-01: force_close is the dominant bond exit reason (held to last bar). A lone
+# `stop` must NOT win the dominance, and the verdict must name a bond lever
+# (max_hold / rebalance), not the "no dominant exit reason" sentinel.
+_FORCE_DOMINANT_FORCE_COUNT = 20
+_FORCE_DOMINANT_STOP_COUNT = 1
+
+
+def _force_close_dominant_bond_trades() -> list[TradeResult]:
+    trades = [
+        _trade(
+            WIN_A,
+            exit_reason="force_close",
+            entry_strategy="bond_duration_rotation",
+            instrument_type="bond",
+            symbol="SU26244RMFS2",
+        )
+        for _ in range(_FORCE_DOMINANT_FORCE_COUNT)
+    ]
+    trades.append(
+        _trade(
+            LOSS_SMALL,
+            exit_reason="stop",
+            entry_strategy="bond_duration_rotation",
+            instrument_type="bond",
+            symbol="SU26241RMFS8",
+        )
+    )
+    return trades
+
+
 # ---------------------------------------------------------------------------
 # Reused verbatim: equity compute / round-trip behavior is unchanged
 # ---------------------------------------------------------------------------
@@ -252,6 +287,23 @@ class TestBondVerdict:
         assert any(lever in verdict for lever in self._BOND_LEVERS)
         assert SEGMENT_BOND in attr.lever_verdict
 
+    def test_force_close_dominant_names_bond_lever_not_sentinel(self) -> None:
+        # WR-01: 20 force_close + 1 stop. force_close is the dominant reason, so
+        # the verdict names a bond lever (max_hold / rebalance), NOT chandelier
+        # and NOT the "no dominant exit reason" sentinel, and a lone `stop` does
+        # NOT falsely win the dominance.
+        attr = diagnose_attribution(
+            SEGMENT_BOND, _force_close_dominant_bond_trades(), instrument_type="bond"
+        )
+        verdict = attr.lever_verdict.lower()
+        assert "chandelier" not in verdict
+        assert "no dominant exit reason" not in verdict
+        assert "no trades" not in verdict
+        # Names the force-close bond lever, NOT yield_stop (the lone stop).
+        assert "max_hold" in verdict or "rebalance" in verdict
+        assert "force-close" in verdict
+        assert "yield_stop" not in verdict
+
 
 # ---------------------------------------------------------------------------
 # New: thin-sample flag (D-05) at a documented floor
@@ -342,6 +394,61 @@ class TestConsolidatedReport:
         assert "chandelier" in report.lower()
         assert SEGMENT_A in report
         assert SEGMENT_B in report
+
+    def _no_loss_trades(self) -> list[TradeResult]:
+        # All winners -> avg_loss == 0 -> payoff collapses to 0. This is the
+        # LEAST asymmetric case and MUST NOT outrank a genuinely asymmetric one.
+        return [
+            _trade(WIN_A, exit_reason="signal", entry_strategy="momentum"),
+            _trade(WIN_B, exit_reason="signal", entry_strategy="momentum"),
+        ]
+
+    def test_no_loss_segment_ranks_below_asymmetric(self) -> None:
+        # WR-02: a no-loss segment (loss_count == 0, payoff == 0) must sort to
+        # the BOTTOM, below a genuinely asymmetric segment (payoff 0.15) -- not
+        # the top, which a naive ascending-payoff sort would do.
+        no_loss = self._diag(SEGMENT_B, self._no_loss_trades())
+        assert no_loss.attribution.loss_count == 0
+        asymmetric = self._diag(SEGMENT_A, self._severe_trades())
+        diagnoses = {SEGMENT_B: no_loss, SEGMENT_A: asymmetric}
+        report = build_consolidated_report(diagnoses)
+        assert report.index(SEGMENT_A) < report.index(SEGMENT_B)
+
+    def test_zero_trade_segment_ranks_below_asymmetric(self) -> None:
+        # WR-02: a zero-trade segment is NOT asymmetric -> sorts last.
+        empty = self._diag(SEGMENT_B, [])
+        assert empty.attribution.total_trades == 0
+        asymmetric = self._diag(SEGMENT_A, self._severe_trades())
+        diagnoses = {SEGMENT_B: empty, SEGMENT_A: asymmetric}
+        report = build_consolidated_report(diagnoses)
+        assert report.index(SEGMENT_A) < report.index(SEGMENT_B)
+
+
+# ---------------------------------------------------------------------------
+# New: instrument-type fallback never mislabels an out-of-default bond (WR-04)
+# ---------------------------------------------------------------------------
+class TestResolveType:
+    """_resolve_type infers bond from the ru_ofz prefix and warns on unknowns."""
+
+    _KNOWN: ClassVar[dict[str, str]] = {"ru_finance": "stock", "ru_ofz_pk": "bond"}
+
+    def test_known_segment_uses_map(self) -> None:
+        assert _resolve_type("ru_finance", self._KNOWN) == "stock"
+        assert _resolve_type("ru_ofz_pk", self._KNOWN) == "bond"
+
+    def test_unknown_ofz_id_infers_bond(self) -> None:
+        # ru_ofz_pd absent from the known map -> inferred "bond", NEVER routed
+        # through the equity/chandelier branch (D-04).
+        assert _resolve_type("ru_ofz_pd", {}) == "bond"
+
+    def test_unknown_non_bond_id_warns_and_defaults_stock(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _resolve_type("ru_mystery", {})
+        assert result == "stock"
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "ru_mystery" in captured.out
 
 
 # ---------------------------------------------------------------------------
