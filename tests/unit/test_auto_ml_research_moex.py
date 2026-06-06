@@ -75,14 +75,20 @@ class TestBarrierConfig:
         """Changing _SEGMENT_BARRIER_CONFIG affects output."""
         from scripts.auto_ml_research import _SEGMENT_BARRIER_CONFIG, _get_barrier_params
 
-        original = _SEGMENT_BARRIER_CONFIG.get("ru_energy")
+        # Sentinel distinguishes "key absent" from "key present with value None"
+        # so cleanup is robust even if ru_energy is ever removed from the config:
+        # restore the original value, or delete the injected key if it was absent.
+        _missing = object()
+        original = _SEGMENT_BARRIER_CONFIG.get("ru_energy", _missing)
         try:
             _SEGMENT_BARRIER_CONFIG["ru_energy"] = (1.0, 3.0)
             upper, lower = _get_barrier_params("ru_energy")
             assert upper == pytest.approx(1.2)  # 1.0 * 1.2
             assert lower == pytest.approx(3.6)  # 3.0 * 1.2
         finally:
-            if original is not None:
+            if original is _missing:
+                _SEGMENT_BARRIER_CONFIG.pop("ru_energy", None)
+            else:
                 _SEGMENT_BARRIER_CONFIG["ru_energy"] = original
 
 
