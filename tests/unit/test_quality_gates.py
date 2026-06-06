@@ -38,7 +38,6 @@ from scripts.training.walk_forward import (  # noqa: E402
 
 _LARGE_SAMPLE = 1000
 _SMALL_SAMPLE = 50
-_SEVEN_GATES = 7
 _EIGHT_GATES = 8
 
 # MLDIAG-02 audited WF-gate constants (verified source: walk_forward.py:46-71).
