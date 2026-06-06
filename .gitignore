@@ -78,5 +78,9 @@ credentials.json
 .worktrees/
 catboost_info/
 
-# GSD planning artifacts
+# GSD planning artifacts (match both a real dir and a worktree symlink)
 .planning/
+.planning
+
+# Worktree-local symlinks into the main repo (machine-specific absolute paths)
+/certs
