@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import sys
+from pathlib import Path
 
 from finalayze.ml.training.quality_gates import (
     FoldMetrics,
@@ -18,10 +20,32 @@ from finalayze.ml.training.quality_gates import (
     evaluate_walk_forward,
 )
 
+# Ensure scripts/ and project root are importable (config/ lives at project root,
+# not under src/). Mirrors tests/unit/test_auto_ml_research_moex.py:23-26.
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT))
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+
+from scripts.training.walk_forward import (  # noqa: E402
+    BH_FDR,
+    MOEX_MIN_PASSING_FOLDS_RATIO,
+    MOEX_PURGE_GAP_DAYS,
+    MOEX_WF_CAL_MONTHS,
+    MOEX_WF_STEP_MONTHS,
+    MOEX_WF_TEST_MONTHS,
+    MOEX_WF_TRAIN_MONTHS,
+)
+
 _LARGE_SAMPLE = 1000
 _SMALL_SAMPLE = 50
-_SEVEN_GATES = 7
 _EIGHT_GATES = 8
+
+# MLDIAG-02 audited WF-gate constants (verified source: walk_forward.py:46-71).
+# Named expectations — no magic numbers in assertions (ruff PLR2004).
+_BH_FDR_EXPECTED = 0.10
+_MIN_RATIO_EXPECTED = 0.34
+_MOEX_WINDOWS_EXPECTED = (8, 1, 3, 2)  # (train, cal, test, step) months
+_MOEX_PURGE_EXPECTED = 40  # calendar days
 
 
 def _make_metrics(**kwargs: object) -> FoldMetrics:
@@ -394,3 +418,45 @@ class TestEvaluateFoldWithMinSignals:
         assert signal_gate.passed is False
         _default_threshold = 50
         assert signal_gate.threshold == float(_default_threshold)
+
+
+# --- Audited WF-gate constants (MLDIAG-02 regression guard) ---
+
+
+class TestAuditedConstants:
+    """MLDIAG-02 regression guard: WF-gate constants must not drift silently.
+
+    These constants govern the binding walk-forward gate (the arbiter of
+    ml_ensemble enablement). The values guarded here are the verified source of
+    truth from scripts/training/walk_forward.py:46-71 as of the Phase-70 H2 audit.
+
+    HONESTY GUARDRAIL (CONTEXT D-05): any future change to these constants must be
+    a deliberate, statistically-principled recalibration justified by the data
+    regime — and scoped as a SEPARATE future phase, gated on an HONEST WF-gate pass
+    (overall_passed:true, force_saved:false). Flipping a DISC verdict to KEEP by
+    editing these is forbidden tune-to-pass / curve-fit. MOEX_MIN_PASSING_FOLDS_RATIO
+    is the highest curve-fit risk (with only 3 MOEX folds it means each sub-gate
+    effectively needs 1/3 folds); loosening it would rubber-stamp noise. This guard
+    exists precisely to surface such drift in code review.
+    """
+
+    def test_bh_fdr_unchanged(self) -> None:
+        """BH false-discovery-rate must remain 0.10 (walk_forward.py:67)."""
+        assert BH_FDR == _BH_FDR_EXPECTED
+
+    def test_min_passing_folds_ratio_unchanged(self) -> None:
+        """MOEX min passing-folds ratio must remain 0.34 = 1/3 (walk_forward.py:71)."""
+        assert MOEX_MIN_PASSING_FOLDS_RATIO == _MIN_RATIO_EXPECTED
+
+    def test_moex_wf_windows_unchanged(self) -> None:
+        """MOEX WF windows (train/cal/test/step months) must remain (8,1,3,2)."""
+        assert (
+            MOEX_WF_TRAIN_MONTHS,
+            MOEX_WF_CAL_MONTHS,
+            MOEX_WF_TEST_MONTHS,
+            MOEX_WF_STEP_MONTHS,
+        ) == _MOEX_WINDOWS_EXPECTED
+
+    def test_moex_purge_gap_unchanged(self) -> None:
+        """MOEX purge gap must remain 40 calendar days (walk_forward.py:61)."""
+        assert MOEX_PURGE_GAP_DAYS == _MOEX_PURGE_EXPECTED

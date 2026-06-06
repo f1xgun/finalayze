@@ -346,3 +346,134 @@ no replacement to load). The unchanged schema-4 feature set stays green
 (`tests/unit/test_fundamental_features.py`, 10 passed). Revisit Round 2 only if/when a future
 fundamental retrain (e.g. on deeper fundamental history) produces a Round-1 KEEP; it is not an
 automatic continuation.
+
+---
+
+## Phase 70 — ML failure root-cause spike (MLDIAG-03 controlled experiments)
+
+**Date:** 2026-06-02
+**Phase:** 70 (ML failure root-cause spike — diagnostic, NOT a retrain)
+**Requirements:** MLDIAG-03
+**Plan:** 70-03 (H3+H4 bounded controlled-experiment matrix on the two data-richest segments)
+
+This phase enables **NO** segment and ships **NO** model. It runs a **FIXED** bounded
+experiment matrix (one variable per row) via the existing `scripts/auto_ml_research.py`
+harness — which has **NO `--force-save` path** (the flag does not exist; the honesty
+guardrail is structurally enforced). Every run records its **honest** `overall_passed` /
+`gate_pass_rates` / `status` (`keep` / `discard` / `crash`). DISC / no-alpha is a VALID and
+likely outcome (D-05). The matrix is interpreted, not chased — no tune-until-pass loop.
+
+The Phase-61/62/64 rows above are the **seeded** truth source this phase builds on:
+- **Phase 62 — Stage-1 legitimate retrain: 0/17 `ru_*` segments passed the WF gate, 0 enabled, 0 force-saved.** (`ru_blue_chips` DISC best_acc 0.5307; `ru_energy` DISC best_acc 0.4167; `ru_finance` DISC; `ru_tech` DISC train-only.)
+- **Phase 64 — Stage-3 fundamental A/B Round-1: KEEP = NONE (0/2).** Fundamentals do not move the WF gate on thin point-in-time history.
+
+### Legend
+
+`KEEP = overall_passed:true AND not force_saved` · `DISC = honest fail (overall_passed:false)` · `FORCED = force_saved (never shipped — structurally impossible in this harness)`
+
+### Fixed experiment matrix (one knob per row; E1 is a GATING checkpoint)
+
+| # | Knob (one variable) | Hypothesis | Harness path | Gating |
+|---|---------------------|------------|--------------|--------|
+| E1 | Baseline / no-signal floor | Is `best_acc` distinguishable from the 0.50 random floor? | `--strategy ablation --max-experiments 1` baseline + 0.50/permutation comparison | **GATING** — if `best_acc` ≈ 0.50 for BOTH segments, H3 no-alpha is largely confirmed and E2-E5 become low-value (short-circuit) |
+| E2 | Feature subset / `max_features` | Does feature noise hurt small-N? | `--strategy ablation --max-experiments 3` | mandatory |
+| E3 | Triple-barrier horizon / barriers | Is `TB_MAX_HOLD` / ATR-mult mismatched to the MOEX regime? | controlled `SEGMENT_BARRIER_CONFIG` / `TB_*` variation | mandatory |
+| E4 | Model class / ensemble weights | Is the XGB+LGBM+CatBoost ensemble overfit for small N? | `--strategy ensemble_weights --max-experiments 2` | mandatory |
+| E5 | Hyperparameter regularization | Does heavier regularization lift OOS accuracy? | `--strategy hyperparameter --max-experiments 2` | **CONDITIONAL** on E1 showing non-random signal (proceed-full); SKIPPED if short-circuit |
+
+### Phase 70 experiment rows
+
+Columns: `Segment | Experiment | knob varied | n_folds | best_acc (avg_accuracy) | overall_passed | binding sub-gate fails | force_saved | status | Verdict`. Every run is appended here with its honest harness verdict. `force_saved` is always `false` (no force-save path exists). `best_acc` is compared against the **0.50 random floor** and the H1 `n_effective` context from Plan 01's reporter (small `n_eff` raises the accuracy-gate threshold sharply).
+
+<!-- E1 rows appended by Task 2 (gating checkpoint). E2-E5 rows appended by Task 3 after the operator gating decision. -->
+
+| Segment | Experiment | knob varied | n_folds | best_acc | overall_passed | binding sub-gate fails (pass-rate) | force_saved | status | Verdict |
+|---------|-----------|-------------|---------|----------|----------------|------------------------------------|-------------|--------|---------|
+| ru_blue_chips | E1 baseline | standard MI selection, default MOEX hparams | 10 | 0.4056 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / pf 0.3 / specificity 0.2 / degenerate 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E1 ablate-month_cos | drop `month_cos` (1 feature) | 10 | 0.4318 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / pf 0.3 / specificity 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_energy | E1 baseline | standard MI selection, default MOEX hparams | 10 | 0.5154 | false | accuracy 0.2 / brier 0.1 (< 0.34); class_balance 0.6, degenerate 0.6, pf 0.5, sensitivity 0.5, specificity 0.9 PASS | false | discard | **DISC** |
+| ru_energy | E1 ablate-max_ret_20d | drop `max_ret_20d` (1 feature) | 10 | 0.5302 | false | accuracy 0.2 (< 0.34); brier 0.2; class_balance 0.6, degenerate 0.8, pf 0.5, specificity 0.9 PASS | false | discard | **DISC** |
+| ru_blue_chips | E2 ablate-month_cos | drop `month_cos` (feature subset) | 10 | 0.4318 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / degenerate 0.1 / pf 0.3 / specificity 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E2 ablate-min_ret_20d | drop `min_ret_20d` (feature subset) | 10 | 0.4226 | false | accuracy 0.3 / brier 0.2 / class_balance 0.1 / degenerate 0.1 / pf 0.2 / specificity 0.3 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E2 ablate-max_ret_20d | drop `max_ret_20d` (feature subset) | 10 | 0.4111 | false | accuracy 0.2 / brier 0.2 / class_balance 0.2 / degenerate 0.2 / pf 0.3 / specificity 0.3 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E3 barrier-horizon TB_MAX_HOLD=10 | shorter label horizon (20→10 bars) | 10 | 0.4655 | false | accuracy 0.3 / brier 0.1 / class_balance 0.3 / degenerate 0.3 / pf 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E3 barrier-horizon TB_MAX_HOLD=40 | longer label horizon (20→40 bars) | 9 | 0.4864 | false | accuracy 0.222 / brier 0.222 / class_balance 0.222 / degenerate 0.222 / specificity 0.0 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E4 ew-0.1-0.2-0.7 | ensemble weights XGB=0.1 LGBM=0.2 Cat=0.7 | 10 | 0.4801 | false | brier 0.3 / class_balance 0.2 / degenerate 0.3 / pf 0.3 (all < 0.34; accuracy 0.4 PASS) | false | discard | **DISC** |
+| ru_blue_chips | E4 ew-0.1-0.3-0.6 | ensemble weights XGB=0.1 LGBM=0.3 Cat=0.6 | 10 | 0.4777 | false | brier 0.2 / class_balance 0.2 / degenerate 0.2 / pf 0.3 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E5 hp-xgb_max_depth=3 | XGB max_depth 5→3 (regularize) | 10 | 0.4112 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / degenerate 0.2 / pf 0.2 / specificity 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_blue_chips | E5 hp-xgb_max_depth=4 | XGB max_depth 5→4 (regularize) | 10 | 0.4112 | false | accuracy 0.2 / brier 0.2 / class_balance 0.1 / degenerate 0.2 / pf 0.2 / specificity 0.2 (all < 0.34) | false | discard | **DISC** |
+| ru_energy | E2 ablate-max_ret_20d | drop `max_ret_20d` (feature subset) | 10 | 0.5191 | false | brier 0.2 (< 0.34); accuracy 0.4, class_balance 0.7, degenerate 0.9, pf 0.5, specificity 0.9 PASS | false | discard | **DISC** |
+| ru_energy | E2 ablate-min_ret_20d | drop `min_ret_20d` (feature subset) | 10 | 0.5329 | false | accuracy 0.3 / brier 0.1 (< 0.34); class_balance 0.9, degenerate 1.0, specificity 0.9 PASS | false | discard | **DISC** |
+| ru_energy | E2 ablate-hist_vol_20 | drop `hist_vol_20` (feature subset) | 10 | 0.5340 | false | brier 0.3 (< 0.34); accuracy 0.4, class_balance 0.7, degenerate 0.9, pf 0.5, specificity 0.8 PASS | false | discard | **DISC** |
+| ru_energy | E3 barrier-horizon TB_MAX_HOLD=10 | shorter label horizon (20→10 bars) | 10 | 0.5051 | false | accuracy 0.0 / brier 0.0 / pf 0.3 (all < 0.34) | false | discard | **DISC** |
+| ru_energy | E3 barrier-horizon TB_MAX_HOLD=40 | longer label horizon (20→40 bars) | 9 | 0.5100 | false | accuracy 0.222 / brier 0.0 / pf 0.333 (all < 0.34) | false | discard | **DISC** |
+| ru_energy | E4 ew-0.1-0.2-0.7 | ensemble weights XGB=0.1 LGBM=0.2 Cat=0.7 | 10 | 0.5299 | false | accuracy 0.2 / brier 0.2 (< 0.34); pf 2.18 raw | false | discard | **DISC** |
+| ru_energy | E4 ew-0.1-0.3-0.6 | ensemble weights XGB=0.1 LGBM=0.3 Cat=0.6 | 10 | 0.5289 | false | accuracy 0.2 / brier 0.2 (< 0.34); pf 3.60 raw | false | discard | **DISC** |
+| ru_energy | E5 hp-xgb_max_depth=3 | XGB max_depth 5→3 (regularize) | 10 | 0.5344 | false | accuracy 0.3 / brier 0.1 (< 0.34) | false | discard | **DISC** |
+| ru_energy | E5 hp-xgb_max_depth=4 | XGB max_depth 5→4 (regularize) | 10 | 0.5341 | false | accuracy 0.2 / brier 0.1 / pf 0.3 (all < 0.34) | false | discard | **DISC** |
+
+> **Harness-mandatory baselines:** `run_research_loop` always runs a `baseline` experiment
+> before the strategy batch, so the JSONL also carries one `baseline` record per E2/E4/E5 invocation
+> (identical to the E1 baseline — `ru_blue_chips` acc 0.4056, `ru_energy` acc 0.5148). These are NOT
+> tune-until-pass retries; they are the harness's fixed control. The E3 runs ARE the baseline (the
+> one varied variable is `_TB_MAX_HOLD`, set at runtime; `--max-experiments 0` ⇒ baseline-only).
+
+### E2–E5 results (proceed-full decision, 2026-06-02)
+
+The operator returned **proceed-full** on the Task 2 E1 gating checkpoint, so the FULL fixed matrix
+ran — E2, E3, E4 mandatory **and E5** (the hyperparameter-regularization grid) — on BOTH segments via
+the existing `scripts/auto_ml_research.py` harness, one variable per row, **NO `--force-save`** (no such
+flag). DB-first cached MOEX candles (token in `os.environ`, never logged — T-70-06). **Every one of the
+18 Task-3 experiment runs landed `overall_passed:false` / DISC; zero crossed any binding sub-gate.**
+
+- **E2 (feature noise, H3):** dropping single features moved `best_acc` only marginally
+  (ru_blue_chips 0.41–0.43 — sub-random; ru_energy 0.52–0.53 — barely above 0.50). No subset crossed the
+  gate. Feature noise is not the binding constraint.
+- **E3 (triple-barrier horizon, H4):** varied the **one** param `_TB_MAX_HOLD` (20→10, 20→40 bars) at
+  runtime through the harness's own `build_full_dataset` (no CLI knob exists — documented per plan). Both
+  shorter and longer horizons stayed DISC on both segments (ru_blue_chips 0.4655/0.4864; ru_energy
+  0.5051/0.5100). Horizon mismatch is not the binding constraint. *(Note: the 40-bar run lost one WF fold
+  — 9 vs 10 — as the longer label window consumes more tail history; expected, not a defect.)*
+- **E4 (model class / ensemble weights, H4):** Cat-heavy mixes (0.6–0.7) raised raw profit-factor
+  (ru_energy pf 2.18/3.60) but `best_acc` stayed below the gate (ru_blue_chips 0.478/0.480; ru_energy
+  0.529/0.530) and accuracy/brier still cleared only ≤ 2/10 folds. Ensemble overfit is not the savior.
+- **E5 (hyperparameter regularization, H4):** heavier regularization (XGB max_depth 5→3, 5→4) did **not**
+  lift OOS accuracy (ru_blue_chips flat at 0.4112; ru_energy 0.534) — no gate crossing. Regularization is
+  not the binding constraint.
+
+**Net Task-3 result: 0/18 experiment runs passed; KEEP = NONE on both segments.** Across E1–E5 the
+binding accuracy and brier sub-gates never cleared the `MOEX_MIN_PASSING_FOLDS_RATIO = 0.34` threshold on
+either segment, regardless of which single lever was varied. This is the honest, expected outcome (D-05):
+no separable predictive edge was found within the bounded, principled matrix — strong evidence for H3
+"no alpha" (corroborated, not chased). No tune-until-pass loop was run; the matrix was fixed up front and
+every verdict recorded as-is. This feeds Plan 04's H1–H4 ranking and the pursue/abandon recommendation.
+
+### E1 gating evidence (read against the 0.50 random floor)
+
+Both E1 runs used the existing `auto_ml_research.py` harness with `--strategy ablation --max-experiments 1 --seed 42`, live Tinkoff/MOEX-ISS data (token via `os.environ`, never logged — T-70-06), and **NO `--force-save`** (no such flag exists; `force_saved` key absent from every JSONL record). Per-experiment honest JSONL: `results/experiments/ru_blue_chips_experiment_log.jsonl` (2 records) and `results/experiments/ru_energy_experiment_log.jsonl` (2 records).
+
+- **ru_blue_chips** — live universe resolves to **SFIN-only** (Phase-66 liquidity selector): 855 candles → 634 triple-barrier samples (56.0% positive), 10 WF folds. **best_acc 0.4056–0.4318 is clearly BELOW the 0.50 random floor.** No separable signal; the accuracy sub-gate clears only 2/10 folds. H3 "no alpha" strongly supported.
+- **ru_energy** — 7 symbols (LKOH/ROSN/NVTK/TATN/TRNFP/SIBN/RNFT, ~855–861 candles each) → 4512 triple-barrier samples (52.0% positive), 10 WF folds. **best_acc 0.5154–0.5302 sits only marginally ABOVE 0.50.** The accuracy sub-gate still clears only 2/10 folds (< 0.34 min-ratio) and brier clears 1–2/10 — `overall_passed:false`. Marginal, not clearly separable.
+
+**Gating recommendation (evidence only — operator decides):** ru_blue_chips is sub-random (no alpha). ru_energy is marginally above 0.50 but does not separate enough to pass any binding sub-gate. This is closer to **short-circuit** (H3 no-alpha largely confirmed; E2–E5 low-value, skip E5) than to a clear **proceed-full** signal. The operator returns the gating decision; Task 3 then runs accordingly.
+
+### Phase 70 closing tally (reconciled against the JSONL logs, 2026-06-02)
+
+Reconciliation note: every experiment recorded in
+`results/experiments/ru_blue_chips_experiment_log.jsonl` (14 records) and
+`results/experiments/ru_energy_experiment_log.jsonl` (14 records) — 28 honest JSONL records
+in total — has a corresponding row above. The 22 distinct one-knob experiment rows in the
+table (11 per segment: E1×2, E2×3, E3×2, E4×2, E5×2) are the varied levers; the remaining
+6 JSONL records are the harness-mandatory `baseline` controls that `run_research_loop` runs
+before each strategy batch (NOT tune-until-pass retries — the harness's fixed control), so
+28 JSONL records map to 22 lever rows + 6 baseline controls. The `force_saved` key is
+**absent entirely** from all 28 records (`grep -c '"force_saved": true' results/experiments/*.jsonl` = 0;
+`grep -c 'force_saved' results/experiments/*.jsonl` = 0) — the honesty guardrail is
+structurally enforced (the harness has no `--force-save` path).
+
+**Phase 70: 22 experiments (11 per segment, both data-richest MOEX segments), 0 honest KEEP / 22 DISC, 0 force-saved.**
+Every row carries `overall_passed:false` and a `discard` status; no row carries
+`force_saved:true`; no E5 short-circuit occurred (the operator returned proceed-full, so the
+full E1–E5 matrix ran). Combined with the seeded Phase-62 (0/17 `ru_*` enabled, 0 force-saved)
+and Phase-64 (0/2 fundamental KEEP) verdicts above, the cumulative MOEX ML truth remains:
+**0 segments legitimately pass the walk-forward gate, 0 enabled, 0 force-save debt.**

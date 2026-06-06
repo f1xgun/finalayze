@@ -75,14 +75,20 @@ class TestBarrierConfig:
         """Changing _SEGMENT_BARRIER_CONFIG affects output."""
         from scripts.auto_ml_research import _SEGMENT_BARRIER_CONFIG, _get_barrier_params
 
-        original = _SEGMENT_BARRIER_CONFIG.get("ru_energy")
+        # Sentinel distinguishes "key absent" from "key present with value None"
+        # so cleanup is robust even if ru_energy is ever removed from the config:
+        # restore the original value, or delete the injected key if it was absent.
+        _missing = object()
+        original = _SEGMENT_BARRIER_CONFIG.get("ru_energy", _missing)
         try:
             _SEGMENT_BARRIER_CONFIG["ru_energy"] = (1.0, 3.0)
             upper, lower = _get_barrier_params("ru_energy")
             assert upper == pytest.approx(1.2)  # 1.0 * 1.2
             assert lower == pytest.approx(3.6)  # 3.0 * 1.2
         finally:
-            if original is not None:
+            if original is _missing:
+                _SEGMENT_BARRIER_CONFIG.pop("ru_energy", None)
+            else:
                 _SEGMENT_BARRIER_CONFIG["ru_energy"] = original
 
 
@@ -599,3 +605,37 @@ class TestMinHistoryGate:
         from scripts.auto_ml_research import _SEGMENT_SYMBOLS
 
         assert "SBERP" not in _SEGMENT_SYMBOLS["ru_finance"]
+
+
+# ---------------------------------------------------------------------------
+# Honesty guardrail — the harness records an honest verdict and has NO
+# force-save path (Phase 70 MLDIAG-03 / CONTEXT D-05).
+# ---------------------------------------------------------------------------
+
+# Default ExperimentResult verdict before any run executes (no magic literals — PLR2004)
+_DEFAULT_STATUS_BEFORE_RUN = "crash"
+_FORCE_SAVE_ATTR = "force_saved"
+
+
+class TestHarnessHonestVerdict:
+    """The experiment harness records an honest verdict with no force-save path (D-05)."""
+
+    def test_experiment_result_records_honest_verdict(self) -> None:
+        """A fresh ExperimentResult carries honest defaults and no force-save attribute.
+
+        Honesty guardrail (CONTEXT D-05 / threat T-70-07): the harness has NO
+        ``--force-save`` flag and ``ExperimentResult`` exposes NO ``force_saved``
+        attribute — a verdict can never be silently flipped to a pass. Before a run
+        executes, the result is an honest ``crash`` / ``overall_passed=False`` default;
+        only a real ``evaluate_walk_forward`` pass flips it (to ``keep``), and a fail
+        records ``discard`` — never a force-save.
+        """
+        from scripts.auto_ml_research import ExperimentConfig, ExperimentResult
+
+        r = ExperimentResult(
+            config=ExperimentConfig(name="x", description="d", strategy="ablation")
+        )
+        assert r.status == _DEFAULT_STATUS_BEFORE_RUN  # default before run
+        assert r.overall_passed is False  # default before run
+        # The harness has NO force-save attribute/path — verdict cannot be flipped.
+        assert not hasattr(r, _FORCE_SAVE_ATTR)
