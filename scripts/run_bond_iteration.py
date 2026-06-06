@@ -54,7 +54,7 @@ from finalayze.backtest.bond_engine import (
 )
 from finalayze.backtest.bond_metrics import BondPerformanceMetrics, compute_bond_metrics
 from finalayze.backtest.costs import MOEX_BOND_COSTS
-from finalayze.core.schemas import BondInfo, Candle, CouponPayment
+from finalayze.core.schemas import BondInfo, Candle, CouponPayment, TradeResult
 from finalayze.data.fetchers.cbr import MacroContextProvider
 from finalayze.risk.yield_stop import YieldStop
 from finalayze.strategies.bond_carry import BondCarryStrategy
@@ -90,6 +90,21 @@ BOND_UNIVERSE: dict[str, list[str]] = {
     "ru_ofz_pd": OFZ_PD_TICKERS,
     "ru_ofz_pk": OFZ_PK_TICKERS,
 }
+
+
+def _write_trades_jsonl(output_path: Path, trades: list[TradeResult]) -> None:
+    """Serialize closed bond trades to a ``trades.jsonl`` sidecar (EXITDIAG-02 / D-04).
+
+    Copied verbatim from ``scripts/run_iteration.py::_write_trades_jsonl`` so the OFZ
+    harness emits the same one-``model_dump_json()``-per-line artifact the equity
+    harness does. The Plan-03 ``exit_reason`` / ``entry_strategy`` fields ride along
+    via ``model_dump_json``. This is the artifact ``scripts/diagnose_exit_asymmetry.py``
+    reads back for the cross-segment attribution.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w") as f:
+        for trade in trades:
+            f.write(trade.model_dump_json() + "\n")
 
 
 def _load_preset(segment: str) -> dict[str, Any]:
@@ -627,6 +642,16 @@ def _run_bond_segment(
     seg_dir.mkdir(parents=True, exist_ok=True)
     summary = _build_summary(segment, result, metrics, config)
     (seg_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    # EXITDIAG-02: per-segment trades.jsonl sidecar for the cross-segment exit
+    # diagnostic (Plan 02). result.trades is list[TradeResult] carrying the
+    # Plan-03 exit_reason / entry_strategy attribution fields.
+    # backtest-iteration: PENDING (live OFZ run, Plan 04) -- the bond_engine
+    # close-reason change is PnL-inert (it only populates previously-None
+    # metadata; exit price / PnL / lifecycle unchanged, proven by
+    # test_bond_engine TestBondExitReasonPnLInert) so it cannot regress bond
+    # backtest economics. The live OFZ gate (Tinkoff token) runs in Plan 04 and
+    # confirms this sidecar emits with non-null exit_reason on real OFZ data.
+    _write_trades_jsonl(seg_dir / "trades.jsonl", result.trades)
 
     return summary
 

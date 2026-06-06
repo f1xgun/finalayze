@@ -24,6 +24,7 @@ from finalayze.core.bond_math import dirty_price, dv01, modified_duration, nkd, 
 from finalayze.core.schemas import (
     Candle,
     CouponPayment,
+    ExitReason,
     LayerConfig,
     PortfolioLayer,
     Signal,
@@ -48,6 +49,17 @@ _TRADING_DAYS_PER_YEAR = 252
 _MIN_EQUITY_CURVE_FOR_SHARPE = 3
 _MIN_RETURNS_FOR_SHARPE = 2
 _STD_EPSILON = 1e-12
+
+# EXITDIAG-02: map the bond engine's internal close-reason tokens to the frozen
+# ExitReason taxonomy recorded on every closed TradeResult. The bond run loop opens
+# on BUY and closes only via yield_stop / max_hold (here) or last-bar force-close
+# (in run()); there is NO maturity-rotation / regime SELL close path that reaches
+# _close_position in this engine, so ExitReason.SIGNAL is not emitted on the bond
+# side (see _check_stops_and_limits + run() -- do not fabricate a SELL path).
+_BOND_EXIT_REASON_MAP: dict[str, str] = {
+    "yield_stop": ExitReason.STOP.value,
+    "max_hold": ExitReason.TIME.value,
+}
 
 
 class BondStrategyFn(Protocol):
@@ -79,6 +91,8 @@ class BondPosition:
     entry_bar_idx: int
     entry_date: date
     coupon_income: Decimal = Decimal(0)  # cumulative gross during hold
+    # EXITDIAG-02: strategy that opened the position (bond_carry / bond_duration_rotation).
+    entry_strategy: str | None = None
 
 
 @dataclass
@@ -254,9 +268,10 @@ class BondBacktestEngine:
             last_date = all_dates[-1]
             last_bar_idx = len(all_dates) - 1
             for sym in list(positions):
+                pos = positions[sym]
                 trade = self._close_position(
                     sym,
-                    positions[sym],
+                    pos,
                     last_date,
                     last_bar_idx,
                     candle_lookup,
@@ -264,6 +279,8 @@ class BondBacktestEngine:
                     broker,
                     bond_info,
                     coupon_schedule,
+                    exit_reason=ExitReason.FORCE_CLOSE.value,
+                    entry_strategy=pos.entry_strategy,
                 )
                 if trade:
                     trades.append(trade)
@@ -342,9 +359,10 @@ class BondBacktestEngine:
 
         closed_trades: list[TradeResult] = []
         for sym, reason in symbols_to_close:
+            pos = positions[sym]
             trade = self._close_position(
                 sym,
-                positions[sym],
+                pos,
                 current_date,
                 bar_idx,
                 candle_lookup,
@@ -352,6 +370,8 @@ class BondBacktestEngine:
                 broker,
                 bond_info,
                 coupon_schedule,
+                exit_reason=_BOND_EXIT_REASON_MAP.get(reason),
+                entry_strategy=pos.entry_strategy,
             )
             if trade:
                 closed_trades.append(trade)
@@ -431,6 +451,7 @@ class BondBacktestEngine:
                 coupon_schedule,
                 broker,
                 portfolio_dv01,
+                entry_strategy=signal.strategy_name,
             )
             if opened:
                 portfolio_dv01 = self._compute_portfolio_dv01(
@@ -457,8 +478,15 @@ class BondBacktestEngine:
         coupon_schedule: dict[str, list[CouponPayment]],
         broker: BondSimulatedBroker,
         portfolio_dv01: Decimal,
+        *,
+        entry_strategy: str | None = None,
     ) -> bool:
-        """Try to size and open a new bond position. Returns True if filled."""
+        """Try to size and open a new bond position. Returns True if filled.
+
+        EXITDIAG-02: ``entry_strategy`` (the opening signal's ``strategy_name``,
+        e.g. ``bond_carry`` / ``bond_duration_rotation``) is stamped onto the
+        ``BondPosition`` so the eventual close can attribute the trade.
+        """
         cfg = self._config
         info = bond_info.get(sym)
         if info is None:
@@ -529,6 +557,7 @@ class BondBacktestEngine:
                 entry_ytm_pct=current_ytm,
                 entry_bar_idx=bar_idx,
                 entry_date=current_date,
+                entry_strategy=entry_strategy,
             )
             logger.debug(
                 "bond_position_opened",
@@ -715,8 +744,19 @@ class BondBacktestEngine:
         broker: BondSimulatedBroker,
         bond_info: dict[str, BondInfo],
         coupon_schedule: dict[str, list[CouponPayment]],
+        *,
+        exit_reason: str | None = None,
+        entry_strategy: str | None = None,
     ) -> TradeResult | None:
-        """Close a bond position and return TradeResult."""
+        """Close a bond position and return TradeResult.
+
+        EXITDIAG-02: ``exit_reason`` (mapped ``ExitReason`` value) and
+        ``entry_strategy`` are metadata-only -- they populate previously-None
+        attribution fields on the ``TradeResult`` and do NOT affect exit price,
+        PnL, or position lifecycle (proven PnL-inert by the Task-3 test).
+        ``entry_strategy`` falls back to ``pos.entry_strategy`` when not passed
+        explicitly so callers that thread it via the position need not repeat it.
+        """
         candle = candle_lookup.get(symbol, {}).get(current_date)
         if candle is None:
             return None
@@ -759,6 +799,9 @@ class BondBacktestEngine:
             hold_bars=bar_idx - pos.entry_bar_idx,
             coupon_income=pos.coupon_income,
             instrument_type="bond",
+            # EXITDIAG-02: attribution metadata (PnL-inert).
+            exit_reason=exit_reason,
+            entry_strategy=entry_strategy if entry_strategy is not None else pos.entry_strategy,
         )
 
     def _build_result(
