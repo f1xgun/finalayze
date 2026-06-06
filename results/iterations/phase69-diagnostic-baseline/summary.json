@@ -1,0 +1,103 @@
+[
+  {
+    "segment": "ru_energy",
+    "symbols": [
+      "LKOH",
+      "ROSN",
+      "NVTK",
+      "TATN",
+      "TRNFP",
+      "SIBN",
+      "RNFT"
+    ],
+    "total_candles": 3566,
+    "total_trades": 166,
+    "concurrent_position_cap": 10,
+    "fundamental_gate_scale": "1.0",
+    "fundamental_earnings_yield": 0.0,
+    "metrics": {
+      "sharpe": "0.7988",
+      "max_drawdown": "0.0092",
+      "win_rate": "0.6084",
+      "profit_factor": "1.3419",
+      "total_return": "0.0136",
+      "total_trades": 166,
+      "sortino_ratio": "1.2121",
+      "calmar_ratio": "0.7278",
+      "turnover_ratio": "6.7560",
+      "sharpe_n_samples": 509,
+      "sharpe_t_statistic": "1.1353",
+      "sharpe_p_value": "0.2562",
+      "alpha": "0.0119",
+      "beta": "0.0051",
+      "information_ratio": "-0.8359",
+      "max_relative_drawdown": "0.479",
+      "benchmark_return": "0.327"
+    },
+    "journal_summary": {
+      "total_decisions": 349,
+      "action_counts": {
+        "SKIP": 174,
+        "BUY": 166,
+        "SELL": 9
+      },
+      "top_skip_reasons": {
+        "no_position_held": 78,
+        "position_already_open": 67,
+        "quantity_zero": 24,
+        "position_value_zero": 5
+      }
+    }
+  },
+  {
+    "segment": "ru_tech",
+    "symbols": [
+      "YDEX",
+      "OZON",
+      "VKCO",
+      "HEAD",
+      "WUSH",
+      "POSI",
+      "ASTR",
+      "DIAS",
+      "SOFL"
+    ],
+    "total_candles": 3842,
+    "total_trades": 8,
+    "concurrent_position_cap": 10,
+    "fundamental_gate_scale": "1.0",
+    "fundamental_earnings_yield": 0.0,
+    "metrics": {
+      "sharpe": "-0.2867",
+      "max_drawdown": "0.0001",
+      "win_rate": "0.3750",
+      "profit_factor": "0.5096",
+      "total_return": "-0.0000",
+      "total_trades": 8,
+      "sortino_ratio": "0",
+      "calmar_ratio": "0",
+      "turnover_ratio": "0.0087",
+      "sharpe_n_samples": 509,
+      "sharpe_t_statistic": "-0.4075",
+      "sharpe_p_value": "0.6836",
+      "alpha": "-0.0",
+      "beta": "-0.0",
+      "information_ratio": "-0.87",
+      "max_relative_drawdown": "0.4956",
+      "benchmark_return": "0.327"
+    },
+    "journal_summary": {
+      "total_decisions": 44,
+      "action_counts": {
+        "SKIP": 35,
+        "BUY": 8,
+        "SELL": 1
+      },
+      "top_skip_reasons": {
+        "no_position_held": 22,
+        "quantity_zero": 12,
+        "pre_trade_check_failed": 1
+      }
+    }
+  }
+]
