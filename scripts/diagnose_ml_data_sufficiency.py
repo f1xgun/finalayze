@@ -1,17 +1,31 @@
 """H1 data/sample-sufficiency reporter (MLDIAG-01) -- token-free, read-only.
 
-Measures, per MOEX segment in {ru_blue_chips, ru_energy} and per symbol, the
-quantities the walk-forward ML gate actually consumes:
+Measures, per MOEX segment in {ru_blue_chips, ru_energy}, the quantities the
+walk-forward ML gate actually consumes:
 
 * raw bar count + date span (usable history),
 * triple-barrier sample count + label class balance,
 * walk-forward fold count, and per-fold ``n_test`` / ``n_effective``.
 
-It reuses the EXACT production code paths
-(``build_triple_barrier_dataset`` -> ``generate_walk_forward_folds``) so the
-reported numbers equal what the gate sees. It is DB-first (token-free); it only
-escalates to Tinkoff gRPC for symbols the DB misses, reading the token via
-``os.environ`` (never logged/printed -- T-70-01).
+It reuses the EXACT production labelling + fold code paths
+(``build_triple_barrier_dataset`` + ``generate_walk_forward_folds``). FIDELITY
+SCOPE -- two granularities are reported, only one of which mirrors the binding
+gate:
+
+* PER SYMBOL (``report_for_candles``): raw-bar / sample / class-balance counts
+  match the gate's symbol-level path (``_build_dataset_triple_barrier``).
+  ``fold_count`` and ``n_effective`` here are PER SYMBOL over that symbol's
+  narrower date span and DO NOT equal what the gate sees.
+* PER SEGMENT (``report_for_segment``): pools all non-skipped symbols'
+  timestamps + hold-bars into a single date-sorted dataset and runs folds ONCE
+  per segment -- exactly as ``_build_dataset_triple_barrier`` ->
+  ``generate_walk_forward_folds`` does. This ``pooled`` block IS the binding
+  gate's view (segment ``fold_count`` >= any per-symbol number), and is the
+  number a re-enablement decision should read.
+
+It is DB-first (token-free); it only escalates to Tinkoff gRPC for symbols the
+DB misses, reading the token via ``os.environ`` (never logged/printed --
+T-70-01).
 
 HONESTY GUARDRAIL (Phase-70 D-05): this reporter trains NO model and ships NO
 model -- it never writes any artifact under ``models/`` and never bypasses the
@@ -102,8 +116,16 @@ def report_for_candles(
 
     PURE / token-free by construction: takes already-fetched candles as an
     argument and makes NO network call and reads NO token. Reuses the exact
-    production labelling + fold code paths so the counts equal what the gate
-    sees.
+    production labelling path (``build_triple_barrier_dataset``), so the
+    per-symbol raw-bar / sample / class-balance counts match the gate's
+    symbol-level path (``_build_dataset_triple_barrier``).
+
+    FIDELITY NOTE: ``fold_count`` and ``n_effective`` returned here are PER
+    SYMBOL over this symbol's narrower date span. The binding gate pools ALL
+    symbols' timestamps into a single date-sorted dataset and runs folds ONCE
+    per segment, so the segment-level ``fold_count`` (see ``report_for_segment``)
+    is >= the per-symbol number reported here. Read the segment ``pooled`` block
+    for the gate's actual view.
 
     Returns a dict with:
         raw_bar_count, date_span (start, end), sample_count, class_balance
@@ -174,6 +196,77 @@ def report_for_candles(
         "fold_count": len(folds),
         "folds": folds,
         "skipped": False,
+    }
+
+
+def report_for_segment(
+    segment_id: str,
+    candles_by_symbol: dict[str, list[Candle]],
+) -> dict[str, object]:
+    """Compute the SEGMENT-level pooled-fold report -- the gate's actual view.
+
+    PURE / token-free by construction (takes already-fetched candles, makes NO
+    network call, reads NO token). Mirrors the production gate's
+    ``_build_dataset_triple_barrier`` -> ``generate_walk_forward_folds`` path:
+    each non-skipped symbol is labelled with ``build_triple_barrier_dataset``,
+    every symbol's ``(timestamp, hold_bar)`` rows are accumulated into one list,
+    that pooled list is date-sorted, and ``generate_walk_forward_folds`` runs
+    ONCE over the union-of-all-symbols timestamp range. This is what the binding
+    WF gate consumes, so segment ``fold_count`` here is the number a
+    re-enablement decision should read (>= any per-symbol ``fold_count``).
+
+    Returns a dict with:
+        pooled_sample_count, pooled_date_span (start, end) | None,
+        contributing_symbols (list -- non-skipped symbols that fed the pool),
+        fold_count, folds (list of {n_test, n_effective}).
+    """
+    tb_params = get_triple_barrier_params(segment_id)
+    max_hold = int(tb_params["max_hold"])
+    min_candles_tb = _WINDOW_SIZE + max_hold + 1
+
+    # rows: (timestamp, hold_bar) accumulated across symbols, mirroring
+    # _build_dataset_triple_barrier (dataset_builder.py:404-412).
+    rows: list[tuple[datetime, int]] = []
+    contributing: list[str] = []
+    for symbol, candles in candles_by_symbol.items():
+        raw_bar_count = len(candles)
+        # Same two-stage skip gate as report_for_candles / production.
+        if raw_bar_count < _MIN_HISTORY_DAYS or raw_bar_count < min_candles_tb:
+            continue
+        sorted_candles = sorted(candles, key=lambda c: c.timestamp)
+        _features, _labels, _weights, timestamps, hold_bars = build_triple_barrier_dataset(
+            sorted_candles,
+            window_size=_WINDOW_SIZE,
+            upper_atr_mult=float(tb_params["upper_atr_mult"]),
+            lower_atr_mult=float(tb_params["lower_atr_mult"]),
+            max_hold=max_hold,
+            atr_period=int(tb_params["atr_period"]),
+            atr_scale=bool(tb_params["atr_scale"]),
+        )
+        if not timestamps:
+            continue
+        contributing.append(symbol)
+        rows.extend(zip(timestamps, hold_bars, strict=True))
+
+    # Date-sort the pooled union (mirrors dataset_builder.py:407 rows.sort).
+    rows.sort(key=lambda r: r[0])
+    pooled_timestamps = [r[0] for r in rows]
+    pooled_hold_bars = [r[1] for r in rows]
+    pooled_sample_count = len(pooled_timestamps)
+    pooled_date_span: tuple[datetime, datetime] | None = (
+        (pooled_timestamps[0], pooled_timestamps[-1]) if pooled_timestamps else None
+    )
+
+    # ONE fold generation over the pooled, segment-wide timestamp range.
+    fold_tuples = generate_walk_forward_folds(pooled_timestamps, segment_id)
+    folds = _folds_from_tuples(fold_tuples, pooled_hold_bars)
+
+    return {
+        "pooled_sample_count": pooled_sample_count,
+        "pooled_date_span": pooled_date_span,
+        "contributing_symbols": contributing,
+        "fold_count": len(folds),
+        "folds": folds,
     }
 
 
@@ -255,6 +348,17 @@ def _print_summary(report: dict[str, object]) -> None:
                 f"{segment_id:<16} {symbol:<8} {sym['raw_bar_count']:>9} "
                 f"{sym['sample_count']:>8} {sym['fold_count']:>6} {n_eff!s:>24}{flag_str}"
             )
+        # Segment-level pooled folds = the binding gate's actual view (WR-01).
+        pooled = seg.get("pooled")
+        if isinstance(pooled, dict):
+            pooled_n_eff = [round(float(f["n_effective"]), 1) for f in pooled["folds"]]
+            print(
+                f"  [{segment_id}] POOLED (gate view): "
+                f"samples={pooled['pooled_sample_count']} "
+                f"folds={pooled['fold_count']} "
+                f"n_eff/fold={pooled_n_eff} "
+                f"contributing={pooled['contributing_symbols']}"
+            )
         if db_missed:
             print(
                 f"  [{segment_id}] DB-missed symbols (need one-time Tinkoff backfill): {db_missed}"
@@ -298,8 +402,11 @@ def main(argv: list[str] | None = None) -> None:
         for symbol in symbols:
             candles = candles_by_symbol.get(symbol, [])
             per_symbol[symbol] = report_for_candles(segment_id, symbol, candles)
+        # Segment-level pooled-fold report -- THE binding gate's view (WR-01).
+        pooled = report_for_segment(segment_id, candles_by_symbol)
         segments_out[segment_id] = {
             "symbols": per_symbol,
+            "pooled": pooled,
             "db_missed": db_missed,
         }
 

@@ -102,6 +102,45 @@ def test_reports_sample_and_fold_counts_on_synthetic_input() -> None:
         assert fold["n_effective"] >= 0.0
 
 
+def test_segment_pooled_folds_gte_per_symbol_on_synthetic_input() -> None:
+    """The segment pooled-fold report mirrors the gate (folds >= per-symbol).
+
+    The binding WF gate pools all symbols' timestamps into one date-sorted
+    dataset and runs folds ONCE per segment, so the pooled ``fold_count`` is
+    >= any single symbol's per-symbol ``fold_count`` (WR-01). Two symbols on
+    overlapping spans pool into a longer union span and never fewer folds.
+    """
+    from scripts.diagnose_ml_data_sufficiency import (
+        report_for_candles,
+        report_for_segment,
+    )
+
+    # Two symbols on staggered (overlapping) spans -> pooled union is wider.
+    candles_a = _make_candles(_N_BARS, start=_BASE_TS)
+    candles_b = _make_candles(_N_BARS, start=_BASE_TS + timedelta(days=200))
+    candles_by_symbol = {"SYM_A": candles_a, "SYM_B": candles_b}
+
+    pooled = report_for_segment(_SEGMENT_ID, candles_by_symbol)
+
+    # Pooled view exposes the gate's segment-level numbers.
+    assert isinstance(pooled["fold_count"], int)
+    assert pooled["fold_count"] >= _EXPECTED_MIN_FOLDS
+    assert len(pooled["folds"]) == pooled["fold_count"]
+    assert sorted(pooled["contributing_symbols"]) == ["SYM_A", "SYM_B"]
+    start, end = pooled["pooled_date_span"]
+    assert start <= end
+    for fold in pooled["folds"]:
+        assert isinstance(fold["n_test"], int)
+        assert isinstance(fold["n_effective"], float)
+        assert fold["n_effective"] >= 0.0
+
+    # The WR-01 invariant: segment-pooled fold_count >= any per-symbol count.
+    per_symbol_a = report_for_candles(_SEGMENT_ID, "SYM_A", candles_a)
+    per_symbol_b = report_for_candles(_SEGMENT_ID, "SYM_B", candles_b)
+    assert pooled["fold_count"] >= per_symbol_a["fold_count"]
+    assert pooled["fold_count"] >= per_symbol_b["fold_count"]
+
+
 def test_reporter_is_token_free_on_synthetic_input(
     monkeypatch: object,
 ) -> None:
@@ -127,8 +166,15 @@ def test_reporter_is_token_free_on_synthetic_input(
 
     mp.setattr(os.environ, "get", _guarded_get)  # type: ignore[attr-defined]
 
-    from scripts.diagnose_ml_data_sufficiency import report_for_candles
+    from scripts.diagnose_ml_data_sufficiency import (
+        report_for_candles,
+        report_for_segment,
+    )
 
     candles = _make_candles(_N_BARS)
     report = report_for_candles(_SEGMENT_ID, _SYMBOL, candles)
     assert report["raw_bar_count"] == _N_BARS
+
+    # The segment-level pooled report is token-free by construction too (WR-01).
+    pooled = report_for_segment(_SEGMENT_ID, {_SYMBOL: candles})
+    assert pooled["pooled_sample_count"] == report["sample_count"]
