@@ -69,6 +69,30 @@ _DEFAULT_SEGMENTS = ["ru_blue_chips", "ru_energy"]
 _DEFAULT_OUTPUT = Path("results/iterations/ml_data_sufficiency_phase70.json")
 
 
+def _folds_from_tuples(
+    fold_tuples: list[tuple[list[int], list[int], list[int]]],
+    hold_bars: list[int],
+) -> list[dict[str, object]]:
+    """Build per-fold {n_test, n_effective} entries, mirroring the gate.
+
+    For each fold, ``avg_hold`` is computed from that fold's OWN test slice
+    (``hold_bars[i] for i in test_idx``), exactly as production does in
+    ``walk_forward.py:392-394`` -- with the empty-test fallback of ``1.0`` (NOT
+    ``max_hold``) so the per-fold ``n_effective`` equals the value the gate
+    feeds ``compute_n_eff``. ``hold_bars`` is index-aligned with the timestamps
+    passed to ``generate_walk_forward_folds``, so ``test_idx`` indexes it
+    directly.
+    """
+    folds: list[dict[str, object]] = []
+    for _train_idx, _cal_idx, test_idx in fold_tuples:
+        n_test = len(test_idx)
+        test_hb = [hold_bars[i] for i in test_idx if i < len(hold_bars)]
+        fold_avg_hold = (sum(test_hb) / len(test_hb)) if test_hb else 1.0
+        n_effective = float(compute_n_eff(n_test, fold_avg_hold))
+        folds.append({"n_test": n_test, "n_effective": n_effective})
+    return folds
+
+
 def report_for_candles(
     segment_id: str,
     symbol: str,
@@ -135,12 +159,11 @@ def report_for_candles(
 
     # Production fold generator (MOEX windows when segment_id starts with "ru_").
     fold_tuples = generate_walk_forward_folds(timestamps, segment_id)
-    avg_hold = (sum(hold_bars) / len(hold_bars)) if hold_bars else float(max_hold)
-    folds: list[dict[str, object]] = []
-    for _train_idx, _cal_idx, test_idx in fold_tuples:
-        n_test = len(test_idx)
-        n_effective = float(compute_n_eff(n_test, avg_hold))
-        folds.append({"n_test": n_test, "n_effective": n_effective})
+    # Per-fold avg_hold from the fold's OWN test slice, mirroring the gate
+    # (walk_forward.py:392-394). hold_bars is index-aligned with timestamps, so
+    # test_idx indexes into it directly. Empty-test fallback is 1.0 to match
+    # production exactly (NOT max_hold), so per-fold n_effective equals the gate.
+    folds = _folds_from_tuples(fold_tuples, hold_bars)
 
     return {
         "symbol": symbol,
