@@ -21,13 +21,11 @@ from scripts.run_iteration import UNIVERSE  # type: ignore[import-untyped]  # no
 TOXIC_SYMBOLS = {"GAZP", "VTBR", "ALRS", "SNGS", "SNGSP", "IRAO"}
 
 
-class TestUniverseRuBlueChips:
-    """ru_blue_chips must not contain toxic symbols."""
+class TestUniverseRuBlueChipsRemoved:
+    """ru_blue_chips was removed in Phase 68 (UNIV-02) -- no longer a UNIVERSE key."""
 
-    def test_no_toxic_symbols(self) -> None:
-        ru_bc = set(UNIVERSE["ru_blue_chips"])
-        overlap = ru_bc & TOXIC_SYMBOLS
-        assert overlap == set(), f"ru_blue_chips contains toxic symbols: {overlap}"
+    def test_not_a_universe_key(self) -> None:
+        assert "ru_blue_chips" not in UNIVERSE
 
 
 class TestUniverseRuEnergy:

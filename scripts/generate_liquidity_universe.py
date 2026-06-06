@@ -97,11 +97,12 @@ _CANDLE_LOOKBACK = timedelta(days=365)
 
 # Curated ticker -> sector seed (D-08 / A3 manual seed). The snapshot has NO sector field, so each
 # share is assigned here. Overlapping blue-chips are assigned to their PRIMARY economic sector
-# (SBER->banks, LKOH->oil_gas, GMKN->metals_mining); "diversified" (ru_blue_chips) is reserved for
-# true conglomerates with no single dominant sector. Sectors are validated against
-# SECTOR_TO_SEGMENT below. Extend this (or pass --sectors-file) for shares --dry-run reports as
-# unmapped before the real generation. A future one-off T-Invest sector pull may supersede this
-# manual seed (A3 refinement) without changing the committed schema.
+# (SBER->banks, LKOH->oil_gas, GMKN->metals_mining). The "diversified"/ru_blue_chips tag was
+# RETIRED in Phase 68 (UNIV-02): it left only one low-turnover name (SFIN) the floor would drop,
+# and the curated re-homing of every blue chip to its real sector made it redundant. Sectors are
+# validated against SECTOR_TO_SEGMENT below. Extend this (or pass --sectors-file) for shares
+# that --dry-run reports as unmapped before the real generation. A future one-off T-Invest sector
+# pull may supersede this manual seed (A3 refinement) without changing the committed schema.
 _TICKER_SECTOR: dict[str, str] = {
     # oil_gas (ru_energy)
     "ROSN": "oil_gas",
@@ -198,8 +199,6 @@ _TICKER_SECTOR: dict[str, str] = {
     "SMLT": "real_estate",
     "LSRG": "real_estate",
     "ETLN": "real_estate",
-    # diversified (ru_blue_chips) -- true conglomerates only
-    "SFIN": "diversified",
 }
 
 

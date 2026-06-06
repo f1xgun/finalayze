@@ -329,6 +329,27 @@ def test_real_presets_directory_passes() -> None:
     assert errors == [], f"Unexpected ERRORs in shipping presets: {errors}"
 
 
+_PRESETS_DIR = Path(__file__).resolve().parents[2] / "src" / "finalayze" / "strategies" / "presets"
+
+# Phase 68 activation presets (Wave 3 liquid + Wave 4 thin). Each must validate
+# with zero ERROR-severity issues (UNIV-03).
+_LIQUID_ACTIVATED_PRESETS = ("ru_metals", "ru_consumer", "ru_construction")
+_THIN_ACTIVATED_PRESETS = ("ru_telecom", "ru_transport", "ru_chemicals")
+_ACTIVATED_PRESETS = _LIQUID_ACTIVATED_PRESETS + _THIN_ACTIVATED_PRESETS
+
+
+@pytest.mark.parametrize("segment_id", _ACTIVATED_PRESETS)
+def test_liquid_activation_preset_has_no_errors(segment_id: str) -> None:
+    """UNIV-03: each activation preset (liquid + thin) yields zero ERROR issues."""
+    preset_path = _PRESETS_DIR / f"{segment_id}.yaml"
+    assert preset_path.is_file(), f"missing activation preset {preset_path}"
+    issues = validate_presets(_PRESETS_DIR)
+    errors = [
+        i for i in issues if i.file == f"{segment_id}.yaml" and i.severity is PresetSeverity.ERROR
+    ]
+    assert errors == [], f"{segment_id}.yaml ERRORs: {errors}"
+
+
 def test_combiner_exposes_presets_dir() -> None:
     """``StrategyCombiner.presets_dir`` is the public seam this hook depends on."""
     pytest.importorskip("finalayze.strategies.combiner")

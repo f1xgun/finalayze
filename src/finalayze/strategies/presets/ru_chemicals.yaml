@@ -1,0 +1,75 @@
+# Phase 68 (UNIV-03 / 68-06 retry) activation preset — chemicals sector.
+# Mechanism: the combiner reads ONLY this strategies: block; authoring it flips
+# the sector from no_signals -> alive.
+#
+# 68-06 RETRY (principled, diagnosis-justified — NOT curve-fit):
+# The first thin preset (momentum + mean_reversion + event_driven) 0-traded.
+# Combiner-level instrumentation showed the deadlock: of 5 cleared signals ALL
+# were momentum SELL -- ZERO BUY signals were ever generated, so no position
+# could open (the journal's 7 entries were all no_position_held SELLs on an
+# empty book). mean_reversion fired ZERO times. The first preset OMITTED
+# dividend_gap, which was the ONLY available BUY-entry source for these two
+# names. PRINCIPLED FIX (option a -- change the strategy mix to match the
+# regime): ADD dividend_gap (economically justified -- PHOR has 7 dividend
+# records and AKRN 1 in the 2023-2024 window), giving the sector its missing
+# BUY-entry generator; raise momentum; drop the never-firing mean_reversion to
+# the band floor. No threshold change (the gate is already cleared at 0.38), no
+# per-symbol tuning; all weights in [0.10, 0.55].
+segment_id: ru_chemicals
+normalize_mode: "firing"
+min_combined_confidence: 0.38
+min_exit_confidence: 0.2
+strategies:
+  momentum:
+    enabled: true
+    weight: 0.40
+    params:
+      rsi_period: 14
+      rsi_oversold: 28
+      rsi_overbought: 72
+      macd_fast: 15
+      macd_slow: 30
+      macd_hist_lookback: 3
+      min_confidence: 0.40
+      lookback_bars: 5
+      stop_atr_multiplier: 3.5
+      trail_activation_atr: 1.5
+      trail_distance_atr: 2.0
+      trend_filter: true
+      trend_sma_period: 100
+      trend_sma_buffer_pct: 2.0
+      adx_filter: false
+      adx_period: 14
+      adx_threshold: 20
+      volume_filter: false
+      volume_sma_period: 20
+      volume_min_ratio: 0.8
+      neutral_reset_bars: 8
+      vol_target_enabled: true
+      vol_target: 0.20
+  mean_reversion:
+    enabled: true
+    weight: 0.10
+    params:
+      bb_period: 20
+      bb_std_dev: 2.5
+      min_confidence: 0.40
+      exit_at_mean: true
+      trend_filter: true
+      trend_sma_period: 100
+      trend_sma_buffer_pct: 3.0
+      rsi_oversold_mr: 25
+      rsi_overbought_mr: 75
+  event_driven:
+    enabled: true
+    weight: 0.10
+    params:
+      min_sentiment: 0.6
+      event_types: [earnings, macro, regulatory]
+  dividend_gap:
+    enabled: true
+    weight: 0.30
+    params:
+      min_gap_pct: 3.0
+      max_hold_bars: 60
+      min_confidence: 0.40

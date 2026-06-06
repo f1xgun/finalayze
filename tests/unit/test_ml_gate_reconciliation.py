@@ -50,7 +50,8 @@ _MODELS_DIR = Path(
 )
 
 # All ru_* equity segments whose presets carry an ml_ensemble block (or could).
-_RU_ML_SEGMENTS = ["ru_blue_chips", "ru_tech", "ru_energy", "ru_finance"]
+# ru_blue_chips removed in Phase 68 (UNIV-02 — segment/preset deleted).
+_RU_ML_SEGMENTS = ["ru_tech", "ru_energy", "ru_finance"]
 
 # Bond presets that must never carry an ml_ensemble block.
 _RU_BOND_SEGMENTS = ["ru_ofz_pd", "ru_ofz_pk"]
@@ -191,7 +192,7 @@ def test_enabled_segment_requires_legitimate_pass(_tmp_models_dir: Path) -> None
     # Negative case (always exercised, independent of today's enabled set): an
     # overall_passed:false artefact must NOT count as a legitimate pass, so an enabled
     # segment backed by it would fail the fail-closed invariant.
-    probe = "ru_blue_chips"
+    probe = "ru_probe_segment"  # synthetic id (ru_blue_chips removed in Phase 68 / UNIV-02)
     _seed_gate(_tmp_models_dir, probe, overall_passed=False, force_saved=False)
     assert not _model_legitimately_passed(probe), (
         f"{probe}: overall_passed:false must NOT be treated as a legitimate gate pass"

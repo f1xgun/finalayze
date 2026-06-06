@@ -13,7 +13,7 @@ import yaml
 
 _PRESETS_DIR = Path(__file__).resolve().parents[2] / "src" / "finalayze" / "strategies" / "presets"
 
-_RU_PRESETS = ["ru_blue_chips", "ru_energy", "ru_finance", "ru_tech"]
+_RU_PRESETS = ["ru_energy", "ru_finance", "ru_tech"]
 
 _EVENT_DRIVEN_RESERVED_WEIGHT = 0.15
 

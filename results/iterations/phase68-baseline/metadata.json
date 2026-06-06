@@ -1,0 +1,642 @@
+{
+  "schema_version": 1,
+  "name": "phase68-baseline",
+  "description": "frozen pre-68 universe (ru_blue_chips + all sectors) git 74669b5",
+  "created_at": "2026-06-01T22:03:29.659330Z",
+  "git_describe": "v10.0-336-g74669b5-dirty",
+  "git_sha": "74669b515ab2c215824f185eeac133d376a90a52",
+  "git_dirty": true,
+  "config_hash": "3f39166271e3f3e8331a61fbd7e0398299454eb6c2db6e1bd50bc544eb5fa896",
+  "strategy_configs": {
+    "ru_energy": {
+      "segment_id": "ru_energy",
+      "normalize_mode": "firing",
+      "min_combined_confidence": 0.38,
+      "min_exit_confidence": 0.24,
+      "regime_routing": {
+        "enabled": true,
+        "adx_period": 14,
+        "trend_threshold": 28,
+        "mr_threshold": 12
+      },
+      "strategies": {
+        "momentum": {
+          "enabled": true,
+          "weight": 0.17,
+          "params": {
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "macd_fast": 10,
+            "macd_slow": 22,
+            "macd_hist_lookback": 3,
+            "min_confidence": 0.4,
+            "lookback_bars": 5,
+            "stop_atr_multiplier": 3.5,
+            "trail_activation_atr": 1.5,
+            "trail_distance_atr": 2.0,
+            "trend_filter": true,
+            "trend_sma_period": 100,
+            "trend_sma_buffer_pct": 2.0,
+            "adx_filter": false,
+            "adx_period": 14,
+            "adx_threshold": 20,
+            "volume_filter": false,
+            "volume_sma_period": 20,
+            "volume_min_ratio": 0.8,
+            "neutral_reset_bars": 8,
+            "vol_target_enabled": true,
+            "vol_target": 0.2
+          }
+        },
+        "event_driven": {
+          "enabled": true,
+          "weight": 0.15,
+          "params": {
+            "min_sentiment": 0.6,
+            "event_types": [
+              "opec",
+              "oil_price",
+              "sanctions",
+              "commodity_price",
+              "geopolitical"
+            ]
+          }
+        },
+        "mean_reversion": {
+          "enabled": true,
+          "weight": 0.1,
+          "params": {
+            "bb_period": 20,
+            "bb_std_dev": 2.8,
+            "min_confidence": 0.4,
+            "exit_at_mean": true,
+            "trend_filter": true,
+            "trend_sma_period": 100,
+            "trend_sma_buffer_pct": 3.0,
+            "rsi_oversold_mr": 25,
+            "rsi_overbought_mr": 75
+          }
+        },
+        "pairs": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "pairs": [],
+            "z_entry": 1.5,
+            "z_exit": 0.0,
+            "min_confidence": 0.4
+          }
+        },
+        "dividend_gap": {
+          "enabled": true,
+          "weight": 0.19,
+          "params": {
+            "min_gap_pct": 3.0,
+            "max_hold_bars": 60,
+            "min_confidence": 0.4
+          }
+        },
+        "cbr_calendar": {
+          "enabled": true,
+          "weight": 0.08,
+          "params": {
+            "min_confidence": 0.3
+          }
+        },
+        "ml_ensemble": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "threshold": 0.1,
+            "min_confidence": 0.3
+          }
+        },
+        "rsi2_connors": {
+          "enabled": true,
+          "weight": 0.13,
+          "params": {
+            "rsi_period": 2,
+            "rsi_buy_threshold": 15.0,
+            "rsi_sell_threshold": 91.9,
+            "sma_trend_period": 100,
+            "sma_exit_period": 5,
+            "min_confidence": 0.45
+          }
+        },
+        "dual_momentum": {
+          "enabled": true,
+          "weight": 0.2,
+          "params": {
+            "lookback_1m": 21,
+            "lookback_3m": 63,
+            "lookback_6m": 126,
+            "min_confidence": 0.5,
+            "vol_target_enabled": true,
+            "vol_target": 0.2
+          }
+        },
+        "ou_mean_reversion": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "ou_window": 60,
+            "entry_threshold": 1.8,
+            "exit_threshold": 0.3,
+            "use_mle": true,
+            "min_confidence": 0.45
+          }
+        }
+      }
+    },
+    "ru_finance": {
+      "segment_id": "ru_finance",
+      "normalize_mode": "firing",
+      "min_combined_confidence": 0.38,
+      "min_exit_confidence": 0.2,
+      "regime_routing": {
+        "enabled": true,
+        "adx_period": 14,
+        "trend_threshold": 29,
+        "mr_threshold": 17
+      },
+      "strategies": {
+        "mean_reversion": {
+          "enabled": true,
+          "weight": 0.2,
+          "params": {
+            "bb_period": 20,
+            "bb_std_dev": 2.5,
+            "min_confidence": 0.4,
+            "exit_at_mean": true,
+            "trend_filter": true,
+            "trend_sma_period": 100,
+            "trend_sma_buffer_pct": 3.0,
+            "rsi_oversold_mr": 25,
+            "rsi_overbought_mr": 75
+          }
+        },
+        "event_driven": {
+          "enabled": true,
+          "weight": 0.15,
+          "params": {
+            "min_sentiment": 0.6,
+            "event_types": [
+              "cbr_rate",
+              "regulatory",
+              "sanctions",
+              "earnings",
+              "macro"
+            ]
+          }
+        },
+        "momentum": {
+          "enabled": true,
+          "weight": 0.1,
+          "params": {
+            "rsi_period": 14,
+            "rsi_oversold": 28,
+            "rsi_overbought": 72,
+            "macd_fast": 15,
+            "macd_slow": 30,
+            "macd_hist_lookback": 3,
+            "min_confidence": 0.4,
+            "lookback_bars": 5,
+            "stop_atr_multiplier": 3.5,
+            "trail_activation_atr": 1.5,
+            "trail_distance_atr": 2.0,
+            "trend_filter": true,
+            "trend_sma_period": 100,
+            "trend_sma_buffer_pct": 2.0,
+            "adx_filter": false,
+            "adx_period": 14,
+            "adx_threshold": 20,
+            "volume_filter": false,
+            "volume_sma_period": 20,
+            "volume_min_ratio": 0.8,
+            "neutral_reset_bars": 8,
+            "vol_target_enabled": true,
+            "vol_target": 0.2
+          }
+        },
+        "ml_ensemble": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "threshold": 0.1,
+            "min_confidence": 0.3
+          }
+        },
+        "dividend_gap": {
+          "enabled": true,
+          "weight": 0.15,
+          "params": {
+            "min_gap_pct": 3.0,
+            "max_hold_bars": 60,
+            "min_confidence": 0.4
+          }
+        },
+        "cbr_calendar": {
+          "enabled": true,
+          "weight": 0.1,
+          "params": {
+            "min_confidence": 0.3
+          }
+        },
+        "rsi2_connors": {
+          "enabled": true,
+          "weight": 0.19,
+          "params": {
+            "rsi_period": 2,
+            "rsi_buy_threshold": 8.4,
+            "rsi_sell_threshold": 92.8,
+            "sma_trend_period": 100,
+            "sma_exit_period": 5,
+            "min_confidence": 0.45
+          }
+        },
+        "dual_momentum": {
+          "enabled": true,
+          "weight": 0.11,
+          "params": {
+            "lookback_1m": 21,
+            "lookback_3m": 63,
+            "lookback_6m": 126,
+            "min_confidence": 0.5,
+            "vol_target_enabled": true,
+            "vol_target": 0.2
+          }
+        },
+        "ou_mean_reversion": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "ou_window": 60,
+            "entry_threshold": 1.8,
+            "exit_threshold": 0.3,
+            "use_mle": true,
+            "min_confidence": 0.45
+          }
+        },
+        "pead": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "min_confidence": 0.4
+          }
+        }
+      }
+    },
+    "ru_tech": {
+      "segment_id": "ru_tech",
+      "normalize_mode": "total",
+      "min_combined_confidence": 0.4,
+      "strategies": {
+        "momentum": {
+          "enabled": true,
+          "weight": 0.31,
+          "params": {
+            "rsi_period": 14,
+            "rsi_oversold": 28,
+            "rsi_overbought": 72,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "min_confidence": 0.4,
+            "lookback_bars": 5,
+            "stop_atr_multiplier": 3.0,
+            "trail_activation_atr": 1.0,
+            "trail_distance_atr": 1.5,
+            "trend_filter": false,
+            "trend_sma_period": 50,
+            "trend_sma_buffer_pct": 2.0,
+            "adx_filter": false,
+            "adx_period": 14,
+            "adx_threshold": 25,
+            "volume_filter": false,
+            "volume_sma_period": 20,
+            "volume_min_ratio": 1.0,
+            "neutral_reset_bars": 8
+          }
+        },
+        "mean_reversion": {
+          "enabled": true,
+          "weight": 0.54,
+          "params": {
+            "bb_period": 20,
+            "bb_std_dev": 2.5,
+            "min_confidence": 0.4,
+            "exit_at_mean": true,
+            "rsi_oversold_mr": 30,
+            "rsi_overbought_mr": 70
+          }
+        },
+        "event_driven": {
+          "enabled": true,
+          "weight": 0.15,
+          "params": {
+            "min_sentiment": 0.65,
+            "event_types": [
+              "regulatory",
+              "earnings",
+              "product_launch"
+            ]
+          }
+        },
+        "ml_ensemble": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "threshold": 0.1,
+            "min_confidence": 0.3
+          }
+        }
+      }
+    },
+    "ru_metals": {},
+    "ru_consumer": {},
+    "ru_telecom": {},
+    "ru_transport": {},
+    "ru_chemicals": {},
+    "ru_construction": {},
+    "ru_utilities": {},
+    "ru_blue_chips": {
+      "segment_id": "ru_blue_chips",
+      "normalize_mode": "firing",
+      "min_combined_confidence": 0.38,
+      "min_exit_confidence": 0.24,
+      "regime_routing": {
+        "enabled": true,
+        "adx_period": 14,
+        "trend_threshold": 34,
+        "mr_threshold": 13
+      },
+      "strategies": {
+        "momentum": {
+          "enabled": true,
+          "weight": 0.09,
+          "params": {
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "macd_fast": 10,
+            "macd_slow": 22,
+            "macd_hist_lookback": 3,
+            "min_confidence": 0.4,
+            "lookback_bars": 5,
+            "stop_atr_multiplier": 3.5,
+            "trail_activation_atr": 1.5,
+            "trail_distance_atr": 2.0,
+            "trend_filter": true,
+            "trend_sma_period": 100,
+            "trend_sma_buffer_pct": 2.0,
+            "adx_filter": false,
+            "adx_period": 14,
+            "adx_threshold": 20,
+            "volume_filter": false,
+            "volume_sma_period": 20,
+            "volume_min_ratio": 0.8,
+            "neutral_reset_bars": 8,
+            "vol_target_enabled": true,
+            "vol_target": 0.2
+          }
+        },
+        "event_driven": {
+          "enabled": true,
+          "weight": 0.15,
+          "params": {
+            "min_sentiment": 0.6,
+            "event_types": [
+              "geopolitical",
+              "sanctions",
+              "cbr_rate",
+              "commodity_price",
+              "earnings"
+            ]
+          }
+        },
+        "mean_reversion": {
+          "enabled": true,
+          "weight": 0.09,
+          "params": {
+            "bb_period": 20,
+            "bb_std_dev": 2.5,
+            "min_confidence": 0.4,
+            "exit_at_mean": true,
+            "trend_filter": true,
+            "trend_sma_period": 100,
+            "trend_sma_buffer_pct": 3.0,
+            "rsi_oversold_mr": 25,
+            "rsi_overbought_mr": 75
+          }
+        },
+        "pairs": {
+          "enabled": true,
+          "weight": 0.12,
+          "params": {
+            "pairs": [
+              [
+                "SBER",
+                "SBERP"
+              ],
+              [
+                "TATN",
+                "TATNP"
+              ]
+            ],
+            "z_entry": 2.0,
+            "z_exit": 0.5,
+            "use_kalman": true,
+            "min_confidence": 0.4,
+            "allow_short": false,
+            "cointegration_start": "2023-01-01"
+          }
+        },
+        "dividend_gap": {
+          "enabled": true,
+          "weight": 0.17,
+          "params": {
+            "min_gap_pct": 3.0,
+            "max_hold_bars": 60,
+            "min_confidence": 0.4
+          }
+        },
+        "cbr_calendar": {
+          "enabled": true,
+          "weight": 0.1,
+          "params": {
+            "min_confidence": 0.3
+          }
+        },
+        "ml_ensemble": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "threshold": 0.1,
+            "min_confidence": 0.3
+          }
+        },
+        "rsi2_connors": {
+          "enabled": true,
+          "weight": 0.14,
+          "params": {
+            "rsi_period": 2,
+            "rsi_buy_threshold": 8.6,
+            "rsi_sell_threshold": 88.7,
+            "sma_trend_period": 100,
+            "sma_exit_period": 5,
+            "min_confidence": 0.35
+          }
+        },
+        "dual_momentum": {
+          "enabled": true,
+          "weight": 0.14,
+          "params": {
+            "lookback_1m": 21,
+            "lookback_3m": 63,
+            "lookback_6m": 126,
+            "min_confidence": 0.5,
+            "vol_target_enabled": true,
+            "vol_target": 0.2
+          }
+        },
+        "ou_mean_reversion": {
+          "enabled": false,
+          "weight": 0.0,
+          "params": {
+            "ou_window": 60,
+            "entry_threshold": 1.8,
+            "exit_threshold": 0.3,
+            "use_mle": true,
+            "min_confidence": 0.45
+          }
+        }
+      }
+    }
+  },
+  "backtest_config": {
+    "initial_cash": "100000",
+    "max_positions": 10,
+    "kelly_fraction": "0.5",
+    "atr_multiplier": "3.0",
+    "regime_provider": "vix",
+    "stop_loss_mode": "chandelier",
+    "max_hold_bars": "per_strategy"
+  },
+  "metrics": {
+    "wf_sharpe": 0.0023,
+    "wf_max_drawdown": 2.12,
+    "profit_factor": 1.1931,
+    "calmar_ratio": 0.0,
+    "trade_count": 245,
+    "avg_hold_bars": 2.64,
+    "segment_pnl_share": {
+      "ru_energy": 100.04160509347486,
+      "ru_finance": -9.82638849534646,
+      "ru_tech": -0.21521659812839258,
+      "ru_metals": 0.0,
+      "ru_consumer": 0.0,
+      "ru_telecom": 0.0,
+      "ru_transport": 0.0,
+      "ru_chemicals": 0.0,
+      "ru_construction": 0.0,
+      "ru_blue_chips": 0.0
+    },
+    "sortino_ratio": 0.0027,
+    "win_rate_by_segment": {
+      "ru_energy": 0.608433734939759,
+      "ru_finance": 0.5915492957746479,
+      "ru_tech": 0.375,
+      "ru_metals": 0.0,
+      "ru_consumer": 0.0,
+      "ru_telecom": 0.0,
+      "ru_transport": 0.0,
+      "ru_chemicals": 0.0,
+      "ru_construction": 0.0,
+      "ru_blue_chips": 0.0
+    },
+    "information_ratio": null,
+    "mc_5th_pct_sharpe": -0.3906298085817824,
+    "model_disagreement": 0.0,
+    "turnover_adjusted_return": 0.0,
+    "gross_sharpe": 0.0023,
+    "net_sharpe": 0.0023,
+    "param_stability_cv": 0.0,
+    "per_model_proba_mean": {}
+  },
+  "gate_results": [
+    {
+      "name": "S1",
+      "gate_type": "safety",
+      "passed": true,
+      "value": 0.0023,
+      "threshold": 0.0,
+      "message": "WF Sharpe >= 0.0"
+    },
+    {
+      "name": "S2",
+      "gate_type": "safety",
+      "passed": true,
+      "value": 2.12,
+      "threshold": 15.0,
+      "message": "Max DD within ceiling"
+    },
+    {
+      "name": "S3",
+      "gate_type": "safety",
+      "passed": false,
+      "value": -0.3906298085817824,
+      "threshold": 0.0,
+      "message": "MC 5th-pct Sharpe -0.3906 < 0.0"
+    },
+    {
+      "name": "C1",
+      "gate_type": "calibration",
+      "passed": true,
+      "value": 0.0,
+      "threshold": 0.05,
+      "message": "No baseline for comparison"
+    },
+    {
+      "name": "C2",
+      "gate_type": "calibration",
+      "passed": true,
+      "value": 0.0,
+      "threshold": 2.0,
+      "message": "No baseline for comparison"
+    },
+    {
+      "name": "C3",
+      "gate_type": "calibration",
+      "passed": true,
+      "value": 245.0,
+      "threshold": 60.0,
+      "message": "Sufficient trades"
+    },
+    {
+      "name": "C4",
+      "gate_type": "calibration",
+      "passed": false,
+      "value": 100.0416,
+      "threshold": 0.35,
+      "message": "Max segment share 10004.2% > 35%"
+    },
+    {
+      "name": "C5",
+      "gate_type": "calibration",
+      "passed": true,
+      "value": -0.3906298085817824,
+      "threshold": 0.0,
+      "message": "No baseline for comparison"
+    },
+    {
+      "name": "C6",
+      "gate_type": "calibration",
+      "passed": true,
+      "value": 0.0,
+      "threshold": 0.3,
+      "message": "Param stability OK"
+    }
+  ],
+  "verdict": "REJECT",
+  "tags": []
+}

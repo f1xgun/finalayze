@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from config.segments import DEFAULT_SEGMENTS, SegmentConfig
+import pytest
+from config.segments import DEFAULT_SEGMENTS, SECTOR_TO_SEGMENT, SegmentConfig
+
+from finalayze.markets.liquidity import select_segment_symbols
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,11 +95,17 @@ _STOCK_SEGMENT_IDS = [
     "us_healthcare",
     "us_finance",
     "us_broad",
-    "ru_blue_chips",
     "ru_energy",
     "ru_tech",
     "ru_finance",
 ]
+
+# D-05 control: ru_energy resolves the oil_gas sector and is UNAFFECTED by removing
+# ru_blue_chips / retiring the diversified tag. Captured verbatim from the committed
+# snapshot's oil_gas sector AFTER the universal safety filter (no toxic, no preferred
+# duplicate -- TRNFP stays because its common TRNF is not present). Re-asserted byte-
+# identical pre/post the Phase-68 edits to prove the changes are universe-local.
+_RU_ENERGY_CONTROL = ["LKOH", "ROSN", "NVTK", "TATN", "TRNFP", "SIBN", "RNFT"]
 
 
 class TestExistingStockSegments:
@@ -122,6 +131,34 @@ class TestRuFinance:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# UNIV-02 — ru_blue_chips removed + diversified retired
+# ---------------------------------------------------------------------------
+
+
+class TestRuBlueChipsRemoved:
+    """ru_blue_chips is gone from the segment set and the sector map (D-02)."""
+
+    def test_not_in_default_segments(self) -> None:
+        assert "ru_blue_chips" not in {s.segment_id for s in DEFAULT_SEGMENTS}
+
+    def test_diversified_tag_retired_from_map(self) -> None:
+        assert "diversified" not in SECTOR_TO_SEGMENT
+        assert "ru_blue_chips" not in SECTOR_TO_SEGMENT.values()
+
+
+# ---------------------------------------------------------------------------
+# UNIV-04 / D-05 — ru_energy byte-identical control pin
+# ---------------------------------------------------------------------------
+
+
+class TestRuEnergyControlPin:
+    """ru_energy selected set is unchanged by the Phase-68 edits (the control)."""
+
+    def test_ru_energy_selected_set_byte_identical(self) -> None:
+        assert select_segment_symbols("ru_energy") == _RU_ENERGY_CONTROL
+
+
 class TestSegmentEnabledFlag:
     def test_enabled_field_defaults_to_true(self) -> None:
         cfg = SegmentConfig(
@@ -138,7 +175,44 @@ class TestSegmentEnabledFlag:
         for seg in us:
             assert seg.enabled is False, f"US segment {seg.segment_id} must be disabled"
 
-    def test_all_moex_segments_enabled(self) -> None:
+    def test_most_moex_segments_enabled(self) -> None:
+        """MOEX segments are enabled EXCEPT the Phase-68 honest disables."""
         moex = [s for s in DEFAULT_SEGMENTS if s.market == "moex"]
         for seg in moex:
+            if seg.segment_id in _PHASE68_DISABLED_MOEX:
+                continue
             assert seg.enabled is True, f"MOEX segment {seg.segment_id} must be enabled"
+
+
+# ---------------------------------------------------------------------------
+# UNIV-03 / UNIV-04 — Phase-68 honest disables + activated KEEP set
+# ---------------------------------------------------------------------------
+
+# ru_utilities: no_symbols (IRAO sanctioned). ru_consumer / ru_chemicals:
+# honest-disable after the 68-06 principled retry -- signals fire and clear the
+# 0.38 gate but BUY entries die at the position-sizing quantity_zero floor
+# (expensive names, shared-capital book); a sizing cause out of phase scope.
+_PHASE68_DISABLED_MOEX = frozenset({"ru_utilities", "ru_consumer", "ru_chemicals"})
+
+# The MOEX-stock sectors that survive Waves 3/4 + the controls as the KEEP set.
+_PHASE68_ACTIVATED_KEEP = (
+    "ru_energy",
+    "ru_finance",
+    "ru_tech",
+    "ru_metals",
+    "ru_construction",
+    "ru_telecom",
+    "ru_transport",
+)
+
+
+class TestPhase68SegmentRoster:
+    """The post-68 enabled/disabled segment roster (UNIV-03/04 honest verdict)."""
+
+    @pytest.mark.parametrize("segment_id", sorted(_PHASE68_DISABLED_MOEX))
+    def test_disabled_sector_is_disabled(self, segment_id: str) -> None:
+        assert _get(segment_id).enabled is False, f"{segment_id} must be enabled=False"
+
+    @pytest.mark.parametrize("segment_id", _PHASE68_ACTIVATED_KEEP)
+    def test_keep_sector_is_enabled(self, segment_id: str) -> None:
+        assert _get(segment_id).enabled is True, f"{segment_id} must stay enabled"

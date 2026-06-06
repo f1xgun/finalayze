@@ -142,25 +142,42 @@ class TestMLStrategyWiring:
 class TestMLEnsemblePresets:
     """Test that ml_ensemble section exists in all YAML presets (disabled until trained)."""
 
+    # The ML-bearing equity presets: 4 US (frozen but kept) + 3 alive RU. The
+    # Phase-68 (Waves 3/4) per-sector ACTIVATION presets are deliberately minimal
+    # (momentum/MR/event/dividend only — ML re-enablement is Phase 70), so they
+    # carry NO ml_ensemble section and are excluded from this check by name.
+    # us_industrial removed S1.2 (orphan); ru_blue_chips removed Phase 68 UNIV-02.
+    _ML_PRESET_SEGMENT_IDS = frozenset(
+        {
+            "us_tech",
+            "us_broad",
+            "us_finance",
+            "us_healthcare",
+            "ru_energy",
+            "ru_finance",
+            "ru_tech",
+        }
+    )
+
     def test_ml_ensemble_present_in_all_presets(self) -> None:
-        """All equity segment YAML presets should have ml_ensemble section."""
-        # 4 US (us_tech, us_broad, us_finance, us_healthcare — frozen but presets kept)
-        # + 4 RU (ru_blue_chips, ru_energy, ru_finance, ru_tech).
-        # us_industrial preset removed in S1.2 as orphan (no segment).
-        expected_preset_count = 8
-        # Filter to equity segment presets (have segment_id key, instrument_type != bond)
+        """The pre-activation equity presets each carry an ml_ensemble section."""
+        expected_preset_count = len(self._ML_PRESET_SEGMENT_IDS)
+        # Filter to the ML-bearing equity segment presets (by segment_id allow-list).
         preset_files = sorted(_PRESETS_DIR.glob("*.yaml"))
         segment_presets = []
         for p in preset_files:
             with p.open() as f:
                 data = yaml.safe_load(f)
-            if isinstance(data, dict) and "segment_id" in data:
-                # Bond presets don't use ml_ensemble
-                if data.get("instrument_type") == "bond":
-                    continue
-                segment_presets.append((p, data))
+            if not isinstance(data, dict) or "segment_id" not in data:
+                continue
+            if data.get("instrument_type") == "bond":
+                continue
+            if data.get("segment_id") not in self._ML_PRESET_SEGMENT_IDS:
+                continue
+            segment_presets.append((p, data))
         assert len(segment_presets) == expected_preset_count, (
-            f"Expected {expected_preset_count} equity segment presets, found {len(segment_presets)}"
+            f"Expected {expected_preset_count} ML-bearing equity presets, "
+            f"found {len(segment_presets)}"
         )
 
         for preset_path, data in segment_presets:

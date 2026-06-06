@@ -32,21 +32,19 @@ from finalayze.markets import liquidity
 # ---------------------------------------------------------------------------
 # The ru_* SHARE segments under test and the curated sector that feeds each
 # (mirrors config.segments.SECTOR_TO_SEGMENT -- the single D-08 source).
-_SEG_BLUE = "ru_blue_chips"
 _SEG_ENERGY = "ru_energy"
 _SEG_TECH = "ru_tech"
 _SEG_FINANCE = "ru_finance"
 
-_SECTOR_DIVERSIFIED = "diversified"
 _SECTOR_OIL_GAS = "oil_gas"
 _SECTOR_TECH = "tech"
 _SECTOR_BANKS = "banks"
 
 # Deterministic FIXTURE snapshot: sector -> ranked symbols. Chosen so the selected set
 # DIFFERS from the old hardcoded lists -- delisted YNDX/TCSG/SNGS are absent and at least
-# one NEW liquid name per sector appears.
+# one NEW liquid name per sector appears. (UNIV-02: the diversified/ru_blue_chips fixture
+# entry was dropped when the tag was retired -- this seam no longer references it.)
 _FIXTURE_SECTORS: dict[str, list[str]] = {
-    _SECTOR_DIVERSIFIED: ["SBER", "LKOH", "GMKN", "PLZL"],  # PLZL new vs old blue list
     _SECTOR_OIL_GAS: ["ROSN", "TATN", "NVTK", "SIBN"],  # SIBN new; no BANEP/TRNFP-only
     _SECTOR_TECH: ["YDEX", "OZON", "ASTR"],  # YDEX/ASTR new; delisted YNDX/CIAN gone
     _SECTOR_BANKS: ["SBER", "VTBR", "MOEX", "BSPB"],  # delisted TCSG gone
@@ -58,7 +56,6 @@ _FIXTURE_SECTORS: dict[str, list[str]] = {
 # injects VTBR (toxic) -- it MUST be dropped here, so this fixture doubles as cross-seam proof
 # that the safety filter is applied at the single source (the selector), not per seam.
 _EXPECTED: dict[str, list[str]] = {
-    _SEG_BLUE: list(_FIXTURE_SECTORS[_SECTOR_DIVERSIFIED]),
     _SEG_ENERGY: list(_FIXTURE_SECTORS[_SECTOR_OIL_GAS]),
     _SEG_TECH: list(_FIXTURE_SECTORS[_SECTOR_TECH]),
     # VTBR dropped by the universal toxic filter (was in the banks fixture).
@@ -68,18 +65,15 @@ _EXPECTED: dict[str, list[str]] = {
 # Pre-phase HARDCODED ru_* lists (captured verbatim from the three seams BEFORE Plan 02).
 # A seam that still returned any of these would FAIL the anti-trivial assertion below.
 _OLD_HARDCODED_CONFIG: dict[str, list[str]] = {
-    _SEG_BLUE: ["SBER", "LKOH", "GMKN"],
     _SEG_ENERGY: ["ROSN", "TATN", "NVTK", "SIBN", "TATNP", "TRNFP"],
     _SEG_TECH: ["YDEX", "OZON", "VKCO", "HEAD", "POSI", "ASTR", "DIAS", "SOFL"],
     _SEG_FINANCE: ["SBER", "T", "CBOM", "BSPB", "MOEX", "VTBR", "AFKS", "RENI"],
 }
 _OLD_HARDCODED_UNIVERSE: dict[str, list[str]] = {
-    _SEG_BLUE: ["SBER", "LKOH", "YNDX", "MGNT", "POLY", "NVTK", "MTLR"],
     _SEG_ENERGY: ["LKOH", "ROSN", "NVTK", "TATN", "TRNFP", "BANEP"],
     _SEG_FINANCE: ["SBER", "SBERP", "TCSG", "CBOM", "BSPB", "MOEX"],
 }
 _OLD_HARDCODED_TRAINING: dict[str, list[str]] = {
-    _SEG_BLUE: ["SBER", "LKOH", "GMKN", "ROSN", "NVTK", "MGNT", "TATN", "TCSG"],
     _SEG_ENERGY: ["ROSN", "TATN", "NVTK", "LKOH", "SNGS", "SIBN"],
     _SEG_TECH: ["YNDX", "OZON", "VKCO", "CIAN"],
     _SEG_FINANCE: ["SBER", "VTBR", "TCSG", "MOEX", "CBOM"],
@@ -122,9 +116,10 @@ def test_three_seams_resolve_same_set(_patched_snapshot: None) -> None:
     seg_symbols = training_cli_mod.SEGMENT_SYMBOLS
 
     # Segments present in ALL three seams. Post-66 run_iteration.UNIVERSE derives a key for
-    # EVERY enabled MOEX stock segment (including ru_tech), so all four ru_* segments under
-    # test are single-sourced across all three seams (verified at runtime).
-    common_segments = [_SEG_BLUE, _SEG_ENERGY, _SEG_TECH, _SEG_FINANCE]
+    # EVERY enabled MOEX stock segment (including ru_tech), so these ru_* segments under
+    # test are single-sourced across all three seams (verified at runtime). ru_blue_chips
+    # was removed in Phase 68 (UNIV-02), so it is no longer part of the seam contract.
+    common_segments = [_SEG_ENERGY, _SEG_TECH, _SEG_FINANCE]
     for seg in common_segments:
         expected = _EXPECTED[seg]
         assert live_symbols[seg] == expected, f"LIVE {seg}: {live_symbols[seg]} != {expected}"
@@ -134,10 +129,10 @@ def test_three_seams_resolve_same_set(_patched_snapshot: None) -> None:
     # ── Anti-trivial guard ──────────────────────────────────────────────────────────
     # The fixture (selector) set MUST differ from the old hardcoded list for >= 1 segment
     # in EACH seam, so a seam that still returned its old hardcoded list would FAIL above.
-    all_segs = (_SEG_BLUE, _SEG_ENERGY, _SEG_TECH, _SEG_FINANCE)
+    all_segs = (_SEG_ENERGY, _SEG_TECH, _SEG_FINANCE)
     # _OLD_HARDCODED_UNIVERSE captured only the pre-66 run_iteration keys (no ru_tech), so the
     # anti-trivial guard for the backtest seam iterates only the segments it recorded.
-    old_universe_segs = (_SEG_BLUE, _SEG_ENERGY, _SEG_FINANCE)
+    old_universe_segs = (_SEG_ENERGY, _SEG_FINANCE)
     assert any(_EXPECTED[s] != _OLD_HARDCODED_CONFIG[s] for s in all_segs)
     assert any(_EXPECTED[s] != _OLD_HARDCODED_UNIVERSE[s] for s in old_universe_segs)
     assert any(_EXPECTED[s] != _OLD_HARDCODED_TRAINING[s] for s in all_segs)
@@ -211,3 +206,38 @@ def test_reload_restores_clean_state() -> None:
     # Boot path intact: the modules import and the ru_* live universes are empty (no
     # committed snapshot yet) -- never a stale list.
     assert {s.segment_id for s in segments_mod.DEFAULT_SEGMENTS}  # non-empty segment set
+
+
+# ---------------------------------------------------------------------------
+# UNIV-02 — ru_blue_chips removed + diversified retired (real committed snapshot)
+# ---------------------------------------------------------------------------
+
+_INJECTED_UNKNOWN_SECTOR = "diversified"  # the now-retired tag -- a snapshot carrying it must raise
+
+
+def test_ru_blue_chips_resolves_empty_from_committed_snapshot() -> None:
+    """Test C (UNIV-02): no sector maps to ru_blue_chips, so the selector returns []."""
+    assert liquidity.select_segment_symbols("ru_blue_chips") == []
+
+
+def test_committed_snapshot_has_no_diversified_key_and_loads_clean() -> None:
+    """Test D (UNIV-02): the committed snapshot has no diversified key; the loader is clean."""
+    sectors = liquidity._load_liquidity_snapshot()  # must NOT raise on the edited snapshot
+    assert "diversified" not in sectors
+
+
+def test_loader_still_fail_closed_on_unknown_sector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test F (T-68-01): an injected unknown/orphaned sector STILL fails closed.
+
+    Removing the diversified tag from the map must not weaken the fail-closed guard:
+    a snapshot carrying a sector key absent from SECTOR_TO_SEGMENT raises ConfigurationError.
+    """
+    from finalayze.core.exceptions import ConfigurationError
+
+    snap = tmp_path / "moex_liquidity_universe.json"
+    snap.write_text(json.dumps({"sectors": {_INJECTED_UNKNOWN_SECTOR: ["SFIN"]}}), encoding="utf-8")
+    monkeypatch.setattr(liquidity, "_LIQ_SNAPSHOT", snap)
+    with pytest.raises(ConfigurationError):
+        liquidity._load_liquidity_snapshot()

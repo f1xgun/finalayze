@@ -1,0 +1,76 @@
+# Phase 68 (UNIV-03 / 68-06 retry) activation preset — consumer sector.
+# Mechanism: the combiner reads ONLY this strategies: block; authoring it flips
+# the sector from no_signals -> alive.
+#
+# 68-06 RETRY (principled, diagnosis-justified — NOT curve-fit):
+# The verbatim-from-ru_finance preset 0-traded. Combiner-level instrumentation
+# (decision_journal.jsonl + standalone combiner diag) showed signals CLEAR the
+# 0.38 gate (18 cleared: 8 BUY / 10 SELL) -- the confidence gate is NOT the
+# killer (min_combined_confidence stays 0.38; lowering it would change nothing
+# and is banned). The 8 BUYs (7 from dividend_gap, 1 momentum) died downstream
+# as quantity_zero: expensive staples (MGNT ~5k, BELU ~6k, GCHE ~5k RUB) whose
+# low-confidence BUYs size below one whole share. mean_reversion fired ZERO
+# times (structurally dead on these trending staples). PRINCIPLED FIX: emphasize
+# the strategies that actually generate BUY entries -- dividend_gap (the dominant
+# entry source, 0.10 -> 0.30) and momentum (0.30 -> 0.40) -- so combined BUY
+# confidence sizes above the one-share floor; drop the never-firing
+# mean_reversion to the band floor. All weights in [0.10, 0.55]; no threshold
+# change; no per-symbol tuning. (X5/MGNT/BELU/LENT/GCHE pay dividends.)
+segment_id: ru_consumer
+normalize_mode: "firing"
+min_combined_confidence: 0.38
+min_exit_confidence: 0.2
+strategies:
+  momentum:
+    enabled: true
+    weight: 0.40
+    params:
+      rsi_period: 14
+      rsi_oversold: 28
+      rsi_overbought: 72
+      macd_fast: 15
+      macd_slow: 30
+      macd_hist_lookback: 3
+      min_confidence: 0.40
+      lookback_bars: 5
+      stop_atr_multiplier: 3.5
+      trail_activation_atr: 1.5
+      trail_distance_atr: 2.0
+      trend_filter: true
+      trend_sma_period: 100
+      trend_sma_buffer_pct: 2.0
+      adx_filter: false
+      adx_period: 14
+      adx_threshold: 20
+      volume_filter: false
+      volume_sma_period: 20
+      volume_min_ratio: 0.8
+      neutral_reset_bars: 8
+      vol_target_enabled: true
+      vol_target: 0.20
+  mean_reversion:
+    enabled: true
+    weight: 0.10
+    params:
+      bb_period: 20
+      bb_std_dev: 2.5
+      min_confidence: 0.40
+      exit_at_mean: true
+      trend_filter: true
+      trend_sma_period: 100
+      trend_sma_buffer_pct: 3.0
+      rsi_oversold_mr: 25
+      rsi_overbought_mr: 75
+  event_driven:
+    enabled: true
+    weight: 0.15
+    params:
+      min_sentiment: 0.6
+      event_types: [earnings, macro, regulatory]
+  dividend_gap:
+    enabled: true
+    weight: 0.30
+    params:
+      min_gap_pct: 3.0
+      max_hold_bars: 60
+      min_confidence: 0.40

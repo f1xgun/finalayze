@@ -31,7 +31,7 @@ _US_LOOKBACK_DAYS_EXPECTED = 1825
 _MOEX_MAX_FEATURES_EXPECTED = 10
 _US_MAX_FEATURES_EXPECTED = 15
 
-_RU_EQUITY_SEGMENTS = ["ru_blue_chips", "ru_energy", "ru_tech", "ru_finance"]
+_RU_EQUITY_SEGMENTS = ["ru_energy", "ru_tech", "ru_finance"]
 _BOND_SEGMENTS = ["ru_ofz_pd", "ru_ofz_pk"]
 
 # Phase 66 (sector-driven semantics): ru_* segments are now GICS-sector buckets resolved by
@@ -123,11 +123,7 @@ class TestIsModexSegment:
 class TestSegmentSymbols:
     """Test _SEGMENT_SYMBOLS dict contains correct ru_* segments."""
 
-    def test_ru_blue_chips_in_segment_symbols(self) -> None:
-        """_SEGMENT_SYMBOLS contains 'ru_blue_chips' key."""
-        from scripts.auto_ml_research import _SEGMENT_SYMBOLS
-
-        assert "ru_blue_chips" in _SEGMENT_SYMBOLS
+    # test_ru_blue_chips_in_segment_symbols removed in Phase 68 (UNIV-02): segment deleted.
 
     def test_ru_energy_in_segment_symbols(self) -> None:
         """_SEGMENT_SYMBOLS contains 'ru_energy' key."""
@@ -147,23 +143,24 @@ class TestSegmentSymbols:
 
         assert "ru_finance" in _SEGMENT_SYMBOLS
 
-    def test_ru_blue_chips_symbols_match_config(self) -> None:
-        """_SEGMENT_SYMBOLS['ru_blue_chips'] is sector-driven (single source = the selector).
+    def test_ru_energy_symbols_match_config(self) -> None:
+        """_SEGMENT_SYMBOLS['ru_energy'] is sector-driven (single source = the selector).
 
-        Phase-66 semantics: ru_blue_chips == the "diversified" sector bucket resolved by
-        ``select_segment_symbols`` from the committed snapshot, NOT a hardcoded thematic list.
-        The invariant under the new semantics: _SEGMENT_SYMBOLS mirrors the selector output
-        (single source of truth) and is free of toxic/sanctioned names (safety post-filter).
+        Phase-66 semantics: ru_* segments are sector buckets resolved by
+        ``select_segment_symbols`` from the committed snapshot, NOT hardcoded thematic lists.
+        The invariant: _SEGMENT_SYMBOLS mirrors the selector output (single source of truth)
+        and is free of toxic/sanctioned names (safety post-filter). (Phase 68 / UNIV-02
+        retargeted this from the removed ru_blue_chips bucket to the ru_energy control.)
         """
         from config.segments import _BOOTSTRAP_SEGMENT_SYMBOLS
         from scripts.auto_ml_research import _SEGMENT_SYMBOLS
 
         from finalayze.markets.liquidity import _TOXIC_SYMBOLS, select_segment_symbols
 
-        symbols = _SEGMENT_SYMBOLS["ru_blue_chips"]
-        # Single source: matches the live selector for the diversified bucket.
+        symbols = _SEGMENT_SYMBOLS["ru_energy"]
+        # Single source: matches the live selector for the oil_gas bucket.
         assert symbols == select_segment_symbols(
-            "ru_blue_chips", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_blue_chips"]
+            "ru_energy", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_energy"]
         )
         # Safety invariant survives the semantics change: no toxic/sanctioned names.
         assert set(symbols) & _TOXIC_SYMBOLS == set()
@@ -228,17 +225,8 @@ class TestGetMaxFeatures:
 class TestArgparseChoices:
     """Test argparse --segment choices include all 4 ru_* equity segments."""
 
-    def test_ru_blue_chips_in_choices(self) -> None:
-        """argparse choices include 'ru_blue_chips'."""
-        import argparse
-
-        from scripts.auto_ml_research import _SEGMENT_SYMBOLS
-
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--segment", choices=list(_SEGMENT_SYMBOLS.keys()))
-        # Should not raise
-        args = parser.parse_args(["--segment", "ru_blue_chips"])
-        assert args.segment == "ru_blue_chips"
+    # test_ru_blue_chips_in_choices removed in Phase 68 (UNIV-02): segment deleted, so it is
+    # no longer an argparse --segment choice.
 
     def test_ru_energy_in_choices(self) -> None:
         """argparse choices include 'ru_energy'."""

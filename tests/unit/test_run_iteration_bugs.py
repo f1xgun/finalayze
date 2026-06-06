@@ -57,26 +57,23 @@ class TestBug2MLStrategyNoModelsDir:
 class TestUniverseMOEXTickers:
     """UNIVERSE dict must contain real MOEX symbols, not ETF proxies."""
 
-    def test_ru_blue_chips_has_real_moex_tickers(self) -> None:
-        """RU segments resolve to real MOEX tickers (sector-driven, Phase 66).
+    def test_blue_chips_resolve_to_real_sector_tickers(self) -> None:
+        """The former blue chips resolve to real MOEX tickers in their sector segments.
 
-        Phase-66 semantics: ru_* segments are GICS-sector buckets, so the blue chips no longer
-        live in one thematic list -- SBER resolves into ru_finance (banks) and LKOH into
-        ru_energy (oil_gas). The real invariant (real MOEX tickers, not delisted ETF proxies) is
-        asserted across the sector segments where those names now belong; ru_blue_chips itself is
-        the "diversified" bucket and must be non-empty and free of ETF proxies.
+        Phase-66 semantics: ru_* segments are GICS-sector buckets, so the blue chips live in
+        their sector segments -- SBER in ru_finance (banks), LKOH in ru_energy (oil_gas). Phase 68
+        (UNIV-02) removed the redundant ru_blue_chips segment; the real invariant (real MOEX
+        tickers, not delisted ETF proxies) is asserted on the sector segments where they belong.
         """
-        bc = ri.UNIVERSE["ru_blue_chips"]
-        assert bc, "ru_blue_chips (diversified bucket) must be non-empty"
-        # SBER / LKOH now live in their sector segments (single-source selector output).
         assert "SBER" in ri.UNIVERSE["ru_finance"]
         assert "LKOH" in ri.UNIVERSE["ru_energy"]
 
-    def test_ru_blue_chips_no_etf_proxies(self) -> None:
-        """ru_blue_chips must NOT contain ETF proxies like RSX, ERUS."""
-        symbols = ri.UNIVERSE["ru_blue_chips"]
-        for proxy in ("RSX", "ERUS", "FLRU.L", "TUR", "EWZ", "INDA"):
-            assert proxy not in symbols
+    def test_sector_segments_have_no_etf_proxies(self) -> None:
+        """The sector segments must NOT contain ETF proxies like RSX, ERUS."""
+        for seg in ("ru_finance", "ru_energy"):
+            symbols = ri.UNIVERSE[seg]
+            for proxy in ("RSX", "ERUS", "FLRU.L", "TUR", "EWZ", "INDA"):
+                assert proxy not in symbols
 
     def test_ru_energy_has_real_moex_tickers(self) -> None:
         """ru_energy should contain ROSN, TATN, NVTK."""
@@ -147,5 +144,5 @@ class TestBuildStrategiesExpanded:
     def test_ru_segment_has_at_least_4_strategies(self) -> None:
         """RU segments: MR+OU+RSI2 (no momentum/dual_mom) + DividendGap = 4."""
         _min_ru_strategies = 4
-        strategies = self._build("ru_blue_chips")
+        strategies = self._build("ru_finance")
         assert len(strategies) >= _min_ru_strategies

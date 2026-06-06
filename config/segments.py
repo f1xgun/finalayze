@@ -39,7 +39,6 @@ SECTOR_TO_SEGMENT: dict[str, str] = {
     "chemicals": "ru_chemicals",
     "tech": "ru_tech",
     "real_estate": "ru_construction",
-    "diversified": "ru_blue_chips",
 }
 
 # ── Bootstrap ru_* SHARE universes (pre-66-04 compat shim) ───────────────────────
@@ -54,7 +53,6 @@ SECTOR_TO_SEGMENT: dict[str, str] = {
 # Bond segments (ru_ofz_pd / ru_ofz_pk) and US segments are NOT bootstrapped here -- they
 # keep their own hardcoded lists below.
 _BOOTSTRAP_SEGMENT_SYMBOLS: dict[str, list[str]] = {
-    "ru_blue_chips": ["SBER", "LKOH", "GMKN"],
     "ru_energy": ["ROSN", "TATN", "NVTK", "SIBN", "TATNP", "TRNFP"],
     "ru_tech": ["YDEX", "OZON", "VKCO", "HEAD", "POSI", "ASTR", "DIAS", "SOFL"],
     "ru_finance": ["SBER", "T", "CBOM", "BSPB", "MOEX", "VTBR", "AFKS", "RENI"],
@@ -151,19 +149,6 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         enabled=False,
     ),
     SegmentConfig(
-        segment_id="ru_blue_chips",
-        market="moex",
-        broker="tinkoff",
-        currency="RUB",
-        symbols=select_segment_symbols(
-            "ru_blue_chips", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_blue_chips"]
-        ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
-        active_strategies=["momentum", "event_driven", "mean_reversion"],
-        news_languages=["ru", "en"],
-        max_allocation_pct=0.30,
-        trading_hours="07:00-15:40 UTC",
-    ),
-    SegmentConfig(
         segment_id="ru_energy",
         market="moex",
         broker="tinkoff",
@@ -253,6 +238,14 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
+        # HONEST-DISABLE (68-06 / D-03 / D-05): after the principled retry preset
+        # (dividend_gap raised to the BUY-entry lever), signals still CLEAR the
+        # 0.38 gate (18 cleared) but every BUY dies downstream as quantity_zero --
+        # expensive staples (MGNT/BELU/GCHE) size below one whole share in the
+        # shared-capital portfolio. That is a position-sizing/capital cause (out of
+        # this phase's scope -> Phase 69), not a preset/confidence cause; no
+        # preset lever fixes it without banned per-symbol tuning. Revival deferred.
+        enabled=False,
         symbols=select_segment_symbols(
             "ru_consumer", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_consumer"]
         ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
@@ -279,6 +272,10 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
+        # no_symbols -- the sole liquid utilities name (IRAO) is sanctioned, so the
+        # selector returns an empty set. Structural / un-revivable; revival deferred
+        # to a future phase (D-03). (Was flagged dead-but-enabled in Phase 66 WR-01.)
+        enabled=False,
         symbols=select_segment_symbols(
             "ru_utilities", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_utilities"]
         ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot
@@ -305,6 +302,13 @@ DEFAULT_SEGMENTS: list[SegmentConfig] = [
         market="moex",
         broker="tinkoff",
         currency="RUB",
+        # HONEST-DISABLE (68-06 / D-03 / D-05): the principled retry preset ADDED
+        # dividend_gap (justified by PHOR/AKRN dividends) and DID restore the
+        # missing BUY signals (0 -> 3 cleared BUYs), but those BUYs still die as
+        # quantity_zero: AKRN ~18-20k RUB / PHOR ~6.5k RUB per share floor below
+        # one whole share in the 2-name shared-capital book. Sizing/capital cause
+        # (out of phase scope -> Phase 69); no preset lever fixes it. Revival deferred.
+        enabled=False,
         symbols=select_segment_symbols(
             "ru_chemicals", bootstrap=_BOOTSTRAP_SEGMENT_SYMBOLS["ru_chemicals"]
         ),  # LIVE seam (D-07): selector-fed, prior-list bootstrap pre-snapshot

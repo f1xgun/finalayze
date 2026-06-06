@@ -190,9 +190,10 @@ class TestPairsStrategySupportedSegments:
     def test_supported_segments_returns_list(self, pairs_strategy: object) -> None:
         segments = pairs_strategy.supported_segments()  # type: ignore[union-attr]
         assert isinstance(segments, list)
-        # us_tech and ru_blue_chips should be in list after YAML update in step 5.3
+        # us_tech enables pairs. ru_blue_chips was the only ru_* with pairs enabled and was
+        # removed in Phase 68 (UNIV-02), so no ru_* segment is pairs-enabled now.
         assert "us_tech" in segments
-        assert "ru_blue_chips" in segments
+        assert "ru_blue_chips" not in segments
 
     def test_get_parameters_us_tech(self, pairs_strategy: object) -> None:
         params = pairs_strategy.get_parameters("us_tech")  # type: ignore[union-attr]
@@ -263,22 +264,13 @@ class TestPairsStrategyAllowShort:
 
 
 @pytest.mark.unit
-class TestRuBlueChipsPairsConfig:
-    """Tests for ru_blue_chips YAML pairs configuration."""
+class TestPairsCointegrationFiltering:
+    """Pairs cointegration date-filtering behaviour (segment-agnostic).
 
-    def test_ru_blue_chips_pairs_config(self, pairs_strategy: object) -> None:
-        """Verify ru_blue_chips has correct pairs config after update."""
-        params = pairs_strategy.get_parameters("ru_blue_chips")  # type: ignore[union-attr]
-        assert params, "ru_blue_chips should have pairs params"
-        pairs_list = params["pairs"]
-        assert len(pairs_list) == 2  # noqa: PLR2004
-        # Check SBER/SBERP and TATN/TATNP pairs
-        pair_tuples = [tuple(p) for p in pairs_list]
-        assert ("SBER", "SBERP") in pair_tuples
-        assert ("TATN", "TATNP") in pair_tuples
-        assert float(params["z_entry"]) == Z_ENTRY
-        assert params.get("allow_short") is False
-        assert params.get("cointegration_start") == "2023-01-01"
+    Phase 68 (UNIV-02): the ru_blue_chips-specific pairs config test was removed with the
+    segment/preset. The cointegration-start data-filtering behaviour below is segment-agnostic
+    and retained (it exercises generate_signal's graceful handling on filtered candle data).
+    """
 
     def test_cointegration_start_filters_data(self, pairs_strategy: object) -> None:
         """When cointegration_start is set, only data from that date onward is used."""
@@ -333,9 +325,9 @@ class TestRuBlueChipsPairsConfig:
             )
 
         strategy.set_peer_candles("SBERP", candles_b)
-        # Using ru_blue_chips which has cointegration_start="2023-01-01"
-        # The strategy should filter out pre-2023 data before cointegration test
-        # This means the structural break in pre-2022 data should NOT affect results
+        # Phase 68 (UNIV-02): ru_blue_chips was removed, so this segment has no pairs config.
+        # generate_signal must still handle an unconfigured segment gracefully (no error, None
+        # or a BUY) -- the segment-agnostic filtering/robustness behaviour under test.
         signal = strategy.generate_signal("SBER", candles_a, "ru_blue_chips")
         # We just verify no error is raised and the strategy handles filtering
         # The actual signal depends on z-score, but the key behavior is that
