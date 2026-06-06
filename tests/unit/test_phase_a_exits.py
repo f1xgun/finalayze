@@ -210,12 +210,10 @@ class TestChandelierMultiplierBySegment:
         "us_healthcare": Decimal("3.5"),
         "us_finance": Decimal("2.5"),
         "ru_blue_chips": Decimal("4.0"),
-        # RUFIN-02 / D-02 (Phase 67): tightened 4.0 -> 3.5 (ru_tech precedent).
-        # EXITDIAG-04 / D-11 (Phase 69): FURTHER tightened 3.5 -> 3.0 from the
-        # phase69-diagnostic-baseline attribution (payoff 0.651; avg-win +524.79
-        # vs avg-loss -805.80; 30 stop exits summed -19,717.80). Wave-4 candidate
-        # gated by the D-11 A/B; floored at the 3.0 us_tech/us_broad value.
-        "ru_finance": Decimal("3.0"),
+        # RUFIN-02 / D-02: tightened 4.0 -> 3.5 (ru_tech precedent). Plan-67-01
+        # attribution named the chandelier stop lever (avg-loss -1022.83 vs
+        # avg-win +566.52; 23 stop exits summed -25,734.80 -- losers run too far).
+        "ru_finance": Decimal("3.5"),
         "ru_energy": Decimal("4.5"),
         "ru_tech": Decimal("3.5"),
     }
@@ -233,18 +231,6 @@ class TestChandelierMultiplierBySegment:
         no-regression control and must be provably untouched.
         """
         assert get_chandelier_multiplier("ru_energy") == Decimal("4.5")
-
-    def test_ru_finance_chandelier_phase69_tune_exitdiag04(self) -> None:
-        """EXITDIAG-04 / D-11: ru_finance chandelier tightened 3.5 -> 3.0.
-
-        Wave-4 candidate (Phase 69) gated by the D-11 A/B. Asserts the tuned
-        ru_finance value alongside the ru_energy control to prove the change is
-        segment-local: ru_energy MUST remain at its 4.5 control value.
-        """
-        ru_finance_tuned = Decimal("3.0")
-        ru_energy_control = Decimal("4.5")
-        assert get_chandelier_multiplier("ru_finance") == ru_finance_tuned
-        assert get_chandelier_multiplier("ru_energy") == ru_energy_control
 
     def test_chandelier_multiplier_unknown_segment(self) -> None:
         """Unknown segment returns default 3.0."""
@@ -330,34 +316,34 @@ class TestEngineChandelierMode:
         sell_trades = [t for t in trades if t.side == "SELL"]
         assert len(sell_trades) >= 1
 
-    def test_engine_ru_finance_chandelier_stop_trips_at_3_0x(self) -> None:
-        """EXITDIAG-04 / D-11 regression (Phase 69): a ru_finance position is
-        closed by the 3.0x chandelier stop, and the pre-tightening 3.5x
-        multiplier would NOT have tripped on the same path.
+    def test_engine_ru_finance_chandelier_stop_trips_at_3_5x(self) -> None:
+        """RUFIN-02 / WR-02 regression: a ru_finance position is closed by the
+        3.5x chandelier stop, and a 4.0x multiplier would NOT have tripped on
+        the same path.
 
         Flat candles at price=100 (high=102, low=98) give ATR=4 and
         highest_high=102, so the chandelier candidate stop is:
 
             stop = 102 - multiplier * 4
 
-        ru_finance (3.0x) -> stop = 90; the prior 3.5x stop would be 88. We drop
-        the price so the candle low is 89 -- strictly between the two stops --
-        which trips the 3.0x stop but is above the (counterfactual) 3.5x stop.
-        This guards against a future revert of the 3.0 multiplier or a break in
-        the ru_finance chandelier wiring, both of which would keep the
-        constant-only TestChandelierMultiplierBySegment suite green.
+        ru_finance (3.5x) -> stop = 88; a 4.0x stop would be 86. We drop the
+        price so the candle low is 87 -- strictly between the two stops -- which
+        trips the 3.5x stop but is above the (counterfactual) 4.0x stop. This
+        guards against a future revert of the 3.5 multiplier or a break in the
+        ru_finance chandelier wiring, both of which would keep the constant-only
+        TestChandelierMultiplierBySegment suite green.
         """
         atr = Decimal(4)  # flat candles: high-low = 4
         highest_high = BASE_PRICE + Decimal(2)  # 102
         ru_finance_mult = get_chandelier_multiplier("ru_finance")
-        control_mult = Decimal("3.5")  # pre-Phase-69 value
-        ru_finance_stop = highest_high - ru_finance_mult * atr  # 90
-        control_stop = highest_high - control_mult * atr  # 88
+        control_mult = Decimal("4.0")
+        ru_finance_stop = highest_high - ru_finance_mult * atr  # 88
+        control_stop = highest_high - control_mult * atr  # 86
 
-        # Sanity: the segment lever is actually 3.0 and the two stops bracket
+        # Sanity: the segment lever is actually 3.5 and the two stops bracket
         # the drop low we choose below.
-        assert ru_finance_mult == Decimal("3.0")
-        drop_low = Decimal(89)
+        assert ru_finance_mult == Decimal("3.5")
+        drop_low = Decimal(87)
         assert control_stop < drop_low < ru_finance_stop
 
         # Build candles: flat through entry + a few bars to establish the stop.
@@ -401,13 +387,13 @@ class TestEngineChandelierMode:
         # (a) A stop exit fired and is tagged as such.
         stop_trades = [t for t in trades if t.exit_reason == ExitReason.STOP]
         assert len(stop_trades) == 1, (
-            f"expected exactly one 'stop' exit at the 3.0x level, got "
+            f"expected exactly one 'stop' exit at the 3.5x level, got "
             f"{[(t.side, t.exit_reason) for t in trades]}"
         )
         assert stop_trades[0].side == "SELL"
 
-        # (b) Control: the drop low sits above the 3.5x counterfactual stop, so
-        # the pre-tightening 3.5 multiplier would NOT have tripped on this path.
+        # (b) Control: the drop low sits above the 4.0x counterfactual stop, so
+        # the pre-tightening 4.0 multiplier would NOT have tripped on this path.
         assert drop_low > control_stop
 
     def test_engine_trailing_mode_unchanged(self) -> None:

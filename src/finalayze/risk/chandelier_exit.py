@@ -21,8 +21,7 @@ _CHANDELIER_MULTIPLIERS: dict[str, Decimal] = {
     "us_healthcare": Decimal("3.5"),
     "us_finance": Decimal("2.5"),
     "ru_blue_chips": Decimal("4.0"),
-    # RUFIN-02 / D-02 (Phase 67): tightened 4.0 -> 3.5. Two independent
-    # justifications:
+    # RUFIN-02 / D-02: tightened 4.0 -> 3.5. Two independent justifications:
     #   (a) 3.5 matches the existing ru_tech multiplier (see ru_tech entry below) --
     #       so the new value is not a fresh free parameter, it reuses a precedent.
     #   (b) The DIRECTION of the change is derived from ru_finance's own attribution
@@ -30,16 +29,9 @@ _CHANDELIER_MULTIPLIERS: dict[str, Decimal] = {
     #       results/iterations/phase67-...): avg-loss -1022.83 vs avg-win +566.52
     #       (payoff 0.554) and 23 stop exits summing -25,734.80 -- losers run too
     #       far, so a tighter chandelier cuts the big losers sooner.
-    # EXITDIAG-04 / D-11 (Phase 69): FURTHER bounded tighten 3.5 -> 3.0. Derived
-    # from ru_finance's phase69-diagnostic-baseline attribution: payoff 0.651;
-    # avg-win +524.79 vs avg-loss -805.80; 30 stop exits summing -19,717.80 --
-    # losers still run too far. 3.0 is a single bounded step (same 0.5 magnitude as
-    # the Phase-67 4.0->3.5 move) and equals the _DEFAULT / us_tech / us_broad
-    # floor -- do NOT go below 3.0 (anti-curve-fit, D-03). DOUBLE-TUNE CAVEAT:
-    # ru_finance was already tuned 4.0->3.5 in Phase 67, so this is a Wave-4
-    # CANDIDATE GATED by the D-11 A/B -- it may be REJECTED if the A/B does not
-    # show net improvement.
-    "ru_finance": Decimal("3.0"),
+    # Stays above the 3.0 us_tech/us_broad floor (anti-curve-fit single bounded
+    # step, D-03).
+    "ru_finance": Decimal("3.5"),
     "ru_energy": Decimal("4.5"),
     "ru_tech": Decimal("3.5"),
 }
