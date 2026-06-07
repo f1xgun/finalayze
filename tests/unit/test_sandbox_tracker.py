@@ -11,7 +11,6 @@ import pytest
 from finalayze.core.schemas import CouponPayment, PortfolioState
 from finalayze.execution.broker_base import OrderRequest, OrderResult
 from finalayze.execution.sandbox_tracker import (
-    _NDFL_RATE,
     DividendEntry,
     SandboxAdjustment,
     SandboxPortfolioTracker,

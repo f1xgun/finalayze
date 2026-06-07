@@ -12,10 +12,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
+from finalayze.core.constants import NDFL_RATE
 from finalayze.core.schemas import Candle, PortfolioState
 from finalayze.execution.broker_base import BrokerBase, OrderRequest, OrderResult
 from finalayze.execution.impact import compute_market_impact, should_reject_trade
+
+if TYPE_CHECKING:
+    from datetime import date
+
+    from finalayze.core.ndfl import YtdTaxAccumulator
 
 
 @dataclass
@@ -56,6 +63,10 @@ class SimulatedBroker(BrokerBase):
         self._stop_states: dict[str, StopLossState] = {}
         self._last_prices: dict[str, Decimal] = {}
         self._current_timestamp: datetime | None = None
+        # WR-04: already-credited (symbol, ex_date) keys -- a repeated calendar date
+        # (e.g. a sub-daily timeframe with >1 bar per day) must NOT re-credit the same
+        # dividend (mirrors ShadowLedger._processed_dividend_dates).
+        self._processed_dividend_dates: set[tuple[str, date]] = set()
         # Market impact model settings
         self._use_impact_model: bool = use_impact_model
         self._adv: dict[str, float] = adv if adv is not None else {}
@@ -262,6 +273,66 @@ class SimulatedBroker(BrokerBase):
     def update_prices(self, candle: Candle) -> None:
         """Update last known price for a symbol from a candle's close."""
         self._last_prices[candle.symbol] = candle.close
+
+    def process_dividends(
+        self,
+        current_date: date,
+        schedule: dict[tuple[str, date], Decimal],
+        *,
+        tax_rate: Decimal = NDFL_RATE,
+        ytd_accumulator: YtdTaxAccumulator | None = None,
+    ) -> Decimal:
+        """Credit net-of-NDFL dividends for held positions due on current_date.
+
+        Mirrors ``BondSimulatedBroker.process_coupons`` (bond_simulated_broker.py:136):
+        per-bar, O(held positions), gross -> tax -> net -> ``self._cash +=``. PnL-inert --
+        does NOT touch positions, last prices, or the trade-PnL formula (that is what keeps
+        total-return accounting non-breaking, D-16). ``schedule`` stores GROSS per-share
+        amounts keyed ``(symbol, ex_date)``; a dividend is credited ONLY on the exact ex-date
+        bar, and ONCE -- a ``(symbol, ex_date)`` already credited is never re-credited, so a
+        repeated calendar date (sub-daily timeframe, >1 bar per day) does not double-credit
+        (WR-04, mirrors ``ShadowLedger._processed_dividend_dates``). Returns the total net
+        credited on this date.
+
+        Args:
+            current_date: Current bar date.
+            schedule: ``{(symbol, ex_date): gross_per_share}`` dividend index.
+            tax_rate: Flat NDFL rate applied to gross (defaults to the L0 single source).
+                Used ONLY when ``ytd_accumulator`` is ``None`` (the direct-caller default --
+                keeps the golden kopeck test exact at 13% below the threshold).
+            ytd_accumulator: Optional cross-sleeve YTD taxable-income accumulator (WR-01 /
+                R-3). When supplied, the gross is taxed via the progressive 13/15% marginal
+                band against the running YTD total (so cumulative income above the 2.4M RUB
+                threshold within a tax year is taxed at 15%) instead of the flat ``tax_rate``;
+                the accumulator advances by the credited gross. When ``None`` (the default),
+                the flat ``tax_rate`` is used and behaviour is UNCHANGED (byte-identical
+                golden/A-B, which are all below the threshold so marginal == 13%).
+
+        Returns:
+            Total net dividend income credited on this date.
+        """
+        total_net = Decimal(0)
+        for symbol, qty in list(self._positions.items()):
+            if qty <= 0:
+                continue
+            gross_per_share = schedule.get((symbol, current_date))
+            if gross_per_share is None:
+                continue
+            key = (symbol, current_date)
+            if key in self._processed_dividend_dates:
+                # Already credited on this ex-date -- idempotent, never double-credit (WR-04).
+                continue
+            self._processed_dividend_dates.add(key)
+            gross = gross_per_share * qty
+            if ytd_accumulator is not None:
+                # WR-01: progressive 13/15% band against the cross-sleeve running YTD.
+                tax = ytd_accumulator.tax(gross, current_date.year)
+            else:
+                tax = gross * tax_rate
+            net = gross - tax
+            self._cash += net  # the single credit point (mirrors process_coupons:158)
+            total_net += net
+        return total_net
 
     def has_position(self, symbol: str) -> bool:
         """Return True if the broker holds a non-zero position in symbol."""

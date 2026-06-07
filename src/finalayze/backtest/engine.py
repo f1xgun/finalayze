@@ -20,6 +20,7 @@ from finalayze.backtest.journal import BacktestJournal
 from finalayze.backtest.journaling_combiner import JournalingStrategyCombiner
 from finalayze.backtest.position_executor import BacktestPositionExecutor
 from finalayze.backtest.risk_evaluator import BacktestRiskEvaluator
+from finalayze.core.ndfl import YtdTaxAccumulator
 from finalayze.core.schemas import (
     Candle,
     PortfolioState,
@@ -49,10 +50,12 @@ from finalayze.risk.stops import CATASTROPHIC_DROP_PCT
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from datetime import date
 
     from finalayze.backtest.costs import TransactionCosts
     from finalayze.backtest.decision_journal import DecisionJournal, FinalAction
     from finalayze.core.schemas import Signal
+    from finalayze.execution.deposit_broker import DepositSimulatedBroker
     from finalayze.risk.circuit_breaker import CircuitBreaker
     from finalayze.risk.kelly import RollingKelly
     from finalayze.risk.loss_limits import LossLimitTracker
@@ -693,6 +696,8 @@ class BacktestEngine:
         candles_by_symbol: dict[str, list[Candle]],
         *,
         eligible_at: Callable[[datetime], set[str]] | None = None,
+        dividend_schedule: dict[tuple[str, date], Decimal] | None = None,
+        deposit_ladder: DepositSimulatedBroker | None = None,
     ) -> tuple[list[TradeResult], list[PortfolioState]]:
         """Run a portfolio-level backtest over multiple symbols.
 
@@ -703,6 +708,24 @@ class BacktestEngine:
             symbols: List of ticker symbols to trade.
             segment_id: Market segment identifier.
             candles_by_symbol: Candle data keyed by symbol.
+            dividend_schedule: Optional total-return dividend index (ACCT-01 / D-16),
+                ``{(symbol, ex_date): gross_per_share}`` from
+                ``backtest.dividend_schedule.load_dividend_schedule``. When supplied, held
+                positions accrue net-of-NDFL dividends to cash per bar (after the price update,
+                before valuation) via ``broker.process_dividends`` -- the trade-PnL formula is
+                untouched and the credited cash flows into the equity curve through
+                ``get_portfolio``. When ``None`` (the default), the per-bar income hook is a
+                no-op and behaviour is UNCHANGED -- this preserves every existing
+                ``run_portfolio`` caller and test (byte-identical, D-16).
+            deposit_ladder: Optional ``DepositSimulatedBroker`` deposit sleeve (DEP-01 / ACCT-02).
+                When supplied, ``deposit_ladder.accrue(bar_date)`` compounds its own daily
+                net-of-NDFL interest into the deposit mark each bar (mark-only, CR-01: the interest
+                stays inside the deposit and is NOT swept to cash), and that single reconciled
+                ``deposit_ladder.deposit_value()`` (principal + accrued net) is folded into THIS
+                bar's returned ``PortfolioState.equity`` (WR-02) so the deposit sleeve growth is
+                visible on the equity/return/Sharpe curve. When ``None`` (the default), no deposit
+                interest is accrued and the snapshot is left untouched -- preserving every existing
+                caller and test (byte-identical, D-16).
             eligible_at: Optional CARDINAL D-05 as-of universe gate. When supplied, the eligible
                 universe is recomputed at each QUARTERLY rebalance bar ``T`` via ``eligible_at(T)``
                 -- which the caller backs with ``markets.liquidity.eligible_universe_as_of`` so the
@@ -745,6 +768,11 @@ class BacktestEngine:
 
         trades: list[TradeResult] = []
         snapshots: list[PortfolioState] = []
+        # WR-01: one cross-sleeve YTD taxable-income accumulator per run, threaded into the
+        # dividend credit so the progressive 13/15% band is applied against a single running
+        # YTD (it resets per tax year inside .tax()). Created unconditionally but only consulted
+        # when dividend_schedule is provided -> the None path is untouched (byte-identical, D-16).
+        ytd_tax_accumulator = YtdTaxAccumulator()
         entry_prices: dict[str, Decimal] = {}
         entry_bars: dict[str, int] = {}
         entry_strategies: dict[str, str] = {}
@@ -793,6 +821,23 @@ class BacktestEngine:
                     idx = candle_index[sym][ts]
                     broker.update_prices(sym_candles[idx])
                     bar_counts[sym] = bar_counts.get(sym, 0) + 1
+
+            # Total-return income credit (mirrors bond_engine.py:214). No-op when both inputs
+            # are None -> all existing run_portfolio callers stay byte-identical (D-16). Credits
+            # net-of-NDFL income to cash via the broker; the trade-PnL formula is untouched and
+            # equity auto-updates in get_portfolio(). After update_prices, before the snapshot
+            # append below -> the credit lands in THIS bar's equity and nowhere earlier (D-17).
+            # WR-01: dividend income is taxed through the cross-sleeve progressive 13/15% band
+            # (ytd_tax_accumulator, created once per run; resets per tax year inside .tax()) so
+            # cumulative YTD income above the 2.4M RUB threshold is charged at 15% -- below the
+            # threshold marginal == flat 13%, so the golden/A-B (both below threshold) are
+            # byte-identical.
+            if dividend_schedule is not None:
+                broker.process_dividends(
+                    ts.date(), dividend_schedule, ytd_accumulator=ytd_tax_accumulator
+                )
+            if deposit_ladder is not None:
+                deposit_ladder.accrue(ts.date())
 
             # Update correlation cache every N bars (portfolio mode only)
             if ts_index % self._correlation_update_interval == 0 and len(symbols) > 1:
@@ -1003,7 +1048,17 @@ class BacktestEngine:
                             bar_index=bar_counts.get(sym, 0),
                         )
 
-            snapshots.append(broker.get_portfolio())
+            # WR-02: fold the deposit sleeve's single reconciled mark (CR-01:
+            # deposit_value() == principal + accrued_net, no cash double-count)
+            # into THIS bar's equity so the deposit growth is visible on the
+            # returned curve. When deposit_ladder is None this is a strict no-op
+            # -> the snapshot is byte-identical (D-16).
+            snapshot = broker.get_portfolio()
+            if deposit_ladder is not None:
+                snapshot = snapshot.model_copy(
+                    update={"equity": snapshot.equity + deposit_ladder.deposit_value()}
+                )
+            snapshots.append(snapshot)
             ts_index += 1
 
         # S5.3: end-of-data positions are left OPEN by default.  Same

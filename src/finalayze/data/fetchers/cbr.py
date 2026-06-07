@@ -771,3 +771,27 @@ class MacroContextProvider:
             cpi_yoy=cpi_yoy,
             last_cbr_decision=last_decision,
         )
+
+
+# Default deposit spread below the key rate (D-04). Configurable per-tranche:
+# longer-dated tranches may carry a different spread.
+_DEFAULT_DEPOSIT_SPREAD_PP = Decimal("1.0")
+_PCT_POINTS = Decimal(100)
+
+
+def deposit_rate_as_of(as_of: date, spread_pp: Decimal = _DEFAULT_DEPOSIT_SPREAD_PP) -> Decimal:
+    """Annual deposit rate as a decimal fraction = (key_rate - spread) / 100, as-of only.
+
+    Reads ``key_rate`` via the look-ahead-safe meeting calendar (most recent CBR
+    meeting on/before ``as_of``), reusing ``MacroContextProvider.get_snapshot`` --
+    no new fetcher (anti-pattern 5). ``key_rate`` is in percentage points
+    (``21.00`` means 21%), so the spread is subtracted in percentage points and
+    the result is divided by 100 to a fraction (``21.00pp - 1.0pp -> 0.20``).
+
+    Returns ``Decimal(0)`` before the first meeting in the calendar
+    (``key_rate is None``). ``spread_pp`` is configurable per-tranche (D-04).
+    """
+    snap = MacroContextProvider().get_snapshot(as_of)
+    if snap.key_rate is None:
+        return Decimal(0)
+    return (snap.key_rate - spread_pp) / _PCT_POINTS

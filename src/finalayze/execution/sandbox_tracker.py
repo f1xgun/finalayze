@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from finalayze.core.constants import NDFL_RATE
 from finalayze.core.schemas import PortfolioState
 from finalayze.execution.broker_base import BrokerBase, OrderRequest, OrderResult
 
@@ -36,8 +37,6 @@ if TYPE_CHECKING:
     from finalayze.markets.instruments import InstrumentRegistry
 
 logger = structlog.get_logger(__name__)
-
-_NDFL_RATE = Decimal("0.13")
 
 
 @dataclass
@@ -89,7 +88,7 @@ class ShadowLedger:
         symbol: str,
         payment_date: date,
         gross: Decimal,
-        tax_rate: Decimal = _NDFL_RATE,
+        tax_rate: Decimal = NDFL_RATE,
     ) -> SandboxAdjustment | None:
         """Record a coupon payment. Returns adjustment or None if already processed."""
         key = (symbol, payment_date)
@@ -120,7 +119,7 @@ class ShadowLedger:
         symbol: str,
         ex_date: date,
         gross: Decimal,
-        tax_rate: Decimal = _NDFL_RATE,
+        tax_rate: Decimal = NDFL_RATE,
     ) -> SandboxAdjustment | None:
         """Record a dividend payment. Returns adjustment or None if already processed."""
         key = (symbol, ex_date)
@@ -179,7 +178,7 @@ class SandboxPortfolioTracker(BrokerBase):
         self,
         broker: TinkoffBroker,
         registry: InstrumentRegistry | None = None,
-        tax_rate: Decimal = _NDFL_RATE,
+        tax_rate: Decimal = NDFL_RATE,
     ) -> None:
         self._broker = broker
         self._registry = registry
