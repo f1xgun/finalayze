@@ -13,32 +13,34 @@ credited to cash every bar (ACCT-02). The mark is ``principal + accrued net``
 and NEVER reprices on any market-price input (DEP-01 / D-05: zero market risk).
 Breaking a tranche before maturity forfeits accrued interest down to the demand
 rate (DEP-02 / D-03). A matured tranche auto-rolls into a fresh same-term
-tranche at the as-of deposit rate with no penalty (R-4 -- the honest no-allocator
-W1 default; the W2 allocator decision that would TRIGGER a break/roll is out of
+tranche at the as-of deposit rate with no penalty (R-4 -- the honest no-W2
+W1 default; the W2 wave decision that would TRIGGER a break/roll is out of
 scope here, D-06).
 
 ``split_across_banks`` / ``uninsured_excess`` (DEP-03) are pure ASV sizing
 functions: they take a principal and return per-bank insured slices, flagging
 accrued-over-cap exposure as not-risk-free (D-09). They read no risk profiles
-or target weights (R-5 boundary discipline -- no W2/allocator coupling).
+or portfolio weights (R-5 boundary discipline -- no W2 sizing-layer coupling).
 
 See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 """
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from dateutil.relativedelta import relativedelta
 
 from finalayze.core.constants import (
+    ASV_CAP_PER_BANK,
     DEPOSIT_DEMAND_RATE,
     DEPOSIT_FLOOR_BASE,
     NDFL_RATE,
 )
 from finalayze.core.ndfl import ndfl_on_deposit_interest
-from finalayze.core.schemas import DepositTranche
+from finalayze.core.schemas import BankAllocation, DepositTranche
 from finalayze.data.fetchers.cbr import deposit_rate_as_of
 from finalayze.execution.simulated_broker import SimulatedBroker
 
@@ -134,7 +136,7 @@ class DepositSimulatedBroker(SimulatedBroker):
 
         Marks the tranche broken and resets its accrued net to
         ``principal * DEPOSIT_DEMAND_RATE`` (~0.01%) -- no liquid-cash-at-full-rate
-        fiction (Pitfall 2 / T-71-10). The W2 allocator decision that TRIGGERS a
+        fiction (Pitfall 2 / T-71-10). The W2 wave decision that TRIGGERS a
         break is out of scope here (D-06); this method only models the penalty.
         """
         del current_date  # the penalty does not depend on the bar date in W1
@@ -175,3 +177,34 @@ class DepositSimulatedBroker(SimulatedBroker):
     def tax_paid(self) -> Decimal:
         """Total NDFL tax paid on deposit interest."""
         return self._total_tax_paid
+
+
+def split_across_banks(
+    total_principal: Decimal, cap: Decimal = ASV_CAP_PER_BANK
+) -> list[BankAllocation]:
+    """Greedily distribute principal across banks so each stays <= the insured cap.
+
+    Pure sizing (DEP-03 / R-5): takes a principal, returns per-bank allocations.
+    Reads no risk profiles, portfolio weights or other asset classes -- no W2
+    sizing-layer coupling. At the 2.5M RUB default capital (D-08) this yields 2 banks
+    (1.4M + 1.1M): the split IS exercised. Each bank's principal is capped at
+    ``cap`` (default ``ASV_CAP_PER_BANK``).
+    """
+    n_banks = max(1, math.ceil(total_principal / cap))
+    allocations: list[BankAllocation] = []
+    remaining = total_principal
+    for i in range(n_banks):
+        principal = min(remaining, cap)
+        allocations.append(BankAllocation(bank_id=f"bank_{i}", principal=principal))
+        remaining -= principal
+    return allocations
+
+
+def uninsured_excess(bank: BankAllocation, cap: Decimal = ASV_CAP_PER_BANK) -> Decimal:
+    """Insured exposure above the cap, flagged not-risk-free (D-09).
+
+    Accrued interest counts toward the cap (``insured_exposure = principal +
+    accrued_net``), so a bank at the cap exceeds it as interest accrues. W1 only
+    FLAGS the excess; the W2 sizing wave is what would act on it (R-5 boundary).
+    """
+    return max(Decimal(0), bank.insured_exposure - cap)
