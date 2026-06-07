@@ -23,7 +23,7 @@ the L0 helper so the cross-sleeve cumulative tax is applied in one place (Patter
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -76,17 +76,34 @@ def load_dividend_schedule(path: Path | None = None) -> dict[tuple[str, date], D
         raise ConfigurationError(msg)
 
     index: dict[tuple[str, date], Decimal] = {}
-    for symbol, events in raw.items():
-        for ev in events:
-            if ev.get("status", _PAID_STATUS) != _PAID_STATUS:
-                # Skip cancelled/reduced -- mandatory honesty (GAZP 2022-06-30).
-                continue
-            ex = date.fromisoformat(ev["ex_date"])
-            # Decimal(str(amount)): the YAML amount is a float; round-tripping via str
-            # avoids float-binary contamination of the kopeck-exact golden test.
-            amount = Decimal(str(ev["amount"]))
-            key = (symbol, ex)
-            index[key] = index.get(key, Decimal(0)) + amount
+    # WR-03: the per-event parse is fully fail-closed -- any malformed-but-parseable
+    # content (event not a mapping, missing ex_date/amount, bad isoformat, null
+    # events, non-numeric amount) re-raises as ConfigurationError with the offending
+    # file + cause, never an opaque low-level traceback at the snapshot path.
+    try:
+        for symbol, events in raw.items():
+            if not isinstance(events, list):
+                # A symbol key mapping to null / a scalar / a mapping is malformed
+                # content (the schema is {symbol: [event, ...]}). An ABSENT symbol is
+                # simply not a key here and legitimately yields no entries.
+                msg = f"malformed events list for {symbol}: {events!r}"
+                raise ConfigurationError(msg)
+            for ev in events:
+                if not isinstance(ev, dict):
+                    msg = f"malformed event for {symbol}: {ev!r}"
+                    raise ConfigurationError(msg)
+                if ev.get("status", _PAID_STATUS) != _PAID_STATUS:
+                    # Skip cancelled/reduced -- mandatory honesty (GAZP 2022-06-30).
+                    continue
+                ex = date.fromisoformat(ev["ex_date"])
+                # Decimal(str(amount)): the YAML amount is a float; round-tripping via str
+                # avoids float-binary contamination of the kopeck-exact golden test.
+                amount = Decimal(str(ev["amount"]))
+                key = (symbol, ex)
+                index[key] = index.get(key, Decimal(0)) + amount
+    except (KeyError, ValueError, TypeError, AttributeError, InvalidOperation) as exc:
+        msg = f"dividend snapshot malformed at {target}: {exc}"
+        raise ConfigurationError(msg) from exc
 
     _LOGGER.debug("dividend_schedule_loaded", path=str(target), entries=len(index))
     return index

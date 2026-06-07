@@ -17,9 +17,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
+
+import pytest
 
 from finalayze.backtest.dividend_schedule import load_dividend_schedule
 from finalayze.core.constants import NDFL_RATE
+from finalayze.core.exceptions import ConfigurationError
 
 # ── Constants (named -- no magic numbers) ───────────────────────────────────
 
@@ -70,3 +74,43 @@ def test_cancelled_not_accrued() -> None:
     """A cancelled dividend is skipped at load time -> zero accrual (ACCT-01)."""
     schedule = load_dividend_schedule()
     assert (_GAZP, _GAZP_CANCELLED_EX_DATE) not in schedule
+
+
+# ── WR-03: per-event malformed content is fully fail-closed (ConfigurationError) ──
+
+# Each maps a malformed YAML body to the low-level exception the unguarded loop
+# would otherwise leak; the loader must re-raise ALL of them as ConfigurationError.
+_MALFORMED_BODIES = (
+    pytest.param("SBER:\n  - just-a-string\n", id="event_not_a_mapping"),
+    pytest.param("SBER:\n  - amount: 25.0\n", id="missing_ex_date"),
+    pytest.param("SBER:\n  - ex_date: '2023-05-11'\n", id="missing_amount"),
+    pytest.param("SBER:\n  - ex_date: not-a-date\n    amount: 25.0\n", id="bad_date"),
+    pytest.param("SBER:\n", id="null_events"),
+    pytest.param("SBER:\n  - ex_date: '2023-05-11'\n    amount: abc\n", id="non_numeric_amount"),
+)
+
+
+@pytest.mark.parametrize("body", _MALFORMED_BODIES)
+def test_malformed_event_is_fail_closed(body: str, tmp_path: Path) -> None:
+    """Malformed-but-parseable per-event content raises ConfigurationError (WR-03).
+
+    The docstring promises a corrupt/unparseable/malformed file is fail-closed; the
+    per-event parse loop must re-raise low-level KeyError/ValueError/TypeError/
+    AttributeError/InvalidOperation as ConfigurationError rather than leaking an
+    opaque traceback at the snapshot path.
+    """
+    snapshot = tmp_path / "moex_dividends.yaml"
+    snapshot.write_text(body, encoding="utf-8")
+    with pytest.raises(ConfigurationError):
+        load_dividend_schedule(path=snapshot)
+
+
+def test_well_formed_override_still_loads(tmp_path: Path) -> None:
+    """A well-formed override path still loads correctly (WR-03 guard is not over-broad)."""
+    snapshot = tmp_path / "moex_dividends.yaml"
+    snapshot.write_text(
+        "SBER:\n  - ex_date: '2023-05-11'\n    amount: 25.0\n    status: paid\n",
+        encoding="utf-8",
+    )
+    schedule = load_dividend_schedule(path=snapshot)
+    assert schedule[(_SBER, _SBER_EX_DATE)] == _SBER_DIV
