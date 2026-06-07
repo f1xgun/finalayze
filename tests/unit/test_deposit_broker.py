@@ -17,7 +17,7 @@ RED now: ``finalayze.execution.deposit_broker`` (Plan 04) +
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from finalayze.core.constants import DEPOSIT_DEMAND_RATE, NDFL_RATE
@@ -227,3 +227,42 @@ def test_accrual_curve_monotone_by_net_interest() -> None:
         assert broker.interest_income_net >= previous
         previous = broker.interest_income_net
     assert NDFL_RATE > _ZERO  # the tax rate exists for above-floor bars
+
+
+_DAY_AFTER_MATURITY = _MATURITY_DATE + timedelta(days=1)
+
+
+def test_accrue_on_maturity_date_credits() -> None:
+    """The maturity date itself still accrues (the boundary is ``<``, not ``<=``, WR-05)."""
+    broker = _make_broker(_make_tranche())
+    net = broker.accrue(_MATURITY_DATE)
+    assert net > _ZERO  # maturity_date < maturity_date is False -> the tranche accrues
+    assert broker.interest_income_net == net
+
+
+def test_accrue_after_maturity_credits_zero() -> None:
+    """One day past maturity accrues zero -- the tranche is excluded (WR-05 boundary)."""
+    broker = _make_broker(_make_tranche())
+    net = broker.accrue(_DAY_AFTER_MATURITY)
+    assert net == _ZERO  # maturity_date < (maturity_date + 1 day) -> skipped
+    assert broker.interest_income_net == _ZERO
+
+
+def test_break_tranche_ignores_current_date_in_w1() -> None:
+    """``break_tranche`` is current_date-inert in W1: any date yields the same penalty (WR-05).
+
+    The ``current_date`` param is retained for W2 (where the rebalance decision that
+    TRIGGERS a break is date-aware), but in W1 the penalty depends only on the
+    principal, so two breaks with different dates produce the identical mark.
+    """
+    tranche_a = _make_tranche()
+    broker_a = _make_broker(tranche_a)
+    broker_a.accrue(_ACCRUE_BAR)
+    broker_a.break_tranche(tranche_a, _OPEN_DATE)
+
+    tranche_b = _make_tranche()
+    broker_b = _make_broker(tranche_b)
+    broker_b.accrue(_ACCRUE_BAR)
+    broker_b.break_tranche(tranche_b, _DAY_AFTER_MATURITY)
+
+    assert tranche_a.accrued_net == tranche_b.accrued_net == _PRINCIPAL * DEPOSIT_DEMAND_RATE

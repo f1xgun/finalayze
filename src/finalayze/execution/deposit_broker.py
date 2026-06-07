@@ -161,8 +161,14 @@ class DepositSimulatedBroker(SimulatedBroker):
         ``principal * DEPOSIT_DEMAND_RATE`` (~0.01%) -- no liquid-cash-at-full-rate
         fiction (Pitfall 2 / T-71-10). The W2 wave decision that TRIGGERS a
         break is out of scope here (D-06); this method only models the penalty.
+
+        ``current_date`` is RETAINED but W1-inert: the penalty depends only on the
+        principal, so the bar date does not change the mark in W1 (WR-05). It is
+        kept in the signature because W2 (where the date-aware rebalance decision
+        triggers the break) will need it; deleting it now and re-adding it later
+        would churn every caller.
         """
-        del current_date  # the penalty does not depend on the bar date in W1
+        del current_date  # W1-inert: the penalty does not depend on the bar date (WR-05)
         tranche.broken = True
         tranche.accrued_net = tranche.principal * DEPOSIT_DEMAND_RATE
 
