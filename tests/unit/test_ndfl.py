@@ -20,7 +20,7 @@ from finalayze.core.constants import (
     NDFL_RATE,
     NDFL_RATE_HIGH,
 )
-from finalayze.core.ndfl import ndfl_marginal, ndfl_on_deposit_interest
+from finalayze.core.ndfl import YtdTaxAccumulator, ndfl_marginal, ndfl_on_deposit_interest
 
 # ── Constants (named -- no magic numbers, ruff PLR2004) ─────────────────────
 
@@ -92,3 +92,50 @@ def test_deposit_floor_monotone_no_future_month() -> None:
         _CROSS_FLOOR_GROSS, _CROSS_FLOOR_YTD_BEFORE, _HIGHER_FLOOR
     )
     assert high_floor_tax <= low_floor_tax
+
+
+# ── WR-01: YtdTaxAccumulator wires the progressive band against a running YTD ──
+
+_YEAR = 2023
+_NEXT_YEAR = 2024
+_BELOW_CREDIT = Decimal(1_000_000)  # << 2.4M -> all 13%
+_CROSS_CREDIT = Decimal(2_000_000)  # second 2M credit crosses the 2.4M threshold
+
+
+def test_ytd_accumulator_below_threshold_is_flat_13() -> None:
+    """A credit wholly below the 2.4M YTD threshold is taxed flat 13% (WR-01)."""
+    acc = YtdTaxAccumulator()
+    tax = acc.tax(_BELOW_CREDIT, _YEAR)
+    assert tax == _BELOW_CREDIT * NDFL_RATE
+    assert acc.ytd_taxable == _BELOW_CREDIT
+
+
+def test_ytd_accumulator_15_fires_above_threshold() -> None:
+    """Once cumulative YTD taxable income exceeds 2.4M, the excess is taxed 15% (WR-01).
+
+    First credit (1M) is wholly below 2.4M -> 13%. The second credit (2M) takes
+    cumulative YTD from 1M to 3M, straddling the 2.4M threshold: 1.4M of it at 13%
+    (up to the threshold) and 0.6M at 15%.
+    """
+    acc = YtdTaxAccumulator()
+    acc.tax(_BELOW_CREDIT, _YEAR)  # YTD now 1M
+
+    second_tax = acc.tax(_CROSS_CREDIT, _YEAR)  # YTD 1M -> 3M
+    below_portion = NDFL_PROGRESSIVE_THRESHOLD - _BELOW_CREDIT  # 1.4M at 13%
+    above_portion = _CROSS_CREDIT - below_portion  # 0.6M at 15%
+    expected = below_portion * NDFL_RATE + above_portion * NDFL_RATE_HIGH
+    assert second_tax == expected
+    assert acc.ytd_taxable == _BELOW_CREDIT + _CROSS_CREDIT
+
+
+def test_ytd_accumulator_resets_on_new_tax_year() -> None:
+    """The accumulator resets on a Jan-1 tax-year boundary -> the band restarts (WR-01)."""
+    acc = YtdTaxAccumulator()
+    acc.tax(_CROSS_CREDIT, _YEAR)
+    acc.tax(_CROSS_CREDIT, _YEAR)  # well above the threshold this year
+    assert acc.ytd_taxable == _CROSS_CREDIT + _CROSS_CREDIT
+
+    # New year: YTD resets, so a sub-threshold credit is flat 13% again.
+    next_year_tax = acc.tax(_BELOW_CREDIT, _NEXT_YEAR)
+    assert next_year_tax == _BELOW_CREDIT * NDFL_RATE
+    assert acc.ytd_taxable == _BELOW_CREDIT

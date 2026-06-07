@@ -20,6 +20,7 @@ from finalayze.backtest.journal import BacktestJournal
 from finalayze.backtest.journaling_combiner import JournalingStrategyCombiner
 from finalayze.backtest.position_executor import BacktestPositionExecutor
 from finalayze.backtest.risk_evaluator import BacktestRiskEvaluator
+from finalayze.core.ndfl import YtdTaxAccumulator
 from finalayze.core.schemas import (
     Candle,
     PortfolioState,
@@ -767,6 +768,11 @@ class BacktestEngine:
 
         trades: list[TradeResult] = []
         snapshots: list[PortfolioState] = []
+        # WR-01: one cross-sleeve YTD taxable-income accumulator per run, threaded into the
+        # dividend credit so the progressive 13/15% band is applied against a single running
+        # YTD (it resets per tax year inside .tax()). Created unconditionally but only consulted
+        # when dividend_schedule is provided -> the None path is untouched (byte-identical, D-16).
+        ytd_tax_accumulator = YtdTaxAccumulator()
         entry_prices: dict[str, Decimal] = {}
         entry_bars: dict[str, int] = {}
         entry_strategies: dict[str, str] = {}
@@ -821,8 +827,15 @@ class BacktestEngine:
             # net-of-NDFL income to cash via the broker; the trade-PnL formula is untouched and
             # equity auto-updates in get_portfolio(). After update_prices, before the snapshot
             # append below -> the credit lands in THIS bar's equity and nowhere earlier (D-17).
+            # WR-01: dividend income is taxed through the cross-sleeve progressive 13/15% band
+            # (ytd_tax_accumulator, created once per run; resets per tax year inside .tax()) so
+            # cumulative YTD income above the 2.4M RUB threshold is charged at 15% -- below the
+            # threshold marginal == flat 13%, so the golden/A-B (both below threshold) are
+            # byte-identical.
             if dividend_schedule is not None:
-                broker.process_dividends(ts.date(), dividend_schedule)
+                broker.process_dividends(
+                    ts.date(), dividend_schedule, ytd_accumulator=ytd_tax_accumulator
+                )
             if deposit_ladder is not None:
                 deposit_ladder.accrue(ts.date())
 

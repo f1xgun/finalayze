@@ -22,6 +22,8 @@ from finalayze.execution.impact import compute_market_impact, should_reject_trad
 if TYPE_CHECKING:
     from datetime import date
 
+    from finalayze.core.ndfl import YtdTaxAccumulator
+
 
 @dataclass
 class StopLossState:
@@ -278,6 +280,7 @@ class SimulatedBroker(BrokerBase):
         schedule: dict[tuple[str, date], Decimal],
         *,
         tax_rate: Decimal = NDFL_RATE,
+        ytd_accumulator: YtdTaxAccumulator | None = None,
     ) -> Decimal:
         """Credit net-of-NDFL dividends for held positions due on current_date.
 
@@ -295,6 +298,15 @@ class SimulatedBroker(BrokerBase):
             current_date: Current bar date.
             schedule: ``{(symbol, ex_date): gross_per_share}`` dividend index.
             tax_rate: Flat NDFL rate applied to gross (defaults to the L0 single source).
+                Used ONLY when ``ytd_accumulator`` is ``None`` (the direct-caller default --
+                keeps the golden kopeck test exact at 13% below the threshold).
+            ytd_accumulator: Optional cross-sleeve YTD taxable-income accumulator (WR-01 /
+                R-3). When supplied, the gross is taxed via the progressive 13/15% marginal
+                band against the running YTD total (so cumulative income above the 2.4M RUB
+                threshold within a tax year is taxed at 15%) instead of the flat ``tax_rate``;
+                the accumulator advances by the credited gross. When ``None`` (the default),
+                the flat ``tax_rate`` is used and behaviour is UNCHANGED (byte-identical
+                golden/A-B, which are all below the threshold so marginal == 13%).
 
         Returns:
             Total net dividend income credited on this date.
@@ -312,7 +324,11 @@ class SimulatedBroker(BrokerBase):
                 continue
             self._processed_dividend_dates.add(key)
             gross = gross_per_share * qty
-            tax = gross * tax_rate
+            if ytd_accumulator is not None:
+                # WR-01: progressive 13/15% band against the cross-sleeve running YTD.
+                tax = ytd_accumulator.tax(gross, current_date.year)
+            else:
+                tax = gross * tax_rate
             net = gross - tax
             self._cash += net  # the single credit point (mirrors process_coupons:158)
             total_net += net

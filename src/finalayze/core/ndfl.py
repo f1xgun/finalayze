@@ -7,7 +7,10 @@ true L0 leaf. Imports only the L0 constants module (downward-legal) + stdlib.
 
 - ``ndfl_marginal`` applies the progressive 13/15% band marginally across the
   2.4M RUB threshold (R-3), look-ahead-free (integrates only realized-so-far
-  income).
+  income). ``YtdTaxAccumulator`` is the stateful per-run wiring (WR-01): the
+  engine owns one per ``run_portfolio`` call and threads it into the dividend
+  credit so the band is applied against a single cross-sleeve running YTD that
+  resets each tax year.
 - ``ndfl_on_deposit_interest`` taxes only the portion of YTD deposit interest
   above the running-max non-taxable floor (R-2); a higher (later-observed)
   floor never increases tax retroactively.
@@ -38,6 +41,44 @@ def ndfl_marginal(delta: Decimal, ytd_before: Decimal) -> tuple[Decimal, Decimal
     at_15 = delta - at_13
     tax = at_13 * NDFL_RATE + at_15 * NDFL_RATE_HIGH
     return tax, ytd_before + delta
+
+
+class YtdTaxAccumulator:
+    """Per-run cumulative-YTD taxable-income accumulator for the progressive band (WR-01 / R-3).
+
+    Owned by the engine for one ``run_portfolio`` call and shared across the income
+    credit paths so the cumulative 13/15% band (``ndfl_marginal``) is applied once
+    against a single cross-sleeve YTD total. The accumulator resets on a Jan-1 tax-year
+    boundary (``year`` change), so the band restarts each year. Look-ahead-free: it
+    integrates only income credited on/before the current bar, so re-ordering future
+    bars never changes a past bar's tax.
+
+    Stateful by design (it accumulates across bars), but it is a leaf object holding
+    only Decimals + an int year -- it imports no project modules beyond the L0
+    constants its ``ndfl_marginal`` already uses, so it stays a true L0 helper.
+    """
+
+    def __init__(self) -> None:
+        self._ytd_taxable = Decimal(0)
+        self._current_year: int | None = None
+
+    @property
+    def ytd_taxable(self) -> Decimal:
+        """Cumulative taxable income credited so far in the current tax year."""
+        return self._ytd_taxable
+
+    def tax(self, gross: Decimal, year: int) -> Decimal:
+        """Marginal NDFL on ``gross`` credited in ``year``; advances the YTD total.
+
+        Resets the YTD accumulator on a new tax year (Jan-1 boundary) before applying
+        the marginal band, so cumulative income above the 2.4M RUB threshold within
+        the SAME year is taxed at 15% (R-3). Returns only the tax for THIS credit.
+        """
+        if year != self._current_year:
+            self._ytd_taxable = Decimal(0)
+            self._current_year = year
+        tax, self._ytd_taxable = ndfl_marginal(gross, self._ytd_taxable)
+        return tax
 
 
 def ndfl_on_deposit_interest(

@@ -140,3 +140,56 @@ def test_process_dividends_idempotent_on_repeated_date() -> None:
     assert first == _GOLDEN_NET  # 100 x 25.0 x (1 - 0.13) net
     assert second == Decimal(0)  # idempotent: no double-credit
     assert broker.get_portfolio().cash == cash_after_first  # cash unchanged on repeat
+
+
+# ── WR-01: dividend credit routes through the progressive 13/15% band ────────
+
+_BIG_QTY = Decimal(200_000)  # 200k sh x 25.0 = 5.0M gross -> straddles the 2.4M threshold
+_THRESHOLD = Decimal(2_400_000)
+_NDFL_HIGH = Decimal("0.15")
+
+
+def test_process_dividends_flat_13_below_threshold() -> None:
+    """Below the 2.4M YTD threshold, the accumulator path equals flat 13% (WR-01).
+
+    Routing the golden SBER credit (2500 gross << 2.4M) through the YTD accumulator
+    must yield the SAME net as the flat-rate default -- the golden kopeck value 2175.00.
+    """
+    from finalayze.core.ndfl import YtdTaxAccumulator
+    from finalayze.execution.simulated_broker import SimulatedBroker
+
+    broker = SimulatedBroker(initial_cash=Decimal(0))
+    broker._positions[_SBER] = _SBER_QTY
+    acc = YtdTaxAccumulator()
+
+    net = broker.process_dividends(
+        _SBER_EX_DATE, {(_SBER, _SBER_EX_DATE): _SBER_DIV}, ytd_accumulator=acc
+    )
+    assert net == _GOLDEN_NET  # 2175.00 -- identical to the flat-rate golden
+
+
+def test_process_dividends_15_fires_above_threshold() -> None:
+    """Cumulative YTD dividend income above 2.4M is taxed 15% on the excess (WR-01).
+
+    A 5.0M gross dividend credited via the accumulator straddles the 2.4M threshold:
+    2.4M at 13% and the 2.6M excess at 15%. The net must reflect the higher band.
+    """
+    from finalayze.core.ndfl import YtdTaxAccumulator
+    from finalayze.execution.simulated_broker import SimulatedBroker
+
+    broker = SimulatedBroker(initial_cash=Decimal(0))
+    broker._positions[_SBER] = _BIG_QTY
+    acc = YtdTaxAccumulator()
+
+    gross = _SBER_DIV * _BIG_QTY  # 5.0M
+    net = broker.process_dividends(
+        _SBER_EX_DATE, {(_SBER, _SBER_EX_DATE): _SBER_DIV}, ytd_accumulator=acc
+    )
+
+    below_tax = _THRESHOLD * NDFL_RATE
+    above_tax = (gross - _THRESHOLD) * _NDFL_HIGH
+    expected_net = gross - (below_tax + above_tax)
+    assert net == expected_net
+    # The high band genuinely fired: net is strictly below the flat-13% net.
+    assert net < gross - gross * NDFL_RATE
+    assert acc.ytd_taxable == gross
