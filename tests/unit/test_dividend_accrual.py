@@ -114,3 +114,29 @@ def test_well_formed_override_still_loads(tmp_path: Path) -> None:
     )
     schedule = load_dividend_schedule(path=snapshot)
     assert schedule[(_SBER, _SBER_EX_DATE)] == _SBER_DIV
+
+
+# ── WR-04: dividend credit is idempotent per (symbol, ex_date) ───────────────
+
+
+def test_process_dividends_idempotent_on_repeated_date() -> None:
+    """A repeated calendar date does NOT re-credit the same dividend (WR-04).
+
+    On a sub-daily timeframe (or any data where two bars share a calendar day),
+    ``process_dividends`` is invoked twice with the same ``current_date``. The
+    second call must credit zero -- a ``(symbol, ex_date)`` already credited is
+    never re-credited (mirrors ``ShadowLedger._processed_dividend_dates``).
+    """
+    from finalayze.execution.simulated_broker import SimulatedBroker
+
+    broker = SimulatedBroker(initial_cash=Decimal(0))
+    broker._positions[_SBER] = _SBER_QTY  # held position across the ex-date
+    schedule = {(_SBER, _SBER_EX_DATE): _SBER_DIV}
+
+    first = broker.process_dividends(_SBER_EX_DATE, schedule)
+    cash_after_first = broker.get_portfolio().cash
+    second = broker.process_dividends(_SBER_EX_DATE, schedule)  # same date, repeated bar
+
+    assert first == _GOLDEN_NET  # 100 x 25.0 x (1 - 0.13) net
+    assert second == Decimal(0)  # idempotent: no double-credit
+    assert broker.get_portfolio().cash == cash_after_first  # cash unchanged on repeat

@@ -81,6 +81,9 @@ class DepositSimulatedBroker(SimulatedBroker):
         self._ytd_deposit_gross = Decimal(0)
         self._running_max_key_rate = Decimal(0)
         self._current_year: int | None = None
+        # WR-04: dates already accrued -- a repeated calendar date (sub-daily
+        # timeframe, >1 bar per day) must NOT compound the deposit twice in one day.
+        self._processed_accrual_dates: set[date] = set()
 
     def accrue(self, current_date: date) -> Decimal:
         """Accrue one bar of net-of-NDFL interest for every live tranche.
@@ -97,8 +100,16 @@ class DepositSimulatedBroker(SimulatedBroker):
         accrued mark, overstating ``cash + deposit_value()`` by the accrued net
         and leaving a pre-maturity :meth:`break_tranche` unable to claw it back.
         Returns the total net interest accrued on this bar (for callers who want
-        the bar's credit; they must not ALSO read it from the mark).
+        the bar's credit; they must not ALSO read it from the mark). Accrual is
+        idempotent per calendar date: a repeated date (a multi-bar day on a
+        sub-daily timeframe) is a no-op, so the deposit never compounds twice in
+        one day (WR-04).
         """
+        # WR-04: idempotency guard -- a date already accrued does not compound again.
+        if current_date in self._processed_accrual_dates:
+            return Decimal(0)
+        self._processed_accrual_dates.add(current_date)
+
         # R-2 tax-year boundary: reset the YTD/floor accumulators on Jan 1.
         if current_date.year != self._current_year:
             self._ytd_deposit_gross = Decimal(0)

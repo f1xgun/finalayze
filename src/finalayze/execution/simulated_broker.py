@@ -61,6 +61,10 @@ class SimulatedBroker(BrokerBase):
         self._stop_states: dict[str, StopLossState] = {}
         self._last_prices: dict[str, Decimal] = {}
         self._current_timestamp: datetime | None = None
+        # WR-04: already-credited (symbol, ex_date) keys -- a repeated calendar date
+        # (e.g. a sub-daily timeframe with >1 bar per day) must NOT re-credit the same
+        # dividend (mirrors ShadowLedger._processed_dividend_dates).
+        self._processed_dividend_dates: set[tuple[str, date]] = set()
         # Market impact model settings
         self._use_impact_model: bool = use_impact_model
         self._adv: dict[str, float] = adv if adv is not None else {}
@@ -281,8 +285,11 @@ class SimulatedBroker(BrokerBase):
         per-bar, O(held positions), gross -> tax -> net -> ``self._cash +=``. PnL-inert --
         does NOT touch positions, last prices, or the trade-PnL formula (that is what keeps
         total-return accounting non-breaking, D-16). ``schedule`` stores GROSS per-share
-        amounts keyed ``(symbol, ex_date)``; accrual happens only on/after the exact ex-date
-        (D-14). Returns the total net credited on this date.
+        amounts keyed ``(symbol, ex_date)``; a dividend is credited ONLY on the exact ex-date
+        bar, and ONCE -- a ``(symbol, ex_date)`` already credited is never re-credited, so a
+        repeated calendar date (sub-daily timeframe, >1 bar per day) does not double-credit
+        (WR-04, mirrors ``ShadowLedger._processed_dividend_dates``). Returns the total net
+        credited on this date.
 
         Args:
             current_date: Current bar date.
@@ -299,6 +306,11 @@ class SimulatedBroker(BrokerBase):
             gross_per_share = schedule.get((symbol, current_date))
             if gross_per_share is None:
                 continue
+            key = (symbol, current_date)
+            if key in self._processed_dividend_dates:
+                # Already credited on this ex-date -- idempotent, never double-credit (WR-04).
+                continue
+            self._processed_dividend_dates.add(key)
             gross = gross_per_share * qty
             tax = gross * tax_rate
             net = gross - tax

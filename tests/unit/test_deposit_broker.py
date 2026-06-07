@@ -199,6 +199,25 @@ def test_roll_at_maturity() -> None:
     assert rolled.maturity_date > _MATURITY_DATE
 
 
+def test_accrue_idempotent_on_repeated_date() -> None:
+    """Accruing twice on the SAME calendar date credits interest only once (WR-04).
+
+    A multi-bar calendar day (sub-daily timeframe) invokes ``accrue`` twice with the
+    same date; the second call must be a no-op so the deposit does not compound twice
+    in a single day (mirrors the dividend idempotency guard).
+    """
+    broker = _make_broker(_make_tranche())
+
+    first = broker.accrue(_ACCRUE_BAR)
+    mark_after_first = broker.deposit_value()
+    second = broker.accrue(_ACCRUE_BAR)  # same date, repeated bar
+
+    assert first == _FIRST_BAR_GROSS
+    assert second == _ZERO  # idempotent: no second compounding on the same day
+    assert broker.deposit_value() == mark_after_first  # mark unchanged on repeat
+    assert broker.interest_income_net == _FIRST_BAR_GROSS
+
+
 def test_accrual_curve_monotone_by_net_interest() -> None:
     """Net interest income only ever grows -- a smooth compounding line (R-4 / D-16)."""
     broker = _make_broker(_make_tranche())
