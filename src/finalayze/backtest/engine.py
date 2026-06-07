@@ -49,10 +49,12 @@ from finalayze.risk.stops import CATASTROPHIC_DROP_PCT
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from datetime import date
 
     from finalayze.backtest.costs import TransactionCosts
     from finalayze.backtest.decision_journal import DecisionJournal, FinalAction
     from finalayze.core.schemas import Signal
+    from finalayze.execution.deposit_broker import DepositSimulatedBroker
     from finalayze.risk.circuit_breaker import CircuitBreaker
     from finalayze.risk.kelly import RollingKelly
     from finalayze.risk.loss_limits import LossLimitTracker
@@ -693,6 +695,8 @@ class BacktestEngine:
         candles_by_symbol: dict[str, list[Candle]],
         *,
         eligible_at: Callable[[datetime], set[str]] | None = None,
+        dividend_schedule: dict[tuple[str, date], Decimal] | None = None,
+        deposit_ladder: DepositSimulatedBroker | None = None,
     ) -> tuple[list[TradeResult], list[PortfolioState]]:
         """Run a portfolio-level backtest over multiple symbols.
 
@@ -703,6 +707,20 @@ class BacktestEngine:
             symbols: List of ticker symbols to trade.
             segment_id: Market segment identifier.
             candles_by_symbol: Candle data keyed by symbol.
+            dividend_schedule: Optional total-return dividend index (ACCT-01 / D-16),
+                ``{(symbol, ex_date): gross_per_share}`` from
+                ``backtest.dividend_schedule.load_dividend_schedule``. When supplied, held
+                positions accrue net-of-NDFL dividends to cash per bar (after the price update,
+                before valuation) via ``broker.process_dividends`` -- the trade-PnL formula is
+                untouched and the credited cash flows into the equity curve through
+                ``get_portfolio``. When ``None`` (the default), the per-bar income hook is a
+                no-op and behaviour is UNCHANGED -- this preserves every existing
+                ``run_portfolio`` caller and test (byte-identical, D-16).
+            deposit_ladder: Optional ``DepositSimulatedBroker`` deposit sleeve (DEP-01 / ACCT-02).
+                When supplied, ``deposit_ladder.accrue(bar_date)`` credits its own daily-compounded
+                net-of-NDFL interest each bar. When ``None`` (the default), no deposit interest is
+                accrued and behaviour is UNCHANGED -- preserving every existing caller and test
+                (byte-identical, D-16).
             eligible_at: Optional CARDINAL D-05 as-of universe gate. When supplied, the eligible
                 universe is recomputed at each QUARTERLY rebalance bar ``T`` via ``eligible_at(T)``
                 -- which the caller backs with ``markets.liquidity.eligible_universe_as_of`` so the
@@ -793,6 +811,16 @@ class BacktestEngine:
                     idx = candle_index[sym][ts]
                     broker.update_prices(sym_candles[idx])
                     bar_counts[sym] = bar_counts.get(sym, 0) + 1
+
+            # Total-return income credit (mirrors bond_engine.py:214). No-op when both inputs
+            # are None -> all existing run_portfolio callers stay byte-identical (D-16). Credits
+            # net-of-NDFL income to cash via the broker; the trade-PnL formula is untouched and
+            # equity auto-updates in get_portfolio(). After update_prices, before the snapshot
+            # append below -> the credit lands in THIS bar's equity and nowhere earlier (D-17).
+            if dividend_schedule is not None:
+                broker.process_dividends(ts.date(), dividend_schedule)
+            if deposit_ladder is not None:
+                deposit_ladder.accrue(ts.date())
 
             # Update correlation cache every N bars (portfolio mode only)
             if ts_index % self._correlation_update_interval == 0 and len(symbols) > 1:
