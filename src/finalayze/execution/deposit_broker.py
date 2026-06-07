@@ -57,8 +57,10 @@ class DepositSimulatedBroker(SimulatedBroker):
 
     Holds a ladder of :class:`DepositTranche` rungs (3/6/12-month, D-01). Each
     bar, :meth:`accrue` compounds one trading day of net-of-NDFL interest for
-    every live tranche and credits it to cash (the single ``self._cash +=``
-    point, mirroring ``BondSimulatedBroker.process_coupons``). The deposit mark
+    every live tranche INTO the tranche mark (mark-only, CR-01) -- the interest
+    stays inside the deposit and itself compounds; it is NOT swept to
+    ``self._cash`` (sweeping would double-represent it against the mark and leave
+    a pre-maturity :meth:`break_tranche` unable to claw it back). The deposit mark
     (:meth:`deposit_value`) is ``principal + accrued net`` and is independent of
     any market price (D-05). :meth:`break_tranche` forfeits accrued interest to
     the demand rate (D-03); :meth:`roll_at_maturity` rolls a matured tranche into
