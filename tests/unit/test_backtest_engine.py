@@ -255,6 +255,40 @@ class TestPortfolioBacktest:
         # Should not crash, and produce some trades
         assert len(snapshots) > 0
 
+    def test_no_schedule_byte_identical(self) -> None:
+        """run_portfolio with dividend_schedule=None == the default path (ACCT-01 / D-16).
+
+        RED now: run_portfolio does not yet accept the additive keyword-only
+        params (TypeError). GREEN once Plan 05 adds dividend_schedule=None /
+        deposit_ladder=None defaulting to a no-op so all existing callers stay
+        byte-identical. Trades are compared with the non-deterministic signal_id
+        UUID stripped (Phase-69 byte-identical convention); snapshots (no UUID)
+        are compared directly.
+        """
+        candles = _make_candle_series_for_symbol("TEST")
+
+        default_engine = BacktestEngine(strategy=StubStrategy(), initial_cash=INITIAL_CASH)
+        default_trades, default_snapshots = default_engine.run_portfolio(
+            symbols=["TEST"],
+            segment_id="us_large_cap",
+            candles_by_symbol={"TEST": candles},
+        )
+
+        explicit_engine = BacktestEngine(strategy=StubStrategy(), initial_cash=INITIAL_CASH)
+        explicit_trades, explicit_snapshots = explicit_engine.run_portfolio(
+            symbols=["TEST"],
+            segment_id="us_large_cap",
+            candles_by_symbol={"TEST": candles},
+            dividend_schedule=None,  # type: ignore[call-arg]  # RED: kwarg added by Plan 05
+            deposit_ladder=None,  # type: ignore[call-arg]  # RED: kwarg added by Plan 05
+        )
+
+        def _strip_ids(trades: list[object]) -> list[dict[str, object]]:
+            return [t.model_dump(exclude={"signal_id"}) for t in trades]  # type: ignore[attr-defined]
+
+        assert _strip_ids(explicit_trades) == _strip_ids(default_trades)
+        assert explicit_snapshots == default_snapshots
+
 
 # ---------------------------------------------------------------------------
 # Structural break exclusion tests
