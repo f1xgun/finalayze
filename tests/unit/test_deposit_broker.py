@@ -83,9 +83,17 @@ def _make_broker(tranche: DepositTranche) -> DepositSimulatedBroker:
 
 
 def test_daily_accrual_net() -> None:
-    """One bar accrues net-of-NDFL interest and credits cash exactly (ACCT-02)."""
+    """One bar accrues net-of-NDFL interest into the MARK, not cash (CR-01 / ACCT-02).
+
+    Mark-only contract (CR-01): a locked deposit's interest stays INSIDE the
+    deposit -- ``accrue`` compounds the net into ``deposit_value()`` and does NOT
+    sweep it to ``self._cash`` (which would double-represent it once
+    ``deposit_value`` also carries the accrued mark). ``accrue`` still RETURNS the
+    net for callers who want the bar's credit.
+    """
     broker = _make_broker(_make_tranche())
     cash_before = broker.get_portfolio().cash
+    mark_before = broker.deposit_value()
 
     net = broker.accrue(_ACCRUE_BAR)
 
@@ -94,7 +102,53 @@ def test_daily_accrual_net() -> None:
     assert net == _FIRST_BAR_GROSS
     assert broker.interest_income_net == _FIRST_BAR_GROSS
     assert broker.tax_paid == _ZERO
-    assert broker.get_portfolio().cash - cash_before == net
+    # Mark-only: cash is UNCHANGED; the mark grew by exactly the net (no double-count).
+    assert broker.get_portfolio().cash == cash_before
+    assert broker.deposit_value() - mark_before == net
+
+
+def test_accrue_compounds_inside_the_tranche() -> None:
+    """Net interest compounds on (principal + accrued_net) -- true compounding (CR-01).
+
+    A locked deposit's accrued interest stays in the deposit and itself earns
+    interest, so the second bar's gross is computed on the grown base, not the
+    flat principal. The first bar (flat principal) is therefore strictly smaller
+    than the second bar's gross.
+    """
+    broker = _make_broker(_make_tranche())
+
+    first = broker.accrue(_ACCRUE_BARS[0])
+    second = broker.accrue(_ACCRUE_BARS[1])
+
+    # Both bars are below the floor (no tax) so net == gross; the second bar
+    # compounds on (principal + first net) > principal -> strictly larger.
+    assert second > first
+
+
+def test_cash_plus_mark_reconciled_before_and_after_break() -> None:
+    """``cash + deposit_value()`` is reconciled with no double-count (CR-01 regression).
+
+    Before a break: total == initial_cash + principal + cumulative_net (the accrued
+    interest lives ONLY in the mark, never also in cash). After a pre-maturity
+    break: total == initial_cash + principal + demand penalty (the accrued interest
+    is forfeited to the demand rate; there is no swept cash to claw back).
+    """
+    tranche = _make_tranche()
+    broker = _make_broker(tranche)
+
+    cumulative_net = _ZERO
+    for bar in _ACCRUE_BARS:
+        cumulative_net += broker.accrue(bar)
+
+    cash = broker.get_portfolio().cash
+    total_before = cash + broker.deposit_value()
+    assert total_before == _INITIAL_CASH + _PRINCIPAL + cumulative_net
+
+    broker.break_tranche(tranche, _ACCRUE_BARS[-1])
+
+    demand_penalty = tranche.principal * DEPOSIT_DEMAND_RATE
+    total_after = broker.get_portfolio().cash + broker.deposit_value()
+    assert total_after == _INITIAL_CASH + _PRINCIPAL + demand_penalty
 
 
 def test_mark_is_principal_plus_accrued() -> None:

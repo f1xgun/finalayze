@@ -88,9 +88,16 @@ class DepositSimulatedBroker(SimulatedBroker):
         Daily-compounding convention (codebase-wide,
         ``portfolio_orchestrator.py``): ``(1 + annual) ** (1/252) - 1``. The
         gross is taxed via :func:`ndfl_on_deposit_interest` against the YTD
-        running-max floor (R-2), and the NET is credited to cash -- the single
-        credit point, mirroring ``process_coupons``. Returns the total net
-        interest credited on this bar.
+        running-max floor (R-2), and the NET is folded into the tranche
+        ``accrued_net`` -- i.e. the deposit's interest stays INSIDE the deposit
+        (mark-only, CR-01) and itself earns interest (true compounding: the next
+        bar's gross is computed on ``principal + accrued_net``, not the flat
+        principal). It is NOT swept to ``self._cash`` -- that would
+        double-represent it because :meth:`deposit_value` already carries the
+        accrued mark, overstating ``cash + deposit_value()`` by the accrued net
+        and leaving a pre-maturity :meth:`break_tranche` unable to claw it back.
+        Returns the total net interest accrued on this bar (for callers who want
+        the bar's credit; they must not ALSO read it from the mark).
         """
         # R-2 tax-year boundary: reset the YTD/floor accumulators on Jan 1.
         if current_date.year != self._current_year:
@@ -109,10 +116,15 @@ class DepositSimulatedBroker(SimulatedBroker):
             if tranche.broken or tranche.maturity_date < current_date:
                 continue
             daily = (Decimal(1) + tranche.annual_rate) ** (Decimal(1) / _TRADING_DAYS) - Decimal(1)
-            gross = tranche.principal * daily
+            # True compounding: the accrued net stays in the deposit and earns
+            # interest, so the base is (principal + accrued_net), not flat principal.
+            gross = (tranche.principal + tranche.accrued_net) * daily
             tax = ndfl_on_deposit_interest(gross, self._ytd_deposit_gross, running_floor)
             net = gross - tax
-            self._cash += net  # <- THE single credit point (mirrors process_coupons)
+            # Mark-only (CR-01): fold net into the tranche mark; do NOT sweep to
+            # self._cash. deposit_value() already carries accrued_net, so sweeping
+            # would double-count it (cash + mark) and a pre-maturity break could
+            # not claw the swept interest back.
             tranche.accrued_gross += gross
             tranche.accrued_net += net
             self._ytd_deposit_gross += gross
