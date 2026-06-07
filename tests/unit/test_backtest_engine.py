@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from itertools import pairwise
 
 from finalayze.backtest.engine import BacktestEngine
 from finalayze.core.schemas import Candle, Signal, SignalDirection
@@ -287,6 +288,69 @@ class TestPortfolioBacktest:
             return [t.model_dump(exclude={"signal_id"}) for t in trades]  # type: ignore[attr-defined]
 
         assert _strip_ids(explicit_trades) == _strip_ids(default_trades)
+        assert explicit_snapshots == default_snapshots
+
+    def test_deposit_ladder_value_folds_into_equity(self) -> None:
+        """deposit_ladder.deposit_value() flows into the per-bar equity curve (WR-02).
+
+        The deposit sleeve accrues mark-only interest each bar (CR-01); WR-02 folds
+        that single, reconciled ``deposit_value()`` into the returned snapshot equity
+        so the deposit growth is visible on the curve. SilentStrategy makes no trades,
+        so the trading broker's standalone equity is FLAT at INITIAL_CASH every bar;
+        any equity growth across bars is the deposit sleeve.
+        """
+        from finalayze.core.schemas import DepositTranche
+        from finalayze.execution.deposit_broker import DepositSimulatedBroker
+
+        candles = _make_candle_series_for_symbol("TEST")
+        principal = Decimal(1_000_000)
+        tranche = DepositTranche(
+            principal=principal,
+            term_months=3,
+            annual_rate=Decimal("0.20"),
+            open_date=date(2024, 1, 1),
+            maturity_date=date(2024, 12, 31),  # well past the candle window -> always live
+        )
+        ladder = DepositSimulatedBroker(initial_cash=Decimal(0), tranches=[tranche])
+
+        engine = BacktestEngine(strategy=SilentStrategy(), initial_cash=INITIAL_CASH)
+        _trades, snapshots = engine.run_portfolio(
+            symbols=["TEST"],
+            segment_id="us_large_cap",
+            candles_by_symbol={"TEST": candles},
+            deposit_ladder=ladder,
+        )
+
+        assert snapshots
+        # The trading broker alone has no positions and no trades -> its equity is
+        # flat at INITIAL_CASH; every snapshot equity must therefore exceed it by the
+        # deposit sleeve mark, which only grows -> the curve is strictly increasing.
+        equities = [s.equity for s in snapshots]
+        assert all(e > INITIAL_CASH for e in equities)  # deposit value is folded in
+        assert all(b >= a for a, b in pairwise(equities))  # monotone non-decreasing
+        assert equities[-1] > equities[0]  # deposit accrued over the window
+        # Final equity == trading equity (INITIAL_CASH) + the final deposit mark.
+        assert snapshots[-1].equity == INITIAL_CASH + ladder.deposit_value()
+
+    def test_no_deposit_ladder_byte_identical(self) -> None:
+        """deposit_ladder=None leaves the equity curve byte-identical (WR-02 / D-16)."""
+        candles = _make_candle_series_for_symbol("TEST")
+
+        default_engine = BacktestEngine(strategy=StubStrategy(), initial_cash=INITIAL_CASH)
+        _dt, default_snapshots = default_engine.run_portfolio(
+            symbols=["TEST"],
+            segment_id="us_large_cap",
+            candles_by_symbol={"TEST": candles},
+        )
+
+        explicit_engine = BacktestEngine(strategy=StubStrategy(), initial_cash=INITIAL_CASH)
+        _et, explicit_snapshots = explicit_engine.run_portfolio(
+            symbols=["TEST"],
+            segment_id="us_large_cap",
+            candles_by_symbol={"TEST": candles},
+            deposit_ladder=None,
+        )
+
         assert explicit_snapshots == default_snapshots
 
 

@@ -717,10 +717,14 @@ class BacktestEngine:
                 no-op and behaviour is UNCHANGED -- this preserves every existing
                 ``run_portfolio`` caller and test (byte-identical, D-16).
             deposit_ladder: Optional ``DepositSimulatedBroker`` deposit sleeve (DEP-01 / ACCT-02).
-                When supplied, ``deposit_ladder.accrue(bar_date)`` credits its own daily-compounded
-                net-of-NDFL interest each bar. When ``None`` (the default), no deposit interest is
-                accrued and behaviour is UNCHANGED -- preserving every existing caller and test
-                (byte-identical, D-16).
+                When supplied, ``deposit_ladder.accrue(bar_date)`` compounds its own daily
+                net-of-NDFL interest into the deposit mark each bar (mark-only, CR-01: the interest
+                stays inside the deposit and is NOT swept to cash), and that single reconciled
+                ``deposit_ladder.deposit_value()`` (principal + accrued net) is folded into THIS
+                bar's returned ``PortfolioState.equity`` (WR-02) so the deposit sleeve growth is
+                visible on the equity/return/Sharpe curve. When ``None`` (the default), no deposit
+                interest is accrued and the snapshot is left untouched -- preserving every existing
+                caller and test (byte-identical, D-16).
             eligible_at: Optional CARDINAL D-05 as-of universe gate. When supplied, the eligible
                 universe is recomputed at each QUARTERLY rebalance bar ``T`` via ``eligible_at(T)``
                 -- which the caller backs with ``markets.liquidity.eligible_universe_as_of`` so the
@@ -1031,7 +1035,17 @@ class BacktestEngine:
                             bar_index=bar_counts.get(sym, 0),
                         )
 
-            snapshots.append(broker.get_portfolio())
+            # WR-02: fold the deposit sleeve's single reconciled mark (CR-01:
+            # deposit_value() == principal + accrued_net, no cash double-count)
+            # into THIS bar's equity so the deposit growth is visible on the
+            # returned curve. When deposit_ladder is None this is a strict no-op
+            # -> the snapshot is byte-identical (D-16).
+            snapshot = broker.get_portfolio()
+            if deposit_ladder is not None:
+                snapshot = snapshot.model_copy(
+                    update={"equity": snapshot.equity + deposit_ladder.deposit_value()}
+                )
+            snapshots.append(snapshot)
             ts_index += 1
 
         # S5.3: end-of-data positions are left OPEN by default.  Same
