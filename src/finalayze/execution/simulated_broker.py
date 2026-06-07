@@ -12,10 +12,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
+from finalayze.core.constants import NDFL_RATE
 from finalayze.core.schemas import Candle, PortfolioState
 from finalayze.execution.broker_base import BrokerBase, OrderRequest, OrderResult
 from finalayze.execution.impact import compute_market_impact, should_reject_trade
+
+if TYPE_CHECKING:
+    from datetime import date
 
 
 @dataclass
@@ -262,6 +267,44 @@ class SimulatedBroker(BrokerBase):
     def update_prices(self, candle: Candle) -> None:
         """Update last known price for a symbol from a candle's close."""
         self._last_prices[candle.symbol] = candle.close
+
+    def process_dividends(
+        self,
+        current_date: date,
+        schedule: dict[tuple[str, date], Decimal],
+        *,
+        tax_rate: Decimal = NDFL_RATE,
+    ) -> Decimal:
+        """Credit net-of-NDFL dividends for held positions due on current_date.
+
+        Mirrors ``BondSimulatedBroker.process_coupons`` (bond_simulated_broker.py:136):
+        per-bar, O(held positions), gross -> tax -> net -> ``self._cash +=``. PnL-inert --
+        does NOT touch positions, last prices, or the trade-PnL formula (that is what keeps
+        total-return accounting non-breaking, D-16). ``schedule`` stores GROSS per-share
+        amounts keyed ``(symbol, ex_date)``; accrual happens only on/after the exact ex-date
+        (D-14). Returns the total net credited on this date.
+
+        Args:
+            current_date: Current bar date.
+            schedule: ``{(symbol, ex_date): gross_per_share}`` dividend index.
+            tax_rate: Flat NDFL rate applied to gross (defaults to the L0 single source).
+
+        Returns:
+            Total net dividend income credited on this date.
+        """
+        total_net = Decimal(0)
+        for symbol, qty in list(self._positions.items()):
+            if qty <= 0:
+                continue
+            gross_per_share = schedule.get((symbol, current_date))
+            if gross_per_share is None:
+                continue
+            gross = gross_per_share * qty
+            tax = gross * tax_rate
+            net = gross - tax
+            self._cash += net  # the single credit point (mirrors process_coupons:158)
+            total_net += net
+        return total_net
 
     def has_position(self, symbol: str) -> bool:
         """Return True if the broker holds a non-zero position in symbol."""
