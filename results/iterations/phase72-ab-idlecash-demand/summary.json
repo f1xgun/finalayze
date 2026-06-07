@@ -1,0 +1,21 @@
+{
+  "name": "phase72-ab-idlecash-demand",
+  "phase": "72-06",
+  "leg": "demand",
+  "description": "R-7: idle/transit cash at DEPOSIT_DEMAND_RATE (upper bound)",
+  "final_equity": "217524.9759414898790248664951",
+  "verdict": "PASS",
+  "notes": {
+    "demand_rate_annual": "0.0001",
+    "demand_rate_daily": "3.96805635605543077753E-7",
+    "merged_last": "217521.0816631170917327300342",
+    "upper_bound_demand_credit": "3.89",
+    "upper_bound_pct_of_equity": "0.0018",
+    "delta_zero_vs_demand_upper_bound": "3.89",
+    "material": false,
+    "chosen_default": "0% (idle/transit cash earns nothing)",
+    "rationale": "R-7/A3: the MCFTR sleeve is fully invested (allocator merges already-invested curves, D-12) -> structural idle cash is 0; even the absurd upper bound (the entire equity leg at the demand rate for a full quarter) is 3.89 RUB == 0.0018% of equity -> immaterial -> pick 0% for simplicity."
+  },
+  "git_sha": "893a87c6d1b7d3be5e8eb4d7e2c6abfd46d968e0",
+  "created_at": "2026-06-07T22:52:08.082416+00:00"
+}
