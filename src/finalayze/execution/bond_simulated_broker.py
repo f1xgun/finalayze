@@ -15,6 +15,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from finalayze.core.constants import NDFL_RATE
 from finalayze.execution.simulated_broker import SimulatedBroker
 
 if TYPE_CHECKING:
@@ -23,7 +24,6 @@ if TYPE_CHECKING:
     from finalayze.core.schemas import CouponPayment
 
 
-_NDFL_TAX_RATE = Decimal("0.13")  # 13% Russian income tax on coupon income
 _OFZ_FACE_VALUE = Decimal(1000)
 
 
@@ -43,7 +43,7 @@ class BondSimulatedBroker(SimulatedBroker):
         initial_cash: Decimal,
         coupon_schedule: dict[str, list[CouponPayment]],
         face_value: Decimal = _OFZ_FACE_VALUE,
-        tax_rate: Decimal = _NDFL_TAX_RATE,
+        tax_rate: Decimal = NDFL_RATE,  # L0 single source (D-12)
     ) -> None:
         super().__init__(initial_cash=initial_cash)
         self._coupon_schedule = coupon_schedule

@@ -967,3 +967,39 @@ def compute_file_sha(path: str) -> str:
     """
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Deposit sleeve types (Phase 71 -- total-return accounting + deposit ladder)
+# ---------------------------------------------------------------------------
+@dataclass
+class DepositTranche:
+    """One rung of the deposit ladder (D-01).
+
+    Mutable on purpose: ``accrued_net``/``accrued_gross`` mutate per bar as the
+    sleeve broker compounds interest, and ``broken`` flips once a pre-maturity
+    break resets the tranche to the demand rate (D-03).
+    """
+
+    principal: Decimal
+    term_months: int  # 3 / 6 / 12
+    annual_rate: Decimal  # fraction; key_rate - spread at open (D-04)
+    open_date: date
+    maturity_date: date
+    accrued_net: Decimal = Decimal(0)
+    accrued_gross: Decimal = Decimal(0)
+    broken: bool = False
+
+
+@dataclass(frozen=True)
+class BankAllocation:
+    """ASV per-bank insured-exposure slice (D-09 / R-5)."""
+
+    bank_id: str
+    principal: Decimal
+    accrued_net: Decimal = Decimal(0)
+
+    @property
+    def insured_exposure(self) -> Decimal:
+        """Principal plus accrued net interest (both count toward the cap, D-09)."""
+        return self.principal + self.accrued_net
