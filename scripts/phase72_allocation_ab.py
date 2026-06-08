@@ -18,9 +18,15 @@ A/B #1 -- D-13 reproduction (no-regression, A4 structural equivalence):
               Logged as phase72-ab-d13-baseline / phase72-ab-d13-candidate.
 
   Plus the LIVE path: ``AllocationOrchestrator`` BALANCED profile, pure quarterly,
-  cost + NDFL ON. ASSERT the live merged curve differs from the zero-cost run ONLY
-  by the explicit ``rebalance_cost`` + ``realized_ndfl`` line items (D-09/D-07 --
-  cost/tax are surfaced, never buried). Logged as phase72-ab-live-balanced.
+  cost + NDFL ON, driven by the REAL per-rebalance rescale (NO ``forced_leg_deltas``
+  hook -- removed; CR-01). A RISING equity curve makes equity overweight at each
+  quarter boundary so it is SOLD above its seeded FIFO basis: the orchestrator's
+  OWN ``rebalance_cost`` (> 0) and ``realized_ndfl`` (> 0) are charged from the
+  genuine traded delta (WR-01). ASSERT the live merged curve differs from the
+  zero-cost run ONLY by the cumulative ``rebalance_cost`` + ``realized_ndfl`` line
+  items, compared to the kopeck (D-09/D-07 -- cost/tax surfaced, never buried; the
+  28-sig-digit Decimal subtraction off a ~150k book leaves sub-kopeck noise).
+  Logged as phase72-ab-live-balanced.
 
 A/B #2 -- R-7 idle/transit-cash (0% vs demand-rate):
   Quantify the merged-curve delta of crediting idle/transit cash at 0% vs at
@@ -32,9 +38,9 @@ A/B #2 -- R-7 idle/transit-cash (0% vs demand-rate):
 
 Honest verdict framing (same as W1, D-13): PASS = the deposit=0 spine reproduces
 the legacy 60/40 curve to the kopeck AND the live curve moves ONLY by the explicit
-cost/tax line items -- NOT "PF improved". A missing/zero cost line when a non-deposit
-leg trades is a BLOCKING discrepancy (T-72-20); a non-matching reproduction is a
-REJECT (T-72-19).
+cost/tax line items (both > 0, computed on the REAL path) -- NOT "PF improved". A
+missing/zero cost line when a non-deposit leg trades is a BLOCKING discrepancy
+(T-72-20); a non-matching reproduction is a REJECT (T-72-19).
 
 Logs all five legs under results/iterations/phase72-* with history.jsonl verdicts.
 """
@@ -53,12 +59,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from finalayze.backtest.bond_engine import BondBacktestResult
 from finalayze.backtest.portfolio_orchestrator import PortfolioBacktestOrchestrator
 from finalayze.core.constants import DEPOSIT_DEMAND_RATE
-from finalayze.core.ndfl import YtdTaxAccumulator
-from finalayze.core.schemas import AssetClass, PortfolioState, RiskProfile
-from finalayze.orchestration.allocation import (
-    AllocationOrchestrator,
-    CostBasisLedger,
-)
+from finalayze.core.schemas import PortfolioState, RiskProfile
+from finalayze.orchestration.allocation import AllocationOrchestrator
 
 # -- Deterministic A/B fixture (named constants -- no magic numbers) -----------
 
@@ -79,19 +81,14 @@ _OFZ_DAILY = Decimal("1.0002")  # slow OFZ-PK accrual
 _EQ_DAILY = Decimal("1.004")  # equity rally -> drift breach
 _DEP_DAILY = Decimal("1.00003")  # deposit mark, near-flat term accrual
 
-# Live-balanced forced rebalance deltas (deterministic test hook on the allocator):
-# the equity leg SELLS (cost charged) and the ofz leg BUYS (cost charged); deposit
-# is cost-free (D-09). |Δ| drives the explicit round-trip cost line item.
-_LIVE_EQ_DELTA = Decimal(-8000)
-_LIVE_OFZ_DELTA = Decimal(3000)
+# Live-balanced path (CR-01/WR-01): NO forced-delta hook -- the equity rally
+# (``_EQ_DAILY`` above) makes equity overweight at each quarter boundary, so the
+# orchestrator SELLS it above its seeded FIFO basis and charges the REAL round-trip
+# cost (> 0) + the REAL realized-gains NDFL (> 0) per rebalance. The deposit leg is
+# cost-free AND capital-gains-free (D-09/D-07). No side-ledger proof: the gate reads
+# ``live.rebalance_cost`` / ``live.realized_ndfl`` straight off the orchestrator.
 
-# Realized-NDFL demonstration (D-07): a profitable FIFO eq sell through the SAME
-# CostBasisLedger + YtdTaxAccumulator the orchestrator owns. _charge_rebalance only
-# ever SELLS, so a non-zero realized_ndfl requires a prior buy lot -> we exercise the
-# exact ledger/accumulator path here to PROVE the tax line is non-zero on a real gain.
-_NDFL_LOT_QTY = Decimal(100)
-_NDFL_BUY_PRICE = Decimal(100)
-_NDFL_SELL_PRICE = Decimal(130)  # gain = 100 * (130 - 100) = 3000
+_CR01_FIX_NOTE = "real per-rebalance cost+ndfl (no forced hook)"
 
 _KOPECK = Decimal("0.01")
 _TRADING_DAYS_PER_QUARTER = 63  # upper-bound horizon for the R-7 worst case
@@ -210,30 +207,22 @@ def _run_d13(dates: list[date], git_sha: str) -> tuple[bool, dict[str, object]]:
             mismatches += 1
     d13_matches = mismatches == 0
 
-    # LIVE path: BALANCED, pure quarterly, cost ON via forced deltas.
-    zc = orch.run(deposit_curve=dep, ofz_pk_curve=ofz, equity_curve=eq)
-    live = orch.run(
-        deposit_curve=dep,
-        ofz_pk_curve=ofz,
-        equity_curve=eq,
-        forced_leg_deltas={
-            AssetClass.EQUITY: _LIVE_EQ_DELTA,
-            AssetClass.OFZ_PK: _LIVE_OFZ_DELTA,
-        },
-    )
+    # LIVE path: BALANCED, pure quarterly, REAL cost + NDFL (no forced hook, CR-01).
+    # The same rising curves drive a genuine quarter-boundary sell of the overweight
+    # (rallying) equity leg -> the orchestrator charges real round-trip cost + real
+    # FIFO realized-gains NDFL. zero_cost re-runs the SAME spine with friction off,
+    # so the two merged curves differ ONLY by the cumulative cost+ndfl (WR-02).
+    zc = orch.run(deposit_curve=dep, ofz_pk_curve=ofz, equity_curve=eq, zero_cost=True)
+    live = orch.run(deposit_curve=dep, ofz_pk_curve=ofz, equity_curve=eq)
+
     curve_delta = zc.merged_equity_curve[-1] - live.merged_equity_curve[-1]
     line_items = live.rebalance_cost + live.realized_ndfl
-    live_only_by_line_items = curve_delta == line_items
+    # Compare to the kopeck: both are Decimal-exact, but subtracting a ~3k friction
+    # off a ~150k book loses the sub-kopeck tail at the 28-sig-digit default context.
+    live_only_by_line_items = _q(curve_delta) == _q(line_items)
     cost_nonzero_when_leg_trades = live.rebalance_cost > Decimal(0)
-
-    # Realized-NDFL proof (D-07): a profitable FIFO sell through the SAME ledger +
-    # accumulator the orchestrator owns -> a real, non-zero tax line item.
-    ledger = CostBasisLedger()
-    acc = YtdTaxAccumulator()
-    ledger.buy(AssetClass.EQUITY, _NDFL_LOT_QTY, _NDFL_BUY_PRICE)
-    realized_gain = ledger.sell(AssetClass.EQUITY, _NDFL_LOT_QTY, _NDFL_SELL_PRICE)
-    realized_ndfl_proof = acc.tax(max(Decimal(0), realized_gain), _YEAR)
-    ndfl_nonzero_on_gain = realized_ndfl_proof > Decimal(0)
+    # WR-01/WR-05: read the orchestrator's OWN realized_ndfl (no side-ledger proof).
+    ndfl_nonzero_on_gain = live.realized_ndfl > Decimal(0)
 
     passed = (
         d13_matches
@@ -259,17 +248,17 @@ def _run_d13(dates: list[date], git_sha: str) -> tuple[bool, dict[str, object]]:
         "legacy_last": str(_q(legacy_curve[-1])),
         "candidate_first": str(_q(cand.merged_equity_curve[0])),
         "candidate_last": str(_q(cand.merged_equity_curve[-1])),
+        "live_rebalance_dates": [d.isoformat() for d in live.rebalance_dates],
         "live_zero_cost_last": str(zc.merged_equity_curve[-1]),
         "live_with_cost_last": str(live.merged_equity_curve[-1]),
         "live_curve_delta_zc_minus_live": str(curve_delta),
         "live_rebalance_cost": str(live.rebalance_cost),
         "live_realized_ndfl": str(live.realized_ndfl),
         "live_cost_plus_ndfl": str(line_items),
-        "live_delta_equals_line_items": live_only_by_line_items,
+        "live_delta_equals_line_items_kopeck": live_only_by_line_items,
         "cost_nonzero_when_leg_trades": cost_nonzero_when_leg_trades,
-        "realized_ndfl_proof_gain": str(realized_gain),
-        "realized_ndfl_proof_tax_13_15_band": str(realized_ndfl_proof),
         "ndfl_nonzero_on_gain": ndfl_nonzero_on_gain,
+        "cr01_fix": _CR01_FIX_NOTE,
     }
 
     _write_iteration(
@@ -306,10 +295,11 @@ def _run_d13(dates: list[date], git_sha: str) -> tuple[bool, dict[str, object]]:
             "name": "phase72-ab-live-balanced",
             "phase": _PHASE,
             "leg": "live",
-            "description": "AllocationOrchestrator BALANCED, pure quarterly, cost+NDFL ON",
+            "description": "AllocationOrchestrator BALANCED, pure quarterly, REAL cost+NDFL ON",
             "final_equity": str(live.merged_equity_curve[-1]),
             "rebalance_cost": str(live.rebalance_cost),
             "realized_ndfl": str(live.realized_ndfl),
+            "cr01_fix": _CR01_FIX_NOTE,
             "verdict": verdict,
             "notes": shared_notes,
             "git_sha": git_sha,
@@ -324,6 +314,7 @@ def _run_d13(dates: list[date], git_sha: str) -> tuple[bool, dict[str, object]]:
         metrics={
             "final_equity": str(_q(legacy_curve[-1])),
             "d13_kopeck_match": d13_matches,
+            "cr01_fix": _CR01_FIX_NOTE,
         },
     )
     _append_history(
@@ -334,6 +325,7 @@ def _run_d13(dates: list[date], git_sha: str) -> tuple[bool, dict[str, object]]:
             "final_equity": str(_q(cand.merged_equity_curve[-1])),
             "d13_kopeck_match": d13_matches,
             "d13_max_raw_diff": str(max_raw_diff),
+            "cr01_fix": _CR01_FIX_NOTE,
         },
     )
     _append_history(
@@ -344,7 +336,8 @@ def _run_d13(dates: list[date], git_sha: str) -> tuple[bool, dict[str, object]]:
             "final_equity": str(live.merged_equity_curve[-1]),
             "rebalance_cost": str(live.rebalance_cost),
             "realized_ndfl": str(live.realized_ndfl),
-            "delta_equals_line_items": live_only_by_line_items,
+            "delta_equals_line_items_kopeck": live_only_by_line_items,
+            "cr01_fix": _CR01_FIX_NOTE,
         },
     )
 
@@ -468,17 +461,15 @@ def main() -> int:
     print(f"  mismatches @0.01       = {d13_notes['d13_mismatches_at_0.01']}")
     print(f"  max raw float-vs-dec   = {d13_notes['d13_max_raw_float_vs_decimal_diff']}")
     print("-" * 70)
-    print("  live-balanced (quarterly, cost+NDFL ON):")
+    print("  live-balanced (quarterly, REAL cost+NDFL ON, no forced hook):")
+    print(f"    rebalance dates       = {d13_notes['live_rebalance_dates']}")
     print(f"    zero-cost last        = {d13_notes['live_zero_cost_last']}")
     print(f"    with-cost last        = {d13_notes['live_with_cost_last']}")
     print(f"    curve delta (zc-live) = {d13_notes['live_curve_delta_zc_minus_live']}")
-    print(f"    rebalance_cost        = {d13_notes['live_rebalance_cost']}")
-    print(f"    realized_ndfl         = {d13_notes['live_realized_ndfl']}")
-    print(f"    delta == line items   = {d13_notes['live_delta_equals_line_items']}")
-    print(
-        f"    NDFL proof gain/tax   = {d13_notes['realized_ndfl_proof_gain']}"
-        f" / {d13_notes['realized_ndfl_proof_tax_13_15_band']}"
-    )
+    print(f"    rebalance_cost        = {d13_notes['live_rebalance_cost']}  (> 0)")
+    print(f"    realized_ndfl         = {d13_notes['live_realized_ndfl']}  (> 0)")
+    print(f"    delta==items (kopeck) = {d13_notes['live_delta_equals_line_items_kopeck']}")
+    print(f"    cr01_fix              = {d13_notes['cr01_fix']}")
     print("-" * 70)
     print("A/B #2 -- R-7 idle/transit cash (0% vs demand-rate):")
     print(
