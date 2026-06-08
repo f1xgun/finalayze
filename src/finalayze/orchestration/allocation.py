@@ -12,12 +12,23 @@ quarter boundary it:
 
 - moves each leg to its exact L1 target weight (no drift band, D-08);
 - charges the explicit ``MOEX_RETAIL_COSTS`` (Investor ~1.10%) round-trip cost on
-  the traded equity/OFZ legs only (the deposit leg is cost-free, D-09);
+  the traded equity/OFZ legs only (the deposit leg is cost-free, D-09), computed
+  from the REAL per-leg rescale delta every quarter;
 - accrues realized-gains NDFL on profitable eq/OFZ sells via a FIFO
-  ``CostBasisLedger`` fed into the W1 ``YtdTaxAccumulator`` 13/15% band (D-07);
-- funds the underweight class in the lockup-respecting order
-  matured -> accrued-income -> liquid-cash -> last-resort break-with-penalty
-  (D-06, via ``fund_underweight``).
+  ``CostBasisLedger`` (seeded with the opening eq/OFZ basis and re-fed on each
+  rebalance buy) fed into the W1 ``YtdTaxAccumulator`` 13/15% band (D-07).
+
+The deposit leg's interest is taxed on the W1 deposit accrual path (it is NOT a
+capital gain), so the FIFO ledger holds eq/OFZ basis only and the deposit leg is
+both cost-free and capital-gains-free here (D-07/D-09).
+
+The lockup-respecting funding-order helper ``fund_underweight``
+(matured -> accrued-income -> liquid-cash -> last-resort break-with-penalty,
+D-06) ships as a TESTED-BUT-UNWIRED broker-level helper (like the dormant
+``tighten`` rule). ``run()`` merges precomputed curves and owns no broker, so it
+never calls ``fund_underweight``; W3 wires that helper into a broker-driven
+boundary rebalance (WR-03 -- the docstring states this honestly rather than
+implying ``run()`` already funds via it).
 
 The equity sleeve is the passive MCFTR series only -- no active-selection
 signal-generation import re-enters the path (SAA-04, the closed-alpha invariant).
@@ -253,10 +264,18 @@ def _fund_underweight_breakdown(
             breakdown.from_break += draw
             breakdown.broke_tranche = True
             remaining -= draw
-            # Withdraw the liquidated rung from the active sleeve so deposit_value()
+            # Remove the liquidated rung from the active sleeve so deposit_value()
             # reflects that its capital now funds the rebalance.
             if broker_tranches is not None and tranche in broker_tranches:
                 broker_tranches.remove(tranche)
+            # CR-02 capital conservation: when the broken tranche over-funds the
+            # need, the UN-DRAWN liquidated value (``broke_value - draw``) does not
+            # vanish -- it becomes liquid cash on the broker. Total broker value
+            # (``deposit_value() + _cash``) then drops only by the funded draw plus
+            # the demand-rate break penalty, never by the residual principal.
+            residual = broke_value - draw
+            if residual > _ZERO and broker_tranches is not None:
+                broker._cash += residual
 
     return breakdown
 
@@ -360,17 +379,21 @@ class AllocationOrchestrator:
         ofz_pk_curve: list[tuple[date, Decimal]],
         equity_curve: list[tuple[date, Decimal]],
         *,
-        forced_leg_deltas: dict[AssetClass, Decimal] | None = None,
         legacy_monthly_drift_cadence: bool = False,
         zero_cost: bool = False,
     ) -> AllocationResult:
         """Merge the three pre-computed TR curves into an ``AllocationResult``.
 
-        ``forced_leg_deltas`` is a deterministic test hook: it sets the traded
-        |Δvalue| per leg at the first rebalance boundary so the cost line item can
-        be asserted exactly. ``legacy_monthly_drift_cadence`` + ``zero_cost`` drive
-        the D-13 structural-equivalence path (legacy 60/40, monthly+drift, no cost).
-        Never constructs/runs an engine (D-12).
+        Cost + realized-gains NDFL are charged from the REAL per-leg rescale delta
+        on every quarter that actually rebalances (CR-01/WR-01): there is no
+        external delta hook -- the traded notional is ``|target_value -
+        current_value|`` per eq/OFZ leg (deposit cost-free, D-09), and the FIFO
+        ledger (seeded with the opening eq/OFZ basis) realizes a real gain on a
+        boundary sell. ``legacy_monthly_drift_cadence`` + ``zero_cost`` drive the
+        D-13 structural-equivalence path (legacy 60/40, monthly+drift, no cost --
+        ``zero_cost`` keeps ``cumulative_friction`` at 0 so the merged curve is
+        byte-identical to the pre-fix reproduction). Never constructs/runs an
+        engine (D-12).
         """
         dates, dep, ofz, eq = self._align_and_normalize(deposit_curve, ofz_pk_curve, equity_curve)
         weights = (
@@ -389,7 +412,6 @@ class AllocationOrchestrator:
             ofz,
             eq,
             weights,
-            forced_leg_deltas=forced_leg_deltas or {},
             legacy_cadence=legacy_monthly_drift_cadence,
             charge_cost=not zero_cost,
         )
@@ -480,7 +502,6 @@ class AllocationOrchestrator:
         eq: list[Decimal],
         weights: _LegWeights,
         *,
-        forced_leg_deltas: dict[AssetClass, Decimal],
         legacy_cadence: bool,
         charge_cost: bool,
     ) -> tuple[list[Decimal], dict[AssetClass, list[Decimal]], list[date], Decimal, Decimal]:
@@ -490,7 +511,19 @@ class AllocationOrchestrator:
         (D-08) unless ``legacy_cadence`` is set, moves each leg to its EXACT target
         (no band), and -- the Pitfall-4 gap the legacy spine left open -- charges
         the explicit round-trip cost (D-09) and the FIFO realized-gains NDFL (D-07)
-        as line items. Engines are never re-run (D-12).
+        as line items computed from the REAL per-leg rescale delta. Engines are
+        never re-run (D-12).
+
+        Curve-scale <-> FIFO lots (the keystone mapping): treat each leg's ``scale``
+        as the UNITS held and the unscaled curve value at bar ``i`` as the per-unit
+        price, so the leg's market value is ``curve[i] * scale``. A rescale from
+        ``old_scale`` to ``new_scale`` at price ``curve[i]`` is a buy (units up) or
+        sell (units down) of ``|new_scale - old_scale|`` units at price
+        ``curve[i]`` -- traded RUB notional ``|new_scale - old_scale| * curve[i] ==
+        |target_value - current_value|`` (CR-01/WR-01). Friction is applied
+        cumulatively from the rebalance bar onward (WR-02), never folded into the
+        last bar; with ``charge_cost`` False ``cumulative_friction`` stays 0, so the
+        zero_cost D-13 reproduction is byte-identical to the pre-fix path.
         """
         merged: list[Decimal] = []
         weight_series: dict[AssetClass, list[Decimal]] = {
@@ -501,6 +534,7 @@ class AllocationOrchestrator:
         rebalance_dates: list[date] = []
         rebalance_cost = _ZERO
         realized_ndfl = _ZERO
+        cumulative_friction = _ZERO
 
         ledger = CostBasisLedger()
         ytd_acc = YtdTaxAccumulator()
@@ -508,8 +542,12 @@ class AllocationOrchestrator:
         dep_scale = _ONE
         ofz_scale = _ONE
         eq_scale = _ONE
+
+        # Seed the FIFO ledger with the opening eq/OFZ basis (live cost path only).
+        if charge_cost:
+            self._seed_opening_basis(ledger, ofz, eq)
+
         last_period: int | tuple[int, int] | None = None
-        forced_applied = False
 
         for i, d in enumerate(dates):
             period = d.month if legacy_cadence else self._quarter_key(d)
@@ -527,6 +565,13 @@ class AllocationOrchestrator:
                     target_dep = total * weights.deposit
                     target_ofz = total * weights.ofz_pk
                     target_eq = total * weights.equity
+                    # Capture the OLD eq/OFZ scales (pre-rebalance UNITS) BEFORE
+                    # overwriting them -- the cost + NDFL charge needs them to
+                    # compute the traded delta per capital-gains leg.
+                    capital_gains_legs = (
+                        (AssetClass.OFZ_PK, ofz[i], target_ofz, ofz_scale),
+                        (AssetClass.EQUITY, eq[i], target_eq, eq_scale),
+                    )
                     if dep[i] > _ZERO:
                         dep_scale = target_dep / dep[i]
                     if ofz[i] > _ZERO:
@@ -534,32 +579,75 @@ class AllocationOrchestrator:
                     if eq[i] > _ZERO:
                         eq_scale = target_eq / eq[i]
                     rebalance_dates.append(d)
-                    if charge_cost and forced_leg_deltas and not forced_applied:
+                    if charge_cost:
                         bar_cost, bar_ndfl = self._charge_rebalance(
-                            forced_leg_deltas, ledger, ytd_acc, d.year
+                            capital_gains_legs, ledger, ytd_acc, d.year
                         )
                         rebalance_cost += bar_cost
                         realized_ndfl += bar_ndfl
-                        forced_applied = True
+                        cumulative_friction += bar_cost + bar_ndfl
 
             dep_val = dep[i] * dep_scale
             ofz_val = ofz[i] * ofz_scale
             eq_val = eq[i] * eq_scale
-            bar_total = dep_val + ofz_val + eq_val
+            gross_total = dep_val + ofz_val + eq_val
 
-            weight_series[AssetClass.DEPOSIT].append(self._share(dep_val, bar_total))
-            weight_series[AssetClass.OFZ_PK].append(self._share(ofz_val, bar_total))
-            weight_series[AssetClass.EQUITY].append(self._share(eq_val, bar_total))
-            merged.append(bar_total)
-
-        # Fold the explicit cost + NDFL line items out of the realized curve so the
-        # merged curve is net of the W2 frictions (D-07/D-09 -- never buried, the
-        # totals are surfaced on AllocationResult). Flat sentinel deltas keep the
-        # structural-equivalence path (zero_cost) byte-clean.
-        if merged and (rebalance_cost > _ZERO or realized_ndfl > _ZERO):
-            merged[-1] = merged[-1] - rebalance_cost - realized_ndfl
+            # Weight shares are computed on the GROSS (pre-friction) total so they
+            # stay legacy-comparable; the merged curve carries the running friction.
+            weight_series[AssetClass.DEPOSIT].append(self._share(dep_val, gross_total))
+            weight_series[AssetClass.OFZ_PK].append(self._share(ofz_val, gross_total))
+            weight_series[AssetClass.EQUITY].append(self._share(eq_val, gross_total))
+            merged.append(gross_total - cumulative_friction)
 
         return merged, weight_series, rebalance_dates, rebalance_cost, realized_ndfl
+
+    @staticmethod
+    def _seed_opening_basis(ledger: CostBasisLedger, ofz: list[Decimal], eq: list[Decimal]) -> None:
+        """Seed the FIFO ledger with the opening eq/OFZ basis BEFORE the bar loop (D-07).
+
+        Only called on the live cost path -- NOT the zero_cost D-13 reproduction.
+        The deposit leg has no capital-gains basis (D-07/D-09): its interest is
+        taxed on the W1 deposit accrual path, never here. Each leg's scale starts
+        at 1 unit, so the seeded lot is ``(1 unit @ curve[0])`` per capital-gains
+        leg -- a later boundary sell realizes a real gain against this basis.
+        """
+        if eq and eq[0] > _ZERO:
+            ledger.buy(AssetClass.EQUITY, _ONE, eq[0])
+        if ofz and ofz[0] > _ZERO:
+            ledger.buy(AssetClass.OFZ_PK, _ONE, ofz[0])
+
+    @staticmethod
+    def _charge_rebalance(
+        legs: tuple[tuple[AssetClass, Decimal, Decimal, Decimal], ...],
+        ledger: CostBasisLedger,
+        ytd_acc: YtdTaxAccumulator,
+        year: int,
+    ) -> tuple[Decimal, Decimal]:
+        """Real per-leg round-trip cost + FIFO realized-gains NDFL for one rebalance (D-09/D-07).
+
+        ``legs`` is ``(asset_class, price, target_value, old_units)`` for the two
+        capital-gains legs only (the deposit leg is cost-free AND has no
+        capital-gains basis -- its interest is taxed on the W1 deposit path). For
+        each leg the traded delta is ``new_units - old_units`` where
+        ``new_units = target_value / price``; the round-trip cost is charged on the
+        traded notional ``|d_units| * price`` (CR-01), a buy re-feeds the FIFO
+        ledger basis and a sell realizes a real gain taxed via the W1
+        ``YtdTaxAccumulator`` 13/15% band (WR-01). Returns ``(bar_cost, bar_ndfl)``.
+        """
+        bar_cost = _ZERO
+        bar_ndfl = _ZERO
+        for leg, price, target_value, old_units in legs:
+            if price <= _ZERO:
+                continue
+            new_units = target_value / price
+            d_units = new_units - old_units
+            bar_cost += abs(d_units) * price * _ROUND_TRIP_COST
+            if d_units > _ZERO:
+                ledger.buy(leg, d_units, price)
+            elif d_units < _ZERO:
+                gain = ledger.sell(leg, -d_units, price)
+                bar_ndfl += ytd_acc.tax(max(_ZERO, gain), year)
+        return bar_cost, bar_ndfl
 
     def _should_rebalance(
         self,
@@ -586,31 +674,6 @@ class AllocationOrchestrator:
         legacy_ofz_target = weights.ofz_pk / (weights.ofz_pk + weights.equity)
         drift = abs(current_ofz_pct - legacy_ofz_target)
         return drift > _LEGACY_DRIFT_THRESHOLD
-
-    @staticmethod
-    def _charge_rebalance(
-        forced_leg_deltas: dict[AssetClass, Decimal],
-        ledger: CostBasisLedger,
-        ytd_acc: YtdTaxAccumulator,
-        year: int,
-    ) -> tuple[Decimal, Decimal]:
-        """Cost + realized-gains NDFL on the traded eq/OFZ legs (D-09 / D-07).
-
-        Cost = sum_{eq,ofz} |Δvalue| * round_trip; the deposit leg is cost-free
-        (no MOEX ticket). Realized NDFL routes a profitable sell through the FIFO
-        ledger into the W1 YtdTaxAccumulator 13/15% band; a leg with no prior buys
-        has no basis to realize, so it contributes 0 honestly.
-        """
-        cost = _ZERO
-        ndfl = _ZERO
-        for asset_class, delta in forced_leg_deltas.items():
-            if asset_class is AssetClass.DEPOSIT:
-                continue
-            cost += abs(delta) * _ROUND_TRIP_COST
-            if delta < _ZERO:
-                gain = ledger.sell(asset_class, abs(delta), _ONE)
-                ndfl += ytd_acc.tax(max(_ZERO, gain), year)
-        return cost, ndfl
 
     @staticmethod
     def _share(value: Decimal, total: Decimal) -> Decimal:
