@@ -1,0 +1,33 @@
+# Strategic Asset Allocation (SAA) risk-profile weight vectors + MaxDD caps.
+# Phase 72 / W2 (D-01, D-04, D-08). These are FIXED config vectors -- never solver
+# output (D-03, Pitfall 8). Each weight vector MUST sum to 1.0. OFZ-PK is a flat 25%
+# carry leg across all profiles; equity scales 15 -> 50%; deposit carries the
+# conservative end (deposit-anchored, drawdown-control product).
+#
+# Layout: each top-level key is a RiskProfile name mapping to {weights, max_drawdown_pct}.
+# The reserved 'rebalance_cadence' scalar (D-08) is informational metadata, not a profile;
+# the orchestrator drives the quarterly trigger off _quarter_key. The loader
+# (src/finalayze/config/allocation_profiles.py) is fail-closed: a vector not summing to
+# 1.0, a negative weight, an unknown/missing profile, or a missing cap raises
+# ConfigurationError (V5 / Pitfall-8 guard).
+
+rebalance_cadence: quarterly   # D-08 (pure quarterly calendar; informational)
+
+conservative:
+  weights:
+    deposit: 0.60
+    ofz_pk: 0.25
+    equity: 0.15
+  max_drawdown_pct: 0.08
+balanced:                # operator default profile (D-02)
+  weights:
+    deposit: 0.45
+    ofz_pk: 0.25
+    equity: 0.30
+  max_drawdown_pct: 0.15
+growth:
+  weights:
+    deposit: 0.25
+    ofz_pk: 0.25
+    equity: 0.50
+  max_drawdown_pct: 0.25

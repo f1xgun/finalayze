@@ -37,6 +37,36 @@ class PortfolioLayer(StrEnum):
     SHORT = "short"  # 10-15%, stocks only, 1-5 days
 
 
+class RiskProfile(StrEnum):
+    """SAA risk profile (D-01/D-02). Maps to a fixed {deposit, ofz_pk, equity} weight vector."""
+
+    CONSERVATIVE = "conservative"
+    BALANCED = "balanced"
+    GROWTH = "growth"
+
+
+class AssetClass(StrEnum):
+    """The three SAA asset classes merged by the AllocationOrchestrator (D-01)."""
+
+    DEPOSIT = "deposit"
+    OFZ_PK = "ofz_pk"
+    EQUITY = "equity"
+
+
+@dataclass(frozen=True)
+class AllocationProfile:
+    """A risk profile's fixed target weights + its MaxDD cap (SAA-01/SAA-05, D-01/D-04).
+
+    Weights are FIXED config vectors (D-03 -- never solver output). The vector MUST
+    sum to 1.0 and be non-negative; validation is enforced by the L1 loader (Plan 03,
+    V5 fail-closed), not here, so this stays a pure carrier mirroring LayerConfig.
+    """
+
+    profile: RiskProfile
+    weights: dict[AssetClass, Decimal]
+    max_drawdown_pct: Decimal
+
+
 class Candle(BaseModel):
     """OHLCV candle for a single timeframe bar."""
 

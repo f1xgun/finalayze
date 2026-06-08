@@ -1,0 +1,45 @@
+{
+  "name": "phase72-ab-d13-baseline",
+  "phase": "72-06",
+  "leg": "baseline",
+  "description": "legacy PortfolioBacktestOrchestrator 60/40 (monthly+drift, no cost)",
+  "final_equity": "185115.46",
+  "verdict": "PASS",
+  "notes": {
+    "window": {
+      "first_bar": "2023-01-01",
+      "n_bars": 240,
+      "seed": "deterministic geometric curves (no RNG, no network, no engine re-run)"
+    },
+    "legacy_rebalances_fired": "legacy monthly+drift fired (scale-at-boundary exercised)",
+    "candidate_rebalances": [
+      "2023-03-01",
+      "2023-05-01",
+      "2023-07-01"
+    ],
+    "d13_kopeck_match": true,
+    "d13_mismatches_at_0.01": 0,
+    "d13_max_kopeck_diff": "0",
+    "d13_max_raw_float_vs_decimal_diff": "5.34818665818E-11",
+    "legacy_first": "100000.00",
+    "legacy_last": "185115.46",
+    "candidate_first": "100000.00",
+    "candidate_last": "185115.46",
+    "live_rebalance_dates": [
+      "2023-04-01",
+      "2023-07-01"
+    ],
+    "live_zero_cost_last": "217521.0816631170917327300342",
+    "live_with_cost_last": "214529.7940747799464494353696",
+    "live_curve_delta_zc_minus_live": "2991.2875883371452832946646",
+    "live_rebalance_cost": "633.3780249313309502272804075",
+    "live_realized_ndfl": "2357.909563405814333067384226",
+    "live_cost_plus_ndfl": "2991.287588337145283294664634",
+    "live_delta_equals_line_items_kopeck": true,
+    "cost_nonzero_when_leg_trades": true,
+    "ndfl_nonzero_on_gain": true,
+    "cr01_fix": "real per-rebalance cost+ndfl (no forced hook)"
+  },
+  "git_sha": "c5ed2f5d064b299f098120e5907a117ae10a51e6",
+  "created_at": "2026-06-08T06:08:05.171462+00:00"
+}

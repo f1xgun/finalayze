@@ -23,6 +23,7 @@ from finalayze.data.fetchers._cache_utils import GenericFileCache
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from decimal import Decimal
 
     from config.settings import Settings
 
@@ -237,6 +238,67 @@ class MarketDataLoader:
         if result and cache is not None:
             cache.set(key, result)
         return result
+
+
+# ── MCFTR passive equity sleeve (SAA-04) ─────────────────────────────────────
+
+# R-1: MCFTR ("Indeks MosBirzhi polnoy dokhodnosti bruttto") is the GROSS MOEX
+# total-return index — the passive equity leg AND the W3 100%-equity benchmark.
+_MCFTR_SECID = "MCFTR"
+
+
+def _fetch_mcftr_rows(
+    secid: str,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[tuple[date, Decimal]]:
+    """Fetch the MCFTR total-return index rows via the EXACT IMOEX index path.
+
+    Reuses ``MoexISSFetcher.fetch_candles`` over the public ISS REST index
+    endpoint (``moex_iss.py:432`` — ``.../markets/index/securities/{secid}.json``),
+    the same path the IMOEX benchmark uses (``loader.py:104-107``); only the secid
+    string changes (``"IMOEX"`` -> ``"MCFTR"``). MCFTR is an unauthenticated index
+    series, NOT a Tinkoff instrument candle, so NO token/cert is read (T-72-11; the
+    CLAUDE.md "MOEX data = Tinkoff gRPC only" invariant governs INSTRUMENT candles
+    only, R-1).
+
+    This is the isolated network seam: it is constructed lazily (no fetch at import
+    time) and is monkeypatched offline in unit tests (``test_mcftr_sleeve.py``).
+    Returns the ordered ``(date, Decimal close)`` series.
+    """
+    from finalayze.data.fetchers.moex_iss import MoexISSFetcher  # noqa: PLC0415
+
+    if start is None:
+        start = datetime(2022, 1, 1, tzinfo=UTC)
+    if end is None:
+        end = datetime.now(tz=UTC)
+    with MoexISSFetcher() as fetcher:
+        candles = fetcher.fetch_candles(secid, start, end)
+    return [(candle.timestamp.date(), candle.close) for candle in candles]
+
+
+def load_mcftr_series(
+    secid: str = _MCFTR_SECID,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[tuple[date, Decimal]]:
+    """Load the MCFTR (MOEX total-return, gross/bruttto) index — the passive equity sleeve.
+
+    SAA-04. The single synthetic total-return equity position that IS the W3
+    "100% equity" benchmark (apples-to-apples; survivorship-free). Reuses the EXACT
+    IMOEX index path (``loader.py:104-107`` -> ``_fetch_mcftr_rows``), secid swap
+    only — NO new fetcher class, NO token/cert.
+
+    MCFTR already embeds dividend reinvestment + index reconstitution (R-1), so this
+    sleeve does NOT run ``process_dividends`` / per-name accrual (double-count, T-72-13).
+    NO active stock-picking / combiner / momentum / ML re-enters the equity path
+    (anti-pattern 4, T-72-12). A1: MCFTR is the GROSS series; MCFTRR is the net
+    variant (single-secid swap if after-tax consistency is wanted — not built in W2).
+
+    Returns the ordered ``(date, Decimal close)`` series the allocation orchestrator
+    forward-fills as the equity leg.
+    """
+    return _fetch_mcftr_rows(secid, start, end)
 
 
 def _orm_to_fundamental(row: Any) -> FundamentalSnapshot:
