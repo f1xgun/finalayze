@@ -28,8 +28,13 @@ from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+from finalayze.core.ndfl import YtdTaxAccumulator
 from finalayze.core.schemas import AssetClass, RiskProfile
-from finalayze.orchestration.allocation import AllocationOrchestrator, AllocationResult
+from finalayze.orchestration.allocation import (
+    AllocationOrchestrator,
+    AllocationResult,
+    CostBasisLedger,
+)
 
 # -- Constants (named -- no magic numbers, ruff PLR2004) ----------------------
 
@@ -45,6 +50,7 @@ _PER_SIDE_COST = Decimal("0.0055")
 _ROUND_TRIP_COST = _PER_SIDE_COST * Decimal(2)
 
 _ZERO = Decimal(0)
+_ONE = Decimal(1)
 
 # Tiny in-memory total-return curves (flat -> trivially mergeable; the spine,
 # trigger and cost line are what these tests pin, not curve dynamics).
@@ -52,10 +58,29 @@ _FLAT_LEVEL = Decimal(100)
 _EQUITY_LEVEL = Decimal(120)
 _OFZ_LEVEL = Decimal(110)
 
-# A known traded delta on the equity + ofz legs at a forced rebalance.
-_EQ_DELTA = Decimal(10_000)
-_OFZ_DELTA = Decimal(5_000)
-_EXPECTED_COST = (_EQ_DELTA + _OFZ_DELTA) * _ROUND_TRIP_COST
+# BALANCED target weights (config: deposit 0.45 / ofz_pk 0.25 / equity 0.30).
+_BALANCED_DEPOSIT_W = Decimal("0.45")
+_BALANCED_OFZ_W = Decimal("0.25")
+_BALANCED_EQUITY_W = Decimal("0.30")
+
+# The flat fixture's first-quarter REAL rebalance (no forced hook):
+#   total = 100 + 110 + 120 = 330
+#   target ofz = 330 * 0.25 = 82.5  (current 110 -> SELL 27.5)
+#   target eq  = 330 * 0.30 = 99.0  (current 120 -> SELL 21.0)
+#   target dep = 330 * 0.45 = 148.5 (current 100 -> BUY 48.5, cost-free, D-09)
+# After the first rebalance the flat legs sit at target, so later quarters trade
+# ~0 -> the run's total rebalance_cost equals this first-quarter charge.
+_FLAT_TOTAL = _FLAT_LEVEL + _OFZ_LEVEL + _EQUITY_LEVEL
+_FLAT_OFZ_SELL = _OFZ_LEVEL - _FLAT_TOTAL * _BALANCED_OFZ_W  # 110 - 82.5 = 27.5
+_FLAT_EQ_SELL = _EQUITY_LEVEL - _FLAT_TOTAL * _BALANCED_EQUITY_W  # 120 - 99 = 21
+_EXPECTED_COST = (_FLAT_OFZ_SELL + _FLAT_EQ_SELL) * _ROUND_TRIP_COST
+# The cost-free deposit notional (148.5 - 100 = 48.5) is EXCLUDED from the charge:
+# the round-trip cost on the traded eq+ofz value alone is < the cost would be if
+# the deposit notional were charged, proving the deposit leg is cost-free.
+_DEPOSIT_BUY = _FLAT_TOTAL * _BALANCED_DEPOSIT_W - _FLAT_LEVEL  # 48.5
+
+# NDFL flat 13% band (below the 2.4M YTD threshold).
+_NDFL_13 = Decimal("0.13")
 
 # Forbidden active-selection substrings (SAA-04 closed-alpha import-guard).
 _FORBIDDEN_IMPORTS = ("combiner", "StrategyCombiner", "momentum", "strategies.ml")
@@ -90,27 +115,81 @@ def test_quarterly_trigger() -> None:
 
 
 def test_rebalance_cost_line_item() -> None:
-    """A traded eq/ofz leg is charged round-trip cost as an EXPLICIT line item (SAA-03 / D-09)."""
+    """A REAL quarterly rebalance charges round-trip cost as an EXPLICIT line item (SAA-03 / D-09).
+
+    No ``forced_leg_deltas`` hook: the cost is computed from the genuine per-leg
+    rescale delta (CR-01). On the flat fixture the first quarter sells ofz 27.5 +
+    eq 21 (and BUYS deposit 48.5 cost-free), so the run's total ``rebalance_cost``
+    equals ``(27.5 + 21) * round_trip`` -- the cost-free 48.5 deposit notional is
+    excluded by construction (deposit leg is cost-free, D-09).
+    """
     dates = _daily_index(_YEAR, _DAYS_IN_YEAR)
     orch = AllocationOrchestrator(risk_profile=RiskProfile.BALANCED)
     result = orch.run(
         deposit_curve=_flat_series(dates, _FLAT_LEVEL),
         ofz_pk_curve=_flat_series(dates, _OFZ_LEVEL),
         equity_curve=_flat_series(dates, _EQUITY_LEVEL),
-        forced_leg_deltas={AssetClass.EQUITY: _EQ_DELTA, AssetClass.OFZ_PK: _OFZ_DELTA},
     )
-    # The cost is the round-trip charge on the traded eq + ofz value; deposit free.
+    # The cost is the round-trip charge on the traded eq + ofz value only.
     assert result.rebalance_cost == _EXPECTED_COST
     assert result.rebalance_cost > _ZERO  # an explicit, non-zero field on the result
 
-    # A deposit-only delta contributes nothing to the cost (deposit leg cost-free).
-    deposit_only = orch.run(
+    # Deposit is cost-free, asserted via magnitude: had the cost-free 48.5 deposit
+    # BUY notional been charged, the cost would be strictly larger. The actual
+    # charge excludes it, so it is below the deposit-inclusive upper bound.
+    cost_if_deposit_charged = (_FLAT_OFZ_SELL + _FLAT_EQ_SELL + _DEPOSIT_BUY) * _ROUND_TRIP_COST
+    assert result.rebalance_cost < cost_if_deposit_charged
+
+    # A run whose legs already sit exactly at target trades ~0 -> charges ~0 cost.
+    # Build a flat fixture pre-balanced to the BALANCED weights (dep 45 / ofz 25 /
+    # eq 30 on a 100 book): the first quarter has zero per-leg drift -> zero cost.
+    at_target = orch.run(
+        deposit_curve=_flat_series(dates, _BALANCED_DEPOSIT_W * _FLAT_LEVEL),
+        ofz_pk_curve=_flat_series(dates, _BALANCED_OFZ_W * _FLAT_LEVEL),
+        equity_curve=_flat_series(dates, _BALANCED_EQUITY_W * _FLAT_LEVEL),
+    )
+    assert at_target.rebalance_cost == _ZERO
+
+
+def test_realized_ndfl_on_real_rebalance_sell() -> None:
+    """A RISING equity leg sold at a quarter boundary realizes FIFO-gain NDFL (D-07 / WR-01).
+
+    Drives the orchestrator's OWN ``realized_ndfl`` through a real ``run()`` (no
+    hook): a single-quarter window (Jan 1 -> Apr 2) with a strongly-rallying equity
+    leg makes equity overweight at the Apr-1 boundary, so it is SOLD above its
+    seeded basis (``eq[0]``). The ofz leg is flat (sold at its basis -> 0 gain), so
+    the run's realized NDFL is purely the equity FIFO gain * 13% (below the band).
+    """
+    start = date(_YEAR, 1, 1)
+    span_end = date(_YEAR, 4, 2)  # spans exactly ONE quarter boundary (Apr 1)
+    dates = [start + timedelta(days=i) for i in range((span_end - start).days + 1)]
+    orch = AllocationOrchestrator(risk_profile=RiskProfile.BALANCED)
+
+    eq_daily = Decimal("1.01")  # strong rally -> equity overweight at the boundary
+    eq_curve = [(d, _EQUITY_LEVEL * eq_daily**i) for i, d in enumerate(dates)]
+
+    result = orch.run(
         deposit_curve=_flat_series(dates, _FLAT_LEVEL),
         ofz_pk_curve=_flat_series(dates, _OFZ_LEVEL),
-        equity_curve=_flat_series(dates, _EQUITY_LEVEL),
-        forced_leg_deltas={AssetClass.DEPOSIT: _EQ_DELTA},
+        equity_curve=eq_curve,
     )
-    assert deposit_only.rebalance_cost == _ZERO
+    assert len(result.rebalance_dates) == 1  # exactly one boundary in the window
+    assert result.realized_ndfl > _ZERO
+
+    # Independently replay the single equity sell to pin realized_ndfl == gain*0.13.
+    apr1_idx = (date(_YEAR, 4, 1) - start).days
+    eq_price = eq_curve[apr1_idx][1]
+    weights = orch._profile_weights()  # noqa: SLF001 -- test pins the exact charge
+    total = _FLAT_LEVEL + _OFZ_LEVEL + eq_price
+    target_eq = total * weights.equity
+    eq_units_new = target_eq / eq_price  # scale started at 1 unit @ eq[0]
+    eq_sold_units = _ONE - eq_units_new  # positive: the leg is overweight -> sells
+    ledger = CostBasisLedger()
+    ledger.buy(AssetClass.EQUITY, _ONE, eq_curve[0][1])
+    gain = ledger.sell(AssetClass.EQUITY, eq_sold_units, eq_price)
+    expected_ndfl = YtdTaxAccumulator().tax(gain, _YEAR)
+    assert expected_ndfl == gain * _NDFL_13  # below the 2.4M band -> flat 13%
+    assert result.realized_ndfl == expected_ndfl
 
 
 def test_equity_sleeve_passive() -> None:

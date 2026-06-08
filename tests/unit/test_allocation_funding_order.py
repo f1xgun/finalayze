@@ -113,6 +113,39 @@ def test_last_resort_breaks_locked_with_penalty() -> None:
     assert broker.deposit_value() <= deposit_before
 
 
+def test_breaking_large_tranche_conserves_value() -> None:
+    """Breaking a 1M locked tranche for a 500K need conserves capital -- no ~500K leak (CR-02).
+
+    The reviewer's data-loss defect: breaking the WHOLE 1M tranche while counting
+    only the 500K draw used to drop ``deposit_value()`` by ~1M while funding only
+    500K, destroying ~500K. The fix credits the un-drawn liquidated residual to
+    liquid cash, so TOTAL broker value (``deposit_value() + _cash``) drops only by
+    the funded need (adjusted by the tiny demand-rate accrual ``break_tranche``
+    credits onto a fresh rung), NOT by the full principal.
+    """
+    locked = _make_tranche(open_date=_MID_QUARTER_OPEN, maturity_date=_MID_QUARTER_MATURITY)
+    broker = DepositSimulatedBroker(initial_cash=_INITIAL_CASH, tranches=[locked])
+
+    total_before = broker.deposit_value() + broker._cash  # noqa: SLF001 -- test pins conservation
+
+    funded = fund_underweight(broker, _FUNDING_NEED, _REBALANCE_TS)
+
+    total_after = broker.deposit_value() + broker._cash  # noqa: SLF001
+    drop = total_before - total_after
+
+    # The need is fully funded, not over- or under-drawn.
+    assert funded == _FUNDING_NEED
+    # Capital conservation: total value drops by the funded need only (the un-drawn
+    # ~500K residual survives as liquid cash). ``break_tranche`` resets the fresh
+    # rung's accrued_net to ``principal * DEPOSIT_DEMAND_RATE`` (a small credit),
+    # so the exact total drop is ``need - principal * demand_rate``.
+    demand_accrual = locked.principal * DEPOSIT_DEMAND_RATE
+    assert drop == _FUNDING_NEED - demand_accrual
+    # The defect would have destroyed ~ (principal - need); assert no such leak.
+    assert drop < _PRINCIPAL
+    assert _FUNDING_NEED - drop <= demand_accrual  # within the demand-rate adjustment
+
+
 def test_quarter_boundary_ladder_construction() -> None:
     """Quarter-boundary tranches mature at the next boundary; mid-quarter ones do not (R-6)."""
     quarter_tranche = _make_tranche(

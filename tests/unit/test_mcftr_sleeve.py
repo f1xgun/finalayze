@@ -21,7 +21,9 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+import finalayze.data.loader as loader_module
 from finalayze.data.loader import load_mcftr_series
+from finalayze.execution.simulated_broker import SimulatedBroker
 
 # -- Constants (named -- no magic numbers, ruff PLR2004) ----------------------
 
@@ -55,26 +57,43 @@ def test_mcftr_series_loads_offline(monkeypatch) -> None:  # noqa: ANN001
 
 
 def test_no_dividend_double_accrual(monkeypatch) -> None:  # noqa: ANN001
-    """The MCFTR sleeve never calls process_dividends -- the index reinvests gross (R-1).
+    """The MCFTR sleeve never runs dividend accrual -- the index reinvests gross (R-1 / WR-04).
 
     MCFTR already embeds dividend reinvestment, so accruing dividends again on the
-    equity sleeve would double-count. A spy on ``process_dividends`` must record
-    zero calls during MCFTR series construction.
+    equity sleeve would double-count. This is a REAL guard (the old version
+    monkeypatched a non-existent ``finalayze.data.loader.process_dividends`` with
+    ``raising=False``, so it passed trivially and protected nothing). Here:
+
+    1. Spy on the REAL dividend-accrual symbol ``SimulatedBroker.process_dividends``
+       (``execution/simulated_broker.py``) with ``raising=True`` -- patching a wrong
+       attribute name would fail loudly. ``load_mcftr_series`` must NOT invoke it.
+    2. Assert the loader module binds NO dividend-processing symbol at all (the
+       L2 index loader must not import the L5 broker's dividend accrual) -- if a
+       future edit wired one in, this guard fails.
+    3. Assert the series passes through the raw total-return index levels unchanged
+       (no per-name re-accrual mutates the closes).
     """
     calls: list[object] = []
 
-    def _spy(*args: object, **kwargs: object) -> None:
+    def _spy(*args: object, **kwargs: object) -> Decimal:
         calls.append((args, kwargs))
+        return Decimal(0)
 
     monkeypatch.setattr(
         "finalayze.data.loader._fetch_mcftr_rows",
         lambda *_args, **_kwargs: list(_MCFTR_FIXTURE),
         raising=False,
     )
-    monkeypatch.setattr(
-        "finalayze.data.loader.process_dividends",
-        _spy,
-        raising=False,
-    )
-    load_mcftr_series(_MCFTR_SECID)
-    assert calls == []  # the MCFTR leg reinvests dividends gross -- no re-accrual
+    # Patch the REAL symbol (raising=True): a wrong name would raise AttributeError.
+    monkeypatch.setattr(SimulatedBroker, "process_dividends", _spy, raising=True)
+
+    series = load_mcftr_series(_MCFTR_SECID)
+
+    # 1. The real dividend-accrual path was never invoked by the MCFTR loader.
+    assert calls == []
+    # 2. The loader module imports no dividend-processing symbol (no double-accrual
+    #    surface to invoke in the first place).
+    assert not hasattr(loader_module, "process_dividends")
+    # 3. The MCFTR closes pass through unchanged -- no dividend re-accrual mutates
+    #    the gross total-return index levels.
+    assert series == list(_MCFTR_FIXTURE)
