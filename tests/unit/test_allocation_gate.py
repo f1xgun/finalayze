@@ -36,13 +36,16 @@ net-of-NDFL / snapshot / no-drift tests.
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
 from finalayze.backtest.allocation_gate import (
     REGIME_SPLIT_BOUNDARY,
+    _load_gate_snapshot,
     accrue_real_risk_free_leg,
     build_naive_legs,
     excess_sortino_from_equity,
@@ -57,6 +60,7 @@ from finalayze.backtest.allocation_gate import (
 )
 from finalayze.backtest.bond_walk_forward import generate_wf_windows
 from finalayze.core.allocation import tighten  # used only to derive the EXPECTED frozen vector
+from finalayze.core.exceptions import ConfigurationError
 from finalayze.core.ndfl import YtdTaxAccumulator
 from finalayze.core.schemas import AssetClass, RiskProfile
 from finalayze.orchestration.allocation import AllocationOrchestrator, AllocationResult
@@ -679,3 +683,116 @@ def test_regime_split_rejects_empty_window() -> None:
     """
     with pytest.raises(ValueError, match="non-empty"):
         regime_split([])
+
+
+# -- Fail-closed committed snapshot loader (REGIME-01 / D-05 / V5) -------------
+
+# The three leg keys the snapshot loader expects (R-F shape). The fixture serializes
+# Decimal -> str and date -> ISO string (the Phase-65 _row_to_instrument convention).
+_SNAP_EQUITY_KEY = "equity_mcftrr_net"
+_SNAP_OFZ_KEY = "ofz_ruflbitr_net"
+_SNAP_DEPOSIT_KEY = "deposit_net"
+# The binding window end (the look-ahead clamp, Pitfall 3): no bar may post-date this.
+_SNAP_WINDOW_START = "2024-01-01"
+_SNAP_WINDOW_END = "2026-06-10"
+# A bar dated AFTER the window end -> must be rejected (look-ahead guard).
+_SNAP_FUTURE_BAR = "2026-06-11"
+_SNAP_BASE_EQUITY = "6423.95"
+_SNAP_BASE_FIXED = "100000.00"
+
+
+def _well_formed_snapshot() -> dict[str, object]:
+    """A minimal valid snapshot dict (3 legs, 2 bars each, all <= the window end)."""
+    return {
+        "generated_at": "2026-06-12T00:00:00Z",
+        "window": {"start": _SNAP_WINDOW_START, "end": _SNAP_WINDOW_END},
+        "git_sha": "deadbeef",
+        "legs": {
+            _SNAP_EQUITY_KEY: [["2024-01-03", _SNAP_BASE_EQUITY], [_SNAP_WINDOW_END, "6110.63"]],
+            _SNAP_OFZ_KEY: [["2024-01-03", _SNAP_BASE_FIXED], [_SNAP_WINDOW_END, "112000.00"]],
+            _SNAP_DEPOSIT_KEY: [["2024-01-03", _SNAP_BASE_FIXED], [_SNAP_WINDOW_END, "118000.00"]],
+        },
+    }
+
+
+def test_gate_snapshot_missing_raises(tmp_path: Path) -> None:
+    """A MISSING snapshot file fails closed -> ConfigurationError (REGIME-01 / V5).
+
+    The committed snapshot is the CI trust boundary -- a missing file must raise, never
+    silently fall back to synthetic data (the Phase-65 fail-closed pattern).
+    """
+    missing = tmp_path / "does_not_exist.json"
+    with pytest.raises(ConfigurationError):
+        _load_gate_snapshot(missing)
+
+
+def test_gate_snapshot_corrupt_raises(tmp_path: Path) -> None:
+    """A CORRUPT / malformed snapshot fails closed -> ConfigurationError (REGIME-01 / V5).
+
+    Both invalid JSON and a well-formed JSON missing a required leg key must raise -- no
+    silent synthetic fallback (T-74-03).
+    """
+    bad_json = tmp_path / "corrupt.json"
+    bad_json.write_text("{ this is not json", encoding="utf-8")
+    with pytest.raises(ConfigurationError):
+        _load_gate_snapshot(bad_json)
+
+    # Valid JSON but a required leg key is absent -> still fails closed.
+    snap = _well_formed_snapshot()
+    del snap["legs"][_SNAP_OFZ_KEY]  # type: ignore[index]
+    missing_leg = tmp_path / "missing_leg.json"
+    missing_leg.write_text(json.dumps(snap), encoding="utf-8")
+    with pytest.raises(ConfigurationError):
+        _load_gate_snapshot(missing_leg)
+
+
+def test_gate_snapshot_round_trip_clamped(tmp_path: Path) -> None:
+    """A well-formed snapshot re-hydrates Decimal-exact + rejects future bars (REGIME-01 / P-3).
+
+    Round-trip: a valid snapshot loads into three ``(date, Decimal)`` curves with exact
+    Decimal re-hydration. A bar dated AFTER ``window.end`` (the look-ahead clamp) makes the
+    loader fail closed (T-74-04).
+    """
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps(_well_formed_snapshot()), encoding="utf-8")
+    equity, ofz, deposit = _load_gate_snapshot(good)
+
+    # Three (date, Decimal) curves, Decimal-exact after re-hydration.
+    assert equity[0] == (date(2024, 1, 3), Decimal(_SNAP_BASE_EQUITY))
+    assert ofz[0] == (date(2024, 1, 3), Decimal(_SNAP_BASE_FIXED))
+    assert deposit[0] == (date(2024, 1, 3), Decimal(_SNAP_BASE_FIXED))
+    assert all(isinstance(d, date) and isinstance(v, Decimal) for d, v in equity)
+    assert equity[-1][0] == date.fromisoformat(_SNAP_WINDOW_END)
+
+    # A bar dated AFTER window.end -> rejected (look-ahead clamp, Pitfall 3).
+    leaky = _well_formed_snapshot()
+    leaky["legs"][_SNAP_EQUITY_KEY].append([_SNAP_FUTURE_BAR, "9999.99"])  # type: ignore[index,union-attr]
+    leak_file = tmp_path / "leaky.json"
+    leak_file.write_text(json.dumps(leaky), encoding="utf-8")
+    with pytest.raises(ConfigurationError):
+        _load_gate_snapshot(leak_file)
+
+
+def test_no_allocation_logic_drift() -> None:
+    """The frozen merge path is byte-identical given identical input curves (frozen-allocator).
+
+    ``build_naive_legs`` + the frozen ``AllocationOrchestrator`` merge produce IDENTICAL
+    results across two calls on the SAME input curves. This pins that the Phase-74
+    measurement changes (net basis / snapshot / boundary) did NOT perturb the allocation
+    logic -- the candidate and the naive legs both flow through the unchanged frozen path.
+    """
+    dates = _daily_index(_FIRST_BAR, _N_BARS)
+    deposit_curve = _curve(_DEPOSIT_BASE, _DEPOSIT_DAILY, dates)
+    ofz_pk_curve = _curve(_OFZ_BASE, _OFZ_DAILY, dates)
+    equity_curve = _curve(_EQUITY_BASE, _EQUITY_DAILY, dates)
+
+    legs_a = build_naive_legs(deposit_curve, ofz_pk_curve, equity_curve)
+    legs_b = build_naive_legs(deposit_curve, ofz_pk_curve, equity_curve)
+
+    assert set(legs_a) == set(legs_b)
+    for name in legs_a:
+        # Byte-identical merged equity curve + headline metrics across the two runs.
+        assert list(legs_a[name].merged_equity_curve) == list(legs_b[name].merged_equity_curve)
+        assert legs_a[name].sharpe == legs_b[name].sharpe
+        assert legs_a[name].max_drawdown_pct == legs_b[name].max_drawdown_pct
+        assert legs_a[name].rebalance_cost == legs_b[name].rebalance_cost

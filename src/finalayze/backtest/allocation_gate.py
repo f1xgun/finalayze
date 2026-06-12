@@ -32,17 +32,20 @@ with real metrics, not a synthetic glide.
 
 from __future__ import annotations
 
+import json
 import math
 import statistics
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from finalayze.backtest.bond_walk_forward import (
     _compute_excess_sharpe_from_equity,
     generate_wf_windows,
 )
 from finalayze.core.allocation import tighten
+from finalayze.core.exceptions import ConfigurationError
 from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
 from finalayze.data.fetchers.cbr import (
     MacroContextProvider,
@@ -541,6 +544,75 @@ def net_index_returns(
         prev_level = level
         out.append((d, value))
     return out
+
+
+# ── Committed real-data snapshot (REGIME-01 / D-05, Phase-65 fail-closed pattern) ──
+# The binding cert reads a committed JSON snapshot of the fetched real series (MCFTRR
+# net equity + RUFLBITR-derived net OFZ + net deposit) so CI reproduces the gate
+# deterministically with NO network. A missing/corrupt/future-dated file fails closed
+# (ConfigurationError) — there is NO silent fallback to synthetic data (T-74-03 / V5).
+# Plan 03 writes the committed file (and creates the data/ dir); this loader reads it.
+_GATE_SNAPSHOT = Path(__file__).parent / "data" / "allocation_gate_snapshot.json"
+# The binding window endpoint (the look-ahead clamp, Pitfall 3 / T-74-04): NO bar may
+# post-date this. Named — no magic date in the guard.
+_BINDING_END = date(2026, 6, 10)
+# The three leg keys the snapshot must carry (R-F shape). Validated fail-closed.
+_SNAPSHOT_LEG_KEYS = ("equity_mcftrr_net", "ofz_ruflbitr_net", "deposit_net")
+
+
+def _rehydrate_leg(rows: Any, *, window_end: date) -> list[tuple[date, Decimal]]:
+    """Re-hydrate one snapshot leg ``[[iso_date, decimal_str], ...]`` fail-closed (Pitfall 3 / V5).
+
+    Coerces each row to ``(date.fromisoformat(d), Decimal(str(v)))`` (the Phase-65
+    ``_row_to_instrument`` convention) and REJECTS (raises ``ConfigurationError``) any bar
+    dated after ``window_end`` OR after :data:`_BINDING_END` (the look-ahead clamp). A
+    malformed row shape raises via the caller's ``except`` tuple.
+    """
+    out: list[tuple[date, Decimal]] = []
+    for d_str, v_str in rows:
+        d = date.fromisoformat(str(d_str))
+        if d > window_end or d > _BINDING_END:
+            msg = (
+                f"allocation-gate snapshot bar {d.isoformat()} post-dates the binding window "
+                f"end ({window_end.isoformat()} / clamp {_BINDING_END.isoformat()}) — "
+                "look-ahead leak (Pitfall 3 / T-74-04)"
+            )
+            raise ConfigurationError(msg)
+        out.append((d, Decimal(str(v_str))))
+    return out
+
+
+def _load_gate_snapshot(
+    path: Path = _GATE_SNAPSHOT,
+) -> tuple[
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+]:
+    """Read the committed real-data gate snapshot, fail-closed (REGIME-01 / D-05 / V5).
+
+    Copies the Phase-65 ``instruments.py:239-251`` committed-snapshot pattern EXACTLY: read
+    the JSON, pull the three required legs (``equity_mcftrr_net`` / ``ofz_ruflbitr_net`` /
+    ``deposit_net``), and re-hydrate each ``[iso_date, decimal_str]`` row to a
+    ``(date, Decimal)`` pair. On a missing/corrupt file or a missing required key the loader
+    raises :class:`finalayze.core.exceptions.ConfigurationError` — there is NO silent
+    fallback to synthetic data (the committed file is the CI trust boundary, T-74-03).
+
+    Look-ahead clamp (Pitfall 3 / T-74-04): every bar must be ``<= window.end`` AND
+    ``<= _BINDING_END`` (2026-06-10) — a snapshot refreshed on a later date cannot leak a
+    future bar. Returns ``(equity, ofz, deposit)`` curves on their committed date axes.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        window_end = date.fromisoformat(str(raw["window"]["end"]))
+        legs = raw["legs"]
+        equity = _rehydrate_leg(legs[_SNAPSHOT_LEG_KEYS[0]], window_end=window_end)
+        ofz = _rehydrate_leg(legs[_SNAPSHOT_LEG_KEYS[1]], window_end=window_end)
+        deposit = _rehydrate_leg(legs[_SNAPSHOT_LEG_KEYS[2]], window_end=window_end)
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        msg = f"allocation-gate snapshot missing/corrupt at {path}: {exc}"
+        raise ConfigurationError(msg) from exc  # NO fallback to synthetic data (D-05)
+    return equity, ofz, deposit
 
 
 def regime_split(dates: list[date]) -> dict[str, tuple[date, date]]:
