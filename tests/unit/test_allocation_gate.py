@@ -39,13 +39,14 @@ from decimal import Decimal
 
 import pytest
 
-from finalayze.backtest.allocation_gate import (  # noqa: E402 -- RED: module absent until Plans 02-04
+from finalayze.backtest.allocation_gate import (
     CUT_GLIDE,
     REGIME_SPLIT_BOUNDARY,
     accrue_real_risk_free_leg,
     build_naive_legs,
     excess_sortino_from_equity,
     gate_with_autotighten,
+    net_index_returns,
     oos_wf_sharpes,
     realized_dd_fraction,
     regime_split,
@@ -56,6 +57,7 @@ from finalayze.backtest.allocation_gate import (  # noqa: E402 -- RED: module ab
 )
 from finalayze.backtest.bond_walk_forward import generate_wf_windows
 from finalayze.core.allocation import tighten  # used only to derive the EXPECTED frozen vector
+from finalayze.core.ndfl import YtdTaxAccumulator
 from finalayze.core.schemas import AssetClass, RiskProfile
 from finalayze.orchestration.allocation import AllocationOrchestrator, AllocationResult
 
@@ -471,6 +473,122 @@ def test_accrue_real_risk_free_leg_grows_from_real_key_rate() -> None:
     assert ofz[-1][1] > _LIVE_BASE
     # OFZ-PK floater (no spread, full key rate) out-accrues the deposit (key-1pp).
     assert ofz[-1][1] > deposit[-1][1]
+
+
+# -- NDFL net step (REGIME-04, D-01/D-04, R-E) --------------------------------
+
+# A rising fetched-index level series whose daily return is the per-bar income the
+# net step taxes. Strictly increasing -> every daily return is positive -> taxed.
+_RISING_INDEX_BASE = Decimal(100)
+_RISING_INDEX_DAILY = Decimal("1.0005")
+# A flat (zero-return) index: every daily return is 0 -> nothing is taxed, so net == gross
+# == the unchanged level (principal is never taxed -- Pitfall 1).
+_FLAT_INDEX_LEVEL = Decimal(100)
+# Enough bars for the cross-leg YTD to accumulate meaningfully (still well under the
+# 2.4M threshold on a 100k base, so the cross-leg test reasons about ordering, not the band).
+_NET_N_STEPS = 24
+# A SINGLE-tax-year window (all bars in 2025) so the shared accumulator's YTD is monotonic
+# across both legs -- no Jan-1 reset confounds the cross-leg assertion. 2025 opens in the
+# high-rate regime (20-21%), so the deposit leg accrues real taxable income.
+_NET_SINGLE_YEAR_FIRST = date(2025, 1, 9)
+_NET_SINGLE_YEAR_STEPS = 11  # ~monthly bars through 2025, all in one tax year
+
+
+def _rebased_index(base: Decimal, daily: Decimal, dates: list[date]) -> list[tuple[date, Decimal]]:
+    """A deterministic rising (date, Decimal) index *level* series (e.g. a RUFLBITR proxy)."""
+    return [(d, base * daily**i) for i, d in enumerate(dates)]
+
+
+def test_accrue_real_risk_free_leg_nets_via_accumulator() -> None:
+    """The net deposit/OFZ leg loses income to NDFL: net final value < gross (REGIME-04 / R-E).
+
+    Threading a ``YtdTaxAccumulator`` into ``accrue_real_risk_free_leg`` nets the per-bar
+    income INCREMENT (not the level -- Pitfall 1) through the progressive 13/15% band, so
+    the net leg's final value is strictly BELOW the same call with ``tax_acc=None`` (gross).
+    Both still open at ``base`` on ``dates[0]`` and rise across the 16-21% high-rate regime.
+    The gross path (``tax_acc=None``) stays byte-identical to today (no regression).
+    """
+    dates = [_LIVE_FIRST + timedelta(days=i * _DAYS_BETWEEN) for i in range(_NET_N_STEPS)]
+    dates = [d for d in dates if d <= _LIVE_LAST]
+
+    gross = accrue_real_risk_free_leg(dates, _LIVE_BASE, spread_pp=_DEPOSIT_SPREAD_PP)
+    net = accrue_real_risk_free_leg(
+        dates, _LIVE_BASE, spread_pp=_DEPOSIT_SPREAD_PP, tax_acc=YtdTaxAccumulator()
+    )
+
+    # Same axis, both open at base (R-3).
+    assert [d for d, _ in net] == dates
+    assert net[0][1] == _LIVE_BASE
+    assert gross[0][1] == _LIVE_BASE
+    # Both rise (high-rate regime), but the net leg loses income to NDFL -> strictly below gross.
+    assert net[-1][1] > _LIVE_BASE
+    assert net[-1][1] < gross[-1][1]
+
+
+def test_net_index_returns_taxes_increment_not_principal() -> None:
+    """``net_index_returns`` taxes the daily return increment, not principal (REGIME-04 / P-1).
+
+    A rising fetched index re-based to a net total-return curve has a total gain strictly
+    BELOW the gross index's total gain (income lost to NDFL), opening at the same base. A
+    FLAT (zero daily return) index returns net == gross == the level unchanged -- principal
+    is never taxed (Pitfall 1).
+    """
+    dates = [_LIVE_FIRST + timedelta(days=i * _DAYS_BETWEEN) for i in range(_NET_N_STEPS)]
+    dates = [d for d in dates if d <= _LIVE_LAST]
+
+    rising = _rebased_index(_RISING_INDEX_BASE, _RISING_INDEX_DAILY, dates)
+    net = net_index_returns(rising, tax_acc=YtdTaxAccumulator())
+
+    # Opens at the same base; total net gain is strictly below the gross index gain.
+    assert net[0][1] == rising[0][1]
+    gross_gain = rising[-1][1] - rising[0][1]
+    net_gain = net[-1][1] - net[0][1]
+    assert net_gain > _ZERO
+    assert net_gain < gross_gain
+
+    # A flat index: zero daily return -> nothing taxed -> net == gross == level unchanged.
+    flat = [(d, _FLAT_INDEX_LEVEL) for d in dates]
+    flat_net = net_index_returns(flat, tax_acc=YtdTaxAccumulator())
+    assert [v for _, v in flat_net] == [v for _, v in flat]
+
+
+def test_shared_accumulator_cross_leg_ytd() -> None:
+    """One shared accumulator accrues a single cross-leg YTD over deposit + index legs (R-E / A2).
+
+    Passing the SAME ``YtdTaxAccumulator`` through a deposit-leg call THEN a
+    ``net_index_returns`` call accumulates one cross-leg YTD (the W1 cross-sleeve design):
+    the second leg's tax is computed on top of the first leg's YTD, not from zero. Using a
+    single-tax-year window (no Jan-1 reset) the accumulator's running YTD strictly grows on
+    the second (index) leg, so it saw the deposit leg's prior YTD. Modeling the
+    cross-leg-shared behavior (not per-leg) is the deliverable.
+    """
+    dates = [
+        _NET_SINGLE_YEAR_FIRST + timedelta(days=i * _DAYS_BETWEEN)
+        for i in range(_NET_SINGLE_YEAR_STEPS)
+    ]
+    rising = _rebased_index(_RISING_INDEX_BASE, _RISING_INDEX_DAILY, dates)
+
+    shared = YtdTaxAccumulator()
+    deposit_net = accrue_real_risk_free_leg(
+        dates, _LIVE_BASE, spread_pp=_DEPOSIT_SPREAD_PP, tax_acc=shared
+    )
+    ytd_after_deposit = shared.ytd_taxable
+    index_net = net_index_returns(rising, tax_acc=shared)
+    ytd_after_both = shared.ytd_taxable
+
+    # The shared accumulator advanced on BOTH legs (one tax year, no reset): the YTD strictly
+    # grew on the index leg, so the second leg saw a non-zero starting YTD (cross-leg, not
+    # per-leg).
+    assert ytd_after_deposit > _ZERO
+    assert ytd_after_both > ytd_after_deposit
+    # Cross-leg, not per-leg: had the index leg used a FRESH accumulator, its standalone YTD
+    # would be far below the shared running total (which already carries the deposit YTD).
+    index_only_ytd = YtdTaxAccumulator()
+    net_index_returns(rising, tax_acc=index_only_ytd)
+    assert ytd_after_both > index_only_ytd.ytd_taxable
+    # Both nets are real curves (open at base, taxed below their gross).
+    assert deposit_net[0][1] == _LIVE_BASE
+    assert index_net[0][1] == rising[0][1]
 
 
 # -- Risk-free-bar methodology note (operator follow-up, framing-only) ---------

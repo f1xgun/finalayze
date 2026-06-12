@@ -52,6 +52,7 @@ from finalayze.data.fetchers.cbr import (
 from finalayze.strategies.bond_duration_rotation import CBRRegime, classify_regime
 
 if TYPE_CHECKING:
+    from finalayze.core.ndfl import YtdTaxAccumulator
     from finalayze.orchestration.allocation import AllocationOrchestrator, AllocationResult
 
 # ── Constants (named — no PLR2004 magic numbers) ─────────────────────────────
@@ -513,7 +514,11 @@ def _reaccrue_risk_free_leg(
 
 
 def accrue_real_risk_free_leg(
-    dates: list[date], base: Decimal, *, spread_pp: Decimal
+    dates: list[date],
+    base: Decimal,
+    *,
+    spread_pp: Decimal,
+    tax_acc: YtdTaxAccumulator | None = None,
 ) -> list[tuple[date, Decimal]]:
     """Accrue a risk-free leg from the REAL CBR key-rate path (the live-cert builder).
 
@@ -531,6 +536,16 @@ def accrue_real_risk_free_leg(
     risk-free legs derive from the REAL CBR calendar, the equity leg from the REAL MCFTR
     series. The returned ``(date, Decimal)`` series shares the supplied common date axis
     (R-3), so the three legs forward-align identically for ``build_naive_legs``.
+
+    Net-of-NDFL step (REGIME-04 / D-01 / D-04 / R-E): when ``tax_acc`` is supplied, the
+    per-bar income INCREMENT (``value * daily_factor - value`` — the day's accrued interest,
+    NOT the level) is netted through the shared progressive 13/15% band
+    (:class:`finalayze.core.ndfl.YtdTaxAccumulator`); only the after-tax income compounds.
+    Pass ONE shared accumulator per run so the deposit + OFZ legs share one cross-leg YTD
+    (the W1 cross-sleeve design). With ``tax_acc=None`` the leg is GROSS — byte-identical
+    to the pre-Phase-74 behaviour (no NDFL on the daily income delta). Never net the curve
+    LEVEL — that would tax principal (Pitfall 1). MCFTRR is already net and must NOT be
+    routed through an accumulator.
     """
     if not dates:
         return []
@@ -540,7 +555,52 @@ def accrue_real_risk_free_leg(
         # deposit_rate_as_of returns a FRACTION already net of the spread (key-spread)/100.
         annual = deposit_rate_as_of(d, spread_pp=spread_pp)
         daily_factor = Decimal(str((1.0 + float(annual)) ** (1.0 / _TRADING_DAYS)))
-        value = value * daily_factor
+        # Net the day's income INCREMENT (not the level) through the shared NDFL band (R-E).
+        gross_income_delta = value * daily_factor - value
+        tax = tax_acc.tax(gross_income_delta, year=d.year) if tax_acc else Decimal(0)
+        value = value + (gross_income_delta - tax)
+        out.append((d, value))
+    return out
+
+
+def net_index_returns(
+    level_series: list[tuple[date, Decimal]],
+    *,
+    tax_acc: YtdTaxAccumulator | None = None,
+) -> list[tuple[date, Decimal]]:
+    """Re-base a fetched GROSS index (RUFLBITR) to a net-of-NDFL TR curve (REGIME-04 / R-E).
+
+    The deposit/OFZ accrual analogue for a FETCHED index level series: the real RUFLBITR
+    floating-coupon-bond TR index is published GROSS of investor NDFL (D-04 derived
+    implication), so to honour D-01 (net both sides) its daily return must be netted of the
+    same progressive 13/15% band the deposit leg uses.
+
+    The curve opens at the same base (``level_series[0]``). For each subsequent bar the day's
+    income is the RETURN INCREMENT applied to the prior NET value
+    (``prior_value * (level[i] / level[i - 1] - 1)`` — NOT the index level, Pitfall 1). A
+    POSITIVE daily income is netted through ``tax_acc.tax(income, year=d.year)``; a NEGATIVE
+    daily return is passed through untaxed (a loss is not a refund). When ``tax_acc`` is
+    ``None`` the increment compounds gross. Principal is never taxed: a flat (zero-return)
+    index returns the level unchanged.
+
+    Pass the SAME shared ``YtdTaxAccumulator`` used by :func:`accrue_real_risk_free_leg` so
+    the index leg shares one cross-leg YTD with the deposit leg (the W1 cross-sleeve design).
+    MCFTRR is ALREADY net — do NOT route it through this helper (Pitfall 1: double-taxing
+    equity).
+    """
+    if not level_series:
+        return []
+    out: list[tuple[date, Decimal]] = [level_series[0]]
+    value = level_series[0][1]
+    prev_level = level_series[0][1]
+    for d, level in level_series[1:]:
+        if prev_level > 0:
+            daily_return = level / prev_level - _ONE
+            income = value * daily_return
+            if income > _ZERO:
+                income -= tax_acc.tax(income, year=d.year) if tax_acc else _ZERO
+            value = value + income
+        prev_level = level
         out.append((d, value))
     return out
 
