@@ -41,7 +41,15 @@ is the honest set, never a single softened pass).
 Usage::
 
     uv run python scripts/run_allocation_gate.py            # deterministic offline cert (default)
-    uv run python scripts/run_allocation_gate.py --live     # fetch the real MCFTR series (operator)
+    uv run python scripts/run_allocation_gate.py --live     # REAL MCFTR/CBR cert (operator)
+
+``--live`` (operator-directed, an explicit override of D-10): the binding v11.0 cert on
+the REAL series -- the genuine MCFTR gross total-return index (public ISS REST, no token)
+as the equity leg + benchmark bar, and the deposit/OFZ-PK legs daily-accrued from the REAL
+look-ahead-safe ``CBR_MEETINGS`` key-rate calendar (deposit = key-1pp, OFZ-PK floater =
+full key rate). All three legs share the MCFTR trading-day axis (R-3). The per-profile
+verdict is whatever ``gate_with_autotighten`` returns on the real curves -- a HARD_FAIL on
+real data is a legitimate, non-softened, honest outcome (the Phase-72 anti-hollow lesson).
 """
 
 from __future__ import annotations
@@ -59,6 +67,7 @@ from typing import TYPE_CHECKING, cast
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from finalayze.backtest.allocation_gate import (
+    accrue_real_risk_free_leg,
     build_naive_legs,
     excess_sortino_from_equity,
     gate_with_autotighten,
@@ -70,6 +79,7 @@ from finalayze.backtest.allocation_gate import (
 )
 from finalayze.config.allocation_profiles import load_allocation_profiles
 from finalayze.core.schemas import RiskProfile
+from finalayze.data.loader import load_mcftr_series
 
 if TYPE_CHECKING:
     from finalayze.orchestration.allocation import AllocationResult
@@ -111,6 +121,26 @@ _RNG_SEED = 73  # fixed seed -> reproducible cert (CLAUDE.md: no magic, named co
 
 _TRADING_DAYS_PER_YEAR = 252
 _PERCENT = Decimal(100)
+
+# ── Live window (operator-directed --live run, D-10 override) ────────────────
+# The operator REJECTED the seeded-synthetic fixture as the binding v11.0 cert and
+# required the cert computed on the REAL MCFTR/CBR series. This window BRACKETS the
+# documented REGIME_SPLIT_BOUNDARY (2025-07-25) so the report renders BOTH regimes on
+# REAL data. MCFTR (the equity leg) is the public ISS-REST gross total-return index; the
+# deposit + OFZ-PK legs accrue from the REAL look-ahead-safe CBR_MEETINGS key-rate path.
+_LIVE_START = datetime(2024, 1, 1, tzinfo=timezone.utc)  # noqa: UP017
+_LIVE_END = datetime(2025, 11, 30, tzinfo=timezone.utc)  # noqa: UP017
+# Real legs share ONE common daily axis (the MCFTR trading-day calendar): the deposit +
+# OFZ-PK legs are accrued on the EXACT MCFTR dates so build_naive_legs sees one basis (R-3).
+_LIVE_DEPOSIT_BASE = Decimal(100_000)
+_LIVE_OFZ_BASE = Decimal(100_000)
+# Deposit accrues at key-1pp (mirrors W1's deposit spread); OFZ-PK floater tracks the full
+# key rate (no spread). Both read the REAL CBR calendar via accrue_real_risk_free_leg.
+_LIVE_DEPOSIT_SPREAD_PP = Decimal("1.0")
+_LIVE_OFZ_SPREAD_PP = Decimal(0)
+# A real ~2y MCFTR window has ~480+ trading-day bars; refuse a hollow run if the fetch
+# returns far fewer (HONESTY GATE: never fabricate a synthetic 'live' leg, T-73-12).
+_N_LIVE_MIN_BARS = 300
 
 # The three SAA profiles, in the conservative -> balanced -> growth order the report
 # renders them. Each carries its own MaxDD cap (8 / 15 / 25%) read from the loaded
@@ -182,6 +212,50 @@ def _append_history(name: str, *, git_sha: str, verdict: str, metrics: dict[str,
         fh.write(json.dumps(entry) + "\n")
 
 
+def _load_live_curves() -> tuple[
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+]:
+    """Load the three REAL total-return curves for the operator-directed ``--live`` cert.
+
+    Operator decision (D-10 override): the seeded-synthetic fixture is REJECTED as the
+    binding v11.0 cert; the cert MUST be computed on the REAL MCFTR/CBR series. Every leg
+    here is genuine real-market data (the Phase-72 anti-hollow lesson, escalated):
+
+    - **equity (MCFTR)** -- REAL: ``load_mcftr_series`` over the public MOEX ISS REST index
+      endpoint (gross total-return, NO token/cert; R-1). This is BOTH the equity sleeve and
+      the 100%-equity benchmark bar (apples-to-apples).
+    - **deposit** -- REAL: ``accrue_real_risk_free_leg`` daily-compounds at the as-of
+      ``deposit_rate_as_of`` (key - 1pp) read look-ahead-safe from the REAL ``CBR_MEETINGS``
+      key-rate calendar.
+    - **OFZ-PK** -- REAL: the same real-rate accrual at the full key rate (no spread) -- the
+      floater leg. (The allocator's OFZ-PK leg is an as-of-key-rate accrued floater, not a
+      per-bond candle series; the W2/bond layer keys it off the same real CBR key rate,
+      73-RESEARCH R-5.)
+
+    The MCFTR trading-day calendar is the MASTER axis: the deposit + OFZ-PK legs accrue on
+    the EXACT MCFTR dates so all three legs share ONE common daily basis (R-3) -- the same
+    alignment the offline path's shared ``_dates()`` gives.
+    """
+    equity_curve = load_mcftr_series(start=_LIVE_START, end=_LIVE_END)
+    if len(equity_curve) < _N_LIVE_MIN_BARS:
+        msg = (
+            f"--live MCFTR fetch returned only {len(equity_curve)} bars over "
+            f"{_LIVE_START.date()}..{_LIVE_END.date()} (need >= {_N_LIVE_MIN_BARS}); "
+            "real equity data unavailable -- refusing to fabricate a synthetic 'live' leg."
+        )
+        raise SystemExit(msg)
+    # The MCFTR trading-day calendar IS the common axis (R-3): accrue the two risk-free
+    # legs on the EXACT MCFTR dates from the REAL CBR key-rate path.
+    axis = [d for d, _ in equity_curve]
+    deposit_curve = accrue_real_risk_free_leg(
+        axis, _LIVE_DEPOSIT_BASE, spread_pp=_LIVE_DEPOSIT_SPREAD_PP
+    )
+    ofz_pk_curve = accrue_real_risk_free_leg(axis, _LIVE_OFZ_BASE, spread_pp=_LIVE_OFZ_SPREAD_PP)
+    return deposit_curve, ofz_pk_curve, equity_curve
+
+
 def _load_curves(
     *, live: bool, dates: list[date]
 ) -> tuple[
@@ -192,17 +266,14 @@ def _load_curves(
     """Load the three benchmark TR curves.
 
     Default (``live=False``): the deterministic in-memory geometric curves -- CI-safe,
-    reproducible, no token, no network (the cert path). With ``--live`` the operator may
-    wire the REAL MCFTR equity series; deferred (D-10: the gate is offline/deterministic
-    by default and this phase has no live path). The flag is reserved so the CLI shape
-    documents the upgrade without shipping an unverified network call into the cert.
+    reproducible, no token, no network (the cert path). With ``--live`` (the operator's
+    D-10 override) the REAL series are loaded via :func:`_load_live_curves`: the genuine
+    MCFTR equity index + the real-CBR-rate-accrued deposit/OFZ-PK legs. The live legs drive
+    their OWN dates (the MCFTR trading-day calendar), so the offline ``dates`` argument is
+    used only for the default path.
     """
     if live:
-        msg = (
-            "--live (real MCFTR fetch) is reserved for an operator run; the committed cert "
-            "is deterministic/offline by default (D-10). Run without --live for the CI cert."
-        )
-        raise SystemExit(msg)
+        return _load_live_curves()
     # One fixed-seed RNG per leg (seed offset by leg index) so the three noise streams are
     # independent yet fully reproducible -- two runs are byte-identical (CI-safe cert).
     # S311: seeded deterministic test-fixture RNGs, not a cryptographic use.
@@ -340,7 +411,13 @@ def main() -> int:
     print("=" * 78)
     print("PHASE 73 ALLOCATION GATE (GATE-01/02/03) -- backtest-iteration cert")
     print("=" * 78)
-    print(f"window: {_FIRST_BAR} + {_N_BARS} daily bars (deterministic, offline, no token)")
+    if args.live:
+        print(
+            f"window: REAL data {_LIVE_START.date()}..{_LIVE_END.date()} "
+            "(MCFTR ISS-REST equity + real-CBR-rate deposit/OFZ-PK legs, operator D-10 override)"
+        )
+    else:
+        print(f"window: {_FIRST_BAR} + {_N_BARS} daily bars (deterministic, offline, no token)")
     print(f"git_sha: {git_sha}")
     print("-" * 78)
     print("Per-profile verdicts (REAL gate_with_autotighten path -- not a pre-baked literal):")
