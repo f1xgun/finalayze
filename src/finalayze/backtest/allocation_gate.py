@@ -21,17 +21,19 @@ The conjunctive verdict (:func:`verdict_for_profile`, D-01) PASSes IFF the
 allocator's Sharpe AND Sortino both clear the best-of-three naive bar AND the
 realized MaxDD is within the profile cap — never an "either/or".
 
-The auto-tighten (V-5), OOS walk-forward (V-8), cut-path (V-7) and regime-split
-(V-9) primitives are implemented by Plans 03/04; their public names are declared
-here so the module imports cleanly, but they raise ``NotImplementedError`` until
-those plans land.
+The auto-tighten (V-5) and OOS walk-forward (V-8) primitives are implemented by
+Plan 03; the cut-path (V-7), regime-split (V-9) and the Markdown/JSON report
+renderer (D-11) are implemented by Plan 04. The cut-path lowers ONLY the risk-free
+legs under the synthetic :data:`CUT_GLIDE` while holding the MCFTR equity curve
+byte-identical (D-07), and is FRAMING-ONLY (D-08) — its metrics are reported with
+the explicit high-rate caveat but never feed the binding verdict.
 """
 
 from __future__ import annotations
 
 import math
 import statistics
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, cast
 
@@ -41,7 +43,12 @@ from finalayze.backtest.bond_walk_forward import (
 )
 from finalayze.core.allocation import tighten
 from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
-from finalayze.data.fetchers.cbr import CBRMeeting, get_last_cbr_decision
+from finalayze.data.fetchers.cbr import (
+    CBRMeeting,
+    MacroContextProvider,
+    get_last_cbr_decision,
+)
+from finalayze.strategies.bond_duration_rotation import CBRRegime, classify_regime
 
 if TYPE_CHECKING:
     from finalayze.orchestration.allocation import AllocationOrchestrator, AllocationResult
@@ -251,11 +258,10 @@ def verdict_for_profile(
     }
 
 
-# ── Deferred public surface (Plans 03/04) ────────────────────────────────────
-# These names are part of the V-1..V-9 import contract pinned by Plan 01, so they
-# MUST exist for the test module to import. Their behaviour lands in Plans 03
-# (auto-tighten V-5, OOS walk-forward V-8) and 04 (cut-path V-7, regime-split V-9);
-# until then they raise so the four deferred tests FAIL (not error at collection).
+# ── Cut-path + regime framing surface (Plan 04, D-07/D-08/D-09/R-6) ──────────
+# These names are part of the V-1..V-9 import contract pinned by Plan 01. The
+# auto-tighten (V-5) / OOS WF (V-8) primitives landed in Plan 03; the cut-path
+# scenario (V-7), regime split (V-9) and report renderer (D-11) land below.
 
 # CUT_GLIDE: the synthetic declining-rate meeting calendar (V-7 / D-07).
 # FRAMING-ONLY (D-08): these metrics are reported but NEVER fed into the binding
@@ -280,9 +286,15 @@ _DEPOSIT_SPREAD_PP = Decimal("1.0")
 _PCT_POINTS = Decimal(100)
 _TRADING_DAYS = 252
 
-# REGIME_SPLIT_BOUNDARY: the early-cut regime boundary (V-9 / D-09 / R-6).
-# Pinned to date(2025, 7, 25); finalised in Plan 04 / Task 2.
-REGIME_SPLIT_BOUNDARY: date | None = None
+# REGIME_SPLIT_BOUNDARY: the early-cut regime boundary (V-9 / D-09 / R-6). The first
+# real 2025 CBR cut (21 -> 20) lands on 2025-07-25 — the documented high-rate/plateau
+# vs early-cut split point. NAMED (no magic date in logic).
+REGIME_SPLIT_BOUNDARY: date = date(2025, 7, 25)
+
+# The mandatory honesty caveat (D-08 / Pitfall 6): a deposit-wins-raw-return outcome in a
+# 16-21% high-rate regime is correctly framed as NOT a failure. Pinned VERBATIM by the
+# report; the verifier greps for this literal string.
+_HIGH_RATE_CAVEAT = "100% deposit winning raw return in a 16-21% high-rate regime is NOT a failure"
 
 
 def _run_and_score(
@@ -514,6 +526,145 @@ def _profile_weights_for(profile_key: RiskProfile) -> dict[AssetClass, Decimal]:
     return dict(profile.weights)
 
 
-def regime_split(*args: object, **kwargs: object) -> dict[str, tuple[date, date]]:
-    """Partition a date window at the regime boundary (V-9 / D-09) — Plan 04 / Task 2."""
-    raise NotImplementedError("regime_split lands in Plan 73-04 Task 2")
+def regime_split(dates: list[date]) -> dict[str, tuple[date, date]]:
+    """Partition a date window at :data:`REGIME_SPLIT_BOUNDARY` (V-9 / D-09 / R-6).
+
+    The HEADLINE regime report (D-09): a documented high-rate/plateau vs early-cut date
+    split at 2025-07-25 — the first real 2025 CBR cut. Returns:
+
+    - ``{"high_rate": (start, 2025-07-24), "early_cut": (2025-07-25, end)}`` for a window
+      spanning the boundary;
+    - ``{"high_rate": (start, end)}`` (single regime) when the whole window ends before the
+      boundary — the single-high-rate case leans on the cut-path scenario for framing
+      (Pitfall 6).
+
+    This date split (NOT the ``classify_regime`` cross-check) is the binding-readable
+    headline because it matches Pitfall 6's wording literally and is trivial to verify.
+    """
+    start, end = dates[0], dates[-1]
+    if end < REGIME_SPLIT_BOUNDARY:
+        return {"high_rate": (start, end)}  # single regime — lean on the cut-path scenario
+    day_before = REGIME_SPLIT_BOUNDARY - timedelta(days=1)
+    return {"high_rate": (start, day_before), "early_cut": (REGIME_SPLIT_BOUNDARY, end)}
+
+
+# Defensive defaults for the classify_regime cross-check before the calendar's first
+# meeting (snapshot fields can be None). NEUTRAL-leaning so a missing snapshot never
+# fabricates a HAWKISH/DOVISH headline — the date split is the headline, this is secondary.
+_DEFAULT_KEY_RATE_PP = Decimal("21.0")
+_DEFAULT_CPI_YOY = Decimal("0.0")
+_DEFAULT_LAST_DECISION = "hold"
+
+
+def classify_regime_for_date(d: date) -> CBRRegime:
+    """Thin per-date wrapper reusing :func:`classify_regime` VERBATIM (D-09 cross-check).
+
+    Assembles the ``(key_rate, ruonia_7d_avg, cpi_yoy, last_cbr_decision)`` tuple from
+    :meth:`MacroContextProvider.get_snapshot` (look-ahead-safe, as-of *d*) and feeds it to
+    the FROZEN :func:`finalayze.strategies.bond_duration_rotation.classify_regime`. The
+    wrapper is the small new code; ``classify_regime`` is reused, not re-implemented — this
+    is the SECONDARY cross-check (the headline is the date split in :func:`regime_split`).
+
+    Missing snapshot fields (before the calendar's first meeting) fall back to NEUTRAL-safe
+    defaults so a gap never fabricates a regime label.
+    """
+    snap = MacroContextProvider().get_snapshot(d)
+    key_rate = snap.key_rate if snap.key_rate is not None else _DEFAULT_KEY_RATE_PP
+    ruonia = snap.ruonia_7d_avg if snap.ruonia_7d_avg is not None else key_rate
+    cpi = snap.cpi_yoy if snap.cpi_yoy is not None else _DEFAULT_CPI_YOY
+    last = snap.last_cbr_decision if snap.last_cbr_decision is not None else _DEFAULT_LAST_DECISION
+    return classify_regime(key_rate, ruonia, cpi, last)
+
+
+def render_json(
+    per_profile_verdicts: dict[str, object],
+    naive_metrics: dict[str, object],
+    cut_path_metrics: dict[str, object],
+    regime: dict[str, tuple[date, date]],
+    *,
+    git_sha: str,
+) -> dict[str, object]:
+    """Assemble all gate metrics into a JSON-serializable sidecar (D-11).
+
+    Mirrors the ``scripts/phase72_allocation_ab.py`` ``summary.json`` shape: a flat dict of
+    per-profile / per-naive / cut-path metric blocks plus the ``git_sha`` and the regime
+    split (rendered as ISO date pairs). Decimal values are stringified so the dict is
+    ``json.dumps``-able without a custom encoder. The machine-readable feed a future
+    dashboard (deferred) consumes.
+    """
+    return {
+        "git_sha": git_sha,
+        "per_profile": per_profile_verdicts,
+        "naive": naive_metrics,
+        "cut_path": cut_path_metrics,
+        "regime_split": {k: [v[0].isoformat(), v[1].isoformat()] for k, v in regime.items()},
+        "high_rate_caveat": _HIGH_RATE_CAVEAT,
+    }
+
+
+def _fmt(value: object) -> str:
+    """Render a metric cell — floats to 4dp, everything else via ``str`` (report-only)."""
+    return f"{value:.4f}" if isinstance(value, float) else str(value)
+
+
+def render_report(payload: dict[str, object]) -> str:
+    """Render the human-readable Markdown gate report (D-11).
+
+    Sections: a header, the per-profile verdict table (profile | Sharpe vs best-naive |
+    Sortino vs best-naive | realized MaxDD vs cap | mean WF-fold Sharpe | verdict), the
+    naive-comparison block, the regime split block, the cut-path metrics block, and the
+    mandatory honesty caveat line (:data:`_HIGH_RATE_CAVEAT`, verbatim).
+
+    The BINDING number is the full-window metric (``verdict_for_profile``); the mean
+    WF-fold Sharpe (R-1 / D-02) is REPORTED alongside so GATE-01's "OOS via walk-forward"
+    is visibly honored without being binding. ``payload`` is the :func:`render_json` dict
+    (or a compatible shape).
+    """
+    per_profile = cast("dict[str, object]", payload.get("per_profile", {}))
+    naive = cast("dict[str, object]", payload.get("naive", {}))
+    cut_path = cast("dict[str, object]", payload.get("cut_path", {}))
+    regime = cast("dict[str, object]", payload.get("regime_split", {}))
+
+    lines: list[str] = [
+        "# Allocation Gate Report (GATE-01/02/03)",
+        "",
+        f"git_sha: `{payload.get('git_sha', 'unknown')}`",
+        "",
+        "## Per-Profile Verdict (binding = full-window; WF mean reported-only)",
+        "",
+        "| Profile | Sharpe | Best-naive Sharpe | Sortino | Best-naive Sortino "
+        "| Realized MaxDD | Cap | Mean WF Sharpe | Verdict |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for name, raw in per_profile.items():
+        v = cast("dict[str, object]", raw)
+        lines.append(
+            f"| {name} | {_fmt(v.get('sharpe'))} | {_fmt(v.get('best_naive_sharpe'))} "
+            f"| {_fmt(v.get('sortino'))} | {_fmt(v.get('best_naive_sortino'))} "
+            f"| {_fmt(v.get('realized_maxdd_frac'))} | {_fmt(v.get('cap_frac'))} "
+            f"| {_fmt(v.get('mean_wf_sharpe'))} | {_fmt(v.get('verdict', v.get('pass')))} |"
+        )
+
+    lines += [
+        "",
+        "## Naive Benchmark Comparison (best-of-three is the bar, D-04)",
+        "",
+        *(f"- `{k}`: {_fmt(val)}" for k, val in naive.items()),
+        "",
+        "## Regime Split (headline = documented date split, D-09 / R-6)",
+        "",
+        *(f"- `{k}`: {val}" for k, val in regime.items()),
+        "",
+        "## Cut-Path Scenario (FRAMING-ONLY — NOT a binding verdict, D-07/D-08)",
+        "",
+        "_The synthetic CUT_GLIDE lowers ONLY the risk-free legs; the MCFTR equity curve "
+        "is held byte-identical (no fabricated uplift). Illustrative, not a forecast (A2)._",
+        "",
+        *(f"- `{k}`: {_fmt(val)}" for k, val in cut_path.items()),
+        "",
+        "## Honesty Caveat (Pitfall 6 / D-08)",
+        "",
+        f"> {_HIGH_RATE_CAVEAT}",
+        "",
+    ]
+    return "\n".join(lines)
