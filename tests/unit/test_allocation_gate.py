@@ -38,12 +38,21 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from finalayze.backtest.allocation_gate import (  # noqa: E402 -- RED: module absent until Plans 02-04
+    CUT_GLIDE,
+    REGIME_SPLIT_BOUNDARY,
     build_naive_legs,
     excess_sortino_from_equity,
+    gate_with_autotighten,
+    oos_wf_sharpes,
     realized_dd_fraction,
+    regime_split,
+    run_cut_path,
     verdict_for_profile,
 )
+from finalayze.backtest.bond_walk_forward import generate_wf_windows
+from finalayze.core.allocation import tighten  # used only to derive the EXPECTED frozen vector
 from finalayze.core.schemas import AssetClass, RiskProfile
+from finalayze.orchestration.allocation import AllocationOrchestrator, AllocationResult
 
 # -- Constants (named -- no magic numbers, ruff PLR2004) ----------------------
 
@@ -90,6 +99,36 @@ _ALLOC_SORTINO_FAIL = 0.40  # below best-naive Sortino
 _ALLOC_MAXDD_FAIL_PCT = 20.0  # 0.20 -> over the 0.15 balanced cap
 
 _ZERO = Decimal(0)
+
+# -- Task 2 constants (V-5, V-7, V-8, V-9) ------------------------------------
+
+# V-9 / D-09 / R-6: the early-cut regime boundary.
+_BOUNDARY = date(2025, 7, 25)
+_HIGH_RATE_LAST = date(2025, 7, 24)  # last day of the high-rate window
+
+# V-8 / D-02: the WF window cadence the gate MUST pass explicitly to
+# generate_wf_windows (train/test/step months).
+_WF_TRAIN_M = 12
+_WF_TEST_M = 6
+_WF_STEP_M = 3
+# A >= 4-year daily window so generate_wf_windows yields >= 3 folds.
+_WF_FIRST_BAR = date(2021, 1, 1)
+_WF_N_BARS = 4 * 365 + 1  # ~4 years of daily bars (inclusive of a leap day)
+
+# V-5 / D-03: a growth-like cap-breaching base vector. A static breach drains
+# equity 5pp/step into deposit until equity clamps at 0 (the tighten terminal
+# state): deposit -> base_deposit + base_equity, ofz_pk fixed, equity -> 0.
+_GROWTHISH_DEPOSIT_W = Decimal("0.20")
+_GROWTHISH_OFZ_W = Decimal("0.25")
+_GROWTHISH_EQUITY_W = Decimal("0.55")
+_GROWTH_BASE_WEIGHTS = {
+    AssetClass.DEPOSIT: _GROWTHISH_DEPOSIT_W,
+    AssetClass.OFZ_PK: _GROWTHISH_OFZ_W,
+    AssetClass.EQUITY: _GROWTHISH_EQUITY_W,
+}
+# A realized MaxDD (percent) that breaches even after equity drains to 0.
+_BREACH_MAXDD_PCT = 30.0  # 0.30 -> over any sane cap -> HARD_FAIL
+_HARD_FAIL = "HARD_FAIL"
 
 
 def _daily_index(first: date, n: int) -> list[date]:
@@ -253,3 +292,114 @@ def test_naive_legs_same_basis() -> None:
     assert set(legs) == {"deposit_100", "equity_100", "static_60_30_10"}
     assert legs["deposit_100"].rebalance_cost == _ZERO
     assert legs["static_60_30_10"].rebalance_cost > _ZERO
+
+
+def test_autotighten_hard_fail() -> None:
+    """A still-breaching profile freezes after the 5pp step and HARD_FAILs (V-5 / D-03).
+
+    A cap-breaching base vector drains equity 5pp/step into deposit until equity
+    clamps at 0 (the tighten terminal state). If the cap STILL breaches at that
+    frozen vector the gate returns ``HARD_FAIL`` -- it does NOT widen further. The
+    frozen vector matches the real ``tighten`` terminal: equity 0, deposit =
+    base_deposit + base_equity, OFZ-PK unchanged.
+    """
+    dates = _daily_index(_FIRST_BAR, _N_BARS)
+    deposit_curve = _curve(_DEPOSIT_BASE, _DEPOSIT_DAILY, dates)
+    ofz_pk_curve = _curve(_OFZ_BASE, _OFZ_DAILY, dates)
+    # A losing equity leg so the breach persists even after equity drains to 0.
+    equity_curve = _curve(_LOSING_BASE, _LOSING_DAILY, dates)
+
+    result = gate_with_autotighten(
+        profile_key=RiskProfile.GROWTH,
+        base_weights=_GROWTH_BASE_WEIGHTS,
+        cap_fraction=_CAP_CONSERVATIVE,
+        deposit_curve=deposit_curve,
+        ofz_pk_curve=ofz_pk_curve,
+        equity_curve=equity_curve,
+        naive_sharpes=_NAIVE_SHARPES,
+        naive_sortinos=_NAIVE_SORTINOS,
+    )
+
+    # Derive the EXPECTED frozen vector with the real tighten (the gate must call
+    # it internally); pin equity -> 0 and deposit -> base_deposit + base_equity.
+    expected_frozen = tighten(
+        _GROWTH_BASE_WEIGHTS, realized_dd=_KNOWN_MAXDD_FRAC, cap=_CAP_CONSERVATIVE
+    )
+    assert result["verdict"] == _HARD_FAIL
+    assert result["frozen_weights"][AssetClass.EQUITY] == _ZERO
+    assert (
+        result["frozen_weights"][AssetClass.DEPOSIT] == _GROWTHISH_DEPOSIT_W + _GROWTHISH_EQUITY_W
+    )
+    assert result["frozen_weights"][AssetClass.OFZ_PK] == _GROWTHISH_OFZ_W
+    assert result["frozen_weights"] == expected_frozen
+
+
+def test_wf_folds_no_rerun() -> None:
+    """OOS WF Sharpes slice the merged curve with 12/6/3 -- no engine re-run (V-8 / D-02).
+
+    ``oos_wf_sharpes`` slices the already-merged AllocationResult curve per
+    ``generate_wf_windows(start, end, 12, 6, 3)`` and computes one excess Sharpe per
+    fold. It NEVER constructs or runs a backtest engine; pinned by asserting the
+    fold count equals the window count for the SAME date span.
+    """
+    dates = _daily_index(_WF_FIRST_BAR, _WF_N_BARS)
+    orch = AllocationOrchestrator(risk_profile=RiskProfile.BALANCED)
+    result: AllocationResult = orch.run(
+        deposit_curve=_curve(_DEPOSIT_BASE, _DEPOSIT_DAILY, dates),
+        ofz_pk_curve=_curve(_OFZ_BASE, _OFZ_DAILY, dates),
+        equity_curve=_curve(_EQUITY_BASE, _EQUITY_DAILY, dates),
+    )
+    expected_windows = generate_wf_windows(
+        result.dates[0], result.dates[-1], _WF_TRAIN_M, _WF_TEST_M, _WF_STEP_M
+    )
+    folds = oos_wf_sharpes(result)
+    assert len(folds) == len(expected_windows)
+    assert all(isinstance(s, float) for s in folds)
+
+
+def test_cutpath_equity_fixed() -> None:
+    """The cut-path holds the MCFTR equity curve byte-identical (V-7 / D-07).
+
+    ``run_cut_path`` rebuilds ONLY the deposit + OFZ legs under the synthetic
+    declining ``CUT_GLIDE`` meeting calendar; the equity (MCFTR) leg is passed
+    through UNCHANGED (no fabricated uplift). The deposit leg under CUT_GLIDE
+    differs from the high-rate baseline deposit leg.
+    """
+    dates = _daily_index(_FIRST_BAR, _N_BARS)
+    deposit_curve = _curve(_DEPOSIT_BASE, _DEPOSIT_DAILY, dates)
+    ofz_pk_curve = _curve(_OFZ_BASE, _OFZ_DAILY, dates)
+    equity_curve = _curve(_EQUITY_BASE, _EQUITY_DAILY, dates)
+
+    cut = run_cut_path(deposit_curve, ofz_pk_curve, equity_curve)
+
+    # Equity leg is held FIXED to exact Decimal equality (no uplift).
+    assert [v for _, v in equity_curve] == list(cut.equity_curve)
+    # The deposit leg under CUT_GLIDE diverges from the high-rate baseline.
+    assert list(cut.deposit_curve) != [v for _, v in deposit_curve]
+    assert CUT_GLIDE is not None  # the synthetic declining meeting calendar exists
+
+
+def test_regime_split() -> None:
+    """The early-cut regime boundary is 2025-07-25 (V-9 / D-09 / R-6).
+
+    ``regime_split`` partitions a date window at 2025-07-25 -- the high-rate window
+    ends 2025-07-24, the early-cut window starts 2025-07-25. A window entirely
+    before the boundary is a single high-rate regime.
+    """
+    assert REGIME_SPLIT_BOUNDARY == _BOUNDARY
+
+    spanning = [
+        _BOUNDARY - timedelta(days=30),
+        _HIGH_RATE_LAST,
+        _BOUNDARY,
+        _BOUNDARY + timedelta(days=30),
+    ]
+    split = regime_split(spanning)
+    assert split["high_rate"][1] == _HIGH_RATE_LAST
+    assert split["early_cut"][0] == _BOUNDARY
+
+    # A window entirely before the boundary -> the whole span is high_rate.
+    pre_only = [_BOUNDARY - timedelta(days=60), _HIGH_RATE_LAST]
+    pre_split = regime_split(pre_only)
+    assert pre_split["high_rate"][0] == pre_only[0]
+    assert pre_split["high_rate"][1] == _HIGH_RATE_LAST
