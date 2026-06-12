@@ -1,0 +1,69 @@
+{
+  "git_sha": "17e324e1bb61a23349e38437fa96cf522c64c5d9",
+  "per_profile": {
+    "conservative": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -0.5321322909028473,
+      "best_naive_sharpe": 0.004566921430360009,
+      "sortino": -0.7479767252184853,
+      "best_naive_sortino": 0.006551753535622983,
+      "realized_maxdd_frac": 0.02615560286586794,
+      "cap_frac": 0.08,
+      "mean_wf_sharpe": -1.166249265307357
+    },
+    "balanced": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -0.3248387802679162,
+      "best_naive_sharpe": 0.004566921430360009,
+      "sortino": -0.45740459802980404,
+      "best_naive_sortino": 0.006551753535622983,
+      "realized_maxdd_frac": 0.039754098987667054,
+      "cap_frac": 0.15,
+      "mean_wf_sharpe": -0.901159774268646
+    },
+    "growth": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -0.21943966828186576,
+      "best_naive_sharpe": 0.004566921430360009,
+      "sortino": -0.31001133023849997,
+      "best_naive_sortino": 0.006551753535622983,
+      "realized_maxdd_frac": 0.0818291976913182,
+      "cap_frac": 0.25,
+      "mean_wf_sharpe": -0.7786419391015645
+    }
+  },
+  "naive": {
+    "deposit_100_sharpe": -0.1642454462873384,
+    "deposit_100_sortino": -0.2280844821906661,
+    "deposit_100_maxdd_pct": 0.018322854583910822,
+    "equity_100_sharpe": 0.004566921430360009,
+    "equity_100_sortino": 0.006551753535622983,
+    "equity_100_maxdd_pct": 18.42170809843538,
+    "static_60_30_10_sharpe": -0.21461714236864116,
+    "static_60_30_10_sortino": -0.3030704898759941,
+    "static_60_30_10_maxdd_pct": 10.400880786582839
+  },
+  "cut_path": {
+    "sharpe": 0.30021804020704396,
+    "sortino": 0.43750858425511013,
+    "maxdd_pct": 3.7885010032425046,
+    "rebalance_cost": "863.7685554229811073422970276",
+    "realized_ndfl": "971.0455183916316970015817523",
+    "final_equity": "457239.9431754144571427335109",
+    "note": "FRAMING-ONLY (D-08): risk-free legs lowered under CUT_GLIDE; equity held fixed."
+  },
+  "regime_split": {
+    "high_rate": [
+      "2024-01-01",
+      "2025-07-24"
+    ],
+    "early_cut": [
+      "2025-07-25",
+      "2025-11-30"
+    ]
+  },
+  "high_rate_caveat": "100% deposit winning raw return in a 16-21% high-rate regime is NOT a failure"
+}
