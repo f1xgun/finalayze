@@ -34,6 +34,10 @@ import statistics
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from finalayze.backtest.bond_walk_forward import (
+    _compute_excess_sharpe_from_equity,
+    generate_wf_windows,
+)
 from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
 
 if TYPE_CHECKING:
@@ -52,6 +56,12 @@ _MIN_RETURNS = 2
 # CONVENTION (a large-but-finite stand-in for an undefined ratio) as a float, since
 # the gate's Sortino is a float to sit on the same footing as AllocationResult.sharpe.
 _LARGE_SORTINO_SENTINEL = 1e9
+# OOS walk-forward geometry (D-02). Passed EXPLICITLY to generate_wf_windows — its
+# own defaults are 24/12/6, so these named constants are REQUIRED to honor the 12/6/3
+# cadence GATE-01 mandates (V-8).
+_WF_TRAIN_MONTHS = 12
+_WF_TEST_MONTHS = 6
+_WF_STEP_MONTHS = 3
 
 
 def excess_sortino_from_equity(
@@ -259,9 +269,52 @@ def gate_with_autotighten(*args: object, **kwargs: object) -> dict[str, object]:
     raise NotImplementedError("gate_with_autotighten lands in Plan 73-03")
 
 
-def oos_wf_sharpes(*args: object, **kwargs: object) -> list[float]:
-    """OOS walk-forward Sharpes sliced from the merged curve (V-8 / D-02) — Plan 03."""
-    raise NotImplementedError("oos_wf_sharpes lands in Plan 73-03")
+def oos_wf_sharpes(
+    result: AllocationResult,
+    risk_free_annual_pct: float = _DEFAULT_RUONIA_ANNUAL_PCT,
+) -> list[float]:
+    """OOS walk-forward Sharpes sliced from the merged curve — NO engine re-run (V-8 / D-02).
+
+    Slices the ALREADY-merged ``AllocationResult.merged_equity_curve`` per
+    ``generate_wf_windows(result.dates[0], result.dates[-1], 12, 6, 3)`` and computes one
+    RUONIA-excess Sharpe per OOS test slice via
+    :func:`bond_walk_forward._compute_excess_sharpe_from_equity` — the SAME daily-rf footing
+    as the gate Sortino. This is "walk-forward ANALYSIS" (time-based slicing), never
+    walk-forward OPTIMIZATION: no ``AllocationOrchestrator`` is constructed, no backtest
+    engine is run (D-02). The 12/6/3 cadence is passed EXPLICITLY (generate_wf_windows
+    defaults to 24/12/6).
+
+    A test slice with too few daily returns (``< _MIN_RETURNS + 1`` bars) is skipped, so the
+    returned count is the number of windows that yielded a defined fold Sharpe.
+    """
+    windows = generate_wf_windows(
+        result.dates[0], result.dates[-1], _WF_TRAIN_MONTHS, _WF_TEST_MONTHS, _WF_STEP_MONTHS
+    )
+    idx = {d: i for i, d in enumerate(result.dates)}
+    curve = [float(v) for v in result.merged_equity_curve]
+    out: list[float] = []
+    for _ts, _te, test_start, test_end in windows:
+        slc = [curve[idx[d]] for d in result.dates if test_start <= d <= test_end]
+        if len(slc) >= _MIN_RETURNS + 1:
+            out.append(_compute_excess_sharpe_from_equity(slc, risk_free_annual_pct))
+    return out
+
+
+def mean_wf_sharpe(
+    result: AllocationResult,
+    risk_free_annual_pct: float = _DEFAULT_RUONIA_ANNUAL_PCT,
+) -> float:
+    """The REPORTED mean OOS walk-forward Sharpe (D-02 / R-1) — NOT binding.
+
+    The mean of :func:`oos_wf_sharpes` (``0.0`` if no folds). This is the robustness number
+    GATE-01 reports AGAINST the naive bar so "OOS via walk-forward" is visibly honored
+    (R-1 mitigation); the BINDING metric is the full-window Sharpe/Sortino in
+    :func:`verdict_for_profile`, not this average. Deliberately does NOT route through
+    ``compute_walk_forward_sharpe`` (it wants a ``PortfolioBacktestResult``, has 0 callers,
+    and would re-run an engine — the anti-pattern this avoids).
+    """
+    vals = oos_wf_sharpes(result, risk_free_annual_pct)
+    return sum(vals) / len(vals) if vals else 0.0
 
 
 def run_cut_path(*args: object, **kwargs: object) -> AllocationResult:
