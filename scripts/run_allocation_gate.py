@@ -238,7 +238,18 @@ def _load_live_curves() -> tuple[
     the EXACT MCFTR dates so all three legs share ONE common daily basis (R-3) -- the same
     alignment the offline path's shared ``_dates()`` gives.
     """
-    equity_curve = load_mcftr_series(start=_LIVE_START, end=_LIVE_END)
+    try:
+        equity_curve = load_mcftr_series(start=_LIVE_START, end=_LIVE_END)
+    except Exception as exc:  # operator-facing legibility at the network seam (WR-03)
+        # WR-03 / T-73-16: a failed fetch (ISS-REST network error, timeout, HTTP error)
+        # must surface as a clean, actionable operator message -- NOT a raw traceback.
+        # Mirror the short-fetch guard below: a non-zero exit signals a HARNESS failure,
+        # and the message distinguishes "MOEX unreachable" from a real bug.
+        msg = (
+            f"--live MCFTR fetch failed ({type(exc).__name__}: {exc}); "
+            "MOEX ISS-REST unreachable -- refusing to fabricate a synthetic 'live' leg."
+        )
+        raise SystemExit(msg) from exc
     if len(equity_curve) < _N_LIVE_MIN_BARS:
         msg = (
             f"--live MCFTR fetch returned only {len(equity_curve)} bars over "
