@@ -32,12 +32,13 @@ from __future__ import annotations
 import math
 import statistics
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from finalayze.backtest.bond_walk_forward import (
     _compute_excess_sharpe_from_equity,
     generate_wf_windows,
 )
+from finalayze.core.allocation import tighten
 from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
 
 if TYPE_CHECKING:
@@ -264,9 +265,99 @@ CUT_GLIDE: object | None = None
 REGIME_SPLIT_BOUNDARY: date | None = None
 
 
-def gate_with_autotighten(*args: object, **kwargs: object) -> dict[str, object]:
-    """Auto-tighten execute path (V-5 / D-03) — implemented in Plan 03."""
-    raise NotImplementedError("gate_with_autotighten lands in Plan 73-03")
+def _run_and_score(
+    _profile_key: RiskProfile,
+    weights: dict[AssetClass, Decimal],
+    cap_fraction: Decimal,
+    deposit_curve: list[tuple[date, Decimal]],
+    ofz_pk_curve: list[tuple[date, Decimal]],
+    equity_curve: list[tuple[date, Decimal]],
+    naive_sharpes: list[float],
+    naive_sortinos: list[float],
+) -> dict[str, object]:
+    """Run the FROZEN allocator on a single weight vector and score it against the naive bar.
+
+    Constructs the degenerate-profile orchestrator via :func:`_naive_orchestrator` (the same
+    ``profiles=`` injection seam the naive legs use — the candidate runs on the IDENTICAL
+    cost/NDFL basis, R-3), runs it on the three curves, derives the curve-based Sortino
+    (TRAP B), and returns the conjunctive :func:`verdict_for_profile` dict merged with the
+    ``result`` carrier and the reported :func:`mean_wf_sharpe` (R-1). The ``_profile_key`` is
+    accepted for caller symmetry only — the verdict depends solely on weights/cap/curves
+    (the degenerate orchestrator pins its own arbitrary internal profile key).
+    """
+    result = _naive_orchestrator(weights, cap_fraction).run(
+        deposit_curve, ofz_pk_curve, equity_curve
+    )
+    alloc_sortino = excess_sortino_from_equity([float(v) for v in result.merged_equity_curve])
+    verdict = verdict_for_profile(
+        alloc_sharpe=result.sharpe,
+        alloc_sortino=alloc_sortino,
+        alloc_max_drawdown_pct=result.max_drawdown_pct,
+        naive_sharpes=naive_sharpes,
+        naive_sortinos=naive_sortinos,
+        cap_fraction=cap_fraction,
+    )
+    return {**verdict, "result": result, "mean_wf_sharpe": mean_wf_sharpe(result)}
+
+
+def gate_with_autotighten(
+    *,
+    profile_key: RiskProfile,
+    base_weights: dict[AssetClass, Decimal],
+    cap_fraction: Decimal,
+    deposit_curve: list[tuple[date, Decimal]],
+    ofz_pk_curve: list[tuple[date, Decimal]],
+    equity_curve: list[tuple[date, Decimal]],
+    naive_sharpes: list[float],
+    naive_sortinos: list[float],
+) -> dict[str, object]:
+    """Execute the W2-deferred D-05 auto-tighten loop: freeze + OOS re-gate (V-5 / D-03).
+
+    EXECUTES the dormant L0 :func:`finalayze.core.allocation.tighten` rule that W2 shipped
+    tested-but-unwired. Sequence:
+
+    1. Score the untightened ``base_weights``. If it PASSes → ``"PASS"`` (no tighten needed).
+    2. On a cap breach: feed the realized DD (reconciled to a FRACTION via
+       :func:`realized_dd_fraction`) and the cap into ``tighten`` — a parameter-free, monotone
+       5pp equity→deposit shift that clamps equity at 0. FREEZE that vector.
+    3. Re-run the allocator on the FROZEN vector and re-gate OOS. If it now PASSes →
+       ``"PASS_AFTER_TIGHTEN"``; otherwise → ``"HARD_FAIL"``.
+
+    This is the HONESTY GUARD (T-73-06): a still-failing frozen vector is a binding
+    HARD_FAIL — there is NO further widening, no search, no optimizer after the single
+    freeze (Pitfall 8). The returned dict carries ``frozen_weights`` for traceability.
+    """
+    first = _run_and_score(
+        profile_key,
+        base_weights,
+        cap_fraction,
+        deposit_curve,
+        ofz_pk_curve,
+        equity_curve,
+        naive_sharpes,
+        naive_sortinos,
+    )
+    if first["pass"]:
+        return {"verdict": "PASS", **first}
+
+    first_result = cast("AllocationResult", first["result"])
+    realized_dd_frac = realized_dd_fraction(first_result.max_drawdown_pct)
+    # Single parameter-free 5pp equity->deposit freeze — NEVER a search/widening loop (Pitfall 8).
+    frozen = tighten(base_weights, realized_dd_frac, cap_fraction)
+    regated = _run_and_score(
+        profile_key,
+        frozen,
+        cap_fraction,
+        deposit_curve,
+        ofz_pk_curve,
+        equity_curve,
+        naive_sharpes,
+        naive_sortinos,
+    )
+    if regated["pass"]:
+        return {"verdict": "PASS_AFTER_TIGHTEN", "frozen_weights": frozen, **regated}
+    # No further widening after the freeze — a persistent breach is a binding FAIL (D-03).
+    return {"verdict": "HARD_FAIL", "frozen_weights": frozen, **regated}
 
 
 def oos_wf_sharpes(
