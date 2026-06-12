@@ -66,6 +66,7 @@ from typing import TYPE_CHECKING, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from finalayze.backtest import allocation_gate as _gate
 from finalayze.backtest.allocation_gate import (
     accrue_real_risk_free_leg,
     build_naive_legs,
@@ -149,6 +150,18 @@ _LIVE_OFZ_SPREAD_PP = Decimal(0)
 # A real ~2.5y MCFTRR window has ~610+ trading-day bars; refuse a hollow run if a fetch
 # returns far fewer (HONESTY GATE: never fabricate a synthetic 'live' leg, T-73-12).
 _N_LIVE_MIN_BARS = 300
+
+# ── Committed real-data snapshot (REGIME-01 / D-05) ──────────────────────────
+# Default --live (and CI) reads the committed snapshot via the FROZEN Plan-02 fail-closed
+# loader (deterministic, no network); --live --refresh-snapshot fetches + nets + WRITES it.
+# Re-exported here at module scope so the path can be monkeypatched in tests. The binding
+# committed fixture itself is produced by the OPERATOR in Plan 04 (the real network fetch),
+# never here. The three R-F leg keys mirror the Plan-02 loader's _SNAPSHOT_LEG_KEYS.
+_GATE_SNAPSHOT = _gate._GATE_SNAPSHOT  # the committed snapshot path (Plan 02)
+_load_gate_snapshot = _gate._load_gate_snapshot  # the fail-closed reader (Plan 02)
+_SNAP_LEG_EQUITY = "equity_mcftrr_net"
+_SNAP_LEG_OFZ = "ofz_ruflbitr_net"
+_SNAP_LEG_DEPOSIT = "deposit_net"
 
 # The three SAA profiles, in the conservative -> balanced -> growth order the report
 # renders them. Each carries its own MaxDD cap (8 / 15 / 25%) read from the loaded
@@ -315,8 +328,91 @@ def _load_live_curves() -> tuple[
     return deposit_curve, ofz_pk_curve, equity_curve
 
 
+def _clamp_leg(leg: list[tuple[date, Decimal]]) -> list[list[str]]:
+    """Serialize ONE leg to ``[[iso_date, decimal_str], ...]``, clamped to ``_LIVE_END`` (Pitfall3).
+
+    Drops any bar dated after ``_LIVE_END`` (the look-ahead guard, T-74-07): a refresh run on
+    a later calendar day cannot leak a future bar into the committed fixture. Decimal is
+    serialized as a STRING and date as an ISO string — the exact Phase-65 ``_row_to_instrument``
+    re-hydration convention the Plan-02 loader reads back Decimal-exact.
+    """
+    binding_end = _LIVE_END.date()
+    return [[d.isoformat(), str(v)] for d, v in leg if d <= binding_end]
+
+
+def _write_gate_snapshot(
+    deposit: list[tuple[date, Decimal]],
+    ofz: list[tuple[date, Decimal]],
+    equity: list[tuple[date, Decimal]],
+    *,
+    start: date,
+    end: date,
+    git_sha: str,
+    path: Path = _GATE_SNAPSHOT,
+) -> Path:
+    """Write the committed real-data snapshot fixture (R-F shape) — the ONLY network-write path.
+
+    Serializes the three NETTED legs (``equity_mcftrr_net`` / ``ofz_ruflbitr_net`` /
+    ``deposit_net``) to the Phase-65 committed-snapshot shape (Decimal-as-string, ISO dates),
+    clamped to ``_LIVE_END`` (look-ahead guard, Pitfall 3 / T-74-07), and creates the
+    ``src/finalayze/backtest/data/`` directory if absent. Only ``--live --refresh-snapshot``
+    calls this; the default ``--live`` read path never writes. The committed binding fixture
+    is produced by the OPERATOR in Plan 04 (the real network fetch), not in CI.
+    """
+    payload = {
+        "generated_at": datetime.now(tz=timezone.utc).isoformat(),  # noqa: UP017
+        "window": {"start": start.isoformat(), "end": end.isoformat()},
+        "git_sha": git_sha,
+        "legs": {
+            _SNAP_LEG_EQUITY: _clamp_leg(equity),
+            _SNAP_LEG_OFZ: _clamp_leg(ofz),
+            _SNAP_LEG_DEPOSIT: _clamp_leg(deposit),
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)  # create src/finalayze/backtest/data/
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def _load_binding_curves(
+    *, refresh_snapshot: bool
+) -> tuple[
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+]:
+    """Resolve the three binding ``--live`` curves: refresh-fetch+write, or read the snapshot.
+
+    - ``refresh_snapshot=True`` (operator network path): fetch + net the REAL series via
+      :func:`_load_live_curves`, WRITE the committed fixture via :func:`_write_gate_snapshot`,
+      and use those curves.
+    - ``refresh_snapshot=False`` (default ``--live`` + CI): READ the committed snapshot via
+      the FROZEN Plan-02 fail-closed :func:`_load_gate_snapshot` (deterministic, NO network).
+
+    Either way the verdict still flows through the REAL ``build_naive_legs ->
+    gate_with_autotighten`` path on whatever curves were loaded (anti-hollow: no test-only
+    hook, no pre-baked verdict literal — the W2/Phase-72 lesson). Returns
+    ``(deposit, ofz_pk, equity)`` — the same leg order :func:`_load_live_curves` returns.
+    """
+    if refresh_snapshot:
+        deposit, ofz_pk, equity = _load_live_curves()
+        _write_gate_snapshot(
+            deposit,
+            ofz_pk,
+            equity,
+            start=_LIVE_START.date(),
+            end=_LIVE_END.date(),
+            git_sha=_git_sha(),
+            path=_GATE_SNAPSHOT,
+        )
+        return deposit, ofz_pk, equity
+    # Default --live / CI: the FROZEN fail-closed snapshot reader returns (equity, ofz, deposit).
+    equity, ofz_pk, deposit = _load_gate_snapshot(_GATE_SNAPSHOT)
+    return deposit, ofz_pk, equity
+
+
 def _load_curves(
-    *, live: bool, dates: list[date]
+    *, live: bool, refresh_snapshot: bool, dates: list[date]
 ) -> tuple[
     list[tuple[date, Decimal]],
     list[tuple[date, Decimal]],
@@ -324,15 +420,19 @@ def _load_curves(
 ]:
     """Load the three benchmark TR curves.
 
-    Default (``live=False``): the deterministic in-memory geometric curves -- CI-safe,
-    reproducible, no token, no network (the cert path). With ``--live`` (the operator's
-    D-10 override) the REAL series are loaded via :func:`_load_live_curves`: the genuine
-    MCFTR equity index + the real-CBR-rate-accrued deposit/OFZ-PK legs. The live legs drive
-    their OWN dates (the MCFTR trading-day calendar), so the offline ``dates`` argument is
-    used only for the default path.
+    Three paths:
+
+    - ``live=True, refresh_snapshot=False`` (the binding default + CI): READ the committed
+      net-of-tax snapshot via the FROZEN Plan-02 fail-closed loader (deterministic, no
+      network).
+    - ``live=True, refresh_snapshot=True`` (operator network path): FETCH + net the REAL
+      MCFTRR/RUFLBITR series and (re)write the committed fixture.
+    - ``live=False`` (the non-binding CI smoke): the deterministic in-memory geometric
+      curves -- CI-safe, reproducible, no token, no network. The offline ``dates`` argument
+      is used only here.
     """
     if live:
-        return _load_live_curves()
+        return _load_binding_curves(refresh_snapshot=refresh_snapshot)
     # One fixed-seed RNG per leg (seed offset by leg index) so the three noise streams are
     # independent yet fully reproducible -- two runs are byte-identical (CI-safe cert).
     # S311: seeded deterministic test-fixture RNGs, not a cryptographic use.
@@ -356,16 +456,21 @@ def _naive_metrics(naives: dict[str, AllocationResult]) -> dict[str, object]:
     return out
 
 
-def run_gate(*, live: bool, git_sha: str) -> tuple[dict[str, object], str, str]:
+def run_gate(
+    *, live: bool, git_sha: str, refresh_snapshot: bool = False
+) -> tuple[dict[str, object], str, str]:
     """Drive the REAL gate end-to-end and assemble the JSON payload + Markdown report.
 
     The Phase 72 anti-hollow contract: every per-profile verdict comes from the REAL
     ``gate_with_autotighten`` on the REAL ``build_naive_legs`` output -- NOT a pre-baked
-    constant. Returns ``(payload, report_md, overall_verdict)`` where ``overall_verdict``
+    constant -- whether the curves came from the committed snapshot, a refresh fetch, or the
+    offline smoke. Returns ``(payload, report_md, overall_verdict)`` where ``overall_verdict``
     is the honest SET of the three per-profile verdicts (D-06).
     """
     dates = _dates()
-    deposit_curve, ofz_pk_curve, equity_curve = _load_curves(live=live, dates=dates)
+    deposit_curve, ofz_pk_curve, equity_curve = _load_curves(
+        live=live, refresh_snapshot=refresh_snapshot, dates=dates
+    )
 
     # 1. The three naive benchmark legs on ONE basis (R-3) -- the bar the candidate clears.
     naives = build_naive_legs(deposit_curve, ofz_pk_curve, equity_curve)
@@ -446,7 +551,9 @@ def main() -> int:
     args = parser.parse_args()
 
     git_sha = _git_sha()
-    payload, report_md, overall = run_gate(live=args.live, git_sha=git_sha)
+    payload, report_md, overall = run_gate(
+        live=args.live, git_sha=git_sha, refresh_snapshot=args.refresh_snapshot
+    )
 
     run_name = f"{_RUN_PREFIX}-{datetime.now(tz=timezone.utc):%Y%m%dT%H%M%SZ}"  # noqa: UP017
     run_dir = _write_iteration(run_name, payload)

@@ -16,6 +16,7 @@ exercise the CLI plumbing:
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import date, timedelta
 from decimal import Decimal
@@ -128,3 +129,138 @@ def test_run_gate_has_no_cut_path() -> None:
     assert per_profile
     for v in per_profile.values():
         assert v["verdict"] in _VALID_VERDICTS
+
+
+# ── Task 2: snapshot read (default --live) + refresh-write ───────────────────
+
+# A multi-year daily window (2024-01-03 .. 2026-06-10) so regime_split spans the boundary
+# and the OOS walk-forward windows (12/6/3 months) yield real fold Sharpes.
+_SNAP_FIRST = date(2024, 1, 3)
+_SNAP_N_BARS = 620  # ~2.4y of daily bars -> last bar still <= 2026-06-10
+
+
+def _snapshot_legs() -> tuple[
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+]:
+    """Three deterministic net TR legs (deposit anchor, OFZ carry, faster equity)."""
+    axis = [_SNAP_FIRST + timedelta(days=i) for i in range(_SNAP_N_BARS)]
+    deposit = [(d, Decimal(100_000) * Decimal("1.00055") ** i) for i, d in enumerate(axis)]
+    ofz = [(d, Decimal(100_000) * Decimal("1.0004") ** i) for i, d in enumerate(axis)]
+    equity = [(d, Decimal(6000) * Decimal("1.0006") ** i) for i, d in enumerate(axis)]
+    return deposit, ofz, equity
+
+
+def _write_snapshot_file(
+    path: Path,
+    *,
+    end: date = date(2026, 6, 10),
+    legs: tuple[
+        list[tuple[date, Decimal]],
+        list[tuple[date, Decimal]],
+        list[tuple[date, Decimal]],
+    ]
+    | None = None,
+) -> None:
+    """Write a valid committed-snapshot fixture (the R-F shape) to ``path``."""
+    deposit, ofz, equity = legs if legs is not None else _snapshot_legs()
+
+    def _ser(leg: list[tuple[date, Decimal]]) -> list[list[str]]:
+        return [[d.isoformat(), str(v)] for d, v in leg]
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-06-12T00:00:00+00:00",
+                "window": {"start": _SNAP_FIRST.isoformat(), "end": end.isoformat()},
+                "git_sha": "test",
+                "legs": {
+                    "equity_mcftrr_net": _ser(equity),
+                    "ofz_ruflbitr_net": _ser(ofz),
+                    "deposit_net": _ser(deposit),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_live_reads_committed_snapshot_no_network(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Default --live reads the committed snapshot (NO network); verdicts via the REAL gate path."""
+    snap = tmp_path / "allocation_gate_snapshot.json"
+    _write_snapshot_file(snap)
+    monkeypatch.setattr(rag, "_GATE_SNAPSHOT", snap)
+
+    # Any fetch attempt is a hard failure — the snapshot-read path must NOT hit the network.
+    def _boom(**_kwargs: object) -> list[tuple[date, Decimal]]:
+        msg = "network must not be touched on the snapshot-read path"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(rag, "load_mcftr_series", _boom)
+
+    payload, _report, _overall = rag.run_gate(live=True, git_sha="test", refresh_snapshot=False)
+    per_profile = cast("dict[str, dict[str, object]]", payload["per_profile"])
+    assert per_profile  # the real gate path produced verdicts
+    for v in per_profile.values():
+        assert v["verdict"] in _VALID_VERDICTS  # real gate output, not a pre-baked constant
+
+
+def test_refresh_snapshot_writes_round_trippable_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--refresh-snapshot fetches + nets + writes a Decimal-exact, clamped, round-trippable file."""
+    monkeypatch.setattr(rag, "load_mcftr_series", _secid_fetch())
+    deposit_curve, ofz_pk_curve, equity_curve = rag._load_live_curves()
+
+    snap = tmp_path / "data" / "allocation_gate_snapshot.json"
+    rag._write_gate_snapshot(
+        deposit_curve,
+        ofz_pk_curve,
+        equity_curve,
+        start=_FIRST_FETCH_BAR,
+        end=date(2026, 6, 10),
+        git_sha="test",
+        path=snap,
+    )
+    assert snap.is_file()  # the data/ dir was created and the fixture written
+
+    # Round-trips Decimal-exact through the FROZEN Plan-02 loader (the binding read path).
+    re_equity, re_ofz, re_deposit = rag._load_gate_snapshot(snap)
+    assert re_equity == equity_curve
+    assert re_ofz == ofz_pk_curve
+    assert re_deposit == deposit_curve
+    # Look-ahead clamp (Pitfall 3): no written bar post-dates _LIVE_END.
+    binding_end = rag._LIVE_END.date()
+    assert all(d <= binding_end for d, _ in re_equity)
+
+
+def test_refresh_snapshot_clamps_future_bars(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The refresh-write path drops any fetched bar after _LIVE_END (look-ahead guard)."""
+    monkeypatch.setattr(rag, "load_mcftr_series", _secid_fetch())
+    deposit_curve, ofz_pk_curve, equity_curve = rag._load_live_curves()
+    # Append a synthetic future bar past the clamp to every leg.
+    future = rag._LIVE_END.date() + timedelta(days=5)
+    deposit_curve.append((future, deposit_curve[-1][1]))
+    ofz_pk_curve.append((future, ofz_pk_curve[-1][1]))
+    equity_curve.append((future, equity_curve[-1][1]))
+
+    snap = tmp_path / "data" / "allocation_gate_snapshot.json"
+    rag._write_gate_snapshot(
+        deposit_curve,
+        ofz_pk_curve,
+        equity_curve,
+        start=_FIRST_FETCH_BAR,
+        end=rag._LIVE_END.date(),
+        git_sha="test",
+        path=snap,
+    )
+    re_equity, _re_ofz, _re_deposit = rag._load_gate_snapshot(snap)
+    # The future bar must NOT survive the clamp on write.
+    assert all(d <= rag._LIVE_END.date() for d, _ in re_equity)
+    assert future not in [d for d, _ in re_equity]
