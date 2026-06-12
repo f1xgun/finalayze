@@ -34,10 +34,12 @@ import statistics
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
+
 if TYPE_CHECKING:
     from datetime import date
 
-    from finalayze.orchestration.allocation import AllocationResult
+    from finalayze.orchestration.allocation import AllocationOrchestrator, AllocationResult
 
 # ── Constants (named — no PLR2004 magic numbers) ─────────────────────────────
 _PERCENT = Decimal(100)
@@ -110,6 +112,134 @@ def realized_dd_fraction(max_drawdown_pct: float) -> Decimal:
     return Decimal(str(max_drawdown_pct)) / _PERCENT
 
 
+# ── Naive-leg weight constants (degenerate benchmark vectors) ────────────────
+_ONE = Decimal(1)
+_ZERO = Decimal(0)
+_STATIC_DEP = Decimal("0.1")
+_STATIC_OFZ = Decimal("0.3")
+_STATIC_EQ = Decimal("0.6")
+# A benchmark leg has no binding cap (it is the bar, not the candidate) → 1.0.
+_NAIVE_CAP = Decimal("1.0")
+
+
+def _zero_curve(reference: list[tuple[date, Decimal]]) -> list[tuple[date, Decimal]]:
+    """A collapsed (all-``Decimal(0)``) TR curve on ``reference``'s exact date index.
+
+    Used to take a leg OUT of a single-asset benchmark book. The orchestrator seeds
+    every leg at ``scale=1`` regardless of target weight, so passing a leg's REAL
+    rising curve into a 0%-target book makes the first boundary LIQUIDATE that leg
+    (a real sell → cost). A zeroed curve carries no value (``price <= 0`` is skipped
+    by ``_charge_rebalance``), so the held leg never trades against it — this is the
+    orchestrator's own ``reproduce_legacy_60_40`` collapse pattern (allocation.py:449)
+    applied to the eq/OFZ legs instead of the deposit leg. The held-leg basis is
+    UNCHANGED (same curve, same dates), so the three legs still share one basis (R-3).
+    """
+    return [(d, _ZERO) for d, _ in reference]
+
+
+def _naive_orchestrator(weights: dict[AssetClass, Decimal], cap: Decimal) -> AllocationOrchestrator:
+    """Build an AllocationOrchestrator pinned to a single degenerate benchmark vector.
+
+    Uses the ``profiles=`` injection seam (allocation.py:347) so the FROZEN W2
+    allocator runs the naive leg on the SAME cost/NDFL path as the real candidate —
+    guaranteeing the same basis (R-3). The profile KEY is arbitrary (only the
+    weights/cap matter for a benchmark leg). Deferred inline import for the L5→L5
+    hop (ARCHITECTURE Pattern 4 / bond_engine.py:180).
+    """
+    from finalayze.orchestration.allocation import AllocationOrchestrator  # noqa: PLC0415
+
+    p = RiskProfile.BALANCED  # arbitrary key — only weights/cap matter for a benchmark leg
+    profile = AllocationProfile(profile=p, weights=weights, max_drawdown_pct=cap)
+    return AllocationOrchestrator(risk_profile=p, profiles={p: profile})
+
+
+def build_naive_legs(
+    deposit_curve: list[tuple[date, Decimal]],
+    ofz_pk_curve: list[tuple[date, Decimal]],
+    equity_curve: list[tuple[date, Decimal]],
+) -> dict[str, AllocationResult]:
+    """Build the three naive benchmark legs on ONE basis via degenerate injection (V-6 / R-3).
+
+    Each leg is the FROZEN allocator run with a degenerate fixed-weight profile on the
+    SAME basis (D-04/D-05). For the two single-asset legs the NON-held curves are
+    collapsed to zero (:func:`_zero_curve`) so the 100%-target book never liquidates a
+    phantom leg the orchestrator seeded at ``scale=1`` (the held leg's curve is
+    UNCHANGED → same basis, R-3). The 60/30/10 leg keeps all three curves and trades:
+
+    - ``deposit_100`` — 100% deposit, eq/OFZ collapsed: only the cost-free deposit leg
+      is ever held → ``rebalance_cost == 0`` (D-09 deposit is free).
+    - ``equity_100`` — 100% equity, deposit/OFZ collapsed: a single-leg book always at
+      its 100% target → ~zero turnover.
+    - ``static_60_30_10`` — 60% equity / 30% OFZ-PK / 10% deposit on the FULL curves:
+      quarterly-rebalances the traded eq+OFZ legs → ``rebalance_cost > 0``
+      (MOEX_RETAIL_COSTS round-trip).
+    """
+    deposit_weights = {AssetClass.DEPOSIT: _ONE, AssetClass.OFZ_PK: _ZERO, AssetClass.EQUITY: _ZERO}
+    equity_weights = {AssetClass.DEPOSIT: _ZERO, AssetClass.OFZ_PK: _ZERO, AssetClass.EQUITY: _ONE}
+    static_weights = {
+        AssetClass.DEPOSIT: _STATIC_DEP,
+        AssetClass.OFZ_PK: _STATIC_OFZ,
+        AssetClass.EQUITY: _STATIC_EQ,
+    }
+    zero_dep = _zero_curve(deposit_curve)
+    zero_ofz = _zero_curve(ofz_pk_curve)
+    zero_eq = _zero_curve(equity_curve)
+    return {
+        # 100% deposit: collapse eq + OFZ so nothing trades against them → cost 0.
+        "deposit_100": _naive_orchestrator(deposit_weights, _NAIVE_CAP).run(
+            deposit_curve, zero_ofz, zero_eq
+        ),
+        # 100% equity: collapse deposit + OFZ; the lone equity leg holds its 100% target.
+        "equity_100": _naive_orchestrator(equity_weights, _NAIVE_CAP).run(
+            zero_dep, zero_ofz, equity_curve
+        ),
+        # 60/30/10: all three legs live → eq + OFZ rebalance and incur real cost.
+        "static_60_30_10": _naive_orchestrator(static_weights, _NAIVE_CAP).run(
+            deposit_curve, ofz_pk_curve, equity_curve
+        ),
+    }
+
+
+def verdict_for_profile(
+    *,
+    alloc_sharpe: float,
+    alloc_sortino: float,
+    alloc_max_drawdown_pct: float,
+    naive_sharpes: list[float],
+    naive_sortinos: list[float],
+    cap_fraction: Decimal,
+) -> dict[str, object]:
+    """The strict conjunctive §7 PASS verdict (V-3/V-4 / D-01/D-04).
+
+    PASS IFF **all three** hold (NOT either/or):
+
+    1. ``alloc_sharpe  >= max(naive_sharpes)``  — beats the best-of-three naive bar;
+    2. ``alloc_sortino >= max(naive_sortinos)`` — same, on downside-risk footing;
+    3. ``realized_dd_fraction(alloc_max_drawdown_pct) <= cap_fraction`` — within the
+       profile MaxDD cap (TRAP A reconciled).
+
+    ``>=`` is inclusive: a metric EXACTLY at its bar PASSes. Flipping any single
+    condition flips the verdict to fail.
+    """
+    best_naive_sharpe = max(naive_sharpes)
+    best_naive_sortino = max(naive_sortinos)
+    realized_frac = realized_dd_fraction(alloc_max_drawdown_pct)
+    passes = (
+        alloc_sharpe >= best_naive_sharpe
+        and alloc_sortino >= best_naive_sortino
+        and realized_frac <= cap_fraction
+    )
+    return {
+        "pass": passes,
+        "sharpe": alloc_sharpe,
+        "best_naive_sharpe": best_naive_sharpe,
+        "sortino": alloc_sortino,
+        "best_naive_sortino": best_naive_sortino,
+        "realized_maxdd_frac": float(realized_frac),
+        "cap_frac": float(cap_fraction),
+    }
+
+
 # ── Deferred public surface (Plans 03/04) ────────────────────────────────────
 # These names are part of the V-1..V-9 import contract pinned by Plan 01, so they
 # MUST exist for the test module to import. Their behaviour lands in Plans 03
@@ -122,16 +252,6 @@ CUT_GLIDE: object | None = None
 # REGIME_SPLIT_BOUNDARY: the early-cut regime boundary (V-9 / D-09 / R-6, Plan 04).
 # Pinned to date(2025, 7, 25); finalised in Plan 04.
 REGIME_SPLIT_BOUNDARY: date | None = None
-
-
-def build_naive_legs(*args: object, **kwargs: object) -> dict[str, AllocationResult]:
-    """Three degenerate naive legs on one basis (V-6 / R-3) — Task 2 of this plan."""
-    raise NotImplementedError("build_naive_legs lands in Task 2 of Plan 73-02")
-
-
-def verdict_for_profile(*args: object, **kwargs: object) -> dict[str, object]:
-    """Conjunctive per-profile PASS verdict (V-3/V-4 / D-01/D-04) — Task 2 of this plan."""
-    raise NotImplementedError("verdict_for_profile lands in Task 2 of Plan 73-02")
 
 
 def gate_with_autotighten(*args: object, **kwargs: object) -> dict[str, object]:
