@@ -52,6 +52,33 @@ CPI_BEFORE_ALL = date(2023, 1, 1)  # before any CPI publication in our data
 EXPECTED_CPI_MONTH_AFTER_JAN2025 = "2025-01"
 EXPECTED_CPI_MONTH_BEFORE_JAN2025 = "2024-12"
 
+# ── Verified realized 2025-2026 CBR easing path (R-C, official cbr.ru archive) ─
+# Each entry: (decision date, action, rate_after). The committed calendar had six
+# WRONG rate values and two unfilled meetings; the real path is 21% -> 14.50%
+# (first cut 2025-06-06, terminal 14.50% on 2026-04-24). No magic numbers (PLR2004).
+_FIRST_CUT = (date(2025, 6, 6), "cut", Decimal("20.00"))  # FIRST cut: 06-06, not 07-25
+_CUT_2025_07 = (date(2025, 7, 25), "cut", Decimal("18.00"))
+_CUT_2025_09 = (date(2025, 9, 12), "cut", Decimal("17.00"))
+_CUT_2025_10 = (date(2025, 10, 24), "cut", Decimal("16.50"))
+_CUT_2025_12 = (date(2025, 12, 19), "cut", Decimal("16.00"))
+_CUT_2026_02 = (date(2026, 2, 13), "cut", Decimal("15.50"))
+_CUT_2026_03 = (date(2026, 3, 20), "cut", Decimal("15.00"))  # was None (filled)
+_CUT_2026_04 = (date(2026, 4, 24), "cut", Decimal("14.50"))  # was None (filled), terminal
+_REALIZED_EASING_PATH = (
+    _FIRST_CUT,
+    _CUT_2025_07,
+    _CUT_2025_09,
+    _CUT_2025_10,
+    _CUT_2025_12,
+    _CUT_2026_02,
+    _CUT_2026_03,
+    _CUT_2026_04,
+)
+
+# The terminal realized rate is observed as-of the binding window endpoint.
+_BINDING_WINDOW_END = date(2026, 6, 10)
+_TERMINAL_REALIZED_RATE = Decimal("14.50")
+
 
 # ── CBR_MEETINGS data integrity tests ───────────────────────────────────────
 
@@ -105,6 +132,40 @@ class TestCBRMeetingsData:
         m = CBR_MEETINGS[0]
         with pytest.raises(AttributeError):
             m.decision = "hold"  # type: ignore[misc]
+
+
+# ── Realized 2025-2026 easing-path value spot-check (R-C / D-03) ─────────────
+
+
+def test_realized_2025_2026_path_matches_cbr_archive() -> None:
+    """The committed 2025-2026 cuts match the verified cbr.ru realized path (R-C).
+
+    Spot-checks each decision date against the official archive: first cut
+    2025-06-06 -> 20.00 (NOT a hold at 21.00), terminal 2026-04-24 -> 14.50.
+    RED before Task 2: the un-corrected calendar carries 21/20/19/18/17/16 + two
+    None, so this assertion fails until CBR_MEETINGS is corrected.
+    """
+    by_date = {m.date: m for m in CBR_MEETINGS}
+    for decision_date, action, rate_after in _REALIZED_EASING_PATH:
+        meeting = by_date.get(decision_date)
+        assert meeting is not None, f"No CBR meeting on {decision_date}"
+        assert meeting.decision == action, (
+            f"{decision_date}: expected action {action!r}, got {meeting.decision!r}"
+        )
+        assert meeting.rate_after == rate_after, (
+            f"{decision_date}: expected rate {rate_after}, got {meeting.rate_after}"
+        )
+
+
+def test_terminal_realized_rate_is_1450_at_binding_end() -> None:
+    """The terminal realized key rate at the binding window end is 14.50% (R-C).
+
+    The path ended at 14.50% on 2026-04-24; the 2026-06-19 meeting is still
+    future as-of 2026-06-10, so the last decided rate is the terminal one.
+    """
+    last = get_last_cbr_decision(_BINDING_WINDOW_END)
+    assert last is not None
+    assert last.rate_after == _TERMINAL_REALIZED_RATE
 
 
 # ── CPI_PUBLICATION_DATES data integrity tests ──────────────────────────────
@@ -300,9 +361,18 @@ class TestIsCuttingCycle:
         """Two consecutive cuts by Oct 30 2025 -> True."""
         assert is_cutting_cycle(date(2025, 10, 30)) is True
 
-    def test_not_cutting_only_one_cut_jul_2025(self) -> None:
-        """Jul 30 2025: only 1 cut so far (2025-07-25), before that was holds -> False."""
-        assert is_cutting_cycle(date(2025, 7, 30)) is False
+    def test_cutting_cycle_jul_2025_two_cuts(self) -> None:
+        """Jul 30 2025: two cuts so far (2025-06-06, 2025-07-25) -> True (R-C).
+
+        The corrected realized calendar makes 2025-06-06 the FIRST cut (was a
+        spurious 21.00 hold), so by Jul 30 2025 the last two decisions are both
+        cuts -- a cutting cycle. (Pre-correction this date had only one cut.)
+        """
+        assert is_cutting_cycle(date(2025, 7, 30)) is True
+
+    def test_not_cutting_after_first_cut_jun_2025(self) -> None:
+        """Jun 30 2025: only the 2025-06-06 cut so far, before it were holds -> False."""
+        assert is_cutting_cycle(date(2025, 6, 30)) is False
 
     def test_not_cutting_holds_mid_2023(self) -> None:
         """Mid-2023 holds -> not cutting."""
