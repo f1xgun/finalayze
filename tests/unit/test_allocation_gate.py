@@ -294,6 +294,27 @@ def test_naive_legs_same_basis() -> None:
     assert legs["static_60_30_10"].rebalance_cost > _ZERO
 
 
+def test_equity_leg_basis_identical() -> None:
+    """The ``equity_100`` naive leg IS the MCFTR series fed in -- Pitfall 1 guard (GATE-01).
+
+    The headline dead trap (Pitfall 1 / Pitfall C) is measuring the equity benchmark on
+    price-IMOEX while the allocator's equity sleeve accrues dividends. This pins that the
+    degenerate ``equity_100`` leg's equity-contribution curve is the SAME MCFTR series the
+    allocator's equity sleeve uses (within forward-fill tolerance) -- no basis mismatch.
+    """
+    dates = _daily_index(_FIRST_BAR, _N_BARS)
+    deposit_curve = _curve(_DEPOSIT_BASE, _DEPOSIT_DAILY, dates)
+    ofz_pk_curve = _curve(_OFZ_BASE, _OFZ_DAILY, dates)
+    equity_curve = _curve(_EQUITY_BASE, _EQUITY_DAILY, dates)
+
+    legs = build_naive_legs(deposit_curve, ofz_pk_curve, equity_curve)
+
+    # The equity_100 leg's equity contribution curve == the MCFTR series fed to the
+    # allocator (same series -> Pitfall 1 solved). Dates are pre-aligned, so the
+    # forward-fill is the identity and the comparison is exact Decimal equality.
+    assert list(legs["equity_100"].equity_curve) == [v for _, v in equity_curve]
+
+
 def test_autotighten_hard_fail() -> None:
     """A still-breaching profile freezes after the 5pp step and HARD_FAILs (V-5 / D-03).
 

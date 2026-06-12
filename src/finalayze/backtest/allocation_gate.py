@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, cast
 
@@ -40,10 +41,9 @@ from finalayze.backtest.bond_walk_forward import (
 )
 from finalayze.core.allocation import tighten
 from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
+from finalayze.data.fetchers.cbr import CBRMeeting, get_last_cbr_decision
 
 if TYPE_CHECKING:
-    from datetime import date
-
     from finalayze.orchestration.allocation import AllocationOrchestrator, AllocationResult
 
 # ── Constants (named — no PLR2004 magic numbers) ─────────────────────────────
@@ -257,11 +257,31 @@ def verdict_for_profile(
 # (auto-tighten V-5, OOS walk-forward V-8) and 04 (cut-path V-7, regime-split V-9);
 # until then they raise so the four deferred tests FAIL (not error at collection).
 
-# CUT_GLIDE: the synthetic declining-rate meeting calendar (V-7 / D-07, Plan 04).
-CUT_GLIDE: object | None = None
+# CUT_GLIDE: the synthetic declining-rate meeting calendar (V-7 / D-07).
+# FRAMING-ONLY (D-08): these metrics are reported but NEVER fed into the binding
+# verdict. The glide is ILLUSTRATIVE (A2) — it STEEPENS the real 2025 easing already
+# in CBR_MEETINGS (21 -> 20 -> 19 -> 18 -> 17 -> 16) into a full down-leg
+# (18 -> 15 -> 12 -> 10 -> 8). It is NOT a forecast; it is anchored to the real 2025
+# cut DIRECTION (is_cutting_cycle confirms the cycle) to isolate the rate effect.
+CUT_GLIDE: tuple[CBRMeeting, ...] = (
+    CBRMeeting(date(2025, 7, 25), "core", "cut", Decimal("18.00")),
+    CBRMeeting(date(2025, 9, 12), "interim", "cut", Decimal("15.00")),
+    CBRMeeting(date(2025, 10, 24), "core", "cut", Decimal("12.00")),
+    CBRMeeting(date(2025, 12, 19), "interim", "cut", Decimal("10.00")),
+    CBRMeeting(date(2026, 2, 13), "core", "cut", Decimal("8.00")),
+)
 
-# REGIME_SPLIT_BOUNDARY: the early-cut regime boundary (V-9 / D-09 / R-6, Plan 04).
-# Pinned to date(2025, 7, 25); finalised in Plan 04.
+# The synthetic glide's TERMINAL key rate (percentage points) — the down-leg floor the
+# risk-free legs are re-accrued toward. Named to avoid a magic number in the curve math.
+_CUT_GLIDE_TERMINAL_RATE_PP = Decimal("8.00")
+# The deposit spread below the key rate (mirrors cbr._DEFAULT_DEPOSIT_SPREAD_PP, D-04).
+_DEPOSIT_SPREAD_PP = Decimal("1.0")
+# OFZ-PK floaters track the key rate ~1:1 (no spread); reuse the same key-rate path.
+_PCT_POINTS = Decimal(100)
+_TRADING_DAYS = 252
+
+# REGIME_SPLIT_BOUNDARY: the early-cut regime boundary (V-9 / D-09 / R-6).
+# Pinned to date(2025, 7, 25); finalised in Plan 04 / Task 2.
 REGIME_SPLIT_BOUNDARY: date | None = None
 
 
@@ -408,11 +428,92 @@ def mean_wf_sharpe(
     return sum(vals) / len(vals) if vals else 0.0
 
 
-def run_cut_path(*args: object, **kwargs: object) -> AllocationResult:
-    """Synthetic rate-cut framing path (V-7 / D-07) — implemented in Plan 04."""
-    raise NotImplementedError("run_cut_path lands in Plan 73-04")
+def _cut_glide_key_rate_as_of(as_of: date) -> Decimal:
+    """The synthetic CUT_GLIDE key rate (pp) as-of *as_of* — strictly no look-ahead.
+
+    Reads the steeper synthetic glide first (``m.date <= as_of`` only — same as-of
+    discipline as ``get_last_cbr_decision``); BEFORE the glide's first meeting it falls
+    back to the REAL CBR calendar's as-of key rate. Returns the glide's terminal floor if
+    neither is available. The cut-path is therefore ALWAYS read per-bar (no future leak)
+    yet describes a lower-rate world once the glide engages (T-73-09 guard).
+    """
+    glide_past = [m for m in CUT_GLIDE if m.date <= as_of and m.rate_after is not None]
+    if glide_past:
+        return cast("Decimal", glide_past[-1].rate_after)
+    real = get_last_cbr_decision(as_of)
+    if real is not None and real.rate_after is not None:
+        return real.rate_after
+    return _CUT_GLIDE_TERMINAL_RATE_PP
+
+
+def _reaccrue_risk_free_leg(
+    curve: list[tuple[date, Decimal]], *, spread_pp: Decimal
+) -> list[tuple[date, Decimal]]:
+    """Re-accrue a single risk-free leg under the synthetic CUT_GLIDE key-rate path.
+
+    Treats the leg as a daily-compounded deposit/floater: at each bar the annual rate is
+    ``(cut_glide_key_rate(as_of) - spread_pp) / 100`` (read strictly as-of — no
+    look-ahead) and the day's growth factor is ``(1 + annual) ** (1/252)``. Re-accrues
+    from the leg's OPENING value so the whole curve reflects the lower glide rate. The
+    high-rate baseline curve was built off a HIGHER (16-21%) rate, so the re-accrued curve
+    diverges from it (``deposit_under_cut != deposit_baseline``) while introducing NO
+    look-ahead and NO equity uplift (the equity leg is never touched here, D-07).
+    """
+    if not curve:
+        return []
+    opening = curve[0][1]
+    out: list[tuple[date, Decimal]] = [(curve[0][0], opening)]
+    value = opening
+    for d, _ in curve[1:]:
+        annual = (_cut_glide_key_rate_as_of(d) - spread_pp) / _PCT_POINTS
+        daily_factor = Decimal(str((1.0 + float(annual)) ** (1.0 / _TRADING_DAYS)))
+        value = value * daily_factor
+        out.append((d, value))
+    return out
+
+
+def run_cut_path(
+    deposit_curve: list[tuple[date, Decimal]],
+    ofz_pk_curve: list[tuple[date, Decimal]],
+    equity_curve: list[tuple[date, Decimal]],
+    *,
+    profile_key: RiskProfile = RiskProfile.BALANCED,
+) -> AllocationResult:
+    """Synthetic rate-cut FRAMING path: lower the risk-free legs, hold equity FIXED (V-7 / D-07).
+
+    Re-derives ONLY the deposit + OFZ-PK benchmark curves under the synthetic declining
+    :data:`CUT_GLIDE` key-rate path (read strictly as-of per bar — ``m.date <= as_of`` — so
+    NO look-ahead is introduced, T-73-09) and passes the ORIGINAL ``equity_curve`` through
+    BYTE-IDENTICAL (the MCFTR equity sleeve is held fixed — NO fabricated equity-beta
+    uplift, D-07). It then runs the FROZEN allocator on (cut_deposit, cut_ofz, equity).
+
+    FRAMING-ONLY (D-08): the returned metrics are reported and carry the explicit high-rate
+    caveat, but are NEVER fed into the binding verdict. The glide is ILLUSTRATIVE (A2) —
+    anchored to the real 2025 easing direction, NOT a forecast. Its purpose is to
+    demonstrate the §7 thesis: when the deposit anchor stops yielding 16-21%, the
+    equity/bond weights become decisive.
+    """
+    cut_deposit = _reaccrue_risk_free_leg(deposit_curve, spread_pp=_DEPOSIT_SPREAD_PP)
+    # OFZ-PK floaters track the key rate ~1:1 (no deposit spread).
+    cut_ofz = _reaccrue_risk_free_leg(ofz_pk_curve, spread_pp=_ZERO)
+    # Equity (MCFTR) is passed through UNCHANGED — no uplift (D-07).
+    return _naive_orchestrator(_profile_weights_for(profile_key), _NAIVE_CAP).run(
+        cut_deposit, cut_ofz, equity_curve
+    )
+
+
+def _profile_weights_for(profile_key: RiskProfile) -> dict[AssetClass, Decimal]:
+    """The 3-asset target weight vector for *profile_key* (read from the loaded profiles).
+
+    Used by :func:`run_cut_path` so the cut-path scenario runs the SAME L1 target weights
+    the real profile would, just under the lowered risk-free legs.
+    """
+    from finalayze.config.allocation_profiles import load_allocation_profiles  # noqa: PLC0415
+
+    profile = load_allocation_profiles()[profile_key]
+    return dict(profile.weights)
 
 
 def regime_split(*args: object, **kwargs: object) -> dict[str, tuple[date, date]]:
-    """Partition a date window at the regime boundary (V-9 / D-09) — Plan 04."""
-    raise NotImplementedError("regime_split lands in Plan 73-04")
+    """Partition a date window at the regime boundary (V-9 / D-09) — Plan 04 / Task 2."""
+    raise NotImplementedError("regime_split lands in Plan 73-04 Task 2")
