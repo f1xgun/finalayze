@@ -297,6 +297,24 @@ REGIME_SPLIT_BOUNDARY: date = date(2025, 7, 25)
 # report; the verifier greps for this literal string.
 _HIGH_RATE_CAVEAT = "100% deposit winning raw return in a 16-21% high-rate regime is NOT a failure"
 
+# Methodology note (operator follow-up, framing-only — NOT a metric/verdict/logic change):
+# in a 16-21% high-rate regime the 100%-deposit leg is a near-vol-free ~18% return (≈0
+# downside, MaxDD 0), so its risk-adjusted Sharpe/Sortino is enormous (e.g. Sortino ~4.8e13
+# is the genuine value of a zero-downside curve, NOT a rendering bug). Because that
+# near-risk-free leg sets the best-naive bar, the conjunctive Sharpe ∧ Sortino test is
+# STRUCTURALLY unwinnable for any equity-holding allocation while the high rate holds — so a
+# HARD_FAIL here reflects the RATE REGIME, not an allocator defect. This note re-frames the
+# numbers only; it changes no metric, verdict, cap or the binding gate logic.
+_RISK_FREE_BAR_NOTE = (
+    "Methodology note (framing-only): in a 16-21% high-rate regime the 100%-deposit leg is a "
+    "near-vol-free ~18% return (near-zero downside, MaxDD 0), so its Sharpe/Sortino bar is "
+    "enormous (a Sortino ~4.8e13 is the TRUE value of a zero-downside curve, NOT a rendering "
+    "bug). That near-risk-free leg sets the best-naive bar, which makes the conjunctive "
+    "Sharpe ∧ Sortino test structurally unwinnable for any equity-holding allocation while "
+    "the high rate holds -- so a HARD_FAIL here reflects the RATE REGIME, not an allocator "
+    "defect."
+)
+
 
 def _run_and_score(
     _profile_key: RiskProfile,
@@ -646,8 +664,10 @@ def render_report(payload: dict[str, object]) -> str:
 
     Sections: a header, the per-profile verdict table (profile | Sharpe vs best-naive |
     Sortino vs best-naive | realized MaxDD vs cap | mean WF-fold Sharpe | verdict), the
-    naive-comparison block, the regime split block, the cut-path metrics block, and the
-    mandatory honesty caveat line (:data:`_HIGH_RATE_CAVEAT`, verbatim).
+    naive-comparison block (prefixed with the framing-only :data:`_RISK_FREE_BAR_NOTE`
+    explaining why a near-vol-free risk-free leg inflates the naive Sharpe/Sortino bar in a
+    high-rate regime), the regime split block, the cut-path metrics block, and the mandatory
+    honesty caveat line (:data:`_HIGH_RATE_CAVEAT`, verbatim).
 
     The BINDING number is the full-window metric (``verdict_for_profile``); the mean
     WF-fold Sharpe (R-1 / D-02) is REPORTED alongside so GATE-01's "OOS via walk-forward"
@@ -682,6 +702,8 @@ def render_report(payload: dict[str, object]) -> str:
     lines += [
         "",
         "## Naive Benchmark Comparison (best-of-three is the bar, D-04)",
+        "",
+        f"> {_RISK_FREE_BAR_NOTE}",
         "",
         *(f"- `{k}`: {_fmt(val)}" for k, val in naive.items()),
         "",

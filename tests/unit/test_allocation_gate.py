@@ -47,6 +47,8 @@ from finalayze.backtest.allocation_gate import (  # noqa: E402 -- RED: module ab
     oos_wf_sharpes,
     realized_dd_fraction,
     regime_split,
+    render_json,
+    render_report,
     run_cut_path,
     verdict_for_profile,
 )
@@ -467,3 +469,71 @@ def test_accrue_real_risk_free_leg_grows_from_real_key_rate() -> None:
     assert ofz[-1][1] > _LIVE_BASE
     # OFZ-PK floater (no spread, full key rate) out-accrues the deposit (key-1pp).
     assert ofz[-1][1] > deposit[-1][1]
+
+
+# -- Risk-free-bar methodology note (operator follow-up, framing-only) ---------
+
+# The verbatim substrings the operator's methodology note MUST render, explaining why a
+# near-vol-free risk-free leg inflates the naive Sharpe/Sortino bar in a high-rate regime
+# (so a HARD_FAIL reflects the RATE REGIME, not an allocator defect) -- and that a huge
+# Sortino is the TRUE value of a zero-downside curve, NOT a rendering bug.
+_NOTE_FRAMING = "Methodology note (framing-only)"
+_NOTE_NEAR_VOL_FREE = "near-vol-free"
+_NOTE_NOT_A_BUG = "NOT a rendering"
+_NOTE_STRUCTURALLY = "structurally unwinnable"
+_NOTE_REGIME = "reflects the RATE REGIME, not an allocator defect"
+
+# A minimal render payload: one HARD_FAIL profile + the zero-downside deposit bar that
+# motivates the note (a near-infinite Sortino on a flat 16-21% deposit leg).
+_NOTE_GIT_SHA = "deadbeef"
+_NOTE_DEPOSIT_SORTINO = 48082830638875.85
+_NOTE_DEPOSIT_SHARPE = 21.6448
+_NOTE_PROFILE_SHARPE = -0.0429
+_NOTE_PROFILE_SORTINO = -0.0628
+
+
+def test_report_renders_risk_free_bar_note() -> None:
+    """render_report carries the operator's framing-only risk-free-bar methodology note.
+
+    The note explains the economically-real, NOT-a-bug provenance of the enormous
+    near-vol-free deposit Sharpe/Sortino bar in a 16-21% high-rate regime, and that it makes
+    the conjunctive test structurally unwinnable for any equity-holding allocation while the
+    high rate holds -- so a HARD_FAIL reflects the REGIME, not a defect. It is FRAMING-ONLY:
+    it must not alter any rendered metric or verdict (the HARD_FAIL stays HARD_FAIL).
+    """
+    per_profile = {
+        "conservative": {
+            "verdict": _HARD_FAIL,
+            "sharpe": _NOTE_PROFILE_SHARPE,
+            "best_naive_sharpe": _NOTE_DEPOSIT_SHARPE,
+            "sortino": _NOTE_PROFILE_SORTINO,
+            "best_naive_sortino": _NOTE_DEPOSIT_SORTINO,
+            "realized_maxdd_frac": 0.021,
+            "cap_frac": 0.08,
+            "mean_wf_sharpe": 0.457,
+        }
+    }
+    naive_metrics = {
+        "deposit_100_sharpe": _NOTE_DEPOSIT_SHARPE,
+        "deposit_100_sortino": _NOTE_DEPOSIT_SORTINO,
+        "deposit_100_maxdd_pct": 0.0,
+    }
+    cut_path_metrics: dict[str, object] = {"sharpe": -0.4881, "note": "FRAMING-ONLY"}
+    regime = regime_split([_BOUNDARY - timedelta(days=30), _BOUNDARY + timedelta(days=30)])
+
+    payload = render_json(
+        per_profile, naive_metrics, cut_path_metrics, regime, git_sha=_NOTE_GIT_SHA
+    )
+    report = render_report(payload)
+
+    # The methodology note renders verbatim (all framing pieces present).
+    assert _NOTE_FRAMING in report
+    assert _NOTE_NEAR_VOL_FREE in report
+    assert _NOTE_NOT_A_BUG in report
+    assert _NOTE_STRUCTURALLY in report
+    assert _NOTE_REGIME in report
+
+    # FRAMING-ONLY: the note changes no verdict/metric. The HARD_FAIL stays HARD_FAIL and the
+    # mandatory honesty caveat is still rendered exactly once.
+    assert _HARD_FAIL in report
+    assert report.count("100% deposit winning raw return in a 16-21% high-rate regime") == 1
