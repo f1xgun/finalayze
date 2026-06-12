@@ -37,6 +37,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
+import pytest
+
 from finalayze.backtest.allocation_gate import (  # noqa: E402 -- RED: module absent until Plans 02-04
     CUT_GLIDE,
     REGIME_SPLIT_BOUNDARY,
@@ -537,3 +539,48 @@ def test_report_renders_risk_free_bar_note() -> None:
     # mandatory honesty caveat is still rendered exactly once.
     assert _HARD_FAIL in report
     assert report.count("100% deposit winning raw return in a 16-21% high-rate regime") == 1
+
+
+# -- Edge-input guards on the exported surface (WR-01 / WR-02) -----------------
+
+
+def test_verdict_for_profile_rejects_empty_naive_lists() -> None:
+    """verdict_for_profile defends the best-of-three bar against an empty leg list (WR-01).
+
+    The conjunctive bar is ``max(naive_sharpes)``/``max(naive_sortinos)`` -- an empty list
+    would raise an opaque ``ValueError: max() arg is an empty sequence``. The exported,
+    test-pinned contract must reject the degenerate input with a CLEAR message instead. The
+    happy path (three legs) is unchanged and still PASSes -- pinned by
+    ``test_best_naive_max_over_three`` -- so no real-cert verdict moves.
+    """
+    with pytest.raises(ValueError, match="non-empty"):
+        verdict_for_profile(
+            alloc_sharpe=_ALLOC_SHARPE_PASS,
+            alloc_sortino=_ALLOC_SORTINO_PASS,
+            alloc_max_drawdown_pct=_ALLOC_MAXDD_PASS_PCT,
+            naive_sharpes=[],
+            naive_sortinos=_NAIVE_SORTINOS,
+            cap_fraction=_CAP_BALANCED,
+        )
+
+    with pytest.raises(ValueError, match="non-empty"):
+        verdict_for_profile(
+            alloc_sharpe=_ALLOC_SHARPE_PASS,
+            alloc_sortino=_ALLOC_SORTINO_PASS,
+            alloc_max_drawdown_pct=_ALLOC_MAXDD_PASS_PCT,
+            naive_sharpes=_NAIVE_SHARPES,
+            naive_sortinos=[],
+            cap_fraction=_CAP_BALANCED,
+        )
+
+
+def test_regime_split_rejects_empty_window() -> None:
+    """regime_split defends the exported surface against an empty date window (WR-02).
+
+    ``start, end = dates[0], dates[-1]`` indexes an empty list -> an opaque ``IndexError``.
+    The real cert path always passes a >= 300-bar window, so the non-empty behaviour
+    (pinned by ``test_regime_split``) is untouched; only the degenerate empty input now
+    raises a CLEAR ``ValueError``.
+    """
+    with pytest.raises(ValueError, match="non-empty"):
+        regime_split([])

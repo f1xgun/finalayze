@@ -239,7 +239,16 @@ def verdict_for_profile(
 
     ``>=`` is inclusive: a metric EXACTLY at its bar PASSes. Flipping any single
     condition flips the verdict to fail.
+
+    Edge guard (WR-01): the best-of-three bar is ``max(naive_sharpes)`` /
+    ``max(naive_sortinos)`` — both lists MUST be non-empty or ``max([])`` raises an opaque
+    ``ValueError``. The production caller always passes three legs from
+    :func:`build_naive_legs`, so this never fires on the cert path; it defends the exported
+    surface against any future caller that filters degenerate legs.
     """
+    if not naive_sharpes or not naive_sortinos:
+        msg = "naive_sharpes and naive_sortinos must be non-empty (the best-of-three bar)"
+        raise ValueError(msg)
     best_naive_sharpe = max(naive_sharpes)
     best_naive_sortino = max(naive_sortinos)
     realized_frac = realized_dd_fraction(alloc_max_drawdown_pct)
@@ -592,7 +601,15 @@ def regime_split(dates: list[date]) -> dict[str, tuple[date, date]]:
 
     This date split (NOT the ``classify_regime`` cross-check) is the binding-readable
     headline because it matches Pitfall 6's wording literally and is trivial to verify.
+
+    Edge guard (WR-02): ``dates[0]``/``dates[-1]`` index the window — an empty list would
+    raise an opaque ``IndexError``. The real cert path always passes a >= 300-bar window
+    (offline ``_N_BARS`` / ``--live`` ``_N_LIVE_MIN_BARS``), so this never fires there; it
+    defends the exported surface against a degenerate empty window.
     """
+    if not dates:
+        msg = "regime_split requires a non-empty date window"
+        raise ValueError(msg)
     start, end = dates[0], dates[-1]
     if end < REGIME_SPLIT_BOUNDARY:
         return {"high_rate": (start, end)}  # single regime — lean on the cut-path scenario
