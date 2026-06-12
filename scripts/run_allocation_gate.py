@@ -71,7 +71,6 @@ from finalayze.backtest.allocation_gate import (
     build_naive_legs,
     excess_sortino_from_equity,
     gate_with_autotighten,
-    mean_wf_sharpe,
     regime_split,
     render_json,
     render_report,
@@ -342,10 +341,12 @@ def run_gate(*, live: bool, git_sha: str) -> tuple[dict[str, object], str, str]:
             naive_sharpes=naive_sharpes,
             naive_sortinos=naive_sortinos,
         )
-        # Strip the non-serializable AllocationResult carrier; keep the reported WF mean.
-        alloc_result = result.pop("result", None)
-        if alloc_result is not None:
-            result["mean_wf_sharpe"] = mean_wf_sharpe(cast("AllocationResult", alloc_result))
+        # Strip the non-serializable carriers. WR-04: mean_wf_sharpe is the SINGLE
+        # source of truth -- _run_and_score already attached the module-computed value
+        # (allocation_gate.py), so do NOT recompute it here (a second WF pass would be
+        # wasted work AND a second owner that could silently diverge on the risk-free
+        # default). Just drop the AllocationResult carrier; the attached value stays.
+        result.pop("result", None)  # non-serializable AllocationResult carrier
         result.pop("frozen_weights", None)  # weight dict is not JSON-key-safe; verdict suffices
         per_profile[profile_key.value] = result
 
