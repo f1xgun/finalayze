@@ -21,12 +21,13 @@ The conjunctive verdict (:func:`verdict_for_profile`, D-01) PASSes IFF the
 allocator's Sharpe AND Sortino both clear the best-of-three naive bar AND the
 realized MaxDD is within the profile cap — never an "either/or".
 
-The auto-tighten (V-5) and OOS walk-forward (V-8) primitives are implemented by
-Plan 03; the cut-path (V-7), regime-split (V-9) and the Markdown/JSON report
-renderer (D-11) are implemented by Plan 04. The cut-path lowers ONLY the risk-free
-legs under the synthetic :data:`CUT_GLIDE` while holding the MCFTR equity curve
-byte-identical (D-07), and is FRAMING-ONLY (D-08) — its metrics are reported with
-the explicit high-rate caveat but never feed the binding verdict.
+The auto-tighten (V-5) and OOS walk-forward (V-8) primitives, the regime split
+(V-9) and the Markdown/JSON report renderer (D-11) live here. The synthetic
+framing cut-path (V-7) was RETIRED in Phase 74 (D-07): the real binding window now
+contains the real easing (high-rate plateau → the verified 2025 CBR cuts from
+2025-06-06), so the evidence-based "cut scenario" is the real easing sub-window —
+the post-:data:`REGIME_SPLIT_BOUNDARY` segment of :func:`regime_split` — reported
+with real metrics, not a synthetic glide.
 """
 
 from __future__ import annotations
@@ -44,10 +45,8 @@ from finalayze.backtest.bond_walk_forward import (
 from finalayze.core.allocation import tighten
 from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
 from finalayze.data.fetchers.cbr import (
-    CBRMeeting,
     MacroContextProvider,
     deposit_rate_as_of,
-    get_last_cbr_decision,
 )
 from finalayze.strategies.bond_duration_rotation import CBRRegime, classify_regime
 
@@ -269,38 +268,21 @@ def verdict_for_profile(
     }
 
 
-# ── Cut-path + regime framing surface (Plan 04, D-07/D-08/D-09/R-6) ──────────
-# These names are part of the V-1..V-9 import contract pinned by Plan 01. The
-# auto-tighten (V-5) / OOS WF (V-8) primitives landed in Plan 03; the cut-path
-# scenario (V-7), regime split (V-9) and report renderer (D-11) land below.
+# ── Regime framing surface (D-09/R-6) ───────────────────────────────────────
+# The synthetic framing cut-path (V-7 / D-07/D-08) was RETIRED in Phase 74 (D-07):
+# the real binding window now CONTAINS the real easing (high-rate plateau → the real
+# 2025 cuts), so the "cut scenario" is the real easing sub-window (the post-boundary
+# segment of regime_split), reported with real metrics — not a synthetic glide.
 
-# CUT_GLIDE: the synthetic declining-rate meeting calendar (V-7 / D-07).
-# FRAMING-ONLY (D-08): these metrics are reported but NEVER fed into the binding
-# verdict. The glide is ILLUSTRATIVE (A2) — it STEEPENS the real 2025 easing already
-# in CBR_MEETINGS (21 -> 20 -> 19 -> 18 -> 17 -> 16) into a full down-leg
-# (18 -> 15 -> 12 -> 10 -> 8). It is NOT a forecast; it is anchored to the real 2025
-# cut DIRECTION (is_cutting_cycle confirms the cycle) to isolate the rate effect.
-CUT_GLIDE: tuple[CBRMeeting, ...] = (
-    CBRMeeting(date(2025, 7, 25), "core", "cut", Decimal("18.00")),
-    CBRMeeting(date(2025, 9, 12), "interim", "cut", Decimal("15.00")),
-    CBRMeeting(date(2025, 10, 24), "core", "cut", Decimal("12.00")),
-    CBRMeeting(date(2025, 12, 19), "interim", "cut", Decimal("10.00")),
-    CBRMeeting(date(2026, 2, 13), "core", "cut", Decimal("8.00")),
-)
-
-# The synthetic glide's TERMINAL key rate (percentage points) — the down-leg floor the
-# risk-free legs are re-accrued toward. Named to avoid a magic number in the curve math.
-_CUT_GLIDE_TERMINAL_RATE_PP = Decimal("8.00")
-# The deposit spread below the key rate (mirrors cbr._DEFAULT_DEPOSIT_SPREAD_PP, D-04).
-_DEPOSIT_SPREAD_PP = Decimal("1.0")
-# OFZ-PK floaters track the key rate ~1:1 (no spread); reuse the same key-rate path.
-_PCT_POINTS = Decimal(100)
+# Trading days per year for the daily-compounding accrual (accrue_real_risk_free_leg).
 _TRADING_DAYS = 252
 
-# REGIME_SPLIT_BOUNDARY: the early-cut regime boundary (V-9 / D-09 / R-6). The first
-# real 2025 CBR cut (21 -> 20) lands on 2025-07-25 — the documented high-rate/plateau
-# vs early-cut split point. NAMED (no magic date in logic).
-REGIME_SPLIT_BOUNDARY: date = date(2025, 7, 25)
+# REGIME_SPLIT_BOUNDARY: the early-cut regime boundary (V-9 / D-09 / R-6). Phase 74 (R-C)
+# shifts it to the VERIFIED first real 2025 CBR cut (2025-06-06 → 20.00) — the calendar
+# previously listed a spurious 2025-07-25 first cut; Plan 01 corrected CBR_MEETINGS to the
+# cbr.ru archive (first cut 2025-06-06). This is the documented high-rate/plateau vs
+# early-cut split point. NAMED (no magic date in logic).
+REGIME_SPLIT_BOUNDARY: date = date(2025, 6, 6)
 
 # The mandatory honesty caveat (D-08 / Pitfall 6): a deposit-wins-raw-return outcome in a
 # 16-21% high-rate regime is correctly framed as NOT a failure. Pinned VERBATIM by the
@@ -469,50 +451,6 @@ def mean_wf_sharpe(
     return sum(vals) / len(vals) if vals else 0.0
 
 
-def _cut_glide_key_rate_as_of(as_of: date) -> Decimal:
-    """The synthetic CUT_GLIDE key rate (pp) as-of *as_of* — strictly no look-ahead.
-
-    Reads the steeper synthetic glide first (``m.date <= as_of`` only — same as-of
-    discipline as ``get_last_cbr_decision``); BEFORE the glide's first meeting it falls
-    back to the REAL CBR calendar's as-of key rate. Returns the glide's terminal floor if
-    neither is available. The cut-path is therefore ALWAYS read per-bar (no future leak)
-    yet describes a lower-rate world once the glide engages (T-73-09 guard).
-    """
-    glide_past = [m for m in CUT_GLIDE if m.date <= as_of and m.rate_after is not None]
-    if glide_past:
-        return cast("Decimal", glide_past[-1].rate_after)
-    real = get_last_cbr_decision(as_of)
-    if real is not None and real.rate_after is not None:
-        return real.rate_after
-    return _CUT_GLIDE_TERMINAL_RATE_PP
-
-
-def _reaccrue_risk_free_leg(
-    curve: list[tuple[date, Decimal]], *, spread_pp: Decimal
-) -> list[tuple[date, Decimal]]:
-    """Re-accrue a single risk-free leg under the synthetic CUT_GLIDE key-rate path.
-
-    Treats the leg as a daily-compounded deposit/floater: at each bar the annual rate is
-    ``(cut_glide_key_rate(as_of) - spread_pp) / 100`` (read strictly as-of — no
-    look-ahead) and the day's growth factor is ``(1 + annual) ** (1/252)``. Re-accrues
-    from the leg's OPENING value so the whole curve reflects the lower glide rate. The
-    high-rate baseline curve was built off a HIGHER (16-21%) rate, so the re-accrued curve
-    diverges from it (``deposit_under_cut != deposit_baseline``) while introducing NO
-    look-ahead and NO equity uplift (the equity leg is never touched here, D-07).
-    """
-    if not curve:
-        return []
-    opening = curve[0][1]
-    out: list[tuple[date, Decimal]] = [(curve[0][0], opening)]
-    value = opening
-    for d, _ in curve[1:]:
-        annual = (_cut_glide_key_rate_as_of(d) - spread_pp) / _PCT_POINTS
-        daily_factor = Decimal(str((1.0 + float(annual)) ** (1.0 / _TRADING_DAYS)))
-        value = value * daily_factor
-        out.append((d, value))
-    return out
-
-
 def accrue_real_risk_free_leg(
     dates: list[date],
     base: Decimal,
@@ -522,10 +460,10 @@ def accrue_real_risk_free_leg(
 ) -> list[tuple[date, Decimal]]:
     """Accrue a risk-free leg from the REAL CBR key-rate path (the live-cert builder).
 
-    The live-cert analogue of :func:`_reaccrue_risk_free_leg`: identical daily-compounding
-    convention (``(1 + annual) ** (1/252)``), but it reads the REAL look-ahead-safe
-    :func:`finalayze.data.fetchers.cbr.deposit_rate_as_of` (which resolves the most-recent
-    ``CBR_MEETINGS`` decision on/before each bar) instead of the synthetic ``CUT_GLIDE``.
+    Daily-compounding convention (``(1 + annual) ** (1/252)``) reading the REAL
+    look-ahead-safe :func:`finalayze.data.fetchers.cbr.deposit_rate_as_of` (which resolves
+    the most-recent ``CBR_MEETINGS`` decision on/before each bar) — the real realized
+    calendar, not a synthetic framing path (the synthetic cut-path was retired, D-07).
     With ``spread_pp = 1.0`` this is the deposit leg (key - 1pp, mirroring W1's deposit
     accrual); with ``spread_pp = 0`` it is the OFZ-PK floater leg (tracks the full key
     rate ~1:1). The leg opens at ``base`` on ``dates[0]`` and compounds one trading day per
@@ -605,59 +543,16 @@ def net_index_returns(
     return out
 
 
-def run_cut_path(
-    deposit_curve: list[tuple[date, Decimal]],
-    ofz_pk_curve: list[tuple[date, Decimal]],
-    equity_curve: list[tuple[date, Decimal]],
-    *,
-    profile_key: RiskProfile = RiskProfile.BALANCED,
-) -> AllocationResult:
-    """Synthetic rate-cut FRAMING path: lower the risk-free legs, hold equity FIXED (V-7 / D-07).
-
-    Re-derives ONLY the deposit + OFZ-PK benchmark curves under the synthetic declining
-    :data:`CUT_GLIDE` key-rate path (read strictly as-of per bar — ``m.date <= as_of`` — so
-    NO look-ahead is introduced, T-73-09) and passes the ORIGINAL ``equity_curve`` through
-    BYTE-IDENTICAL (the MCFTR equity sleeve is held fixed — NO fabricated equity-beta
-    uplift, D-07). It then runs the FROZEN allocator on (cut_deposit, cut_ofz, equity).
-
-    FRAMING-ONLY (D-08): the returned metrics are reported and carry the explicit high-rate
-    caveat, but are NEVER fed into the binding verdict. The glide is ILLUSTRATIVE (A2) —
-    anchored to the real 2025 easing direction, NOT a forecast. Its purpose is to
-    demonstrate the §7 thesis: when the deposit anchor stops yielding 16-21%, the
-    equity/bond weights become decisive.
-    """
-    cut_deposit = _reaccrue_risk_free_leg(deposit_curve, spread_pp=_DEPOSIT_SPREAD_PP)
-    # OFZ-PK floaters track the key rate ~1:1 (no deposit spread).
-    cut_ofz = _reaccrue_risk_free_leg(ofz_pk_curve, spread_pp=_ZERO)
-    # Equity (MCFTR) is passed through UNCHANGED — no uplift (D-07).
-    return _naive_orchestrator(_profile_weights_for(profile_key), _NAIVE_CAP).run(
-        cut_deposit, cut_ofz, equity_curve
-    )
-
-
-def _profile_weights_for(profile_key: RiskProfile) -> dict[AssetClass, Decimal]:
-    """The 3-asset target weight vector for *profile_key* (read from the loaded profiles).
-
-    Used by :func:`run_cut_path` so the cut-path scenario runs the SAME L1 target weights
-    the real profile would, just under the lowered risk-free legs.
-    """
-    from finalayze.config.allocation_profiles import load_allocation_profiles  # noqa: PLC0415
-
-    profile = load_allocation_profiles()[profile_key]
-    return dict(profile.weights)
-
-
 def regime_split(dates: list[date]) -> dict[str, tuple[date, date]]:
     """Partition a date window at :data:`REGIME_SPLIT_BOUNDARY` (V-9 / D-09 / R-6).
 
     The HEADLINE regime report (D-09): a documented high-rate/plateau vs early-cut date
-    split at 2025-07-25 — the first real 2025 CBR cut. Returns:
+    split at 2025-06-06 — the VERIFIED first real 2025 CBR cut (R-C). Returns:
 
-    - ``{"high_rate": (start, 2025-07-24), "early_cut": (2025-07-25, end)}`` for a window
+    - ``{"high_rate": (start, 2025-06-05), "early_cut": (2025-06-06, end)}`` for a window
       spanning the boundary;
     - ``{"high_rate": (start, end)}`` (single regime) when the whole window ends before the
-      boundary — the single-high-rate case leans on the cut-path scenario for framing
-      (Pitfall 6).
+      boundary — a single high-rate plateau (Pitfall 6).
 
     This date split (NOT the ``classify_regime`` cross-check) is the binding-readable
     headline because it matches Pitfall 6's wording literally and is trivial to verify.
@@ -672,7 +567,7 @@ def regime_split(dates: list[date]) -> dict[str, tuple[date, date]]:
         raise ValueError(msg)
     start, end = dates[0], dates[-1]
     if end < REGIME_SPLIT_BOUNDARY:
-        return {"high_rate": (start, end)}  # single regime — lean on the cut-path scenario
+        return {"high_rate": (start, end)}  # single high-rate plateau (no easing sub-window)
     day_before = REGIME_SPLIT_BOUNDARY - timedelta(days=1)
     return {"high_rate": (start, day_before), "early_cut": (REGIME_SPLIT_BOUNDARY, end)}
 
@@ -708,7 +603,6 @@ def classify_regime_for_date(d: date) -> CBRRegime:
 def render_json(
     per_profile_verdicts: dict[str, object],
     naive_metrics: dict[str, object],
-    cut_path_metrics: dict[str, object],
     regime: dict[str, tuple[date, date]],
     *,
     git_sha: str,
@@ -716,16 +610,17 @@ def render_json(
     """Assemble all gate metrics into a JSON-serializable sidecar (D-11).
 
     Mirrors the ``scripts/phase72_allocation_ab.py`` ``summary.json`` shape: a flat dict of
-    per-profile / per-naive / cut-path metric blocks plus the ``git_sha`` and the regime
-    split (rendered as ISO date pairs). Decimal values are stringified so the dict is
-    ``json.dumps``-able without a custom encoder. The machine-readable feed a future
-    dashboard (deferred) consumes.
+    per-profile / per-naive metric blocks plus the ``git_sha`` and the regime split
+    (rendered as ISO date pairs). The synthetic cut-path block was retired in Phase 74
+    (D-07) — the real easing sub-window is now the post-boundary segment of
+    ``regime_split``. Decimal values are stringified so the dict is ``json.dumps``-able
+    without a custom encoder. The machine-readable feed a future dashboard (deferred)
+    consumes.
     """
     return {
         "git_sha": git_sha,
         "per_profile": per_profile_verdicts,
         "naive": naive_metrics,
-        "cut_path": cut_path_metrics,
         "regime_split": {k: [v[0].isoformat(), v[1].isoformat()] for k, v in regime.items()},
         "high_rate_caveat": _HIGH_RATE_CAVEAT,
     }
@@ -743,8 +638,10 @@ def render_report(payload: dict[str, object]) -> str:
     Sortino vs best-naive | realized MaxDD vs cap | mean WF-fold Sharpe | verdict), the
     naive-comparison block (prefixed with the framing-only :data:`_RISK_FREE_BAR_NOTE`
     explaining why a near-vol-free risk-free leg inflates the naive Sharpe/Sortino bar in a
-    high-rate regime), the regime split block, the cut-path metrics block, and the mandatory
-    honesty caveat line (:data:`_HIGH_RATE_CAVEAT`, verbatim).
+    high-rate regime), the regime split block, the REAL easing sub-window block (the
+    post-`REGIME_SPLIT_BOUNDARY` segment — the evidence-based cut scenario that replaced the
+    retired synthetic cut-path, D-07), and the mandatory honesty caveat line
+    (:data:`_HIGH_RATE_CAVEAT`, verbatim).
 
     The BINDING number is the full-window metric (``verdict_for_profile``); the mean
     WF-fold Sharpe (R-1 / D-02) is REPORTED alongside so GATE-01's "OOS via walk-forward"
@@ -753,7 +650,6 @@ def render_report(payload: dict[str, object]) -> str:
     """
     per_profile = cast("dict[str, object]", payload.get("per_profile", {}))
     naive = cast("dict[str, object]", payload.get("naive", {}))
-    cut_path = cast("dict[str, object]", payload.get("cut_path", {}))
     regime = cast("dict[str, object]", payload.get("regime_split", {}))
 
     lines: list[str] = [
@@ -788,12 +684,18 @@ def render_report(payload: dict[str, object]) -> str:
         "",
         *(f"- `{k}`: {val}" for k, val in regime.items()),
         "",
-        "## Cut-Path Scenario (FRAMING-ONLY — NOT a binding verdict, D-07/D-08)",
+        "## Real Easing Sub-Window (post-REGIME_SPLIT_BOUNDARY, evidence-based, D-07)",
         "",
-        "_The synthetic CUT_GLIDE lowers ONLY the risk-free legs; the MCFTR equity curve "
-        "is held byte-identical (no fabricated uplift). Illustrative, not a forecast (A2)._",
+        "_The synthetic framing cut-path is RETIRED (D-07). The real binding window now "
+        "CONTAINS the real easing (high-rate plateau → the verified 2025 CBR cuts from "
+        "2025-06-06), so the cut scenario is the REAL easing sub-window below — sourced from "
+        "the regime split, not a synthetic glide._",
         "",
-        *(f"- `{k}`: {_fmt(val)}" for k, val in cut_path.items()),
+        *(
+            [f"- easing sub-window: `{regime['early_cut']}`"]
+            if "early_cut" in regime
+            else ["- easing sub-window: none (window ends before the first real cut)"]
+        ),
         "",
         "## Honesty Caveat (Pitfall 6 / D-08)",
         "",

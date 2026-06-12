@@ -23,13 +23,15 @@ The contract pinned here:
 - V-6 (R-3): ``build_naive_legs`` builds the three legs on the SAME basis via
   degenerate-profile injection -- the deposit leg is cost-free, the rebalanced
   60/30/10 leg charges MOEX_RETAIL_COSTS.
-- V-7 (D-07): the cut-path lowers the risk-free legs while holding the MCFTR equity
-  curve BYTE-IDENTICAL (framing-only, not fed into the binding verdict).
+- V-7 (D-07): RETIRED in Phase 74 -- the synthetic framing cut-path is deleted; the
+  real easing sub-window (post-boundary) is now the evidence-based cut scenario.
 - V-8 (D-02): OOS walk-forward Sharpes are sliced from the merged curve via
   ``generate_wf_windows`` -- NO engine re-run.
-- V-9 (D-09/R-6): the regime split boundary is 2025-07-25.
+- V-9 (D-09/R-6): the regime split boundary is 2025-06-06 (Phase 74 R-C shifted it
+  from 2025-07-25 to the verified first real 2025 CBR cut).
 
-RED now: ``finalayze.backtest.allocation_gate`` (Plans 02/03/04) does not exist yet.
+Phase 74 (Plan 02) reproduces this contract minus the retired V-7, plus the new
+net-of-NDFL / snapshot / no-drift tests.
 """
 
 from __future__ import annotations
@@ -40,7 +42,6 @@ from decimal import Decimal
 import pytest
 
 from finalayze.backtest.allocation_gate import (
-    CUT_GLIDE,
     REGIME_SPLIT_BOUNDARY,
     accrue_real_risk_free_leg,
     build_naive_legs,
@@ -52,7 +53,6 @@ from finalayze.backtest.allocation_gate import (
     regime_split,
     render_json,
     render_report,
-    run_cut_path,
     verdict_for_profile,
 )
 from finalayze.backtest.bond_walk_forward import generate_wf_windows
@@ -109,9 +109,10 @@ _ZERO = Decimal(0)
 
 # -- Task 2 constants (V-5, V-7, V-8, V-9) ------------------------------------
 
-# V-9 / D-09 / R-6: the early-cut regime boundary.
-_BOUNDARY = date(2025, 7, 25)
-_HIGH_RATE_LAST = date(2025, 7, 24)  # last day of the high-rate window
+# V-9 / D-09 / R-6: the early-cut regime boundary. Phase 74 (R-C) shifts it to the
+# VERIFIED first real 2025 CBR cut (2025-06-06 -> 20.00, was wrongly 2025-07-25).
+_BOUNDARY = date(2025, 6, 6)
+_HIGH_RATE_LAST = date(2025, 6, 5)  # last day of the high-rate window
 
 # V-8 / D-02: the WF window cadence the gate MUST pass explicitly to
 # generate_wf_windows (train/test/step months).
@@ -385,34 +386,12 @@ def test_wf_folds_no_rerun() -> None:
     assert all(isinstance(s, float) for s in folds)
 
 
-def test_cutpath_equity_fixed() -> None:
-    """The cut-path holds the MCFTR equity curve byte-identical (V-7 / D-07).
-
-    ``run_cut_path`` rebuilds ONLY the deposit + OFZ legs under the synthetic
-    declining ``CUT_GLIDE`` meeting calendar; the equity (MCFTR) leg is passed
-    through UNCHANGED (no fabricated uplift). The deposit leg under CUT_GLIDE
-    differs from the high-rate baseline deposit leg.
-    """
-    dates = _daily_index(_FIRST_BAR, _N_BARS)
-    deposit_curve = _curve(_DEPOSIT_BASE, _DEPOSIT_DAILY, dates)
-    ofz_pk_curve = _curve(_OFZ_BASE, _OFZ_DAILY, dates)
-    equity_curve = _curve(_EQUITY_BASE, _EQUITY_DAILY, dates)
-
-    cut = run_cut_path(deposit_curve, ofz_pk_curve, equity_curve)
-
-    # Equity leg is held FIXED to exact Decimal equality (no uplift).
-    assert [v for _, v in equity_curve] == list(cut.equity_curve)
-    # The deposit leg under CUT_GLIDE diverges from the high-rate baseline.
-    assert list(cut.deposit_curve) != [v for _, v in deposit_curve]
-    assert CUT_GLIDE is not None  # the synthetic declining meeting calendar exists
-
-
 def test_regime_split() -> None:
-    """The early-cut regime boundary is 2025-07-25 (V-9 / D-09 / R-6).
+    """The early-cut regime boundary is 2025-06-06 (V-9 / D-09 / R-6, R-C-corrected).
 
-    ``regime_split`` partitions a date window at 2025-07-25 -- the high-rate window
-    ends 2025-07-24, the early-cut window starts 2025-07-25. A window entirely
-    before the boundary is a single high-rate regime.
+    ``regime_split`` partitions a date window at 2025-06-06 -- the VERIFIED first real
+    2025 CBR cut (21 -> 20). The high-rate window ends 2025-06-05, the early-cut window
+    starts 2025-06-06. A window entirely before the boundary is a single high-rate regime.
     """
     assert REGIME_SPLIT_BOUNDARY == _BOUNDARY
 
@@ -450,9 +429,9 @@ _DAYS_BETWEEN = 30
 def test_accrue_real_risk_free_leg_grows_from_real_key_rate() -> None:
     """The live deposit/OFZ leg accrues from the REAL CBR key-rate path (operator D-10 override).
 
-    ``accrue_real_risk_free_leg`` is the live-cert analogue of ``_reaccrue_risk_free_leg``
-    but it reads the REAL ``deposit_rate_as_of`` (the look-ahead-safe ``CBR_MEETINGS``
-    calendar) instead of the synthetic ``CUT_GLIDE``. On a real window opening in the
+    ``accrue_real_risk_free_leg`` reads the REAL ``deposit_rate_as_of`` (the look-ahead-safe
+    ``CBR_MEETINGS`` calendar) — the real realized calendar, not the retired synthetic
+    framing path (D-07). On a real window opening in the
     16-21% high-rate regime the leg compounds upward monotonically (the rate is strictly
     positive across the whole window), opens at ``base``, and the no-spread (OFZ-PK
     floater) leg out-accrues the 1pp-spread (deposit) leg because it tracks the full key
@@ -638,12 +617,10 @@ def test_report_renders_risk_free_bar_note() -> None:
         "deposit_100_sortino": _NOTE_DEPOSIT_SORTINO,
         "deposit_100_maxdd_pct": 0.0,
     }
-    cut_path_metrics: dict[str, object] = {"sharpe": -0.4881, "note": "FRAMING-ONLY"}
+    # The synthetic cut-path is retired (D-07): render_json no longer takes a cut_path arg.
     regime = regime_split([_BOUNDARY - timedelta(days=30), _BOUNDARY + timedelta(days=30)])
 
-    payload = render_json(
-        per_profile, naive_metrics, cut_path_metrics, regime, git_sha=_NOTE_GIT_SHA
-    )
+    payload = render_json(per_profile, naive_metrics, regime, git_sha=_NOTE_GIT_SHA)
     report = render_report(payload)
 
     # The methodology note renders verbatim (all framing pieces present).
