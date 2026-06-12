@@ -40,6 +40,7 @@ from decimal import Decimal
 from finalayze.backtest.allocation_gate import (  # noqa: E402 -- RED: module absent until Plans 02-04
     CUT_GLIDE,
     REGIME_SPLIT_BOUNDARY,
+    accrue_real_risk_free_leg,
     build_naive_legs,
     excess_sortino_from_equity,
     gate_with_autotighten,
@@ -424,3 +425,45 @@ def test_regime_split() -> None:
     pre_split = regime_split(pre_only)
     assert pre_split["high_rate"][0] == pre_only[0]
     assert pre_split["high_rate"][1] == _HIGH_RATE_LAST
+
+
+# -- Live-path real-rate accrual (73-05 --live, operator-directed) -------------
+
+# The real CBR key-rate window the operator's live cert spans: it BRACKETS the
+# 2025-07-25 first-cut boundary so both regimes are exercised on REAL data.
+_LIVE_BASE = Decimal(100_000)
+_LIVE_FIRST = date(2024, 1, 2)
+_LIVE_LAST = date(2025, 11, 27)
+# The real CBR key rate (percentage points) on/before _LIVE_FIRST is 16.00%; the
+# deposit leg accrues at key-1pp = 15% -> the first daily step is strictly > base.
+_DEPOSIT_SPREAD_PP = Decimal("1.0")
+_OFZ_SPREAD_PP = Decimal(0)
+_DAYS_BETWEEN = 30
+
+
+def test_accrue_real_risk_free_leg_grows_from_real_key_rate() -> None:
+    """The live deposit/OFZ leg accrues from the REAL CBR key-rate path (operator D-10 override).
+
+    ``accrue_real_risk_free_leg`` is the live-cert analogue of ``_reaccrue_risk_free_leg``
+    but it reads the REAL ``deposit_rate_as_of`` (the look-ahead-safe ``CBR_MEETINGS``
+    calendar) instead of the synthetic ``CUT_GLIDE``. On a real window opening in the
+    16-21% high-rate regime the leg compounds upward monotonically (the rate is strictly
+    positive across the whole window), opens at ``base``, and the no-spread (OFZ-PK
+    floater) leg out-accrues the 1pp-spread (deposit) leg because it tracks the full key
+    rate. The dates are preserved EXACTLY (one common axis, R-3).
+    """
+    dates = [_LIVE_FIRST + timedelta(days=i * _DAYS_BETWEEN) for i in range(24)]
+    dates = [d for d in dates if d <= _LIVE_LAST]
+
+    deposit = accrue_real_risk_free_leg(dates, _LIVE_BASE, spread_pp=_DEPOSIT_SPREAD_PP)
+    ofz = accrue_real_risk_free_leg(dates, _LIVE_BASE, spread_pp=_OFZ_SPREAD_PP)
+
+    # Same axis, opens at base.
+    assert [d for d, _ in deposit] == dates
+    assert deposit[0][1] == _LIVE_BASE
+    assert ofz[0][1] == _LIVE_BASE
+    # Real high-rate regime -> strictly rising, and the final value exceeds the opening.
+    assert deposit[-1][1] > _LIVE_BASE
+    assert ofz[-1][1] > _LIVE_BASE
+    # OFZ-PK floater (no spread, full key rate) out-accrues the deposit (key-1pp).
+    assert ofz[-1][1] > deposit[-1][1]

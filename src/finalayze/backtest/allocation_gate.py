@@ -46,6 +46,7 @@ from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
 from finalayze.data.fetchers.cbr import (
     CBRMeeting,
     MacroContextProvider,
+    deposit_rate_as_of,
     get_last_cbr_decision,
 )
 from finalayze.strategies.bond_duration_rotation import CBRRegime, classify_regime
@@ -478,6 +479,39 @@ def _reaccrue_risk_free_leg(
     value = opening
     for d, _ in curve[1:]:
         annual = (_cut_glide_key_rate_as_of(d) - spread_pp) / _PCT_POINTS
+        daily_factor = Decimal(str((1.0 + float(annual)) ** (1.0 / _TRADING_DAYS)))
+        value = value * daily_factor
+        out.append((d, value))
+    return out
+
+
+def accrue_real_risk_free_leg(
+    dates: list[date], base: Decimal, *, spread_pp: Decimal
+) -> list[tuple[date, Decimal]]:
+    """Accrue a risk-free leg from the REAL CBR key-rate path (the live-cert builder).
+
+    The live-cert analogue of :func:`_reaccrue_risk_free_leg`: identical daily-compounding
+    convention (``(1 + annual) ** (1/252)``), but it reads the REAL look-ahead-safe
+    :func:`finalayze.data.fetchers.cbr.deposit_rate_as_of` (which resolves the most-recent
+    ``CBR_MEETINGS`` decision on/before each bar) instead of the synthetic ``CUT_GLIDE``.
+    With ``spread_pp = 1.0`` this is the deposit leg (key - 1pp, mirroring W1's deposit
+    accrual); with ``spread_pp = 0`` it is the OFZ-PK floater leg (tracks the full key
+    rate ~1:1). The leg opens at ``base`` on ``dates[0]`` and compounds one trading day per
+    bar at the as-of annual rate — strictly as-of, NO look-ahead.
+
+    This is the genuine real-data deposit/OFZ-PK total-return series the operator's
+    ``--live`` cert requires (an explicit, operator-authorized override of D-10): both
+    risk-free legs derive from the REAL CBR calendar, the equity leg from the REAL MCFTR
+    series. The returned ``(date, Decimal)`` series shares the supplied common date axis
+    (R-3), so the three legs forward-align identically for ``build_naive_legs``.
+    """
+    if not dates:
+        return []
+    out: list[tuple[date, Decimal]] = [(dates[0], base)]
+    value = base
+    for d in dates[1:]:
+        # deposit_rate_as_of returns a FRACTION already net of the spread (key-spread)/100.
+        annual = deposit_rate_as_of(d, spread_pp=spread_pp)
         daily_factor = Decimal(str((1.0 + float(annual)) ** (1.0 / _TRADING_DAYS)))
         value = value * daily_factor
         out.append((d, value))
