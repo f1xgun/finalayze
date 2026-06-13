@@ -68,11 +68,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from finalayze.backtest import allocation_gate as _gate
 from finalayze.backtest.allocation_gate import (
-    accrue_real_risk_free_leg,
     build_naive_legs,
     excess_sortino_from_equity,
     gate_with_autotighten,
-    net_index_returns,
+    net_fixed_income_legs_interleaved,
     regime_split,
     render_json,
     render_report,
@@ -317,13 +316,21 @@ def _load_live_curves() -> tuple[
     axis = [d for d, _ in equity_curve]
     # ONE shared accumulator per run so the deposit + OFZ legs share one cross-leg YTD (W1).
     tax_acc = YtdTaxAccumulator()
-    # OFZ leg: forward-align RUFLBITR onto the master axis, then net the daily-return
-    # increment of NDFL (D-04 derived implication: the real bond index is published gross).
+    # CR-01: net BOTH fixed-income legs INTERLEAVED BY DATE in ONE shared, date-ordered pass
+    # — NOT leg-by-leg. A leg-by-leg netting (full OFZ pass, then full deposit pass through the
+    # same accumulator) silently breaks the W1 cross-leg-YTD contract on a multi-tax-year
+    # window: the deposit leg's first (earliest) bar would trigger a Jan-1 reset that wipes the
+    # OFZ leg's accumulated YTD. Interleaving by date makes both legs' daily increments hit the
+    # SAME running YTD before any year-boundary reset (the band crossover the shared YTD exists
+    # to detect). On this cert's window both legs stay in the 13% band, so the netted curves are
+    # byte-identical to the old leg-by-leg result — only the multi-year correctness changes.
     ruflbitr_on_axis = _forward_align(ruflbitr_gross, axis)
-    ofz_pk_curve = net_index_returns(ruflbitr_on_axis, tax_acc=tax_acc)
-    # Deposit leg: accrue from the REAL CBR key-rate path, netted through the SAME band.
-    deposit_curve = accrue_real_risk_free_leg(
-        axis, _LIVE_DEPOSIT_BASE, spread_pp=_LIVE_DEPOSIT_SPREAD_PP, tax_acc=tax_acc
+    deposit_curve, ofz_pk_curve = net_fixed_income_legs_interleaved(
+        ruflbitr_on_axis,
+        axis,
+        _LIVE_DEPOSIT_BASE,
+        deposit_spread_pp=_LIVE_DEPOSIT_SPREAD_PP,
+        tax_acc=tax_acc,
     )
     return deposit_curve, ofz_pk_curve, equity_curve
 

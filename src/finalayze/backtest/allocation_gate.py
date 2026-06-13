@@ -546,6 +546,78 @@ def net_index_returns(
     return out
 
 
+def net_fixed_income_legs_interleaved(
+    ofz_level_series: list[tuple[date, Decimal]],
+    deposit_dates: list[date],
+    deposit_base: Decimal,
+    *,
+    deposit_spread_pp: Decimal,
+    tax_acc: YtdTaxAccumulator,
+) -> tuple[list[tuple[date, Decimal]], list[tuple[date, Decimal]]]:
+    """Net BOTH fixed-income legs in ONE date-ordered pass through a shared YTD (CR-01).
+
+    The W1 cross-sleeve contract is that the deposit + OFZ-PK legs share ONE cross-leg
+    progressive-band YTD per run (one :class:`YtdTaxAccumulator`). Netting them
+    LEG-BY-LEG (the full OFZ pass across the whole multi-year axis, THEN the full deposit
+    pass) silently BREAKS that contract on a multi-tax-year window: after the OFZ pass the
+    accumulator's ``_current_year`` is the LAST year, so the deposit leg's FIRST (earliest)
+    bar triggers a Jan-1 reset (:meth:`YtdTaxAccumulator.tax` resets on a ``year`` change),
+    discarding the OFZ leg's accumulated YTD — the two legs are then taxed as if each had
+    its own per-year YTD (CR-01).
+
+    This helper instead nets both legs interleaved BY DATE: for each bar (in date order)
+    the OFZ income increment AND the deposit income increment are taxed through the SAME
+    accumulator at ``year=d.year``, so BOTH increments hit the same running YTD BEFORE any
+    year-boundary reset. The two legs MUST share one common date axis (R-3) — the OFZ level
+    series is forward-aligned onto the deposit ``dates`` by the caller, so
+    ``[d for d, _ in ofz_level_series] == deposit_dates``.
+
+    Per-leg arithmetic is IDENTICAL to :func:`net_index_returns` (OFZ) and
+    :func:`accrue_real_risk_free_leg` (deposit): a positive income increment is netted
+    through the band, a loss (OFZ) passes through untaxed, principal is never taxed
+    (Pitfall 1). On a window where the cross-leg YTD never crosses the 2.4M threshold (every
+    increment is taxed at the 13% base rate) the netted curves are BYTE-IDENTICAL to the
+    leg-by-leg result — only a band crossover (the exact thing the shared YTD exists to
+    detect) makes the interleaved result differ. Returns ``(deposit_curve, ofz_pk_curve)``.
+    """
+    if not deposit_dates:
+        return [], []
+    if [d for d, _ in ofz_level_series] != deposit_dates:
+        msg = "net_fixed_income_legs_interleaved requires both legs on one shared date axis (R-3)"
+        raise ConfigurationError(msg)
+
+    deposit_out: list[tuple[date, Decimal]] = [(deposit_dates[0], deposit_base)]
+    ofz_out: list[tuple[date, Decimal]] = [ofz_level_series[0]]
+    deposit_value = deposit_base
+    ofz_value = ofz_level_series[0][1]
+    ofz_prev_level = ofz_level_series[0][1]
+
+    for i in range(1, len(deposit_dates)):
+        d = deposit_dates[i]
+        # OFZ leg increment (net_index_returns arithmetic) — taxed FIRST against the shared
+        # YTD so both legs' increments hit the SAME running YTD before any year reset.
+        ofz_level = ofz_level_series[i][1]
+        if ofz_prev_level > 0:
+            ofz_income = ofz_value * (ofz_level / ofz_prev_level - _ONE)
+            if ofz_income > _ZERO:
+                ofz_income -= tax_acc.tax(ofz_income, year=d.year)
+            ofz_value = ofz_value + ofz_income
+        ofz_prev_level = ofz_level
+
+        # Deposit leg increment (accrue_real_risk_free_leg arithmetic) — taxed against the
+        # SAME shared YTD at the SAME year, before the next year's reset.
+        annual = deposit_rate_as_of(d, spread_pp=deposit_spread_pp)
+        daily_factor = Decimal(str((1.0 + float(annual)) ** (1.0 / _TRADING_DAYS)))
+        gross_income_delta = deposit_value * daily_factor - deposit_value
+        deposit_tax = tax_acc.tax(max(gross_income_delta, _ZERO), year=d.year)
+        deposit_value = deposit_value + (gross_income_delta - deposit_tax)
+
+        ofz_out.append((d, ofz_value))
+        deposit_out.append((d, deposit_value))
+
+    return deposit_out, ofz_out
+
+
 # ── Committed real-data snapshot (REGIME-01 / D-05, Phase-65 fail-closed pattern) ──
 # The binding cert reads a committed JSON snapshot of the fetched real series (MCFTRR
 # net equity + RUFLBITR-derived net OFZ + net deposit) so CI reproduces the gate

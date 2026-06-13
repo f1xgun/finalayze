@@ -50,6 +50,7 @@ from finalayze.backtest.allocation_gate import (
     build_naive_legs,
     excess_sortino_from_equity,
     gate_with_autotighten,
+    net_fixed_income_legs_interleaved,
     net_index_returns,
     oos_wf_sharpes,
     realized_dd_fraction,
@@ -476,6 +477,23 @@ _NET_N_STEPS = 24
 _NET_SINGLE_YEAR_FIRST = date(2025, 1, 9)
 _NET_SINGLE_YEAR_STEPS = 11  # ~monthly bars through 2025, all in one tax year
 
+# A TWO-tax-year daily window (CR-01 / IN-04a): the interleaved netter must NOT reset the
+# cross-leg YTD between legs at a year boundary. On a LARGE base the cross-leg YTD crosses
+# the 2.4M progressive threshold WITHIN the first tax year, so the band crossover (13% ->
+# 15%) is the exact thing the shared YTD must detect. The OLD leg-by-leg structure (full OFZ
+# pass, then full deposit pass) would reset the accumulator before the deposit leg's first
+# (earliest) bar, undertaxing the deposit leg; the interleaved netter taxes both legs' daily
+# increments against the SAME running YTD before any year reset.
+_TWO_YEAR_FIRST = date(2024, 1, 9)  # window opens in 2024, runs into 2025 (two tax years)
+_TWO_YEAR_STEPS = 24  # ~monthly bars spanning 2024 + 2025
+# A LARGE base so the COMBINED cross-leg income crosses the 2.4M progressive band WITHIN the
+# first tax year (200M base -> the deposit + OFZ legs each accrue ~1.6M+ income in 2024, so
+# their combined cross-leg YTD crosses 2.4M and the band-crossover the shared YTD must detect
+# fires). On a small base both legs stay in the 13% band and the netted curves are identical
+# either way -- that is exactly why the orchestrator's real-window cert is byte-unchanged.
+_LARGE_BASE = Decimal(200_000_000)
+_LARGE_INDEX_DAILY = Decimal("1.0006")  # a high-carry index so the OFZ leg income is material
+
 
 def _rebased_index(base: Decimal, daily: Decimal, dates: list[date]) -> list[tuple[date, Decimal]]:
     """A deterministic rising (date, Decimal) index *level* series (e.g. a RUFLBITR proxy)."""
@@ -572,6 +590,51 @@ def test_shared_accumulator_cross_leg_ytd() -> None:
     # Both nets are real curves (open at base, taxed below their gross).
     assert deposit_net[0][1] == _LIVE_BASE
     assert index_net[0][1] == rising[0][1]
+
+
+def test_shared_accumulator_cross_leg_ytd_two_tax_years() -> None:
+    """Interleaved netting honors the cross-leg YTD across a TWO-tax-year window (CR-01 / IN-04a).
+
+    The W1 contract is ONE cross-leg progressive-band YTD per run. Netting the two
+    fixed-income legs LEG-BY-LEG (full OFZ pass, then full deposit pass through the same
+    accumulator) silently breaks that contract on a multi-tax-year window: after the OFZ pass
+    ``_current_year`` is the LAST year, so the deposit leg's earliest bar triggers a Jan-1
+    reset that wipes the OFZ leg's accumulated YTD (CR-01). On a LARGE base where the combined
+    cross-leg income crosses the 2.4M band within the first year, that reset UNDERTAXES the
+    deposit leg (its first-year income is taxed from zero instead of on top of the OFZ YTD).
+
+    :func:`net_fixed_income_legs_interleaved` taxes both legs' daily increments against the
+    SAME running YTD before any year-boundary reset, so the deposit leg crosses into the 15%
+    band sooner -> strictly MORE tax -> a strictly LOWER deposit final value than the broken
+    leg-by-leg structure. This assertion is RED on the old leg-by-leg driver and GREEN after
+    the interleaved fix.
+    """
+    dates = [_TWO_YEAR_FIRST + timedelta(days=i * _DAYS_BETWEEN) for i in range(_TWO_YEAR_STEPS)]
+    # Two distinct tax years are actually spanned (guards the fixture against drift).
+    assert len({d.year for d in dates}) >= 2  # noqa: PLR2004
+    ofz_levels = _rebased_index(_LARGE_BASE, _LARGE_INDEX_DAILY, dates)
+
+    # Interleaved (the fix): both legs net against ONE shared, date-ordered YTD.
+    shared = YtdTaxAccumulator()
+    deposit_interleaved, ofz_interleaved = net_fixed_income_legs_interleaved(
+        ofz_levels, dates, _LARGE_BASE, deposit_spread_pp=_DEPOSIT_SPREAD_PP, tax_acc=shared
+    )
+
+    # Leg-by-leg (the OLD broken structure): full OFZ pass, THEN full deposit pass, one acc.
+    leg_by_leg = YtdTaxAccumulator()
+    net_index_returns(ofz_levels, tax_acc=leg_by_leg)  # OFZ pass advances _current_year to 2025
+    deposit_leg_by_leg = accrue_real_risk_free_leg(
+        dates, _LARGE_BASE, spread_pp=_DEPOSIT_SPREAD_PP, tax_acc=leg_by_leg
+    )
+
+    # The interleaved deposit leg crosses into the 15% band sooner (it sees the OFZ YTD before
+    # the year boundary), so it pays strictly MORE tax than the reset-confounded leg-by-leg.
+    assert deposit_interleaved[-1][1] < deposit_leg_by_leg[-1][1]
+    # Both still open at base (principal never taxed) and share the one axis (R-3).
+    assert deposit_interleaved[0][1] == _LARGE_BASE
+    assert ofz_interleaved[0][1] == _LARGE_BASE
+    assert [d for d, _ in deposit_interleaved] == dates
+    assert [d for d, _ in ofz_interleaved] == dates
 
 
 # -- Risk-free-bar methodology note (operator follow-up, framing-only) ---------
