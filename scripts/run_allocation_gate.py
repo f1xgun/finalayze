@@ -22,7 +22,7 @@ verdict is whatever ``gate_with_autotighten`` returns (PASS / PASS_AFTER_TIGHTEN
 HARD_FAIL). A HARD_FAIL is a legitimate, honest, non-softened outcome.
 
 Window: a multi-year daily window that SPANS the documented regime boundary
-(``REGIME_SPLIT_BOUNDARY`` = 2025-07-25) so the report renders BOTH the high-rate and
+(``REGIME_SPLIT_BOUNDARY`` = 2025-06-06) so the report renders BOTH the high-rate and
 the early-cut regimes. The deposit leg is flat-ish (the strong 16-21% high-rate anchor),
 OFZ-PK slowly rises, equity rises faster -- the honest deposit-anchored geometry the §7
 thesis is judged against.
@@ -91,10 +91,10 @@ _RUN_PREFIX = "allocation-gate-73"
 _ITER_DIR = Path(__file__).resolve().parent.parent / "results" / "iterations"
 
 # Deterministic offline window: a multi-year daily span that BRACKETS the documented
-# regime boundary (REGIME_SPLIT_BOUNDARY = 2025-07-25) so the report renders BOTH the
+# regime boundary (REGIME_SPLIT_BOUNDARY = 2025-06-06) so the report renders BOTH the
 # high-rate and the early-cut regimes (D-09 / R-6). Start well before, end well after.
 _FIRST_BAR = date(2024, 1, 1)
-_N_BARS = 700  # ~2.8y of daily bars -> spans 2025-07-25 + many quarter boundaries
+_N_BARS = 700  # ~2.8y of daily bars -> spans 2025-06-06 + many quarter boundaries
 
 # Curve geometry (deterministic, no network, no token -- a CI-safe reproducible cert).
 # Deposit is the flat-ish high-rate anchor; OFZ-PK is a slow carry leg; equity rises
