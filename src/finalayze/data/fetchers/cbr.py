@@ -375,7 +375,7 @@ CBR_MEETINGS: tuple[CBRMeeting, ...] = (
     CBRMeeting(date(2022, 4, 29), "core", "cut", Decimal("14.00")),
     CBRMeeting(date(2022, 6, 10), "interim", "cut", Decimal("9.50")),
     CBRMeeting(date(2022, 7, 22), "core", "cut", Decimal("8.00")),
-    CBRMeeting(date(2022, 9, 16), "interim", "hold", Decimal("7.50")),
+    CBRMeeting(date(2022, 9, 16), "interim", "cut", Decimal("7.50")),  # 8.00->7.50 is a cut
     CBRMeeting(date(2022, 10, 28), "core", "hold", Decimal("7.50")),
     CBRMeeting(date(2022, 12, 16), "interim", "hold", Decimal("7.50")),
     # 2023
