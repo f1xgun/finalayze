@@ -836,6 +836,28 @@ def test_gate_snapshot_round_trip_clamped(tmp_path: Path) -> None:
         _load_gate_snapshot(leak_file)
 
 
+def test_gate_snapshot_rejects_misaligned_axes(tmp_path: Path) -> None:
+    """The loader rejects legs whose date axes are not identical (WR-01 / R-3).
+
+    The whole gate runs on ONE basis (R-3) and ``regime_split`` keys off only the deposit
+    leg's dates, so a snapshot whose three legs have misaligned date axes would silently
+    produce a WRONG basis without raising. The committed fixture always shares the MCFTRR
+    axis (so the assertion accepts it -- pinned by ``test_gate_snapshot_round_trip_clamped``),
+    but a fail-closed loader that documents R-3 must also ENFORCE it: a hand-crafted snapshot
+    with three different per-leg axes must raise ``ConfigurationError``.
+    """
+    snap = _well_formed_snapshot()
+    # Shift the OFZ leg onto a DIFFERENT date axis (same length, different dates) -> misaligned.
+    snap["legs"][_SNAP_OFZ_KEY] = [  # type: ignore[index]
+        ["2024-01-04", _SNAP_BASE_FIXED],
+        [_SNAP_WINDOW_END, "112000.00"],
+    ]
+    misaligned = tmp_path / "misaligned.json"
+    misaligned.write_text(json.dumps(snap), encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="one date axis"):
+        _load_gate_snapshot(misaligned)
+
+
 def test_gate_snapshot_rejects_window_end_past_binding_end(tmp_path: Path) -> None:
     """The loader rejects a window.end that post-dates _BINDING_END (IN-02 defense-in-depth).
 

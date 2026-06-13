@@ -693,6 +693,13 @@ def _load_gate_snapshot(
             f"binding clamp {_BINDING_END.isoformat()} at {path} (mis-stamped window)"
         )
         raise ConfigurationError(msg)
+    # WR-01 (R-3): the whole gate runs on ONE basis and regime_split keys off only the deposit
+    # leg's dates, so the three legs MUST share one identical, non-empty date axis. Enforce the
+    # documented one-basis invariant fail-closed (the committed fixture always shares it).
+    axes = ([d for d, _ in equity], [d for d, _ in ofz], [d for d, _ in deposit])
+    if not all(axis == axes[0] and axis for axis in axes):
+        msg = f"allocation-gate snapshot legs do not share one date axis (R-3) at {path}"
+        raise ConfigurationError(msg)
     return equity, ofz, deposit
 
 
