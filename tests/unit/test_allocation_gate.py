@@ -836,6 +836,24 @@ def test_gate_snapshot_round_trip_clamped(tmp_path: Path) -> None:
         _load_gate_snapshot(leak_file)
 
 
+def test_gate_snapshot_rejects_window_end_past_binding_end(tmp_path: Path) -> None:
+    """The loader rejects a window.end that post-dates _BINDING_END (IN-02 defense-in-depth).
+
+    The per-bar clamp already rejects any bar > _BINDING_END, so no future bar can leak. But
+    the ``window.end`` field itself was never checked against _BINDING_END: a snapshot
+    declaring ``window.end = 2027-01-01`` loaded fine (its bars were still clamped). Surface a
+    mis-stamped window EXPLICITLY rather than relying only on the bar-level clamp -- a
+    window.end past _BINDING_END raises ``ConfigurationError``.
+    """
+    snap = _well_formed_snapshot()
+    # window.end declared well past the binding clamp (bars stay <= clamp; only the field lies).
+    snap["window"] = {"start": _SNAP_WINDOW_START, "end": "2027-01-01"}  # type: ignore[index]
+    bad_window = tmp_path / "bad_window.json"
+    bad_window.write_text(json.dumps(snap), encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="binding"):
+        _load_gate_snapshot(bad_window)
+
+
 def test_no_allocation_logic_drift() -> None:
     """The frozen merge path is byte-identical given identical input curves (frozen-allocator).
 

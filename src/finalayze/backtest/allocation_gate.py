@@ -684,6 +684,15 @@ def _load_gate_snapshot(
     except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         msg = f"allocation-gate snapshot missing/corrupt at {path}: {exc}"
         raise ConfigurationError(msg) from exc  # NO fallback to synthetic data (D-05)
+    # IN-02 (defense-in-depth): reject a window.end that post-dates the binding clamp. The
+    # per-bar clamp already rejects any bar > _BINDING_END, but a mis-stamped window.end field
+    # itself was never checked — surface it explicitly rather than relying on the bar clamp.
+    if window_end > _BINDING_END:
+        msg = (
+            f"allocation-gate snapshot window.end {window_end.isoformat()} post-dates the "
+            f"binding clamp {_BINDING_END.isoformat()} at {path} (mis-stamped window)"
+        )
+        raise ConfigurationError(msg)
     return equity, ofz, deposit
 
 
