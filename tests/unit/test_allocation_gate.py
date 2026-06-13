@@ -44,6 +44,7 @@ from pathlib import Path
 import pytest
 
 from finalayze.backtest.allocation_gate import (
+    _LARGE_SORTINO_SENTINEL,
     REGIME_SPLIT_BOUNDARY,
     _load_gate_snapshot,
     accrue_real_risk_free_leg,
@@ -257,6 +258,45 @@ def test_sortino_negative_not_clamped() -> None:
     sortino = excess_sortino_from_equity(losing, risk_free_annual_pct=_RUONIA_PCT)
     assert sortino < 0.0
     assert sortino != 0.0
+
+
+def test_sortino_sentinel_vs_sentinel_does_not_auto_pass() -> None:
+    """A zero-downside candidate does NOT pass the Sortino leg by sentinel equality (WR-02).
+
+    ``excess_sortino_from_equity`` returns the fixed ``_LARGE_SORTINO_SENTINEL`` for a
+    zero-downside (monotone-up) curve. If a candidate leg is ALSO zero-downside, the naive
+    comparison ``alloc_sortino >= best_naive_sortino`` would be ``sentinel >= sentinel`` ->
+    ``True``, satisfying the Sortino condition by sentinel EQUALITY rather than a real
+    risk-adjusted measurement. The contract: sentinel-vs-sentinel is UNDEFINED -> it must NOT
+    auto-pass the Sortino leg (treat it as a fail, not an automatic pass).
+
+    This guards a future caller whose candidate is itself near-zero-downside. It does NOT move
+    this cert's HARD_FAIL: any equity-holding allocation has downside, so ``alloc_sortino``
+    never hits the sentinel and a real Sortino value still compares normally (pinned by the
+    sibling conjunctive tests, whose verdicts are unchanged).
+    """
+    sentinel_vs_sentinel = verdict_for_profile(
+        alloc_sharpe=_ALLOC_SHARPE_PASS,
+        alloc_sortino=_LARGE_SORTINO_SENTINEL,
+        alloc_max_drawdown_pct=_ALLOC_MAXDD_PASS_PCT,
+        naive_sharpes=_NAIVE_SHARPES,
+        naive_sortinos=[*_NAIVE_SORTINOS, _LARGE_SORTINO_SENTINEL],  # a zero-downside naive leg
+        cap_fraction=_CAP_BALANCED,
+    )
+    # The sentinel-vs-sentinel Sortino case must NOT auto-pass (undefined, not a real win).
+    assert sentinel_vs_sentinel["pass"] is False
+
+    # A REAL (finite) candidate Sortino still clears a finite best-naive bar normally -- the
+    # sentinel guard only fires when BOTH sides are the sentinel.
+    finite = verdict_for_profile(
+        alloc_sharpe=_ALLOC_SHARPE_PASS,
+        alloc_sortino=_ALLOC_SORTINO_PASS,
+        alloc_max_drawdown_pct=_ALLOC_MAXDD_PASS_PCT,
+        naive_sharpes=_NAIVE_SHARPES,
+        naive_sortinos=_NAIVE_SORTINOS,
+        cap_fraction=_CAP_BALANCED,
+    )
+    assert finite["pass"] is True
 
 
 def test_best_naive_max_over_three() -> None:

@@ -255,11 +255,18 @@ def verdict_for_profile(
     best_naive_sharpe = max(naive_sharpes)
     best_naive_sortino = max(naive_sortinos)
     realized_frac = realized_dd_fraction(alloc_max_drawdown_pct)
-    passes = (
-        alloc_sharpe >= best_naive_sharpe
-        and alloc_sortino >= best_naive_sortino
-        and realized_frac <= cap_fraction
+    # WR-02: ``excess_sortino_from_equity`` returns the fixed ``_LARGE_SORTINO_SENTINEL`` for a
+    # zero-downside (monotone-up) leg. A candidate that is ITSELF zero-downside would otherwise
+    # satisfy ``alloc_sortino >= best_naive_sortino`` by sentinel EQUALITY (1e9 >= 1e9), passing
+    # the Sortino leg without a real risk-adjusted comparison. Treat sentinel-vs-sentinel as
+    # UNDEFINED -> the Sortino condition fails (never an automatic pass). This never moves this
+    # cert's verdict: an equity-holding allocation always has downside, so ``alloc_sortino`` is
+    # never the sentinel here -- the real Sortino value still compares normally.
+    sortino_sentinel_tie = (
+        alloc_sortino >= _LARGE_SORTINO_SENTINEL and best_naive_sortino >= _LARGE_SORTINO_SENTINEL
     )
+    sortino_passes = (not sortino_sentinel_tie) and alloc_sortino >= best_naive_sortino
+    passes = alloc_sharpe >= best_naive_sharpe and sortino_passes and realized_frac <= cap_fraction
     return {
         "pass": passes,
         "sharpe": alloc_sharpe,
