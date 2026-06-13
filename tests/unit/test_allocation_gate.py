@@ -128,6 +128,11 @@ _WF_STEP_M = 3
 # A >= 4-year daily window so generate_wf_windows yields >= 3 folds.
 _WF_FIRST_BAR = date(2021, 1, 1)
 _WF_N_BARS = 4 * 365 + 1  # ~4 years of daily bars (inclusive of a leap day)
+# A SPARSE axis (IN-04b skip path): ~70-day spacing over a long span so the 6-month test
+# slices carry only 1-2 bars and SOME WF windows are skipped (folds < windows, but > 0).
+_WF_SPARSE_FIRST = date(2021, 1, 1)
+_WF_SPARSE_SPACING_DAYS = 70  # > a 6-month/12-step cadence -> some test slices < _MIN_RETURNS+1
+_WF_SPARSE_BARS = 40  # ~7.7y at 70-day spacing -> many windows, a fraction skipped
 
 # V-5 / D-03: a growth-like cap-breaching base vector. A static breach drains
 # equity 5pp/step into deposit until equity clamps at 0 (the tighten terminal
@@ -413,8 +418,13 @@ def test_wf_folds_no_rerun() -> None:
 
     ``oos_wf_sharpes`` slices the already-merged AllocationResult curve per
     ``generate_wf_windows(start, end, 12, 6, 3)`` and computes one excess Sharpe per
-    fold. It NEVER constructs or runs a backtest engine; pinned by asserting the
-    fold count equals the window count for the SAME date span.
+    fold. It NEVER constructs or runs a backtest engine.
+
+    The GENERAL invariant (IN-04b) is ``len(folds) <= len(expected_windows)``: a window
+    whose test slice has too few daily returns (< ``_MIN_RETURNS + 1`` bars) is SKIPPED. For
+    DENSE daily data no window is ever skipped, so the equality ``==`` holds -- this dense
+    case keeps the strict equality. The skip path is exercised separately by
+    ``test_wf_folds_skip_sparse_windows`` so the inequality is documented, not masked.
     """
     dates = _daily_index(_WF_FIRST_BAR, _WF_N_BARS)
     orch = AllocationOrchestrator(risk_profile=RiskProfile.BALANCED)
@@ -427,7 +437,40 @@ def test_wf_folds_no_rerun() -> None:
         result.dates[0], result.dates[-1], _WF_TRAIN_M, _WF_TEST_M, _WF_STEP_M
     )
     folds = oos_wf_sharpes(result)
+    # General invariant: never MORE folds than windows (a sparse window is skipped).
+    assert len(folds) <= len(expected_windows)
+    # Dense daily data -> no window is skipped -> the strict equality still holds.
     assert len(folds) == len(expected_windows)
+    assert all(isinstance(s, float) for s in folds)
+
+
+def test_wf_folds_skip_sparse_windows() -> None:
+    """A sparse window SKIPS folds whose test slice has too few bars (IN-04b skip path).
+
+    ``oos_wf_sharpes`` skips any 6-month test slice with ``< _MIN_RETURNS + 1`` bars. On a
+    SPARSE axis (bars ~70 days apart) some 6-month test slices carry only 1-2 bars and are
+    skipped, so ``len(folds) < len(expected_windows)`` while still ``> 0``. This exercises
+    the skip path the dense ``test_wf_folds_no_rerun`` cannot reach, so the general
+    ``<=`` invariant is documented rather than masked by the dense fixture's shape.
+    """
+    dates = [
+        _WF_SPARSE_FIRST + timedelta(days=i * _WF_SPARSE_SPACING_DAYS)
+        for i in range(_WF_SPARSE_BARS)
+    ]
+    orch = AllocationOrchestrator(risk_profile=RiskProfile.BALANCED)
+    result: AllocationResult = orch.run(
+        deposit_curve=_curve(_DEPOSIT_BASE, _DEPOSIT_DAILY, dates),
+        ofz_pk_curve=_curve(_OFZ_BASE, _OFZ_DAILY, dates),
+        equity_curve=_curve(_EQUITY_BASE, _EQUITY_DAILY, dates),
+    )
+    expected_windows = generate_wf_windows(
+        result.dates[0], result.dates[-1], _WF_TRAIN_M, _WF_TEST_M, _WF_STEP_M
+    )
+    folds = oos_wf_sharpes(result)
+    # Some windows are SKIPPED (sparse test slices) -> strictly fewer folds than windows,
+    # but the kept folds are still real -> > 0. This is the skip path the dense case misses.
+    assert len(expected_windows) > 0
+    assert 0 < len(folds) < len(expected_windows)
     assert all(isinstance(s, float) for s in folds)
 
 
