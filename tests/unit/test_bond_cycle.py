@@ -783,9 +783,14 @@ class TestOFZRotation:
         assert result[PortfolioLayer.STRATEGIC].capital_pct == Decimal("0.275")
 
     def test_ofz_rotation_single_cut_not_cycle(self) -> None:
-        """Only 1 cut on 2025-07-25 -> configs unchanged (need 2+ consecutive)."""
+        """Only 1 cut on 2025-06-06 (verified first cut) -> configs unchanged.
+
+        Needs 2+ consecutive cuts; by 2025-06-30 only the first cut (2025-06-06)
+        has landed, preceded by holds, so no rotation. (The 2nd cut is 2025-07-25;
+        the corrected R-C calendar makes 06-06, not 07-25, the first cut.)
+        """
         configs = dict(DEFAULT_LAYER_CONFIGS)
-        result = apply_ofz_rotation(configs, as_of=date(2025, 7, 30))
+        result = apply_ofz_rotation(configs, as_of=date(2025, 6, 30))
         assert result[PortfolioLayer.CORE].capital_pct == Decimal("0.45")
         assert result[PortfolioLayer.STRATEGIC].capital_pct == Decimal("0.275")
 

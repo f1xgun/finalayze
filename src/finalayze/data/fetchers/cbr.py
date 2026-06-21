@@ -375,7 +375,7 @@ CBR_MEETINGS: tuple[CBRMeeting, ...] = (
     CBRMeeting(date(2022, 4, 29), "core", "cut", Decimal("14.00")),
     CBRMeeting(date(2022, 6, 10), "interim", "cut", Decimal("9.50")),
     CBRMeeting(date(2022, 7, 22), "core", "cut", Decimal("8.00")),
-    CBRMeeting(date(2022, 9, 16), "interim", "hold", Decimal("7.50")),
+    CBRMeeting(date(2022, 9, 16), "interim", "cut", Decimal("7.50")),  # 8.00->7.50 is a cut
     CBRMeeting(date(2022, 10, 28), "core", "hold", Decimal("7.50")),
     CBRMeeting(date(2022, 12, 16), "interim", "hold", Decimal("7.50")),
     # 2023
@@ -397,20 +397,20 @@ CBR_MEETINGS: tuple[CBRMeeting, ...] = (
     CBRMeeting(date(2024, 9, 13), "interim", "hike", Decimal("19.00")),
     CBRMeeting(date(2024, 10, 25), "core", "hike", Decimal("21.00")),
     CBRMeeting(date(2024, 12, 20), "interim", "hold", Decimal("21.00")),
-    # 2025
+    # 2025 — realized easing path verified against the official cbr.ru archive (R-C).
     CBRMeeting(date(2025, 2, 14), "core", "hold", Decimal("21.00")),
     CBRMeeting(date(2025, 3, 21), "interim", "hold", Decimal("21.00")),
     CBRMeeting(date(2025, 4, 25), "core", "hold", Decimal("21.00")),
-    CBRMeeting(date(2025, 6, 6), "interim", "hold", Decimal("21.00")),  # verify
-    CBRMeeting(date(2025, 7, 25), "core", "cut", Decimal("20.00")),  # verify
-    CBRMeeting(date(2025, 9, 12), "interim", "cut", Decimal("19.00")),  # verify
-    CBRMeeting(date(2025, 10, 24), "core", "cut", Decimal("18.00")),  # verify
-    CBRMeeting(date(2025, 12, 19), "interim", "cut", Decimal("17.00")),  # verify
+    CBRMeeting(date(2025, 6, 6), "interim", "cut", Decimal("20.00")),  # FIRST cut (not 07-25)
+    CBRMeeting(date(2025, 7, 25), "core", "cut", Decimal("18.00")),
+    CBRMeeting(date(2025, 9, 12), "interim", "cut", Decimal("17.00")),
+    CBRMeeting(date(2025, 10, 24), "core", "cut", Decimal("16.50")),
+    CBRMeeting(date(2025, 12, 19), "interim", "cut", Decimal("16.00")),
     # 2026
-    CBRMeeting(date(2026, 2, 13), "core", "cut", Decimal("16.00")),  # verify
-    CBRMeeting(date(2026, 3, 20), "interim", None, None),  # scheduled
-    CBRMeeting(date(2026, 4, 24), "core", None, None),
-    CBRMeeting(date(2026, 6, 19), "interim", None, None),
+    CBRMeeting(date(2026, 2, 13), "core", "cut", Decimal("15.50")),
+    CBRMeeting(date(2026, 3, 20), "interim", "cut", Decimal("15.00")),  # filled
+    CBRMeeting(date(2026, 4, 24), "core", "cut", Decimal("14.50")),  # filled — terminal 14.50%
+    CBRMeeting(date(2026, 6, 19), "interim", None, None),  # future
     CBRMeeting(date(2026, 7, 24), "core", None, None),
     CBRMeeting(date(2026, 9, 11), "interim", None, None),
     CBRMeeting(date(2026, 10, 23), "core", None, None),

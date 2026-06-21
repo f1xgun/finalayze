@@ -21,37 +21,40 @@ The conjunctive verdict (:func:`verdict_for_profile`, D-01) PASSes IFF the
 allocator's Sharpe AND Sortino both clear the best-of-three naive bar AND the
 realized MaxDD is within the profile cap — never an "either/or".
 
-The auto-tighten (V-5) and OOS walk-forward (V-8) primitives are implemented by
-Plan 03; the cut-path (V-7), regime-split (V-9) and the Markdown/JSON report
-renderer (D-11) are implemented by Plan 04. The cut-path lowers ONLY the risk-free
-legs under the synthetic :data:`CUT_GLIDE` while holding the MCFTR equity curve
-byte-identical (D-07), and is FRAMING-ONLY (D-08) — its metrics are reported with
-the explicit high-rate caveat but never feed the binding verdict.
+The auto-tighten (V-5) and OOS walk-forward (V-8) primitives, the regime split
+(V-9) and the Markdown/JSON report renderer (D-11) live here. The synthetic
+framing cut-path (V-7) was RETIRED in Phase 74 (D-07): the real binding window now
+contains the real easing (high-rate plateau → the verified 2025 CBR cuts from
+2025-06-06), so the evidence-based "cut scenario" is the real easing sub-window —
+the post-:data:`REGIME_SPLIT_BOUNDARY` segment of :func:`regime_split` — reported
+with real metrics, not a synthetic glide.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import statistics
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from finalayze.backtest.bond_walk_forward import (
     _compute_excess_sharpe_from_equity,
     generate_wf_windows,
 )
 from finalayze.core.allocation import tighten
+from finalayze.core.exceptions import ConfigurationError
 from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
 from finalayze.data.fetchers.cbr import (
-    CBRMeeting,
     MacroContextProvider,
     deposit_rate_as_of,
-    get_last_cbr_decision,
 )
 from finalayze.strategies.bond_duration_rotation import CBRRegime, classify_regime
 
 if TYPE_CHECKING:
+    from finalayze.core.ndfl import YtdTaxAccumulator
     from finalayze.orchestration.allocation import AllocationOrchestrator, AllocationResult
 
 # ── Constants (named — no PLR2004 magic numbers) ─────────────────────────────
@@ -252,11 +255,18 @@ def verdict_for_profile(
     best_naive_sharpe = max(naive_sharpes)
     best_naive_sortino = max(naive_sortinos)
     realized_frac = realized_dd_fraction(alloc_max_drawdown_pct)
-    passes = (
-        alloc_sharpe >= best_naive_sharpe
-        and alloc_sortino >= best_naive_sortino
-        and realized_frac <= cap_fraction
+    # WR-02: ``excess_sortino_from_equity`` returns the fixed ``_LARGE_SORTINO_SENTINEL`` for a
+    # zero-downside (monotone-up) leg. A candidate that is ITSELF zero-downside would otherwise
+    # satisfy ``alloc_sortino >= best_naive_sortino`` by sentinel EQUALITY (1e9 >= 1e9), passing
+    # the Sortino leg without a real risk-adjusted comparison. Treat sentinel-vs-sentinel as
+    # UNDEFINED -> the Sortino condition fails (never an automatic pass). This never moves this
+    # cert's verdict: an equity-holding allocation always has downside, so ``alloc_sortino`` is
+    # never the sentinel here -- the real Sortino value still compares normally.
+    sortino_sentinel_tie = (
+        alloc_sortino >= _LARGE_SORTINO_SENTINEL and best_naive_sortino >= _LARGE_SORTINO_SENTINEL
     )
+    sortino_passes = (not sortino_sentinel_tie) and alloc_sortino >= best_naive_sortino
+    passes = alloc_sharpe >= best_naive_sharpe and sortino_passes and realized_frac <= cap_fraction
     return {
         "pass": passes,
         "sharpe": alloc_sharpe,
@@ -268,38 +278,21 @@ def verdict_for_profile(
     }
 
 
-# ── Cut-path + regime framing surface (Plan 04, D-07/D-08/D-09/R-6) ──────────
-# These names are part of the V-1..V-9 import contract pinned by Plan 01. The
-# auto-tighten (V-5) / OOS WF (V-8) primitives landed in Plan 03; the cut-path
-# scenario (V-7), regime split (V-9) and report renderer (D-11) land below.
+# ── Regime framing surface (D-09/R-6) ───────────────────────────────────────
+# The synthetic framing cut-path (V-7 / D-07/D-08) was RETIRED in Phase 74 (D-07):
+# the real binding window now CONTAINS the real easing (high-rate plateau → the real
+# 2025 cuts), so the "cut scenario" is the real easing sub-window (the post-boundary
+# segment of regime_split), reported with real metrics — not a synthetic glide.
 
-# CUT_GLIDE: the synthetic declining-rate meeting calendar (V-7 / D-07).
-# FRAMING-ONLY (D-08): these metrics are reported but NEVER fed into the binding
-# verdict. The glide is ILLUSTRATIVE (A2) — it STEEPENS the real 2025 easing already
-# in CBR_MEETINGS (21 -> 20 -> 19 -> 18 -> 17 -> 16) into a full down-leg
-# (18 -> 15 -> 12 -> 10 -> 8). It is NOT a forecast; it is anchored to the real 2025
-# cut DIRECTION (is_cutting_cycle confirms the cycle) to isolate the rate effect.
-CUT_GLIDE: tuple[CBRMeeting, ...] = (
-    CBRMeeting(date(2025, 7, 25), "core", "cut", Decimal("18.00")),
-    CBRMeeting(date(2025, 9, 12), "interim", "cut", Decimal("15.00")),
-    CBRMeeting(date(2025, 10, 24), "core", "cut", Decimal("12.00")),
-    CBRMeeting(date(2025, 12, 19), "interim", "cut", Decimal("10.00")),
-    CBRMeeting(date(2026, 2, 13), "core", "cut", Decimal("8.00")),
-)
-
-# The synthetic glide's TERMINAL key rate (percentage points) — the down-leg floor the
-# risk-free legs are re-accrued toward. Named to avoid a magic number in the curve math.
-_CUT_GLIDE_TERMINAL_RATE_PP = Decimal("8.00")
-# The deposit spread below the key rate (mirrors cbr._DEFAULT_DEPOSIT_SPREAD_PP, D-04).
-_DEPOSIT_SPREAD_PP = Decimal("1.0")
-# OFZ-PK floaters track the key rate ~1:1 (no spread); reuse the same key-rate path.
-_PCT_POINTS = Decimal(100)
+# Trading days per year for the daily-compounding accrual (accrue_real_risk_free_leg).
 _TRADING_DAYS = 252
 
-# REGIME_SPLIT_BOUNDARY: the early-cut regime boundary (V-9 / D-09 / R-6). The first
-# real 2025 CBR cut (21 -> 20) lands on 2025-07-25 — the documented high-rate/plateau
-# vs early-cut split point. NAMED (no magic date in logic).
-REGIME_SPLIT_BOUNDARY: date = date(2025, 7, 25)
+# REGIME_SPLIT_BOUNDARY: the early-cut regime boundary (V-9 / D-09 / R-6). Phase 74 (R-C)
+# shifts it to the VERIFIED first real 2025 CBR cut (2025-06-06 → 20.00) — the calendar
+# previously listed a spurious 2025-07-25 first cut; Plan 01 corrected CBR_MEETINGS to the
+# cbr.ru archive (first cut 2025-06-06). This is the documented high-rate/plateau vs
+# early-cut split point. NAMED (no magic date in logic).
+REGIME_SPLIT_BOUNDARY: date = date(2025, 6, 6)
 
 # The mandatory honesty caveat (D-08 / Pitfall 6): a deposit-wins-raw-return outcome in a
 # 16-21% high-rate regime is correctly framed as NOT a failure. Pinned VERBATIM by the
@@ -468,59 +461,19 @@ def mean_wf_sharpe(
     return sum(vals) / len(vals) if vals else 0.0
 
 
-def _cut_glide_key_rate_as_of(as_of: date) -> Decimal:
-    """The synthetic CUT_GLIDE key rate (pp) as-of *as_of* — strictly no look-ahead.
-
-    Reads the steeper synthetic glide first (``m.date <= as_of`` only — same as-of
-    discipline as ``get_last_cbr_decision``); BEFORE the glide's first meeting it falls
-    back to the REAL CBR calendar's as-of key rate. Returns the glide's terminal floor if
-    neither is available. The cut-path is therefore ALWAYS read per-bar (no future leak)
-    yet describes a lower-rate world once the glide engages (T-73-09 guard).
-    """
-    glide_past = [m for m in CUT_GLIDE if m.date <= as_of and m.rate_after is not None]
-    if glide_past:
-        return cast("Decimal", glide_past[-1].rate_after)
-    real = get_last_cbr_decision(as_of)
-    if real is not None and real.rate_after is not None:
-        return real.rate_after
-    return _CUT_GLIDE_TERMINAL_RATE_PP
-
-
-def _reaccrue_risk_free_leg(
-    curve: list[tuple[date, Decimal]], *, spread_pp: Decimal
-) -> list[tuple[date, Decimal]]:
-    """Re-accrue a single risk-free leg under the synthetic CUT_GLIDE key-rate path.
-
-    Treats the leg as a daily-compounded deposit/floater: at each bar the annual rate is
-    ``(cut_glide_key_rate(as_of) - spread_pp) / 100`` (read strictly as-of — no
-    look-ahead) and the day's growth factor is ``(1 + annual) ** (1/252)``. Re-accrues
-    from the leg's OPENING value so the whole curve reflects the lower glide rate. The
-    high-rate baseline curve was built off a HIGHER (16-21%) rate, so the re-accrued curve
-    diverges from it (``deposit_under_cut != deposit_baseline``) while introducing NO
-    look-ahead and NO equity uplift (the equity leg is never touched here, D-07).
-    """
-    if not curve:
-        return []
-    opening = curve[0][1]
-    out: list[tuple[date, Decimal]] = [(curve[0][0], opening)]
-    value = opening
-    for d, _ in curve[1:]:
-        annual = (_cut_glide_key_rate_as_of(d) - spread_pp) / _PCT_POINTS
-        daily_factor = Decimal(str((1.0 + float(annual)) ** (1.0 / _TRADING_DAYS)))
-        value = value * daily_factor
-        out.append((d, value))
-    return out
-
-
 def accrue_real_risk_free_leg(
-    dates: list[date], base: Decimal, *, spread_pp: Decimal
+    dates: list[date],
+    base: Decimal,
+    *,
+    spread_pp: Decimal,
+    tax_acc: YtdTaxAccumulator | None = None,
 ) -> list[tuple[date, Decimal]]:
     """Accrue a risk-free leg from the REAL CBR key-rate path (the live-cert builder).
 
-    The live-cert analogue of :func:`_reaccrue_risk_free_leg`: identical daily-compounding
-    convention (``(1 + annual) ** (1/252)``), but it reads the REAL look-ahead-safe
-    :func:`finalayze.data.fetchers.cbr.deposit_rate_as_of` (which resolves the most-recent
-    ``CBR_MEETINGS`` decision on/before each bar) instead of the synthetic ``CUT_GLIDE``.
+    Daily-compounding convention (``(1 + annual) ** (1/252)``) reading the REAL
+    look-ahead-safe :func:`finalayze.data.fetchers.cbr.deposit_rate_as_of` (which resolves
+    the most-recent ``CBR_MEETINGS`` decision on/before each bar) — the real realized
+    calendar, not a synthetic framing path (the synthetic cut-path was retired, D-07).
     With ``spread_pp = 1.0`` this is the deposit leg (key - 1pp, mirroring W1's deposit
     accrual); with ``spread_pp = 0`` it is the OFZ-PK floater leg (tracks the full key
     rate ~1:1). The leg opens at ``base`` on ``dates[0]`` and compounds one trading day per
@@ -531,6 +484,16 @@ def accrue_real_risk_free_leg(
     risk-free legs derive from the REAL CBR calendar, the equity leg from the REAL MCFTR
     series. The returned ``(date, Decimal)`` series shares the supplied common date axis
     (R-3), so the three legs forward-align identically for ``build_naive_legs``.
+
+    Net-of-NDFL step (REGIME-04 / D-01 / D-04 / R-E): when ``tax_acc`` is supplied, the
+    per-bar income INCREMENT (``value * daily_factor - value`` — the day's accrued interest,
+    NOT the level) is netted through the shared progressive 13/15% band
+    (:class:`finalayze.core.ndfl.YtdTaxAccumulator`); only the after-tax income compounds.
+    Pass ONE shared accumulator per run so the deposit + OFZ legs share one cross-leg YTD
+    (the W1 cross-sleeve design). With ``tax_acc=None`` the leg is GROSS — byte-identical
+    to the pre-Phase-74 behaviour (no NDFL on the daily income delta). Never net the curve
+    LEVEL — that would tax principal (Pitfall 1). MCFTRR is already net and must NOT be
+    routed through an accumulator.
     """
     if not dates:
         return []
@@ -540,64 +503,223 @@ def accrue_real_risk_free_leg(
         # deposit_rate_as_of returns a FRACTION already net of the spread (key-spread)/100.
         annual = deposit_rate_as_of(d, spread_pp=spread_pp)
         daily_factor = Decimal(str((1.0 + float(annual)) ** (1.0 / _TRADING_DAYS)))
-        value = value * daily_factor
+        # Net the day's income INCREMENT (not the level) through the shared NDFL band (R-E).
+        gross_income_delta = value * daily_factor - value
+        tax = tax_acc.tax(gross_income_delta, year=d.year) if tax_acc else Decimal(0)
+        value = value + (gross_income_delta - tax)
         out.append((d, value))
     return out
 
 
-def run_cut_path(
-    deposit_curve: list[tuple[date, Decimal]],
-    ofz_pk_curve: list[tuple[date, Decimal]],
-    equity_curve: list[tuple[date, Decimal]],
+def net_index_returns(
+    level_series: list[tuple[date, Decimal]],
     *,
-    profile_key: RiskProfile = RiskProfile.BALANCED,
-) -> AllocationResult:
-    """Synthetic rate-cut FRAMING path: lower the risk-free legs, hold equity FIXED (V-7 / D-07).
+    tax_acc: YtdTaxAccumulator | None = None,
+) -> list[tuple[date, Decimal]]:
+    """Re-base a fetched GROSS index (RUFLBITR) to a net-of-NDFL TR curve (REGIME-04 / R-E).
 
-    Re-derives ONLY the deposit + OFZ-PK benchmark curves under the synthetic declining
-    :data:`CUT_GLIDE` key-rate path (read strictly as-of per bar — ``m.date <= as_of`` — so
-    NO look-ahead is introduced, T-73-09) and passes the ORIGINAL ``equity_curve`` through
-    BYTE-IDENTICAL (the MCFTR equity sleeve is held fixed — NO fabricated equity-beta
-    uplift, D-07). It then runs the FROZEN allocator on (cut_deposit, cut_ofz, equity).
+    The deposit/OFZ accrual analogue for a FETCHED index level series: the real RUFLBITR
+    floating-coupon-bond TR index is published GROSS of investor NDFL (D-04 derived
+    implication), so to honour D-01 (net both sides) its daily return must be netted of the
+    same progressive 13/15% band the deposit leg uses.
 
-    FRAMING-ONLY (D-08): the returned metrics are reported and carry the explicit high-rate
-    caveat, but are NEVER fed into the binding verdict. The glide is ILLUSTRATIVE (A2) —
-    anchored to the real 2025 easing direction, NOT a forecast. Its purpose is to
-    demonstrate the §7 thesis: when the deposit anchor stops yielding 16-21%, the
-    equity/bond weights become decisive.
+    The curve opens at the same base (``level_series[0]``). For each subsequent bar the day's
+    income is the RETURN INCREMENT applied to the prior NET value
+    (``prior_value * (level[i] / level[i - 1] - 1)`` — NOT the index level, Pitfall 1). A
+    POSITIVE daily income is netted through ``tax_acc.tax(income, year=d.year)``; a NEGATIVE
+    daily return is passed through untaxed (a loss is not a refund). When ``tax_acc`` is
+    ``None`` the increment compounds gross. Principal is never taxed: a flat (zero-return)
+    index returns the level unchanged.
+
+    Pass the SAME shared ``YtdTaxAccumulator`` used by :func:`accrue_real_risk_free_leg` so
+    the index leg shares one cross-leg YTD with the deposit leg (the W1 cross-sleeve design).
+    MCFTRR is ALREADY net — do NOT route it through this helper (Pitfall 1: double-taxing
+    equity).
     """
-    cut_deposit = _reaccrue_risk_free_leg(deposit_curve, spread_pp=_DEPOSIT_SPREAD_PP)
-    # OFZ-PK floaters track the key rate ~1:1 (no deposit spread).
-    cut_ofz = _reaccrue_risk_free_leg(ofz_pk_curve, spread_pp=_ZERO)
-    # Equity (MCFTR) is passed through UNCHANGED — no uplift (D-07).
-    return _naive_orchestrator(_profile_weights_for(profile_key), _NAIVE_CAP).run(
-        cut_deposit, cut_ofz, equity_curve
-    )
+    if not level_series:
+        return []
+    out: list[tuple[date, Decimal]] = [level_series[0]]
+    value = level_series[0][1]
+    prev_level = level_series[0][1]
+    for d, level in level_series[1:]:
+        if prev_level > 0:
+            daily_return = level / prev_level - _ONE
+            income = value * daily_return
+            if income > _ZERO:
+                income -= tax_acc.tax(income, year=d.year) if tax_acc else _ZERO
+            value = value + income
+        prev_level = level
+        out.append((d, value))
+    return out
 
 
-def _profile_weights_for(profile_key: RiskProfile) -> dict[AssetClass, Decimal]:
-    """The 3-asset target weight vector for *profile_key* (read from the loaded profiles).
+def net_fixed_income_legs_interleaved(
+    ofz_level_series: list[tuple[date, Decimal]],
+    deposit_dates: list[date],
+    deposit_base: Decimal,
+    *,
+    deposit_spread_pp: Decimal,
+    tax_acc: YtdTaxAccumulator,
+) -> tuple[list[tuple[date, Decimal]], list[tuple[date, Decimal]]]:
+    """Net BOTH fixed-income legs in ONE date-ordered pass through a shared YTD (CR-01).
 
-    Used by :func:`run_cut_path` so the cut-path scenario runs the SAME L1 target weights
-    the real profile would, just under the lowered risk-free legs.
+    The W1 cross-sleeve contract is that the deposit + OFZ-PK legs share ONE cross-leg
+    progressive-band YTD per run (one :class:`YtdTaxAccumulator`). Netting them
+    LEG-BY-LEG (the full OFZ pass across the whole multi-year axis, THEN the full deposit
+    pass) silently BREAKS that contract on a multi-tax-year window: after the OFZ pass the
+    accumulator's ``_current_year`` is the LAST year, so the deposit leg's FIRST (earliest)
+    bar triggers a Jan-1 reset (:meth:`YtdTaxAccumulator.tax` resets on a ``year`` change),
+    discarding the OFZ leg's accumulated YTD — the two legs are then taxed as if each had
+    its own per-year YTD (CR-01).
+
+    This helper instead nets both legs interleaved BY DATE: for each bar (in date order)
+    the OFZ income increment AND the deposit income increment are taxed through the SAME
+    accumulator at ``year=d.year``, so BOTH increments hit the same running YTD BEFORE any
+    year-boundary reset. The two legs MUST share one common date axis (R-3) — the OFZ level
+    series is forward-aligned onto the deposit ``dates`` by the caller, so
+    ``[d for d, _ in ofz_level_series] == deposit_dates``.
+
+    Per-leg arithmetic is IDENTICAL to :func:`net_index_returns` (OFZ) and
+    :func:`accrue_real_risk_free_leg` (deposit): a positive income increment is netted
+    through the band, a loss (OFZ) passes through untaxed, principal is never taxed
+    (Pitfall 1). On a window where the cross-leg YTD never crosses the 2.4M threshold (every
+    increment is taxed at the 13% base rate) the netted curves are BYTE-IDENTICAL to the
+    leg-by-leg result — only a band crossover (the exact thing the shared YTD exists to
+    detect) makes the interleaved result differ. Returns ``(deposit_curve, ofz_pk_curve)``.
     """
-    from finalayze.config.allocation_profiles import load_allocation_profiles  # noqa: PLC0415
+    if not deposit_dates:
+        return [], []
+    if [d for d, _ in ofz_level_series] != deposit_dates:
+        msg = "net_fixed_income_legs_interleaved requires both legs on one shared date axis (R-3)"
+        raise ConfigurationError(msg)
 
-    profile = load_allocation_profiles()[profile_key]
-    return dict(profile.weights)
+    deposit_out: list[tuple[date, Decimal]] = [(deposit_dates[0], deposit_base)]
+    ofz_out: list[tuple[date, Decimal]] = [ofz_level_series[0]]
+    deposit_value = deposit_base
+    ofz_value = ofz_level_series[0][1]
+    ofz_prev_level = ofz_level_series[0][1]
+
+    for i in range(1, len(deposit_dates)):
+        d = deposit_dates[i]
+        # OFZ leg increment (net_index_returns arithmetic) — taxed FIRST against the shared
+        # YTD so both legs' increments hit the SAME running YTD before any year reset.
+        ofz_level = ofz_level_series[i][1]
+        if ofz_prev_level > 0:
+            ofz_income = ofz_value * (ofz_level / ofz_prev_level - _ONE)
+            if ofz_income > _ZERO:
+                ofz_income -= tax_acc.tax(ofz_income, year=d.year)
+            ofz_value = ofz_value + ofz_income
+        ofz_prev_level = ofz_level
+
+        # Deposit leg increment (accrue_real_risk_free_leg arithmetic) — taxed against the
+        # SAME shared YTD at the SAME year, before the next year's reset.
+        annual = deposit_rate_as_of(d, spread_pp=deposit_spread_pp)
+        daily_factor = Decimal(str((1.0 + float(annual)) ** (1.0 / _TRADING_DAYS)))
+        gross_income_delta = deposit_value * daily_factor - deposit_value
+        deposit_tax = tax_acc.tax(max(gross_income_delta, _ZERO), year=d.year)
+        deposit_value = deposit_value + (gross_income_delta - deposit_tax)
+
+        ofz_out.append((d, ofz_value))
+        deposit_out.append((d, deposit_value))
+
+    return deposit_out, ofz_out
+
+
+# ── Committed real-data snapshot (REGIME-01 / D-05, Phase-65 fail-closed pattern) ──
+# The binding cert reads a committed JSON snapshot of the fetched real series (MCFTRR
+# net equity + RUFLBITR-derived net OFZ + net deposit) so CI reproduces the gate
+# deterministically with NO network. A missing/corrupt/future-dated file fails closed
+# (ConfigurationError) — there is NO silent fallback to synthetic data (T-74-03 / V5).
+# Plan 03 writes the committed file (and creates the data/ dir); this loader reads it.
+_GATE_SNAPSHOT = Path(__file__).parent / "data" / "allocation_gate_snapshot.json"
+# The binding window endpoint (the look-ahead clamp, Pitfall 3 / T-74-04): NO bar may
+# post-date this. Named — no magic date in the guard.
+_BINDING_END = date(2026, 6, 10)
+# The three leg keys the snapshot must carry (R-F shape). Validated fail-closed.
+_SNAPSHOT_LEG_KEYS = ("equity_mcftrr_net", "ofz_ruflbitr_net", "deposit_net")
+
+
+def _rehydrate_leg(rows: Any, *, window_end: date) -> list[tuple[date, Decimal]]:
+    """Re-hydrate one snapshot leg ``[[iso_date, decimal_str], ...]`` fail-closed (Pitfall 3 / V5).
+
+    Coerces each row to ``(date.fromisoformat(d), Decimal(str(v)))`` (the Phase-65
+    ``_row_to_instrument`` convention) and REJECTS (raises ``ConfigurationError``) any bar
+    dated after ``window_end`` OR after :data:`_BINDING_END` (the look-ahead clamp). A
+    malformed row shape raises via the caller's ``except`` tuple.
+    """
+    out: list[tuple[date, Decimal]] = []
+    for d_str, v_str in rows:
+        d = date.fromisoformat(str(d_str))
+        if d > window_end or d > _BINDING_END:
+            msg = (
+                f"allocation-gate snapshot bar {d.isoformat()} post-dates the binding window "
+                f"end ({window_end.isoformat()} / clamp {_BINDING_END.isoformat()}) — "
+                "look-ahead leak (Pitfall 3 / T-74-04)"
+            )
+            raise ConfigurationError(msg)
+        out.append((d, Decimal(str(v_str))))
+    return out
+
+
+def _load_gate_snapshot(
+    path: Path = _GATE_SNAPSHOT,
+) -> tuple[
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+]:
+    """Read the committed real-data gate snapshot, fail-closed (REGIME-01 / D-05 / V5).
+
+    Copies the Phase-65 ``instruments.py:239-251`` committed-snapshot pattern EXACTLY: read
+    the JSON, pull the three required legs (``equity_mcftrr_net`` / ``ofz_ruflbitr_net`` /
+    ``deposit_net``), and re-hydrate each ``[iso_date, decimal_str]`` row to a
+    ``(date, Decimal)`` pair. On a missing/corrupt file or a missing required key the loader
+    raises :class:`finalayze.core.exceptions.ConfigurationError` — there is NO silent
+    fallback to synthetic data (the committed file is the CI trust boundary, T-74-03).
+
+    Look-ahead clamp (Pitfall 3 / T-74-04): every bar must be ``<= window.end`` AND
+    ``<= _BINDING_END`` (2026-06-10) — a snapshot refreshed on a later date cannot leak a
+    future bar. Returns ``(equity, ofz, deposit)`` curves on their committed date axes.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        window_end = date.fromisoformat(str(raw["window"]["end"]))
+        legs = raw["legs"]
+        equity = _rehydrate_leg(legs[_SNAPSHOT_LEG_KEYS[0]], window_end=window_end)
+        ofz = _rehydrate_leg(legs[_SNAPSHOT_LEG_KEYS[1]], window_end=window_end)
+        deposit = _rehydrate_leg(legs[_SNAPSHOT_LEG_KEYS[2]], window_end=window_end)
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        msg = f"allocation-gate snapshot missing/corrupt at {path}: {exc}"
+        raise ConfigurationError(msg) from exc  # NO fallback to synthetic data (D-05)
+    # IN-02 (defense-in-depth): reject a window.end that post-dates the binding clamp. The
+    # per-bar clamp already rejects any bar > _BINDING_END, but a mis-stamped window.end field
+    # itself was never checked — surface it explicitly rather than relying on the bar clamp.
+    if window_end > _BINDING_END:
+        msg = (
+            f"allocation-gate snapshot window.end {window_end.isoformat()} post-dates the "
+            f"binding clamp {_BINDING_END.isoformat()} at {path} (mis-stamped window)"
+        )
+        raise ConfigurationError(msg)
+    # WR-01 (R-3): the whole gate runs on ONE basis and regime_split keys off only the deposit
+    # leg's dates, so the three legs MUST share one identical, non-empty date axis. Enforce the
+    # documented one-basis invariant fail-closed (the committed fixture always shares it).
+    axes = ([d for d, _ in equity], [d for d, _ in ofz], [d for d, _ in deposit])
+    if not all(axis == axes[0] and axis for axis in axes):
+        msg = f"allocation-gate snapshot legs do not share one date axis (R-3) at {path}"
+        raise ConfigurationError(msg)
+    return equity, ofz, deposit
 
 
 def regime_split(dates: list[date]) -> dict[str, tuple[date, date]]:
     """Partition a date window at :data:`REGIME_SPLIT_BOUNDARY` (V-9 / D-09 / R-6).
 
     The HEADLINE regime report (D-09): a documented high-rate/plateau vs early-cut date
-    split at 2025-07-25 — the first real 2025 CBR cut. Returns:
+    split at 2025-06-06 — the VERIFIED first real 2025 CBR cut (R-C). Returns:
 
-    - ``{"high_rate": (start, 2025-07-24), "early_cut": (2025-07-25, end)}`` for a window
+    - ``{"high_rate": (start, 2025-06-05), "early_cut": (2025-06-06, end)}`` for a window
       spanning the boundary;
     - ``{"high_rate": (start, end)}`` (single regime) when the whole window ends before the
-      boundary — the single-high-rate case leans on the cut-path scenario for framing
-      (Pitfall 6).
+      boundary — a single high-rate plateau (Pitfall 6).
 
     This date split (NOT the ``classify_regime`` cross-check) is the binding-readable
     headline because it matches Pitfall 6's wording literally and is trivial to verify.
@@ -612,7 +734,7 @@ def regime_split(dates: list[date]) -> dict[str, tuple[date, date]]:
         raise ValueError(msg)
     start, end = dates[0], dates[-1]
     if end < REGIME_SPLIT_BOUNDARY:
-        return {"high_rate": (start, end)}  # single regime — lean on the cut-path scenario
+        return {"high_rate": (start, end)}  # single high-rate plateau (no easing sub-window)
     day_before = REGIME_SPLIT_BOUNDARY - timedelta(days=1)
     return {"high_rate": (start, day_before), "early_cut": (REGIME_SPLIT_BOUNDARY, end)}
 
@@ -648,7 +770,6 @@ def classify_regime_for_date(d: date) -> CBRRegime:
 def render_json(
     per_profile_verdicts: dict[str, object],
     naive_metrics: dict[str, object],
-    cut_path_metrics: dict[str, object],
     regime: dict[str, tuple[date, date]],
     *,
     git_sha: str,
@@ -656,16 +777,17 @@ def render_json(
     """Assemble all gate metrics into a JSON-serializable sidecar (D-11).
 
     Mirrors the ``scripts/phase72_allocation_ab.py`` ``summary.json`` shape: a flat dict of
-    per-profile / per-naive / cut-path metric blocks plus the ``git_sha`` and the regime
-    split (rendered as ISO date pairs). Decimal values are stringified so the dict is
-    ``json.dumps``-able without a custom encoder. The machine-readable feed a future
-    dashboard (deferred) consumes.
+    per-profile / per-naive metric blocks plus the ``git_sha`` and the regime split
+    (rendered as ISO date pairs). The synthetic cut-path block was retired in Phase 74
+    (D-07) — the real easing sub-window is now the post-boundary segment of
+    ``regime_split``. Decimal values are stringified so the dict is ``json.dumps``-able
+    without a custom encoder. The machine-readable feed a future dashboard (deferred)
+    consumes.
     """
     return {
         "git_sha": git_sha,
         "per_profile": per_profile_verdicts,
         "naive": naive_metrics,
-        "cut_path": cut_path_metrics,
         "regime_split": {k: [v[0].isoformat(), v[1].isoformat()] for k, v in regime.items()},
         "high_rate_caveat": _HIGH_RATE_CAVEAT,
     }
@@ -683,8 +805,10 @@ def render_report(payload: dict[str, object]) -> str:
     Sortino vs best-naive | realized MaxDD vs cap | mean WF-fold Sharpe | verdict), the
     naive-comparison block (prefixed with the framing-only :data:`_RISK_FREE_BAR_NOTE`
     explaining why a near-vol-free risk-free leg inflates the naive Sharpe/Sortino bar in a
-    high-rate regime), the regime split block, the cut-path metrics block, and the mandatory
-    honesty caveat line (:data:`_HIGH_RATE_CAVEAT`, verbatim).
+    high-rate regime), the regime split block, the REAL easing sub-window block (the
+    post-`REGIME_SPLIT_BOUNDARY` segment — the evidence-based cut scenario that replaced the
+    retired synthetic cut-path, D-07), and the mandatory honesty caveat line
+    (:data:`_HIGH_RATE_CAVEAT`, verbatim).
 
     The BINDING number is the full-window metric (``verdict_for_profile``); the mean
     WF-fold Sharpe (R-1 / D-02) is REPORTED alongside so GATE-01's "OOS via walk-forward"
@@ -693,7 +817,6 @@ def render_report(payload: dict[str, object]) -> str:
     """
     per_profile = cast("dict[str, object]", payload.get("per_profile", {}))
     naive = cast("dict[str, object]", payload.get("naive", {}))
-    cut_path = cast("dict[str, object]", payload.get("cut_path", {}))
     regime = cast("dict[str, object]", payload.get("regime_split", {}))
 
     lines: list[str] = [
@@ -728,12 +851,18 @@ def render_report(payload: dict[str, object]) -> str:
         "",
         *(f"- `{k}`: {val}" for k, val in regime.items()),
         "",
-        "## Cut-Path Scenario (FRAMING-ONLY — NOT a binding verdict, D-07/D-08)",
+        "## Real Easing Sub-Window (post-REGIME_SPLIT_BOUNDARY, evidence-based, D-07)",
         "",
-        "_The synthetic CUT_GLIDE lowers ONLY the risk-free legs; the MCFTR equity curve "
-        "is held byte-identical (no fabricated uplift). Illustrative, not a forecast (A2)._",
+        "_The synthetic framing cut-path is RETIRED (D-07). The real binding window now "
+        "CONTAINS the real easing (high-rate plateau → the verified 2025 CBR cuts from "
+        "2025-06-06), so the cut scenario is the REAL easing sub-window below — sourced from "
+        "the regime split, not a synthetic glide._",
         "",
-        *(f"- `{k}`: {_fmt(val)}" for k, val in cut_path.items()),
+        *(
+            [f"- easing sub-window: `{regime['early_cut']}`"]
+            if "early_cut" in regime
+            else ["- easing sub-window: none (window ends before the first real cut)"]
+        ),
         "",
         "## Honesty Caveat (Pitfall 6 / D-08)",
         "",

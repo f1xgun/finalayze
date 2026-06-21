@@ -1,0 +1,60 @@
+{
+  "git_sha": "d93f3d41ab86e4c25a6046fb9a5944ce5748be3d",
+  "per_profile": {
+    "conservative": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -0.8827330026372536,
+      "best_naive_sharpe": -0.6505587542125374,
+      "sortino": -1.2478970254739743,
+      "best_naive_sortino": -0.9256020482001079,
+      "realized_maxdd_frac": 0.022338023081730985,
+      "cap_frac": 0.08,
+      "mean_wf_sharpe": -0.2220371584568709
+    },
+    "balanced": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -0.8471137674362542,
+      "best_naive_sharpe": -0.6505587542125374,
+      "sortino": -1.1964262310927583,
+      "best_naive_sortino": -0.9256020482001079,
+      "realized_maxdd_frac": 0.05388546231211946,
+      "cap_frac": 0.15,
+      "mean_wf_sharpe": -0.27928014583186916
+    },
+    "growth": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -0.81780311692944,
+      "best_naive_sharpe": -0.6505587542125374,
+      "sortino": -1.1565368703799883,
+      "best_naive_sortino": -0.9256020482001079,
+      "realized_maxdd_frac": 0.11497531906740908,
+      "cap_frac": 0.25,
+      "mean_wf_sharpe": -0.2876673500988344
+    }
+  },
+  "naive": {
+    "deposit_100_sharpe": -4.626414216151382,
+    "deposit_100_sortino": -5.39945940834521,
+    "deposit_100_maxdd_pct": 0.0,
+    "equity_100_sharpe": -0.6505587542125374,
+    "equity_100_sortino": -0.9256020482001079,
+    "equity_100_maxdd_pct": 27.800869111196075,
+    "static_60_30_10_sharpe": -0.8025073671750057,
+    "static_60_30_10_sortino": -1.1363439487175455,
+    "static_60_30_10_maxdd_pct": 15.233543476459454
+  },
+  "regime_split": {
+    "high_rate": [
+      "2024-01-02",
+      "2025-06-05"
+    ],
+    "early_cut": [
+      "2025-06-06",
+      "2026-06-08"
+    ]
+  },
+  "high_rate_caveat": "100% deposit winning raw return in a 16-21% high-rate regime is NOT a failure"
+}

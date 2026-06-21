@@ -293,7 +293,8 @@ def load_mcftr_series(
     sleeve does NOT run ``process_dividends`` / per-name accrual (double-count, T-72-13).
     NO active stock-picking / combiner / momentum / ML re-enters the equity path
     (anti-pattern 4, T-72-12). A1: MCFTR is the GROSS series; MCFTRR is the net
-    variant (single-secid swap if after-tax consistency is wanted — not built in W2).
+    variant (single-secid swap if after-tax consistency is wanted — wired in Phase 74,
+    REGIME-04/D-02, as the binding net-of-tax equity benchmark).
 
     Returns the ordered ``(date, Decimal close)`` series the allocation orchestrator
     forward-fills as the equity leg.
