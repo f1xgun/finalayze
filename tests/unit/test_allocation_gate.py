@@ -47,6 +47,7 @@ from finalayze.backtest.allocation_gate import (
     _LARGE_SORTINO_SENTINEL,
     REGIME_SPLIT_BOUNDARY,
     _load_gate_snapshot,
+    _slice_leg,
     accrue_real_risk_free_leg,
     build_naive_legs,
     excess_sortino_from_equity,
@@ -56,11 +57,13 @@ from finalayze.backtest.allocation_gate import (
     oos_wf_sharpes,
     realized_dd_fraction,
     regime_split,
+    regime_verdicts,
     render_json,
     render_report,
     verdict_for_profile,
 )
 from finalayze.backtest.bond_walk_forward import generate_wf_windows
+from finalayze.config.allocation_profiles import load_allocation_profiles
 from finalayze.core.allocation import tighten  # used only to derive the EXPECTED frozen vector
 from finalayze.core.exceptions import ConfigurationError
 from finalayze.core.ndfl import YtdTaxAccumulator
@@ -148,6 +151,29 @@ _GROWTH_BASE_WEIGHTS = {
 # A realized MaxDD (percent) that breaches even after equity drains to 0.
 _BREACH_MAXDD_PCT = 30.0  # 0.30 -> over any sane cap -> HARD_FAIL
 _HARD_FAIL = "HARD_FAIL"
+
+# -- Phase 75 per-regime binding constants (V-10/V-11 + no-renet + no-regression) ----
+# The conservative -> balanced -> growth order the report renders the profiles in
+# (mirrors run_allocation_gate._PROFILE_ORDER; the driver takes this as a parameter so
+# the gate module gains NO config dependency).
+_PROFILE_ORDER = (RiskProfile.CONSERVATIVE, RiskProfile.BALANCED, RiskProfile.GROWTH)
+# The real gate verdicts the per-regime units must carry (anti-hollow: a REAL gate output,
+# never a constant). Mirrors gate_with_autotighten's three terminal verdict strings.
+_PASS = "PASS"
+_PASS_AFTER_TIGHTEN = "PASS_AFTER_TIGHTEN"
+_VALID_VERDICTS = {_PASS, _PASS_AFTER_TIGHTEN, _HARD_FAIL}
+# The two binding regime units regime_split / regime_verdicts emit on a boundary-spanning
+# window. "early_cut" IS the easing binding unit (the post-cut segment).
+_REGIME_HIGH_RATE = "high_rate"
+_REGIME_EASING = "early_cut"
+# A boundary-SPANNING window so regime_split returns BOTH units. The easing slice is given
+# DISTINCT geometry (a declining equity leg post-boundary) so its recomputed best-of-three
+# naive bar differs from the full-window bar (V-11 apples-to-apples-within-regime proof).
+_REGIME_PRE_DAYS = 360  # ~1y of daily bars before the boundary (the high-rate slice)
+_REGIME_POST_DAYS = 260  # ~1y of daily bars from the boundary (the easing slice)
+_REGIME_PRE_FIRST = _BOUNDARY - timedelta(days=_REGIME_PRE_DAYS)
+# Post-boundary equity DECLINES (the real easing finding) so the easing naive bar diverges.
+_EASING_EQUITY_DAILY = Decimal("0.9994")  # a falling equity leg in the easing sub-window
 
 
 def _daily_index(first: date, n: int) -> list[date]:
@@ -982,3 +1008,163 @@ def test_no_allocation_logic_drift() -> None:
         assert legs_a[name].sharpe == legs_b[name].sharpe
         assert legs_a[name].max_drawdown_pct == legs_b[name].max_drawdown_pct
         assert legs_a[name].rebalance_cost == legs_b[name].rebalance_cost
+
+
+# -- Phase 75: per-regime binding verdicts (REGIME-02 / D-01) ------------------
+
+
+def _regime_dates() -> list[date]:
+    """A boundary-spanning daily index: a high-rate slice then an easing slice.
+
+    The window starts ~1y before REGIME_SPLIT_BOUNDARY and runs ~1y after, so
+    ``regime_split`` returns BOTH ``high_rate`` and ``early_cut``.
+    """
+    pre = [_REGIME_PRE_FIRST + timedelta(days=i) for i in range(_REGIME_PRE_DAYS)]
+    post = [_BOUNDARY + timedelta(days=i) for i in range(_REGIME_POST_DAYS)]
+    return pre + post
+
+
+def _regime_legs() -> tuple[
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+]:
+    """Build the three already-netted (date, Decimal) legs for a boundary-spanning window.
+
+    Deposit + OFZ rise smoothly across the whole window; equity RISES in the high-rate
+    slice but DECLINES in the easing slice (the real easing finding) so the easing
+    sub-window's recomputed best-of-three naive bar differs from the full-window bar
+    (V-11 apples-to-apples-within-regime).
+    """
+    dates = _regime_dates()
+    deposit = _curve(_DEPOSIT_BASE, _DEPOSIT_DAILY, dates)
+    ofz = _curve(_OFZ_BASE, _OFZ_DAILY, dates)
+    # Equity rises pre-boundary, then declines from the boundary onward (distinct easing
+    # geometry) so the per-regime naive bar is genuinely recomputed on the slice.
+    equity: list[tuple[date, Decimal]] = []
+    eq_value = _EQUITY_BASE
+    prev: date | None = None
+    for d in dates:
+        if prev is not None:
+            daily = _EASING_EQUITY_DAILY if d >= _BOUNDARY else _EQUITY_DAILY
+            eq_value = eq_value * daily
+        equity.append((d, eq_value))
+        prev = d
+    return deposit, ofz, equity
+
+
+def test_regime_slice_does_not_renet() -> None:
+    """``_slice_leg`` is a PURE inclusive date filter -- no re-net / no NDFL delta (T-75-02).
+
+    The slice path must NEVER touch the tax accumulator: slicing an ALREADY-netted leg
+    returns the date-matched full-window values byte-for-byte (the CR-01 YtdTaxAccumulator
+    year-boundary bug is structurally unreachable on the slice path). Pinned for all three
+    legs across the boundary, mirroring the byte-identity assertion shape of
+    ``test_no_allocation_logic_drift``.
+    """
+    deposit, ofz, equity = _regime_legs()
+    regime = regime_split([d for d, _ in deposit])
+    w_start, w_end = regime[_REGIME_EASING]
+
+    for leg in (deposit, ofz, equity):
+        sliced = _slice_leg(leg, w_start, w_end)
+        expected = [(d, v) for d, v in leg if w_start <= d <= w_end]
+        # Value-for-value identity: no NDFL re-applied, no re-net delta.
+        assert sliced == expected
+        assert all(isinstance(v, Decimal) for _, v in sliced)
+
+
+def test_regime_verdicts_binding() -> None:
+    """Per-regime BINDING verdicts emitted for high_rate AND easing via the REAL gate (V-10).
+
+    ``regime_verdicts`` slices the already-netted legs at REGIME_SPLIT_BOUNDARY and runs the
+    EXISTING ``build_naive_legs -> gate_with_autotighten`` per profile on each sub-window.
+    The returned dict is keyed by regime unit; each per-profile value carries ``verdict`` in
+    ``_VALID_VERDICTS`` (a REAL gate output, never a pre-baked constant -- anti-hollow).
+    """
+    deposit, ofz, equity = _regime_legs()
+    profiles = load_allocation_profiles()
+
+    out = regime_verdicts(deposit, ofz, equity, profiles, _PROFILE_ORDER)
+
+    # Boundary-spanning window -> BOTH binding units present.
+    assert _REGIME_HIGH_RATE in out
+    assert _REGIME_EASING in out
+    for unit in (_REGIME_HIGH_RATE, _REGIME_EASING):
+        per_profile = out[unit]
+        # Every profile produced a REAL gate verdict for this regime unit.
+        assert set(per_profile) == {p.value for p in _PROFILE_ORDER}
+        for raw in per_profile.values():
+            v = raw  # a per-profile verdict dict
+            assert isinstance(v, dict)
+            assert v["verdict"] in _VALID_VERDICTS  # real gate output, not a constant
+            # The non-serializable carriers are stripped (mirrors the run_gate loop).
+            assert "result" not in v
+            assert "frozen_weights" not in v
+
+
+def test_regime_naive_bar_recomputed_on_subwindow() -> None:
+    """The easing unit's naive bar is recomputed on the SLICE, not the full window (V-11).
+
+    Each sub-window recomputes its OWN best-of-three naive bar (apples-to-apples within
+    regime, D-01 derived). With a declining easing equity slice, the easing per-profile
+    ``best_naive_sharpe`` MUST differ from the full-window best-naive Sharpe (proving the
+    bar is sliced, not borrowed from the whole window).
+    """
+    deposit, ofz, equity = _regime_legs()
+    profiles = load_allocation_profiles()
+
+    # The full-window best-of-three naive Sharpe (the bar the per-regime units must NOT reuse).
+    full_naives = build_naive_legs(deposit, ofz, equity)
+    full_best_naive_sharpe = max(n.sharpe for n in full_naives.values())
+
+    out = regime_verdicts(deposit, ofz, equity, profiles, _PROFILE_ORDER)
+    easing_profile = next(iter(out[_REGIME_EASING].values()))
+    assert isinstance(easing_profile, dict)
+    easing_best_naive_sharpe = easing_profile["best_naive_sharpe"]
+
+    # The easing slice recomputed its OWN bar -> it differs from the full-window bar.
+    assert isinstance(easing_best_naive_sharpe, float)
+    assert easing_best_naive_sharpe != full_best_naive_sharpe
+
+
+def test_full_window_no_regression() -> None:
+    """Adding regime_verdicts does NOT perturb the full-window verdicts (D-01 no-regression).
+
+    The EXISTING full-window ``build_naive_legs -> gate_with_autotighten`` path yields the
+    SAME per-profile verdicts whether or not ``regime_verdicts`` is also computed on the same
+    legs. The full-window path stays the cert-of-record; Plan 03 ANDs the regime units onto
+    it without demoting it.
+    """
+    deposit, ofz, equity = _regime_legs()
+    profiles = load_allocation_profiles()
+
+    def _full_window_verdicts() -> dict[str, object]:
+        naives = build_naive_legs(deposit, ofz, equity)
+        naive_sharpes = [n.sharpe for n in naives.values()]
+        naive_sortinos = [
+            excess_sortino_from_equity([float(v) for v in n.merged_equity_curve])
+            for n in naives.values()
+        ]
+        out: dict[str, object] = {}
+        for pk in _PROFILE_ORDER:
+            p = profiles[pk]
+            v = gate_with_autotighten(
+                profile_key=pk,
+                base_weights=p.weights,
+                cap_fraction=p.max_drawdown_pct,
+                deposit_curve=deposit,
+                ofz_pk_curve=ofz,
+                equity_curve=equity,
+                naive_sharpes=naive_sharpes,
+                naive_sortinos=naive_sortinos,
+            )
+            out[pk.value] = v["verdict"]
+        return out
+
+    before = _full_window_verdicts()
+    # Compute the per-regime units on the SAME legs -> must not mutate the full-window path.
+    regime_verdicts(deposit, ofz, equity, profiles, _PROFILE_ORDER)
+    after = _full_window_verdicts()
+
+    assert before == after
