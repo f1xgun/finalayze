@@ -44,12 +44,15 @@ from pathlib import Path
 import pytest
 
 from finalayze.backtest.allocation_gate import (
+    _ESCALATION_DEPOSIT_ANCHOR,
     _LARGE_SORTINO_SENTINEL,
+    _N1_CAVEAT,
     REGIME_SPLIT_BOUNDARY,
     _load_gate_snapshot,
     _slice_leg,
     accrue_real_risk_free_leg,
     build_naive_legs,
+    derive_escalation,
     excess_sortino_from_equity,
     gate_with_autotighten,
     net_fixed_income_legs_interleaved,
@@ -174,6 +177,45 @@ _REGIME_POST_DAYS = 260  # ~1y of daily bars from the boundary (the easing slice
 _REGIME_PRE_FIRST = _BOUNDARY - timedelta(days=_REGIME_PRE_DAYS)
 # Post-boundary equity DECLINES (the real easing finding) so the easing naive bar diverges.
 _EASING_EQUITY_DAILY = Decimal("0.9994")  # a falling equity leg in the easing sub-window
+
+# -- Phase 75 Plan 02 decision-derivation + render constants (V-12 + render_json + V-13) ----
+# A git_sha for the render payload (named -- no inline magic string in the test).
+_DECISION_GIT_SHA = "feedface"
+# The five EXISTING render_json keys Plan 02 must preserve ADDITIVELY (no key dropped/renamed).
+_EXISTING_JSON_KEYS = ("git_sha", "per_profile", "naive", "regime_split", "high_rate_caveat")
+# A fused-status string Plan 02 must NEVER emit (D-04: the N=1 caveat is separate metadata,
+# not appended to a verdict-status string).
+_FUSED_N1_STATUS = "HARD_FAIL (N=1)"
+# The Per-Regime Verdict section header + the rendered easing-unit label.
+_PER_REGIME_HEADER = "Per-Regime Verdict"
+_EASING_LABEL = "easing"
+# A minimal per_regime block shaped like regime_verdicts output (high_rate + easing units),
+# each carrying one HARD_FAIL per-profile verdict -- the both-HARD_FAIL pair the real cert
+# produces, so derive_escalation escalates.
+_DECISION_PER_REGIME: dict[str, dict[str, object]] = {
+    _REGIME_HIGH_RATE: {
+        RiskProfile.CONSERVATIVE.value: {
+            "verdict": _HARD_FAIL,
+            "sharpe": -0.8827,
+            "best_naive_sharpe": -0.6506,
+            "sortino": -0.5,
+            "best_naive_sortino": -0.4,
+            "realized_maxdd_frac": 0.02,
+            "cap_frac": 0.08,
+        }
+    },
+    _REGIME_EASING: {
+        RiskProfile.CONSERVATIVE.value: {
+            "verdict": _HARD_FAIL,
+            "sharpe": -0.9,
+            "best_naive_sharpe": -0.5,
+            "sortino": -0.6,
+            "best_naive_sortino": -0.3,
+            "realized_maxdd_frac": 0.03,
+            "cap_frac": 0.08,
+        }
+    },
+}
 
 
 def _daily_index(first: date, n: int) -> list[date]:
@@ -1168,3 +1210,126 @@ def test_full_window_no_regression() -> None:
     after = _full_window_verdicts()
 
     assert before == after
+
+
+# -- Phase 75 Plan 02: decision derivation + additive render (V-12 + render_json + V-13) ----
+
+
+def test_escalation_derived_from_verdicts() -> None:
+    """``escalation`` is DERIVED from the REAL per-regime verdicts, never pre-baked (V-12).
+
+    Anti-hollow (D-03a): ``escalation == _ESCALATION_DEPOSIT_ANCHOR`` ONLY when BOTH the
+    high_rate AND easing unit verdicts are ``HARD_FAIL``. A fabricated easing-PASS pair yields
+    ``escalation is None`` (the flag tracks the cert, not this discussion). ``n1_caveat`` is
+    always-on separate metadata (D-04) for every pair.
+    """
+    # Both regimes HARD_FAIL -> the deposit-anchor escalation is recorded.
+    both_fail = derive_escalation(_HARD_FAIL, _HARD_FAIL)
+    assert both_fail["escalation"] == _ESCALATION_DEPOSIT_ANCHOR
+    assert both_fail["n1_caveat"] is True
+
+    # Fabricated easing-PASS pair -> NO escalation (anti-hollow proof).
+    high_fail_easing_pass = derive_escalation(_HARD_FAIL, _PASS)
+    assert high_fail_easing_pass["escalation"] is None
+    assert high_fail_easing_pass["n1_caveat"] is True
+
+    # Both PASS -> NO escalation.
+    both_pass = derive_escalation(_PASS, _PASS)
+    assert both_pass["escalation"] is None
+    assert both_pass["n1_caveat"] is True
+
+
+def test_render_json_per_regime_block() -> None:
+    """``render_json`` carries the per_regime block + escalation + n1_caveat ADDITIVELY.
+
+    Every EXISTING key (git_sha, per_profile, naive, regime_split, high_rate_caveat) is
+    preserved, AND the three Phase-75 keys (per_regime, escalation, n1_caveat) are added. The
+    per_regime value is the ``regime_verdicts`` shape; escalation is the derived flag.
+    """
+    per_profile = {
+        "conservative": {
+            "verdict": _HARD_FAIL,
+            "sharpe": _NOTE_PROFILE_SHARPE,
+            "best_naive_sharpe": _NOTE_DEPOSIT_SHARPE,
+            "sortino": _NOTE_PROFILE_SORTINO,
+            "best_naive_sortino": _NOTE_DEPOSIT_SORTINO,
+            "realized_maxdd_frac": 0.021,
+            "cap_frac": 0.08,
+            "mean_wf_sharpe": 0.457,
+        }
+    }
+    naive_metrics = {
+        "deposit_100_sharpe": _NOTE_DEPOSIT_SHARPE,
+        "deposit_100_sortino": _NOTE_DEPOSIT_SORTINO,
+        "deposit_100_maxdd_pct": 0.0,
+    }
+    regime = regime_split([_BOUNDARY - timedelta(days=30), _BOUNDARY + timedelta(days=30)])
+    escalation = derive_escalation(_HARD_FAIL, _HARD_FAIL)["escalation"]
+
+    payload = render_json(
+        per_profile,
+        naive_metrics,
+        regime,
+        git_sha=_DECISION_GIT_SHA,
+        per_regime=_DECISION_PER_REGIME,
+        escalation=escalation,
+        n1_caveat=True,
+    )
+
+    # Every existing key preserved (additive).
+    for key in _EXISTING_JSON_KEYS:
+        assert key in payload
+    # The three Phase-75 keys added.
+    assert payload["per_regime"] == _DECISION_PER_REGIME
+    assert payload["escalation"] == _ESCALATION_DEPOSIT_ANCHOR
+    assert payload["n1_caveat"] is True
+
+
+def test_report_renders_n1_caveat() -> None:
+    """``render_report`` renders the verbatim _N1_CAVEAT line + a Per-Regime Verdict table (V-13).
+
+    D-04 no-fusion: the N=1 caveat is rendered VERBATIM exactly once as its own line (mirroring
+    the _HIGH_RATE_CAVEAT block) and is NEVER fused into a verdict-status string (no
+    "HARD_FAIL (N=1)"). The report also shows a Per-Regime Verdict section with high_rate and
+    easing rows.
+    """
+    per_profile = {
+        "conservative": {
+            "verdict": _HARD_FAIL,
+            "sharpe": _NOTE_PROFILE_SHARPE,
+            "best_naive_sharpe": _NOTE_DEPOSIT_SHARPE,
+            "sortino": _NOTE_PROFILE_SORTINO,
+            "best_naive_sortino": _NOTE_DEPOSIT_SORTINO,
+            "realized_maxdd_frac": 0.021,
+            "cap_frac": 0.08,
+            "mean_wf_sharpe": 0.457,
+        }
+    }
+    naive_metrics = {
+        "deposit_100_sharpe": _NOTE_DEPOSIT_SHARPE,
+        "deposit_100_sortino": _NOTE_DEPOSIT_SORTINO,
+        "deposit_100_maxdd_pct": 0.0,
+    }
+    regime = regime_split([_BOUNDARY - timedelta(days=30), _BOUNDARY + timedelta(days=30)])
+    escalation = derive_escalation(_HARD_FAIL, _HARD_FAIL)["escalation"]
+
+    payload = render_json(
+        per_profile,
+        naive_metrics,
+        regime,
+        git_sha=_DECISION_GIT_SHA,
+        per_regime=_DECISION_PER_REGIME,
+        escalation=escalation,
+        n1_caveat=True,
+    )
+    report = render_report(payload)
+
+    # The verbatim N=1 caveat renders exactly once (grep-pinned, D-04).
+    assert _N1_CAVEAT in report
+    assert report.count(_N1_CAVEAT) == 1
+    # The Per-Regime Verdict section + both regime rows render.
+    assert _PER_REGIME_HEADER in report
+    assert _REGIME_HIGH_RATE in report
+    assert _EASING_LABEL in report
+    # The N=1 caveat is metadata, NOT fused into a verdict-status string (D-04 no-fusion).
+    assert _FUSED_N1_STATUS not in report
