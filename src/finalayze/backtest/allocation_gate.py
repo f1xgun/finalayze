@@ -294,6 +294,11 @@ _TRADING_DAYS = 252
 # early-cut split point. NAMED (no magic date in logic).
 REGIME_SPLIT_BOUNDARY: date = date(2025, 6, 6)
 
+# The binding HARD_FAIL verdict string (Phase 75 / REGIME-02). NAMED so the per-regime
+# driver and Plan 02's derive_escalation never inline the raw literal. It mirrors the
+# terminal verdict gate_with_autotighten emits ("PASS" / "PASS_AFTER_TIGHTEN" / "HARD_FAIL").
+_HARD_FAIL = "HARD_FAIL"
+
 # The mandatory honesty caveat (D-08 / Pitfall 6): a deposit-wins-raw-return outcome in a
 # 16-21% high-rate regime is correctly framed as NOT a failure. Pinned VERBATIM by the
 # report; the verifier greps for this literal string.
@@ -737,6 +742,78 @@ def regime_split(dates: list[date]) -> dict[str, tuple[date, date]]:
         return {"high_rate": (start, end)}  # single high-rate plateau (no easing sub-window)
     day_before = REGIME_SPLIT_BOUNDARY - timedelta(days=1)
     return {"high_rate": (start, day_before), "early_cut": (REGIME_SPLIT_BOUNDARY, end)}
+
+
+def _slice_leg(
+    leg: list[tuple[date, Decimal]], start: date, end: date
+) -> list[tuple[date, Decimal]]:
+    """Inclusive date slice of an ALREADY-NETTED ``(date, Decimal)`` leg. No re-net (T-75-02).
+
+    A PURE date filter — it never constructs or invokes a :class:`YtdTaxAccumulator` and never
+    calls :func:`net_fixed_income_legs_interleaved`. The snapshot legs were netted ONCE at
+    creation time (Phase 74 CR-01 single-pass), so slicing the already-net levels keeps the
+    CR-01 year-boundary bug structurally unreachable: ``_slice_leg`` returns the date-matched
+    full-window values byte-for-byte, no NDFL delta.
+    """
+    return [(d, v) for d, v in leg if start <= d <= end]
+
+
+def regime_verdicts(
+    deposit_net: list[tuple[date, Decimal]],
+    ofz_net: list[tuple[date, Decimal]],
+    equity_net: list[tuple[date, Decimal]],
+    profiles: dict[RiskProfile, AllocationProfile],
+    profile_order: tuple[RiskProfile, ...],
+) -> dict[str, dict[str, object]]:
+    """Per-regime BINDING verdicts on the ALREADY-NETTED legs (REGIME-02 / D-01).
+
+    Slices each leg at :data:`REGIME_SPLIT_BOUNDARY` (via :func:`regime_split`) and runs the
+    EXISTING :func:`build_naive_legs` -> :func:`gate_with_autotighten` per profile on each
+    sub-window — the REAL frozen path (anti-hollow), never a pre-baked literal. NO re-net (the
+    slice path never touches :class:`YtdTaxAccumulator`), so the CR-01 year-boundary bug is
+    structurally unreachable. Each sub-window recomputes its OWN best-of-three naive bar
+    (apples-to-apples within regime, D-01 derived).
+
+    :func:`regime_split` emits ``high_rate`` / ``early_cut``; ``early_cut`` IS the easing
+    binding unit (the post-cut segment). On a window ending before the boundary only
+    ``high_rate`` is present (single-regime edge) — the easing unit is then absent.
+
+    ``profiles`` and ``profile_order`` are PARAMETERS (the CLI injects them) so this module
+    gains no config dependency and the orchestrator stays the only profile owner. Returns a
+    dict keyed by regime unit; each value is a per-profile verdict dict with the
+    non-serializable ``result`` / ``frozen_weights`` carriers stripped (mirroring the CLI loop).
+    """
+    regime = regime_split([d for d, _ in deposit_net])
+    out: dict[str, dict[str, object]] = {}
+    for unit, (w_start, w_end) in regime.items():
+        sub_dep = _slice_leg(deposit_net, w_start, w_end)
+        sub_ofz = _slice_leg(ofz_net, w_start, w_end)
+        sub_eq = _slice_leg(equity_net, w_start, w_end)
+        # Recompute the slice's OWN best-of-three naive bar (apples-to-apples within regime).
+        naives = build_naive_legs(sub_dep, sub_ofz, sub_eq)
+        naive_sharpes = [n.sharpe for n in naives.values()]
+        naive_sortinos = [
+            excess_sortino_from_equity([float(v) for v in n.merged_equity_curve])
+            for n in naives.values()
+        ]
+        per_profile: dict[str, object] = {}
+        for pk in profile_order:
+            p = profiles[pk]
+            v = gate_with_autotighten(
+                profile_key=pk,
+                base_weights=p.weights,
+                cap_fraction=p.max_drawdown_pct,
+                deposit_curve=sub_dep,
+                ofz_pk_curve=sub_ofz,
+                equity_curve=sub_eq,
+                naive_sharpes=naive_sharpes,
+                naive_sortinos=naive_sortinos,
+            )
+            v.pop("result", None)  # non-serializable AllocationResult carrier
+            v.pop("frozen_weights", None)  # weight dict not JSON-key-safe; verdict suffices
+            per_profile[pk.value] = v
+        out[unit] = per_profile
+    return out
 
 
 # Defensive defaults for the classify_regime cross-check before the calendar's first
