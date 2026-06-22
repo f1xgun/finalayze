@@ -545,10 +545,10 @@ def net_index_returns(
     *,
     tax_acc: YtdTaxAccumulator | None = None,
 ) -> list[tuple[date, Decimal]]:
-    """Re-base a fetched GROSS index (RUFLBITR) to a net-of-NDFL TR curve (REGIME-04 / R-E).
+    """Re-base a fetched GROSS index (RGBITR) to a net-of-NDFL TR curve (REGIME-04 / R-E).
 
-    The deposit/OFZ accrual analogue for a FETCHED index level series: the real RUFLBITR
-    floating-coupon-bond TR index is published GROSS of investor NDFL (D-04 derived
+    The deposit/OFZ accrual analogue for a FETCHED index level series: the real RGBITR
+    fixed-coupon-bond TR index is published GROSS of investor NDFL (D-04 derived
     implication), so to honour D-01 (net both sides) its daily return must be netted of the
     same progressive 13/15% band the deposit leg uses.
 
@@ -656,7 +656,7 @@ def net_fixed_income_legs_interleaved(
 
 # ── Committed real-data snapshot (REGIME-01 / D-05, Phase-65 fail-closed pattern) ──
 # The binding cert reads a committed JSON snapshot of the fetched real series (MCFTRR
-# net equity + RUFLBITR-derived net OFZ + net deposit) so CI reproduces the gate
+# net equity + RGBITR-derived net OFZ + net deposit) so CI reproduces the gate
 # deterministically with NO network. A missing/corrupt/future-dated file fails closed
 # (ConfigurationError) — there is NO silent fallback to synthetic data (T-74-03 / V5).
 # Plan 03 writes the committed file (and creates the data/ dir); this loader reads it.
@@ -700,7 +700,7 @@ def _load_gate_snapshot(
     """Read the committed real-data gate snapshot, fail-closed (REGIME-01 / D-05 / V5).
 
     Copies the Phase-65 ``instruments.py:239-251`` committed-snapshot pattern EXACTLY: read
-    the JSON, pull the three required legs (``equity_mcftrr_net`` / ``ofz_ruflbitr_net`` /
+    the JSON, pull the three required legs (``equity_mcftrr_net`` / ``ofz_rgbitr_net`` /
     ``deposit_net``), and re-hydrate each ``[iso_date, decimal_str]`` row to a
     ``(date, Decimal)`` pair. On a missing/corrupt file or a missing required key the loader
     raises :class:`finalayze.core.exceptions.ConfigurationError` — there is NO silent

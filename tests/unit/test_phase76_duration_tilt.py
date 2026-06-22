@@ -25,6 +25,7 @@ from decimal import Decimal
 
 import pytest
 
+from finalayze.backtest.allocation_gate import _load_gate_snapshot, _slice_leg
 from finalayze.config.allocation_profiles import load_allocation_profiles
 from finalayze.core.exceptions import ConfigurationError
 from finalayze.core.schemas import AssetClass, RiskProfile
@@ -62,6 +63,12 @@ _EXPECTED_TILT = {
 
 _VECTOR_SUM = Decimal("1.0")
 _FLAT_LEVEL = Decimal(100)
+_ZERO_DEC = Decimal(0)
+
+# A window entirely before the first cut (high_rate only) and one entirely after (easing).
+_PRE_CUT_WINDOW_START = date(2024, 6, 1)  # 2024-06-01 + 300d ends ~2025-03, all pre-cut
+_EASING_WINDOW_START = date(2025, 8, 1)  # after the 2025-07-25 second cut -> easing throughout
+_SUBWINDOW_DAYS = 300
 
 
 def _daily(start: date, days: int) -> list[date]:
@@ -204,3 +211,65 @@ def test_snapshot_ofz_leg_key_renamed() -> None:
 
     assert gate._SNAPSHOT_LEG_KEYS[1] == "ofz_rgbitr_net"
     assert len(gate._SNAPSHOT_LEG_KEYS) == 3  # noqa: PLR2004
+
+
+# -- T-5: per-regime slice is no-renet + sub-window tilt correctness -----------
+
+
+def test_slice_leg_is_pure_date_filter_no_renet() -> None:
+    """regime_verdicts slices already-netted curves via a PURE date filter -- no re-net.
+
+    ``_slice_leg`` returns exactly the in-range (date, value) pairs, byte-identical to the
+    source: it never re-runs ``YtdTaxAccumulator`` on the slice (Phase-74 CR-01 -- netting
+    happens ONCE at full-window creation, even with the RGBITR-tilt candidate upstream).
+    """
+    leg = [(date(2025, 1, 1) + timedelta(days=i), Decimal(100 + i)) for i in range(200)]
+    start, end = date(2025, 3, 1), date(2025, 5, 31)
+    expected = [(d, v) for d, v in leg if start <= d <= end]
+    assert _slice_leg(leg, start, end) == expected
+
+
+def test_subwindow_entirely_high_rate_uses_high_rate_tilt() -> None:
+    """A window entirely before the first cut tilts to high_rate at every boundary."""
+    dates = _daily(_PRE_CUT_WINDOW_START, _SUBWINDOW_DAYS)
+    orch = AllocationOrchestrator(risk_profile=RiskProfile.CONSERVATIVE)
+    result = orch.run(_flat(dates), _flat(dates), _flat(dates))
+    assert result.rebalance_dates
+    for rd in result.rebalance_dates:
+        assert result.weight_series[_D][result.dates.index(rd)] == _CONS_HIGH[_D]
+
+
+def test_subwindow_entirely_easing_uses_easing_tilt() -> None:
+    """A window entirely after the first cut tilts to easing at every boundary."""
+    dates = _daily(_EASING_WINDOW_START, _SUBWINDOW_DAYS)
+    orch = AllocationOrchestrator(risk_profile=RiskProfile.CONSERVATIVE)
+    result = orch.run(_flat(dates), _flat(dates), _flat(dates))
+    assert result.rebalance_dates
+    for rd in result.rebalance_dates:
+        assert result.weight_series[_D][result.dates.index(rd)] == _CONS_EASE[_D]
+
+
+# -- T-7: the binding-cert candidate charges REAL cost and tilts (anti-hollow) -
+
+
+def test_cert_candidate_charges_real_cost_and_tilts() -> None:
+    """The cert candidate over the REAL committed snapshot charges cost AND tilts by regime.
+
+    Anti-hollow (Phase-72 lesson): the BALANCED candidate run over the real RGBITR snapshot
+    charges a non-zero ``rebalance_cost`` from the genuine per-leg delta (no forced hook),
+    and tilts -- a pre-cut boundary holds the high_rate deposit weight (0.60), a post-cut
+    boundary the easing weight (0.25). Both read from the committed RGBITR fixture, proving
+    the swap + tilt are LIVE on the binding path, not a literal.
+    """
+    equity, ofz, deposit = _load_gate_snapshot()
+    orch = AllocationOrchestrator(risk_profile=RiskProfile.BALANCED)
+    result = orch.run(deposit_curve=deposit, ofz_pk_curve=ofz, equity_curve=equity)
+
+    assert result.rebalance_cost > _ZERO_DEC
+    assert len(result.rebalance_dates) > 1
+
+    pre = [d for d in result.rebalance_dates if d < _FIRST_CUT]
+    post = [d for d in result.rebalance_dates if d >= _FIRST_CUT]
+    assert pre and post
+    assert result.weight_series[_D][result.dates.index(pre[-1])] == _BAL_HIGH[_D]
+    assert result.weight_series[_D][result.dates.index(post[0])] == _BAL_EASE[_D]

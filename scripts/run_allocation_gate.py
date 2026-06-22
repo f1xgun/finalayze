@@ -269,7 +269,7 @@ def _fetch_real_series(secid: str) -> list[tuple[date, Decimal]]:
 
     Wraps ``load_mcftr_series(secid=...)`` over the public MOEX ISS-REST index endpoint
     (no token/cert) with the WR-03 / T-73-12 honesty guards applied IDENTICALLY to every
-    secid (MCFTRR and RUFLBITR): a raising fetch or a short fetch surfaces a clean,
+    secid (MCFTRR and RGBITR): a raising fetch or a short fetch surfaces a clean,
     actionable operator ``SystemExit`` -- NEVER a fabricated synthetic 'live' leg. A
     non-zero exit signals a HARNESS failure (MOEX unreachable), not a HARD_FAIL verdict.
     """
@@ -296,7 +296,7 @@ def _forward_align(
 ) -> list[tuple[date, Decimal]]:
     """Forward-fill ``series`` onto the master ``axis`` (the as-of, look-ahead-safe convention).
 
-    RUFLBITR is fetched on its own trading-day calendar; the gate needs all three legs on
+    RGBITR is fetched on its own trading-day calendar; the gate needs all three legs on
     the ONE master (MCFTRR) axis (R-3). For each master date the most-recent series level
     on/before that date is used (the same forward-fill the orchestrator applies), so no
     future bar leaks. Master dates before the first series bar carry the first level.
@@ -393,7 +393,7 @@ def _write_gate_snapshot(
 ) -> Path:
     """Write the committed real-data snapshot fixture (R-F shape) — the ONLY network-write path.
 
-    Serializes the three NETTED legs (``equity_mcftrr_net`` / ``ofz_ruflbitr_net`` /
+    Serializes the three NETTED legs (``equity_mcftrr_net`` / ``ofz_rgbitr_net`` /
     ``deposit_net``) to the Phase-65 committed-snapshot shape (Decimal-as-string, ISO dates),
     clamped to ``_LIVE_END`` (look-ahead guard, Pitfall 3 / T-74-07), and creates the
     ``src/finalayze/backtest/data/`` directory if absent. Only ``--live --refresh-snapshot``
@@ -467,7 +467,7 @@ def _load_curves(
       net-of-tax snapshot via the FROZEN Plan-02 fail-closed loader (deterministic, no
       network).
     - ``live=True, refresh_snapshot=True`` (operator network path): FETCH + net the REAL
-      MCFTRR/RUFLBITR series and (re)write the committed fixture.
+      MCFTRR/RGBITR series and (re)write the committed fixture.
     - ``live=False`` (the non-binding CI smoke): the deterministic in-memory geometric
       curves -- CI-safe, reproducible, no token, no network. The offline ``dates`` argument
       is used only here.
@@ -645,7 +645,7 @@ def main() -> int:
         "--refresh-snapshot",
         action="store_true",
         help=(
-            "Fetch the REAL MCFTRR/RUFLBITR series, net them, and (re)write the committed "
+            "Fetch the REAL MCFTRR/RGBITR series, net them, and (re)write the committed "
             "snapshot fixture (operator-only network path; default --live reads the snapshot)."
         ),
     )
@@ -699,13 +699,13 @@ def main() -> int:
     if args.live and args.refresh_snapshot:
         print(
             f"window: REAL data {_LIVE_START.date()}..{_LIVE_END.date()} "
-            "(MCFTRR net equity + RUFLBITR net OFZ + real-CBR-rate net deposit; "
+            "(MCFTRR net equity + RGBITR net OFZ + real-CBR-rate net deposit; "
             "REFRESHED + committed snapshot, Phase 74 D-05)"
         )
     elif args.live:
         print(
             f"window: REAL data {_LIVE_START.date()}..{_LIVE_END.date()} "
-            "(committed net-of-tax snapshot: MCFTRR/RUFLBITR/deposit; offline, Phase 74 D-05)"
+            "(committed net-of-tax snapshot: MCFTRR/RGBITR/deposit; offline, Phase 74 D-05)"
         )
     else:
         print(

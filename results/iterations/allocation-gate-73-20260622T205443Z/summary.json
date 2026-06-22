@@ -1,0 +1,135 @@
+{
+  "git_sha": "e4279c10abfd22b59fa1db78c5f0b63d8c26ef4c",
+  "per_profile": {
+    "conservative": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -1.1283608720385232,
+      "best_naive_sharpe": -0.6505587542125374,
+      "sortino": -1.6006942082083124,
+      "best_naive_sortino": -0.9256020482001079,
+      "realized_maxdd_frac": 0.03881500928551212,
+      "cap_frac": 0.08,
+      "mean_wf_sharpe": -0.31666116222086255
+    },
+    "balanced": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -1.0023781387286088,
+      "best_naive_sharpe": -0.6505587542125374,
+      "sortino": -1.414233098656307,
+      "best_naive_sortino": -0.9256020482001079,
+      "realized_maxdd_frac": 0.07861715936800794,
+      "cap_frac": 0.15,
+      "mean_wf_sharpe": -0.32194961183533205
+    },
+    "growth": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -0.9188470180162278,
+      "best_naive_sharpe": -0.6505587542125374,
+      "sortino": -1.2973724158127056,
+      "best_naive_sortino": -0.9256020482001079,
+      "realized_maxdd_frac": 0.150006226842458,
+      "cap_frac": 0.25,
+      "mean_wf_sharpe": -0.31071932354407406
+    }
+  },
+  "naive": {
+    "deposit_100_sharpe": -4.626414216151382,
+    "deposit_100_sortino": -5.39945940834521,
+    "deposit_100_maxdd_pct": 0.0,
+    "equity_100_sharpe": -0.6505587542125374,
+    "equity_100_sortino": -0.9256020482001079,
+    "equity_100_maxdd_pct": 27.800869111196075,
+    "static_60_30_10_sharpe": -0.9026864782884786,
+    "static_60_30_10_sortino": -1.2762499468839923,
+    "static_60_30_10_maxdd_pct": 19.309283113136733
+  },
+  "regime_split": {
+    "high_rate": [
+      "2024-01-02",
+      "2025-06-05"
+    ],
+    "early_cut": [
+      "2025-06-06",
+      "2026-06-08"
+    ]
+  },
+  "high_rate_caveat": "100% deposit winning raw return in a 16-21% high-rate regime is NOT a failure",
+  "per_regime": {
+    "high_rate": {
+      "conservative": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -1.1409359585212164,
+        "best_naive_sharpe": 0.8904425094852376,
+        "sortino": -1.6514127328384822,
+        "best_naive_sortino": 1.3120674760569269,
+        "realized_maxdd_frac": 0.03881500928551212,
+        "cap_frac": 0.08,
+        "mean_wf_sharpe": 0.0
+      },
+      "balanced": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -1.012972704887895,
+        "best_naive_sharpe": 0.8904425094852376,
+        "sortino": -1.4505583759425011,
+        "best_naive_sortino": 1.3120674760569269,
+        "realized_maxdd_frac": 0.07861715936800794,
+        "cap_frac": 0.15,
+        "mean_wf_sharpe": 0.0
+      },
+      "growth": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -0.9248914988720045,
+        "best_naive_sharpe": 0.8904425094852376,
+        "sortino": -1.3223957163372908,
+        "best_naive_sortino": 1.3120674760569269,
+        "realized_maxdd_frac": 0.150006226842458,
+        "cap_frac": 0.25,
+        "mean_wf_sharpe": 0.0
+      }
+    },
+    "early_cut": {
+      "conservative": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -1.3980385378608782,
+        "best_naive_sharpe": -0.7637932588585011,
+        "sortino": -1.87226709838997,
+        "best_naive_sortino": -1.0663194795576252,
+        "realized_maxdd_frac": 0.02614144203734612,
+        "cap_frac": 0.08,
+        "mean_wf_sharpe": 0.0
+      },
+      "balanced": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -1.1915437751010332,
+        "best_naive_sharpe": -0.7637932588585011,
+        "sortino": -1.615799381373953,
+        "best_naive_sortino": -1.0663194795576252,
+        "realized_maxdd_frac": 0.05649908390997964,
+        "cap_frac": 0.15,
+        "mean_wf_sharpe": 0.0
+      },
+      "growth": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -1.0766257960457488,
+        "best_naive_sharpe": -0.7637932588585011,
+        "sortino": -1.4714393760435445,
+        "best_naive_sortino": -1.0663194795576252,
+        "realized_maxdd_frac": 0.09678206077229042,
+        "cap_frac": 0.25,
+        "mean_wf_sharpe": 0.0
+      }
+    }
+  },
+  "escalation": "deposit_anchor_vs_redesign",
+  "n1_caveat": true,
+  "phase_verdict": "HARD_FAIL"
+}
