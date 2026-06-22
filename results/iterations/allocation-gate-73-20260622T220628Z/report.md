@@ -1,6 +1,6 @@
 # Allocation Gate Report (GATE-01/02/03)
 
-git_sha: `7f50e9d0ccc18c505c106bbb592324590e22e5ca`
+git_sha: `44ef26ff3ea9db870d671fb054d1069a65b770c0`
 
 ## Per-Profile Verdict (binding = full-window; WF mean reported-only)
 
