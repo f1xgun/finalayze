@@ -687,6 +687,10 @@ class AllocationOrchestrator:
         Legacy cadence keeps the monthly drift>0.05 band (D-13 reproduction). The
         live SAA path moves to the exact target on every quarter boundary (D-08), so
         it always rebalances (a flat ~0-drift bar is a harmless no-op rescale).
+
+        ``weights`` is consulted ONLY on the legacy branch below; on the live path this
+        early-returns True, so the (possibly Phase-76-tilted) ``boundary_weights`` the
+        caller passes here is intentionally unread (IN-01).
         """
         if not legacy_cadence:
             return True

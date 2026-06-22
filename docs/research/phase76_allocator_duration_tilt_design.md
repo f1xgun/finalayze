@@ -161,3 +161,8 @@ HARD_FAIL; escalation `deposit_anchor_vs_redesign`; `n1_caveat` true — all DER
 path. The deposit anchor holds against the best floater+tilt construction. This is the honest,
 shippable deliverable; large real capital only after a regime-level PASS (deferred).
 
+> **Note (IN-01/IN-02, code review):** the tilt's first effective application is the first QUARTER
+> boundary — leg scales start at 1.0 at bar 0, so the pre-first-boundary book is the raw curve sum,
+> identical for candidate and naive (the comparison stays fair). `_should_rebalance` reads its
+> `weights` argument only on the legacy branch; on the live path it early-returns `True`.
+

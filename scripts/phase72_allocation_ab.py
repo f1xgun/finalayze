@@ -58,8 +58,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from finalayze.backtest.bond_engine import BondBacktestResult
 from finalayze.backtest.portfolio_orchestrator import PortfolioBacktestOrchestrator
+from finalayze.config.allocation_profiles import load_allocation_profiles
 from finalayze.core.constants import DEPOSIT_DEMAND_RATE
-from finalayze.core.schemas import PortfolioState, RiskProfile
+from finalayze.core.schemas import AllocationProfile, PortfolioState, RiskProfile
 from finalayze.orchestration.allocation import AllocationOrchestrator
 
 # -- Deterministic A/B fixture (named constants -- no magic numbers) -----------
@@ -350,7 +351,15 @@ def _run_idlecash(dates: list[date], git_sha: str) -> tuple[str, dict[str, objec
     eq = _curve(_EQ_BASE, _EQ_DAILY, dates)
     dep = _curve(_DEP_BASE, _DEP_DAILY, dates)
 
-    orch = AllocationOrchestrator(risk_profile=RiskProfile.BALANCED)
+    # Pin the STATIC v11.1 SAA (regime_weights=None) this A/B measures -- NOT the Phase-76
+    # regime tilt the loaded default BALANCED profile now carries (WR-02).
+    _bal = load_allocation_profiles()[RiskProfile.BALANCED]
+    _static_bal = AllocationProfile(
+        profile=_bal.profile, weights=_bal.weights, max_drawdown_pct=_bal.max_drawdown_pct
+    )
+    orch = AllocationOrchestrator(
+        risk_profile=RiskProfile.BALANCED, profiles={RiskProfile.BALANCED: _static_bal}
+    )
     base = orch.run(deposit_curve=dep, ofz_pk_curve=ofz, equity_curve=eq)
     merged_last = base.merged_equity_curve[-1]
 
