@@ -6,12 +6,13 @@ See docs/architecture/OVERVIEW.md for database schema.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -541,3 +542,79 @@ class SandboxMetricRow(Base):
     max_slippage_bps: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     avg_slippage_bps: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     drawdown_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
+
+
+class SaaPortfolioModel(Base):
+    """Strategic Asset Allocation portfolio identity + risk choice (Phase 77).
+
+    Single-operator MVP: no User/account model, bare portfolio UUID, low-cardinality
+    plain table. Risk choice (RiskProfile value) drives target weights via
+    load_allocation_profiles(risk_profile) — no separate TargetAllocationSnapshot table.
+    """
+
+    __tablename__ = "saa_portfolios"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    risk_profile: Mapped[str] = mapped_column(String(12), nullable=False)
+    budget_rub: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    deposit_tranches: Mapped[list[DepositTrancheModel]] = relationship(back_populates="portfolio")
+
+
+class DepositTrancheModel(Base):
+    """One rung of the deposit ladder, mirroring DepositTranche 1:1 (Phase 77).
+
+    Mutable row per live tranche: accrued_net/accrued_gross mutate per bar as the
+    sleeve broker compounds interest (mark-only, CR-01), and broken flips once a
+    pre-maturity break resets the tranche to the demand rate (D-03). bank_id
+    (nullable) is used for ASV grouping (GROUP BY bank_id), not separate per-bank
+    table. Foreign key uses ON DELETE RESTRICT (safety, no silent data loss).
+    """
+
+    __tablename__ = "deposit_tranches"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("saa_portfolios.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    principal: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    term_months: Mapped[int] = mapped_column(Integer, nullable=False)
+    annual_rate: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    open_date: Mapped[date] = mapped_column(Date, nullable=False)
+    maturity_date: Mapped[date] = mapped_column(Date, nullable=False)
+    accrued_net: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False, default=Decimal(0))
+    accrued_gross: Mapped[Decimal] = mapped_column(
+        Numeric(20, 2), nullable=False, default=Decimal(0)
+    )
+    broken: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    bank_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    portfolio: Mapped[SaaPortfolioModel] = relationship(back_populates="deposit_tranches")
