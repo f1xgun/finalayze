@@ -58,26 +58,30 @@ _FLAT_LEVEL = Decimal(100)
 _EQUITY_LEVEL = Decimal(120)
 _OFZ_LEVEL = Decimal(110)
 
-# BALANCED target weights (config: deposit 0.45 / ofz_pk 0.25 / equity 0.30).
-_BALANCED_DEPOSIT_W = Decimal("0.45")
-_BALANCED_OFZ_W = Decimal("0.25")
+# BALANCED *realized* weights in this fixture's year (Phase 76 regime tilt): _YEAR=2023
+# has NO CBR cuts, so rate_regime_as_of is high_rate at every boundary and BALANCED tilts
+# to its high_rate vector {deposit 0.60 / ofz_pk 0.10 / equity 0.30}
+# (config/allocation_profiles.yaml regime_weights.high_rate.balanced). The base static
+# vector (0.45/0.25/0.30) is only the untilted fallback, not what a 2023 run charges.
+_BALANCED_DEPOSIT_W = Decimal("0.60")
+_BALANCED_OFZ_W = Decimal("0.10")
 _BALANCED_EQUITY_W = Decimal("0.30")
 
-# The flat fixture's first-quarter REAL rebalance (no forced hook):
+# The flat fixture's first-quarter REAL rebalance (no forced hook), high_rate tilt:
 #   total = 100 + 110 + 120 = 330
-#   target ofz = 330 * 0.25 = 82.5  (current 110 -> SELL 27.5)
+#   target ofz = 330 * 0.10 = 33.0  (current 110 -> SELL 77.0)
 #   target eq  = 330 * 0.30 = 99.0  (current 120 -> SELL 21.0)
-#   target dep = 330 * 0.45 = 148.5 (current 100 -> BUY 48.5, cost-free, D-09)
+#   target dep = 330 * 0.60 = 198.0 (current 100 -> BUY 98.0, cost-free, D-09)
 # After the first rebalance the flat legs sit at target, so later quarters trade
 # ~0 -> the run's total rebalance_cost equals this first-quarter charge.
 _FLAT_TOTAL = _FLAT_LEVEL + _OFZ_LEVEL + _EQUITY_LEVEL
-_FLAT_OFZ_SELL = _OFZ_LEVEL - _FLAT_TOTAL * _BALANCED_OFZ_W  # 110 - 82.5 = 27.5
+_FLAT_OFZ_SELL = _OFZ_LEVEL - _FLAT_TOTAL * _BALANCED_OFZ_W  # 110 - 33 = 77
 _FLAT_EQ_SELL = _EQUITY_LEVEL - _FLAT_TOTAL * _BALANCED_EQUITY_W  # 120 - 99 = 21
 _EXPECTED_COST = (_FLAT_OFZ_SELL + _FLAT_EQ_SELL) * _ROUND_TRIP_COST
-# The cost-free deposit notional (148.5 - 100 = 48.5) is EXCLUDED from the charge:
+# The cost-free deposit notional (198 - 100 = 98) is EXCLUDED from the charge:
 # the round-trip cost on the traded eq+ofz value alone is < the cost would be if
 # the deposit notional were charged, proving the deposit leg is cost-free.
-_DEPOSIT_BUY = _FLAT_TOTAL * _BALANCED_DEPOSIT_W - _FLAT_LEVEL  # 48.5
+_DEPOSIT_BUY = _FLAT_TOTAL * _BALANCED_DEPOSIT_W - _FLAT_LEVEL  # 98
 
 # NDFL flat 13% band (below the 2.4M YTD threshold).
 _NDFL_13 = Decimal("0.13")
@@ -118,10 +122,11 @@ def test_rebalance_cost_line_item() -> None:
     """A REAL quarterly rebalance charges round-trip cost as an EXPLICIT line item (SAA-03 / D-09).
 
     No ``forced_leg_deltas`` hook: the cost is computed from the genuine per-leg
-    rescale delta (CR-01). On the flat fixture the first quarter sells ofz 27.5 +
-    eq 21 (and BUYS deposit 48.5 cost-free), so the run's total ``rebalance_cost``
-    equals ``(27.5 + 21) * round_trip`` -- the cost-free 48.5 deposit notional is
-    excluded by construction (deposit leg is cost-free, D-09).
+    rescale delta (CR-01). 2023 is a high_rate regime (no CBR cuts), so BALANCED tilts
+    to {0.60/0.10/0.30}; on the flat fixture the first quarter sells ofz 77 + eq 21 (and
+    BUYS deposit 98 cost-free), so the run's total ``rebalance_cost`` equals
+    ``(77 + 21) * round_trip`` -- the cost-free 98 deposit notional is excluded by
+    construction (deposit leg is cost-free, D-09).
     """
     dates = _daily_index(_YEAR, _DAYS_IN_YEAR)
     orch = AllocationOrchestrator(risk_profile=RiskProfile.BALANCED)
@@ -141,7 +146,7 @@ def test_rebalance_cost_line_item() -> None:
     assert result.rebalance_cost < cost_if_deposit_charged
 
     # A run whose legs already sit exactly at target trades ~0 -> charges ~0 cost.
-    # Build a flat fixture pre-balanced to the BALANCED weights (dep 45 / ofz 25 /
+    # Build a flat fixture pre-balanced to the high_rate tilt weights (dep 60 / ofz 10 /
     # eq 30 on a 100 book): the first quarter has zero per-leg drift -> zero cost.
     at_target = orch.run(
         deposit_curve=_flat_series(dates, _BALANCED_DEPOSIT_W * _FLAT_LEVEL),

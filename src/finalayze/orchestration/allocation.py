@@ -37,8 +37,9 @@ A deposit=0 / legacy monthly+drift / zero-cost run of the same spine reproduces
 the legacy ``PortfolioBacktestOrchestrator`` 60/40 merged curve (D-13 structural
 equivalence -- NOT a byte-match of the live quarterly+cost path).
 
-Layer 5: imports L0 (schemas / ndfl / constants), L4 (backtest costs), and the
-L5 ``DepositSimulatedBroker``. Never imports L6 (api / dashboard / monitoring),
+Layer 5: imports L0 (schemas / ndfl / constants), L2 (the ``cbr`` look-ahead-safe
+``rate_regime_as_of`` selector, Phase 76), L4 (backtest costs), and the L5
+``DepositSimulatedBroker``. Never imports L6 (api / dashboard / monitoring),
 never imports the dormant ``tighten`` (W3 wires the freeze, R-4), never imports an
 active-selection signal-generation module (SAA-04).
 
@@ -57,6 +58,7 @@ from finalayze.backtest.costs import MOEX_RETAIL_COSTS
 from finalayze.config.allocation_profiles import load_allocation_profiles
 from finalayze.core.ndfl import YtdTaxAccumulator
 from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
+from finalayze.data.fetchers.cbr import rate_regime_as_of
 
 if TYPE_CHECKING:
     from datetime import date
@@ -373,6 +375,28 @@ class AllocationOrchestrator:
         """The legacy 60/40 weights for the D-13 reproduction (A4): ofz 0.40, eq 0.60."""
         return _LegWeights(deposit=_ZERO, ofz_pk=_LEGACY_OFZ_WEIGHT, equity=_LEGACY_EQUITY_WEIGHT)
 
+    def _target_weights(
+        self, when: date, static_weights: _LegWeights, *, legacy_cadence: bool
+    ) -> _LegWeights:
+        """Select the rebalance target weights for a boundary date (Phase 76 regime tilt).
+
+        The static path (legacy cadence, or a profile with no ``regime_weights``) returns
+        ``static_weights`` unchanged, so the naive benchmark legs and the D-13 reproduction
+        stay untilted (zero behavioural change). When the profile carries ``regime_weights``
+        (the real SAA candidate) it selects the look-ahead-safe regime vector via
+        ``rate_regime_as_of(when)`` -- a deterministic table lookup with zero trainable
+        parameters (D-03), never an optimizer.
+        """
+        regime_weights = self._profile.regime_weights
+        if legacy_cadence or regime_weights is None:
+            return static_weights
+        vec = regime_weights[rate_regime_as_of(when)]
+        return _LegWeights(
+            deposit=vec[AssetClass.DEPOSIT],
+            ofz_pk=vec[AssetClass.OFZ_PK],
+            equity=vec[AssetClass.EQUITY],
+        )
+
     def run(
         self,
         deposit_curve: list[tuple[date, Decimal]],
@@ -555,16 +579,17 @@ class AllocationOrchestrator:
             last_period = period
 
             if is_boundary:
+                boundary_weights = self._target_weights(d, weights, legacy_cadence=legacy_cadence)
                 dep_val = dep[i] * dep_scale
                 ofz_val = ofz[i] * ofz_scale
                 eq_val = eq[i] * eq_scale
                 total = dep_val + ofz_val + eq_val
                 if total > _ZERO and self._should_rebalance(
-                    dep_val, ofz_val, total, weights, legacy_cadence
+                    dep_val, ofz_val, total, boundary_weights, legacy_cadence
                 ):
-                    target_dep = total * weights.deposit
-                    target_ofz = total * weights.ofz_pk
-                    target_eq = total * weights.equity
+                    target_dep = total * boundary_weights.deposit
+                    target_ofz = total * boundary_weights.ofz_pk
+                    target_eq = total * boundary_weights.equity
                     # Capture the OLD eq/OFZ scales (pre-rebalance UNITS) BEFORE
                     # overwriting them -- the cost + NDFL charge needs them to
                     # compute the traded delta per capital-gains leg.
@@ -662,6 +687,10 @@ class AllocationOrchestrator:
         Legacy cadence keeps the monthly drift>0.05 band (D-13 reproduction). The
         live SAA path moves to the exact target on every quarter boundary (D-08), so
         it always rebalances (a flat ~0-drift bar is a harmless no-op rescale).
+
+        ``weights`` is consulted ONLY on the legacy branch below; on the live path this
+        early-returns True, so the (possibly Phase-76-tilted) ``boundary_weights`` the
+        caller passes here is intentionally unread (IN-01).
         """
         if not legacy_cadence:
             return True

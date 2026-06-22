@@ -13,21 +13,57 @@
 
 rebalance_cadence: quarterly   # D-08 (pure quarterly calendar; informational)
 
+# Phase 76 (v11.2 W1): optional `regime_weights` per profile holds the look-ahead-safe
+# tilt -- {high_rate, easing} weight vectors selected per quarterly boundary by
+# `cbr.rate_regime_as_of` (high_rate until the first CBR cut, easing after). Each
+# (profile x regime) vector ALSO sums to 1.0 and is non-negative (loader fail-closed).
+# Thesis (deposit-anchored, FROZEN before the cert, never fitted to the verdict):
+# high_rate -> deposit dominates, OFZ duration minimal (RGBITR bleeds at high rates);
+# easing -> shift into OFZ duration + equity (RGBITR captures bond price upside as rates
+# fall). The base `weights` stay the v11.1 static vectors (naive legs + backward compat).
+
 conservative:
   weights:
     deposit: 0.60
     ofz_pk: 0.25
     equity: 0.15
   max_drawdown_pct: 0.08
+  regime_weights:
+    high_rate:
+      deposit: 0.75
+      ofz_pk: 0.10
+      equity: 0.15
+    easing:
+      deposit: 0.45
+      ofz_pk: 0.35
+      equity: 0.20
 balanced:                # operator default profile (D-02)
   weights:
     deposit: 0.45
     ofz_pk: 0.25
     equity: 0.30
   max_drawdown_pct: 0.15
+  regime_weights:
+    high_rate:
+      deposit: 0.60
+      ofz_pk: 0.10
+      equity: 0.30
+    easing:
+      deposit: 0.25
+      ofz_pk: 0.40
+      equity: 0.35
 growth:
   weights:
     deposit: 0.25
     ofz_pk: 0.25
     equity: 0.50
   max_drawdown_pct: 0.25
+  regime_weights:
+    high_rate:
+      deposit: 0.40
+      ofz_pk: 0.10
+      equity: 0.50
+    easing:
+      deposit: 0.10
+      ofz_pk: 0.40
+      equity: 0.50

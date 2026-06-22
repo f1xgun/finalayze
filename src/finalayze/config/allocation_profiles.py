@@ -31,7 +31,13 @@ import structlog
 import yaml
 
 from finalayze.core.exceptions import ConfigurationError
-from finalayze.core.schemas import AllocationProfile, AssetClass, RiskProfile
+from finalayze.core.schemas import (
+    RATE_REGIME_EASING,
+    RATE_REGIME_HIGH_RATE,
+    AllocationProfile,
+    AssetClass,
+    RiskProfile,
+)
 
 _LOGGER = structlog.get_logger(__name__)
 
@@ -119,21 +125,7 @@ def _build_profile(name: Any, body: object, target: Path) -> AllocationProfile:
         msg = f"profile {name!r} missing a weights mapping in {target}"
         raise ConfigurationError(msg)
 
-    raw_weights: dict[Any, Any] = body["weights"]
-    weights: dict[AssetClass, Decimal] = {}
-    for cls in _REQUIRED_CLASSES:
-        if cls.value not in raw_weights:
-            msg = f"profile {name!r} missing weight for {cls.value!r} in {target}"
-            raise ConfigurationError(msg)
-        weights[cls] = _to_decimal(raw_weights[cls.value], name, cls.value, target)
-        if weights[cls] < _ZERO:
-            msg = f"profile {name!r} has a negative weight for {cls.value!r} in {target}"
-            raise ConfigurationError(msg)
-
-    if sum(weights.values()) != _WEIGHT_SUM_TARGET:
-        total = sum(weights.values())
-        msg = f"profile {name!r} weights sum to {total}, expected 1.0, in {target}"
-        raise ConfigurationError(msg)
+    weights = _parse_weight_vector(body["weights"], name, "weights", target)
 
     if "max_drawdown_pct" not in body:
         msg = f"profile {name!r} missing max_drawdown_pct in {target}"
@@ -143,7 +135,68 @@ def _build_profile(name: Any, body: object, target: Path) -> AllocationProfile:
         msg = f"profile {name!r} has a negative max_drawdown_pct in {target}"
         raise ConfigurationError(msg)
 
-    return AllocationProfile(profile=profile, weights=weights, max_drawdown_pct=cap)
+    regime_weights = _parse_regime_weights(body.get("regime_weights"), name, target)
+
+    return AllocationProfile(
+        profile=profile,
+        weights=weights,
+        max_drawdown_pct=cap,
+        regime_weights=regime_weights,
+    )
+
+
+def _parse_weight_vector(
+    raw: object, name: Any, ctx: str, target: Path
+) -> dict[AssetClass, Decimal]:
+    """Validate one {deposit, ofz_pk, equity} vector: 3 classes, non-negative, sums to 1.0.
+
+    Shared by the base ``weights`` and each Phase-76 ``regime_weights`` tilt vector so they
+    enforce the IDENTICAL V5 invariant (Decimal-exact sum, no implicit renormalization).
+    """
+    if not isinstance(raw, dict):
+        msg = f"profile {name!r} {ctx} is not a mapping in {target}"
+        raise ConfigurationError(msg)
+    vector: dict[AssetClass, Decimal] = {}
+    for cls in _REQUIRED_CLASSES:
+        if cls.value not in raw:
+            msg = f"profile {name!r} {ctx} missing weight for {cls.value!r} in {target}"
+            raise ConfigurationError(msg)
+        vector[cls] = _to_decimal(raw[cls.value], name, f"{ctx}.{cls.value}", target)
+        if vector[cls] < _ZERO:
+            msg = f"profile {name!r} {ctx} has a negative weight for {cls.value!r} in {target}"
+            raise ConfigurationError(msg)
+    total = sum(vector.values())
+    if total != _WEIGHT_SUM_TARGET:
+        msg = f"profile {name!r} {ctx} weights sum to {total}, expected 1.0, in {target}"
+        raise ConfigurationError(msg)
+    return vector
+
+
+def _parse_regime_weights(
+    raw: object, name: Any, target: Path
+) -> dict[str, dict[AssetClass, Decimal]] | None:
+    """Validate the optional Phase-76 tilt block (keys {high_rate, easing}), fail-closed.
+
+    Absent/``None`` -> no tilt (the orchestrator falls back to the static ``weights``).
+    If present it MUST carry EXACTLY the two regime keys, each a valid weight vector
+    (3 classes, non-negative, sums to 1.0). No renormalization, no solver (D-03).
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        msg = f"profile {name!r} regime_weights is not a mapping in {target}"
+        raise ConfigurationError(msg)
+    expected = {RATE_REGIME_HIGH_RATE, RATE_REGIME_EASING}
+    if set(raw) != expected:
+        msg = (
+            f"profile {name!r} regime_weights keys {sorted(map(str, raw))} != "
+            f"{sorted(expected)} in {target}"
+        )
+        raise ConfigurationError(msg)
+    return {
+        str(regime): _parse_weight_vector(vec, name, f"regime_weights.{regime}", target)
+        for regime, vec in raw.items()
+    }
 
 
 def _to_decimal(value: object, name: object, field: str, target: Path) -> Decimal:

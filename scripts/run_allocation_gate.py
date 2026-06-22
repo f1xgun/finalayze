@@ -532,6 +532,7 @@ def run_gate(
             equity_curve=equity_curve,
             naive_sharpes=naive_sharpes,
             naive_sortinos=naive_sortinos,
+            regime_weights=profile.regime_weights,
         )
         # Strip the non-serializable carriers. WR-04: mean_wf_sharpe is the SINGLE
         # source of truth -- _run_and_score already attached the module-computed value
