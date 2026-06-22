@@ -44,11 +44,16 @@ from pathlib import Path
 import pytest
 
 from finalayze.backtest.allocation_gate import (
+    _ESCALATION_DEPOSIT_ANCHOR,
+    _HIGH_RATE_CAVEAT,
     _LARGE_SORTINO_SENTINEL,
+    _N1_CAVEAT,
     REGIME_SPLIT_BOUNDARY,
     _load_gate_snapshot,
+    _slice_leg,
     accrue_real_risk_free_leg,
     build_naive_legs,
+    derive_escalation,
     excess_sortino_from_equity,
     gate_with_autotighten,
     net_fixed_income_legs_interleaved,
@@ -56,11 +61,13 @@ from finalayze.backtest.allocation_gate import (
     oos_wf_sharpes,
     realized_dd_fraction,
     regime_split,
+    regime_verdicts,
     render_json,
     render_report,
     verdict_for_profile,
 )
 from finalayze.backtest.bond_walk_forward import generate_wf_windows
+from finalayze.config.allocation_profiles import load_allocation_profiles
 from finalayze.core.allocation import tighten  # used only to derive the EXPECTED frozen vector
 from finalayze.core.exceptions import ConfigurationError
 from finalayze.core.ndfl import YtdTaxAccumulator
@@ -148,6 +155,68 @@ _GROWTH_BASE_WEIGHTS = {
 # A realized MaxDD (percent) that breaches even after equity drains to 0.
 _BREACH_MAXDD_PCT = 30.0  # 0.30 -> over any sane cap -> HARD_FAIL
 _HARD_FAIL = "HARD_FAIL"
+
+# -- Phase 75 per-regime binding constants (V-10/V-11 + no-renet + no-regression) ----
+# The conservative -> balanced -> growth order the report renders the profiles in
+# (mirrors run_allocation_gate._PROFILE_ORDER; the driver takes this as a parameter so
+# the gate module gains NO config dependency).
+_PROFILE_ORDER = (RiskProfile.CONSERVATIVE, RiskProfile.BALANCED, RiskProfile.GROWTH)
+# The real gate verdicts the per-regime units must carry (anti-hollow: a REAL gate output,
+# never a constant). Mirrors gate_with_autotighten's three terminal verdict strings.
+_PASS = "PASS"
+_PASS_AFTER_TIGHTEN = "PASS_AFTER_TIGHTEN"
+_VALID_VERDICTS = {_PASS, _PASS_AFTER_TIGHTEN, _HARD_FAIL}
+# The two binding regime units regime_split / regime_verdicts emit on a boundary-spanning
+# window. "early_cut" IS the easing binding unit (the post-cut segment).
+_REGIME_HIGH_RATE = "high_rate"
+_REGIME_EASING = "early_cut"
+# A boundary-SPANNING window so regime_split returns BOTH units. The easing slice is given
+# DISTINCT geometry (a declining equity leg post-boundary) so its recomputed best-of-three
+# naive bar differs from the full-window bar (V-11 apples-to-apples-within-regime proof).
+_REGIME_PRE_DAYS = 360  # ~1y of daily bars before the boundary (the high-rate slice)
+_REGIME_POST_DAYS = 260  # ~1y of daily bars from the boundary (the easing slice)
+_REGIME_PRE_FIRST = _BOUNDARY - timedelta(days=_REGIME_PRE_DAYS)
+# Post-boundary equity DECLINES (the real easing finding) so the easing naive bar diverges.
+_EASING_EQUITY_DAILY = Decimal("0.9994")  # a falling equity leg in the easing sub-window
+
+# -- Phase 75 Plan 02 decision-derivation + render constants (V-12 + render_json + V-13) ----
+# A git_sha for the render payload (named -- no inline magic string in the test).
+_DECISION_GIT_SHA = "feedface"
+# The five EXISTING render_json keys Plan 02 must preserve ADDITIVELY (no key dropped/renamed).
+_EXISTING_JSON_KEYS = ("git_sha", "per_profile", "naive", "regime_split", "high_rate_caveat")
+# A fused-status string Plan 02 must NEVER emit (D-04: the N=1 caveat is separate metadata,
+# not appended to a verdict-status string).
+_FUSED_N1_STATUS = "HARD_FAIL (N=1)"
+# The Per-Regime Verdict section header + the rendered easing-unit label.
+_PER_REGIME_HEADER = "Per-Regime Verdict"
+_EASING_LABEL = "easing"
+# A minimal per_regime block shaped like regime_verdicts output (high_rate + easing units),
+# each carrying one HARD_FAIL per-profile verdict -- the both-HARD_FAIL pair the real cert
+# produces, so derive_escalation escalates.
+_DECISION_PER_REGIME: dict[str, dict[str, object]] = {
+    _REGIME_HIGH_RATE: {
+        RiskProfile.CONSERVATIVE.value: {
+            "verdict": _HARD_FAIL,
+            "sharpe": -0.8827,
+            "best_naive_sharpe": -0.6506,
+            "sortino": -0.5,
+            "best_naive_sortino": -0.4,
+            "realized_maxdd_frac": 0.02,
+            "cap_frac": 0.08,
+        }
+    },
+    _REGIME_EASING: {
+        RiskProfile.CONSERVATIVE.value: {
+            "verdict": _HARD_FAIL,
+            "sharpe": -0.9,
+            "best_naive_sharpe": -0.5,
+            "sortino": -0.6,
+            "best_naive_sortino": -0.3,
+            "realized_maxdd_frac": 0.03,
+            "cap_frac": 0.08,
+        }
+    },
+}
 
 
 def _daily_index(first: date, n: int) -> list[date]:
@@ -982,3 +1051,382 @@ def test_no_allocation_logic_drift() -> None:
         assert legs_a[name].sharpe == legs_b[name].sharpe
         assert legs_a[name].max_drawdown_pct == legs_b[name].max_drawdown_pct
         assert legs_a[name].rebalance_cost == legs_b[name].rebalance_cost
+
+
+# -- Phase 75: per-regime binding verdicts (REGIME-02 / D-01) ------------------
+
+
+def _regime_dates() -> list[date]:
+    """A boundary-spanning daily index: a high-rate slice then an easing slice.
+
+    The window starts ~1y before REGIME_SPLIT_BOUNDARY and runs ~1y after, so
+    ``regime_split`` returns BOTH ``high_rate`` and ``early_cut``.
+    """
+    pre = [_REGIME_PRE_FIRST + timedelta(days=i) for i in range(_REGIME_PRE_DAYS)]
+    post = [_BOUNDARY + timedelta(days=i) for i in range(_REGIME_POST_DAYS)]
+    return pre + post
+
+
+def _regime_legs() -> tuple[
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+    list[tuple[date, Decimal]],
+]:
+    """Build the three already-netted (date, Decimal) legs for a boundary-spanning window.
+
+    Deposit + OFZ rise smoothly across the whole window; equity RISES in the high-rate
+    slice but DECLINES in the easing slice (the real easing finding) so the easing
+    sub-window's recomputed best-of-three naive bar differs from the full-window bar
+    (V-11 apples-to-apples-within-regime).
+    """
+    dates = _regime_dates()
+    deposit = _curve(_DEPOSIT_BASE, _DEPOSIT_DAILY, dates)
+    ofz = _curve(_OFZ_BASE, _OFZ_DAILY, dates)
+    # Equity rises pre-boundary, then declines from the boundary onward (distinct easing
+    # geometry) so the per-regime naive bar is genuinely recomputed on the slice.
+    equity: list[tuple[date, Decimal]] = []
+    eq_value = _EQUITY_BASE
+    prev: date | None = None
+    for d in dates:
+        if prev is not None:
+            daily = _EASING_EQUITY_DAILY if d >= _BOUNDARY else _EQUITY_DAILY
+            eq_value = eq_value * daily
+        equity.append((d, eq_value))
+        prev = d
+    return deposit, ofz, equity
+
+
+def test_regime_slice_does_not_renet() -> None:
+    """``_slice_leg`` is a PURE inclusive date filter -- no re-net / no NDFL delta (T-75-02).
+
+    The slice path must NEVER touch the tax accumulator: slicing an ALREADY-netted leg
+    returns the date-matched full-window values byte-for-byte (the CR-01 YtdTaxAccumulator
+    year-boundary bug is structurally unreachable on the slice path). Pinned for all three
+    legs across the boundary, mirroring the byte-identity assertion shape of
+    ``test_no_allocation_logic_drift``.
+    """
+    deposit, ofz, equity = _regime_legs()
+    regime = regime_split([d for d, _ in deposit])
+    w_start, w_end = regime[_REGIME_EASING]
+
+    for leg in (deposit, ofz, equity):
+        sliced = _slice_leg(leg, w_start, w_end)
+        expected = [(d, v) for d, v in leg if w_start <= d <= w_end]
+        # Value-for-value identity: no NDFL re-applied, no re-net delta.
+        assert sliced == expected
+        assert all(isinstance(v, Decimal) for _, v in sliced)
+
+
+def test_regime_verdicts_binding() -> None:
+    """Per-regime BINDING verdicts emitted for high_rate AND easing via the REAL gate (V-10).
+
+    ``regime_verdicts`` slices the already-netted legs at REGIME_SPLIT_BOUNDARY and runs the
+    EXISTING ``build_naive_legs -> gate_with_autotighten`` per profile on each sub-window.
+    The returned dict is keyed by regime unit; each per-profile value carries ``verdict`` in
+    ``_VALID_VERDICTS`` (a REAL gate output, never a pre-baked constant -- anti-hollow).
+    """
+    deposit, ofz, equity = _regime_legs()
+    profiles = load_allocation_profiles()
+
+    out = regime_verdicts(deposit, ofz, equity, profiles, _PROFILE_ORDER)
+
+    # Boundary-spanning window -> BOTH binding units present.
+    assert _REGIME_HIGH_RATE in out
+    assert _REGIME_EASING in out
+    for unit in (_REGIME_HIGH_RATE, _REGIME_EASING):
+        per_profile = out[unit]
+        # Every profile produced a REAL gate verdict for this regime unit.
+        assert set(per_profile) == {p.value for p in _PROFILE_ORDER}
+        for raw in per_profile.values():
+            v = raw  # a per-profile verdict dict
+            assert isinstance(v, dict)
+            assert v["verdict"] in _VALID_VERDICTS  # real gate output, not a constant
+            # The non-serializable carriers are stripped (mirrors the run_gate loop).
+            assert "result" not in v
+            assert "frozen_weights" not in v
+
+
+def test_regime_naive_bar_recomputed_on_subwindow() -> None:
+    """The easing unit's naive bar is recomputed on the SLICE, not the full window (V-11).
+
+    Each sub-window recomputes its OWN best-of-three naive bar (apples-to-apples within
+    regime, D-01 derived). With a declining easing equity slice, the easing per-profile
+    ``best_naive_sharpe`` MUST differ from the full-window best-naive Sharpe (proving the
+    bar is sliced, not borrowed from the whole window).
+    """
+    deposit, ofz, equity = _regime_legs()
+    profiles = load_allocation_profiles()
+
+    # The full-window best-of-three naive Sharpe (the bar the per-regime units must NOT reuse).
+    full_naives = build_naive_legs(deposit, ofz, equity)
+    full_best_naive_sharpe = max(n.sharpe for n in full_naives.values())
+
+    out = regime_verdicts(deposit, ofz, equity, profiles, _PROFILE_ORDER)
+    easing_profile = next(iter(out[_REGIME_EASING].values()))
+    assert isinstance(easing_profile, dict)
+    easing_best_naive_sharpe = easing_profile["best_naive_sharpe"]
+
+    # The easing slice recomputed its OWN bar -> it differs from the full-window bar.
+    assert isinstance(easing_best_naive_sharpe, float)
+    assert easing_best_naive_sharpe != full_best_naive_sharpe
+
+
+def test_full_window_no_regression() -> None:
+    """Adding regime_verdicts does NOT perturb the full-window verdicts (D-01 no-regression).
+
+    The EXISTING full-window ``build_naive_legs -> gate_with_autotighten`` path yields the
+    SAME per-profile verdicts whether or not ``regime_verdicts`` is also computed on the same
+    legs. The full-window path stays the cert-of-record; Plan 03 ANDs the regime units onto
+    it without demoting it.
+    """
+    deposit, ofz, equity = _regime_legs()
+    profiles = load_allocation_profiles()
+
+    def _full_window_verdicts() -> dict[str, object]:
+        naives = build_naive_legs(deposit, ofz, equity)
+        naive_sharpes = [n.sharpe for n in naives.values()]
+        naive_sortinos = [
+            excess_sortino_from_equity([float(v) for v in n.merged_equity_curve])
+            for n in naives.values()
+        ]
+        out: dict[str, object] = {}
+        for pk in _PROFILE_ORDER:
+            p = profiles[pk]
+            v = gate_with_autotighten(
+                profile_key=pk,
+                base_weights=p.weights,
+                cap_fraction=p.max_drawdown_pct,
+                deposit_curve=deposit,
+                ofz_pk_curve=ofz,
+                equity_curve=equity,
+                naive_sharpes=naive_sharpes,
+                naive_sortinos=naive_sortinos,
+            )
+            out[pk.value] = v["verdict"]
+        return out
+
+    before = _full_window_verdicts()
+    # Compute the per-regime units on the SAME legs -> must not mutate the full-window path.
+    regime_verdicts(deposit, ofz, equity, profiles, _PROFILE_ORDER)
+    after = _full_window_verdicts()
+
+    assert before == after
+
+
+# -- Phase 75 Plan 02: decision derivation + additive render (V-12 + render_json + V-13) ----
+
+
+def test_escalation_derived_from_verdicts() -> None:
+    """``escalation`` is DERIVED from the REAL per-regime verdicts, never pre-baked (V-12).
+
+    Anti-hollow (D-03a): ``escalation == _ESCALATION_DEPOSIT_ANCHOR`` ONLY when BOTH the
+    high_rate AND easing unit verdicts are ``HARD_FAIL``. A fabricated easing-PASS pair yields
+    ``escalation is None`` (the flag tracks the cert, not this discussion). ``n1_caveat`` is
+    always-on separate metadata (D-04) for every pair.
+    """
+    # Both regimes HARD_FAIL -> the deposit-anchor escalation is recorded.
+    both_fail = derive_escalation(_HARD_FAIL, _HARD_FAIL)
+    assert both_fail["escalation"] == _ESCALATION_DEPOSIT_ANCHOR
+    assert both_fail["n1_caveat"] is True
+
+    # Fabricated easing-PASS pair -> NO escalation (anti-hollow proof).
+    high_fail_easing_pass = derive_escalation(_HARD_FAIL, _PASS)
+    assert high_fail_easing_pass["escalation"] is None
+    assert high_fail_easing_pass["n1_caveat"] is True
+
+    # Both PASS -> NO escalation.
+    both_pass = derive_escalation(_PASS, _PASS)
+    assert both_pass["escalation"] is None
+    assert both_pass["n1_caveat"] is True
+
+
+def test_render_json_per_regime_block() -> None:
+    """``render_json`` carries the per_regime block + escalation + n1_caveat ADDITIVELY.
+
+    Every EXISTING key (git_sha, per_profile, naive, regime_split, high_rate_caveat) is
+    preserved, AND the three Phase-75 keys (per_regime, escalation, n1_caveat) are added. The
+    per_regime value is the ``regime_verdicts`` shape; escalation is the derived flag.
+    """
+    per_profile = {
+        "conservative": {
+            "verdict": _HARD_FAIL,
+            "sharpe": _NOTE_PROFILE_SHARPE,
+            "best_naive_sharpe": _NOTE_DEPOSIT_SHARPE,
+            "sortino": _NOTE_PROFILE_SORTINO,
+            "best_naive_sortino": _NOTE_DEPOSIT_SORTINO,
+            "realized_maxdd_frac": 0.021,
+            "cap_frac": 0.08,
+            "mean_wf_sharpe": 0.457,
+        }
+    }
+    naive_metrics = {
+        "deposit_100_sharpe": _NOTE_DEPOSIT_SHARPE,
+        "deposit_100_sortino": _NOTE_DEPOSIT_SORTINO,
+        "deposit_100_maxdd_pct": 0.0,
+    }
+    regime = regime_split([_BOUNDARY - timedelta(days=30), _BOUNDARY + timedelta(days=30)])
+    escalation = derive_escalation(_HARD_FAIL, _HARD_FAIL)["escalation"]
+
+    payload = render_json(
+        per_profile,
+        naive_metrics,
+        regime,
+        git_sha=_DECISION_GIT_SHA,
+        per_regime=_DECISION_PER_REGIME,
+        escalation=escalation,
+        n1_caveat=True,
+    )
+
+    # Every existing key preserved (additive).
+    for key in _EXISTING_JSON_KEYS:
+        assert key in payload
+    # The three Phase-75 keys added.
+    assert payload["per_regime"] == _DECISION_PER_REGIME
+    assert payload["escalation"] == _ESCALATION_DEPOSIT_ANCHOR
+    assert payload["n1_caveat"] is True
+
+
+def test_report_renders_n1_caveat() -> None:
+    """``render_report`` renders the verbatim _N1_CAVEAT line + a Per-Regime Verdict table (V-13).
+
+    D-04 no-fusion: the N=1 caveat is rendered VERBATIM exactly once as its own line (mirroring
+    the _HIGH_RATE_CAVEAT block) and is NEVER fused into a verdict-status string (no
+    "HARD_FAIL (N=1)"). The report also shows a Per-Regime Verdict section with high_rate and
+    easing rows.
+    """
+    per_profile = {
+        "conservative": {
+            "verdict": _HARD_FAIL,
+            "sharpe": _NOTE_PROFILE_SHARPE,
+            "best_naive_sharpe": _NOTE_DEPOSIT_SHARPE,
+            "sortino": _NOTE_PROFILE_SORTINO,
+            "best_naive_sortino": _NOTE_DEPOSIT_SORTINO,
+            "realized_maxdd_frac": 0.021,
+            "cap_frac": 0.08,
+            "mean_wf_sharpe": 0.457,
+        }
+    }
+    naive_metrics = {
+        "deposit_100_sharpe": _NOTE_DEPOSIT_SHARPE,
+        "deposit_100_sortino": _NOTE_DEPOSIT_SORTINO,
+        "deposit_100_maxdd_pct": 0.0,
+    }
+    regime = regime_split([_BOUNDARY - timedelta(days=30), _BOUNDARY + timedelta(days=30)])
+    escalation = derive_escalation(_HARD_FAIL, _HARD_FAIL)["escalation"]
+
+    payload = render_json(
+        per_profile,
+        naive_metrics,
+        regime,
+        git_sha=_DECISION_GIT_SHA,
+        per_regime=_DECISION_PER_REGIME,
+        escalation=escalation,
+        n1_caveat=True,
+    )
+    report = render_report(payload)
+
+    # The verbatim N=1 caveat renders exactly once (grep-pinned, D-04).
+    assert _N1_CAVEAT in report
+    assert report.count(_N1_CAVEAT) == 1
+    # The Per-Regime Verdict section + both regime rows render.
+    assert _PER_REGIME_HEADER in report
+    assert _REGIME_HIGH_RATE in report
+    assert _EASING_LABEL in report
+    # The N=1 caveat is metadata, NOT fused into a verdict-status string (D-04 no-fusion).
+    assert _FUSED_N1_STATUS not in report
+
+
+def test_report_suppresses_n1_caveat_when_flag_false() -> None:
+    """``render_report`` honors ``payload["n1_caveat"]`` (WR-01).
+
+    The rendered N=1 caveat block must agree with the machine-readable ``n1_caveat`` flag the
+    sidecar carries. With the flag False (e.g. a legacy/suppressing caller) the human report
+    must NOT emit the verbatim _N1_CAVEAT block, so the two surfaces never diverge. D-04 still
+    holds: the caveat is separate metadata, never fused into a verdict status.
+    """
+    per_profile = {
+        "conservative": {
+            "verdict": _HARD_FAIL,
+            "sharpe": _NOTE_PROFILE_SHARPE,
+            "best_naive_sharpe": _NOTE_DEPOSIT_SHARPE,
+            "sortino": _NOTE_PROFILE_SORTINO,
+            "best_naive_sortino": _NOTE_DEPOSIT_SORTINO,
+            "realized_maxdd_frac": 0.021,
+            "cap_frac": 0.08,
+            "mean_wf_sharpe": 0.457,
+        }
+    }
+    naive_metrics = {
+        "deposit_100_sharpe": _NOTE_DEPOSIT_SHARPE,
+        "deposit_100_sortino": _NOTE_DEPOSIT_SORTINO,
+        "deposit_100_maxdd_pct": 0.0,
+    }
+    # A both-regime window (easing present) but with n1_caveat suppressed.
+    regime = regime_split([_BOUNDARY - timedelta(days=30), _BOUNDARY + timedelta(days=30)])
+    payload = render_json(
+        per_profile,
+        naive_metrics,
+        regime,
+        git_sha=_DECISION_GIT_SHA,
+        per_regime=_DECISION_PER_REGIME,
+        escalation=None,
+        n1_caveat=False,
+    )
+    report = render_report(payload)
+
+    # The N=1 caveat block is gated on the flag -> absent when n1_caveat is False (WR-01).
+    assert _N1_CAVEAT not in report
+    # The honesty caveat (always-on, separate concern) still renders.
+    assert _HIGH_RATE_CAVEAT in report
+    # No fused verdict status regardless of flag state (D-04 no-fusion).
+    assert _FUSED_N1_STATUS not in report
+
+
+def test_report_omits_n1_caveat_on_single_regime_window() -> None:
+    """``render_report`` does not claim an easing read on a no-easing window (WR-02).
+
+    On a window ending before REGIME_SPLIT_BOUNDARY the regime split is single-regime
+    (``high_rate`` only) and the report prints "easing sub-window: none". The N=1 easing
+    caveat (whose text asserts a single OBSERVED easing cycle) must therefore NOT render -- it
+    would be self-contradictory next to the "none" line. The per-regime table still renders the
+    present high_rate unit.
+    """
+    per_profile = {
+        "conservative": {
+            "verdict": _HARD_FAIL,
+            "sharpe": _NOTE_PROFILE_SHARPE,
+            "best_naive_sharpe": _NOTE_DEPOSIT_SHARPE,
+            "sortino": _NOTE_PROFILE_SORTINO,
+            "best_naive_sortino": _NOTE_DEPOSIT_SORTINO,
+            "realized_maxdd_frac": 0.021,
+            "cap_frac": 0.08,
+            "mean_wf_sharpe": 0.457,
+        }
+    }
+    naive_metrics = {
+        "deposit_100_sharpe": _NOTE_DEPOSIT_SHARPE,
+        "deposit_100_sortino": _NOTE_DEPOSIT_SORTINO,
+        "deposit_100_maxdd_pct": 0.0,
+    }
+    # A window ending BEFORE the boundary -> single-regime (high_rate only, no easing).
+    regime = regime_split([_BOUNDARY - timedelta(days=60), _BOUNDARY - timedelta(days=1)])
+    assert _REGIME_EASING not in regime
+    # A high-rate-only per_regime block (no easing unit), like regime_verdicts on this window.
+    high_rate_only = {_REGIME_HIGH_RATE: _DECISION_PER_REGIME[_REGIME_HIGH_RATE]}
+    payload = render_json(
+        per_profile,
+        naive_metrics,
+        regime,
+        git_sha=_DECISION_GIT_SHA,
+        per_regime=high_rate_only,
+        escalation=None,
+        n1_caveat=True,  # flag may be on, but with no easing present the block stays suppressed
+    )
+    report = render_report(payload)
+
+    # The "easing sub-window: none" line renders (the honest no-easing statement).
+    assert "easing sub-window: none" in report
+    # The contradictory N=1 easing caveat must NOT render on a no-easing window (WR-02).
+    assert _N1_CAVEAT not in report
+    # The present high_rate unit still renders in the per-regime table.
+    assert _REGIME_HIGH_RATE in report

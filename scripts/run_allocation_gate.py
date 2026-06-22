@@ -68,11 +68,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from finalayze.backtest import allocation_gate as _gate
 from finalayze.backtest.allocation_gate import (
+    _EASING_UNIT_KEY,
+    _HARD_FAIL,
+    _HIGH_RATE_UNIT_KEY,
     build_naive_legs,
+    derive_escalation,
     excess_sortino_from_equity,
     gate_with_autotighten,
     net_fixed_income_legs_interleaved,
     regime_split,
+    regime_verdicts,
     render_json,
     render_report,
 )
@@ -166,6 +171,32 @@ _SNAP_LEG_DEPOSIT = "deposit_net"
 # renders them. Each carries its own MaxDD cap (8 / 15 / 25%) read from the loaded
 # AllocationProfile (load_allocation_profiles), never hardcoded here.
 _PROFILE_ORDER = (RiskProfile.CONSERVATIVE, RiskProfile.BALANCED, RiskProfile.GROWTH)
+
+# ── Phase 75 (REGIME-02/05) 3-unit phase-verdict wiring constants ─────────────
+# The binding phase verdict = full_window AND high_rate AND easing -> HARD_FAIL if ANY
+# PRESENT unit HARD_FAILs (the honest AND across the three units). These are ALIASES of the
+# module's canonical constants (IN-03): re-importing instead of re-declaring string copies keeps
+# a single source of truth, so a future relabel of a unit key (e.g. "early_cut") propagates here
+# automatically instead of silently diverging and KeyError-ing on per_regime[_EASING_UNIT].
+_PHASE_HARD_FAIL = _HARD_FAIL  # the terminal HARD_FAIL verdict (gate_with_autotighten output)
+_HIGH_RATE_UNIT = _HIGH_RATE_UNIT_KEY  # the high-rate regime unit key (regime_split output)
+_EASING_UNIT = _EASING_UNIT_KEY  # the easing binding unit key (regime_split's post-cut segment)
+# A non-HARD_FAIL sentinel for the absent-easing single-regime edge: pass it to
+# derive_escalation so the escalation stays None when only the high_rate unit exists.
+_EASING_ABSENT_VERDICT = "PASS"
+
+
+def _unit_verdict(per_profile: dict[str, object]) -> str:
+    """Collapse a unit's per-profile verdicts to one unit verdict (honest AND-within-unit).
+
+    A unit HARD_FAILs if ANY profile in it HARD_FAILs; otherwise it inherits the
+    conjunctive PASS-set joined by ``+`` (the same honest-set shape as the full-window
+    ``overall``). No magic literal — uses the named :data:`_PHASE_HARD_FAIL`.
+    """
+    verdicts = [str(cast("dict[str, object]", v)["verdict"]) for v in per_profile.values()]
+    if _PHASE_HARD_FAIL in verdicts:
+        return _PHASE_HARD_FAIL
+    return "+".join(verdicts)
 
 
 def _dates() -> list[date]:
@@ -517,9 +548,50 @@ def run_gate(
     #    post-REGIME_SPLIT_BOUNDARY segment), surfaced by render_report.
     regime = regime_split([d for d, _ in deposit_curve])
 
+    # 3a. Phase 75 (REGIME-02 / D-01): the per-regime BINDING verdicts, computed on the SAME
+    #     already-loaded (already-netted) curves via the REAL frozen path (anti-hollow — no
+    #     re-fetch, no re-net). regime_verdicts emits "high_rate" / "early_cut"; "early_cut" IS
+    #     the easing binding unit (the post-cut segment).
+    per_regime = regime_verdicts(
+        deposit_curve, ofz_pk_curve, equity_curve, profiles, _PROFILE_ORDER
+    )
+
+    # 3b. The 3-unit phase verdict = full_window AND high_rate AND easing (HARD_FAIL if ANY
+    #     PRESENT unit HARD_FAILs). The full_window unit verdict collapses the existing
+    #     per_profile dict; the high_rate/easing units collapse the per_regime sub-dicts.
+    #     Single-regime edge (Pitfall 3): if "early_cut" is absent (window ends before the
+    #     boundary) the easing unit is absent -> phase_verdict = full_window AND high_rate only.
+    full_window_unit = _unit_verdict(per_profile)
+    high_rate_unit = _unit_verdict(per_regime[_HIGH_RATE_UNIT])
+    easing_unit = _unit_verdict(per_regime[_EASING_UNIT]) if _EASING_UNIT in per_regime else None
+    present_units = [full_window_unit, high_rate_unit]
+    if easing_unit is not None:
+        present_units.append(easing_unit)
+    phase_verdict = (
+        _PHASE_HARD_FAIL if _PHASE_HARD_FAIL in present_units else "+".join(present_units)
+    )
+
+    # 3c. Escalation DERIVED from the REAL high_rate/easing unit verdicts (D-03a anti-hollow).
+    #     When the easing unit is absent, pass the non-HARD_FAIL sentinel so escalation stays None.
+    esc = derive_escalation(
+        high_rate_unit, easing_unit if easing_unit is not None else _EASING_ABSENT_VERDICT
+    )
+
     # 4. Render the machine sidecar + the human report through the module renderers (D-11).
+    #    Phase 75 passes the per_regime block + derived escalation + n1_caveat ADDITIVELY.
     naive_metrics = _naive_metrics(naives)
-    payload = render_json(per_profile, naive_metrics, regime, git_sha=git_sha)
+    payload = render_json(
+        per_profile,
+        naive_metrics,
+        regime,
+        git_sha=git_sha,
+        per_regime=per_regime,
+        escalation=cast("str | None", esc["escalation"]),
+        n1_caveat=cast("bool", esc["n1_caveat"]),
+    )
+    # Stash the 3-unit phase verdict on the payload (D-06: the full-window honest-set "overall"
+    # string stays UNCHANGED; the 3-unit verdict travels in the payload + history).
+    payload["phase_verdict"] = phase_verdict
     report_md = render_report(payload)
 
     # 5. The overall verdict is the honest SET of the three per-profile verdicts (D-06).
@@ -527,6 +599,25 @@ def run_gate(
         str(cast("dict[str, object]", per_profile[p.value])["verdict"]) for p in _PROFILE_ORDER
     )
     return payload, report_md, overall
+
+
+def _print_phase75_block(payload: dict[str, object]) -> None:
+    """Print the Phase 75 per-regime units + 3-unit phase verdict + derived escalation.
+
+    Additive console output only — it never touches the exit-code contract; the binding
+    machine-readable surface is summary.json / history.jsonl (this is operator legibility).
+    """
+    per_regime_print = cast("dict[str, dict[str, object]]", payload["per_regime"])
+    print("Per-regime binding verdicts (REAL gate path on the sliced sub-windows):")
+    for unit, profs in per_regime_print.items():
+        unit_verdicts = ", ".join(
+            f"{p}={cast('dict[str, object]', pv)['verdict']!s}" for p, pv in profs.items()
+        )
+        print(f"  {unit:<11} {unit_verdicts}")
+    print(f"PHASE VERDICT (full_window AND high_rate AND easing, D-01): {payload['phase_verdict']}")
+    print(
+        f"escalation (derived, D-03a): {payload['escalation']}  n1_caveat: {payload['n1_caveat']}"
+    )
 
 
 def main() -> int:
@@ -571,6 +662,14 @@ def main() -> int:
         name: cast("dict[str, object]", v)["verdict"] for name, v in per_profile.items()
     }
     naive = payload["naive"]
+    # Phase 75 (REGIME-02/05): the per-regime verdict map for the history line — the bare
+    # per-profile verdict strings per unit (kept compact; the full per-regime metric block
+    # lives in summary.json). Additive — every existing key below is preserved.
+    per_regime_block = cast("dict[str, dict[str, object]]", payload["per_regime"])
+    per_regime_verdicts = {
+        unit: {p: cast("dict[str, object]", pv)["verdict"] for p, pv in profs.items()}
+        for unit, profs in per_regime_block.items()
+    }
     _append_history(
         run_name,
         git_sha=git_sha,
@@ -579,6 +678,11 @@ def main() -> int:
             "kind": "allocation_gate",
             "per_profile_verdicts": per_profile_verdicts,
             "naive_bar": naive,
+            # Phase 75 additive decision keys (no existing key removed/renamed; Pitfall 4).
+            "per_regime_verdicts": per_regime_verdicts,
+            "phase_verdict": payload["phase_verdict"],
+            "escalation": payload["escalation"],
+            "n1_caveat": payload["n1_caveat"],
         },
     )
 
@@ -627,6 +731,10 @@ def main() -> int:
     print(f"artifacts: {run_dir / 'summary.json'}")
     print(f"           {run_dir / 'report.md'}")
     print(f"history:   {_ITER_DIR / 'history.jsonl'}  (appended)")
+    print("-" * 78)
+    # Phase 75 (REGIME-02/05): the per-regime binding units + the 3-unit phase verdict +
+    # the derived escalation flag (additive; the exit-code contract below is UNCHANGED).
+    _print_phase75_block(payload)
     print("-" * 78)
     print(f"OVERALL VERDICT (honest set, D-06): {overall}")
     print("=" * 78)

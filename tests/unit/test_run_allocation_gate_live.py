@@ -38,6 +38,10 @@ if _PROJECT_ROOT not in sys.path:
 
 import run_allocation_gate as rag  # noqa: E402
 
+from finalayze.backtest.allocation_gate import (  # noqa: E402
+    _ESCALATION_DEPOSIT_ANCHOR,
+)
+
 # ── Named constants (no PLR2004 magic numbers in tests) ──────────────────────
 _N_FETCH_BARS = 360  # comfortably > _N_LIVE_MIN_BARS (300) for the happy-path fetches
 _N_SHORT_BARS = 10  # deliberately < _N_LIVE_MIN_BARS to trip the short-fetch honesty gate
@@ -47,6 +51,10 @@ _RUFLBITR_BASE = Decimal("150.00")  # a plausible RUFLBITR floater-index level
 _RUFLBITR_DAILY = Decimal("1.0004")  # floater carry drift (positive -> nets below gross)
 _FIRST_FETCH_BAR = date(2024, 1, 3)  # the first real MCFTRR/RUFLBITR trading bar (R-D)
 _VALID_VERDICTS = {"PASS", "PASS_AFTER_TIGHTEN", "HARD_FAIL"}
+# Phase 75 (REGIME-02/05) — the 3-unit phase verdict + per-regime block keys.
+_PHASE_VERDICT_HARD_FAIL = "HARD_FAIL"  # the honest expected phase verdict on the snapshot
+_REGIME_HIGH_RATE = "high_rate"  # the high-rate binding unit key (regime_split)
+_REGIME_EARLY_CUT = "early_cut"  # the easing binding unit key (regime_split post-cut segment)
 
 
 def _series(base: Decimal, daily: Decimal, n: int) -> list[tuple[date, Decimal]]:
@@ -207,6 +215,43 @@ def test_live_reads_committed_snapshot_no_network(
     assert per_profile  # the real gate path produced verdicts
     for v in per_profile.values():
         assert v["verdict"] in _VALID_VERDICTS  # real gate output, not a pre-baked constant
+
+    # Phase 75 (REGIME-02/05): the per-regime binding block is present and every nested
+    # verdict is a REAL gate output (anti-hollow — same monkeypatched no-network path).
+    assert "per_regime" in payload
+    per_regime = cast("dict[str, dict[str, dict[str, object]]]", payload["per_regime"])
+    assert per_regime  # both regime units are present on the boundary-spanning snapshot
+    for unit in per_regime.values():
+        for pv in unit.values():
+            assert pv["verdict"] in _VALID_VERDICTS  # real gate output, not a pre-baked constant
+    # The N=1 caveat is always-on metadata; the escalation is DERIVED (None or the deposit-anchor).
+    assert payload["n1_caveat"] is True
+    assert payload["escalation"] in {None, _ESCALATION_DEPOSIT_ANCHOR}
+
+
+def test_phase_verdict_is_three_unit_and(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """phase_verdict = full_window AND high_rate AND easing — HARD_FAIL if ANY unit HARD_FAILs.
+
+    On the boundary-spanning committed snapshot (the deposit dominates the high-rate regime),
+    the gate HARD_FAILs in at least one unit, so the 3-unit AND is HARD_FAIL. Both the
+    high_rate and the early_cut (easing) units are present. NO network — the fetch is
+    monkeypatched to RAISE (anti-hollow: the per-regime verdicts flow through the REAL path).
+    """
+    snap = tmp_path / "allocation_gate_snapshot.json"
+    _write_snapshot_file(snap)
+    monkeypatch.setattr(rag, "_GATE_SNAPSHOT", snap)
+
+    def _boom(**_kwargs: object) -> list[tuple[date, Decimal]]:
+        msg = "network must not be touched on the snapshot-read path"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(rag, "load_mcftr_series", _boom)
+
+    payload, _report, _overall = rag.run_gate(live=True, git_sha="test", refresh_snapshot=False)
+    assert payload["phase_verdict"] == _PHASE_VERDICT_HARD_FAIL
+    per_regime = cast("dict[str, object]", payload["per_regime"])
+    assert _REGIME_HIGH_RATE in per_regime
+    assert _REGIME_EARLY_CUT in per_regime
 
 
 def test_refresh_snapshot_writes_round_trippable_fixture(
