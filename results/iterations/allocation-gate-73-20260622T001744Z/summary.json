@@ -1,0 +1,135 @@
+{
+  "git_sha": "97adbc974a9195231c21063c58abba38d9c44d39",
+  "per_profile": {
+    "conservative": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -0.8827330026372536,
+      "best_naive_sharpe": -0.6505587542125374,
+      "sortino": -1.2478970254739743,
+      "best_naive_sortino": -0.9256020482001079,
+      "realized_maxdd_frac": 0.022338023081730985,
+      "cap_frac": 0.08,
+      "mean_wf_sharpe": -0.2220371584568709
+    },
+    "balanced": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -0.8471137674362542,
+      "best_naive_sharpe": -0.6505587542125374,
+      "sortino": -1.1964262310927583,
+      "best_naive_sortino": -0.9256020482001079,
+      "realized_maxdd_frac": 0.05388546231211946,
+      "cap_frac": 0.15,
+      "mean_wf_sharpe": -0.27928014583186916
+    },
+    "growth": {
+      "verdict": "HARD_FAIL",
+      "pass": false,
+      "sharpe": -0.81780311692944,
+      "best_naive_sharpe": -0.6505587542125374,
+      "sortino": -1.1565368703799883,
+      "best_naive_sortino": -0.9256020482001079,
+      "realized_maxdd_frac": 0.11497531906740908,
+      "cap_frac": 0.25,
+      "mean_wf_sharpe": -0.2876673500988344
+    }
+  },
+  "naive": {
+    "deposit_100_sharpe": -4.626414216151382,
+    "deposit_100_sortino": -5.39945940834521,
+    "deposit_100_maxdd_pct": 0.0,
+    "equity_100_sharpe": -0.6505587542125374,
+    "equity_100_sortino": -0.9256020482001079,
+    "equity_100_maxdd_pct": 27.800869111196075,
+    "static_60_30_10_sharpe": -0.8025073671750057,
+    "static_60_30_10_sortino": -1.1363439487175455,
+    "static_60_30_10_maxdd_pct": 15.233543476459454
+  },
+  "regime_split": {
+    "high_rate": [
+      "2024-01-02",
+      "2025-06-05"
+    ],
+    "early_cut": [
+      "2025-06-06",
+      "2026-06-08"
+    ]
+  },
+  "high_rate_caveat": "100% deposit winning raw return in a 16-21% high-rate regime is NOT a failure",
+  "per_regime": {
+    "high_rate": {
+      "conservative": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -0.7816305459970023,
+        "best_naive_sharpe": 0.8904425094852376,
+        "sortino": -1.1239155834179444,
+        "best_naive_sortino": 1.3120674760569269,
+        "realized_maxdd_frac": 0.022338023081730985,
+        "cap_frac": 0.08,
+        "mean_wf_sharpe": 0.0
+      },
+      "balanced": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -0.7985220536535719,
+        "best_naive_sharpe": 0.8904425094852376,
+        "sortino": -1.1429025306915972,
+        "best_naive_sortino": 1.3120674760569269,
+        "realized_maxdd_frac": 0.05388546231211946,
+        "cap_frac": 0.15,
+        "mean_wf_sharpe": 0.0
+      },
+      "growth": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -0.7879631145770087,
+        "best_naive_sharpe": 0.8904425094852376,
+        "sortino": -1.1275746624546554,
+        "best_naive_sortino": 1.3120674760569269,
+        "realized_maxdd_frac": 0.11497531906740908,
+        "cap_frac": 0.25,
+        "mean_wf_sharpe": 0.0
+      }
+    },
+    "early_cut": {
+      "conservative": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -1.2888080370320312,
+        "best_naive_sharpe": -0.7637932588585011,
+        "sortino": -1.7338934212100074,
+        "best_naive_sortino": -1.0663194795576252,
+        "realized_maxdd_frac": 0.01385457304629615,
+        "cap_frac": 0.08,
+        "mean_wf_sharpe": 0.0
+      },
+      "balanced": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -1.0966675650829534,
+        "best_naive_sharpe": -0.7637932588585011,
+        "sortino": -1.4955216881168523,
+        "best_naive_sortino": -1.0663194795576252,
+        "realized_maxdd_frac": 0.039001280037693986,
+        "cap_frac": 0.15,
+        "mean_wf_sharpe": 0.0
+      },
+      "growth": {
+        "verdict": "HARD_FAIL",
+        "pass": false,
+        "sharpe": -1.0083649758222262,
+        "best_naive_sharpe": -0.7637932588585011,
+        "sortino": -1.3840790732003303,
+        "best_naive_sortino": -1.0663194795576252,
+        "realized_maxdd_frac": 0.08001607094919502,
+        "cap_frac": 0.25,
+        "mean_wf_sharpe": 0.0
+      }
+    }
+  },
+  "escalation": "deposit_anchor_vs_redesign",
+  "n1_caveat": true,
+  "phase_verdict": "HARD_FAIL"
+}
