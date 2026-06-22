@@ -299,6 +299,27 @@ REGIME_SPLIT_BOUNDARY: date = date(2025, 6, 6)
 # terminal verdict gate_with_autotighten emits ("PASS" / "PASS_AFTER_TIGHTEN" / "HARD_FAIL").
 _HARD_FAIL = "HARD_FAIL"
 
+# The single-cycle (N=1) caveat for the easing verdict (Phase 75 / REGIME-05 / D-04). Pinned
+# VERBATIM by the report (the verifier greps for this literal), mirroring _HIGH_RATE_CAVEAT.
+# It is SEPARATE metadata (an always-on n1_caveat flag) -- NEVER fused into a verdict-status
+# string (no "HARD_FAIL (N=1)"); the strict conjunctive easing test is UNCHANGED (no softening).
+_N1_CAVEAT = (
+    "The easing verdict is based on a SINGLE observed easing cycle (N=1) — it is "
+    "suggestive, not statistically robust; a future milestone accumulating additional "
+    "easing cycles could upgrade it."
+)
+
+# The machine-readable escalation flag value recorded when BOTH regimes HARD_FAIL (REGIME-05 /
+# D-03): anchor on the near-vol-free deposit for now, document-defer the redesign branch. NAMED
+# so derive_escalation never inlines the literal (anti-hollow: the flag is DERIVED, not pre-baked).
+_ESCALATION_DEPOSIT_ANCHOR = "deposit_anchor_vs_redesign"
+
+# regime_split / regime_verdicts emit the post-cut binding unit under the key "early_cut"; the
+# report renders it under the human-facing label "easing" (REGIME-02). NAMED so render_report
+# never inlines either string.
+_EASING_UNIT_KEY = "early_cut"
+_EASING_UNIT_LABEL = "easing"
+
 # The mandatory honesty caveat (D-08 / Pitfall 6): a deposit-wins-raw-return outcome in a
 # 16-21% high-rate regime is correctly framed as NOT a failure. Pinned VERBATIM by the
 # report; the verifier greps for this literal string.
@@ -816,6 +837,26 @@ def regime_verdicts(
     return out
 
 
+def derive_escalation(high_rate_verdict: str, easing_verdict: str) -> dict[str, object]:
+    """Derive the escalation flag + N=1 caveat from the REAL per-regime verdicts (D-03a).
+
+    Anti-hollow: ``escalation == _ESCALATION_DEPOSIT_ANCHOR`` ONLY when BOTH the ``high_rate``
+    AND the ``easing`` unit verdicts are :data:`_HARD_FAIL`; otherwise ``None`` (if easing
+    somehow PASSed, NO deposit-anchor escalation is recorded — the recorded decision tracks the
+    cert, never a pre-baked literal). ``n1_caveat`` is ALWAYS-ON separate metadata (D-04) for the
+    single-cycle easing read — NEVER fused into a verdict-status string and NOT a threshold change.
+
+    The verdict strings are the terminal outputs of :func:`gate_with_autotighten`
+    (``"PASS"`` / ``"PASS_AFTER_TIGHTEN"`` / ``"HARD_FAIL"``); callers pass the per-regime unit
+    verdicts (see :func:`regime_verdicts`).
+    """
+    both_hard_fail = high_rate_verdict == _HARD_FAIL and easing_verdict == _HARD_FAIL
+    return {
+        "escalation": _ESCALATION_DEPOSIT_ANCHOR if both_hard_fail else None,
+        "n1_caveat": True,
+    }
+
+
 # Defensive defaults for the classify_regime cross-check before the calendar's first
 # meeting (snapshot fields can be None). NEUTRAL-leaning so a missing snapshot never
 # fabricates a HAWKISH/DOVISH headline — the date split is the headline, this is secondary.
@@ -850,6 +891,9 @@ def render_json(
     regime: dict[str, tuple[date, date]],
     *,
     git_sha: str,
+    per_regime: dict[str, dict[str, object]] | None = None,
+    escalation: str | None = None,
+    n1_caveat: bool = False,
 ) -> dict[str, object]:
     """Assemble all gate metrics into a JSON-serializable sidecar (D-11).
 
@@ -860,6 +904,12 @@ def render_json(
     ``regime_split``. Decimal values are stringified so the dict is ``json.dumps``-able
     without a custom encoder. The machine-readable feed a future dashboard (deferred)
     consumes.
+
+    Phase 75 (REGIME-02/05) ADDS three keys ADDITIVELY (every existing key preserved): the
+    ``per_regime`` binding-verdict block (:func:`regime_verdicts` output), the derived
+    ``escalation`` flag (:func:`derive_escalation`), and the always-on ``n1_caveat`` metadata
+    flag (D-04). The keyword-only params default to empty/None/False so existing callers keep
+    working unchanged.
     """
     return {
         "git_sha": git_sha,
@@ -867,6 +917,10 @@ def render_json(
         "naive": naive_metrics,
         "regime_split": {k: [v[0].isoformat(), v[1].isoformat()] for k, v in regime.items()},
         "high_rate_caveat": _HIGH_RATE_CAVEAT,
+        # Phase 75 additive decision block (REGIME-02/05).
+        "per_regime": per_regime if per_regime is not None else {},
+        "escalation": escalation,
+        "n1_caveat": n1_caveat,
     }
 
 
@@ -884,7 +938,9 @@ def render_report(payload: dict[str, object]) -> str:
     explaining why a near-vol-free risk-free leg inflates the naive Sharpe/Sortino bar in a
     high-rate regime), the regime split block, the REAL easing sub-window block (the
     post-`REGIME_SPLIT_BOUNDARY` segment — the evidence-based cut scenario that replaced the
-    retired synthetic cut-path, D-07), and the mandatory honesty caveat line
+    retired synthetic cut-path, D-07), the Phase-75 Per-Regime Verdict section (the binding
+    ``high_rate`` / ``easing`` units + the derived escalation line + the verbatim N=1 caveat,
+    REGIME-02/05 / D-01/D-04), and the mandatory honesty caveat line
     (:data:`_HIGH_RATE_CAVEAT`, verbatim).
 
     The BINDING number is the full-window metric (``verdict_for_profile``); the mean
@@ -895,6 +951,7 @@ def render_report(payload: dict[str, object]) -> str:
     per_profile = cast("dict[str, object]", payload.get("per_profile", {}))
     naive = cast("dict[str, object]", payload.get("naive", {}))
     regime = cast("dict[str, object]", payload.get("regime_split", {}))
+    per_regime = cast("dict[str, object]", payload.get("per_regime", {}))
 
     lines: list[str] = [
         "# Allocation Gate Report (GATE-01/02/03)",
@@ -915,6 +972,22 @@ def render_report(payload: dict[str, object]) -> str:
             f"| {_fmt(v.get('realized_maxdd_frac'))} | {_fmt(v.get('cap_frac'))} "
             f"| {_fmt(v.get('mean_wf_sharpe'))} | {_fmt(v.get('verdict', v.get('pass')))} |"
         )
+
+    # Phase 75: per-regime binding-verdict rows (REGIME-02 / D-01). regime_verdicts emits
+    # "high_rate" / "early_cut"; "early_cut" IS the easing binding unit — render it labeled
+    # "easing". Each row reuses the per-profile _fmt(...) cell pattern (no recompute here).
+    per_regime_rows: list[str] = []
+    for unit_key, unit_raw in per_regime.items():
+        unit_label = _EASING_UNIT_LABEL if unit_key == _EASING_UNIT_KEY else unit_key
+        unit_profiles = cast("dict[str, object]", unit_raw)
+        for prof_name, prof_raw in unit_profiles.items():
+            pv = cast("dict[str, object]", prof_raw)
+            per_regime_rows.append(
+                f"| {unit_label} | {prof_name} | {_fmt(pv.get('sharpe'))} "
+                f"| {_fmt(pv.get('best_naive_sharpe'))} | {_fmt(pv.get('sortino'))} "
+                f"| {_fmt(pv.get('best_naive_sortino'))} | {_fmt(pv.get('realized_maxdd_frac'))} "
+                f"| {_fmt(pv.get('cap_frac'))} | {_fmt(pv.get('verdict', pv.get('pass')))} |"
+            )
 
     lines += [
         "",
@@ -940,6 +1013,19 @@ def render_report(payload: dict[str, object]) -> str:
             if "early_cut" in regime
             else ["- easing sub-window: none (window ends before the first real cut)"]
         ),
+        "",
+        "## Per-Regime Verdict (binding: high_rate AND easing, D-01)",
+        "",
+        "| Regime | Profile | Sharpe | Best-naive Sharpe | Sortino | Best-naive Sortino "
+        "| Realized MaxDD | Cap | Verdict |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        *per_regime_rows,
+        "",
+        f"- escalation: `{payload.get('escalation')}`",
+        "",
+        "## N=1 Caveat (easing single-cycle, D-04)",
+        "",
+        f"> {_N1_CAVEAT}",
         "",
         "## Honesty Caveat (Pitfall 6 / D-08)",
         "",
