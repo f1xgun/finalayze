@@ -222,7 +222,7 @@ def test_slice_leg_is_pure_date_filter_no_renet() -> None:
 
     ``_slice_leg`` returns exactly the in-range (date, value) pairs, byte-identical to the
     source: it never re-runs ``YtdTaxAccumulator`` on the slice (Phase-74 CR-01 -- netting
-    happens ONCE at full-window creation, even with the RGBITR-tilt candidate upstream).
+    happens ONCE at full-window creation, even with the tilted candidate upstream).
     """
     leg = [(date(2025, 1, 1) + timedelta(days=i), Decimal(100 + i)) for i in range(200)]
     start, end = date(2025, 3, 1), date(2025, 5, 31)
@@ -256,11 +256,11 @@ def test_subwindow_entirely_easing_uses_easing_tilt() -> None:
 def test_cert_candidate_charges_real_cost_and_tilts() -> None:
     """The cert candidate over the REAL committed snapshot charges cost AND tilts by regime.
 
-    Anti-hollow (Phase-72 lesson): the BALANCED candidate run over the real RGBITR snapshot
+    Anti-hollow (Phase-72 lesson): the BALANCED candidate run over the real committed snapshot
     charges a non-zero ``rebalance_cost`` from the genuine per-leg delta (no forced hook),
     and tilts -- a pre-cut boundary holds the high_rate deposit weight (0.60), a post-cut
-    boundary the easing weight (0.25). Both read from the committed RGBITR fixture, proving
-    the swap + tilt are LIVE on the binding path, not a literal.
+    boundary the easing weight (0.25). Both read from the committed floater fixture, proving
+    the tilt is LIVE on the binding path, not a literal.
     """
     equity, ofz, deposit = _load_gate_snapshot()
     orch = AllocationOrchestrator(risk_profile=RiskProfile.BALANCED)
