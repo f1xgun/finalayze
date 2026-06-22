@@ -134,13 +134,14 @@ _PERCENT = Decimal(100)
 # the window now ends 2026-06-10 (the verified terminal-rate bar, R-C/R-D) so the report
 # renders BOTH the high-rate plateau and the verified 2025-06-06+ easing on REAL data.
 #   - equity = MCFTRR (MOEX's published net-of-tax total-return index, D-02) — already net.
-#   - OFZ-PK = RUFLBITR (real MOEX floating-coupon-bond TR index, D-04) — fetched GROSS,
-#     then netted of NDFL (D-01 derived implication).
+#   - OFZ = RGBITR (real MOEX fixed-coupon OFZ TR index, Phase 76 SWAP) — fetched GROSS,
+#     then netted of NDFL (D-01 derived implication). Duration captures bond price upside
+#     as rates fall (the deferred-redesign lever, regime_verdict_decision.md §4).
 #   - deposit = accrued from the REAL look-ahead-safe CBR_MEETINGS key-rate path, netted.
 # The two fixed-income legs net through ONE shared YtdTaxAccumulator per run (cross-leg
 # YTD, the W1 design); MCFTRR is already net and is NEVER routed through the accumulator.
 _EQUITY_SECID = "MCFTRR"  # MOEX Russia Net-TR-Res — the net-of-tax equity benchmark (D-02)
-_OFZ_SECID = "RUFLBITR"  # MOEX Floating-Coupon Bond TR index — the real OFZ-PK leg (D-04)
+_OFZ_SECID = "RGBITR"  # MOEX fixed-coupon OFZ TR index — the duration OFZ leg (Phase 76 SWAP)
 _LIVE_START = datetime(2024, 1, 1, tzinfo=timezone.utc)  # noqa: UP017
 _LIVE_END = datetime(2026, 6, 10, tzinfo=timezone.utc)  # noqa: UP017  # full easing cycle (D-05)
 # Real legs share ONE common daily axis (the MCFTRR trading-day calendar): the deposit +
@@ -164,7 +165,7 @@ _N_LIVE_MIN_BARS = 300
 _GATE_SNAPSHOT = _gate._GATE_SNAPSHOT  # the committed snapshot path (Plan 02)
 _load_gate_snapshot = _gate._load_gate_snapshot  # the fail-closed reader (Plan 02)
 _SNAP_LEG_EQUITY = "equity_mcftrr_net"
-_SNAP_LEG_OFZ = "ofz_ruflbitr_net"
+_SNAP_LEG_OFZ = "ofz_rgbitr_net"
 _SNAP_LEG_DEPOSIT = "deposit_net"
 
 # The three SAA profiles, in the conservative -> balanced -> growth order the report
@@ -328,20 +329,22 @@ def _load_live_curves() -> tuple[
       MOEX's published net-of-tax total-return index (D-02; ``_EQUITY_SECID``). It is BOTH
       the equity sleeve and the 100%-equity benchmark bar (apples-to-apples) and is returned
       UNCHANGED — it is NEVER routed through the NDFL accumulator (Pitfall 1: double-tax).
-    - **OFZ-PK (RUFLBITR)** -- REAL, fetched GROSS then NETTED:
-      ``load_mcftr_series(secid="RUFLBITR")`` is the real MOEX floating-coupon-bond TR index
-      (D-04; ``_OFZ_SECID``), forward-aligned onto the MCFTRR axis and netted of NDFL via
-      :func:`net_index_returns` (the gross→net D-01 derived implication).
+    - **OFZ (RGBITR)** -- REAL, fetched GROSS then NETTED (Phase 76 SWAP):
+      ``load_mcftr_series(secid="RGBITR")`` is the real MOEX fixed-coupon OFZ TR index
+      (``_OFZ_SECID``), forward-aligned onto the MCFTRR axis and netted of NDFL via
+      :func:`net_index_returns` (the gross→net D-01 derived implication). Unlike the v11.1
+      RUFLBITR floater it carries DURATION — bond price upside as rates fall (the deferred
+      redesign, regime_verdict_decision.md §4).
     - **deposit** -- REAL, NETTED: ``accrue_real_risk_free_leg`` daily-compounds at the
       as-of ``deposit_rate_as_of`` (key - 1pp) from the REAL ``CBR_MEETINGS`` calendar,
       netted of NDFL via the SAME shared accumulator.
 
-    The MCFTRR trading-day calendar is the MASTER axis (R-3). The deposit + RUFLBITR-OFZ
+    The MCFTRR trading-day calendar is the MASTER axis (R-3). The deposit + RGBITR-OFZ
     legs net through ONE shared :class:`YtdTaxAccumulator` per run (cross-leg YTD, the W1
     cross-sleeve design); MCFTRR (already net) is left as-is.
     """
     equity_curve = _fetch_real_series(_EQUITY_SECID)  # MCFTRR — already net (D-02)
-    ruflbitr_gross = _fetch_real_series(_OFZ_SECID)  # RUFLBITR — gross, netted below (D-04)
+    ofz_gross = _fetch_real_series(_OFZ_SECID)  # RGBITR — fixed-coupon OFZ, gross, netted below
 
     # The MCFTRR trading-day calendar IS the common axis (R-3).
     axis = [d for d, _ in equity_curve]
@@ -355,9 +358,9 @@ def _load_live_curves() -> tuple[
     # SAME running YTD before any year-boundary reset (the band crossover the shared YTD exists
     # to detect). On this cert's window both legs stay in the 13% band, so the netted curves are
     # byte-identical to the old leg-by-leg result — only the multi-year correctness changes.
-    ruflbitr_on_axis = _forward_align(ruflbitr_gross, axis)
+    ofz_on_axis = _forward_align(ofz_gross, axis)
     deposit_curve, ofz_pk_curve = net_fixed_income_legs_interleaved(
-        ruflbitr_on_axis,
+        ofz_on_axis,
         axis,
         _LIVE_DEPOSIT_BASE,
         deposit_spread_pp=_LIVE_DEPOSIT_SPREAD_PP,

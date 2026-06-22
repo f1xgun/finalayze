@@ -53,6 +53,14 @@ class AssetClass(StrEnum):
     EQUITY = "equity"
 
 
+# Phase 76 allocator-tilt regime keys -- the single source of truth for the YAML
+# ``regime_weights`` blocks, the loader's key validation, and the look-ahead-safe
+# ``cbr.rate_regime_as_of`` selector. Distinct from the gate's per-regime cert unit
+# keys (``early_cut``): these name the TILT config vectors, not the cert windows.
+RATE_REGIME_HIGH_RATE = "high_rate"
+RATE_REGIME_EASING = "easing"
+
+
 @dataclass(frozen=True)
 class AllocationProfile:
     """A risk profile's fixed target weights + its MaxDD cap (SAA-01/SAA-05, D-01/D-04).
@@ -60,11 +68,17 @@ class AllocationProfile:
     Weights are FIXED config vectors (D-03 -- never solver output). The vector MUST
     sum to 1.0 and be non-negative; validation is enforced by the L1 loader (Plan 03,
     V5 fail-closed), not here, so this stays a pure carrier mirroring LayerConfig.
+
+    ``regime_weights`` (Phase 76, optional) carries the per-regime tilt vectors
+    ``{"high_rate": {...}, "easing": {...}}`` selected per quarterly boundary by
+    ``cbr.rate_regime_as_of``. ``None`` -> the orchestrator uses the static ``weights``
+    (the naive benchmark legs and the D-13 legacy path stay untilted).
     """
 
     profile: RiskProfile
     weights: dict[AssetClass, Decimal]
     max_drawdown_pct: Decimal
+    regime_weights: dict[str, dict[AssetClass, Decimal]] | None = None
 
 
 class Candle(BaseModel):

@@ -665,7 +665,7 @@ _GATE_SNAPSHOT = Path(__file__).parent / "data" / "allocation_gate_snapshot.json
 # post-date this. Named — no magic date in the guard.
 _BINDING_END = date(2026, 6, 10)
 # The three leg keys the snapshot must carry (R-F shape). Validated fail-closed.
-_SNAPSHOT_LEG_KEYS = ("equity_mcftrr_net", "ofz_ruflbitr_net", "deposit_net")
+_SNAPSHOT_LEG_KEYS = ("equity_mcftrr_net", "ofz_rgbitr_net", "deposit_net")
 
 
 def _rehydrate_leg(rows: Any, *, window_end: date) -> list[tuple[date, Decimal]]:

@@ -20,7 +20,12 @@ from lxml import etree
 from lxml import html as lxml_html
 
 from finalayze.core.exceptions import DataFetchError
-from finalayze.core.schemas import FXRate, KeyRateRecord
+from finalayze.core.schemas import (
+    RATE_REGIME_EASING,
+    RATE_REGIME_HIGH_RATE,
+    FXRate,
+    KeyRateRecord,
+)
 
 if TYPE_CHECKING:
     from finalayze.data.rate_limiter import RateLimiter
@@ -716,6 +721,24 @@ def is_cutting_cycle(as_of: date) -> bool:
     """Return True if the last 2 CBR decisions are both "cut"."""
     decisions = get_recent_cbr_decisions(as_of, count=2)
     return len(decisions) >= 2 and all(d == "cut" for d in decisions)  # noqa: PLR2004
+
+
+def rate_regime_as_of(as_of: date) -> str:
+    """Look-ahead-safe rate regime for the allocator tilt (Phase 76).
+
+    Returns :data:`~finalayze.core.schemas.RATE_REGIME_EASING` once the most recent CBR
+    decision on/before ``as_of`` is a ``"cut"`` (rates falling -> tilt toward OFZ
+    duration + equity), else :data:`~finalayze.core.schemas.RATE_REGIME_HIGH_RATE` (tilt
+    toward the deposit anchor). Reads ONLY meetings ``<= as_of`` via the existing meeting
+    calendar (no look-ahead, no new fetcher), so the 2025-06-06 first cut flips the regime
+    exactly at the gate's ``REGIME_SPLIT_BOUNDARY`` while 2025-06-05 stays ``high_rate``.
+    Alternative ``is_cutting_cycle`` (two consecutive cuts) lags this boundary -- a future
+    tuning lever, not used for the binding tilt.
+    """
+    last = get_last_cbr_decision(as_of)
+    if last is not None and last.decision == "cut":
+        return RATE_REGIME_EASING
+    return RATE_REGIME_HIGH_RATE
 
 
 def get_yield_slope_bps(as_of: date) -> float:
