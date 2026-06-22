@@ -953,6 +953,17 @@ def render_report(payload: dict[str, object]) -> str:
     regime = cast("dict[str, object]", payload.get("regime_split", {}))
     per_regime = cast("dict[str, object]", payload.get("per_regime", {}))
 
+    # Phase 75 (WR-01 / WR-02): the verbatim N=1 easing caveat is rendered ONLY when the easing
+    # unit is actually present in the per-regime block AND the machine-readable n1_caveat flag is
+    # set. Gating on the flag keeps the human report and the JSON sidecar a single source of truth
+    # (WR-01); gating on easing-presence stops the report from asserting an "easing read" on a
+    # single-regime (no-easing) window where it just printed "easing sub-window: none" (WR-02).
+    # D-04 still holds: the caveat is SEPARATE metadata, never fused into a verdict-status string,
+    # and on the normal both-regime cert (easing present + flag True) it still renders EXACTLY once.
+    easing_present = _EASING_UNIT_KEY in per_regime
+    n1_caveat_on = bool(payload.get("n1_caveat", False))
+    render_n1_caveat = easing_present and n1_caveat_on
+
     lines: list[str] = [
         "# Allocation Gate Report (GATE-01/02/03)",
         "",
@@ -1023,10 +1034,11 @@ def render_report(payload: dict[str, object]) -> str:
         "",
         f"- escalation: `{payload.get('escalation')}`",
         "",
-        "## N=1 Caveat (easing single-cycle, D-04)",
-        "",
-        f"> {_N1_CAVEAT}",
-        "",
+        *(
+            ["## N=1 Caveat (easing single-cycle, D-04)", "", f"> {_N1_CAVEAT}", ""]
+            if render_n1_caveat
+            else []
+        ),
         "## Honesty Caveat (Pitfall 6 / D-08)",
         "",
         f"> {_HIGH_RATE_CAVEAT}",

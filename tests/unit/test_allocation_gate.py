@@ -45,6 +45,7 @@ import pytest
 
 from finalayze.backtest.allocation_gate import (
     _ESCALATION_DEPOSIT_ANCHOR,
+    _HIGH_RATE_CAVEAT,
     _LARGE_SORTINO_SENTINEL,
     _N1_CAVEAT,
     REGIME_SPLIT_BOUNDARY,
@@ -1333,3 +1334,99 @@ def test_report_renders_n1_caveat() -> None:
     assert _EASING_LABEL in report
     # The N=1 caveat is metadata, NOT fused into a verdict-status string (D-04 no-fusion).
     assert _FUSED_N1_STATUS not in report
+
+
+def test_report_suppresses_n1_caveat_when_flag_false() -> None:
+    """``render_report`` honors ``payload["n1_caveat"]`` (WR-01).
+
+    The rendered N=1 caveat block must agree with the machine-readable ``n1_caveat`` flag the
+    sidecar carries. With the flag False (e.g. a legacy/suppressing caller) the human report
+    must NOT emit the verbatim _N1_CAVEAT block, so the two surfaces never diverge. D-04 still
+    holds: the caveat is separate metadata, never fused into a verdict status.
+    """
+    per_profile = {
+        "conservative": {
+            "verdict": _HARD_FAIL,
+            "sharpe": _NOTE_PROFILE_SHARPE,
+            "best_naive_sharpe": _NOTE_DEPOSIT_SHARPE,
+            "sortino": _NOTE_PROFILE_SORTINO,
+            "best_naive_sortino": _NOTE_DEPOSIT_SORTINO,
+            "realized_maxdd_frac": 0.021,
+            "cap_frac": 0.08,
+            "mean_wf_sharpe": 0.457,
+        }
+    }
+    naive_metrics = {
+        "deposit_100_sharpe": _NOTE_DEPOSIT_SHARPE,
+        "deposit_100_sortino": _NOTE_DEPOSIT_SORTINO,
+        "deposit_100_maxdd_pct": 0.0,
+    }
+    # A both-regime window (easing present) but with n1_caveat suppressed.
+    regime = regime_split([_BOUNDARY - timedelta(days=30), _BOUNDARY + timedelta(days=30)])
+    payload = render_json(
+        per_profile,
+        naive_metrics,
+        regime,
+        git_sha=_DECISION_GIT_SHA,
+        per_regime=_DECISION_PER_REGIME,
+        escalation=None,
+        n1_caveat=False,
+    )
+    report = render_report(payload)
+
+    # The N=1 caveat block is gated on the flag -> absent when n1_caveat is False (WR-01).
+    assert _N1_CAVEAT not in report
+    # The honesty caveat (always-on, separate concern) still renders.
+    assert _HIGH_RATE_CAVEAT in report
+    # No fused verdict status regardless of flag state (D-04 no-fusion).
+    assert _FUSED_N1_STATUS not in report
+
+
+def test_report_omits_n1_caveat_on_single_regime_window() -> None:
+    """``render_report`` does not claim an easing read on a no-easing window (WR-02).
+
+    On a window ending before REGIME_SPLIT_BOUNDARY the regime split is single-regime
+    (``high_rate`` only) and the report prints "easing sub-window: none". The N=1 easing
+    caveat (whose text asserts a single OBSERVED easing cycle) must therefore NOT render -- it
+    would be self-contradictory next to the "none" line. The per-regime table still renders the
+    present high_rate unit.
+    """
+    per_profile = {
+        "conservative": {
+            "verdict": _HARD_FAIL,
+            "sharpe": _NOTE_PROFILE_SHARPE,
+            "best_naive_sharpe": _NOTE_DEPOSIT_SHARPE,
+            "sortino": _NOTE_PROFILE_SORTINO,
+            "best_naive_sortino": _NOTE_DEPOSIT_SORTINO,
+            "realized_maxdd_frac": 0.021,
+            "cap_frac": 0.08,
+            "mean_wf_sharpe": 0.457,
+        }
+    }
+    naive_metrics = {
+        "deposit_100_sharpe": _NOTE_DEPOSIT_SHARPE,
+        "deposit_100_sortino": _NOTE_DEPOSIT_SORTINO,
+        "deposit_100_maxdd_pct": 0.0,
+    }
+    # A window ending BEFORE the boundary -> single-regime (high_rate only, no easing).
+    regime = regime_split([_BOUNDARY - timedelta(days=60), _BOUNDARY - timedelta(days=1)])
+    assert _REGIME_EASING not in regime
+    # A high-rate-only per_regime block (no easing unit), like regime_verdicts on this window.
+    high_rate_only = {_REGIME_HIGH_RATE: _DECISION_PER_REGIME[_REGIME_HIGH_RATE]}
+    payload = render_json(
+        per_profile,
+        naive_metrics,
+        regime,
+        git_sha=_DECISION_GIT_SHA,
+        per_regime=high_rate_only,
+        escalation=None,
+        n1_caveat=True,  # flag may be on, but with no easing present the block stays suppressed
+    )
+    report = render_report(payload)
+
+    # The "easing sub-window: none" line renders (the honest no-easing statement).
+    assert "easing sub-window: none" in report
+    # The contradictory N=1 easing caveat must NOT render on a no-easing window (WR-02).
+    assert _N1_CAVEAT not in report
+    # The present high_rate unit still renders in the per-regime table.
+    assert _REGIME_HIGH_RATE in report
