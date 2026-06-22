@@ -68,6 +68,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from finalayze.backtest import allocation_gate as _gate
 from finalayze.backtest.allocation_gate import (
+    _EASING_UNIT_KEY,
+    _HARD_FAIL,
+    _HIGH_RATE_UNIT_KEY,
     build_naive_legs,
     derive_escalation,
     excess_sortino_from_equity,
@@ -171,12 +174,13 @@ _PROFILE_ORDER = (RiskProfile.CONSERVATIVE, RiskProfile.BALANCED, RiskProfile.GR
 
 # ── Phase 75 (REGIME-02/05) 3-unit phase-verdict wiring constants ─────────────
 # The binding phase verdict = full_window AND high_rate AND easing -> HARD_FAIL if ANY
-# PRESENT unit HARD_FAILs (the honest AND across the three units). NAMED so the wiring
-# inlines no verdict/unit-key literals (CLAUDE.md no-magic-strings; mirrors the module's
-# own _HARD_FAIL / _EASING_UNIT_KEY constants).
-_PHASE_HARD_FAIL = "HARD_FAIL"  # the terminal HARD_FAIL verdict (gate_with_autotighten output)
-_HIGH_RATE_UNIT = "high_rate"  # the high-rate regime unit key (regime_split / regime_verdicts)
-_EASING_UNIT = "early_cut"  # the easing binding unit key (regime_split's post-cut segment)
+# PRESENT unit HARD_FAILs (the honest AND across the three units). These are ALIASES of the
+# module's canonical constants (IN-03): re-importing instead of re-declaring string copies keeps
+# a single source of truth, so a future relabel of a unit key (e.g. "early_cut") propagates here
+# automatically instead of silently diverging and KeyError-ing on per_regime[_EASING_UNIT].
+_PHASE_HARD_FAIL = _HARD_FAIL  # the terminal HARD_FAIL verdict (gate_with_autotighten output)
+_HIGH_RATE_UNIT = _HIGH_RATE_UNIT_KEY  # the high-rate regime unit key (regime_split output)
+_EASING_UNIT = _EASING_UNIT_KEY  # the easing binding unit key (regime_split's post-cut segment)
 # A non-HARD_FAIL sentinel for the absent-easing single-regime edge: pass it to
 # derive_escalation so the escalation stays None when only the high_rate unit exists.
 _EASING_ABSENT_VERDICT = "PASS"

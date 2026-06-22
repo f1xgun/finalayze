@@ -314,9 +314,12 @@ _N1_CAVEAT = (
 # so derive_escalation never inlines the literal (anti-hollow: the flag is DERIVED, not pre-baked).
 _ESCALATION_DEPOSIT_ANCHOR = "deposit_anchor_vs_redesign"
 
-# regime_split / regime_verdicts emit the post-cut binding unit under the key "early_cut"; the
-# report renders it under the human-facing label "easing" (REGIME-02). NAMED so render_report
-# never inlines either string.
+# regime_split / regime_verdicts emit the pre-cut plateau under the key "high_rate" and the
+# post-cut binding unit under the key "early_cut"; the report renders the post-cut unit under the
+# human-facing label "easing" (REGIME-02). NAMED so neither regime_split, render_report, nor the
+# CLI (scripts/run_allocation_gate.py, IN-03) ever inlines a copy of these unit-key strings — a
+# single source of truth so a future relabel propagates everywhere.
+_HIGH_RATE_UNIT_KEY = "high_rate"
 _EASING_UNIT_KEY = "early_cut"
 _EASING_UNIT_LABEL = "easing"
 
@@ -760,9 +763,13 @@ def regime_split(dates: list[date]) -> dict[str, tuple[date, date]]:
         raise ValueError(msg)
     start, end = dates[0], dates[-1]
     if end < REGIME_SPLIT_BOUNDARY:
-        return {"high_rate": (start, end)}  # single high-rate plateau (no easing sub-window)
+        # single high-rate plateau (no easing sub-window)
+        return {_HIGH_RATE_UNIT_KEY: (start, end)}
     day_before = REGIME_SPLIT_BOUNDARY - timedelta(days=1)
-    return {"high_rate": (start, day_before), "early_cut": (REGIME_SPLIT_BOUNDARY, end)}
+    return {
+        _HIGH_RATE_UNIT_KEY: (start, day_before),
+        _EASING_UNIT_KEY: (REGIME_SPLIT_BOUNDARY, end),
+    }
 
 
 def _slice_leg(
