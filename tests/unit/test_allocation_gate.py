@@ -648,7 +648,7 @@ _LARGE_INDEX_DAILY = Decimal("1.0006")  # a high-carry index so the OFZ leg inco
 
 
 def _rebased_index(base: Decimal, daily: Decimal, dates: list[date]) -> list[tuple[date, Decimal]]:
-    """A deterministic rising (date, Decimal) index *level* series (e.g. a RGBITR proxy)."""
+    """A deterministic rising (date, Decimal) index *level* series (e.g. a RUFLBITR proxy)."""
     return [(d, base * daily**i) for i, d in enumerate(dates)]
 
 
@@ -905,7 +905,7 @@ def test_regime_split_rejects_empty_window() -> None:
 # The three leg keys the snapshot loader expects (R-F shape). The fixture serializes
 # Decimal -> str and date -> ISO string (the Phase-65 _row_to_instrument convention).
 _SNAP_EQUITY_KEY = "equity_mcftrr_net"
-_SNAP_OFZ_KEY = "ofz_rgbitr_net"
+_SNAP_OFZ_KEY = "ofz_ruflbitr_net"
 _SNAP_DEPOSIT_KEY = "deposit_net"
 # The binding window end (the look-ahead clamp, Pitfall 3): no bar may post-date this.
 _SNAP_WINDOW_START = "2024-01-01"

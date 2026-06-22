@@ -159,19 +159,27 @@ def _zero_curve(reference: list[tuple[date, Decimal]]) -> list[tuple[date, Decim
     return [(d, _ZERO) for d, _ in reference]
 
 
-def _naive_orchestrator(weights: dict[AssetClass, Decimal], cap: Decimal) -> AllocationOrchestrator:
+def _naive_orchestrator(
+    weights: dict[AssetClass, Decimal],
+    cap: Decimal,
+    regime_weights: dict[str, dict[AssetClass, Decimal]] | None = None,
+) -> AllocationOrchestrator:
     """Build an AllocationOrchestrator pinned to a single degenerate benchmark vector.
 
     Uses the ``profiles=`` injection seam (allocation.py:347) so the FROZEN W2
     allocator runs the naive leg on the SAME cost/NDFL path as the real candidate —
     guaranteeing the same basis (R-3). The profile KEY is arbitrary (only the
-    weights/cap matter for a benchmark leg). Deferred inline import for the L5→L5
-    hop (ARCHITECTURE Pattern 4 / bond_engine.py:180).
+    weights/cap matter for a benchmark leg). ``regime_weights`` (Phase 76) is passed
+    ONLY for the real CANDIDATE so the orchestrator applies the look-ahead-safe regime
+    tilt; the naive benchmark legs pass ``None`` and stay static. Deferred inline import
+    for the L5→L5 hop (ARCHITECTURE Pattern 4 / bond_engine.py:180).
     """
     from finalayze.orchestration.allocation import AllocationOrchestrator  # noqa: PLC0415
 
     p = RiskProfile.BALANCED  # arbitrary key — only weights/cap matter for a benchmark leg
-    profile = AllocationProfile(profile=p, weights=weights, max_drawdown_pct=cap)
+    profile = AllocationProfile(
+        profile=p, weights=weights, max_drawdown_pct=cap, regime_weights=regime_weights
+    )
     return AllocationOrchestrator(risk_profile=p, profiles={p: profile})
 
 
@@ -356,6 +364,7 @@ def _run_and_score(
     equity_curve: list[tuple[date, Decimal]],
     naive_sharpes: list[float],
     naive_sortinos: list[float],
+    regime_weights: dict[str, dict[AssetClass, Decimal]] | None = None,
 ) -> dict[str, object]:
     """Run the FROZEN allocator on a single weight vector and score it against the naive bar.
 
@@ -366,8 +375,10 @@ def _run_and_score(
     ``result`` carrier and the reported :func:`mean_wf_sharpe` (R-1). The ``_profile_key`` is
     accepted for caller symmetry only — the verdict depends solely on weights/cap/curves
     (the degenerate orchestrator pins its own arbitrary internal profile key).
+    ``regime_weights`` (Phase 76, candidate only) makes the orchestrator apply the
+    look-ahead-safe regime tilt per quarterly boundary; ``None`` keeps the leg static.
     """
-    result = _naive_orchestrator(weights, cap_fraction).run(
+    result = _naive_orchestrator(weights, cap_fraction, regime_weights).run(
         deposit_curve, ofz_pk_curve, equity_curve
     )
     alloc_sortino = excess_sortino_from_equity([float(v) for v in result.merged_equity_curve])
@@ -392,6 +403,7 @@ def gate_with_autotighten(
     equity_curve: list[tuple[date, Decimal]],
     naive_sharpes: list[float],
     naive_sortinos: list[float],
+    regime_weights: dict[str, dict[AssetClass, Decimal]] | None = None,
 ) -> dict[str, object]:
     """Execute the W2-deferred D-05 auto-tighten loop: freeze + OOS re-gate (V-5 / D-03).
 
@@ -409,6 +421,7 @@ def gate_with_autotighten(
     HARD_FAIL — there is NO further widening, no search, no optimizer after the single
     freeze (Pitfall 8). The returned dict carries ``frozen_weights`` for traceability.
     """
+    # The CANDIDATE applies the Phase-76 regime tilt (regime_weights); the naive bar stays static.
     first = _run_and_score(
         profile_key,
         base_weights,
@@ -418,14 +431,25 @@ def gate_with_autotighten(
         equity_curve,
         naive_sharpes,
         naive_sortinos,
+        regime_weights,
     )
     if first["pass"]:
         return {"verdict": "PASS", **first}
+
+    if regime_weights is not None:
+        # The regime tilt IS the candidate's policy; a STATIC auto-tighten freeze cannot de-risk a
+        # per-regime tilt (it overrides any frozen base vector). So a failing TILTED candidate is an
+        # honest binding HARD_FAIL with NO auto-rescue, returning the REAL tilted metrics (NOT a
+        # discarded static re-gate -- the bug this guards). The binding data never breaches a cap,
+        # so the static tighten below is a no-op here anyway; a tilt-aware tighten is future work.
+        return {"verdict": _HARD_FAIL, **first}
 
     first_result = cast("AllocationResult", first["result"])
     realized_dd_frac = realized_dd_fraction(first_result.max_drawdown_pct)
     # Single parameter-free 5pp equity->deposit freeze — NEVER a search/widening loop (Pitfall 8).
     frozen = tighten(base_weights, realized_dd_frac, cap_fraction)
+    # Static path only (regime_weights is None -- tilted candidates returned above): re-gate the
+    # frozen STATIC vector once.
     regated = _run_and_score(
         profile_key,
         frozen,
@@ -545,10 +569,10 @@ def net_index_returns(
     *,
     tax_acc: YtdTaxAccumulator | None = None,
 ) -> list[tuple[date, Decimal]]:
-    """Re-base a fetched GROSS index (RGBITR) to a net-of-NDFL TR curve (REGIME-04 / R-E).
+    """Re-base a fetched GROSS index (RUFLBITR) to a net-of-NDFL TR curve (REGIME-04 / R-E).
 
-    The deposit/OFZ accrual analogue for a FETCHED index level series: the real RGBITR
-    fixed-coupon-bond TR index is published GROSS of investor NDFL (D-04 derived
+    The deposit/OFZ accrual analogue for a FETCHED index level series: the real RUFLBITR
+    floating-coupon-bond TR index is published GROSS of investor NDFL (D-04 derived
     implication), so to honour D-01 (net both sides) its daily return must be netted of the
     same progressive 13/15% band the deposit leg uses.
 
@@ -656,7 +680,7 @@ def net_fixed_income_legs_interleaved(
 
 # ── Committed real-data snapshot (REGIME-01 / D-05, Phase-65 fail-closed pattern) ──
 # The binding cert reads a committed JSON snapshot of the fetched real series (MCFTRR
-# net equity + RGBITR-derived net OFZ + net deposit) so CI reproduces the gate
+# net equity + RUFLBITR-derived net OFZ + net deposit) so CI reproduces the gate
 # deterministically with NO network. A missing/corrupt/future-dated file fails closed
 # (ConfigurationError) — there is NO silent fallback to synthetic data (T-74-03 / V5).
 # Plan 03 writes the committed file (and creates the data/ dir); this loader reads it.
@@ -665,7 +689,7 @@ _GATE_SNAPSHOT = Path(__file__).parent / "data" / "allocation_gate_snapshot.json
 # post-date this. Named — no magic date in the guard.
 _BINDING_END = date(2026, 6, 10)
 # The three leg keys the snapshot must carry (R-F shape). Validated fail-closed.
-_SNAPSHOT_LEG_KEYS = ("equity_mcftrr_net", "ofz_rgbitr_net", "deposit_net")
+_SNAPSHOT_LEG_KEYS = ("equity_mcftrr_net", "ofz_ruflbitr_net", "deposit_net")
 
 
 def _rehydrate_leg(rows: Any, *, window_end: date) -> list[tuple[date, Decimal]]:
@@ -700,7 +724,7 @@ def _load_gate_snapshot(
     """Read the committed real-data gate snapshot, fail-closed (REGIME-01 / D-05 / V5).
 
     Copies the Phase-65 ``instruments.py:239-251`` committed-snapshot pattern EXACTLY: read
-    the JSON, pull the three required legs (``equity_mcftrr_net`` / ``ofz_rgbitr_net`` /
+    the JSON, pull the three required legs (``equity_mcftrr_net`` / ``ofz_ruflbitr_net`` /
     ``deposit_net``), and re-hydrate each ``[iso_date, decimal_str]`` row to a
     ``(date, Decimal)`` pair. On a missing/corrupt file or a missing required key the loader
     raises :class:`finalayze.core.exceptions.ConfigurationError` — there is NO silent
@@ -836,6 +860,7 @@ def regime_verdicts(
                 equity_curve=sub_eq,
                 naive_sharpes=naive_sharpes,
                 naive_sortinos=naive_sortinos,
+                regime_weights=p.regime_weights,
             )
             v.pop("result", None)  # non-serializable AllocationResult carrier
             v.pop("frozen_weights", None)  # weight dict not JSON-key-safe; verdict suffices

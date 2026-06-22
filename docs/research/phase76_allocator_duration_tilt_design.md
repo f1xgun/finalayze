@@ -119,3 +119,45 @@ with a DERIVED escalation and `n1_caveat`, against the RGBITR-tilt candidate, wi
 proven unchanged by tests, `backtest-iteration` run, lint/type green, and a reviewable before/after
 diff. PASS/HARD_FAIL are both complete, shippable outcomes — the phase MUST NOT require beating the
 deposit to be done. `exit 0` = artifacts written; nonzero = harness failure only.
+
+---
+
+## 8. OUTCOME (post-execution) — duration REJECTED, tilt KEPT
+
+The §1 plan was a SWAP (RGBITR duration). Execution answered the deferred question on real data and
+the answer changed the deliverable: **the duration swap is falsified; the regime tilt is kept on the
+RUFLBITR floater.** Shipped allocator = **floater + regime tilt** (operator decision, this session).
+
+### 8.1 Ablation (single-harness 2×2, candidate Sharpe — balanced, full / high_rate / easing)
+
+|                | static                 | tilt                   |
+|----------------|------------------------|------------------------|
+| floater (RUFLBITR) | −0.847 / −0.80 / −0.86 | −0.859 / −0.78 / −0.90 |
+| duration (RGBITR)  | −1.002 / −1.01 / −0.91 | −0.971 / −0.89 / −1.02 |
+
+- **DURATION is the robust culprit:** RGBITR costs **~0.11–0.16 Sharpe vs the floater in every cell**,
+  every regime — more volatile, uncompensated in this 16–21%→easing window (equity *fell*). Falsified.
+- **The TILT is a full-window wash but directionally right:** it HELPS in high_rate (more deposit — the
+  deposit-anchoring direction) and HURTS in easing only because this **single (N=1)** easing cycle had
+  *falling* equity; in a typical easing it would help. Thesis-correct → kept as the product's
+  regime-adaptive mechanism.
+
+### 8.2 CRITICAL bug found + fixed — the tilt never reached the binding gate
+
+The gate built its candidate via `gate_with_autotighten(base_weights=profile.weights, …)` — passing
+ONLY the static base weights. On a failing candidate it fell through to the auto-tighten path and
+returned the **static** re-gate, discarding the (uncomputed) tilt. So **every cert measured a static
+allocator**; only the standalone ablation exercised the tilt. Fix: thread `regime_weights` through
+`_naive_orchestrator → _run_and_score → gate_with_autotighten → regime_verdicts → run_gate`, and a
+failing **tilted** candidate is an honest HARD_FAIL with its REAL tilted metrics (a static
+auto-tighten cannot de-risk a per-regime tilt; it never fires on the binding data anyway). Guarded by
+`test_gate_candidate_applies_tilt_not_just_orchestrator`.
+
+### 8.3 Binding cert (floater + tilt, real net-of-tax committed snapshot)
+
+HARD_FAIL×3 — conservative **−0.9032** / balanced **−0.8589** / growth **−0.8215** vs best-naive
+**−0.6506** (the near-vol-free deposit); per-regime high_rate AND easing HARD_FAIL; phase verdict
+HARD_FAIL; escalation `deposit_anchor_vs_redesign`; `n1_caveat` true — all DERIVED from the REAL gate
+path. The deposit anchor holds against the best floater+tilt construction. This is the honest,
+shippable deliverable; large real capital only after a regime-level PASS (deferred).
+

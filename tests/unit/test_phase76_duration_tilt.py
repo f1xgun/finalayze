@@ -12,8 +12,9 @@ RED first (TDD). Pins the redesign contract before it exists:
 - ``AllocationOrchestrator``: applies the regime tilt PER quarterly boundary
   (high_rate weights before the cut, easing weights after) as a deterministic
   table lookup -- zero trainable params, two runs byte-identical.
-- ``run_allocation_gate``: the OFZ leg secid is RGBITR (not RUFLBITR) and the
-  snapshot OFZ leg key is ``ofz_rgbitr_net``.
+- ``run_allocation_gate``: the OFZ leg stays the RUFLBITR floater -- the RGBITR
+  duration swap was evaluated and REJECTED (risk-adjusted worse in every regime;
+  see the docs/research ablation). The shipped Phase-76 redesign is the TILT.
 
 All fixtures are tiny in-memory ``(date, Decimal)`` curves -- no live engine/API.
 """
@@ -194,22 +195,22 @@ def test_regime_tilt_is_deterministic_table_lookup() -> None:
     assert a.weight_series == b.weight_series
 
 
-# -- RGBITR secid swap + snapshot key rename ----------------------------------
+# -- OFZ leg stays the floater (duration swap evaluated + rejected) -----------
 
 
-def test_ofz_secid_is_rgbitr() -> None:
-    """The live OFZ leg fetches the fixed-coupon RGBITR index (not the RUFLBITR floater)."""
+def test_ofz_leg_is_floater_duration_reverted() -> None:
+    """Phase 76 KEEPS the RUFLBITR floater: the RGBITR duration swap was rejected.
+
+    The ablation found duration risk-adjusted worse in every regime/profile (see
+    docs/research/phase76_allocator_duration_tilt_design.md). The shipped redesign is the
+    regime TILT, not the leg swap -- this guards against a silent re-swap to RGBITR.
+    """
     import scripts.run_allocation_gate as gate_cli  # noqa: PLC0415
 
-    assert gate_cli._OFZ_SECID == "RGBITR"
-    assert gate_cli._SNAP_LEG_OFZ == "ofz_rgbitr_net"
-
-
-def test_snapshot_ofz_leg_key_renamed() -> None:
-    """The committed-snapshot OFZ leg key is ofz_rgbitr_net (3-leg shape preserved)."""
     from finalayze.backtest import allocation_gate as gate  # noqa: PLC0415
 
-    assert gate._SNAPSHOT_LEG_KEYS[1] == "ofz_rgbitr_net"
+    assert gate_cli._OFZ_SECID == "RUFLBITR"
+    assert gate._SNAPSHOT_LEG_KEYS[1] == "ofz_ruflbitr_net"
     assert len(gate._SNAPSHOT_LEG_KEYS) == 3  # noqa: PLR2004
 
 
@@ -273,3 +274,40 @@ def test_cert_candidate_charges_real_cost_and_tilts() -> None:
     assert pre and post
     assert result.weight_series[_D][result.dates.index(pre[-1])] == _BAL_HIGH[_D]
     assert result.weight_series[_D][result.dates.index(post[0])] == _BAL_EASE[_D]
+
+
+def test_gate_candidate_applies_tilt_not_just_orchestrator() -> None:
+    """The BINDING gate candidate (gate_with_autotighten) applies the regime tilt.
+
+    Guards the latent bug where the gate scored the STATIC ``base_weights`` and -- on the
+    HARD_FAIL/tighten path -- returned the static re-gate, DISCARDING the tilted candidate's
+    metrics. The tilted candidate's Sharpe must differ from the static one on the real snapshot,
+    proving the tilt reaches the binding verdict (not only direct orchestrator calls).
+    """
+    from finalayze.backtest.allocation_gate import (  # noqa: PLC0415
+        build_naive_legs,
+        excess_sortino_from_equity,
+        gate_with_autotighten,
+    )
+
+    equity, ofz, deposit = _load_gate_snapshot()
+    prof = load_allocation_profiles()[RiskProfile.BALANCED]
+    naives = build_naive_legs(deposit, ofz, equity)
+    ns = [n.sharpe for n in naives.values()]
+    nso = [
+        excess_sortino_from_equity([float(v) for v in n.merged_equity_curve])
+        for n in naives.values()
+    ]
+    common = {
+        "profile_key": RiskProfile.BALANCED,
+        "base_weights": prof.weights,
+        "cap_fraction": prof.max_drawdown_pct,
+        "deposit_curve": deposit,
+        "ofz_pk_curve": ofz,
+        "equity_curve": equity,
+        "naive_sharpes": ns,
+        "naive_sortinos": nso,
+    }
+    static = gate_with_autotighten(**common)
+    tilted = gate_with_autotighten(**common, regime_weights=prof.regime_weights)
+    assert static["sharpe"] != tilted["sharpe"]  # the tilt reaches the binding gate verdict

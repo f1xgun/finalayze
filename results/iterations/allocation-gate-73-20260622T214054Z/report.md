@@ -1,14 +1,14 @@
 # Allocation Gate Report (GATE-01/02/03)
 
-git_sha: `e4279c10abfd22b59fa1db78c5f0b63d8c26ef4c`
+git_sha: `7f50e9d0ccc18c505c106bbb592324590e22e5ca`
 
 ## Per-Profile Verdict (binding = full-window; WF mean reported-only)
 
 | Profile | Sharpe | Best-naive Sharpe | Sortino | Best-naive Sortino | Realized MaxDD | Cap | Mean WF Sharpe | Verdict |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| conservative | -1.1284 | -0.6506 | -1.6007 | -0.9256 | 0.0388 | 0.0800 | -0.3167 | HARD_FAIL |
-| balanced | -1.0024 | -0.6506 | -1.4142 | -0.9256 | 0.0786 | 0.1500 | -0.3219 | HARD_FAIL |
-| growth | -0.9188 | -0.6506 | -1.2974 | -0.9256 | 0.1500 | 0.2500 | -0.3107 | HARD_FAIL |
+| conservative | -0.9032 | -0.6506 | -1.2635 | -0.9256 | 0.0223 | 0.0800 | -0.3392 | HARD_FAIL |
+| balanced | -0.8589 | -0.6506 | -1.2073 | -0.9256 | 0.0540 | 0.1500 | -0.3453 | HARD_FAIL |
+| growth | -0.8215 | -0.6506 | -1.1603 | -0.9256 | 0.1132 | 0.2500 | -0.3233 | HARD_FAIL |
 
 ## Naive Benchmark Comparison (best-of-three is the bar, D-04)
 
@@ -20,9 +20,9 @@ git_sha: `e4279c10abfd22b59fa1db78c5f0b63d8c26ef4c`
 - `equity_100_sharpe`: -0.6506
 - `equity_100_sortino`: -0.9256
 - `equity_100_maxdd_pct`: 27.8009
-- `static_60_30_10_sharpe`: -0.9027
-- `static_60_30_10_sortino`: -1.2762
-- `static_60_30_10_maxdd_pct`: 19.3093
+- `static_60_30_10_sharpe`: -0.8025
+- `static_60_30_10_sortino`: -1.1363
+- `static_60_30_10_maxdd_pct`: 15.2335
 
 ## Regime Split (headline = documented date split, D-09 / R-6)
 
@@ -39,12 +39,12 @@ _The synthetic framing cut-path is RETIRED (D-07). The real binding window now C
 
 | Regime | Profile | Sharpe | Best-naive Sharpe | Sortino | Best-naive Sortino | Realized MaxDD | Cap | Verdict |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| high_rate | conservative | -1.1409 | 0.8904 | -1.6514 | 1.3121 | 0.0388 | 0.0800 | HARD_FAIL |
-| high_rate | balanced | -1.0130 | 0.8904 | -1.4506 | 1.3121 | 0.0786 | 0.1500 | HARD_FAIL |
-| high_rate | growth | -0.9249 | 0.8904 | -1.3224 | 1.3121 | 0.1500 | 0.2500 | HARD_FAIL |
-| easing | conservative | -1.3980 | -0.7638 | -1.8723 | -1.0663 | 0.0261 | 0.0800 | HARD_FAIL |
-| easing | balanced | -1.1915 | -0.7638 | -1.6158 | -1.0663 | 0.0565 | 0.1500 | HARD_FAIL |
-| easing | growth | -1.0766 | -0.7638 | -1.4714 | -1.0663 | 0.0968 | 0.2500 | HARD_FAIL |
+| high_rate | conservative | -0.7532 | 0.8904 | -1.0823 | 1.3121 | 0.0223 | 0.0800 | HARD_FAIL |
+| high_rate | balanced | -0.7830 | 0.8904 | -1.1200 | 1.3121 | 0.0540 | 0.1500 | HARD_FAIL |
+| high_rate | growth | -0.7782 | 0.8904 | -1.1130 | 1.3121 | 0.1132 | 0.2500 | HARD_FAIL |
+| easing | conservative | -1.1746 | -0.7638 | -1.5878 | -1.0663 | 0.0206 | 0.0800 | HARD_FAIL |
+| easing | balanced | -1.0511 | -0.7638 | -1.4351 | -1.0663 | 0.0504 | 0.1500 | HARD_FAIL |
+| easing | growth | -0.9983 | -0.7638 | -1.3697 | -1.0663 | 0.0811 | 0.2500 | HARD_FAIL |
 
 - escalation: `deposit_anchor_vs_redesign`
 

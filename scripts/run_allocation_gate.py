@@ -134,14 +134,13 @@ _PERCENT = Decimal(100)
 # the window now ends 2026-06-10 (the verified terminal-rate bar, R-C/R-D) so the report
 # renders BOTH the high-rate plateau and the verified 2025-06-06+ easing on REAL data.
 #   - equity = MCFTRR (MOEX's published net-of-tax total-return index, D-02) — already net.
-#   - OFZ = RGBITR (real MOEX fixed-coupon OFZ TR index, Phase 76 SWAP) — fetched GROSS,
-#     then netted of NDFL (D-01 derived implication). Duration captures bond price upside
-#     as rates fall (the deferred-redesign lever, regime_verdict_decision.md §4).
+#   - OFZ-PK = RUFLBITR (real MOEX floating-coupon-bond TR index, D-04) — fetched GROSS,
+#     then netted of NDFL (D-01 derived implication).
 #   - deposit = accrued from the REAL look-ahead-safe CBR_MEETINGS key-rate path, netted.
 # The two fixed-income legs net through ONE shared YtdTaxAccumulator per run (cross-leg
 # YTD, the W1 design); MCFTRR is already net and is NEVER routed through the accumulator.
 _EQUITY_SECID = "MCFTRR"  # MOEX Russia Net-TR-Res — the net-of-tax equity benchmark (D-02)
-_OFZ_SECID = "RGBITR"  # MOEX fixed-coupon OFZ TR index — the duration OFZ leg (Phase 76 SWAP)
+_OFZ_SECID = "RUFLBITR"  # MOEX Floating-Coupon Bond TR index — the real OFZ-PK leg (D-04)
 _LIVE_START = datetime(2024, 1, 1, tzinfo=timezone.utc)  # noqa: UP017
 _LIVE_END = datetime(2026, 6, 10, tzinfo=timezone.utc)  # noqa: UP017  # full easing cycle (D-05)
 # Real legs share ONE common daily axis (the MCFTRR trading-day calendar): the deposit +
@@ -165,7 +164,7 @@ _N_LIVE_MIN_BARS = 300
 _GATE_SNAPSHOT = _gate._GATE_SNAPSHOT  # the committed snapshot path (Plan 02)
 _load_gate_snapshot = _gate._load_gate_snapshot  # the fail-closed reader (Plan 02)
 _SNAP_LEG_EQUITY = "equity_mcftrr_net"
-_SNAP_LEG_OFZ = "ofz_rgbitr_net"
+_SNAP_LEG_OFZ = "ofz_ruflbitr_net"
 _SNAP_LEG_DEPOSIT = "deposit_net"
 
 # The three SAA profiles, in the conservative -> balanced -> growth order the report
@@ -269,7 +268,7 @@ def _fetch_real_series(secid: str) -> list[tuple[date, Decimal]]:
 
     Wraps ``load_mcftr_series(secid=...)`` over the public MOEX ISS-REST index endpoint
     (no token/cert) with the WR-03 / T-73-12 honesty guards applied IDENTICALLY to every
-    secid (MCFTRR and RGBITR): a raising fetch or a short fetch surfaces a clean,
+    secid (MCFTRR and RUFLBITR): a raising fetch or a short fetch surfaces a clean,
     actionable operator ``SystemExit`` -- NEVER a fabricated synthetic 'live' leg. A
     non-zero exit signals a HARNESS failure (MOEX unreachable), not a HARD_FAIL verdict.
     """
@@ -296,7 +295,7 @@ def _forward_align(
 ) -> list[tuple[date, Decimal]]:
     """Forward-fill ``series`` onto the master ``axis`` (the as-of, look-ahead-safe convention).
 
-    RGBITR is fetched on its own trading-day calendar; the gate needs all three legs on
+    RUFLBITR is fetched on its own trading-day calendar; the gate needs all three legs on
     the ONE master (MCFTRR) axis (R-3). For each master date the most-recent series level
     on/before that date is used (the same forward-fill the orchestrator applies), so no
     future bar leaks. Master dates before the first series bar carry the first level.
@@ -329,22 +328,20 @@ def _load_live_curves() -> tuple[
       MOEX's published net-of-tax total-return index (D-02; ``_EQUITY_SECID``). It is BOTH
       the equity sleeve and the 100%-equity benchmark bar (apples-to-apples) and is returned
       UNCHANGED — it is NEVER routed through the NDFL accumulator (Pitfall 1: double-tax).
-    - **OFZ (RGBITR)** -- REAL, fetched GROSS then NETTED (Phase 76 SWAP):
-      ``load_mcftr_series(secid="RGBITR")`` is the real MOEX fixed-coupon OFZ TR index
-      (``_OFZ_SECID``), forward-aligned onto the MCFTRR axis and netted of NDFL via
-      :func:`net_index_returns` (the gross→net D-01 derived implication). Unlike the v11.1
-      RUFLBITR floater it carries DURATION — bond price upside as rates fall (the deferred
-      redesign, regime_verdict_decision.md §4).
+    - **OFZ-PK (RUFLBITR)** -- REAL, fetched GROSS then NETTED:
+      ``load_mcftr_series(secid="RUFLBITR")`` is the real MOEX floating-coupon-bond TR index
+      (D-04; ``_OFZ_SECID``), forward-aligned onto the MCFTRR axis and netted of NDFL via
+      :func:`net_index_returns` (the gross→net D-01 derived implication).
     - **deposit** -- REAL, NETTED: ``accrue_real_risk_free_leg`` daily-compounds at the
       as-of ``deposit_rate_as_of`` (key - 1pp) from the REAL ``CBR_MEETINGS`` calendar,
       netted of NDFL via the SAME shared accumulator.
 
-    The MCFTRR trading-day calendar is the MASTER axis (R-3). The deposit + RGBITR-OFZ
+    The MCFTRR trading-day calendar is the MASTER axis (R-3). The deposit + RUFLBITR-OFZ
     legs net through ONE shared :class:`YtdTaxAccumulator` per run (cross-leg YTD, the W1
     cross-sleeve design); MCFTRR (already net) is left as-is.
     """
     equity_curve = _fetch_real_series(_EQUITY_SECID)  # MCFTRR — already net (D-02)
-    ofz_gross = _fetch_real_series(_OFZ_SECID)  # RGBITR — fixed-coupon OFZ, gross, netted below
+    ruflbitr_gross = _fetch_real_series(_OFZ_SECID)  # RUFLBITR — gross, netted below (D-04)
 
     # The MCFTRR trading-day calendar IS the common axis (R-3).
     axis = [d for d, _ in equity_curve]
@@ -358,9 +355,9 @@ def _load_live_curves() -> tuple[
     # SAME running YTD before any year-boundary reset (the band crossover the shared YTD exists
     # to detect). On this cert's window both legs stay in the 13% band, so the netted curves are
     # byte-identical to the old leg-by-leg result — only the multi-year correctness changes.
-    ofz_on_axis = _forward_align(ofz_gross, axis)
+    ruflbitr_on_axis = _forward_align(ruflbitr_gross, axis)
     deposit_curve, ofz_pk_curve = net_fixed_income_legs_interleaved(
-        ofz_on_axis,
+        ruflbitr_on_axis,
         axis,
         _LIVE_DEPOSIT_BASE,
         deposit_spread_pp=_LIVE_DEPOSIT_SPREAD_PP,
@@ -393,7 +390,7 @@ def _write_gate_snapshot(
 ) -> Path:
     """Write the committed real-data snapshot fixture (R-F shape) — the ONLY network-write path.
 
-    Serializes the three NETTED legs (``equity_mcftrr_net`` / ``ofz_rgbitr_net`` /
+    Serializes the three NETTED legs (``equity_mcftrr_net`` / ``ofz_ruflbitr_net`` /
     ``deposit_net``) to the Phase-65 committed-snapshot shape (Decimal-as-string, ISO dates),
     clamped to ``_LIVE_END`` (look-ahead guard, Pitfall 3 / T-74-07), and creates the
     ``src/finalayze/backtest/data/`` directory if absent. Only ``--live --refresh-snapshot``
@@ -467,7 +464,7 @@ def _load_curves(
       net-of-tax snapshot via the FROZEN Plan-02 fail-closed loader (deterministic, no
       network).
     - ``live=True, refresh_snapshot=True`` (operator network path): FETCH + net the REAL
-      MCFTRR/RGBITR series and (re)write the committed fixture.
+      MCFTRR/RUFLBITR series and (re)write the committed fixture.
     - ``live=False`` (the non-binding CI smoke): the deterministic in-memory geometric
       curves -- CI-safe, reproducible, no token, no network. The offline ``dates`` argument
       is used only here.
@@ -535,6 +532,7 @@ def run_gate(
             equity_curve=equity_curve,
             naive_sharpes=naive_sharpes,
             naive_sortinos=naive_sortinos,
+            regime_weights=profile.regime_weights,
         )
         # Strip the non-serializable carriers. WR-04: mean_wf_sharpe is the SINGLE
         # source of truth -- _run_and_score already attached the module-computed value
@@ -645,7 +643,7 @@ def main() -> int:
         "--refresh-snapshot",
         action="store_true",
         help=(
-            "Fetch the REAL MCFTRR/RGBITR series, net them, and (re)write the committed "
+            "Fetch the REAL MCFTRR/RUFLBITR series, net them, and (re)write the committed "
             "snapshot fixture (operator-only network path; default --live reads the snapshot)."
         ),
     )
@@ -699,13 +697,13 @@ def main() -> int:
     if args.live and args.refresh_snapshot:
         print(
             f"window: REAL data {_LIVE_START.date()}..{_LIVE_END.date()} "
-            "(MCFTRR net equity + RGBITR net OFZ + real-CBR-rate net deposit; "
+            "(MCFTRR net equity + RUFLBITR net OFZ + real-CBR-rate net deposit; "
             "REFRESHED + committed snapshot, Phase 74 D-05)"
         )
     elif args.live:
         print(
             f"window: REAL data {_LIVE_START.date()}..{_LIVE_END.date()} "
-            "(committed net-of-tax snapshot: MCFTRR/RGBITR/deposit; offline, Phase 74 D-05)"
+            "(committed net-of-tax snapshot: MCFTRR/RUFLBITR/deposit; offline, Phase 74 D-05)"
         )
     else:
         print(

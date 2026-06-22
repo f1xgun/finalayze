@@ -5,7 +5,7 @@ NO NETWORK: every test that touches the ``--live`` path monkeypatches the script
 ``--live --refresh-snapshot`` fetch is an OPERATOR action in Plan 04 — these tests only
 exercise the CLI plumbing:
 
-- Task 1: MCFTRR (net equity, unchanged) + RGBITR (gross, then netted via one shared
+- Task 1: MCFTRR (net equity, unchanged) + RUFLBITR (gross, then netted via one shared
   ``YtdTaxAccumulator``); window to 2026-06-10; both fetches ``SystemExit``-guarded; the
   retired ``run_cut_path`` is gone (no ``cut_path`` key in the payload).
 - Task 2: default ``--live`` reads the committed snapshot via ``_load_gate_snapshot`` (no
@@ -47,9 +47,9 @@ _N_FETCH_BARS = 360  # comfortably > _N_LIVE_MIN_BARS (300) for the happy-path f
 _N_SHORT_BARS = 10  # deliberately < _N_LIVE_MIN_BARS to trip the short-fetch honesty gate
 _MCFTRR_BASE = Decimal("6000.00")  # a plausible MCFTRR index level
 _MCFTRR_DAILY = Decimal("1.0007")  # net-equity drift
-_RGBITR_BASE = Decimal("150.00")  # a plausible RGBITR fixed-coupon-index level
-_RGBITR_DAILY = Decimal("1.0004")  # fixed-coupon carry drift (positive -> nets below gross)
-_FIRST_FETCH_BAR = date(2024, 1, 3)  # the first real MCFTRR/RGBITR trading bar (R-D)
+_RUFLBITR_BASE = Decimal("150.00")  # a plausible RUFLBITR floater-index level
+_RUFLBITR_DAILY = Decimal("1.0004")  # floater carry drift (positive -> nets below gross)
+_FIRST_FETCH_BAR = date(2024, 1, 3)  # the first real MCFTRR/RUFLBITR trading bar (R-D)
 _VALID_VERDICTS = {"PASS", "PASS_AFTER_TIGHTEN", "HARD_FAIL"}
 # Phase 75 (REGIME-02/05) — the 3-unit phase verdict + per-regime block keys.
 _PHASE_VERDICT_HARD_FAIL = "HARD_FAIL"  # the honest expected phase verdict on the snapshot
@@ -69,11 +69,11 @@ def _series(base: Decimal, daily: Decimal, n: int) -> list[tuple[date, Decimal]]
 
 
 def _secid_fetch(n: int = _N_FETCH_BARS) -> Callable[..., list[tuple[date, Decimal]]]:
-    """A ``load_mcftr_series`` stand-in keyed by ``secid`` (MCFTRR vs RGBITR, distinct series)."""
+    """A ``load_mcftr_series`` stand-in keyed by ``secid`` (MCFTRR vs RUFLBITR, distinct series)."""
 
     def _fetch(secid: str = "MCFTR", **_kwargs: object) -> list[tuple[date, Decimal]]:
-        if secid == "RGBITR":
-            return _series(_RGBITR_BASE, _RGBITR_DAILY, n)
+        if secid == "RUFLBITR":
+            return _series(_RUFLBITR_BASE, _RUFLBITR_DAILY, n)
         return _series(_MCFTRR_BASE, _MCFTRR_DAILY, n)
 
     return _fetch
@@ -82,13 +82,13 @@ def _secid_fetch(n: int = _N_FETCH_BARS) -> Callable[..., list[tuple[date, Decim
 # ── Task 1 ───────────────────────────────────────────────────────────────────
 
 
-def test_live_curves_mcftrr_unchanged_rgbitr_netted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """MCFTRR equity passes through UNCHANGED (net); RGBITR is netted (differs from raw)."""
+def test_live_curves_mcftrr_unchanged_ruflbitr_netted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MCFTRR equity passes through UNCHANGED (net); RUFLBITR is netted (differs from raw)."""
     monkeypatch.setattr(rag, "load_mcftr_series", _secid_fetch())
     deposit_curve, ofz_pk_curve, equity_curve = rag._load_live_curves()
 
     raw_mcftrr = _series(_MCFTRR_BASE, _MCFTRR_DAILY, _N_FETCH_BARS)
-    raw_rgbitr = _series(_RGBITR_BASE, _RGBITR_DAILY, _N_FETCH_BARS)
+    raw_ruflbitr = _series(_RUFLBITR_BASE, _RUFLBITR_DAILY, _N_FETCH_BARS)
 
     # Equity (MCFTRR) is left as-is — it is already MOEX's net-of-tax index (D-02).
     assert equity_curve == raw_mcftrr
@@ -96,11 +96,11 @@ def test_live_curves_mcftrr_unchanged_rgbitr_netted(monkeypatch: pytest.MonkeyPa
     axis = [d for d, _ in equity_curve]
     assert [d for d, _ in deposit_curve] == axis
     assert [d for d, _ in ofz_pk_curve] == axis
-    # The OFZ leg is the NETTED RGBITR — it must differ from the raw gross series (NDFL haircut).
-    assert ofz_pk_curve != raw_rgbitr
+    # The OFZ leg is the NETTED RUFLBITR — it must differ from the raw gross series (NDFL haircut).
+    assert ofz_pk_curve != raw_ruflbitr
     # Both legs open at the gross base (principal is never taxed) then net the income increment.
-    assert ofz_pk_curve[0][1] == raw_rgbitr[0][1]
-    assert ofz_pk_curve[-1][1] < raw_rgbitr[-1][1]
+    assert ofz_pk_curve[0][1] == raw_ruflbitr[0][1]
+    assert ofz_pk_curve[-1][1] < raw_ruflbitr[-1][1]
 
 
 def test_live_mcftrr_fetch_failure_raises_systemexit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,12 +115,12 @@ def test_live_mcftrr_fetch_failure_raises_systemexit(monkeypatch: pytest.MonkeyP
         rag._load_live_curves()
 
 
-def test_live_rgbitr_short_fetch_raises_systemexit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A short RGBITR fetch trips the short-fetch honesty gate (extended to the 2nd fetch)."""
+def test_live_ruflbitr_short_fetch_raises_systemexit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A short RUFLBITR fetch trips the short-fetch honesty gate (extended to the 2nd fetch)."""
 
     def _fetch(secid: str = "MCFTR", **_kwargs: object) -> list[tuple[date, Decimal]]:
-        if secid == "RGBITR":
-            return _series(_RGBITR_BASE, _RGBITR_DAILY, _N_SHORT_BARS)  # too few bars
+        if secid == "RUFLBITR":
+            return _series(_RUFLBITR_BASE, _RUFLBITR_DAILY, _N_SHORT_BARS)  # too few bars
         return _series(_MCFTRR_BASE, _MCFTRR_DAILY, _N_FETCH_BARS)
 
     monkeypatch.setattr(rag, "load_mcftr_series", _fetch)
@@ -186,7 +186,7 @@ def _write_snapshot_file(
                 "git_sha": "test",
                 "legs": {
                     "equity_mcftrr_net": _ser(equity),
-                    "ofz_rgbitr_net": _ser(ofz),
+                    "ofz_ruflbitr_net": _ser(ofz),
                     "deposit_net": _ser(deposit),
                 },
             }
