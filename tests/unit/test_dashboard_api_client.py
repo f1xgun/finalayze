@@ -143,3 +143,29 @@ def test_get_strategies_performance_returns_list() -> None:
     )
     result = get_strategies_performance(_BASE, _KEY)
     assert isinstance(result, list)
+
+
+@respx.mock
+def test_saa_target_allocation_returns_payload() -> None:
+    payload = {
+        "portfolio_id": "p",
+        "risk_profile": "balanced",
+        "budget_rub": "1000000",
+        "legs": {"deposit": {"symbol": None, "weight": "0.25", "target_notional_rub": "250000"}},
+    }
+    respx.get(f"{_BASE}/api/v1/saa/target-allocation").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    client = ApiClient(base_url=_BASE, api_key=_KEY)
+    result = client.saa_target_allocation()
+    assert result == payload
+    assert respx.calls.last.request.headers["x-api-key"] == _KEY
+
+
+@respx.mock
+def test_saa_target_allocation_404_returns_empty() -> None:
+    respx.get(f"{_BASE}/api/v1/saa/target-allocation").mock(
+        return_value=httpx.Response(404, json={"detail": "no active SAA portfolio"})
+    )
+    client = ApiClient(base_url=_BASE, api_key=_KEY)
+    assert client.saa_target_allocation() == {}

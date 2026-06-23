@@ -51,3 +51,31 @@ def test_experiment_detail_importable() -> None:
 
 def test_decision_history_importable() -> None:
     from finalayze.dashboard.pages import decision_history  # noqa: F401
+
+
+def test_saa_allocation_render_importable() -> None:
+    from finalayze.dashboard.pages import saa_allocation
+
+    assert callable(saa_allocation.render)
+
+
+def test_saa_allocation_build_leg_rows() -> None:
+    from finalayze.dashboard.pages.saa_allocation import _build_leg_rows
+
+    data = {
+        "legs": {
+            "deposit": {"symbol": None, "weight": "0.25", "target_notional_rub": "250000.00"},
+            "equity": {"symbol": "EQMX", "weight": "0.35", "target_notional_rub": "350000.00"},
+        }
+    }
+    rows = _build_leg_rows(data)
+    by_class = {r["Asset class"]: r for r in rows}
+    assert by_class["deposit"]["Symbol"] == "(deposit - manual)"
+    assert by_class["equity"]["Symbol"] == "EQMX"
+    assert by_class["equity"]["Target notional (RUB)"] == "350000.00"
+
+
+def test_saa_allocation_build_leg_rows_empty() -> None:
+    from finalayze.dashboard.pages.saa_allocation import _build_leg_rows
+
+    assert _build_leg_rows({}) == []
