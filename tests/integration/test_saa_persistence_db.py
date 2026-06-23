@@ -327,3 +327,159 @@ def test_012_deposit_accumulators_persist_and_reload() -> None:
             await engine.dispose()
 
     asyncio.run(_run())
+
+
+def test_78_create_active_portfolio_writes_one_row() -> None:
+    """create_active_portfolio writes exactly one active=True row (P3-01)."""
+    import asyncio  # noqa: PLC0415
+    from decimal import Decimal  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: PLC0415
+
+    from finalayze.core.models import SaaPortfolioModel  # noqa: PLC0415
+    from finalayze.core.schemas import RiskProfile  # noqa: PLC0415
+    from finalayze.execution.saa_portfolio_writer import create_active_portfolio  # noqa: PLC0415
+
+    url = _db_url()
+    _upgrade_head(url)
+
+    async def _run() -> None:
+        engine = create_async_engine(url)
+        try:
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+            # Create first portfolio
+            pid1 = await create_active_portfolio(
+                session_factory,
+                budget_rub=Decimal("100000.00"),
+                risk_profile=RiskProfile.BALANCED,
+            )
+            assert pid1 is not None
+
+            # Verify exactly one active row exists
+            async with session_factory() as session:
+                active_rows = (
+                    (
+                        await session.execute(
+                            sa.select(SaaPortfolioModel).where(
+                                SaaPortfolioModel.is_active.is_(True)
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assert len(active_rows) == 1
+                assert active_rows[0].id == pid1
+                assert active_rows[0].budget_rub == Decimal("100000.00")
+                assert active_rows[0].risk_profile == "balanced"
+                assert active_rows[0].deposit_accumulators is None
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def test_78_second_create_deactivates_first() -> None:
+    """A second create_active_portfolio flips the first to is_active=False (P3-01)."""
+    import asyncio  # noqa: PLC0415
+    from decimal import Decimal  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: PLC0415
+
+    from finalayze.core.models import SaaPortfolioModel  # noqa: PLC0415
+    from finalayze.core.schemas import RiskProfile  # noqa: PLC0415
+    from finalayze.execution.saa_portfolio_writer import create_active_portfolio  # noqa: PLC0415
+
+    url = _db_url()
+    _upgrade_head(url)
+
+    async def _run() -> None:
+        engine = create_async_engine(url)
+        try:
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+            # Create first portfolio
+            pid1 = await create_active_portfolio(
+                session_factory,
+                budget_rub=Decimal("100000.00"),
+                risk_profile=RiskProfile.BALANCED,
+            )
+
+            # Create second portfolio
+            pid2 = await create_active_portfolio(
+                session_factory,
+                budget_rub=Decimal("500000.00"),
+                risk_profile=RiskProfile.GROWTH,
+            )
+
+            # Verify exactly one active row now (pid2)
+            async with session_factory() as session:
+                active_rows = (
+                    (
+                        await session.execute(
+                            sa.select(SaaPortfolioModel).where(
+                                SaaPortfolioModel.is_active.is_(True)
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assert len(active_rows) == 1
+                assert active_rows[0].id == pid2
+
+                # Verify first portfolio is inactive
+                inactive = (
+                    await session.execute(
+                        sa.select(SaaPortfolioModel).where(SaaPortfolioModel.id == pid1)
+                    )
+                ).scalar_one()
+                assert inactive.is_active is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def test_78_invalid_input_writes_zero_rows() -> None:
+    """Invalid budget/profile input raises before any write (P3-01)."""
+    import asyncio  # noqa: PLC0415
+    from decimal import Decimal  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: PLC0415
+
+    from finalayze.core.exceptions import ConfigurationError  # noqa: PLC0415
+    from finalayze.core.models import SaaPortfolioModel  # noqa: PLC0415
+    from finalayze.core.schemas import RiskProfile  # noqa: PLC0415
+    from finalayze.execution.saa_portfolio_writer import create_active_portfolio  # noqa: PLC0415
+
+    url = _db_url()
+    _upgrade_head(url)
+
+    async def _run() -> None:
+        engine = create_async_engine(url)
+        try:
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+            # Try to create with invalid profile (test setup ensures no prior rows)
+            with pytest.raises(ConfigurationError):
+                await create_active_portfolio(
+                    session_factory,
+                    budget_rub=Decimal("100000.00"),
+                    risk_profile="invalid",  # type: ignore[arg-type]
+                )
+
+            # Verify no row was written
+            async with session_factory() as session:
+                count = (
+                    await session.execute(sa.select(sa.func.count()).select_from(SaaPortfolioModel))
+                ).scalar()
+                assert count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
