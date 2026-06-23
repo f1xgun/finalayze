@@ -8,20 +8,25 @@ the deposit is mark-only with no broker API, so it can only ever surface as a Ma
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import ClassVar
 from uuid import uuid4
 
 import pytest
 
-from finalayze.core.schemas import AssetClass
+from finalayze.core.schemas import AssetClass, DepositTranche
 from finalayze.execution.broker_base import OrderRequest, OrderResult
+from finalayze.execution.deposit_broker import DepositSimulatedBroker
+from finalayze.markets.instruments import Instrument
 from finalayze.orchestration.rebalance_planner import (
     LegOutcome,
     LegSizing,
     ManualAction,
     PlannedLeg,
     RebalancePlan,
+    compute_funding_advisory,
+    plan_rebalance,
     size_auto_leg,
 )
 
@@ -224,3 +229,147 @@ class TestSizeAutoLeg:
             budget_rub=_BUDGET,
         )
         assert isinstance(sizing, LegSizing)
+
+
+def _equity_instrument() -> Instrument:
+    return Instrument(
+        symbol="EQMX",
+        market_id="moex",
+        name="VIM MOEX-Index ETF",
+        instrument_type="etf",
+        figi="TCS00A101EJ5",
+        lot_size=1,
+        currency="RUB",
+    )
+
+
+def _ofz_instrument() -> Instrument:
+    return Instrument(
+        symbol="SU29024RMFS5",
+        market_id="moex",
+        name="OFZ 29024",
+        instrument_type="bond",
+        figi="BBG01GJ1FRZ6",
+        lot_size=1,
+        currency="RUB",
+        face_value=Decimal(1000),
+        floating_coupon=True,
+    )
+
+
+class TestPlanRebalance:
+    """P79-06/07: compose plan_rebalance -- deterministic ids + deposit manual action/advisory."""
+
+    _PID = uuid4()
+    _PLAN_ID = "plan-2026Q2"
+    _AS_OF = date(2026, 6, 23)
+    _CREATED = datetime(2026, 6, 23, tzinfo=UTC)
+    _BUDGET = Decimal(1_000_000)
+    _WEIGHTS: ClassVar[dict[AssetClass, Decimal]] = {
+        AssetClass.DEPOSIT: Decimal("0.45"),
+        AssetClass.OFZ_PK: Decimal("0.25"),
+        AssetClass.EQUITY: Decimal("0.30"),
+    }
+    _PRICES: ClassVar[dict[str, Decimal]] = {"EQMX": Decimal(100), "SU29024RMFS5": Decimal(1000)}
+
+    def _plan(
+        self,
+        *,
+        current_positions: dict[str, Decimal] | None = None,
+        deposit_current: Decimal = Decimal(0),
+        deposit_broker: DepositSimulatedBroker | None = None,
+    ) -> RebalancePlan:
+        return plan_rebalance(
+            active_portfolio=(self._PID, "balanced", self._BUDGET),
+            target_weights=self._WEIGHTS,
+            current_positions=current_positions or {},
+            last_prices=self._PRICES,
+            leg_instruments={
+                AssetClass.EQUITY: _equity_instrument(),
+                AssetClass.OFZ_PK: _ofz_instrument(),
+            },
+            deposit_current_notional=deposit_current,
+            plan_id=self._PLAN_ID,
+            created_at=self._CREATED,
+            deposit_broker=deposit_broker,
+            as_of=self._AS_OF,
+        )
+
+    def test_first_build_two_auto_legs_and_one_deposit_action(self) -> None:
+        """A first build BUYs both AUTO legs and emits one DEPOSIT manual action."""
+        plan = self._plan()
+        assert {leg.asset_class for leg in plan.auto_legs} == {
+            AssetClass.EQUITY,
+            AssetClass.OFZ_PK,
+        }
+        assert all(leg.side == "BUY" for leg in plan.auto_legs)
+        assert len(plan.manual_actions) == 1
+        assert plan.manual_actions[0].asset_class is AssetClass.DEPOSIT
+
+    def test_equity_leg_sizing_and_symbol(self) -> None:
+        """0.30 * 1_000_000 / 100 = 3000 units of EQMX, routed to moex."""
+        plan = self._plan()
+        eq = next(leg for leg in plan.auto_legs if leg.asset_class is AssetClass.EQUITY)
+        assert eq.order.symbol == "EQMX"
+        assert eq.order.quantity == Decimal(3000)
+        assert eq.market_id == "moex"
+
+    def test_deterministic_client_order_ids_byte_stable(self) -> None:
+        """Same plan_id + inputs -> identical client_order_ids (replay-safe, P79-R6)."""
+        ids_a = {leg.asset_class: leg.order.client_order_id for leg in self._plan().auto_legs}
+        ids_b = {leg.asset_class: leg.order.client_order_id for leg in self._plan().auto_legs}
+        assert ids_a == ids_b
+        assert all(cid.startswith("fnz-") for cid in ids_a.values())
+        # distinct legs get distinct ids (no accidental collision)
+        assert len(set(ids_a.values())) == len(ids_a)
+
+    def test_deposit_never_produces_an_order(self) -> None:
+        """No AUTO leg is the deposit; deposit is manual-only (P79-R7)."""
+        plan = self._plan()
+        assert all(leg.asset_class is not AssetClass.DEPOSIT for leg in plan.auto_legs)
+
+    def test_positive_deposit_delta_has_no_advisory(self) -> None:
+        """Deposit underweight (delta > 0) -> a 'place' action, no funding advisory."""
+        plan = self._plan(deposit_current=Decimal(0))  # target 450k, current 0 -> +450k
+        action = plan.manual_actions[0]
+        assert action.funding_advisory is None
+        assert "place" in action.description.lower()
+
+    def test_negative_deposit_delta_advisory_no_broker_mutation(self) -> None:
+        """Deposit overweight (delta < 0) -> READ-ONLY advisory, broker UNTOUCHED (P79-R8)."""
+        tranche = DepositTranche(
+            principal=Decimal(1_000_000),
+            term_months=12,
+            annual_rate=Decimal("0.20"),
+            open_date=date(2026, 1, 1),
+            maturity_date=date(2027, 1, 1),  # > as_of -> locked, forces a last-resort break
+            broken=False,
+        )
+        broker = DepositSimulatedBroker(initial_cash=Decimal(0), tranches=[tranche])
+        before = broker.deposit_value()
+
+        # deposit overweight: current 700k > target 450k -> delta -250k -> withdraw 250k
+        plan = self._plan(deposit_current=Decimal(700_000), deposit_broker=broker)
+        advisory = plan.manual_actions[0].funding_advisory
+
+        assert advisory is not None
+        assert advisory.broke_tranche is True  # the shadow exercised the real break path
+        assert advisory.total >= Decimal(250_000)  # the need was sourced
+        # the REAL broker is untouched: no tranche broken/removed, mark unchanged.
+        assert broker.deposit_value() == before == Decimal(1_000_000)
+        assert "withdraw" in plan.manual_actions[0].description.lower()
+
+    def test_compute_funding_advisory_is_non_mutating(self) -> None:
+        """compute_funding_advisory runs the strict order on a shadow, never the real broker."""
+        tranche = DepositTranche(
+            principal=Decimal(1_000_000),
+            term_months=12,
+            annual_rate=Decimal("0.20"),
+            open_date=date(2026, 1, 1),
+            maturity_date=date(2027, 1, 1),
+            broken=False,
+        )
+        broker = DepositSimulatedBroker(initial_cash=Decimal(0), tranches=[tranche])
+        advisory = compute_funding_advisory(broker, Decimal(300_000), self._AS_OF)
+        assert advisory.total >= Decimal(300_000)
+        assert broker.deposit_value() == Decimal(1_000_000)  # unchanged

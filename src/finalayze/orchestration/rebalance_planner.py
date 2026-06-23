@@ -16,18 +16,24 @@ lands in subsequent subtasks.
 
 from __future__ import annotations
 
+import copy
+import hashlib
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
 from finalayze.config.rebalance_config import SAA_REBALANCE_BAND_PCT
 from finalayze.core.schemas import AssetClass
+from finalayze.execution.broker_base import OrderRequest
 
 if TYPE_CHECKING:
-    from datetime import datetime
+    from collections.abc import Mapping
+    from datetime import date, datetime
     from uuid import UUID
 
-    from finalayze.execution.broker_base import OrderRequest, OrderResult
+    from finalayze.execution.broker_base import OrderResult
+    from finalayze.execution.deposit_broker import DepositSimulatedBroker
+    from finalayze.markets.instruments import Instrument
     from finalayze.orchestration.allocation import FundingBreakdown
 
 Mode = Literal["DRY_RUN", "SANDBOX", "LIVE"]
@@ -35,6 +41,10 @@ Side = Literal["BUY", "SELL"]
 LegStatus = Literal["FILLED", "PARTIAL", "FAILED", "SKIPPED_BELOW_LOT"]
 
 _ZERO = Decimal(0)
+
+# The two AUTO (broker-routed) legs, in deterministic order. DEPOSIT is intentionally absent --
+# it is a MANUAL action item only (L-01), handled separately by plan_rebalance.
+_AUTO_CLASSES: tuple[AssetClass, ...] = (AssetClass.EQUITY, AssetClass.OFZ_PK)
 
 
 @dataclass(frozen=True)
@@ -164,4 +174,135 @@ def size_auto_leg(
         delta_qty=floored,
         delta_notional=delta_notional,
         target_notional=target_notional,
+    )
+
+
+def _deterministic_client_order_id(plan_id: str, asset_class: AssetClass, side: Side) -> str:
+    """Derive a stable, replay-safe client_order_id from (plan_id, asset_class, side) (P79-R6).
+
+    Re-running the planner for the same plan_id yields a byte-identical id, so the broker's
+    idempotent ``post_order(order_id=...)`` collapses accidental duplicates on the money path.
+    SHA-256 (usedforsecurity=False -- this is an identifier digest, not a security primitive),
+    truncated to a fixed 24 hex chars under the broker's ``fnz-`` convention.
+    """
+    raw = f"{plan_id}|{asset_class.value}|{side}"
+    digest = hashlib.sha256(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:24]
+    return f"fnz-{digest}"
+
+
+def _deposit_description(delta_notional: Decimal) -> str:
+    """Human-readable operator instruction for the DEPOSIT leg, by delta sign."""
+    if delta_notional > _ZERO:
+        return f"DEPOSIT: place {delta_notional} RUB on a bank deposit (underweight by this amount)"
+    if delta_notional < _ZERO:
+        return (
+            f"DEPOSIT: withdraw {abs(delta_notional)} RUB from the deposit sleeve "
+            "to fund the other legs"
+        )
+    return "DEPOSIT: on target, no action"
+
+
+def compute_funding_advisory(
+    deposit_broker: DepositSimulatedBroker,
+    need: Decimal,
+    as_of: date,
+) -> FundingBreakdown:
+    """Compute a READ-ONLY deposit funding breakdown WITHOUT mutating the real broker (P79-R8).
+
+    The strict lockup-respecting order (matured -> income -> cash -> last-resort break) is the
+    same one the analytics path uses, but here it runs on a ``deepcopy`` SHADOW of the broker so
+    the real deposit sleeve is never broken/withdrawn. The returned ``FundingBreakdown`` tells the
+    operator how much to raise and from where; the operator performs the actual deposit move.
+    """
+    from finalayze.orchestration.allocation import (  # noqa: PLC0415 -- avoid load-time coupling
+        _fund_underweight_breakdown,
+    )
+
+    shadow = copy.deepcopy(deposit_broker)
+    return _fund_underweight_breakdown(shadow, need, as_of)
+
+
+def plan_rebalance(
+    *,
+    active_portfolio: tuple[UUID, str, Decimal],
+    target_weights: Mapping[AssetClass, Decimal],
+    current_positions: Mapping[str, Decimal],
+    last_prices: Mapping[str, Decimal],
+    leg_instruments: Mapping[AssetClass, Instrument],
+    deposit_current_notional: Decimal,
+    plan_id: str,
+    created_at: datetime,
+    mode: Mode = "DRY_RUN",
+    deposit_broker: DepositSimulatedBroker | None = None,
+    as_of: date | None = None,
+) -> RebalancePlan:
+    """Turn target weights + current holdings into a REBALANCE PLAN (pure, P79-R1/R6/R7/R8).
+
+    For each AUTO class (EQUITY, OFZ_PK): ``target = budget * weight``, size the signed delta
+    against the current holding (``size_auto_leg``), and emit a ``PlannedLeg`` with a
+    deterministic ``OrderRequest`` (or nothing, when within-band / below-one-lot). The DEPOSIT
+    class becomes a single ``ManualAction`` (never an order); when the deposit is overweight
+    (negative delta) and a ``deposit_broker`` + ``as_of`` are supplied, a READ-ONLY funding
+    advisory is attached. The planner owns no broker handle and performs no I/O.
+    """
+    portfolio_id, risk_profile, budget_rub = active_portfolio
+
+    auto_legs: list[PlannedLeg] = []
+    for asset_class in _AUTO_CLASSES:
+        instrument = leg_instruments[asset_class]
+        symbol = instrument.symbol
+        target_notional = budget_rub * target_weights[asset_class]
+        est_price = last_prices[symbol]
+        current_qty = current_positions.get(symbol, _ZERO)
+        sizing = size_auto_leg(
+            target_notional=target_notional,
+            est_price=est_price,
+            current_qty=current_qty,
+            lot_size=instrument.lot_size,
+            budget_rub=budget_rub,
+        )
+        if sizing is None:
+            continue
+        order = OrderRequest(
+            symbol=symbol,
+            side=sizing.side,
+            quantity=sizing.delta_qty,
+            client_order_id=_deterministic_client_order_id(plan_id, asset_class, sizing.side),
+        )
+        auto_legs.append(
+            PlannedLeg(
+                asset_class=asset_class,
+                market_id=instrument.market_id,
+                order=order,
+                side=sizing.side,
+                target_notional=target_notional,
+                est_price=est_price,
+            )
+        )
+
+    # DEPOSIT -> MANUAL action item only (mark-only, no broker API).
+    deposit_target = budget_rub * target_weights[AssetClass.DEPOSIT]
+    deposit_delta = deposit_target - deposit_current_notional
+    advisory: FundingBreakdown | None = None
+    if deposit_delta < _ZERO and deposit_broker is not None and as_of is not None:
+        advisory = compute_funding_advisory(deposit_broker, abs(deposit_delta), as_of)
+    manual_actions = (
+        ManualAction(
+            asset_class=AssetClass.DEPOSIT,
+            description=_deposit_description(deposit_delta),
+            target_notional=deposit_target,
+            current_notional=deposit_current_notional,
+            funding_advisory=advisory,
+        ),
+    )
+
+    return RebalancePlan(
+        plan_id=plan_id,
+        created_at=created_at,
+        portfolio_id=portfolio_id,
+        risk_profile=risk_profile,
+        budget_rub=budget_rub,
+        mode=mode,
+        auto_legs=tuple(auto_legs),
+        manual_actions=manual_actions,
     )
