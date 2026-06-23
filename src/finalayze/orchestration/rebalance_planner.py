@@ -157,7 +157,8 @@ def size_auto_leg(
     current_notional = current_qty * est_price
     delta_notional = target_notional - current_notional
 
-    # No-churn / dust band on the signed RUB delta -- dust must not churn the book.
+    # No-churn / dust band on the signed RUB delta -- dust must not churn the book. Strict ``<``:
+    # a delta EXACTLY at the band threshold trades (band = the suppress-below boundary, INFO-03).
     if abs(delta_notional) < band_pct * budget_rub:
         return None
 
@@ -244,7 +245,15 @@ def _require_resolved_instruments(leg_instruments: Mapping[AssetClass, Instrumen
 def _assert_notional_sane(
     budget_rub: Decimal, target_weights: Mapping[AssetClass, Decimal]
 ) -> None:
-    """Guard the weight vector: every leg target >= 0, none > budget, sum == budget (P79-R12)."""
+    """Guard the weight vector: complete, every leg target >= 0, none > budget, sum == budget.
+
+    A missing leg is an unsound weight vector and raises a clear ``ValueError`` (P79-R12) rather
+    than an opaque ``KeyError`` from the target computation below (WR-02).
+    """
+    missing = [ac.value for ac in AssetClass if ac not in target_weights]
+    if missing:
+        msg = f"weight vector is missing legs: {missing} (must define all of deposit/ofz_pk/equity)"
+        raise ValueError(msg)
     targets = {ac: budget_rub * target_weights[ac] for ac in AssetClass}
     for asset_class, target in targets.items():
         if target < _ZERO:
@@ -297,6 +306,10 @@ def plan_rebalance(
         instrument = leg_instruments[asset_class]
         symbol = instrument.symbol
         target_notional = budget_rub * target_weights[asset_class]
+        if symbol not in last_prices:
+            # Fail loud like the FIGI guard (P79-R13) rather than an opaque KeyError (INFO-01).
+            msg = f"no est_price for the {asset_class.value} leg symbol {symbol!r}"
+            raise ValueError(msg)
         est_price = last_prices[symbol]
         current_qty = current_positions.get(symbol, _ZERO)
         sizing = size_auto_leg(

@@ -127,6 +127,23 @@ def test_failed_and_below_lot_classified() -> None:
     assert by_class[AssetClass.OFZ_PK] == "SKIPPED_BELOW_LOT"
 
 
+def test_failed_reason_mentioning_lot_size_is_not_misclassified_skipped() -> None:
+    """A FAILED whose reason merely mentions a lot size stays FAILED, not SKIPPED (WR-01)."""
+    broker = _ProgrammedBroker(
+        {
+            "EQMX": OrderResult(
+                filled=False,
+                symbol="EQMX",
+                quantity=Decimal(0),
+                reason="order rejected: lot size mismatch on instrument",
+            ),
+        }
+    )
+    plan = _plan((_leg(AssetClass.EQUITY, "EQMX", 100),))
+    outcomes = submit_rebalance_plan(plan, _router(broker), ModeManager())
+    assert outcomes[0].status == "FAILED"
+
+
 def test_failed_leg_does_not_abort_others() -> None:
     """A broker that RAISES on a leg isolates that failure; other legs still execute."""
     # The raising broker hits both legs; assert both come back as FAILED outcomes (not an abort).

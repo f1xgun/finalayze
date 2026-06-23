@@ -30,7 +30,10 @@ if TYPE_CHECKING:
 _log = structlog.get_logger()
 
 _ZERO = Decimal(0)
-_LOT_REJECT_MARKER = "lot size"  # TinkoffBroker's below-lot reject: "... less than lot size N"
+# TinkoffBroker's below-lot reject reason is exactly "Quantity X is less than lot size N"
+# (tinkoff_broker.py). Match that PRECISE phrase -- NOT a generic "lot size" -- so a genuine FAILED
+# order whose reason merely mentions a lot size is never silently downgraded to SKIPPED (WR-01).
+_LOT_REJECT_MARKER = "less than lot size"
 
 
 def _classify_outcome(result: OrderResult, requested_qty: Decimal) -> LegStatus:
@@ -40,6 +43,11 @@ def _classify_outcome(result: OrderResult, requested_qty: Decimal) -> LegStatus:
     - filled, less than requested  -> PARTIAL
     - not filled, below-lot reject  -> SKIPPED_BELOW_LOT
     - not filled, anything else    -> FAILED
+
+    SKIPPED_BELOW_LOT is a DEFENSIVE (belt-and-suspenders) path: the planner already floors each
+    AUTO qty to the lot size and emits no order below one lot (``size_auto_leg``), so a below-lot
+    order should not normally reach the broker -- it is reachable only on a planner/broker
+    lot-size disagreement (INFO-02).
     """
     if result.filled:
         return "PARTIAL" if result.quantity < requested_qty else "FILLED"

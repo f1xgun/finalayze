@@ -464,3 +464,32 @@ class TestPlanRebalanceGuards:
             weights=self._GOOD_WEIGHTS,
         )
         assert len(plan.auto_legs) == 2
+
+    def test_missing_weight_leg_raises_clear_value_error(self) -> None:
+        """A weight vector missing a leg raises a clear ValueError, not a KeyError (WR-02)."""
+        incomplete = {AssetClass.DEPOSIT: Decimal("0.5"), AssetClass.EQUITY: Decimal("0.5")}
+        with pytest.raises(ValueError, match="missing legs"):
+            self._call(
+                instruments={
+                    AssetClass.EQUITY: _equity_instrument(),
+                    AssetClass.OFZ_PK: _ofz_instrument(),
+                },
+                weights=incomplete,
+            )
+
+    def test_missing_est_price_raises_clear_value_error(self) -> None:
+        """A leg symbol absent from last_prices fails loud, not a bare KeyError (INFO-01)."""
+        with pytest.raises(ValueError, match="est_price"):
+            plan_rebalance(
+                active_portfolio=(uuid4(), "balanced", Decimal(1_000_000)),
+                target_weights=self._GOOD_WEIGHTS,
+                current_positions={},
+                last_prices={"EQMX": Decimal(100)},  # SU29024RMFS5 price missing
+                leg_instruments={
+                    AssetClass.EQUITY: _equity_instrument(),
+                    AssetClass.OFZ_PK: _ofz_instrument(),
+                },
+                deposit_current_notional=Decimal(0),
+                plan_id="p",
+                created_at=datetime(2026, 6, 23, tzinfo=UTC),
+            )
