@@ -23,6 +23,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
 from finalayze.config.rebalance_config import SAA_REBALANCE_BAND_PCT
+from finalayze.core.exceptions import InstrumentNotFoundError
 from finalayze.core.schemas import AssetClass
 from finalayze.execution.broker_base import OrderRequest
 
@@ -41,6 +42,8 @@ Side = Literal["BUY", "SELL"]
 LegStatus = Literal["FILLED", "PARTIAL", "FAILED", "SKIPPED_BELOW_LOT"]
 
 _ZERO = Decimal(0)
+# Notional sanity tolerance: leg targets must sum to the budget within this RUB epsilon (P79-R12).
+_NOTIONAL_TOLERANCE = Decimal("0.01")
 
 # The two AUTO (broker-routed) legs, in deterministic order. DEPOSIT is intentionally absent --
 # it is a MANUAL action item only (L-01), handled separately by plan_rebalance.
@@ -222,6 +225,40 @@ def compute_funding_advisory(
     return _fund_underweight_breakdown(shadow, need, as_of)
 
 
+def _require_resolved_instruments(leg_instruments: Mapping[AssetClass, Instrument]) -> None:
+    """Fail loud if any AUTO leg is missing an instrument or a FIGI (P79-R13).
+
+    Validated UPFRONT across ALL auto legs so a missing FIGI aborts the WHOLE plan -- there is
+    never a half-rebalance where one leg's order is built and another's silently dropped.
+    """
+    for asset_class in _AUTO_CLASSES:
+        instrument = leg_instruments.get(asset_class)
+        if instrument is None or not instrument.figi:
+            msg = (
+                f"no resolved FIGI for the {asset_class.value} leg; aborting the whole plan "
+                "(no half-rebalance)"
+            )
+            raise InstrumentNotFoundError(msg)
+
+
+def _assert_notional_sane(
+    budget_rub: Decimal, target_weights: Mapping[AssetClass, Decimal]
+) -> None:
+    """Guard the weight vector: every leg target >= 0, none > budget, sum == budget (P79-R12)."""
+    targets = {ac: budget_rub * target_weights[ac] for ac in AssetClass}
+    for asset_class, target in targets.items():
+        if target < _ZERO:
+            msg = f"leg {asset_class.value} target notional is negative: {target}"
+            raise ValueError(msg)
+        if target > budget_rub:
+            msg = f"leg {asset_class.value} target {target} exceeds the budget {budget_rub}"
+            raise ValueError(msg)
+    total = sum(targets.values(), _ZERO)
+    if abs(total - budget_rub) >= _NOTIONAL_TOLERANCE:
+        msg = f"leg targets sum to {total}, which != budget {budget_rub} (weights must sum to 1)"
+        raise ValueError(msg)
+
+
 def plan_rebalance(
     *,
     active_portfolio: tuple[UUID, str, Decimal],
@@ -244,8 +281,16 @@ def plan_rebalance(
     class becomes a single ``ManualAction`` (never an order); when the deposit is overweight
     (negative delta) and a ``deposit_broker`` + ``as_of`` are supplied, a READ-ONLY funding
     advisory is attached. The planner owns no broker handle and performs no I/O.
+
+    Raises:
+        InstrumentNotFoundError: If an AUTO leg has no resolved instrument/FIGI (whole-plan abort).
+        ValueError: If the weight vector is unsound (negative / over-budget / not summing to 1).
     """
     portfolio_id, risk_profile, budget_rub = active_portfolio
+
+    # Validate UPFRONT (fail fast, no half-plan) before constructing any order.
+    _require_resolved_instruments(leg_instruments)
+    _assert_notional_sane(budget_rub, target_weights)
 
     auto_legs: list[PlannedLeg] = []
     for asset_class in _AUTO_CLASSES:

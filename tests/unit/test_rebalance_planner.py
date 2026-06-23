@@ -15,6 +15,7 @@ from uuid import uuid4
 
 import pytest
 
+from finalayze.core.exceptions import InstrumentNotFoundError
 from finalayze.core.schemas import AssetClass, DepositTranche
 from finalayze.execution.broker_base import OrderRequest, OrderResult
 from finalayze.execution.deposit_broker import DepositSimulatedBroker
@@ -373,3 +374,93 @@ class TestPlanRebalance:
         advisory = compute_funding_advisory(broker, Decimal(300_000), self._AS_OF)
         assert advisory.total >= Decimal(300_000)
         assert broker.deposit_value() == Decimal(1_000_000)  # unchanged
+
+
+class TestPlanRebalanceGuards:
+    """P79-08/09: FIGI fail-loud whole-plan abort + notional sanity guard."""
+
+    _GOOD_WEIGHTS: ClassVar[dict[AssetClass, Decimal]] = {
+        AssetClass.DEPOSIT: Decimal("0.45"),
+        AssetClass.OFZ_PK: Decimal("0.25"),
+        AssetClass.EQUITY: Decimal("0.30"),
+    }
+    _PRICES: ClassVar[dict[str, Decimal]] = {"EQMX": Decimal(100), "SU29024RMFS5": Decimal(1000)}
+
+    def _call(
+        self,
+        *,
+        instruments: dict[AssetClass, Instrument],
+        weights: dict[AssetClass, Decimal],
+    ) -> RebalancePlan:
+        return plan_rebalance(
+            active_portfolio=(uuid4(), "balanced", Decimal(1_000_000)),
+            target_weights=weights,
+            current_positions={},
+            last_prices=self._PRICES,
+            leg_instruments=instruments,
+            deposit_current_notional=Decimal(0),
+            plan_id="p",
+            created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        )
+
+    def test_missing_figi_aborts_whole_plan(self) -> None:
+        """An AUTO leg whose instrument has no FIGI aborts the WHOLE plan (P79-R13)."""
+        no_figi = Instrument(
+            symbol="EQMX", market_id="moex", name="x", instrument_type="etf", figi=None, lot_size=1
+        )
+        with pytest.raises(InstrumentNotFoundError):
+            self._call(
+                instruments={AssetClass.EQUITY: no_figi, AssetClass.OFZ_PK: _ofz_instrument()},
+                weights=self._GOOD_WEIGHTS,
+            )
+
+    def test_missing_leg_instrument_aborts(self) -> None:
+        """A missing AUTO-leg instrument aborts the plan (no half-rebalance)."""
+        with pytest.raises(InstrumentNotFoundError):
+            self._call(
+                instruments={AssetClass.EQUITY: _equity_instrument()},  # OFZ_PK missing
+                weights=self._GOOD_WEIGHTS,
+            )
+
+    def test_weights_not_summing_to_budget_rejected(self) -> None:
+        """A weight vector that does not sum to 1 (targets != budget) is rejected (P79-R12)."""
+        over = {
+            AssetClass.DEPOSIT: Decimal("0.45"),
+            AssetClass.OFZ_PK: Decimal("0.25"),
+            AssetClass.EQUITY: Decimal("0.40"),  # sums to 1.10
+        }
+        with pytest.raises(ValueError, match="sum"):
+            self._call(
+                instruments={
+                    AssetClass.EQUITY: _equity_instrument(),
+                    AssetClass.OFZ_PK: _ofz_instrument(),
+                },
+                weights=over,
+            )
+
+    def test_negative_weight_rejected(self) -> None:
+        """A negative leg weight (negative target notional) is rejected (P79-R12)."""
+        negative = {
+            AssetClass.DEPOSIT: Decimal("-0.10"),
+            AssetClass.OFZ_PK: Decimal("0.40"),
+            AssetClass.EQUITY: Decimal("0.70"),  # sums to 1.00 but deposit is negative
+        }
+        with pytest.raises(ValueError, match="negative"):
+            self._call(
+                instruments={
+                    AssetClass.EQUITY: _equity_instrument(),
+                    AssetClass.OFZ_PK: _ofz_instrument(),
+                },
+                weights=negative,
+            )
+
+    def test_good_weights_and_figis_pass(self) -> None:
+        """A well-formed weight vector with resolved FIGIs builds both AUTO legs."""
+        plan = self._call(
+            instruments={
+                AssetClass.EQUITY: _equity_instrument(),
+                AssetClass.OFZ_PK: _ofz_instrument(),
+            },
+            weights=self._GOOD_WEIGHTS,
+        )
+        assert len(plan.auto_legs) == 2
