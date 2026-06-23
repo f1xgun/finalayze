@@ -942,3 +942,91 @@ class TradingPersistence:
             self._persist_news_article_async(article, impact_result),
             table="news_articles",
         )
+
+    async def _upsert_deposit_tranches_async(
+        self,
+        tranches: list[Any],
+        portfolio_id: Any,
+    ) -> None:
+        """Upsert deposit tranches by id via PostgreSQL ON CONFLICT (Phase 77 P2-05).
+
+        For per-bar accrual updates: each tranche row is updated in-place via
+        on_conflict_do_update, never duplicated. The updated_at timestamp is
+        refreshed on every bar. Called from DepositSimulatedBroker.accrue().
+
+        Args:
+            tranches: List of DepositTranche dataclass instances.
+            portfolio_id: UUID of the parent portfolio.
+        """
+        from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: PLC0415
+
+        from finalayze.core.models import DepositTrancheModel  # noqa: PLC0415
+        from finalayze.core.schemas import DepositTranche  # noqa: PLC0415
+
+        if not tranches:
+            return
+        factory = self._get_bg_session_factory()
+        async with factory() as session:
+            # DepositTranche carries no persistent id, so derive a STABLE row id from the full
+            # tranche IDENTITY: repeated per-bar accrual upserts then UPDATE the same row (never
+            # duplicate). LIMITATION (P2 MVP): two byte-identical tranches -- same portfolio, dates,
+            # term, principal AND rate -- collapse to one row; an ASV-split of identical same-day
+            # same-term deposits across banks would need bank_id (or a real id) in the key, deferred
+            # until DepositTranche carries one. The standard one-tranche-per-term ladder is fine.
+            import uuid as _uuid  # noqa: PLC0415
+
+            rows_to_upsert = []
+            for tranche in tranches:
+                if not isinstance(tranche, DepositTranche):  # pragma: no cover
+                    continue
+                tranche_id = _uuid.uuid5(
+                    _uuid.NAMESPACE_DNS,
+                    f"{portfolio_id}-{tranche.open_date}-{tranche.maturity_date}"
+                    f"-{tranche.term_months}-{tranche.principal}-{tranche.annual_rate}",
+                )
+                rows_to_upsert.append(
+                    {
+                        "id": tranche_id,
+                        "portfolio_id": portfolio_id,
+                        "principal": tranche.principal,
+                        "term_months": tranche.term_months,
+                        "annual_rate": tranche.annual_rate,
+                        "open_date": tranche.open_date,
+                        "maturity_date": tranche.maturity_date,
+                        "accrued_net": tranche.accrued_net,
+                        "accrued_gross": tranche.accrued_gross,
+                        "broken": tranche.broken,
+                        "bank_id": None,
+                        "updated_at": datetime.now(UTC),
+                    }
+                )
+
+            # PostgreSQL ON CONFLICT DO UPDATE: update accrued_* / broken / updated_at
+            # if the row already exists, else insert.
+            stmt = pg_insert(DepositTrancheModel).values(rows_to_upsert)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["id"],
+                set_={
+                    "accrued_net": stmt.excluded.accrued_net,
+                    "accrued_gross": stmt.excluded.accrued_gross,
+                    "broken": stmt.excluded.broken,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+    async def upsert_deposit_tranches_async(
+        self,
+        tranches: list[Any],
+        portfolio_id: Any,
+    ) -> None:
+        """Async wrapper for deposit tranche upsert (for async contexts, Phase 77 P2-05)."""
+        if not tranches:
+            return
+        await self._persist_to_db_async(
+            self._upsert_deposit_tranches_async(tranches, portfolio_id),
+            table="deposit_tranches",
+            portfolio=str(portfolio_id),
+            tranche_count=len(tranches),
+        )
