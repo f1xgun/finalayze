@@ -127,6 +127,11 @@ async def create_active_portfolio(
       1. Deactivate all rows with is_active=True.
       2. Insert the new active portfolio row.
 
+    SINGLE-ACTIVE is enforced at the APP level (one atomic txn), assuming a SINGLE writer
+    (the human-driven CLI). Two concurrent creates under READ COMMITTED could both deactivate
+    + insert and leave two active rows (WR-02); a DB partial-unique index (``WHERE is_active``)
+    is the deferred durable hardening (decision D-3).
+
     All validation (budget, profile, profile availability in config) must occur
     BEFORE this call. Validation failures in this function are precondition
     violations (should never happen in production code).
@@ -146,10 +151,13 @@ async def create_active_portfolio(
 
     from finalayze.core.models import SaaPortfolioModel  # noqa: PLC0415
 
-    # Pre-flight: ensure the profile exists in the config (fail-closed).
+    # Pre-flight: ensure the profile exists in the config (fail-closed). ``getattr`` guards
+    # off-contract (non-enum) input so a bad value degrades to ConfigurationError, never an
+    # AttributeError on ``.value`` (BL-01).
     profiles = load_allocation_profiles()
     if risk_profile not in profiles:
-        msg = f"risk profile {risk_profile.value!r} not in allocation_profiles.yaml"
+        name = getattr(risk_profile, "value", risk_profile)
+        msg = f"risk profile {name!r} not in allocation_profiles.yaml"
         raise ConfigurationError(msg)
 
     new_portfolio_id: UUID | None = None

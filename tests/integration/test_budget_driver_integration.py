@@ -66,7 +66,11 @@ def test_budget_driver_scale_invariant_and_cost_linear() -> None:
     assert small.rebalance_cost > Decimal(0), "the drifting book must actually trade (non-hollow)"
     assert large.rebalance_cost == small.rebalance_cost * _TEN
 
-    # realized NDFL likewise scales exactly 10x (FIFO gain on the real, 10x-priced delta).
+    # realized NDFL scales exactly 10x ONLY while the gain stays in the 13% band. NDFL is
+    # PROGRESSIVE (15% above NDFL_PROGRESSIVE_THRESHOLD = 2.4M RUB, core/ndfl.py); at the 1M
+    # budget the realized gain is ~7.5k (NDFL ~977 = gain*0.13), far below the crossing -- so
+    # exact-10x holds. Bumping _LARGE past the ~2.4M-gain band would correctly break this for a
+    # progressive-tax reason (not a bug); keep _LARGE provably below the crossing (WR-01).
     if small.realized_ndfl > Decimal(0):
         assert large.realized_ndfl == small.realized_ndfl * _TEN
 

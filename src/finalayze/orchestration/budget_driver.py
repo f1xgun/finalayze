@@ -140,12 +140,10 @@ def _rescale_curve(
         Rescaled curve with the same dates but multiplied values.
     """
     if not curve or curve[0][1] == _ZERO:
-        _log.warning(
-            "rescale_curve_edge_case",
-            curve_len=len(curve),
-            first_value=str(curve[0][1]) if curve else "empty",
-        )
-        return curve
+        # Fail loud: returning the curve unscaled would silently corrupt the opening notional
+        # by orders of magnitude on a money path (WR-03) -- a wrong allocation, not an error.
+        msg = f"cannot rescale curve: empty or zero base value (len={len(curve)})"
+        raise ValueError(msg)
 
     base_value = curve[0][1]
     scale_factor = target_notional / base_value

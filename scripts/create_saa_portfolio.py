@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -55,6 +56,16 @@ def main() -> int:
 
     # Load .env
     load_dotenv()
+
+    # Fail loud on a money path: get_async_session_factory() silently defaults to a localhost
+    # DB in DEBUG mode, which would write the portfolio to the WRONG database. Require an explicit
+    # DB URL env var so a missing config is a clear error, not a silent mis-target (IN-01).
+    if not (os.environ.get("FINALAYZE_DATABASE_URL") or os.environ.get("DATABASE_URL")):
+        _log.error(
+            "database_url_not_set",
+            error="set FINALAYZE_DATABASE_URL (or DATABASE_URL) before creating a portfolio",
+        )
+        return 1
 
     # Get session factory (will raise if DB env unset)
     try:

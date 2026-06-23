@@ -62,20 +62,16 @@ class TestRescaleCurve:
         assert result[0][1] == Decimal(5000)
         assert result[1][1] == Decimal(5250)
 
-    def test_rescale_empty_curve_unchanged(self) -> None:
-        """Empty curve returns unchanged."""
-        curve: list[tuple[date, Decimal]] = []
-        result = _rescale_curve(curve, Decimal(100000))
-        assert result == []
+    def test_rescale_empty_curve_raises(self) -> None:
+        """An empty curve fails loud rather than silently returning unscaled (WR-03)."""
+        with pytest.raises(ValueError, match="cannot rescale"):
+            _rescale_curve([], Decimal(100000))
 
-    def test_rescale_zero_base_returns_unchanged(self) -> None:
-        """Zero base value returns curve unchanged (edge case)."""
-        curve = [
-            (date(2026, 1, 1), Decimal(0)),
-            (date(2026, 1, 2), Decimal(100)),
-        ]
-        result = _rescale_curve(curve, Decimal(100000))
-        assert result == curve  # unchanged
+    def test_rescale_zero_base_raises(self) -> None:
+        """A zero base fails loud -- a silent unscaled return would corrupt the notional (WR-03)."""
+        curve = [(date(2026, 1, 1), Decimal(0)), (date(2026, 1, 2), Decimal(100))]
+        with pytest.raises(ValueError, match="cannot rescale"):
+            _rescale_curve(curve, Decimal(100000))
 
     def test_rescale_single_value_curve(self) -> None:
         """Single-point curve rescales correctly."""

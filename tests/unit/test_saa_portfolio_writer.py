@@ -68,9 +68,11 @@ class TestCoerceBudget:
         assert result == Decimal("100000.00")
 
     def test_coerce_float_budget(self) -> None:
-        """Coerce float budget to Decimal (exact via str)."""
+        """Coerce float budget to the EXACT Decimal value via str (no binary-float drift)."""
         result = coerce_budget(100000.5)
-        # Float 100000.5 -> str -> Decimal -> quantize
+        # str(100000.5) == "100000.5" -> Decimal -> quantize(0.01); asserting the VALUE (not just
+        # the exponent) is what proves the str() path avoids float(100000.5) binary noise (IN-03).
+        assert result == Decimal("100000.50")
         assert result.as_tuple().exponent == -2
 
     def test_coerce_decimal_budget(self) -> None:
