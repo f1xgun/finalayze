@@ -68,10 +68,37 @@ def normalize_positions_to_symbols(
         try:
             registry.get(key, _MOEX)  # validate it is a known MOEX symbol
         except InstrumentNotFoundError:
-            _log.debug("normalize_positions_skip_unknown_key", key=key)
+            # A NON-ZERO unmapped holding is worth a WARNING, not a silent debug -- it may be a leg
+            # held under a drifted FIGI (SMP-02). A zero position is just noise.
+            level = _log.warning if qty != _ZERO else _log.debug
+            level("normalize_positions_skip_unknown_key", key=key, qty=str(qty))
             continue
         out[key] = qty
     return out
+
+
+def reconcile_leg_positions(
+    leg_instruments: Mapping[AssetClass, Instrument],
+    normalized_positions: Mapping[str, Decimal],
+    *,
+    raw_book_nonempty: bool,
+) -> list[AssetClass]:
+    """Return AUTO legs showing ZERO holdings against a NON-EMPTY broker book (SMP-02 guard).
+
+    A leg that normalizes to zero while the broker reported a non-empty book is a possible FIGI
+    drift / unmapped holding (the live broker FIGI did not match the snapshot FIGI). Left silent,
+    ``plan_rebalance`` would size a FULL BUY of ``budget*weight`` instead of a top-up. The caller
+    WARN-logs these so the operator verifies before submitting. It is deliberately NOT a hard fail:
+    legitimately holding zero of a leg while holding other instruments is valid (e.g. a first OFZ
+    buy), so failing would block correct rebalances.
+    """
+    if not raw_book_nonempty:
+        return []
+    return [
+        asset_class
+        for asset_class, instrument in leg_instruments.items()
+        if normalized_positions.get(instrument.symbol, _ZERO) == _ZERO
+    ]
 
 
 def resolve_leg_instruments(registry: InstrumentRegistry) -> dict[AssetClass, Instrument]:
@@ -149,9 +176,19 @@ async def run_rebalance(
 
     leg_instruments = resolve_leg_instruments(registry)
 
-    current_positions = normalize_positions_to_symbols(
-        broker_router.route(_MOEX).get_positions(), registry
-    )
+    raw_positions = broker_router.route(_MOEX).get_positions()
+    current_positions = normalize_positions_to_symbols(raw_positions, registry)
+    # SMP-02: surface a leg that shows zero against a non-empty book (possible FIGI drift) so the
+    # operator verifies before submitting -- an unmapped leg holding would inflate a BUY otherwise.
+    for asset_class in reconcile_leg_positions(
+        leg_instruments, current_positions, raw_book_nonempty=bool(raw_positions)
+    ):
+        _log.warning(
+            "rebalance_leg_zero_against_nonempty_book",
+            asset_class=asset_class.value,
+            symbol=leg_instruments[asset_class].symbol,
+            hint="possible FIGI drift / unmapped leg holding -- verify before submitting",
+        )
 
     raw_prices = fetch_last_prices([inst.symbol for inst in leg_instruments.values()])
     last_prices: dict[str, Decimal] = {}

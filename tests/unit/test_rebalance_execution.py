@@ -24,6 +24,7 @@ from finalayze.orchestration import rebalance_execution
 from finalayze.orchestration.rebalance_execution import (
     format_rebalance_plan,
     normalize_positions_to_symbols,
+    reconcile_leg_positions,
     resolve_leg_instruments,
     run_rebalance,
     to_rub_price,
@@ -308,3 +309,27 @@ def test_format_rebalance_plan_renders_legs_actions_and_preview() -> None:
     assert "BUY" in rendered
     assert "place 250000 RUB" in rendered
     assert "preview -- no orders submitted" in rendered
+
+
+class TestReconcileLegPositions:
+    """SMP-02 guard: flag a leg showing zero holdings against a non-empty broker book."""
+
+    def test_flags_zero_leg_against_nonempty_book(self) -> None:
+        """A leg missing from normalized positions while the book is non-empty is flagged."""
+        legs = resolve_leg_instruments(build_default_registry())
+        # equity present, OFZ absent (e.g. its live FIGI drifted and was dropped).
+        flagged = reconcile_leg_positions(
+            legs, {_EQUITY_SYMBOL: Decimal(100)}, raw_book_nonempty=True
+        )
+        assert flagged == [AssetClass.OFZ_PK]
+
+    def test_empty_book_flags_nothing(self) -> None:
+        """An empty broker book (a genuine first build) flags nothing -- no false positive."""
+        legs = resolve_leg_instruments(build_default_registry())
+        assert reconcile_leg_positions(legs, {}, raw_book_nonempty=False) == []
+
+    def test_all_legs_present_flags_nothing(self) -> None:
+        """Both legs present in normalized positions -> no flag."""
+        legs = resolve_leg_instruments(build_default_registry())
+        positions = {_EQUITY_SYMBOL: Decimal(100), _OFZ_SYMBOL: Decimal(50)}
+        assert reconcile_leg_positions(legs, positions, raw_book_nonempty=True) == []
