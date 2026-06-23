@@ -89,6 +89,19 @@ class ApiClient:
             return result
         return {"alerts": [], "total": 0, "page": page, "page_size": page_size}
 
+    def saa_target_allocation(self) -> dict[str, object]:
+        """Fetch the SAA target allocation from /api/v1/saa/target-allocation (Phase 81).
+
+        Returns the parsed JSON object on success; on a 404 (no active SAA portfolio) or any
+        non-2xx / non-dict response, returns an empty dict so the dashboard renders a friendly
+        empty state rather than crashing.
+        """
+        resp = self.get("/api/v1/saa/target-allocation")
+        result = resp.json()
+        if resp.is_success and isinstance(result, dict):
+            return result
+        return {}
+
 
 # ── Convenience functions used by page modules ─────────────────────────────────
 
