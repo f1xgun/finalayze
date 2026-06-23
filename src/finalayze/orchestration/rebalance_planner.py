@@ -17,13 +17,14 @@ lands in subsequent subtasks.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
+from finalayze.config.rebalance_config import SAA_REBALANCE_BAND_PCT
 from finalayze.core.schemas import AssetClass
 
 if TYPE_CHECKING:
     from datetime import datetime
-    from decimal import Decimal
     from uuid import UUID
 
     from finalayze.execution.broker_base import OrderRequest, OrderResult
@@ -32,6 +33,8 @@ if TYPE_CHECKING:
 Mode = Literal["DRY_RUN", "SANDBOX", "LIVE"]
 Side = Literal["BUY", "SELL"]
 LegStatus = Literal["FILLED", "PARTIAL", "FAILED", "SKIPPED_BELOW_LOT"]
+
+_ZERO = Decimal(0)
 
 
 @dataclass(frozen=True)
@@ -96,3 +99,69 @@ class RebalancePlan:
                     "manual action (L-01)"
                 )
                 raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class LegSizing:
+    """Pure signed sizing result for one AUTO leg (no order/instrument context yet).
+
+    ``delta_qty`` is the POSITIVE number of units to trade in direction ``side``, already
+    floored to the instrument lot size. ``delta_notional`` is the signed RUB delta
+    (``target - current``) used for the no-churn band decision.
+    """
+
+    side: Side
+    delta_qty: Decimal
+    delta_notional: Decimal
+    target_notional: Decimal
+
+
+def size_auto_leg(
+    *,
+    target_notional: Decimal,
+    est_price: Decimal,
+    current_qty: Decimal,
+    lot_size: int,
+    budget_rub: Decimal,
+    band_pct: Decimal = SAA_REBALANCE_BAND_PCT,
+) -> LegSizing | None:
+    """Size one AUTO leg from its target notional and current holding (pure, P79-R3/R4/R5).
+
+    Returns ``None`` when the leg should NOT trade:
+    - the signed RUB delta is within the no-churn band (``|delta| < band_pct * budget``), or
+    - the lot-floored trade quantity is below one lot.
+
+    Otherwise returns a ``LegSizing`` with a positive, lot-floored ``delta_qty`` and a BUY/SELL
+    ``side`` derived from the signed delta (not the absolute target).
+
+    Raises:
+        ValueError: If ``est_price`` is not positive (cannot size / would divide by zero).
+    """
+    if est_price <= _ZERO:
+        msg = f"est_price must be positive to size a leg; got {est_price}"
+        raise ValueError(msg)
+
+    current_notional = current_qty * est_price
+    delta_notional = target_notional - current_notional
+
+    # No-churn / dust band on the signed RUB delta -- dust must not churn the book.
+    if abs(delta_notional) < band_pct * budget_rub:
+        return None
+
+    target_qty = target_notional / est_price
+    delta_qty = target_qty - current_qty
+    side: Side = "BUY" if delta_qty > _ZERO else "SELL"
+
+    # Floor the ABSOLUTE delta down to the instrument lot size, mirroring the broker's
+    # floor(qty / lot) * lot rule so the planned qty equals the qty the broker will accept.
+    lot = Decimal(lot_size)
+    floored = (abs(delta_qty) // lot) * lot
+    if floored <= _ZERO:
+        return None  # below one lot -> no order (SKIPPED_BELOW_LOT at plan time)
+
+    return LegSizing(
+        side=side,
+        delta_qty=floored,
+        delta_notional=delta_notional,
+        target_notional=target_notional,
+    )

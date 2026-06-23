@@ -18,10 +18,14 @@ from finalayze.core.schemas import AssetClass
 from finalayze.execution.broker_base import OrderRequest, OrderResult
 from finalayze.orchestration.rebalance_planner import (
     LegOutcome,
+    LegSizing,
     ManualAction,
     PlannedLeg,
     RebalancePlan,
+    size_auto_leg,
 )
+
+_BUDGET = Decimal(1_000_000)
 
 _CREATED = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -121,3 +125,102 @@ def test_leg_outcome_constructs() -> None:
     )
     assert outcome.status == "FILLED"
     assert outcome.result.filled is True
+
+
+class TestSizeAutoLeg:
+    """P79-03/04/05: pure signed delta sizing, no-churn band, lot-size flooring."""
+
+    def test_first_build_is_buy(self) -> None:
+        """current=0 -> a full BUY of the lot-floored target qty (P79-R3)."""
+        sizing = size_auto_leg(
+            target_notional=Decimal(550_000),
+            est_price=Decimal(100),
+            current_qty=Decimal(0),
+            lot_size=1,
+            budget_rub=_BUDGET,
+        )
+        assert sizing is not None
+        assert sizing.side == "BUY"
+        assert sizing.delta_qty == Decimal(5500)
+
+    def test_overweight_is_sell_of_signed_delta(self) -> None:
+        """Holding more than target -> SELL the signed delta, not the absolute target (P79-R3)."""
+        sizing = size_auto_leg(
+            target_notional=Decimal(550_000),
+            est_price=Decimal(100),
+            current_qty=Decimal(6000),  # target qty is 5500 -> sell 500
+            lot_size=1,
+            budget_rub=_BUDGET,
+        )
+        assert sizing is not None
+        assert sizing.side == "SELL"
+        assert sizing.delta_qty == Decimal(500)
+
+    def test_dust_below_band_is_suppressed(self) -> None:
+        """|delta_notional| < 2% of budget -> no trade (P79-R4)."""
+        sizing = size_auto_leg(
+            target_notional=Decimal(510_000),  # vs current 500_000 -> delta 10_000 < 20_000 band
+            est_price=Decimal(100),
+            current_qty=Decimal(5000),
+            lot_size=1,
+            budget_rub=_BUDGET,
+        )
+        assert sizing is None
+
+    def test_above_band_emits(self) -> None:
+        """|delta_notional| above the band -> a real leg (P79-R4)."""
+        sizing = size_auto_leg(
+            target_notional=Decimal(530_000),  # vs current 500_000 -> delta 30_000 > 20_000 band
+            est_price=Decimal(100),
+            current_qty=Decimal(5000),
+            lot_size=1,
+            budget_rub=_BUDGET,
+        )
+        assert sizing is not None
+        assert sizing.side == "BUY"
+        assert sizing.delta_qty == Decimal(300)
+
+    def test_lot_floor_rounds_down(self) -> None:
+        """A 185-share target at lot_size 10 floors to 180 (matches the broker rule, P79-R5)."""
+        sizing = size_auto_leg(
+            target_notional=Decimal(18_500),
+            est_price=Decimal(100),
+            current_qty=Decimal(0),
+            lot_size=10,
+            budget_rub=Decimal(100_000),
+        )
+        assert sizing is not None
+        assert sizing.delta_qty == Decimal(180)
+
+    def test_below_one_lot_is_suppressed(self) -> None:
+        """A target under one lot (7 shares, lot 10) emits no leg even above the band (P79-R5)."""
+        sizing = size_auto_leg(
+            target_notional=Decimal(700),
+            est_price=Decimal(100),
+            current_qty=Decimal(0),
+            lot_size=10,
+            budget_rub=Decimal(10_000),  # band 200 < delta 700, so band passes; lot floor kills it
+        )
+        assert sizing is None
+
+    def test_zero_price_raises(self) -> None:
+        """A non-positive price cannot size a leg (avoids div-by-zero on a money path)."""
+        with pytest.raises(ValueError, match="price"):
+            size_auto_leg(
+                target_notional=Decimal(1000),
+                est_price=Decimal(0),
+                current_qty=Decimal(0),
+                lot_size=1,
+                budget_rub=_BUDGET,
+            )
+
+    def test_returns_legsizing_type(self) -> None:
+        """The sizing result is the immutable LegSizing value type."""
+        sizing = size_auto_leg(
+            target_notional=Decimal(550_000),
+            est_price=Decimal(100),
+            current_qty=Decimal(0),
+            lot_size=1,
+            budget_rub=_BUDGET,
+        )
+        assert isinstance(sizing, LegSizing)
