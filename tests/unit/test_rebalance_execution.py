@@ -22,6 +22,7 @@ from finalayze.execution.deposit_broker import DepositSimulatedBroker
 from finalayze.markets.instruments import Instrument, build_default_registry
 from finalayze.orchestration import rebalance_execution
 from finalayze.orchestration.rebalance_execution import (
+    format_rebalance_plan,
     normalize_positions_to_symbols,
     resolve_leg_instruments,
     run_rebalance,
@@ -243,3 +244,67 @@ async def test_run_rebalance_wires_deposit_mark(monkeypatch: pytest.MonkeyPatch)
     )
     deposit_action = plan.manual_actions[0]
     assert deposit_action.current_notional == Decimal(100_000)  # == deposit_value()
+
+
+async def test_run_rebalance_preview_places_no_orders(monkeypatch: pytest.MonkeyPatch) -> None:
+    """submit=False assembles the real plan but places NO orders (safe preview)."""
+    pid = uuid4()
+    _patch_db(monkeypatch, portfolio_id=pid, active=(pid, "balanced", _BUDGET), deposit=None)
+    broker = _FakeBroker(positions={})
+    plan, outcomes = await run_rebalance(
+        broker_router=BrokerRouter({"moex": broker}),
+        mode_manager=ModeManager(),
+        registry=build_default_registry(),
+        session_factory=object(),
+        clock=_CLOCK,
+        fetch_last_prices=_fetch_prices,
+        submit=False,
+    )
+    assert outcomes == []  # nothing submitted
+    assert broker.submitted == []  # the broker was never asked to place an order
+    assert len(plan.auto_legs) == 2  # but the real plan was still assembled
+
+
+def test_format_rebalance_plan_renders_legs_actions_and_preview() -> None:
+    """The formatter shows AUTO legs, the deposit MANUAL action, and a preview marker."""
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from finalayze.execution.broker_base import OrderRequest
+    from finalayze.orchestration.rebalance_planner import (
+        ManualAction,
+        PlannedLeg,
+        RebalancePlan,
+    )
+
+    leg = PlannedLeg(
+        asset_class=AssetClass.EQUITY,
+        market_id="moex",
+        order=OrderRequest(
+            symbol="EQMX", side="BUY", quantity=Decimal(3500), client_order_id="fnz-x"
+        ),
+        side="BUY",
+        target_notional=Decimal(350_000),
+        est_price=Decimal(100),
+    )
+    deposit = ManualAction(
+        asset_class=AssetClass.DEPOSIT,
+        description="DEPOSIT: place 250000 RUB on a bank deposit",
+        target_notional=Decimal(250_000),
+        current_notional=Decimal(0),
+    )
+    plan = RebalancePlan(
+        plan_id="p1",
+        created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        portfolio_id=uuid4(),
+        risk_profile="balanced",
+        budget_rub=Decimal(1_000_000),
+        mode="DRY_RUN",
+        auto_legs=(leg,),
+        manual_actions=(deposit,),
+    )
+    rendered = format_rebalance_plan(plan, [])
+    assert "EQMX" in rendered
+    assert "BUY" in rendered
+    assert "place 250000 RUB" in rendered
+    assert "preview -- no orders submitted" in rendered

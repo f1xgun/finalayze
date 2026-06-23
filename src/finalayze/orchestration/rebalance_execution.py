@@ -112,13 +112,19 @@ async def run_rebalance(
     fetch_last_prices: Callable[[list[str]], Mapping[str, Decimal]],
     mode: Mode = "DRY_RUN",
     confirm: bool = False,
+    submit: bool = True,
 ) -> tuple[RebalancePlan, list[LegOutcome]]:
     """Assemble the real inputs and run an end-to-end (sandbox) SAA rebalance (P80-R4..R7).
 
     Reads the active portfolio, computes the regime-tilted target weights for today, resolves the
     leg instruments, normalizes current positions to symbols, converts last-price quotes to RUB
-    (bond %-of-face -> RUB), loads the deposit mark, then builds (``plan_rebalance``) and submits
-    (``submit_rebalance_plan``) the plan. DRY_RUN by default; LIVE stays triple-gated.
+    (bond %-of-face -> RUB), loads the deposit mark, then builds (``plan_rebalance``) and -- when
+    ``submit`` is True -- submits (``submit_rebalance_plan``) the plan. DRY_RUN by default; LIVE
+    stays triple-gated.
+
+    ``submit=False`` is a SAFE PREVIEW: it assembles the real inputs and builds the plan but places
+    NO orders, returning ``(plan, [])`` -- used by the CLI's default dry-run preview so a no-arg run
+    never touches a broker order path.
 
     The token-dependent collaborators are injected (``broker_router``, ``fetch_last_prices``,
     ``session_factory``, ``clock``), so the whole flow is unit-testable with a fake broker + price
@@ -172,8 +178,47 @@ async def run_rebalance(
         as_of=as_of,
     )
 
+    if not submit:
+        return plan, []  # safe preview: real plan assembled, no orders placed.
+
     # submit_rebalance_plan is synchronous (blocking gRPC bridge); offload off the event loop.
     outcomes = await asyncio.to_thread(
         submit_rebalance_plan, plan, broker_router, mode_manager, confirm=confirm
     )
     return plan, outcomes
+
+
+def format_rebalance_plan(plan: RebalancePlan, outcomes: list[LegOutcome]) -> str:
+    """Render a human-readable REBALANCE PLAN summary for the CLI."""
+    lines = [
+        f"REBALANCE PLAN  portfolio={plan.portfolio_id}  budget={plan.budget_rub} RUB"
+        f"  profile={plan.risk_profile}  mode={plan.mode}",
+        f"  plan_id={plan.plan_id}",
+        "  AUTO -> Tinkoff broker orders:",
+    ]
+    if plan.auto_legs:
+        lines.extend(
+            f"    {leg.side:4} {leg.asset_class.value:7} {leg.order.symbol:14}"
+            f" qty={leg.order.quantity}  (~{leg.target_notional} RUB target)"
+            for leg in plan.auto_legs
+        )
+    else:
+        lines.append("    (none -- all AUTO legs within the no-churn band)")
+    lines.append("  MANUAL -> operator action items:")
+    for action in plan.manual_actions:
+        lines.append(f"    {action.asset_class.value}: {action.description}")
+        if action.funding_advisory is not None:
+            adv = action.funding_advisory
+            lines.append(
+                f"      funding advisory: matured={adv.from_matured} income={adv.from_income}"
+                f" cash={adv.from_cash} break={adv.from_break} (broke_tranche={adv.broke_tranche})"
+            )
+    if outcomes:
+        lines.append("  SUBMIT outcomes:")
+        lines.extend(
+            f"    {o.asset_class.value:7} {o.status:18} filled={o.result.quantity}"
+            for o in outcomes
+        )
+    else:
+        lines.append("  (preview -- no orders submitted)")
+    return "\n".join(lines)
