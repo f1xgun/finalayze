@@ -458,6 +458,23 @@ class AllocationOrchestrator:
             total_return_pct=total_return,
         )
 
+    def get_rebalance_weights(self, as_of: date) -> dict[AssetClass, Decimal]:
+        """Return the regime-tilted SAA target weights for ``as_of`` (Phase 79 P79-R15).
+
+        ADDITIVE, read-only accessor for the live weights-to-orders planner: it reuses the EXACT
+        look-ahead-safe tilt the analytics path applies at a rebalance boundary
+        (``_target_weights`` -> ``rate_regime_as_of``), so a live rebalance plan and the analytics
+        curve agree on the high_rate/easing tilt. It does NOT modify ``run()`` or any existing
+        method, and never re-runs an engine (D-12). ``legacy_cadence=False`` -> the real SAA tilt
+        (or the static profile vector when the profile carries no ``regime_weights``).
+        """
+        legs = self._target_weights(as_of, self._profile_weights(), legacy_cadence=False)
+        return {
+            AssetClass.DEPOSIT: legs.deposit,
+            AssetClass.OFZ_PK: legs.ofz_pk,
+            AssetClass.EQUITY: legs.equity,
+        }
+
     def reproduce_legacy_60_40(
         self,
         ofz_pk_curve: list[tuple[date, Decimal]],
