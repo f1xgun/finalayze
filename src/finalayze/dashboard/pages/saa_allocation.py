@@ -58,3 +58,10 @@ def render(api: ApiClient) -> None:
         "Read-only. Run a rebalance via `scripts/run_rebalance.py` (sandbox preview by default); "
         "real-money go-live is a hard stop."
     )
+
+
+# Streamlit runs this module AS A SCRIPT via st.navigation / page.run() (app.py registers it by
+# path), so rendering only happens through a module-level render() call -- mirror every other page.
+# app.py puts the shared ApiClient in session_state before page.run().
+if (_api := st.session_state.get("api")) is not None:
+    render(_api)

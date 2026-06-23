@@ -68,6 +68,7 @@ def test_returns_target_allocation() -> None:
     assert body["risk_profile"] == "balanced"
     assert body["budget_rub"] == "1000000"
     assert body["deposit_current_notional_rub"] == "0"  # no persisted deposit
+    assert body["as_of"]  # serialized ISO as-of date (AH-03)
     assert set(body["legs"]) == {"deposit", "ofz_pk", "equity"}
 
     budget = Decimal(body["budget_rub"])
