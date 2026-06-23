@@ -77,5 +77,30 @@ Indexes: `ix_deposit_tranches_portfolio_id`, `ix_saa_portfolios_is_active`.
 
 `012` applies onto `011` + reverts cleanly; static AST test passes with no DB; live-DB round-trip preserves
 `Numeric(20,2)/(8,4)` Decimal precision + tz; FK enforced; per-bar upsert UPDATEs in place (no row
-duplication) via `TradingPersistence`; replay-equivalence bit-identical across Jan-1; ruff + mypy green;
-every new file has `from __future__ import annotations` + `Decimal` for money.
+duplication) via `TradingPersistence`; ruff + mypy green; every new file has
+`from __future__ import annotations` + `Decimal` for money.
+
+---
+
+## OUTCOME — reload reconstruction (P2-06) reworked: DIRECT LOAD, no replay
+
+Adversarial code review (CR-01) caught a real correctness bug in the FIRST (replay-based) reload: it
+replayed `accrue()` over **calendar days**, but the live ladder accrues on **trading days only**
+(`backtest/engine.py:840` iterates candle timestamps, ~252/yr) and `accrue()` compounds `(1+annual)^(1/252)`
+**per call** — so a calendar replay over-compounds the mark (~365 steps where live had ~252). The original
+"replay-equivalence" gate missed it (its oracle also used calendar days: replay-vs-replay, trivially equal).
+
+**Fix (operator-directed): reload is now a DIRECT LOAD, never a replay** — cadence-independent and bit-exact.
+The broker's mutable state is persisted in two places and restored verbatim: per-tranche accrued marks →
+`deposit_tranches` (already); the broker-level year-scoped accumulators (`_ytd_deposit_gross` /
+`_running_max_key_rate` / `_current_year`) + totals + last-accrual-date → a new
+`saa_portfolios.deposit_accumulators` JSONB column. `load_deposit_broker_from_db` loads tranches (marks) +
+`serialize/restore_deposit_accumulators`, with NO replay. The binding gate is real: after persist→restore,
+the NEXT `accrue()` resumes BIT-IDENTICALLY to a never-restarted broker
+(`test_restore_then_next_accrue_matches_live`) — the cadence bug class is structurally impossible.
+
+Other review notes addressed: the upsert unit test now asserts the compiled `ON CONFLICT DO UPDATE`
+statement (not just that `execute` was called); the live-DB test asserts both indexes and the
+`ON DELETE RESTRICT` semantics. Known limitation kept: the upsert's `bank_id` is `None` and absent from the
+natural key (DepositTranche carries no `bank_id`), so the `bank_id` column is reserved/nullable until a
+later phase threads bank identity through.

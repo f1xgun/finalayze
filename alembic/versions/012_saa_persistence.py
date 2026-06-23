@@ -44,6 +44,7 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("deposit_accumulators", postgresql.JSONB(), nullable=True),
     )
     op.create_index("ix_saa_portfolios_is_active", "saa_portfolios", ["is_active"])
 

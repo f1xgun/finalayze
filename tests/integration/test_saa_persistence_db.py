@@ -88,8 +88,70 @@ def test_012_creates_saa_tables_with_correct_shape() -> None:
                 )
             ).scalar()
             assert fk_count == 1, f"deposit_tranches must have one FK; got {fk_count}"
+
+        # Both secondary indexes were created (design-doc success criterion).
+        idx_names = {ix["name"] for ix in insp.get_indexes("saa_portfolios")} | {
+            ix["name"] for ix in insp.get_indexes("deposit_tranches")
+        }
+        assert "ix_saa_portfolios_is_active" in idx_names
+        assert "ix_deposit_tranches_portfolio_id" in idx_names
     finally:
         engine.dispose()
+
+
+def test_012_on_delete_restrict_blocks_parent_delete() -> None:
+    """ON DELETE RESTRICT: deleting a portfolio that still has tranches raises (D-3 safety)."""
+    import asyncio  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+    from sqlalchemy.exc import IntegrityError  # noqa: PLC0415
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: PLC0415
+
+    from finalayze.core.models import DepositTrancheModel, SaaPortfolioModel  # noqa: PLC0415
+
+    url = _db_url()
+    _upgrade_head(url)
+    pid = uuid.uuid4()
+    tid = uuid.uuid4()
+
+    async def _run() -> None:
+        engine = create_async_engine(url)
+        try:
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with session_factory() as session:
+                session.add(
+                    SaaPortfolioModel(
+                        id=pid,
+                        risk_profile="balanced",
+                        budget_rub=Decimal(100000),
+                        is_active=True,
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+                session.add(
+                    DepositTrancheModel(
+                        id=tid,
+                        portfolio_id=pid,
+                        principal=Decimal(50000),
+                        term_months=3,
+                        annual_rate=Decimal("0.1800"),
+                        open_date=date(2026, 1, 15),
+                        maturity_date=date(2026, 4, 15),
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+                await session.commit()
+            async with session_factory() as session:
+                await session.execute(
+                    sa.delete(SaaPortfolioModel).where(SaaPortfolioModel.id == pid)
+                )
+                with pytest.raises(IntegrityError):
+                    await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
 
 
 def test_012_fk_enforced_rejects_bogus_portfolio_id() -> None:
@@ -194,6 +256,73 @@ def test_012_orm_round_trip_preserves_decimal_precision() -> None:
                 assert t.accrued_net == Decimal("123.45")
                 assert t.accrued_gross == Decimal("141.89")
                 assert t.broken is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def test_012_deposit_accumulators_persist_and_reload() -> None:
+    """deposit_accumulators JSONB persists + the loader restores broker state (P2-06)."""
+    import asyncio  # noqa: PLC0415
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: PLC0415
+
+    from finalayze.core.models import DepositTrancheModel, SaaPortfolioModel  # noqa: PLC0415
+    from finalayze.execution.deposit_loader import load_deposit_broker_from_db  # noqa: PLC0415
+
+    url = _db_url()
+    _upgrade_head(url)
+    pid = uuid.uuid4()
+    accumulators = {
+        "ytd_deposit_gross": "1234.56",
+        "running_max_key_rate": "0.1800",
+        "current_year": 2026,
+        "total_interest_gross": "1234.56",
+        "total_interest_net": "1100.00",
+        "total_tax_paid": "134.56",
+        "last_accrual_date": "2026-03-15",
+    }
+
+    async def _run() -> None:
+        engine = create_async_engine(url)
+        try:
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with session_factory() as session:
+                session.add(
+                    SaaPortfolioModel(
+                        id=pid,
+                        risk_profile="balanced",
+                        budget_rub=Decimal(100000),
+                        is_active=True,
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
+                        deposit_accumulators=accumulators,
+                    )
+                )
+                session.add(
+                    DepositTrancheModel(
+                        id=uuid.uuid4(),
+                        portfolio_id=pid,
+                        principal=Decimal(50000),
+                        term_months=3,
+                        annual_rate=Decimal("0.1800"),
+                        open_date=date(2026, 1, 15),
+                        maturity_date=date(2026, 4, 15),
+                        accrued_net=Decimal("12.34"),
+                        accrued_gross=Decimal("14.18"),
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+                await session.commit()
+
+            broker = await load_deposit_broker_from_db(pid, date(2026, 2, 1), session_factory)
+            assert broker is not None
+            assert broker._ytd_deposit_gross == Decimal("1234.56")  # noqa: SLF001
+            assert broker._running_max_key_rate == Decimal("0.1800")  # noqa: SLF001
+            assert broker._current_year == 2026  # noqa: SLF001
+            assert len(broker._tranches) == 1  # noqa: SLF001
+            assert broker._tranches[0].accrued_net == Decimal("12.34")  # noqa: SLF001
         finally:
             await engine.dispose()
 

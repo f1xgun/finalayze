@@ -573,6 +573,9 @@ class SaaPortfolioModel(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+    # Phase 77 P2-06: the deposit sleeve's broker-level accumulators (year-scoped NDFL/floor
+    # state + totals + last accrual date), persisted so reload is a DIRECT load (no replay).
+    deposit_accumulators: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
     deposit_tranches: Mapped[list[DepositTrancheModel]] = relationship(back_populates="portfolio")
 
