@@ -6,16 +6,25 @@ Instrument, fail-loud), to_rub_price (bond %-of-face -> RUB; ETF passthrough).
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 
+from finalayze.core.clock import SimulatedClock
 from finalayze.core.exceptions import InstrumentNotFoundError
-from finalayze.core.schemas import AssetClass
+from finalayze.core.modes import ModeManager
+from finalayze.core.schemas import AssetClass, DepositTranche
+from finalayze.execution.broker_base import OrderRequest, OrderResult
+from finalayze.execution.broker_router import BrokerRouter
+from finalayze.execution.deposit_broker import DepositSimulatedBroker
 from finalayze.markets.instruments import Instrument, build_default_registry
+from finalayze.orchestration import rebalance_execution
 from finalayze.orchestration.rebalance_execution import (
     normalize_positions_to_symbols,
     resolve_leg_instruments,
+    run_rebalance,
     to_rub_price,
 )
 
@@ -99,3 +108,138 @@ class TestToRubPrice:
         )
         with pytest.raises(ValueError, match="face_value"):
             to_rub_price(bond, Decimal("95.5"))
+
+
+# --- run_rebalance orchestration (P80-04..07) -------------------------------------------------
+
+_AS_OF = date(2026, 6, 23)  # easing regime (after the 2025-06-06 first cut)
+_BUDGET = Decimal(1_000_000)
+_CLOCK = SimulatedClock(datetime(2026, 6, 23, tzinfo=UTC))
+# Tinkoff-style raw quotes: equity in RUB-per-share; bond as % of face (95.5% of 1000 = 955 RUB).
+_RAW_PRICES = {_EQUITY_SYMBOL: Decimal(100), _OFZ_SYMBOL: Decimal("95.5")}
+
+
+class _FakeBroker:
+    """A fake MOEX broker: configurable positions + a FILLED submit (records orders)."""
+
+    def __init__(self, positions: dict[str, Decimal] | None = None) -> None:
+        self._positions = positions or {}
+        self.submitted: list[OrderRequest] = []
+
+    def get_positions(self) -> dict[str, Decimal]:
+        return dict(self._positions)
+
+    def submit_order(self, order: OrderRequest, fill_candle: object = None) -> OrderResult:
+        self.submitted.append(order)
+        return OrderResult(
+            filled=True, symbol=order.symbol, side=order.side, quantity=order.quantity
+        )
+
+
+def _fetch_prices(_symbols: list[str]) -> dict[str, Decimal]:
+    return dict(_RAW_PRICES)
+
+
+def _patch_db(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    portfolio_id: object,
+    active: object,
+    deposit: object,
+) -> None:
+    async def _get_active(_sf: object) -> object:
+        return active
+
+    async def _load_deposit(_pid: object, _date: object, _sf: object) -> object:
+        return deposit
+
+    monkeypatch.setattr(rebalance_execution, "get_active_portfolio", _get_active)
+    monkeypatch.setattr(rebalance_execution, "load_deposit_broker_from_db", _load_deposit)
+
+
+async def test_run_rebalance_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """End-to-end (mock DB): real weights + price conversion + plan + dry-run submit."""
+    pid = uuid4()
+    _patch_db(monkeypatch, portfolio_id=pid, active=(pid, "balanced", _BUDGET), deposit=None)
+    broker = _FakeBroker(positions={})  # first build, no holdings
+    plan, outcomes = await run_rebalance(
+        broker_router=BrokerRouter({"moex": broker}),
+        mode_manager=ModeManager(),
+        registry=build_default_registry(),
+        session_factory=object(),  # unused (DB calls patched)
+        clock=_CLOCK,
+        fetch_last_prices=_fetch_prices,
+    )
+    assert plan.budget_rub == _BUDGET
+    legs = {leg.asset_class: leg for leg in plan.auto_legs}
+    # easing-regime balanced weights at 2026-06-23: deposit 0.25 / ofz 0.40 / equity 0.35.
+    # equity: 0.35*1M / 100 = 3500 units.
+    assert legs[AssetClass.EQUITY].order.quantity == Decimal(3500)
+    # OFZ: 0.40*1M / 955 RUB = 418.8 -> floor 418. (Without the %->RUB conversion it would be
+    # 400000/95.5 = 4188 -- so asserting 418 proves to_rub_price was applied. ANTI-HOLLOW.)
+    assert legs[AssetClass.OFZ_PK].order.quantity == Decimal(418)
+    # deposit: 0.25*1M = 250k, manual action only.
+    assert plan.manual_actions[0].asset_class is AssetClass.DEPOSIT
+    assert plan.manual_actions[0].target_notional == Decimal(250_000)
+    assert len(outcomes) == 2
+    assert all(o.status == "FILLED" for o in outcomes)
+
+
+async def test_run_rebalance_no_active_portfolio_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No active portfolio -> a clear ValueError, never a silent no-op (P80-R5)."""
+    _patch_db(monkeypatch, portfolio_id=uuid4(), active=None, deposit=None)
+    with pytest.raises(ValueError, match="no active"):
+        await run_rebalance(
+            broker_router=BrokerRouter({"moex": _FakeBroker()}),
+            mode_manager=ModeManager(),
+            registry=build_default_registry(),
+            session_factory=object(),
+            clock=_CLOCK,
+            fetch_last_prices=_fetch_prices,
+        )
+
+
+async def test_run_rebalance_plan_id_deterministic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same portfolio + as_of -> identical plan_id and identical leg client_order_ids (P80-R6)."""
+    pid = uuid4()
+    _patch_db(monkeypatch, portfolio_id=pid, active=(pid, "balanced", _BUDGET), deposit=None)
+    kwargs = {
+        "mode_manager": ModeManager(),
+        "registry": build_default_registry(),
+        "session_factory": object(),
+        "clock": _CLOCK,
+        "fetch_last_prices": _fetch_prices,
+    }
+    plan_a, _ = await run_rebalance(broker_router=BrokerRouter({"moex": _FakeBroker()}), **kwargs)
+    plan_b, _ = await run_rebalance(broker_router=BrokerRouter({"moex": _FakeBroker()}), **kwargs)
+    assert plan_a.plan_id == plan_b.plan_id == f"{pid}:{_AS_OF.isoformat()}"
+    ids_a = {leg.asset_class: leg.order.client_order_id for leg in plan_a.auto_legs}
+    ids_b = {leg.asset_class: leg.order.client_order_id for leg in plan_b.auto_legs}
+    assert ids_a == ids_b
+
+
+async def test_run_rebalance_wires_deposit_mark(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deposit ManualAction reflects the loaded deposit_value() (P80-R7)."""
+    pid = uuid4()
+    tranche = DepositTranche(
+        principal=Decimal(100_000),
+        term_months=12,
+        annual_rate=Decimal("0.20"),
+        open_date=date(2026, 1, 1),
+        maturity_date=date(2027, 1, 1),
+        broken=False,
+    )
+    deposit_broker = DepositSimulatedBroker(initial_cash=Decimal(0), tranches=[tranche])
+    _patch_db(
+        monkeypatch, portfolio_id=pid, active=(pid, "balanced", _BUDGET), deposit=deposit_broker
+    )
+    plan, _ = await run_rebalance(
+        broker_router=BrokerRouter({"moex": _FakeBroker()}),
+        mode_manager=ModeManager(),
+        registry=build_default_registry(),
+        session_factory=object(),
+        clock=_CLOCK,
+        fetch_last_prices=_fetch_prices,
+    )
+    deposit_action = plan.manual_actions[0]
+    assert deposit_action.current_notional == Decimal(100_000)  # == deposit_value()
