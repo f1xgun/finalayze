@@ -25,10 +25,12 @@ from finalayze.config.rebalance_config import get_equity_symbol, get_ofz_pk_symb
 from finalayze.core.exceptions import InstrumentNotFoundError
 from finalayze.core.schemas import AssetClass, RiskProfile
 from finalayze.execution.deposit_loader import load_deposit_broker_from_db
+from finalayze.execution.rebalance_writer import persist_rebalance_run
 from finalayze.execution.saa_portfolio_writer import get_active_portfolio
 from finalayze.orchestration.allocation import AllocationOrchestrator
 from finalayze.orchestration.rebalance_executor import submit_rebalance_plan
 from finalayze.orchestration.rebalance_planner import plan_rebalance
+from finalayze.orchestration.rebalance_reconcile import reconcile_rebalance_run
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -137,6 +139,7 @@ async def run_rebalance(
     session_factory: async_sessionmaker[AsyncSession],
     clock: Clock,
     fetch_last_prices: Callable[[list[str]], Mapping[str, Decimal]],
+    nkd_by_symbol: Mapping[str, Decimal] | None = None,
     mode: Mode = "DRY_RUN",
     confirm: bool = False,
     submit: bool = True,
@@ -145,7 +148,8 @@ async def run_rebalance(
 
     Reads the active portfolio, computes the regime-tilted target weights for today, resolves the
     leg instruments, normalizes current positions to symbols, converts last-price quotes to RUB
-    (bond %-of-face -> RUB), loads the deposit mark, then builds (``plan_rebalance``) and -- when
+    (bond %-of-face -> RUB, plus the injected ``nkd_by_symbol`` accrued coupon for a dirty-price
+    bond size), loads the deposit mark, then builds (``plan_rebalance``) and -- when
     ``submit`` is True -- submits (``submit_rebalance_plan``) the plan. DRY_RUN by default; LIVE
     stays triple-gated.
 
@@ -190,13 +194,17 @@ async def run_rebalance(
             hint="possible FIGI drift / unmapped leg holding -- verify before submitting",
         )
 
+    nkd = nkd_by_symbol or {}
     raw_prices = fetch_last_prices([inst.symbol for inst in leg_instruments.values()])
     last_prices: dict[str, Decimal] = {}
     for asset_class, instrument in leg_instruments.items():
-        if instrument.symbol not in raw_prices:
-            msg = f"no last price for the {asset_class.value} leg {instrument.symbol!r}"
+        symbol = instrument.symbol
+        if symbol not in raw_prices:
+            msg = f"no last price for the {asset_class.value} leg {symbol!r}"
             raise ValueError(msg)
-        last_prices[instrument.symbol] = to_rub_price(instrument, raw_prices[instrument.symbol])
+        # Size off the DIRTY price = clean RUB (to_rub_price: bond %->RUB / equity passthrough) +
+        # accrued coupon (NKD, RUB per bond). NKD is 0 for equity (absent from the map) (P82-R6).
+        last_prices[symbol] = to_rub_price(instrument, raw_prices[symbol]) + nkd.get(symbol, _ZERO)
 
     deposit_broker = await load_deposit_broker_from_db(portfolio_id, as_of, session_factory)
     deposit_current = deposit_broker.deposit_value() if deposit_broker is not None else _ZERO
@@ -222,6 +230,23 @@ async def run_rebalance(
     outcomes = await asyncio.to_thread(
         submit_rebalance_plan, plan, broker_router, mode_manager, confirm=confirm
     )
+
+    # Reconcile filled-vs-planned and persist the audit record. Persist is BEST EFFORT: the orders
+    # are already placed, so a write failure must NOT fail the run -- log and return (P82-R7).
+    reconciliation = reconcile_rebalance_run(plan, outcomes)
+    if reconciliation.status != "COMPLETE":
+        _log.warning(
+            "rebalance_reconciliation_discrepancy",
+            plan_id=plan.plan_id,
+            status=reconciliation.status,
+            fill_rate=str(reconciliation.fill_rate),
+            alerts=list(reconciliation.alerts),
+        )
+    try:
+        await persist_rebalance_run(session_factory, plan, outcomes, reconciliation)
+    except Exception as exc:  # audit write must not fail a completed run (orders already placed)
+        _log.error("rebalance_persist_failed", plan_id=plan.plan_id, error=str(exc))
+
     return plan, outcomes
 
 

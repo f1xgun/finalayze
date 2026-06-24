@@ -61,6 +61,26 @@ def missing_env_error() -> str | None:
     return None
 
 
+def fetch_nkd_by_symbol(fetcher: object, ofz_symbol: str, as_of: object) -> dict[str, object]:
+    """Best-effort: today's accrued coupon (NKD, RUB/bond) for the OFZ leg (Phase 82 P82-R8).
+
+    Returns ``{ofz_symbol: nkd_value}`` so run_rebalance sizes the bond off the DIRTY price; an
+    empty dict on a fetch failure or no data -> sizing falls back to the clean price (no exception).
+    """
+    from datetime import UTC, datetime, time  # noqa: PLC0415
+
+    try:
+        records = fetcher.fetch_accrued_interest(  # type: ignore[attr-defined]
+            ofz_symbol,
+            datetime.combine(as_of, time.min, tzinfo=UTC),  # type: ignore[arg-type]
+            datetime.combine(as_of, time.max, tzinfo=UTC),  # type: ignore[arg-type]
+        )
+    except Exception as exc:  # NKD is an enhancement -- fall back to clean-only sizing
+        _log.warning("nkd_fetch_failed", symbol=ofz_symbol, error=str(exc))
+        return {}
+    return {ofz_symbol: records[-1].value} if records else {}
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a one-shot SAA rebalance.")
     parser.add_argument(
@@ -106,9 +126,11 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
     """Wire the sandbox broker + session factory and run (operator checkpoint; needs a token)."""
     from config.settings import Settings  # noqa: PLC0415
 
+    from finalayze.config.rebalance_config import get_ofz_pk_symbol  # noqa: PLC0415
     from finalayze.core.clock import RealClock  # noqa: PLC0415
     from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
     from finalayze.core.modes import ModeManager, WorkMode  # noqa: PLC0415
+    from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
     from finalayze.execution.broker_router import BrokerRouter  # noqa: PLC0415
     from finalayze.execution.retry import RetryPolicy  # noqa: PLC0415
     from finalayze.execution.tinkoff_broker import TinkoffBroker  # noqa: PLC0415
@@ -131,6 +153,10 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
     # LIVE requires WorkMode.REAL (which itself requires FINALAYZE_REAL_CONFIRMED=true); the
     # ModeManager construction is an extra hard-stop layer for a LIVE run.
     mode_manager = ModeManager(WorkMode.REAL if plan_mode == "LIVE" else WorkMode.SANDBOX)
+    clock = RealClock()
+    # Best-effort NKD (accrued coupon) so the OFZ leg sizes off the dirty price; {} -> clean-only.
+    fetcher = TinkoffFetcher(token=settings.tinkoff_token, registry=registry, sandbox=True)
+    nkd_by_symbol = fetch_nkd_by_symbol(fetcher, get_ofz_pk_symbol(), clock.now().date())
 
     async def _go() -> int:
         plan, outcomes = await run_rebalance(
@@ -138,8 +164,9 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
             mode_manager=mode_manager,
             registry=registry,
             session_factory=session_factory,
-            clock=RealClock(),
+            clock=clock,
             fetch_last_prices=broker.get_last_prices,
+            nkd_by_symbol=nkd_by_symbol,  # type: ignore[arg-type]
             mode=plan_mode,  # type: ignore[arg-type]
             confirm=confirm,
             submit=submit,

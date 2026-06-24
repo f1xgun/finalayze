@@ -81,3 +81,40 @@ def test_main_live_without_confirm_returns_1(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("FINALAYZE_TINKOFF_TOKEN", "tok")
     # Reaching _run would attempt a real gRPC connection; exit 1 proves the gate fires first.
     assert _CLI.main(["--mode", "live"]) == 1
+
+
+def test_fetch_nkd_by_symbol_returns_latest_value() -> None:
+    """The OFZ NKD helper returns the latest (today's) accrued-coupon value (P82-R8)."""
+    from datetime import date
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    class _Fetcher:
+        def fetch_accrued_interest(self, _symbol: str, _start: object, _end: object) -> list:
+            return [SimpleNamespace(value=Decimal("0.30")), SimpleNamespace(value=Decimal("0.55"))]
+
+    out = _CLI.fetch_nkd_by_symbol(_Fetcher(), "SU29024RMFS5", date(2026, 6, 24))
+    assert out == {"SU29024RMFS5": Decimal("0.55")}
+
+
+def test_fetch_nkd_by_symbol_empty_on_failure() -> None:
+    """A fetch failure -> {} (clean-only fallback, never raises)."""
+    from datetime import date
+
+    class _Fetcher:
+        def fetch_accrued_interest(self, _symbol: str, _start: object, _end: object) -> list:
+            msg = "gRPC down"
+            raise RuntimeError(msg)
+
+    assert _CLI.fetch_nkd_by_symbol(_Fetcher(), "SU29024RMFS5", date(2026, 6, 24)) == {}
+
+
+def test_fetch_nkd_by_symbol_empty_on_no_records() -> None:
+    """No accrued-interest records -> {} (clean-only fallback)."""
+    from datetime import date
+
+    class _Fetcher:
+        def fetch_accrued_interest(self, _symbol: str, _start: object, _end: object) -> list:
+            return []
+
+    assert _CLI.fetch_nkd_by_symbol(_Fetcher(), "SU29024RMFS5", date(2026, 6, 24)) == {}
