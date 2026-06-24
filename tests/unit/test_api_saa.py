@@ -174,3 +174,20 @@ def test_rebalance_runs_empty_when_no_runs() -> None:
         resp = _client().get(_RUNS_PATH, headers=_auth())
     assert resp.status_code == _HTTP_OK
     assert resp.json()["runs"] == []
+
+
+def test_rebalance_runs_forwards_limit_to_reader() -> None:
+    """?limit=N is honored: the value reaches list_rebalance_runs (P83-R6, AH-01)."""
+    pid = uuid4()
+    reader = AsyncMock(return_value=[])
+    with (
+        patch("finalayze.core.db.get_async_session_factory", return_value=object()),
+        patch(
+            "finalayze.api.v1.saa.get_active_portfolio",
+            new=AsyncMock(return_value=(pid, "balanced", Decimal(1_000_000))),
+        ),
+        patch("finalayze.api.v1.saa.list_rebalance_runs", new=reader),
+    ):
+        resp = _client().get(_RUNS_PATH, headers=_auth(), params={"limit": 3})
+    assert resp.status_code == _HTTP_OK
+    assert reader.await_args.kwargs["limit"] == 3  # the ?limit=3 reached the reader

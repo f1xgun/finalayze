@@ -88,21 +88,28 @@ def test_list_rebalance_runs_reads_persisted_runs() -> None:
             pid = await create_active_portfolio(
                 sf, budget_rub=Decimal(1_000_000), risk_profile=RiskProfile.BALANCED
             )
+            # Persist run-a then run-b with a gap so created_at is distinct (locks "newest first").
             for plan_id in ("run-a", "run-b"):
                 plan = _plan(pid, plan_id)
                 outcomes = _outcomes()
                 await persist_rebalance_run(
                     sf, plan, outcomes, reconcile_rebalance_run(plan, outcomes)
                 )
+                await asyncio.sleep(0.01)
 
             records = await list_rebalance_runs(sf, pid, limit=10)
             assert len(records) == 2
             assert {r.plan_id for r in records} == {"run-a", "run-b"}
             assert all(len(r.orders) == 1 for r in records)
             assert records[0].orders[0].symbol == "EQMX"
+            # newest first (CORR-01 / AH-02): run-b was persisted last.
+            assert records[0].plan_id == "run-b"
+            assert records[1].plan_id == "run-a"
 
+            # limit=1 returns only the newest run.
             limited = await list_rebalance_runs(sf, pid, limit=1)
             assert len(limited) == 1
+            assert limited[0].plan_id == "run-b"
         finally:
             await engine.dispose()
 
