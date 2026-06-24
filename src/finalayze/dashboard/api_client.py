@@ -114,6 +114,18 @@ class ApiClient:
             return result
         return {}
 
+    def saa_cert_decision(self) -> dict[str, object]:
+        """Fetch the binding cert decision from /api/v1/saa/cert-decision (Phase 87).
+
+        Returns the parsed JSON on success; an empty dict on a 503 (no committed cert) / non-2xx /
+        non-dict response so the dashboard renders a friendly empty state rather than crashing.
+        """
+        resp = self.get("/api/v1/saa/cert-decision")
+        result = resp.json()
+        if resp.is_success and isinstance(result, dict):
+            return result
+        return {}
+
 
 # ── Convenience functions used by page modules ─────────────────────────────────
 

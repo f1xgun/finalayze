@@ -20,6 +20,14 @@ class ConfigurationError(FinalayzeError):
     """Raised for invalid or missing configuration values."""
 
 
+class CertNotFoundError(ConfigurationError):
+    """No committed allocation-gate cert was found, or the latest one is malformed (Phase 87).
+
+    Fail-closed signal for the read-only decision-support view: the surface layers catch this and
+    render a "no committed cert" empty state rather than inventing numbers.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Market
 # ---------------------------------------------------------------------------

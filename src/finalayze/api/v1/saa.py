@@ -9,6 +9,7 @@ broker, fetches no live positions/prices, and places NO orders -- the live rebal
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from decimal import Decimal
 
 import structlog
@@ -30,6 +31,7 @@ _log = structlog.get_logger()
 router = APIRouter(prefix="/saa", tags=["saa"], dependencies=[Depends(api_key_auth)])
 
 _HTTP_NOT_FOUND = 404
+_HTTP_NO_CERT = 503  # no committed allocation-gate cert -> fail-closed (Phase 87)
 
 
 class LegTarget(BaseModel):
@@ -187,3 +189,77 @@ async def rebalance_runs(limit: int = 20) -> RebalanceRunsResponse:
         for record in records
     ]
     return RebalanceRunsResponse(portfolio_id=str(portfolio_id), runs=runs)
+
+
+class RegimeStoryOut(BaseModel):
+    """One rate-regime sub-window's allocation-vs-best-naive benchmark row (read-only)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    unit_key: str
+    unit_label: str
+    window_start: str
+    window_end: str
+    allocation_sharpe: float
+    best_naive_sharpe: float
+    allocation_sortino: float
+    best_naive_sortino: float
+    unit_verdict: str
+
+
+class CertDecisionResponse(BaseModel):
+    """The latest binding cert verdict + per-regime benchmark stories (read-only)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cert_path: str
+    cert_timestamp: str
+    git_sha: str
+    staleness_days: int
+    phase_verdict: str
+    escalation: str | None
+    n1_caveat: bool
+    alloc_sharpe_full: float
+    best_naive_sharpe_full: float
+    full_verdict: str
+    high_rate_caveat: str
+    headline: str
+    when_framing: str
+    regime_stories: list[RegimeStoryOut]
+
+
+@router.get("/cert-decision", response_model=CertDecisionResponse)
+async def cert_decision() -> CertDecisionResponse:
+    """Return the latest binding allocation-gate cert verdict (read-only, no Tinkoff token).
+
+    Surfaces the FROZEN allocator's honest binding verdict -- measured on real net-of-tax curves --
+    ALONGSIDE the deposit-anchor benchmark, so the operator sees the honest truth: in a 16-21%
+    regime the deposit wins, and in the single observed easing cycle so far all sleeves are negative
+    (N=1). Every number + verdict is DERIVED from the committed cert summary.json -- no pre-baked
+    literal, no softened HARD_FAIL. Returns 503 when no committed cert exists (fail-closed). The
+    sole side-effect is a filesystem read of results/iterations/ (no DB, no network, no token).
+    """
+    from finalayze.backtest.cert_reader import load_latest_cert  # noqa: PLC0415
+    from finalayze.core.exceptions import CertNotFoundError  # noqa: PLC0415
+
+    try:
+        decision = load_latest_cert()
+    except CertNotFoundError as exc:
+        raise HTTPException(status_code=_HTTP_NO_CERT, detail=str(exc)) from exc
+
+    return CertDecisionResponse(
+        cert_path=decision.cert_path,
+        cert_timestamp=decision.cert_timestamp,
+        git_sha=decision.git_sha,
+        staleness_days=decision.staleness_days,
+        phase_verdict=decision.phase_verdict,
+        escalation=decision.escalation,
+        n1_caveat=decision.n1_caveat,
+        alloc_sharpe_full=decision.alloc_sharpe_full,
+        best_naive_sharpe_full=decision.best_naive_sharpe_full,
+        full_verdict=decision.full_verdict,
+        high_rate_caveat=decision.high_rate_caveat,
+        headline=decision.headline,
+        when_framing=decision.when_framing,
+        regime_stories=[RegimeStoryOut(**asdict(s)) for s in decision.regime_stories],
+    )
