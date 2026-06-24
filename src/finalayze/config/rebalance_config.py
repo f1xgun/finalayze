@@ -71,8 +71,10 @@ def get_equity_point_value() -> Decimal:
     except InvalidOperation as exc:
         msg = f"{_EQUITY_POINT_VALUE_ENV} must be a positive number; got {raw!r}"
         raise ConfigurationError(msg) from exc
-    if point_value <= 0:
-        msg = f"{_EQUITY_POINT_VALUE_ENV} must be positive; got {point_value}"
+    # Reject NaN/Infinity too: Decimal('inf') > 0 is True and would slip past a bare positivity
+    # check, then blow up far away as 0*inf -> InvalidOperation in sizing (WR-01).
+    if not point_value.is_finite() or point_value <= 0:
+        msg = f"{_EQUITY_POINT_VALUE_ENV} must be a positive finite number; got {point_value}"
         raise ConfigurationError(msg)
     return point_value
 

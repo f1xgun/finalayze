@@ -72,7 +72,7 @@ class TestNormalizePositions:
 
 class TestResolveLegInstruments:
     def test_resolves_equity_and_ofz(self) -> None:
-        """The default config tickers resolve to the EQMX ETF + SU29024 bond instruments."""
+        """The default config tickers resolve to the IMOEXF index future + SU29024 bond."""
         legs = resolve_leg_instruments(_registry())
         assert legs[AssetClass.EQUITY].symbol == _EQUITY_SYMBOL
         assert legs[AssetClass.OFZ_PK].symbol == _OFZ_SYMBOL

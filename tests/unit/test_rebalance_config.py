@@ -80,3 +80,10 @@ def test_nonpositive_equity_point_value_fails_closed(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("FINALAYZE_SAA_EQUITY_POINT_VALUE", "-1")
     with pytest.raises(ConfigurationError):
         get_equity_point_value()
+
+
+def test_infinity_equity_point_value_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An Infinity point value is rejected (WR-01) -- Decimal('inf') > 0 would slip past."""
+    monkeypatch.setenv("FINALAYZE_SAA_EQUITY_POINT_VALUE", "inf")
+    with pytest.raises(ConfigurationError):
+        get_equity_point_value()
