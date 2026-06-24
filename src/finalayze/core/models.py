@@ -621,3 +621,66 @@ class DepositTrancheModel(Base):
     )
 
     portfolio: Mapped[SaaPortfolioModel] = relationship(back_populates="deposit_tranches")
+
+
+class SaaRebalanceRunModel(Base):
+    """Audit record of one rebalance run (Phase 82): the plan id + reconciliation rollup.
+
+    One row per real (submit) run; child saa_rebalance_orders carry the per-leg outcomes. FK to
+    saa_portfolios uses ON DELETE RESTRICT (no silent loss of a portfolio with run history).
+    """
+
+    __tablename__ = "saa_rebalance_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("saa_portfolios.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    plan_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    mode: Mapped[str] = mapped_column(String(12), nullable=False)
+    budget_rub: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    fill_rate: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    orders: Mapped[list[SaaRebalanceOrderModel]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
+
+
+class SaaRebalanceOrderModel(Base):
+    """One AUTO leg's order + fill outcome within a rebalance run (Phase 82).
+
+    FK to saa_rebalance_runs uses ON DELETE CASCADE (orders belong to their run).
+    """
+
+    __tablename__ = "saa_rebalance_orders"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("saa_rebalance_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    asset_class: Mapped[str] = mapped_column(String(12), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(40), nullable=False)
+    side: Mapped[str] = mapped_column(String(4), nullable=False)
+    requested_qty: Mapped[Decimal] = mapped_column(Numeric(28, 8), nullable=False)
+    filled_qty: Mapped[Decimal] = mapped_column(Numeric(28, 8), nullable=False, default=Decimal(0))
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    client_order_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    run: Mapped[SaaRebalanceRunModel] = relationship(back_populates="orders")
