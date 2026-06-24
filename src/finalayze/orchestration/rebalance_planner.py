@@ -17,7 +17,7 @@ lands in subsequent subtasks.
 from __future__ import annotations
 
 import copy
-import hashlib
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
@@ -181,17 +181,20 @@ def size_auto_leg(
     )
 
 
+# Fixed namespace for deriving deterministic order ids (uuid5). Any constant UUID works.
+_REBALANCE_OID_NAMESPACE = uuid.UUID("c0ffee00-5aa0-4eba-9a9c-e0a1b2c3d4e5")
+
+
 def _deterministic_client_order_id(plan_id: str, asset_class: AssetClass, side: Side) -> str:
     """Derive a stable, replay-safe client_order_id from (plan_id, asset_class, side) (P79-R6).
 
     Re-running the planner for the same plan_id yields a byte-identical id, so the broker's
-    idempotent ``post_order(order_id=...)`` collapses accidental duplicates on the money path.
-    SHA-256 (usedforsecurity=False -- this is an identifier digest, not a security primitive),
-    truncated to a fixed 24 hex chars under the broker's ``fnz-`` convention.
+    idempotent ``post_order(order_id=...)`` collapses accidental duplicates on the money path. The
+    id MUST be a valid UUID -- Tinkoff post_order rejects a non-UUID order_id with INVALID_ARGUMENT
+    ("order_id should be empty or uuid"), found by the sandbox cert. ``uuid5`` (name-based) is both
+    deterministic AND a valid UUID.
     """
-    raw = f"{plan_id}|{asset_class.value}|{side}"
-    digest = hashlib.sha256(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:24]
-    return f"fnz-{digest}"
+    return str(uuid.uuid5(_REBALANCE_OID_NAMESPACE, f"{plan_id}|{asset_class.value}|{side}"))
 
 
 def _deposit_description(delta_notional: Decimal) -> str:

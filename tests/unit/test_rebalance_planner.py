@@ -7,6 +7,7 @@ the deposit is mark-only with no broker API, so it can only ever surface as a Ma
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import FrozenInstanceError
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -320,7 +321,9 @@ class TestPlanRebalance:
         ids_a = {leg.asset_class: leg.order.client_order_id for leg in self._plan().auto_legs}
         ids_b = {leg.asset_class: leg.order.client_order_id for leg in self._plan().auto_legs}
         assert ids_a == ids_b
-        assert all(cid.startswith("fnz-") for cid in ids_a.values())
+        # Each id MUST be a valid UUID -- Tinkoff post_order rejects a non-UUID order_id
+        # ("order_id should be empty or uuid", found by the sandbox cert).
+        assert all(str(uuid.UUID(cid)) == cid for cid in ids_a.values())
         # distinct legs get distinct ids (no accidental collision)
         assert len(set(ids_a.values())) == len(ids_a)
 
