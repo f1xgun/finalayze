@@ -213,10 +213,13 @@ def _compose_when_framing(
 
     if all_hard_fail and deposit_won_high_rate and high_rate is not None:
         parts = [
-            "Risk assets have not beaten the deposit in either measured regime. ",
-            f"In the high-rate plateau ({high_rate.window_start}..{high_rate.window_end}) the "
-            f"deposit's risk-adjusted return was strongly positive (best-naive Sharpe "
-            f"{high_rate.best_naive_sharpe:+.2f}) while the allocator was deeply negative "
+            "The allocator did not beat its best benchmark in either measured regime (both "
+            "HARD_FAIL). ",
+            # best_naive_sharpe is the best-of-three naive bar; attribute the high-rate winner to
+            # the deposit ONLY because the cert's own high_rate_caveat does (not independently).
+            f"In the high-rate plateau ({high_rate.window_start}..{high_rate.window_end}) the best "
+            f"naive benchmark -- the deposit, per the cert's own caveat -- was strongly positive "
+            f"(Sharpe {high_rate.best_naive_sharpe:+.2f}) while the allocator was deeply negative "
             f"({high_rate.allocation_sharpe:+.2f}). ",
             "In the single observed easing cycle all sleeves were negative -- the allocator still "
             "trailed its best benchmark. ",

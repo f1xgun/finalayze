@@ -114,6 +114,9 @@ def test_saa_allocation_module_runs_render_at_module_level(
 
     assert st_mock.title.called  # render ran via the module-level entry block
     api_stub.saa_target_allocation.assert_called_once()
+    # WR-02 / Phase 81 CR-01: the module guard must ALSO reach the honest-verdict block -- deleting
+    # render_cert_decision(_api) would otherwise leave every test green while the block vanishes.
+    api_stub.saa_cert_decision.assert_called_once()
 
 
 def test_rebalance_history_render_importable() -> None:
@@ -233,6 +236,30 @@ def test_saa_allocation_build_benchmark_rows() -> None:
     assert rows[0]["Best-naive Sharpe"] == "0.8904"
     assert rows[-1]["Regime"] == "full window"
     assert rows[-1]["Best-naive Sharpe"] == "-0.6506"
+
+
+def test_build_benchmark_rows_defensive_on_none_sharpe() -> None:
+    """A None numeric (schema drift) formats as '-' instead of crashing the page (WR-03)."""
+    from finalayze.dashboard.pages.saa_allocation import _build_benchmark_rows
+
+    cert = {
+        "regime_stories": [
+            {
+                "unit_label": "high_rate",
+                "window_start": "a",
+                "window_end": "b",
+                "allocation_sharpe": None,
+                "best_naive_sharpe": None,
+                "unit_verdict": "HARD_FAIL",
+            }
+        ],
+        "alloc_sharpe_full": None,
+        "best_naive_sharpe_full": None,
+        "full_verdict": "HARD_FAIL",
+    }
+    rows = _build_benchmark_rows(cert)  # must not raise
+    assert rows[0]["Allocation Sharpe"] == "-"
+    assert rows[-1]["Best-naive Sharpe"] == "-"
 
 
 def test_render_cert_decision_handles_empty_state() -> None:

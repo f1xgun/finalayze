@@ -60,14 +60,19 @@ def render(api: ApiClient) -> None:
     )
 
 
+def _fmt_sharpe(value: Any) -> str:
+    """Format a Sharpe to 4dp, defensively -> '-' on a non-number (never crash on schema drift)."""
+    return f"{value:.4f}" if isinstance(value, (int, float)) else "-"
+
+
 def _build_benchmark_rows(cert: dict[str, Any]) -> list[dict[str, Any]]:
     """Shape the cert per-regime stories + full-window row into a table (pure, testable, P87)."""
     rows: list[dict[str, Any]] = [
         {
             "Regime": story.get("unit_label"),
             "Period": f"{story.get('window_start')} -> {story.get('window_end')}",
-            "Allocation Sharpe": f"{story.get('allocation_sharpe'):.4f}",
-            "Best-naive Sharpe": f"{story.get('best_naive_sharpe'):.4f}",
+            "Allocation Sharpe": _fmt_sharpe(story.get("allocation_sharpe")),
+            "Best-naive Sharpe": _fmt_sharpe(story.get("best_naive_sharpe")),
             "Verdict": story.get("unit_verdict"),
         }
         for story in cert.get("regime_stories", [])
@@ -76,8 +81,8 @@ def _build_benchmark_rows(cert: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "Regime": "full window",
             "Period": "-",
-            "Allocation Sharpe": f"{cert.get('alloc_sharpe_full'):.4f}",
-            "Best-naive Sharpe": f"{cert.get('best_naive_sharpe_full'):.4f}",
+            "Allocation Sharpe": _fmt_sharpe(cert.get("alloc_sharpe_full")),
+            "Best-naive Sharpe": _fmt_sharpe(cert.get("best_naive_sharpe_full")),
             "Verdict": cert.get("full_verdict"),
         }
     )
