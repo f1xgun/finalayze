@@ -43,10 +43,26 @@ def _make_fetcher() -> TinkoffFetcher:
     return TinkoffFetcher(token=_FAKE_TOKEN, registry=_make_registry(), sandbox=True)
 
 
+def _run_async_stub(*, returns: object = None, raises: BaseException | None = None) -> object:
+    """A _run_async replacement that CLOSES the passed coroutine (no 'never awaited' warning).
+
+    The real _run_async awaits the coroutine; a bare ``return_value``/``side_effect`` stub leaves it
+    un-awaited. Closing it keeps the test output clean (IN-02) while still returning/raising.
+    """
+
+    def _inner(coro: object) -> object:
+        coro.close()  # type: ignore[attr-defined]  # consume the orphaned coroutine
+        if raises is not None:
+            raise raises
+        return returns
+
+    return _inner
+
+
 def test_returns_initial_margin_as_decimal() -> None:
     """A successful fetch returns initial_margin_on_buy as a Decimal."""
     fetcher = _make_fetcher()
-    with patch.object(fetcher, "_run_async", return_value=Decimal(2342)):
+    with patch.object(fetcher, "_run_async", side_effect=_run_async_stub(returns=Decimal(2342))):
         assert fetcher.fetch_futures_margin(_FUTURE_SYMBOL) == Decimal(2342)
 
 
@@ -54,7 +70,9 @@ def test_raises_on_grpc_error_does_not_return_empty() -> None:
     """A gRPC error RAISES DataFetchError (never swallows it into an empty/zero margin)."""
     fetcher = _make_fetcher()
     with (
-        patch.object(fetcher, "_run_async", side_effect=RuntimeError("gRPC UNIMPLEMENTED")),
+        patch.object(
+            fetcher, "_run_async", side_effect=_run_async_stub(raises=RuntimeError("gRPC down"))
+        ),
         pytest.raises(DataFetchError, match="futures margin"),
     ):
         fetcher.fetch_futures_margin(_FUTURE_SYMBOL)
@@ -65,7 +83,7 @@ def test_rejects_nonpositive_or_nonfinite_margin(bad: Decimal) -> None:
     """A zero / negative / non-finite margin is rejected at the boundary (a real IM is never 0)."""
     fetcher = _make_fetcher()
     with (
-        patch.object(fetcher, "_run_async", return_value=bad),
+        patch.object(fetcher, "_run_async", side_effect=_run_async_stub(returns=bad)),
         pytest.raises(DataFetchError, match="non-positive/non-finite"),
     ):
         fetcher.fetch_futures_margin(_FUTURE_SYMBOL)

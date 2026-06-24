@@ -62,6 +62,13 @@ async def target_allocation() -> SaaTargetAllocation:
     Shows the budget, the regime-tilted target weights for today, the per-leg target notionals
     (``budget * weight``), and the deposit mark. Does NOT fetch live positions/prices or place
     orders. Returns 404 when there is no active SAA portfolio.
+
+    NOTE: ``target_notional_rub`` is the STRATEGIC EXPOSURE (``budget * weight``), NOT the
+    execution-layer funded CASH. For the leveraged equity FUTURE the actually-committed cash is only
+    margin + a drawdown reserve (Phase 86 fully-funded synthetic equity), and the freed cash is
+    swept into the deposit -- so the deposit's funded plug computed by ``scripts/run_rebalance.py``
+    is larger than the deposit's strategic ``budget * weight`` shown here. Do not cross-read the two
+    as the same cash figure; the rebalance CLI/preview is the source of truth for the cash to move.
     """
     from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
 

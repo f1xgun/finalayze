@@ -195,7 +195,10 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
     )
     from finalayze.core.clock import RealClock  # noqa: PLC0415
     from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
-    from finalayze.core.exceptions import DataFetchError  # noqa: PLC0415
+    from finalayze.core.exceptions import (  # noqa: PLC0415
+        DataFetchError,
+        InstrumentNotFoundError,
+    )
     from finalayze.core.modes import ModeManager, WorkMode  # noqa: PLC0415
     from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
     from finalayze.execution.broker_router import BrokerRouter  # noqa: PLC0415
@@ -239,7 +242,9 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
             equity_symbol=equity_symbol,
             point_value=point_value,
         )
-    except DataFetchError as exc:
+    except (DataFetchError, InstrumentNotFoundError) as exc:
+        # Fail-loud + DISTINCT: a margin fetch failure (or an unmapped future) aborts BEFORE any
+        # plan/preview -- never a silent {} / guessed margin that would under-reserve (IN-03).
         _log.error(
             "run_rebalance_margin_fetch_failed",
             symbol=equity_symbol,

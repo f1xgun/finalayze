@@ -335,6 +335,45 @@ def test_format_rebalance_plan_renders_legs_actions_and_preview() -> None:
     assert "preview -- no orders submitted" in rendered
 
 
+def test_format_rebalance_plan_surfaces_funded_equity_split() -> None:
+    """A funded FUTURE leg renders its margin + reserve cash split and the leverage (WR-01)."""
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from finalayze.execution.broker_base import OrderRequest
+    from finalayze.orchestration.rebalance_planner import PlannedLeg, RebalancePlan
+
+    leg = PlannedLeg(
+        asset_class=AssetClass.EQUITY,
+        market_id="moex",
+        order=OrderRequest(
+            symbol="IMOEXF", side="BUY", quantity=Decimal(15), client_order_id="fnz-x"
+        ),
+        side="BUY",
+        target_notional=Decimal(350_000),  # the EXPOSURE
+        est_price=Decimal(22_750),
+        margin_cash=Decimal(35_130),
+        reserve_cash=Decimal("206257.5"),
+    )
+    plan = RebalancePlan(
+        plan_id="p1",
+        created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        portfolio_id=uuid4(),
+        risk_profile="balanced",
+        budget_rub=Decimal(1_000_000),
+        mode="DRY_RUN",
+        auto_legs=(leg,),
+        manual_actions=(),
+    )
+    rendered = format_rebalance_plan(plan, [])
+    # the funded split is surfaced: the operator sees real cash committed (241,387.5), not just the
+    # 350,000 exposure, and the instrument leverage (350,000 / 241,387.5 ~= 1.45x).
+    assert "funded:" in rendered
+    assert "margin=35130" in rendered
+    assert "reserve=206257.5" in rendered
+    assert "1.45x" in rendered
+
+
 class TestReconcileLegPositions:
     """SMP-02 guard: flag a leg showing zero holdings against a non-empty broker book."""
 

@@ -713,3 +713,28 @@ class TestPlanRebalanceFundedEquity:
         )
         # 0.35*1M/100 = 3500 units * 100 = 350,000; ofz 400,000 -> deposit = 250,000 = 0.25*budget
         assert plan.manual_actions[0].target_notional == Decimal(250_000)
+
+    def test_cash_legs_with_non_dividing_prices_plug_residual_into_deposit(self) -> None:
+        """Non-clean lot prices leave a residual the deposit plug absorbs (idle 0, WR-02)."""
+        # ETF equity @ 137 (lot 1): 350,000/137 -> floor 2554 -> 2554*137 = 349,898 (residual 102).
+        # OFZ @ 997 (lot 1): 400,000/997 -> floor 401 -> 401*997 = 399,797 (residual 203).
+        plan = plan_rebalance(
+            active_portfolio=(self._PID, "balanced", self._BUDGET),
+            target_weights=self._WEIGHTS,
+            current_positions={},
+            last_prices={"EQMX": Decimal(137), "SU29024RMFS5": Decimal(997)},
+            leg_instruments={
+                AssetClass.EQUITY: _equity_instrument(),  # ETF, fully funded (no margin)
+                AssetClass.OFZ_PK: _ofz_instrument(),
+            },
+            deposit_current_notional=Decimal(0),
+            plan_id="p86-residual",
+            created_at=self._CREATED,
+        )
+        equity_cash = Decimal(349_898)
+        ofz_cash = Decimal(399_797)
+        deposit_realized = plan.manual_actions[0].target_notional
+        # the deposit absorbs BOTH lot-flooring residuals (102 + 203 = 305) over the strategic 250k
+        assert deposit_realized == Decimal(250_305)
+        # the cash identity closes EXACTLY despite the non-clean lots (idle == 0 by construction)
+        assert equity_cash + ofz_cash + deposit_realized == self._BUDGET

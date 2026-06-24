@@ -286,11 +286,22 @@ def format_rebalance_plan(plan: RebalancePlan, outcomes: list[LegOutcome]) -> st
         "  AUTO -> Tinkoff broker orders:",
     ]
     if plan.auto_legs:
-        lines.extend(
-            f"    {leg.side:4} {leg.asset_class.value:7} {leg.order.symbol:14}"
-            f" qty={leg.order.quantity}  (~{leg.target_notional} RUB target)"
-            for leg in plan.auto_legs
-        )
+        for leg in plan.auto_legs:
+            lines.append(
+                f"    {leg.side:4} {leg.asset_class.value:7} {leg.order.symbol:14}"
+                f" qty={leg.order.quantity}  (~{leg.target_notional} RUB exposure)"
+            )
+            # A funded FUTURE leg (Phase 86): only margin + reserve CASH backs the exposure; the
+            # freed cash is in the deposit plug. Surface the split so the operator sees the real
+            # cash committed vs the strategic exposure (WR-01).
+            if leg.margin_cash is not None:
+                cash = leg.margin_cash + (leg.reserve_cash or _ZERO)
+                leverage = (leg.target_notional / cash) if cash > _ZERO else _ZERO
+                lines.append(
+                    f"      funded: margin={leg.margin_cash} + reserve={leg.reserve_cash}"
+                    f" = {cash} RUB cash  (exposure {leg.target_notional}; instrument leverage"
+                    f" {leverage:.2f}x, offset by the deposit plug -> portfolio 1.0x)"
+                )
     else:
         lines.append("    (none -- all AUTO legs within the no-churn band)")
     lines.append("  MANUAL -> operator action items:")
