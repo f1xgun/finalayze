@@ -73,7 +73,9 @@ def upgrade() -> None:
         sa.Column("filled_qty", sa.Numeric(28, 8), nullable=False, server_default="0"),
         sa.Column("status", sa.String(20), nullable=False),
         sa.Column("client_order_id", sa.String(64), nullable=False),
-        sa.Column("reason", sa.String(255), nullable=True),
+        # Text (unbounded): a broker rejection reason (gRPC/exchange error) can exceed a VARCHAR;
+        # overflow would abort the whole audit transaction and lose the run record (CR-CORR-01).
+        sa.Column("reason", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("ix_saa_rebalance_orders_run_id", "saa_rebalance_orders", ["run_id"])

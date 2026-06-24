@@ -676,7 +676,10 @@ class SaaRebalanceOrderModel(Base):
     filled_qty: Mapped[Decimal] = mapped_column(Numeric(28, 8), nullable=False, default=Decimal(0))
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     client_order_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Text (unbounded): a broker rejection reason is an arbitrary gRPC/exchange error string that
+    # routinely exceeds a few hundred chars; a VARCHAR overflow would abort the whole audit txn
+    # (CR-CORR-01), losing the run record precisely in the FAILED-leg case audit exists for.
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

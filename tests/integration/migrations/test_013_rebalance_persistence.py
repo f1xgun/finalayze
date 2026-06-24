@@ -58,6 +58,21 @@ def test_runs_fk_restricts_to_portfolios() -> None:
     assert 'sa.ForeignKey("saa_portfolios.id", ondelete="RESTRICT")' in _read()
 
 
+def test_migration_has_expected_column_types() -> None:
+    """Lock the migration's column types byte-for-byte (L-04 parity; AH-02)."""
+    src = _read()
+    # saa_rebalance_runs
+    assert "sa.Numeric(20, 2)" in src  # budget_rub
+    assert "sa.Numeric(8, 4)" in src  # fill_rate
+    assert "sa.Date()" in src  # as_of
+    assert "sa.DateTime(timezone=True)" in src  # created_at
+    # saa_rebalance_orders
+    assert "sa.Numeric(28, 8)" in src  # requested_qty / filled_qty
+    assert "sa.String(40)" in src  # symbol
+    assert "sa.String(64)" in src  # client_order_id
+    assert "sa.Text()" in src  # reason -- unbounded (CR-CORR-01)
+
+
 def test_downgrade_drops_both_tables_child_first() -> None:
     src = _read()
     tree = ast.parse(src)
