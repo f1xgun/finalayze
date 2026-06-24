@@ -118,3 +118,23 @@ def test_fetch_nkd_by_symbol_empty_on_no_records() -> None:
             return []
 
     assert _CLI.fetch_nkd_by_symbol(_Fetcher(), "SU29024RMFS5", date(2026, 6, 24)) == {}
+
+
+def test_equity_point_value_error_when_symbol_overridden(monkeypatch: object) -> None:
+    """Overriding the equity symbol without its point value fails closed (WR-02)."""
+    monkeypatch.setenv("FINALAYZE_SAA_EQUITY_SYMBOL", "MXU6")  # type: ignore[attr-defined]
+    monkeypatch.delenv("FINALAYZE_SAA_EQUITY_POINT_VALUE", raising=False)  # type: ignore[attr-defined]
+    assert _CLI.equity_point_value_error() is not None
+
+
+def test_equity_point_value_error_none_when_both_set(monkeypatch: object) -> None:
+    """Overriding both the symbol and its point value is allowed."""
+    monkeypatch.setenv("FINALAYZE_SAA_EQUITY_SYMBOL", "MXU6")  # type: ignore[attr-defined]
+    monkeypatch.setenv("FINALAYZE_SAA_EQUITY_POINT_VALUE", "10")  # type: ignore[attr-defined]
+    assert _CLI.equity_point_value_error() is None
+
+
+def test_equity_point_value_error_none_on_default(monkeypatch: object) -> None:
+    """The default IMOEXF (symbol not overridden) needs no explicit point value."""
+    monkeypatch.delenv("FINALAYZE_SAA_EQUITY_SYMBOL", raising=False)  # type: ignore[attr-defined]
+    assert _CLI.equity_point_value_error() is None

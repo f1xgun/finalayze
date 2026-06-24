@@ -81,6 +81,24 @@ def fetch_nkd_by_symbol(fetcher: object, ofz_symbol: str, as_of: object) -> dict
     return {ofz_symbol: records[-1].value} if records else {}
 
 
+def equity_point_value_error() -> str | None:
+    """Fail-closed if the equity future symbol is overridden without its point value (WR-02).
+
+    The point value is contract-specific; the default (10 RUB/pt) is only correct for the default
+    IMOEXF. Overriding ``FINALAYZE_SAA_EQUITY_SYMBOL`` to a different future REQUIRES also setting
+    ``FINALAYZE_SAA_EQUITY_POINT_VALUE`` -- otherwise the stale default would silently mis-size the
+    equity leg on a money path.
+    """
+    if os.environ.get("FINALAYZE_SAA_EQUITY_SYMBOL") and not os.environ.get(
+        "FINALAYZE_SAA_EQUITY_POINT_VALUE"
+    ):
+        return (
+            "FINALAYZE_SAA_EQUITY_SYMBOL is overridden; you must also set "
+            "FINALAYZE_SAA_EQUITY_POINT_VALUE (RUB per index point) for that future"
+        )
+    return None
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a one-shot SAA rebalance.")
     parser.add_argument(
@@ -111,6 +129,10 @@ def main(argv: list[str] | None = None) -> int:
     if err:
         _log.error("run_rebalance_env_missing", error=err)
         return 1
+    pv_err = equity_point_value_error()
+    if pv_err:
+        _log.error("run_rebalance_equity_point_value_missing", error=pv_err)
+        return 1
     if args.mode == "live" and not args.confirm:
         _log.error(
             "run_rebalance_live_requires_confirm",
@@ -126,7 +148,11 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
     """Wire the sandbox broker + session factory and run (operator checkpoint; needs a token)."""
     from config.settings import Settings  # noqa: PLC0415
 
-    from finalayze.config.rebalance_config import get_ofz_pk_symbol  # noqa: PLC0415
+    from finalayze.config.rebalance_config import (  # noqa: PLC0415
+        get_equity_point_value,
+        get_equity_symbol,
+        get_ofz_pk_symbol,
+    )
     from finalayze.core.clock import RealClock  # noqa: PLC0415
     from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
     from finalayze.core.modes import ModeManager, WorkMode  # noqa: PLC0415
@@ -157,6 +183,8 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
     # Best-effort NKD (accrued coupon) so the OFZ leg sizes off the dirty price; {} -> clean-only.
     fetcher = TinkoffFetcher(token=settings.tinkoff_token, registry=registry, sandbox=True)
     nkd_by_symbol = fetch_nkd_by_symbol(fetcher, get_ofz_pk_symbol(), clock.now().date())
+    # The equity FUTURE (IMOEXF) is sized by exposure: contract notional = points * point_value.
+    point_value_by_symbol = {get_equity_symbol(): get_equity_point_value()}
 
     async def _go() -> int:
         plan, outcomes = await run_rebalance(
@@ -167,6 +195,7 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
             clock=clock,
             fetch_last_prices=broker.get_last_prices,
             nkd_by_symbol=nkd_by_symbol,  # type: ignore[arg-type]
+            point_value_by_symbol=point_value_by_symbol,
             mode=plan_mode,  # type: ignore[arg-type]
             confirm=confirm,
             submit=submit,
