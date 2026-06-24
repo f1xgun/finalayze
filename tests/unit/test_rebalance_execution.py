@@ -122,6 +122,8 @@ _CLOCK = SimulatedClock(datetime(2026, 6, 23, tzinfo=UTC))
 _RAW_PRICES = {_EQUITY_SYMBOL: Decimal(2275), _OFZ_SYMBOL: Decimal("95.5")}
 # IMOEXF point value 10 RUB/point -> contract notional = 2275*10 = 22_750 RUB (exposure/contract).
 _POINT_VALUES = {_EQUITY_SYMBOL: Decimal(10)}
+# IMOEXF initial margin ~= 2342 RUB/contract (~10%); funds the fully-funded equity reserve (P86).
+_MARGINS = {_EQUITY_SYMBOL: Decimal(2342)}
 
 
 class _FakeBroker:
@@ -178,6 +180,7 @@ async def test_run_rebalance_happy_path(monkeypatch: pytest.MonkeyPatch) -> None
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
         point_value_by_symbol=_POINT_VALUES,
+        margin_by_symbol=_MARGINS,
     )
     assert plan.budget_rub == _BUDGET
     legs = {leg.asset_class: leg for leg in plan.auto_legs}
@@ -187,9 +190,15 @@ async def test_run_rebalance_happy_path(monkeypatch: pytest.MonkeyPatch) -> None
     # OFZ: 0.40*1M / 955 RUB = 418.8 -> floor 418. (Without the %->RUB conversion it would be
     # 400000/95.5 = 4188 -- so asserting 418 proves to_rub_price was applied. ANTI-HOLLOW.)
     assert legs[AssetClass.OFZ_PK].order.quantity == Decimal(418)
-    # deposit: 0.25*1M = 250k, manual action only.
+    # The equity FUTURE is fully funded (Phase 86): it consumes margin + a drawdown reserve, NOT its
+    # full 350k notional. 15 contracts * 2342 = 35,130 margin; reserve = 341,250*0.45 + 35,130*1.5
+    # = 206,257.5; equity_cash = 241,387.5. OFZ funded cash = 418*955 = 399,190.
+    equity = legs[AssetClass.EQUITY]
+    assert equity.margin_cash == Decimal(35_130)
+    assert equity.reserve_cash == Decimal("206257.5")
+    # deposit is the residual PLUG: 1,000,000 - 241,387.5 - 399,190 = 359,422.5 (idle == 0).
     assert plan.manual_actions[0].asset_class is AssetClass.DEPOSIT
-    assert plan.manual_actions[0].target_notional == Decimal(250_000)
+    assert plan.manual_actions[0].target_notional == Decimal("359422.5")
     assert len(outcomes) == 2
     assert all(o.status == "FILLED" for o in outcomes)
 
@@ -206,6 +215,7 @@ async def test_run_rebalance_no_active_portfolio_raises(monkeypatch: pytest.Monk
             clock=_CLOCK,
             fetch_last_prices=_fetch_prices,
             point_value_by_symbol=_POINT_VALUES,
+            margin_by_symbol=_MARGINS,
         )
 
 
@@ -220,6 +230,7 @@ async def test_run_rebalance_plan_id_deterministic(monkeypatch: pytest.MonkeyPat
         "clock": _CLOCK,
         "fetch_last_prices": _fetch_prices,
         "point_value_by_symbol": _POINT_VALUES,
+        "margin_by_symbol": _MARGINS,
     }
     plan_a, _ = await run_rebalance(broker_router=BrokerRouter({"moex": _FakeBroker()}), **kwargs)
     plan_b, _ = await run_rebalance(broker_router=BrokerRouter({"moex": _FakeBroker()}), **kwargs)
@@ -252,6 +263,7 @@ async def test_run_rebalance_wires_deposit_mark(monkeypatch: pytest.MonkeyPatch)
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
         point_value_by_symbol=_POINT_VALUES,
+        margin_by_symbol=_MARGINS,
     )
     deposit_action = plan.manual_actions[0]
     assert deposit_action.current_notional == Decimal(100_000)  # == deposit_value()
@@ -270,6 +282,7 @@ async def test_run_rebalance_preview_places_no_orders(monkeypatch: pytest.Monkey
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
         point_value_by_symbol=_POINT_VALUES,
+        margin_by_symbol=_MARGINS,
         submit=False,
     )
     assert outcomes == []  # nothing submitted
@@ -322,6 +335,45 @@ def test_format_rebalance_plan_renders_legs_actions_and_preview() -> None:
     assert "preview -- no orders submitted" in rendered
 
 
+def test_format_rebalance_plan_surfaces_funded_equity_split() -> None:
+    """A funded FUTURE leg renders its margin + reserve cash split and the leverage (WR-01)."""
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from finalayze.execution.broker_base import OrderRequest
+    from finalayze.orchestration.rebalance_planner import PlannedLeg, RebalancePlan
+
+    leg = PlannedLeg(
+        asset_class=AssetClass.EQUITY,
+        market_id="moex",
+        order=OrderRequest(
+            symbol="IMOEXF", side="BUY", quantity=Decimal(15), client_order_id="fnz-x"
+        ),
+        side="BUY",
+        target_notional=Decimal(350_000),  # the EXPOSURE
+        est_price=Decimal(22_750),
+        margin_cash=Decimal(35_130),
+        reserve_cash=Decimal("206257.5"),
+    )
+    plan = RebalancePlan(
+        plan_id="p1",
+        created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        portfolio_id=uuid4(),
+        risk_profile="balanced",
+        budget_rub=Decimal(1_000_000),
+        mode="DRY_RUN",
+        auto_legs=(leg,),
+        manual_actions=(),
+    )
+    rendered = format_rebalance_plan(plan, [])
+    # the funded split is surfaced: the operator sees real cash committed (241,387.5), not just the
+    # 350,000 exposure, and the instrument leverage (350,000 / 241,387.5 ~= 1.45x).
+    assert "funded:" in rendered
+    assert "margin=35130" in rendered
+    assert "reserve=206257.5" in rendered
+    assert "1.45x" in rendered
+
+
 class TestReconcileLegPositions:
     """SMP-02 guard: flag a leg showing zero holdings against a non-empty broker book."""
 
@@ -362,6 +414,7 @@ async def test_run_rebalance_nkd_dirty_price_sizes_fewer_bonds(
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
         point_value_by_symbol=_POINT_VALUES,
+        margin_by_symbol=_MARGINS,
         nkd_by_symbol={_OFZ_SYMBOL: Decimal(50)},
     )
     legs = {leg.asset_class: leg for leg in plan.auto_legs}
@@ -383,6 +436,7 @@ async def test_run_rebalance_persists_audit_on_submit(monkeypatch: pytest.Monkey
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
         point_value_by_symbol=_POINT_VALUES,
+        margin_by_symbol=_MARGINS,
     )
     persist.assert_awaited_once()
     args = persist.await_args.args  # (session_factory, plan, outcomes, reconciliation)
@@ -405,6 +459,7 @@ async def test_run_rebalance_preview_does_not_persist(monkeypatch: pytest.Monkey
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
         point_value_by_symbol=_POINT_VALUES,
+        margin_by_symbol=_MARGINS,
         submit=False,
     )
     persist.assert_not_awaited()

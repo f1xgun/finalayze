@@ -34,8 +34,21 @@ _DEFAULT_OFZ_PK_SYMBOL = "SU29024RMFS5"
 # points * point_value). Override if the equity future is changed.
 _DEFAULT_EQUITY_POINT_VALUE = "10"
 
+# Phase 86 "fully-funded synthetic equity": the equity FUTURE is funded fully -- only its margin is
+# charged, plus a CASH reserve sized to survive a deep IMOEX drawdown EVEN if MOEX hikes the initial
+# margin (IM) mid-crash, and the freed cash is swept into the deposit anchor (deposit-as-plug):
+#   reserve = exposure * drawdown_survival_pct + margin * (im_hike_mult - 1)
+# so the survivable drawdown stays >= drawdown_survival_pct even after the IM is hiked im_hike_mult
+# times. Defaults: 0.45 (operator's "-45%" intent, brackets the 2022 -33% cluster) and 2.5 (the
+# observed Feb-2022 overnight IM ratio). Both env-overridable + fail-closed.
+SAA_EQUITY_DRAWDOWN_SURVIVAL_PCT_DEFAULT = Decimal("0.45")
+SAA_EQUITY_IM_HIKE_MULT_DEFAULT = Decimal("2.5")
+
 _EQUITY_ENV = "FINALAYZE_SAA_EQUITY_SYMBOL"
 _EQUITY_POINT_VALUE_ENV = "FINALAYZE_SAA_EQUITY_POINT_VALUE"
+_EQUITY_DRAWDOWN_SURVIVAL_PCT_ENV = "FINALAYZE_SAA_EQUITY_DRAWDOWN_SURVIVAL_PCT"
+_EQUITY_IM_HIKE_MULT_ENV = "FINALAYZE_SAA_EQUITY_IM_HIKE_MULT"
+_EQUITY_MARGIN_RATE_ENV = "FINALAYZE_SAA_EQUITY_MARGIN_RATE"
 _OFZ_PK_ENV = "FINALAYZE_SAA_OFZ_PK_SYMBOL"
 
 
@@ -82,3 +95,73 @@ def get_equity_point_value() -> Decimal:
 def get_ofz_pk_symbol() -> str:
     """Return the configured OFZ-PK (federal floating-coupon bond) ticker, fail-closed."""
     return _resolve(_OFZ_PK_ENV, _DEFAULT_OFZ_PK_SYMBOL, "ofz_pk")
+
+
+def _resolve_decimal(env_var: str, default: Decimal | None) -> Decimal | None:
+    """Parse an env var to a finite Decimal (or *default* when unset), fail-closed on garbage.
+
+    Returns ``default`` (possibly ``None``) when the var is unset/blank; otherwise the parsed
+    finite Decimal. A non-numeric or non-finite value raises ConfigurationError -- a malformed
+    risk parameter must never silently fall back to a (possibly unsafe) guess on a money path.
+    """
+    raw = os.environ.get(env_var)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = Decimal(raw.strip())
+    except InvalidOperation as exc:
+        msg = f"{env_var} must be a finite number; got {raw!r}"
+        raise ConfigurationError(msg) from exc
+    if not value.is_finite():
+        msg = f"{env_var} must be a finite number; got {value}"
+        raise ConfigurationError(msg)
+    return value
+
+
+def get_equity_drawdown_survival_pct() -> Decimal:
+    """Return the equity-future drawdown-survival fraction, fail-closed (Phase 86).
+
+    The CASH reserve held against the equity FUTURE is sized so the position survives an index
+    drawdown of at least this fraction (default 0.45) even after an initial-margin hike. Must be a
+    finite fraction in ``(0, 1]``; anything else raises ConfigurationError.
+    """
+    value = _resolve_decimal(
+        _EQUITY_DRAWDOWN_SURVIVAL_PCT_ENV, SAA_EQUITY_DRAWDOWN_SURVIVAL_PCT_DEFAULT
+    )
+    assert value is not None  # default is non-None
+    if not (Decimal(0) < value <= Decimal(1)):
+        msg = f"{_EQUITY_DRAWDOWN_SURVIVAL_PCT_ENV} must be a fraction in (0, 1]; got {value}"
+        raise ConfigurationError(msg)
+    return value
+
+
+def get_equity_im_hike_mult() -> Decimal:
+    """Return the initial-margin (IM) hike multiplier the reserve must withstand, fail-closed.
+
+    MOEX can raise the IM mid-crash (~2.5x overnight in Feb-2022); the reserve carries headroom so
+    the position is not force-liquidated when the IM is hiked by up to this multiple. Must be a
+    finite value ``>= 1`` (1.0 = no hike headroom); anything else raises ConfigurationError.
+    """
+    value = _resolve_decimal(_EQUITY_IM_HIKE_MULT_ENV, SAA_EQUITY_IM_HIKE_MULT_DEFAULT)
+    assert value is not None  # default is non-None
+    if value < Decimal(1):
+        msg = f"{_EQUITY_IM_HIKE_MULT_ENV} must be >= 1 (1.0 = no IM-hike headroom); got {value}"
+        raise ConfigurationError(msg)
+    return value
+
+
+def get_equity_margin_rate() -> Decimal | None:
+    """Return the OPTIONAL static equity-future margin rate, or ``None`` when unset (Phase 86).
+
+    This is a fraction of the contract notional used ONLY for offline/weekend planning when a live
+    broker margin fetch is not possible. It is NEVER an automatic fallback on a live fetch failure
+    (a too-low guess would silently under-reserve). Returns ``None`` when the operator has not
+    explicitly set it; when set, must be a finite fraction in ``(0, 1]``, else ConfigurationError.
+    """
+    value = _resolve_decimal(_EQUITY_MARGIN_RATE_ENV, None)
+    if value is None:
+        return None
+    if not (Decimal(0) < value <= Decimal(1)):
+        msg = f"{_EQUITY_MARGIN_RATE_ENV} must be a fraction in (0, 1]; got {value}"
+        raise ConfigurationError(msg)
+    return value

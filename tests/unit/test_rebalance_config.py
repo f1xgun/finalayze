@@ -13,11 +13,18 @@ import pytest
 
 from finalayze.config.rebalance_config import (
     SAA_REBALANCE_BAND_PCT,
+    get_equity_drawdown_survival_pct,
+    get_equity_im_hike_mult,
+    get_equity_margin_rate,
     get_equity_point_value,
     get_equity_symbol,
     get_ofz_pk_symbol,
 )
 from finalayze.core.exceptions import ConfigurationError
+
+_DRAWDOWN_ENV = "FINALAYZE_SAA_EQUITY_DRAWDOWN_SURVIVAL_PCT"
+_IM_HIKE_ENV = "FINALAYZE_SAA_EQUITY_IM_HIKE_MULT"
+_MARGIN_RATE_ENV = "FINALAYZE_SAA_EQUITY_MARGIN_RATE"
 
 
 def test_rebalance_band_is_two_percent() -> None:
@@ -87,3 +94,69 @@ def test_infinity_equity_point_value_fails_closed(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("FINALAYZE_SAA_EQUITY_POINT_VALUE", "inf")
     with pytest.raises(ConfigurationError):
         get_equity_point_value()
+
+
+# ── Phase 86: funded-equity reserve parameters (drawdown survival, IM-hike, static margin) ──
+
+
+def test_default_drawdown_survival_pct() -> None:
+    """The drawdown-survival fraction defaults to 0.45 (operator's '-45%' intent)."""
+    assert get_equity_drawdown_survival_pct() == Decimal("0.45")
+
+
+def test_env_override_drawdown_survival_pct(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The drawdown-survival fraction is operator-overridable via env."""
+    monkeypatch.setenv(_DRAWDOWN_ENV, "0.50")
+    assert get_equity_drawdown_survival_pct() == Decimal("0.50")
+
+
+@pytest.mark.parametrize("bad", ["abc", "0", "-0.1", "1.5", "inf", "nan"])
+def test_drawdown_survival_pct_fails_closed(monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
+    """Non-numeric / non-finite / out-of-(0,1] drawdown fractions fail closed."""
+    monkeypatch.setenv(_DRAWDOWN_ENV, bad)
+    with pytest.raises(ConfigurationError):
+        get_equity_drawdown_survival_pct()
+
+
+def test_default_im_hike_mult() -> None:
+    """The IM-hike multiplier defaults to 2.5 (the Feb-2022 overnight ratio)."""
+    assert get_equity_im_hike_mult() == Decimal("2.5")
+
+
+def test_env_override_im_hike_mult(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The IM-hike multiplier is operator-overridable via env."""
+    monkeypatch.setenv(_IM_HIKE_ENV, "3")
+    assert get_equity_im_hike_mult() == Decimal(3)
+
+
+@pytest.mark.parametrize("bad", ["abc", "0.9", "0", "-1", "inf", "nan"])
+def test_im_hike_mult_fails_closed(monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
+    """A non-numeric / non-finite / <1 IM-hike multiplier fails closed."""
+    monkeypatch.setenv(_IM_HIKE_ENV, bad)
+    with pytest.raises(ConfigurationError):
+        get_equity_im_hike_mult()
+
+
+def test_im_hike_mult_one_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A multiplier of exactly 1.0 (no IM-hike headroom) is allowed."""
+    monkeypatch.setenv(_IM_HIKE_ENV, "1")
+    assert get_equity_im_hike_mult() == Decimal(1)
+
+
+def test_equity_margin_rate_none_when_unset() -> None:
+    """The static margin rate is None unless the operator explicitly sets it (no auto-fallback)."""
+    assert get_equity_margin_rate() is None
+
+
+def test_equity_margin_rate_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit static margin rate is parsed for offline planning."""
+    monkeypatch.setenv(_MARGIN_RATE_ENV, "0.10")
+    assert get_equity_margin_rate() == Decimal("0.10")
+
+
+@pytest.mark.parametrize("bad", ["abc", "0", "-0.1", "1.5", "inf", "nan"])
+def test_equity_margin_rate_fails_closed(monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
+    """A set-but-malformed static margin rate fails closed (never a silent unsafe guess)."""
+    monkeypatch.setenv(_MARGIN_RATE_ENV, bad)
+    with pytest.raises(ConfigurationError):
+        get_equity_margin_rate()

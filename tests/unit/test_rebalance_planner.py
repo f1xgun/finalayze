@@ -22,11 +22,13 @@ from finalayze.execution.broker_base import OrderRequest, OrderResult
 from finalayze.execution.deposit_broker import DepositSimulatedBroker
 from finalayze.markets.instruments import Instrument
 from finalayze.orchestration.rebalance_planner import (
+    FundedEquityCash,
     LegOutcome,
     LegSizing,
     ManualAction,
     PlannedLeg,
     RebalancePlan,
+    compute_funded_equity_cash,
     compute_funding_advisory,
     plan_rebalance,
     size_auto_leg,
@@ -496,3 +498,243 @@ class TestPlanRebalanceGuards:
                 plan_id="p",
                 created_at=datetime(2026, 6, 23, tzinfo=UTC),
             )
+
+
+# ── Phase 86: fully-funded synthetic equity (margin + reserve + deposit-as-plug) ──────────────
+
+# IMOEXF future facts: lot 1, point_value 10 -> contract notional = 2275 pts * 10 = 22,750;
+# initial margin per contract ~= 2,342 (~10%).
+_IMOEXF_CONTRACT_NOTIONAL = Decimal(22_750)
+_IMOEXF_MARGIN = Decimal(2_342)
+
+
+def _future_equity_instrument() -> Instrument:
+    return Instrument(
+        symbol="IMOEXF",
+        market_id="moex",
+        name="MOEX Index future",
+        instrument_type="future",
+        figi="FUTIMOEXF000",
+        lot_size=1,
+        currency="RUB",
+    )
+
+
+class TestComputeFundedEquityCash:
+    """P86: the pure margin + drawdown-reserve sizing for a fully-funded equity FUTURE."""
+
+    def test_exact_split_for_a_15_contract_target(self) -> None:
+        """350k target / 22,750 -> 15 contracts; margin/reserve/equity_cash are exact Decimals."""
+        funded = compute_funded_equity_cash(
+            target_notional=Decimal(350_000),
+            contract_notional=_IMOEXF_CONTRACT_NOTIONAL,
+            lot_size=1,
+            margin_per_contract=_IMOEXF_MARGIN,
+            drawdown_survival_pct=Decimal("0.45"),
+            im_hike_mult=Decimal("2.5"),
+        )
+        assert isinstance(funded, FundedEquityCash)
+        assert funded.target_contracts == Decimal(15)
+        assert funded.exposure == Decimal(341_250)  # 15 * 22,750
+        assert funded.margin_cash == Decimal(35_130)  # 15 * 2,342
+        # reserve = 341,250 * 0.45 + 35,130 * (2.5 - 1) = 153,562.5 + 52,695 = 206,257.5
+        assert funded.reserve_cash == Decimal("206257.5")
+        assert funded.equity_cash == Decimal("241387.5")  # 35,130 + 206,257.5
+
+    def test_reserve_survives_target_drawdown_even_after_an_im_hike(self) -> None:
+        """Force-liq drawdown == target_dd even when the IM is hiked im_hike_mult x (refuter 1)."""
+        dd, hike = Decimal("0.45"), Decimal("2.5")
+        funded = compute_funded_equity_cash(
+            target_notional=Decimal(350_000),
+            contract_notional=_IMOEXF_CONTRACT_NOTIONAL,
+            lot_size=1,
+            margin_per_contract=_IMOEXF_MARGIN,
+            drawdown_survival_pct=dd,
+            im_hike_mult=hike,
+        )
+        # Force-liquidation fires when posted_cash - exposure*P < hiked_IM. The buffer for variation
+        # loss after the hike = posted - hike*margin; the survivable drawdown is buffer / exposure.
+        hiked_im = hike * funded.margin_cash
+        survivable = (funded.equity_cash - hiked_im) / funded.exposure
+        assert survivable == dd  # exactly the target, not less
+
+    @pytest.mark.parametrize(
+        "bad_margin", [Decimal(0), Decimal(-1), Decimal("inf"), Decimal("nan")]
+    )
+    def test_fails_closed_on_bad_margin(self, bad_margin: Decimal) -> None:
+        """A zero / negative / non-finite margin per contract fails closed (real IM is never 0)."""
+        with pytest.raises(ValueError, match="margin_per_contract"):
+            compute_funded_equity_cash(
+                target_notional=Decimal(350_000),
+                contract_notional=_IMOEXF_CONTRACT_NOTIONAL,
+                lot_size=1,
+                margin_per_contract=bad_margin,
+            )
+
+    def test_fails_closed_on_nonpositive_contract_notional(self) -> None:
+        """A zero contract notional fails closed (cannot divide to size contracts)."""
+        with pytest.raises(ValueError, match="contract_notional"):
+            compute_funded_equity_cash(
+                target_notional=Decimal(350_000),
+                contract_notional=Decimal(0),
+                lot_size=1,
+                margin_per_contract=_IMOEXF_MARGIN,
+            )
+
+    def test_lot_flooring_makes_exposure_below_the_target(self) -> None:
+        """15.38 contracts floor to 15 -> exposure (341,250) < target notional (350,000)."""
+        funded = compute_funded_equity_cash(
+            target_notional=Decimal(350_000),
+            contract_notional=_IMOEXF_CONTRACT_NOTIONAL,
+            lot_size=1,
+            margin_per_contract=_IMOEXF_MARGIN,
+        )
+        assert funded.target_contracts == Decimal(15)
+        assert funded.exposure < Decimal(350_000)
+
+
+class TestPlanRebalanceFundedEquity:
+    """P86: plan_rebalance with a leveraged equity FUTURE -> deposit-as-plug, idle == 0."""
+
+    _PID = uuid4()
+    _AS_OF = date(2026, 6, 23)
+    _CREATED = datetime(2026, 6, 23, tzinfo=UTC)
+    _BUDGET = Decimal(1_000_000)
+    _WEIGHTS: ClassVar[dict[AssetClass, Decimal]] = {
+        AssetClass.DEPOSIT: Decimal("0.25"),
+        AssetClass.OFZ_PK: Decimal("0.40"),
+        AssetClass.EQUITY: Decimal("0.35"),
+    }
+    _PRICES: ClassVar[dict[str, Decimal]] = {
+        "IMOEXF": _IMOEXF_CONTRACT_NOTIONAL,
+        "SU29024RMFS5": Decimal(1000),
+    }
+    _MARGINS: ClassVar[dict[str, Decimal]] = {"IMOEXF": _IMOEXF_MARGIN}
+    # Expected (see TestComputeFundedEquityCash): equity_cash 241,387.5; ofz 0.40*1M = 400,000.
+    _EQUITY_CASH = Decimal("241387.5")
+    _OFZ_CASH = Decimal(400_000)
+    _DEPOSIT_REALIZED = Decimal("358612.5")  # 1,000,000 - 241,387.5 - 400,000
+
+    def _plan(
+        self,
+        *,
+        current_positions: dict[str, Decimal] | None = None,
+        deposit_current: Decimal = Decimal(0),
+        margin_by_symbol: dict[str, Decimal] | None = "default",  # type: ignore[assignment]
+        drawdown: Decimal = Decimal("0.45"),
+        im_hike: Decimal = Decimal("2.5"),
+    ) -> RebalancePlan:
+        margins = self._MARGINS if margin_by_symbol == "default" else margin_by_symbol
+        return plan_rebalance(
+            active_portfolio=(self._PID, "balanced", self._BUDGET),
+            target_weights=self._WEIGHTS,
+            current_positions=current_positions or {},
+            last_prices=self._PRICES,
+            leg_instruments={
+                AssetClass.EQUITY: _future_equity_instrument(),
+                AssetClass.OFZ_PK: _ofz_instrument(),
+            },
+            deposit_current_notional=deposit_current,
+            plan_id="p86",
+            created_at=self._CREATED,
+            as_of=self._AS_OF,
+            margin_by_symbol=margins,  # type: ignore[arg-type]
+            equity_drawdown_survival_pct=drawdown,
+            equity_im_hike_mult=im_hike,
+        )
+
+    def test_deposit_is_the_plug_and_idle_is_zero(self) -> None:
+        """Greenfield: equity_cash + ofz_cash + deposit_realized == budget EXACTLY (idle 0)."""
+        plan = self._plan()
+        deposit = plan.manual_actions[0]
+        assert deposit.target_notional == self._DEPOSIT_REALIZED
+        eq = next(leg for leg in plan.auto_legs if leg.asset_class is AssetClass.EQUITY)
+        assert eq.margin_cash == Decimal(35_130)
+        assert eq.reserve_cash == Decimal("206257.5")
+        equity_cash = (eq.margin_cash or Decimal(0)) + (eq.reserve_cash or Decimal(0))
+        assert equity_cash + self._OFZ_CASH + deposit.target_notional == self._BUDGET
+
+    def test_equity_order_qty_is_the_floored_contracts(self) -> None:
+        """The ORDER is the lot-floored exposure (15 contracts), unchanged from Phase 85 sizing."""
+        plan = self._plan()
+        eq = next(leg for leg in plan.auto_legs if leg.asset_class is AssetClass.EQUITY)
+        assert eq.order.symbol == "IMOEXF"
+        assert eq.order.quantity == Decimal(15)
+        # target_notional stays the EXPOSURE allocation for audit honesty (not the cash split).
+        assert eq.target_notional == Decimal(350_000)
+
+    def test_top_up_does_not_abort_and_reserves_on_held_target(self) -> None:
+        """current 14 -> target 15: trades 1 contract, but reserves on the full 15 (refuter 4)."""
+        plan = self._plan(current_positions={"IMOEXF": Decimal(14)})
+        eq = next(leg for leg in plan.auto_legs if leg.asset_class is AssetClass.EQUITY)
+        assert eq.order.quantity == Decimal(1)  # the traded delta is unchanged
+        # the cash split / deposit plug are on the HELD target (15), identical to greenfield
+        assert plan.manual_actions[0].target_notional == self._DEPOSIT_REALIZED
+
+    def test_within_band_equity_still_plugs_the_deposit(self) -> None:
+        """current 15 == target 15 -> no equity order, but the deposit reflects the held reserve."""
+        plan = self._plan(current_positions={"IMOEXF": Decimal(15)})
+        assert all(leg.asset_class is not AssetClass.EQUITY for leg in plan.auto_legs)
+        assert plan.manual_actions[0].target_notional == self._DEPOSIT_REALIZED
+
+    def test_non_greenfield_deposit_delta_is_the_flow_not_the_stock(self) -> None:
+        """deposit_current != 0: the action's delta is realized - current (the cash to move)."""
+        plan = self._plan(deposit_current=Decimal(100_000))
+        action = plan.manual_actions[0]
+        assert action.target_notional == self._DEPOSIT_REALIZED  # stock
+        assert action.current_notional == Decimal(100_000)
+        # the operator moves the DELTA: 358,612.5 - 100,000 = 258,612.5
+        assert "258612.5" in action.description
+
+    def test_future_leg_without_margin_aborts_whole_plan(self) -> None:
+        """A FUTURE equity leg with no injected margin aborts the plan (mirrors point_value)."""
+        with pytest.raises(ValueError, match="no margin for the future"):
+            self._plan(margin_by_symbol={})
+
+    def test_oversized_reserve_overflows_budget_and_hard_stops(self) -> None:
+        """A reserve so large that equity+ofz cash exceeds the budget hard-stops (no 1.0x fund)."""
+        with pytest.raises(ValueError, match="cannot fund"):
+            self._plan(drawdown=Decimal(3))  # absurd survival -> equity_cash > budget
+
+    def test_etf_equity_is_backward_compatible_deposit_equals_weight(self) -> None:
+        """A non-future (ETF) equity leg with clean lots -> deposit_realized == budget*weight."""
+        plan = plan_rebalance(
+            active_portfolio=(self._PID, "balanced", self._BUDGET),
+            target_weights=self._WEIGHTS,
+            current_positions={},
+            last_prices={"EQMX": Decimal(100), "SU29024RMFS5": Decimal(1000)},
+            leg_instruments={
+                AssetClass.EQUITY: _equity_instrument(),  # ETF @ 100, lot 1 (clean division)
+                AssetClass.OFZ_PK: _ofz_instrument(),
+            },
+            deposit_current_notional=Decimal(0),
+            plan_id="p86-etf",
+            created_at=self._CREATED,
+        )
+        # 0.35*1M/100 = 3500 units * 100 = 350,000; ofz 400,000 -> deposit = 250,000 = 0.25*budget
+        assert plan.manual_actions[0].target_notional == Decimal(250_000)
+
+    def test_cash_legs_with_non_dividing_prices_plug_residual_into_deposit(self) -> None:
+        """Non-clean lot prices leave a residual the deposit plug absorbs (idle 0, WR-02)."""
+        # ETF equity @ 137 (lot 1): 350,000/137 -> floor 2554 -> 2554*137 = 349,898 (residual 102).
+        # OFZ @ 997 (lot 1): 400,000/997 -> floor 401 -> 401*997 = 399,797 (residual 203).
+        plan = plan_rebalance(
+            active_portfolio=(self._PID, "balanced", self._BUDGET),
+            target_weights=self._WEIGHTS,
+            current_positions={},
+            last_prices={"EQMX": Decimal(137), "SU29024RMFS5": Decimal(997)},
+            leg_instruments={
+                AssetClass.EQUITY: _equity_instrument(),  # ETF, fully funded (no margin)
+                AssetClass.OFZ_PK: _ofz_instrument(),
+            },
+            deposit_current_notional=Decimal(0),
+            plan_id="p86-residual",
+            created_at=self._CREATED,
+        )
+        equity_cash = Decimal(349_898)
+        ofz_cash = Decimal(399_797)
+        deposit_realized = plan.manual_actions[0].target_notional
+        # the deposit absorbs BOTH lot-flooring residuals (102 + 203 = 305) over the strategic 250k
+        assert deposit_realized == Decimal(250_305)
+        # the cash identity closes EXACTLY despite the non-clean lots (idle == 0 by construction)
+        assert equity_cash + ofz_cash + deposit_realized == self._BUDGET
