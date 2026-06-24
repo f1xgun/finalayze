@@ -169,3 +169,23 @@ def test_saa_target_allocation_404_returns_empty() -> None:
     )
     client = ApiClient(base_url=_BASE, api_key=_KEY)
     assert client.saa_target_allocation() == {}
+
+
+@respx.mock
+def test_saa_rebalance_runs_returns_payload() -> None:
+    payload = {"portfolio_id": "p", "runs": [{"plan_id": "x", "orders": []}]}
+    respx.get(f"{_BASE}/api/v1/saa/rebalance-runs").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    client = ApiClient(base_url=_BASE, api_key=_KEY)
+    assert client.saa_rebalance_runs() == payload
+    assert respx.calls.last.request.headers["x-api-key"] == _KEY
+
+
+@respx.mock
+def test_saa_rebalance_runs_404_returns_empty() -> None:
+    respx.get(f"{_BASE}/api/v1/saa/rebalance-runs").mock(
+        return_value=httpx.Response(404, json={"detail": "no active SAA portfolio"})
+    )
+    client = ApiClient(base_url=_BASE, api_key=_KEY)
+    assert client.saa_rebalance_runs() == {}

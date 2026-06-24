@@ -114,3 +114,92 @@ def test_saa_allocation_module_runs_render_at_module_level(
 
     assert st_mock.title.called  # render ran via the module-level entry block
     api_stub.saa_target_allocation.assert_called_once()
+
+
+def test_rebalance_history_render_importable() -> None:
+    from finalayze.dashboard.pages import rebalance_history
+
+    assert callable(rebalance_history.render)
+
+
+def test_rebalance_history_build_run_rows() -> None:
+    from finalayze.dashboard.pages.rebalance_history import _build_run_rows
+
+    data = {
+        "runs": [
+            {
+                "created_at": "2026-06-23T12:00:00+00:00",
+                "as_of": "2026-06-23",
+                "mode": "SANDBOX",
+                "status": "COMPLETE",
+                "fill_rate": "1.0000",
+                "orders": [
+                    {
+                        "asset_class": "equity",
+                        "symbol": "EQMX",
+                        "side": "BUY",
+                        "requested_qty": "100",
+                        "filled_qty": "100",
+                        "status": "FILLED",
+                        "reason": None,
+                    }
+                ],
+            }
+        ]
+    }
+    rows = _build_run_rows(data)
+    assert len(rows) == 1
+    assert rows[0]["When"] == "2026-06-23 12:00:00"
+    assert rows[0]["Status"] == "COMPLETE"
+    assert rows[0]["Legs"] == 1
+
+
+def test_rebalance_history_build_run_rows_empty() -> None:
+    from finalayze.dashboard.pages.rebalance_history import _build_run_rows
+
+    assert _build_run_rows({}) == []
+
+
+def test_rebalance_history_module_runs_render_at_module_level(
+    monkeypatch: object,
+) -> None:
+    """Executing the page module invokes render() (Phase 81 CR-01 -- not a blank page)."""
+    import sys
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    from finalayze.dashboard.pages import rebalance_history
+
+    st_mock = MagicMock()
+    api_stub = MagicMock()
+    api_stub.saa_rebalance_runs.return_value = {
+        "portfolio_id": "p",
+        "runs": [
+            {
+                "created_at": "2026-06-23T12:00:00+00:00",
+                "as_of": "2026-06-23",
+                "mode": "SANDBOX",
+                "status": "COMPLETE",
+                "fill_rate": "1.0000",
+                "orders": [
+                    {
+                        "asset_class": "equity",
+                        "symbol": "EQMX",
+                        "side": "BUY",
+                        "requested_qty": "100",
+                        "filled_qty": "100",
+                        "status": "FILLED",
+                        "reason": None,
+                    }
+                ],
+            }
+        ],
+    }
+    st_mock.session_state = {"api": api_stub}
+
+    monkeypatch.setitem(sys.modules, "streamlit", st_mock)  # type: ignore[attr-defined]
+    src_path = Path(rebalance_history.__file__)
+    exec(compile(src_path.read_text(), str(src_path), "exec"), {"__name__": "rh_exec"})  # noqa: S102
+
+    assert st_mock.title.called
+    api_stub.saa_rebalance_runs.assert_called_once()
