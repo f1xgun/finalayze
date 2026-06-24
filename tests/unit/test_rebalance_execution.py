@@ -333,3 +333,25 @@ class TestReconcileLegPositions:
         legs = resolve_leg_instruments(build_default_registry())
         positions = {_EQUITY_SYMBOL: Decimal(100), _OFZ_SYMBOL: Decimal(50)}
         assert reconcile_leg_positions(legs, positions, raw_book_nonempty=True) == []
+
+
+async def test_run_rebalance_nkd_dirty_price_sizes_fewer_bonds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """NKD (accrued coupon) raises the OFZ dirty price -> fewer bonds than clean-only (P82-R6)."""
+    pid = uuid4()
+    _patch_db(monkeypatch, portfolio_id=pid, active=(pid, "balanced", _BUDGET), deposit=None)
+    broker = _FakeBroker(positions={})
+    # OFZ clean = 95.5% of 1000 = 955; dirty = 955 + 50 NKD = 1005. 0.40*1M / 1005 = 398 (vs 418).
+    plan, _ = await run_rebalance(
+        broker_router=BrokerRouter({"moex": broker}),
+        mode_manager=ModeManager(),
+        registry=build_default_registry(),
+        session_factory=object(),
+        clock=_CLOCK,
+        fetch_last_prices=_fetch_prices,
+        nkd_by_symbol={_OFZ_SYMBOL: Decimal(50)},
+    )
+    legs = {leg.asset_class: leg for leg in plan.auto_legs}
+    assert legs[AssetClass.OFZ_PK].order.quantity == Decimal(398)  # NKD reduced the bond qty
+    assert legs[AssetClass.EQUITY].order.quantity == Decimal(3500)  # equity unaffected

@@ -137,6 +137,7 @@ async def run_rebalance(
     session_factory: async_sessionmaker[AsyncSession],
     clock: Clock,
     fetch_last_prices: Callable[[list[str]], Mapping[str, Decimal]],
+    nkd_by_symbol: Mapping[str, Decimal] | None = None,
     mode: Mode = "DRY_RUN",
     confirm: bool = False,
     submit: bool = True,
@@ -145,7 +146,8 @@ async def run_rebalance(
 
     Reads the active portfolio, computes the regime-tilted target weights for today, resolves the
     leg instruments, normalizes current positions to symbols, converts last-price quotes to RUB
-    (bond %-of-face -> RUB), loads the deposit mark, then builds (``plan_rebalance``) and -- when
+    (bond %-of-face -> RUB, plus the injected ``nkd_by_symbol`` accrued coupon for a dirty-price
+    bond size), loads the deposit mark, then builds (``plan_rebalance``) and -- when
     ``submit`` is True -- submits (``submit_rebalance_plan``) the plan. DRY_RUN by default; LIVE
     stays triple-gated.
 
@@ -190,13 +192,17 @@ async def run_rebalance(
             hint="possible FIGI drift / unmapped leg holding -- verify before submitting",
         )
 
+    nkd = nkd_by_symbol or {}
     raw_prices = fetch_last_prices([inst.symbol for inst in leg_instruments.values()])
     last_prices: dict[str, Decimal] = {}
     for asset_class, instrument in leg_instruments.items():
-        if instrument.symbol not in raw_prices:
-            msg = f"no last price for the {asset_class.value} leg {instrument.symbol!r}"
+        symbol = instrument.symbol
+        if symbol not in raw_prices:
+            msg = f"no last price for the {asset_class.value} leg {symbol!r}"
             raise ValueError(msg)
-        last_prices[instrument.symbol] = to_rub_price(instrument, raw_prices[instrument.symbol])
+        # Size off the DIRTY price = clean RUB (to_rub_price: bond %->RUB / equity passthrough) +
+        # accrued coupon (NKD, RUB per bond). NKD is 0 for equity (absent from the map) (P82-R6).
+        last_prices[symbol] = to_rub_price(instrument, raw_prices[symbol]) + nkd.get(symbol, _ZERO)
 
     deposit_broker = await load_deposit_broker_from_db(portfolio_id, as_of, session_factory)
     deposit_current = deposit_broker.deposit_value() if deposit_broker is not None else _ZERO
