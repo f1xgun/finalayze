@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -148,15 +149,18 @@ def _patch_db(
     portfolio_id: object,
     active: object,
     deposit: object,
-) -> None:
+) -> AsyncMock:
     async def _get_active(_sf: object) -> object:
         return active
 
     async def _load_deposit(_pid: object, _date: object, _sf: object) -> object:
         return deposit
 
+    persist = AsyncMock()  # Phase 82: stub the audit-persist so run_rebalance never hits a real DB.
     monkeypatch.setattr(rebalance_execution, "get_active_portfolio", _get_active)
     monkeypatch.setattr(rebalance_execution, "load_deposit_broker_from_db", _load_deposit)
+    monkeypatch.setattr(rebalance_execution, "persist_rebalance_run", persist)
+    return persist
 
 
 async def test_run_rebalance_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -355,3 +359,42 @@ async def test_run_rebalance_nkd_dirty_price_sizes_fewer_bonds(
     legs = {leg.asset_class: leg for leg in plan.auto_legs}
     assert legs[AssetClass.OFZ_PK].order.quantity == Decimal(398)  # NKD reduced the bond qty
     assert legs[AssetClass.EQUITY].order.quantity == Decimal(3500)  # equity unaffected
+
+
+async def test_run_rebalance_persists_audit_on_submit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real submit reconciles + persists the run (P82-R7)."""
+    pid = uuid4()
+    persist = _patch_db(
+        monkeypatch, portfolio_id=pid, active=(pid, "balanced", _BUDGET), deposit=None
+    )
+    plan, outcomes = await run_rebalance(
+        broker_router=BrokerRouter({"moex": _FakeBroker()}),
+        mode_manager=ModeManager(),
+        registry=build_default_registry(),
+        session_factory=object(),
+        clock=_CLOCK,
+        fetch_last_prices=_fetch_prices,
+    )
+    persist.assert_awaited_once()
+    args = persist.await_args.args  # (session_factory, plan, outcomes, reconciliation)
+    assert args[1] is plan
+    assert args[2] == outcomes
+    assert args[3].plan_id == plan.plan_id  # the RebalanceReconciliation
+
+
+async def test_run_rebalance_preview_does_not_persist(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A preview (submit=False) records nothing (P82-R7)."""
+    pid = uuid4()
+    persist = _patch_db(
+        monkeypatch, portfolio_id=pid, active=(pid, "balanced", _BUDGET), deposit=None
+    )
+    await run_rebalance(
+        broker_router=BrokerRouter({"moex": _FakeBroker()}),
+        mode_manager=ModeManager(),
+        registry=build_default_registry(),
+        session_factory=object(),
+        clock=_CLOCK,
+        fetch_last_prices=_fetch_prices,
+        submit=False,
+    )
+    persist.assert_not_awaited()

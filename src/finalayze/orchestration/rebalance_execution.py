@@ -25,10 +25,12 @@ from finalayze.config.rebalance_config import get_equity_symbol, get_ofz_pk_symb
 from finalayze.core.exceptions import InstrumentNotFoundError
 from finalayze.core.schemas import AssetClass, RiskProfile
 from finalayze.execution.deposit_loader import load_deposit_broker_from_db
+from finalayze.execution.rebalance_writer import persist_rebalance_run
 from finalayze.execution.saa_portfolio_writer import get_active_portfolio
 from finalayze.orchestration.allocation import AllocationOrchestrator
 from finalayze.orchestration.rebalance_executor import submit_rebalance_plan
 from finalayze.orchestration.rebalance_planner import plan_rebalance
+from finalayze.orchestration.rebalance_reconcile import reconcile_rebalance_run
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -228,6 +230,23 @@ async def run_rebalance(
     outcomes = await asyncio.to_thread(
         submit_rebalance_plan, plan, broker_router, mode_manager, confirm=confirm
     )
+
+    # Reconcile filled-vs-planned and persist the audit record. Persist is BEST EFFORT: the orders
+    # are already placed, so a write failure must NOT fail the run -- log and return (P82-R7).
+    reconciliation = reconcile_rebalance_run(plan, outcomes)
+    if reconciliation.status != "COMPLETE":
+        _log.warning(
+            "rebalance_reconciliation_discrepancy",
+            plan_id=plan.plan_id,
+            status=reconciliation.status,
+            fill_rate=str(reconciliation.fill_rate),
+            alerts=list(reconciliation.alerts),
+        )
+    try:
+        await persist_rebalance_run(session_factory, plan, outcomes, reconciliation)
+    except Exception as exc:  # audit write must not fail a completed run (orders already placed)
+        _log.error("rebalance_persist_failed", plan_id=plan.plan_id, error=str(exc))
+
     return plan, outcomes
 
 
