@@ -19,6 +19,7 @@ from finalayze.api.v1.auth import api_key_auth
 from finalayze.core.clock import RealClock
 from finalayze.core.schemas import RiskProfile
 from finalayze.execution.deposit_loader import load_deposit_broker_from_db
+from finalayze.execution.rebalance_reader import list_rebalance_runs
 from finalayze.execution.saa_portfolio_writer import get_active_portfolio
 from finalayze.markets.instruments import build_default_registry
 from finalayze.orchestration.allocation import AllocationOrchestrator
@@ -97,3 +98,85 @@ async def target_allocation() -> SaaTargetAllocation:
         deposit_current_notional_rub=str(deposit_value),
         legs=legs,
     )
+
+
+class RebalanceOrderOut(BaseModel):
+    """One persisted per-leg order outcome (read-only)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    asset_class: str
+    symbol: str
+    side: str
+    requested_qty: str
+    filled_qty: str
+    status: str
+    reason: str | None = None
+
+
+class RebalanceRunOut(BaseModel):
+    """One persisted rebalance run + its per-leg orders (read-only)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    run_id: str
+    plan_id: str
+    as_of: str
+    mode: str
+    status: str
+    fill_rate: str
+    created_at: str
+    orders: list[RebalanceOrderOut]
+
+
+class RebalanceRunsResponse(BaseModel):
+    """The active portfolio's recent rebalance runs (newest first)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    portfolio_id: str
+    runs: list[RebalanceRunOut]
+
+
+@router.get("/rebalance-runs", response_model=RebalanceRunsResponse)
+async def rebalance_runs(limit: int = 20) -> RebalanceRunsResponse:
+    """Return the active portfolio's recent rebalance runs (read-only, no Tinkoff token).
+
+    Reads the persisted audit trail (``saa_rebalance_runs`` / ``saa_rebalance_orders``), newest
+    first. ``limit`` is clamped to [1, 100]. Returns 404 when there is no active SAA portfolio; an
+    empty ``runs`` list when the portfolio has no runs yet.
+    """
+    from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+
+    session_factory = get_async_session_factory()
+    active = await get_active_portfolio(session_factory)
+    if active is None:
+        raise HTTPException(status_code=_HTTP_NOT_FOUND, detail="no active SAA portfolio")
+    portfolio_id = active[0]
+
+    records = await list_rebalance_runs(session_factory, portfolio_id, limit=limit)
+    runs = [
+        RebalanceRunOut(
+            run_id=str(record.run_id),
+            plan_id=record.plan_id,
+            as_of=record.as_of.isoformat(),
+            mode=record.mode,
+            status=record.status,
+            fill_rate=str(record.fill_rate),
+            created_at=record.created_at.isoformat(),
+            orders=[
+                RebalanceOrderOut(
+                    asset_class=order.asset_class,
+                    symbol=order.symbol,
+                    side=order.side,
+                    requested_qty=str(order.requested_qty),
+                    filled_qty=str(order.filled_qty),
+                    status=order.status,
+                    reason=order.reason,
+                )
+                for order in record.orders
+            ],
+        )
+        for record in records
+    ]
+    return RebalanceRunsResponse(portfolio_id=str(portfolio_id), runs=runs)

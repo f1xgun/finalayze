@@ -102,6 +102,18 @@ class ApiClient:
             return result
         return {}
 
+    def saa_rebalance_runs(self, *, limit: int = 20) -> dict[str, object]:
+        """Fetch the rebalance-run history from /api/v1/saa/rebalance-runs (Phase 83).
+
+        Returns the parsed JSON on success; an empty dict on a 404 / non-2xx / non-dict response so
+        the dashboard renders a friendly empty state rather than crashing.
+        """
+        resp = self.get("/api/v1/saa/rebalance-runs", params={"limit": limit})
+        result = resp.json()
+        if resp.is_success and isinstance(result, dict):
+            return result
+        return {}
+
 
 # ── Convenience functions used by page modules ─────────────────────────────────
 
