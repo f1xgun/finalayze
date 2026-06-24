@@ -25,6 +25,10 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from decimal import Decimal
 
 # gRPC env vars MUST be set before importing grpc (via t_tech.invest), mirroring run_sandbox.py.
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -99,6 +103,42 @@ def equity_point_value_error() -> str | None:
     return None
 
 
+def build_equity_margin_by_symbol(
+    *,
+    fetcher: object,
+    broker: object,
+    equity_instrument: object,
+    equity_symbol: str,
+    point_value: Decimal,
+) -> dict[str, Decimal]:
+    """Build ``margin_by_symbol`` for the equity leg, fail-LOUD for a FUTURE (Phase 86).
+
+    A non-future equity leg is fully funded (no margin) -> ``{}``. For a FUTURE: the broker initial
+    margin via ``fetch_futures_margin``, which RAISES on a fetch failure -- NEVER a silent guess (a
+    too-low margin would under-reserve the drawdown buffer). An EXPLICIT static rate
+    (``FINALAYZE_SAA_EQUITY_MARGIN_RATE``) overrides the broker margin with ``rate *
+    contract_notional`` (WARN-logged); it is reachable ONLY when the operator has set it, never as
+    an automatic fallback on a fetch failure.
+    """
+    from finalayze.config.rebalance_config import get_equity_margin_rate  # noqa: PLC0415
+
+    if getattr(equity_instrument, "instrument_type", None) != "future":
+        return {}  # fully-funded cash equity (e.g. an ETF) -- no margin to fetch
+    static_rate = get_equity_margin_rate()
+    if static_rate is not None:
+        # Explicit operator override (e.g. a conservative own-margin): margin = rate * notional.
+        raw = broker.get_last_prices([equity_symbol])  # type: ignore[attr-defined]
+        contract_notional = raw[equity_symbol] * point_value
+        _log.warning(
+            "run_rebalance_static_margin_rate_used",
+            symbol=equity_symbol,
+            rate=str(static_rate),
+        )
+        return {equity_symbol: static_rate * contract_notional}
+    # Primary path: the broker initial margin per contract (fail-loud -- DataFetchError on failure).
+    return {equity_symbol: fetcher.fetch_futures_margin(equity_symbol)}  # type: ignore[attr-defined]
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a one-shot SAA rebalance.")
     parser.add_argument(
@@ -155,6 +195,7 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
     )
     from finalayze.core.clock import RealClock  # noqa: PLC0415
     from finalayze.core.db import get_async_session_factory  # noqa: PLC0415
+    from finalayze.core.exceptions import DataFetchError  # noqa: PLC0415
     from finalayze.core.modes import ModeManager, WorkMode  # noqa: PLC0415
     from finalayze.data.fetchers.tinkoff_data import TinkoffFetcher  # noqa: PLC0415
     from finalayze.execution.broker_router import BrokerRouter  # noqa: PLC0415
@@ -184,7 +225,28 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
     fetcher = TinkoffFetcher(token=settings.tinkoff_token, registry=registry, sandbox=True)
     nkd_by_symbol = fetch_nkd_by_symbol(fetcher, get_ofz_pk_symbol(), clock.now().date())
     # The equity FUTURE (IMOEXF) is sized by exposure: contract notional = points * point_value.
-    point_value_by_symbol = {get_equity_symbol(): get_equity_point_value()}
+    equity_symbol = get_equity_symbol()
+    point_value = get_equity_point_value()
+    point_value_by_symbol = {equity_symbol: point_value}
+    # Fully-funded synthetic equity (Phase 86): fetch the future's initial margin FAIL-LOUD -- a
+    # failure aborts BEFORE any plan/preview (distinct error), never a silent under-reserve.
+    equity_instrument = registry.get(equity_symbol, "moex")
+    try:
+        margin_by_symbol = build_equity_margin_by_symbol(
+            fetcher=fetcher,
+            broker=broker,
+            equity_instrument=equity_instrument,
+            equity_symbol=equity_symbol,
+            point_value=point_value,
+        )
+    except DataFetchError as exc:
+        _log.error(
+            "run_rebalance_margin_fetch_failed",
+            symbol=equity_symbol,
+            error=str(exc),
+            hint="could not fetch the equity-future margin; cannot size the funded reserve",
+        )
+        return 1
 
     async def _go() -> int:
         plan, outcomes = await run_rebalance(
@@ -196,6 +258,7 @@ def _run(*, plan_mode: str, submit: bool, confirm: bool) -> int:
             fetch_last_prices=broker.get_last_prices,
             nkd_by_symbol=nkd_by_symbol,  # type: ignore[arg-type]
             point_value_by_symbol=point_value_by_symbol,
+            margin_by_symbol=margin_by_symbol,
             mode=plan_mode,  # type: ignore[arg-type]
             confirm=confirm,
             submit=submit,

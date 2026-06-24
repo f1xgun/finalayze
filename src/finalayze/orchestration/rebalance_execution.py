@@ -21,7 +21,12 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from finalayze.config.rebalance_config import get_equity_symbol, get_ofz_pk_symbol
+from finalayze.config.rebalance_config import (
+    get_equity_drawdown_survival_pct,
+    get_equity_im_hike_mult,
+    get_equity_symbol,
+    get_ofz_pk_symbol,
+)
 from finalayze.core.exceptions import InstrumentNotFoundError
 from finalayze.core.schemas import AssetClass, RiskProfile
 from finalayze.execution.deposit_loader import load_deposit_broker_from_db
@@ -141,6 +146,7 @@ async def run_rebalance(
     fetch_last_prices: Callable[[list[str]], Mapping[str, Decimal]],
     nkd_by_symbol: Mapping[str, Decimal] | None = None,
     point_value_by_symbol: Mapping[str, Decimal] | None = None,
+    margin_by_symbol: Mapping[str, Decimal] | None = None,
     mode: Mode = "DRY_RUN",
     confirm: bool = False,
     submit: bool = True,
@@ -236,6 +242,12 @@ async def run_rebalance(
         mode=mode,
         deposit_broker=deposit_broker,
         as_of=as_of,
+        # Fully-funded synthetic equity (Phase 86): the equity FUTURE consumes margin + a drawdown
+        # reserve, the deposit absorbs the freed cash. Margin is injected (like point_value); the
+        # reserve policy is env-overridable config read here at the orchestration layer.
+        margin_by_symbol=margin_by_symbol,
+        equity_drawdown_survival_pct=get_equity_drawdown_survival_pct(),
+        equity_im_hike_mult=get_equity_im_hike_mult(),
     )
 
     if not submit:

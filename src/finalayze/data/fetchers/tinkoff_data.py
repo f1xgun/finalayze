@@ -26,7 +26,7 @@ if _GRPC_ROOTS.exists():
 
 from datetime import UTC, date, datetime  # noqa: E402
 from decimal import Decimal  # noqa: E402
-from typing import TYPE_CHECKING, Any  # noqa: E402
+from typing import TYPE_CHECKING, Any, cast  # noqa: E402
 
 import structlog  # noqa: E402
 from t_tech.invest import AsyncClient, CandleInterval  # noqa: E402
@@ -1052,6 +1052,38 @@ class TinkoffFetcher(BaseFetcher):
                 )
             )
         return results
+
+    def fetch_futures_margin(self, symbol: str) -> Decimal:
+        """Fetch the initial margin (RUB per contract) for a MOEX FUTURE, fail-LOUD (Phase 86).
+
+        Resolves *symbol* to FIGI and calls ``get_futures_margin``, returning
+        ``initial_margin_on_buy`` as a Decimal. Used to size the fully-funded equity reserve, which
+        is load-bearing -- so unlike ``fetch_all_futures`` (which swallows gRPC errors and returns
+        ``[]``), this RAISES ``DataFetchError`` on any gRPC error and REJECTS a zero / non-finite
+        margin at the boundary (a real IMOEXF initial margin is never 0). A sandbox
+        ``UNIMPLEMENTED``/outage can therefore never masquerade as margin == 0.
+        """
+        figi = self._symbol_to_figi(symbol)
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        try:
+            margin = cast("Decimal", self._run_async(self._fetch_futures_margin_async(figi)))
+        except Exception as exc:
+            msg = f"Tinkoff gRPC error fetching futures margin for {symbol} (FIGI={figi}): {exc}"
+            raise DataFetchError(msg) from exc
+        if not margin.is_finite() or margin <= Decimal(0):
+            msg = (
+                f"futures margin for {symbol} (FIGI={figi}) is non-positive/non-finite "
+                f"({margin}); refusing to size a reserve off a bad margin"
+            )
+            raise DataFetchError(msg)
+        return margin
+
+    async def _fetch_futures_margin_async(self, figi: str) -> Decimal:
+        """Async call to T-Bank SDK get_futures_margin -> initial_margin_on_buy as Decimal."""
+        services = await self._get_services_async()
+        resp = await services.instruments.get_futures_margin(figi=figi)  # type: ignore[attr-defined]
+        return self._money_to_decimal(resp.initial_margin_on_buy)
 
     @staticmethod
     def _next_business_day(dt: datetime) -> datetime:

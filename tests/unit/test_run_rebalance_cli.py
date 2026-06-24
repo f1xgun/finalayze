@@ -138,3 +138,84 @@ def test_equity_point_value_error_none_on_default(monkeypatch: object) -> None:
     """The default IMOEXF (symbol not overridden) needs no explicit point value."""
     monkeypatch.delenv("FINALAYZE_SAA_EQUITY_SYMBOL", raising=False)  # type: ignore[attr-defined]
     assert _CLI.equity_point_value_error() is None
+
+
+# ── Phase 86: build_equity_margin_by_symbol -- fail-LOUD futures margin for the funded reserve ──
+
+from decimal import Decimal  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from finalayze.core.exceptions import DataFetchError  # noqa: E402
+
+_FUTURE_INSTRUMENT = SimpleNamespace(instrument_type="future")
+_ETF_INSTRUMENT = SimpleNamespace(instrument_type="etf")
+
+
+class _MarginFetcher:
+    def __init__(self, margin: Decimal | None = None, *, fail: bool = False) -> None:
+        self._margin = margin
+        self._fail = fail
+
+    def fetch_futures_margin(self, _symbol: str) -> Decimal:
+        if self._fail:
+            msg = "gRPC UNIMPLEMENTED"
+            raise DataFetchError(msg)
+        assert self._margin is not None
+        return self._margin
+
+
+class _PriceBroker:
+    def get_last_prices(self, _symbols: list[str]) -> dict[str, Decimal]:
+        return {"IMOEXF": Decimal(2275)}  # index points
+
+
+def test_build_margin_fetches_for_a_future() -> None:
+    """A FUTURE equity leg -> the broker initial margin via fetch_futures_margin."""
+    out = _CLI.build_equity_margin_by_symbol(
+        fetcher=_MarginFetcher(Decimal(2342)),
+        broker=_PriceBroker(),
+        equity_instrument=_FUTURE_INSTRUMENT,
+        equity_symbol="IMOEXF",
+        point_value=Decimal(10),
+    )
+    assert out == {"IMOEXF": Decimal(2342)}
+
+
+def test_build_margin_propagates_fetch_failure_loudly() -> None:
+    """A fetch failure RAISES (loud) -- never a silent {} / guessed margin (under-reserve risk)."""
+    import pytest
+
+    with pytest.raises(DataFetchError):
+        _CLI.build_equity_margin_by_symbol(
+            fetcher=_MarginFetcher(fail=True),
+            broker=_PriceBroker(),
+            equity_instrument=_FUTURE_INSTRUMENT,
+            equity_symbol="IMOEXF",
+            point_value=Decimal(10),
+        )
+
+
+def test_build_margin_empty_for_non_future_equity() -> None:
+    """A non-future (ETF) equity leg is fully funded -> no margin ({})."""
+    out = _CLI.build_equity_margin_by_symbol(
+        fetcher=_MarginFetcher(fail=True),  # must NOT be called for an ETF
+        broker=_PriceBroker(),
+        equity_instrument=_ETF_INSTRUMENT,
+        equity_symbol="EQMX",
+        point_value=Decimal(10),
+    )
+    assert out == {}
+
+
+def test_build_margin_uses_explicit_static_rate(monkeypatch: object) -> None:
+    """An explicit static rate overrides the fetch with rate * contract_notional (offline)."""
+    monkeypatch.setenv("FINALAYZE_SAA_EQUITY_MARGIN_RATE", "0.10")  # type: ignore[attr-defined]
+    out = _CLI.build_equity_margin_by_symbol(
+        fetcher=_MarginFetcher(fail=True),  # must NOT be called when the static rate is set
+        broker=_PriceBroker(),
+        equity_instrument=_FUTURE_INSTRUMENT,
+        equity_symbol="IMOEXF",
+        point_value=Decimal(10),
+    )
+    # contract notional = 2275 * 10 = 22,750; margin = 0.10 * 22,750 = 2,275
+    assert out == {"IMOEXF": Decimal("2275.00")}

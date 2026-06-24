@@ -22,7 +22,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
-from finalayze.config.rebalance_config import SAA_REBALANCE_BAND_PCT
+from finalayze.config.rebalance_config import (
+    SAA_EQUITY_DRAWDOWN_SURVIVAL_PCT_DEFAULT,
+    SAA_EQUITY_IM_HIKE_MULT_DEFAULT,
+    SAA_REBALANCE_BAND_PCT,
+)
 from finalayze.core.exceptions import InstrumentNotFoundError
 from finalayze.core.schemas import AssetClass
 from finalayze.execution.broker_base import OrderRequest
@@ -42,6 +46,7 @@ Side = Literal["BUY", "SELL"]
 LegStatus = Literal["FILLED", "PARTIAL", "FAILED", "SKIPPED_BELOW_LOT"]
 
 _ZERO = Decimal(0)
+_ONE = Decimal(1)
 # Notional sanity tolerance: leg targets must sum to the budget within this RUB epsilon (P79-R12).
 _NOTIONAL_TOLERANCE = Decimal("0.01")
 
@@ -52,7 +57,14 @@ _AUTO_CLASSES: tuple[AssetClass, ...] = (AssetClass.EQUITY, AssetClass.OFZ_PK)
 
 @dataclass(frozen=True)
 class PlannedLeg:
-    """One AUTO (broker-routed) leg of a rebalance plan: a concrete order + its market."""
+    """One AUTO (broker-routed) leg of a rebalance plan: a concrete order + its market.
+
+    ``target_notional`` is always the EXPOSURE (``budget * weight``) for audit honesty. For a
+    leveraged equity FUTURE leg the CASH the position actually consumes is split into
+    ``margin_cash`` (posted initial margin) + ``reserve_cash`` (the drawdown buffer); both are
+    ``None`` for fully-funded cash legs (bond/etf/share), whose cash == their floored notional
+    (Phase 86 fully-funded synthetic equity).
+    """
 
     asset_class: AssetClass
     market_id: str
@@ -60,6 +72,8 @@ class PlannedLeg:
     side: Side
     target_notional: Decimal
     est_price: Decimal | None = None
+    margin_cash: Decimal | None = None
+    reserve_cash: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +195,75 @@ def size_auto_leg(
     )
 
 
+@dataclass(frozen=True)
+class FundedEquityCash:
+    """The CASH split for a fully-funded equity FUTURE position (Phase 86).
+
+    The future provides ``exposure`` of index exposure on a lot-floored ``target_contracts``
+    position, but only debits ``margin_cash``. ``reserve_cash`` is the cash buffer held so the
+    position survives a deep index drawdown EVEN if MOEX hikes the initial margin mid-crash;
+    ``equity_cash = margin_cash + reserve_cash`` is the total cash the equity sleeve consumes.
+    """
+
+    target_contracts: Decimal
+    exposure: Decimal
+    margin_cash: Decimal
+    reserve_cash: Decimal
+    equity_cash: Decimal
+
+
+def compute_funded_equity_cash(
+    *,
+    target_notional: Decimal,
+    contract_notional: Decimal,
+    lot_size: int,
+    margin_per_contract: Decimal,
+    drawdown_survival_pct: Decimal = SAA_EQUITY_DRAWDOWN_SURVIVAL_PCT_DEFAULT,
+    im_hike_mult: Decimal = SAA_EQUITY_IM_HIKE_MULT_DEFAULT,
+) -> FundedEquityCash:
+    """Size the CASH a fully-funded equity FUTURE consumes for a target exposure (pure, Phase 86).
+
+    Funds the future fully: charge only the posted margin plus a cash reserve sized so the position
+    survives an index drawdown of at least ``drawdown_survival_pct`` even after the initial margin
+    is hiked by ``im_hike_mult`` (MOEX raised the IM ~2.5x overnight in Feb-2022). The reserve adds
+    ``margin * (im_hike_mult - 1)`` of headroom so the survivable drawdown is unchanged by a hike::
+
+        target_contracts = floor(target_notional / contract_notional) over the lot
+        exposure         = target_contracts * contract_notional
+        margin_cash      = target_contracts * margin_per_contract
+        reserve_cash     = exposure * drawdown_survival_pct + margin_cash * (im_hike_mult - 1)
+        equity_cash      = margin_cash + reserve_cash
+
+    The cash split is computed on the lot-floored TARGET position (the full intended holding the
+    margin + reserve secure), NEVER the traded delta -- a top-up that trades 1 contract still
+    reserves against the whole position.
+
+    Raises:
+        ValueError: if ``contract_notional`` <= 0, or ``margin_per_contract`` is non-finite or <= 0
+            (a real futures initial margin is never 0; fail closed on the money path).
+    """
+    if contract_notional <= _ZERO:
+        msg = f"contract_notional must be positive to size a funded future; got {contract_notional}"
+        raise ValueError(msg)
+    if not margin_per_contract.is_finite() or margin_per_contract <= _ZERO:
+        msg = f"margin_per_contract must be a positive finite number; got {margin_per_contract}"
+        raise ValueError(msg)
+
+    lot = Decimal(lot_size)
+    target_contracts = (target_notional / contract_notional // lot) * lot
+    exposure = target_contracts * contract_notional
+    margin_cash = target_contracts * margin_per_contract
+    reserve_cash = exposure * drawdown_survival_pct + margin_cash * (im_hike_mult - _ONE)
+    equity_cash = margin_cash + reserve_cash
+    return FundedEquityCash(
+        target_contracts=target_contracts,
+        exposure=exposure,
+        margin_cash=margin_cash,
+        reserve_cash=reserve_cash,
+        equity_cash=equity_cash,
+    )
+
+
 # Fixed namespace for deriving deterministic order ids (uuid5). Any constant UUID works.
 _REBALANCE_OID_NAMESPACE = uuid.UUID("c0ffee00-5aa0-4eba-9a9c-e0a1b2c3d4e5")
 
@@ -284,27 +367,40 @@ def plan_rebalance(
     mode: Mode = "DRY_RUN",
     deposit_broker: DepositSimulatedBroker | None = None,
     as_of: date | None = None,
+    margin_by_symbol: Mapping[str, Decimal] | None = None,
+    equity_drawdown_survival_pct: Decimal = SAA_EQUITY_DRAWDOWN_SURVIVAL_PCT_DEFAULT,
+    equity_im_hike_mult: Decimal = SAA_EQUITY_IM_HIKE_MULT_DEFAULT,
 ) -> RebalancePlan:
     """Turn target weights + current holdings into a REBALANCE PLAN (pure, P79-R1/R6/R7/R8).
 
     For each AUTO class (EQUITY, OFZ_PK): ``target = budget * weight``, size the signed delta
     against the current holding (``size_auto_leg``), and emit a ``PlannedLeg`` with a
-    deterministic ``OrderRequest`` (or nothing, when within-band / below-one-lot). The DEPOSIT
-    class becomes a single ``ManualAction`` (never an order); when the deposit is overweight
-    (negative delta) and a ``deposit_broker`` + ``as_of`` are supplied, a READ-ONLY funding
-    advisory is attached. The planner owns no broker handle and performs no I/O.
+    deterministic ``OrderRequest`` (or nothing, when within-band / below-one-lot).
+
+    The DEPOSIT class is the residual **plug** (Phase 86 fully-funded synthetic equity): each AUTO
+    leg's CASH consumption is computed on its lot-floored TARGET position -- a leveraged equity
+    FUTURE consumes only ``margin + reserve`` (``compute_funded_equity_cash``, needs
+    ``margin_by_symbol``), a fully-funded cash leg consumes its floored notional -- and the deposit
+    absorbs the rest (``deposit_realized = budget - sum(auto_leg_cash)``), so the budget deploys
+    exactly (idle == 0) and the portfolio is 1.0x. The deposit becomes a single ``ManualAction``
+    (never an order); when it is overweight (negative delta) and a ``deposit_broker`` + ``as_of``
+    are supplied, a READ-ONLY funding advisory is attached. The planner owns no broker handle and
+    performs no I/O (margin is INJECTED via ``margin_by_symbol``, like ``point_value`` upstream).
 
     Raises:
         InstrumentNotFoundError: If an AUTO leg has no resolved instrument/FIGI (whole-plan abort).
-        ValueError: If the weight vector is unsound (negative / over-budget / not summing to 1).
+        ValueError: If the weight vector is unsound; a FUTURE leg has no injected margin; or the
+            funded equity + OFZ cash exceeds the budget (cannot fund at 1.0x leverage).
     """
     portfolio_id, risk_profile, budget_rub = active_portfolio
+    margins = margin_by_symbol or {}
 
     # Validate UPFRONT (fail fast, no half-plan) before constructing any order.
     _require_resolved_instruments(leg_instruments)
     _assert_notional_sane(budget_rub, target_weights)
 
     auto_legs: list[PlannedLeg] = []
+    auto_leg_cash = _ZERO  # total CASH the AUTO legs consume (margin+reserve for futures)
     for asset_class in _AUTO_CLASSES:
         instrument = leg_instruments[asset_class]
         symbol = instrument.symbol
@@ -314,6 +410,38 @@ def plan_rebalance(
             msg = f"no est_price for the {asset_class.value} leg symbol {symbol!r}"
             raise ValueError(msg)
         est_price = last_prices[symbol]
+
+        # Cash this leg consumes, on its lot-floored TARGET position (NOT the traded delta), so the
+        # deposit plug reconciles whether or not THIS rebalance trades (top-up / within-band).
+        margin_cash: Decimal | None = None
+        reserve_cash: Decimal | None = None
+        if instrument.instrument_type == "future":
+            # A leveraged FUTURE: charge only margin + a drawdown reserve (fully-funded synthetic
+            # equity). Margin is injected like point_value; a missing margin aborts the WHOLE plan.
+            margin_per_contract = margins.get(symbol)
+            if margin_per_contract is None:
+                msg = (
+                    f"no margin for the future {asset_class.value} leg {symbol!r}; "
+                    "cannot size the funded equity reserve (inject margin_by_symbol)"
+                )
+                raise ValueError(msg)
+            funded = compute_funded_equity_cash(
+                target_notional=target_notional,
+                contract_notional=est_price,
+                lot_size=instrument.lot_size,
+                margin_per_contract=margin_per_contract,
+                drawdown_survival_pct=equity_drawdown_survival_pct,
+                im_hike_mult=equity_im_hike_mult,
+            )
+            leg_cash = funded.equity_cash
+            margin_cash, reserve_cash = funded.margin_cash, funded.reserve_cash
+        else:
+            # A fully-funded cash leg (bond/etf/share): cash == its lot-floored TARGET notional.
+            lot = Decimal(instrument.lot_size)
+            target_qty = (target_notional / est_price // lot) * lot
+            leg_cash = target_qty * est_price
+        auto_leg_cash += leg_cash
+
         current_qty = current_positions.get(symbol, _ZERO)
         sizing = size_auto_leg(
             target_notional=target_notional,
@@ -338,12 +466,22 @@ def plan_rebalance(
                 side=sizing.side,
                 target_notional=target_notional,
                 est_price=est_price,
+                margin_cash=margin_cash,
+                reserve_cash=reserve_cash,
             )
         )
 
-    # DEPOSIT -> MANUAL action item only (mark-only, no broker API).
-    deposit_target = budget_rub * target_weights[AssetClass.DEPOSIT]
-    deposit_delta = deposit_target - deposit_current_notional
+    # DEPOSIT is the residual PLUG: it absorbs the freed equity-leverage cash + all lot-flooring
+    # residuals so the budget deploys exactly (idle == 0 by construction). HARD STOP if the funded
+    # equity + OFZ cash already exceeds the budget -- that would force >1.0x leverage (P86).
+    deposit_realized = budget_rub - auto_leg_cash
+    if deposit_realized < _ZERO:
+        msg = (
+            f"funded equity + OFZ cash ({auto_leg_cash}) exceeds the budget ({budget_rub}); "
+            "cannot fund the sleeve at 1.0x leverage -- lower the drawdown reserve or the weights"
+        )
+        raise ValueError(msg)
+    deposit_delta = deposit_realized - deposit_current_notional
     advisory: FundingBreakdown | None = None
     if deposit_delta < _ZERO and deposit_broker is not None and as_of is not None:
         advisory = compute_funding_advisory(deposit_broker, abs(deposit_delta), as_of)
@@ -351,7 +489,7 @@ def plan_rebalance(
         ManualAction(
             asset_class=AssetClass.DEPOSIT,
             description=_deposit_description(deposit_delta),
-            target_notional=deposit_target,
+            target_notional=deposit_realized,
             current_notional=deposit_current_notional,
             funding_advisory=advisory,
         ),
