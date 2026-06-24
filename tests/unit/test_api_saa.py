@@ -83,3 +83,94 @@ def test_returns_target_allocation() -> None:
         else:
             assert leg["symbol"]  # equity + OFZ-PK carry a tradeable ticker
     assert total_weight == Decimal(1)  # a valid allocation
+
+
+# --- Phase 83: rebalance-runs history endpoint --------------------------------------------------
+
+_RUNS_PATH = "/api/v1/saa/rebalance-runs"
+
+
+def _sample_record() -> object:
+    from datetime import UTC, date, datetime  # noqa: PLC0415
+
+    from finalayze.execution.rebalance_reader import (  # noqa: PLC0415
+        OrderRecord,
+        RebalanceRunRecord,
+    )
+
+    return RebalanceRunRecord(
+        run_id=uuid4(),
+        plan_id="pid:2026-06-23",
+        as_of=date(2026, 6, 23),
+        mode="SANDBOX",
+        status="COMPLETE",
+        fill_rate=Decimal("1.0000"),
+        created_at=datetime(2026, 6, 23, 12, 0, tzinfo=UTC),
+        orders=(
+            OrderRecord(
+                asset_class="equity",
+                symbol="EQMX",
+                side="BUY",
+                requested_qty=Decimal(100),
+                filled_qty=Decimal(100),
+                status="FILLED",
+                reason=None,
+            ),
+        ),
+    )
+
+
+def test_rebalance_runs_requires_auth() -> None:
+    assert _client().get(_RUNS_PATH).status_code == _HTTP_UNAUTH
+
+
+def test_rebalance_runs_no_active_portfolio_404() -> None:
+    with (
+        patch("finalayze.core.db.get_async_session_factory", return_value=object()),
+        patch("finalayze.api.v1.saa.get_active_portfolio", new=AsyncMock(return_value=None)),
+    ):
+        resp = _client().get(_RUNS_PATH, headers=_auth())
+    assert resp.status_code == _HTTP_NOT_FOUND
+
+
+def test_rebalance_runs_returns_history() -> None:
+    pid = uuid4()
+    with (
+        patch("finalayze.core.db.get_async_session_factory", return_value=object()),
+        patch(
+            "finalayze.api.v1.saa.get_active_portfolio",
+            new=AsyncMock(return_value=(pid, "balanced", Decimal(1_000_000))),
+        ),
+        patch(
+            "finalayze.api.v1.saa.list_rebalance_runs",
+            new=AsyncMock(return_value=[_sample_record()]),
+        ),
+    ):
+        resp = _client().get(_RUNS_PATH, headers=_auth())
+    assert resp.status_code == _HTTP_OK
+    body = resp.json()
+    assert body["portfolio_id"] == str(pid)
+    assert len(body["runs"]) == 1
+    run = body["runs"][0]
+    assert run["plan_id"] == "pid:2026-06-23"
+    assert run["status"] == "COMPLETE"
+    assert run["fill_rate"] == "1.0000"
+    assert run["mode"] == "SANDBOX"
+    assert len(run["orders"]) == 1
+    assert run["orders"][0]["symbol"] == "EQMX"
+    assert run["orders"][0]["filled_qty"] == "100"
+
+
+def test_rebalance_runs_empty_when_no_runs() -> None:
+    pid = uuid4()
+    with (
+        patch("finalayze.core.db.get_async_session_factory", return_value=object()),
+        patch(
+            "finalayze.api.v1.saa.get_active_portfolio",
+            new=AsyncMock(return_value=(pid, "balanced", Decimal(1_000_000))),
+        ),
+        patch("finalayze.api.v1.saa.list_rebalance_runs", new=AsyncMock(return_value=[])),
+    ):
+        resp = _client().get(_RUNS_PATH, headers=_auth())
+    assert resp.status_code == _HTTP_OK
+    assert resp.json()["runs"] == []
