@@ -140,6 +140,7 @@ async def run_rebalance(
     clock: Clock,
     fetch_last_prices: Callable[[list[str]], Mapping[str, Decimal]],
     nkd_by_symbol: Mapping[str, Decimal] | None = None,
+    point_value_by_symbol: Mapping[str, Decimal] | None = None,
     mode: Mode = "DRY_RUN",
     confirm: bool = False,
     submit: bool = True,
@@ -195,6 +196,7 @@ async def run_rebalance(
         )
 
     nkd = nkd_by_symbol or {}
+    point_value = point_value_by_symbol or {}
     raw_prices = fetch_last_prices([inst.symbol for inst in leg_instruments.values()])
     last_prices: dict[str, Decimal] = {}
     for asset_class, instrument in leg_instruments.items():
@@ -202,9 +204,22 @@ async def run_rebalance(
         if symbol not in raw_prices:
             msg = f"no last price for the {asset_class.value} leg {symbol!r}"
             raise ValueError(msg)
-        # Size off the DIRTY price = clean RUB (to_rub_price: bond %->RUB / equity passthrough) +
-        # accrued coupon (NKD, RUB per bond). NKD is 0 for equity (absent from the map) (P82-R6).
-        last_prices[symbol] = to_rub_price(instrument, raw_prices[symbol]) + nkd.get(symbol, _ZERO)
+        if instrument.instrument_type == "future":
+            # A future is sized by EXPOSURE: the per-contract notional = quoted points * the
+            # point value (RUB per index point). size_auto_leg then yields qty = target / notional
+            # = the number of contracts (lot-floored). Fail loud if the point value is missing
+            # (P85-R2/R4) -- a future cannot be priced from points alone.
+            pv = point_value.get(symbol)
+            if pv is None:
+                msg = f"no point_value for the future {asset_class.value} leg {symbol!r}"
+                raise ValueError(msg)
+            last_prices[symbol] = raw_prices[symbol] * pv
+        else:
+            # Size off the DIRTY price = clean RUB (to_rub_price: bond %->RUB / share passthrough)
+            # + accrued coupon (NKD, RUB per bond; 0 for non-bond legs) (P82-R6).
+            last_prices[symbol] = to_rub_price(instrument, raw_prices[symbol]) + nkd.get(
+                symbol, _ZERO
+            )
 
     deposit_broker = await load_deposit_broker_from_db(portfolio_id, as_of, session_factory)
     deposit_current = deposit_broker.deposit_value() if deposit_broker is not None else _ZERO

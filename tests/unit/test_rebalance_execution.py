@@ -31,7 +31,7 @@ from finalayze.orchestration.rebalance_execution import (
     to_rub_price,
 )
 
-_EQUITY_SYMBOL = "EQMX"
+_EQUITY_SYMBOL = "IMOEXF"  # the MOEX-index FUTURE (Phase 85); priced in points * point_value
 _OFZ_SYMBOL = "SU29024RMFS5"
 
 
@@ -118,8 +118,10 @@ class TestToRubPrice:
 _AS_OF = date(2026, 6, 23)  # easing regime (after the 2025-06-06 first cut)
 _BUDGET = Decimal(1_000_000)
 _CLOCK = SimulatedClock(datetime(2026, 6, 23, tzinfo=UTC))
-# Tinkoff-style raw quotes: equity in RUB-per-share; bond as % of face (95.5% of 1000 = 955 RUB).
-_RAW_PRICES = {_EQUITY_SYMBOL: Decimal(100), _OFZ_SYMBOL: Decimal("95.5")}
+# Tinkoff-style raw quotes: the IMOEXF future in index POINTS (2275); bond as % of face.
+_RAW_PRICES = {_EQUITY_SYMBOL: Decimal(2275), _OFZ_SYMBOL: Decimal("95.5")}
+# IMOEXF point value 10 RUB/point -> contract notional = 2275*10 = 22_750 RUB (exposure/contract).
+_POINT_VALUES = {_EQUITY_SYMBOL: Decimal(10)}
 
 
 class _FakeBroker:
@@ -175,12 +177,13 @@ async def test_run_rebalance_happy_path(monkeypatch: pytest.MonkeyPatch) -> None
         session_factory=object(),  # unused (DB calls patched)
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
+        point_value_by_symbol=_POINT_VALUES,
     )
     assert plan.budget_rub == _BUDGET
     legs = {leg.asset_class: leg for leg in plan.auto_legs}
     # easing-regime balanced weights at 2026-06-23: deposit 0.25 / ofz 0.40 / equity 0.35.
-    # equity: 0.35*1M / 100 = 3500 units.
-    assert legs[AssetClass.EQUITY].order.quantity == Decimal(3500)
+    # equity (IMOEXF future): 0.35*1M / 22_750 (contract notional = 2275pts*10) = 15.38 -> 15.
+    assert legs[AssetClass.EQUITY].order.quantity == Decimal(15)
     # OFZ: 0.40*1M / 955 RUB = 418.8 -> floor 418. (Without the %->RUB conversion it would be
     # 400000/95.5 = 4188 -- so asserting 418 proves to_rub_price was applied. ANTI-HOLLOW.)
     assert legs[AssetClass.OFZ_PK].order.quantity == Decimal(418)
@@ -202,6 +205,7 @@ async def test_run_rebalance_no_active_portfolio_raises(monkeypatch: pytest.Monk
             session_factory=object(),
             clock=_CLOCK,
             fetch_last_prices=_fetch_prices,
+            point_value_by_symbol=_POINT_VALUES,
         )
 
 
@@ -215,6 +219,7 @@ async def test_run_rebalance_plan_id_deterministic(monkeypatch: pytest.MonkeyPat
         "session_factory": object(),
         "clock": _CLOCK,
         "fetch_last_prices": _fetch_prices,
+        "point_value_by_symbol": _POINT_VALUES,
     }
     plan_a, _ = await run_rebalance(broker_router=BrokerRouter({"moex": _FakeBroker()}), **kwargs)
     plan_b, _ = await run_rebalance(broker_router=BrokerRouter({"moex": _FakeBroker()}), **kwargs)
@@ -246,6 +251,7 @@ async def test_run_rebalance_wires_deposit_mark(monkeypatch: pytest.MonkeyPatch)
         session_factory=object(),
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
+        point_value_by_symbol=_POINT_VALUES,
     )
     deposit_action = plan.manual_actions[0]
     assert deposit_action.current_notional == Decimal(100_000)  # == deposit_value()
@@ -263,6 +269,7 @@ async def test_run_rebalance_preview_places_no_orders(monkeypatch: pytest.Monkey
         session_factory=object(),
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
+        point_value_by_symbol=_POINT_VALUES,
         submit=False,
     )
     assert outcomes == []  # nothing submitted
@@ -354,11 +361,12 @@ async def test_run_rebalance_nkd_dirty_price_sizes_fewer_bonds(
         session_factory=object(),
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
+        point_value_by_symbol=_POINT_VALUES,
         nkd_by_symbol={_OFZ_SYMBOL: Decimal(50)},
     )
     legs = {leg.asset_class: leg for leg in plan.auto_legs}
     assert legs[AssetClass.OFZ_PK].order.quantity == Decimal(398)  # NKD reduced the bond qty
-    assert legs[AssetClass.EQUITY].order.quantity == Decimal(3500)  # equity unaffected
+    assert legs[AssetClass.EQUITY].order.quantity == Decimal(15)  # future leg: NKD does not apply
 
 
 async def test_run_rebalance_persists_audit_on_submit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -374,6 +382,7 @@ async def test_run_rebalance_persists_audit_on_submit(monkeypatch: pytest.Monkey
         session_factory=object(),
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
+        point_value_by_symbol=_POINT_VALUES,
     )
     persist.assert_awaited_once()
     args = persist.await_args.args  # (session_factory, plan, outcomes, reconciliation)
@@ -395,6 +404,25 @@ async def test_run_rebalance_preview_does_not_persist(monkeypatch: pytest.Monkey
         session_factory=object(),
         clock=_CLOCK,
         fetch_last_prices=_fetch_prices,
+        point_value_by_symbol=_POINT_VALUES,
         submit=False,
     )
     persist.assert_not_awaited()
+
+
+async def test_run_rebalance_future_without_point_value_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A future equity leg with no injected point_value fails loud (P85-R4)."""
+    pid = uuid4()
+    _patch_db(monkeypatch, portfolio_id=pid, active=(pid, "balanced", _BUDGET), deposit=None)
+    with pytest.raises(ValueError, match="point_value"):
+        await run_rebalance(
+            broker_router=BrokerRouter({"moex": _FakeBroker()}),
+            mode_manager=ModeManager(),
+            registry=build_default_registry(),
+            session_factory=object(),
+            clock=_CLOCK,
+            fetch_last_prices=_fetch_prices,
+            # no point_value_by_symbol -> the IMOEXF future leg cannot be priced from points alone
+        )
