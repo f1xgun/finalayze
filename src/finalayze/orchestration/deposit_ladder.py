@@ -101,7 +101,6 @@ class LadderConstraints:
     robustness_lambda: Decimal = Decimal("0.5")  # 0=mean .. 1=worst-case
     noise_bps: Decimal = Decimal(5)  # de-minimis lock-in edge
     tie_bps: Decimal = Decimal(5)
-    uninsured_tolerance_rub: Decimal = Decimal(0)
     uninsured_penalty_lambda: Decimal = Decimal(0)  # 0 -> uninsured is a raw axis, not penalized
     spread_band: SpreadBand = SpreadBand()
 
@@ -243,6 +242,7 @@ class LadderPlan:
     spread_held_constant: bool
     n1_caveat: bool
     progressive_band_caveat: bool
+    recommendation_caveat: str  # reconciles the recommendation with the lock-in verdict (B1)
 
 
 # ============================================================================
@@ -551,33 +551,39 @@ def simulate_candidate(
     broker = DepositSimulatedBroker(initial_cash=Decimal(0), tranches=tranches)
     horizon_end = req.start + relativedelta(months=req.horizon_months)
     horizon_days = (horizon_end - req.start).days
-    original_ids = {id(t) for t in tranches}
+    rolled_indices: set[int] = set()  # positions that ever rolled (lockedness, no id() hazard, W4)
     roll_count = 0
 
     for d in _business_days(req.start, horizon_end):
+        # Roll matured tranches BEFORE accruing (B3): the original tranches accrue on req.start, so
+        # a rolled tranche must likewise accrue on its OPEN day -- otherwise every roll silently
+        # skips one accrual day, biasing the lock-in diff toward the never-rolling long lock.
+        # Rolling first keeps coverage continuous: the old tranche accrued through the prior
+        # business day, the fresh one accrues from d (each calendar day is accrued exactly once).
+        if d < horizon_end:
+            for i, tr in enumerate(tranches):
+                if tr.broken or tr.maturity_date > d:
+                    continue
+                offer = offer_by_term[tr.term_months]
+                rolled_rate = (
+                    scenario.key_rate_at(d) + offer.roll_spread_pp + roll_spread_delta_pp
+                ) / _PCT
+                tranches[i] = DepositTranche(
+                    principal=tr.principal + tr.accrued_net,
+                    term_months=tr.term_months,
+                    annual_rate=max(Decimal(0), rolled_rate),
+                    open_date=d,
+                    maturity_date=d + relativedelta(months=tr.term_months),
+                )
+                rolled_indices.add(i)
+                roll_count += 1
         broker.accrue(d)
-        if d >= horizon_end:
-            continue
-        for i, tr in enumerate(tranches):
-            if tr.broken or tr.maturity_date > d:
-                continue
-            # matured (maturity_date <= d) and not yet at horizon -> roll at the SCENARIO rate
-            offer = offer_by_term[tr.term_months]
-            key_pp = scenario.key_rate_at(d)
-            rolled_rate = (key_pp + offer.roll_spread_pp + roll_spread_delta_pp) / _PCT
-            tranches[i] = DepositTranche(
-                principal=tr.principal + tr.accrued_net,
-                term_months=tr.term_months,
-                annual_rate=max(Decimal(0), rolled_rate),
-                open_date=d,
-                maturity_date=d + relativedelta(months=tr.term_months),
-            )
-            roll_count += 1
 
     terminal = broker.deposit_value()
-    # locked value = value from original (never-rolled) tranches at horizon
+    # locked value = value from positions that NEVER rolled (tracked by index, not id()).
     locked = sum(
-        (t.principal + t.accrued_net for t in tranches if id(t) in original_ids), Decimal(0)
+        (tr.principal + tr.accrued_net for i, tr in enumerate(tranches) if i not in rolled_indices),
+        Decimal(0),
     )
     locked_fraction = (locked / terminal) if terminal > 0 else Decimal(0)
     # liquidation floor: still-locked tranches broken to demand rate; matured ones fully liquid
@@ -773,10 +779,16 @@ def assess_lockin(
     noise = req.constraints.noise_bps
 
     per_scenario_bps: dict[str, Decimal] = {}
+    long_sims: dict[str, SimResult] = {}
+    short_sims: dict[str, SimResult] = {}
     for scen in scenarios:
-        long_t = simulate_candidate(all_long, scen, req, offer_by_term).terminal_value
-        short_t = simulate_candidate(all_short, scen, req, offer_by_term).terminal_value
-        per_scenario_bps[scen.scenario_id] = _lockin_bps(long_t, short_t, req.budget, horizon_days)
+        ls = simulate_candidate(all_long, scen, req, offer_by_term)
+        ss = simulate_candidate(all_short, scen, req, offer_by_term)
+        long_sims[scen.scenario_id] = ls
+        short_sims[scen.scenario_id] = ss
+        per_scenario_bps[scen.scenario_id] = _lockin_bps(
+            ls.terminal_value, ss.terminal_value, req.budget, horizon_days
+        )
 
     curve_implied_bps = next(
         per_scenario_bps[s.scenario_id] for s in scenarios if s.is_curve_implied
@@ -787,6 +799,14 @@ def assess_lockin(
     min_bps = min(rw_bps.values())
     max_bps = max(rw_bps.values())
     worst_id = min(rw_bps, key=lambda k: rw_bps[k])
+
+    # B4: a structural-edge win could come from NDFL floor/band smoothing rather than a higher
+    # locked coupon. At the worst real-world scenario (smallest long edge), if the long advantage
+    # is explained by paying LESS tax rather than earning MORE gross, it is a tax effect.
+    wl, ws_ = long_sims[worst_id], short_sims[worst_id]
+    gross_delta = wl.gross_interest - ws_.gross_interest
+    tax_delta = ws_.tax_paid - wl.tax_paid  # > 0 -> the long leg pays less tax
+    tax_driven = tax_delta > 0 and gross_delta <= tax_delta
 
     # spread-band sweep (under the curve-implied anchor): does the verdict sign survive?
     ci = next(s for s in scenarios if s.is_curve_implied)
@@ -825,6 +845,7 @@ def assess_lockin(
         degenerate=degenerate,
         curve_inverted=curve_inverted,
         curve_slope_bps=curve_slope_bps,
+        tax_driven=tax_driven,
     )
 
     return RegimeLockinReport(
@@ -850,7 +871,7 @@ def assess_lockin(
     )
 
 
-def _classify_lockin(
+def _classify_lockin(  # noqa: PLR0911 - explicit verdict decision tree, one return per outcome
     *,
     curve_implied_bps: Decimal,
     min_bps: Decimal,
@@ -861,6 +882,7 @@ def _classify_lockin(
     degenerate: bool,
     curve_inverted: bool,
     curve_slope_bps: Decimal,
+    tax_driven: bool,
 ) -> tuple[LockinVerdict, str, str]:
     inverted_note = (
         f" The offered curve is inverted (long < short by {abs(curve_slope_bps):.0f}bps), "
@@ -868,10 +890,18 @@ def _classify_lockin(
         if curve_inverted
         else ""
     )
-    breakeven_note = (
-        f" (Curve-implied breakeven lock-in = {curve_implied_bps:.0f}bps, ~0 as expected: the "
-        "offered curve internally prices the cuts.)"
-    )
+    # W1: only claim "~0 as expected" when the bisection actually solved a breakeven; on a steep
+    # curve it clamps and curve_implied_bps is large -- never call a large number "~0".
+    if abs(curve_implied_bps) <= noise:
+        breakeven_note = (
+            f" (Curve-implied breakeven lock-in = {curve_implied_bps:.0f}bps, ~0 as expected: the "
+            "offered curve internally prices the cuts.)"
+        )
+    else:
+        breakeven_note = (
+            f" (Curve-implied breakeven did not solve to ~0 ({curve_implied_bps:.0f}bps): no flat "
+            "forward rate offsets this curve's slope, which is what makes the lock structural.)"
+        )
     # E6: a scenario set that does not SPAN rate directions (cut + non-cut) could not have
     # falsified the recommendation -> make no robust claim.
     if degenerate:
@@ -890,6 +920,14 @@ def _classify_lockin(
                 f"No robust edge: locking long wins (worst +{min_bps:.0f}bps) but the sign flips "
                 "within a plausible forward-spread band -- an artifact of an assumed roll spread, "
                 "not a measured edge." + inverted_note,
+            )
+        if tax_driven:
+            return (
+                LockinVerdict.TAX_SMOOTHING_EDGE,
+                "tax_smoothing",
+                f"Tax-smoothing edge: locking long wins (worst +{min_bps:.0f}bps) but the gain is "
+                "from paying LESS NDFL (gross kept under the annual tax-free floor), not a higher "
+                "coupon -- a tax effect, not a rate forecast." + inverted_note,
             )
         return (
             LockinVerdict.REAL_LOCKIN_EDGE,
@@ -932,6 +970,39 @@ def _classify_lockin(
 # ============================================================================
 
 
+def _recommendation_caveat(
+    recommended: RankedLadder,
+    lockin: RegimeLockinReport,
+    ranked: list[RankedLadder],
+    req: OptimizerRequest,
+) -> str:
+    """Reconcile the robust-value recommendation with the honest lock-in verdict (B1): if the
+    recommendation locks long but the verdict says that lock is NOT a structural edge, say so
+    prominently and name the liquid alternative -- never let the recommendation silently
+    contradict the verdict it ships beside."""
+    shortest = min(req.constraints.allowed_terms)
+    avg_term = sum((Decimal(t) * w for t, w in recommended.candidate.weights.items()), Decimal(0))
+    locks_long = avg_term > Decimal(shortest)
+    if not locks_long:
+        return ""
+    short = next((r for r in ranked if r.candidate.archetype == "ALL_SHORT"), None)
+    alt = (
+        f" Liquid all-short alternative robust value: {short.mean_eatv:,.0f} RUB." if short else ""
+    )
+    if lockin.verdict in (LockinVerdict.REGIME_BET_NOT_EDGE, LockinVerdict.NO_ROBUST_EDGE):
+        return (
+            "The recommended ladder out-ranks the rest only by betting on the modeled cut path; "
+            f"the lock-in verdict is {lockin.verdict.value.upper()} -- NOT a structural edge. "
+            f"Prefer a shorter, liquid ladder unless you will bet rates keep falling.{alt}"
+        )
+    if lockin.verdict == LockinVerdict.LIQUIDITY_COST:
+        return (
+            "WARNING: the recommended ladder locks long but the lock-in verdict is LIQUIDITY_COST "
+            f"(long loses in every modeled scenario) -- prefer the shorter ladder.{alt}"
+        )
+    return ""
+
+
 def optimize_deposit_ladder(req: OptimizerRequest) -> LadderPlan:
     """RECOMMENDATION ONLY: candidates -> scenarios -> rank -> lock-in -> recommend.
 
@@ -941,13 +1012,32 @@ def optimize_deposit_ladder(req: OptimizerRequest) -> LadderPlan:
     missing = [t for t in req.constraints.allowed_terms if t not in offered_terms]
     _require(not missing, f"allowed_terms {missing} have no offer in the snapshot (E1)")
     scenarios = make_default_scenarios(req)
-    candidates = generate_candidates(req)
+    # W2: enforce min_liquid_fraction -- drop candidates that do not keep enough principal maturing
+    # within the liquidity horizon (a stated constraint must bind, not be silently ignored).
+    horizon = req.constraints.liquidity_horizon_months
+    floor = req.constraints.min_liquid_fraction
+    candidates = [
+        c
+        for c in generate_candidates(req)
+        if sum((w for term, w in c.weights.items() if term <= horizon), Decimal(0)) >= floor
+    ]
+    _require(
+        bool(candidates),
+        f"no candidate ladder meets min_liquid_fraction={floor} within {horizon}mo",
+    )
     ranked = rank_ladders(req, candidates, scenarios)
     lockin = assess_lockin(req, scenarios)
     ts = req.term_structure
     provenance = (
         f"{_TERM_STRUCTURE_PATH.name} | as_of={ts.as_of} | mode={ts.snapshot_mode} "
         f"| git_sha={ts.git_sha} | source={ts.source[:60]}..."
+    )
+    # B2: the tax-band caveat is a LOWER BOUND -- it must fire if ANY real-world scenario crosses
+    # the 2.4M band (keying it off the lowest-interest REALIZED path alone would under-warn).
+    progressive = any(
+        ranked[0].per_scenario[s.scenario_id].progressive_band_caveat
+        for s in scenarios
+        if not s.is_curve_implied
     )
     return LadderPlan(
         budget=req.budget,
@@ -960,7 +1050,6 @@ def optimize_deposit_ladder(req: OptimizerRequest) -> LadderPlan:
         snapshot_provenance=provenance,
         spread_held_constant=False,
         n1_caveat=True,
-        progressive_band_caveat=ranked[0]
-        .per_scenario[scenarios[0].scenario_id]
-        .progressive_band_caveat,
+        progressive_band_caveat=progressive,
+        recommendation_caveat=_recommendation_caveat(ranked[0], lockin, ranked, req),
     )

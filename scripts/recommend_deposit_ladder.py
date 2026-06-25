@@ -70,8 +70,11 @@ def main() -> int:
         f"  banks for full ASV insurance: {rec.banks_needed}  "
         f"(uninsured if held in one bank: {rec.uninsured_at_horizon:,.0f} RUB)"
     )
+    if plan.recommendation_caveat:
+        # B1: never let the recommendation silently contradict the lock-in verdict.
+        print(f"  >> RECONCILIATION: {plan.recommendation_caveat}")
     if rec.path_fragile:
-        print("  WARNING: path_fragile -- wins on the realized path but worst on another scenario")
+        print("  note: terminal value is path-dependent (high scenario dispersion)")
     print()
     print(f"LOCK-IN VERDICT : {r.verdict.value.upper()}")
     print(f"  {r.honest_message}")

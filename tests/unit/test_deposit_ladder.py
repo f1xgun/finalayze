@@ -365,3 +365,78 @@ def test_t21_cli_is_read_only_and_runs() -> None:
     assert "RECOMMENDED LADDER" in result.stdout
     assert "LOCK-IN VERDICT" in result.stdout
     assert "No money was moved" in result.stdout
+
+
+# ---------------------------------------------------------------- review-fix regressions
+
+
+def test_b3_rolled_tranche_accrues_on_open_day() -> None:
+    # Under a FLAT key path where the 3mo roll reproduces the offered rate ((21-1)/100 = 0.20), a
+    # rolling all-short ladder must earn the SAME 20% continuously as a locked 12mo at 0.20 -- i.e.
+    # no roll silently skips its open day (pre-fix the rolling leg lost ~1 day per roll).
+    ts = _ts([(3, "0.20", "-1.0"), (12, "0.20", "-1.0")], _REALIZED_PLUS_HOLD, horizon=12)
+    req = _req(ts, horizon=12)
+    obt = {o.term_months: o for o in ts.offers}
+    flat = dl.RatePathScenario("FLAT21", lambda _d: Decimal("21.0"))
+    short = simulate_candidate(
+        dl.LadderCandidate("S", "ALL_SHORT", {3: Decimal(1)}), flat, req, obt
+    )
+    locked = simulate_candidate(
+        dl.LadderCandidate("L", "ALL_LONG", {12: Decimal(1)}), flat, req, obt
+    )
+    assert short.roll_count >= 3
+    assert abs(short.terminal_value - locked.terminal_value) / req.budget < Decimal("0.0005")
+
+
+def test_b2_progressive_band_is_scenario_lower_bound() -> None:
+    ts = _ts(_INVERTED, _REALIZED_PLUS_HOLD, horizon=12)
+    req = _req(ts, horizon=12, ytd_other_taxable_income=Decimal(2300000))
+    plan = optimize_deposit_ladder(req)
+    rec = plan.recommended
+    any_crosses = any(
+        rec.per_scenario[sid].progressive_band_caveat
+        for sid in plan.scenarios_used
+        if sid != "CURVE_IMPLIED"
+    )
+    # plan caveat is the OR across real-world scenarios -> a true LOWER bound (never under-warns)
+    assert plan.progressive_band_caveat == any_crosses
+
+
+def test_w2_min_liquid_fraction_excludes_locked() -> None:
+    ts = _ts(_INVERTED, _REALIZED_PLUS_HOLD)
+    req = OptimizerRequest(
+        budget=_BUDGET,
+        start=ts.as_of,
+        horizon_months=6,
+        term_structure=ts,
+        constraints=LadderConstraints(
+            allowed_terms=(3, 12), min_liquid_fraction=Decimal(1), liquidity_horizon_months=6
+        ),
+    )
+    plan = optimize_deposit_ladder(req)
+    assert all(
+        term <= 6 for term in plan.recommended.candidate.weights
+    )  # only liquid ladders survive
+
+
+def test_w2_impossible_min_liquid_raises() -> None:
+    ts = _ts(_INVERTED, _REALIZED_PLUS_HOLD)
+    req = OptimizerRequest(
+        budget=_BUDGET,
+        start=ts.as_of,
+        horizon_months=6,
+        term_structure=ts,
+        constraints=LadderConstraints(
+            allowed_terms=(3, 12), min_liquid_fraction=Decimal(1), liquidity_horizon_months=2
+        ),
+    )
+    with pytest.raises(ConfigurationError, match="min_liquid_fraction"):
+        optimize_deposit_ladder(req)
+
+
+def test_b1_recommendation_caveat_reconciles_with_verdict(committed_plan: dl.LadderPlan) -> None:
+    # the committed fixture recommends a long lock but the verdict is REGIME_BET -> the plan must
+    # carry an explicit reconciliation caveat (recommendation must not silently contradict verdict).
+    assert committed_plan.lockin_report.verdict == LockinVerdict.REGIME_BET_NOT_EDGE
+    assert committed_plan.recommendation_caveat
+    assert "REGIME_BET" in committed_plan.recommendation_caveat

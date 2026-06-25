@@ -718,3 +718,39 @@ fixture, not literals invented in the test body.
   `window` (backtest/data/allocation_gate_snapshot.json) — mirror for the new fixture.
 - `ASV_CAP_PER_BANK=Decimal(1_400_000)` (constants.py:24), `DEPOSIT_DEMAND_RATE=Decimal("0.0001")`
   (constants.py:27), `NDFL_PROGRESSIVE_THRESHOLD=Decimal(2_400_000)` (constants.py:21).
+
+---
+
+## 9. Code-review fixes applied (post-implementation, adversarial pass)
+
+An adversarial review (gsd-code-reviewer) found 4 BLOCKER + 4 WARNING defects; all fixed:
+
+- **B1 (recommend ≠ verdict):** the ranker maximizes robust after-tax value over a cut-heavy
+  scenario set and could recommend the exact long lock the lock-in report calls "a regime bet,
+  not alpha." `LadderPlan.recommendation_caveat` now reconciles the two — when the verdict is
+  `REGIME_BET_NOT_EDGE`/`NO_ROBUST_EDGE`/`LIQUIDITY_COST` and the recommendation locks long, it
+  prints an explicit reconciliation and names the liquid all-short alternative's robust value.
+- **B2 (tax caveat false-negative):** `progressive_band_caveat` was keyed off the lowest-interest
+  REALIZED scenario, breaking the documented LOWER-BOUND guarantee. Now `any(...)` across the
+  real-world scenarios (fires if any plausible path crosses the 2.4M band).
+- **B3 (skipped open-day bias):** rolled tranches never accrued on their open day (originals do on
+  `start`), losing ~1 day per roll — a directional bias (~26 bps > the 5 bps noise floor) that
+  inflated the apparent lock-long edge. The driver now rolls BEFORE accruing, so coverage is
+  continuous and the ALL_SHORT baseline is unbiased. Regression test asserts a rolling ladder ties
+  a locked equivalent at the same flat rate.
+- **B4 (dead honesty rail):** `TAX_SMOOTHING_EDGE` was defined but never returned, so a tax-driven
+  win would misclassify as `REAL_LOCKIN_EDGE`. Now detected at the worst-case scenario (long edge
+  driven by lower NDFL, not higher gross) and labeled a tax effect.
+- **W1:** the "~0 as expected" breakeven note is now conditional — when the bisection clamps on a
+  steep curve it states the clamp honestly instead of calling a large number "~0."
+- **W2:** `min_liquid_fraction` is now ENFORCED (candidates failing it are dropped; an impossible
+  constraint fails closed); the truly-dead `uninsured_tolerance_rub` field was removed.
+- **W3:** `path_fragile` is documented as terminal-value dispersion (not a lock-decision
+  robustness measure); the regime-bet warning now rides on `recommendation_caveat` regardless.
+- **W4:** `locked_value_fraction` no longer keys off `id()` of discarded objects (id-reuse hazard);
+  lockedness is tracked by stable index.
+
+INFOs (I1–I4) accepted as documented simplifications: NDFL floor uses the real calendar under
+hypothetical scenarios (H9, diff-neutral); committed snapshot `git_sha=null` (provenance carried by
+`source`); ASV `min`-cap for mixed cert/deposit ladders (conservative, soft metric); the import-graph
+guard is static (the runtime negative-call guard T18 covers the order surface).
