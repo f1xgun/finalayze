@@ -29,3 +29,15 @@ DEPOSIT_DEMAND_RATE = Decimal("0.0001")  # ~0.01% annual
 # Deposit non-taxable-floor base (D-10):
 # floor = DEPOSIT_FLOOR_BASE x max-monthly-key-rate-in-year.
 DEPOSIT_FLOOR_BASE = Decimal(1_000_000)  # 1M RUB; floor ~= 1M x 0.21 ~= 210k RUB in 2024-25
+
+# Deposit-ladder optimizer (Phase 88): a "forward" offered-rate snapshot older than
+# this many days fails closed (no recommendation on stale offers). "backtest"-mode
+# snapshots (historical-window evaluations) are exempt -- their as_of is the evaluation
+# start, not a freshness claim.
+MAX_OFFER_STALENESS_DAYS = 14
+
+# ASV raised insurance tiers (Minfin, "from 18 Dec 2025"; effective-date/legal-force should
+# be re-verified -- a SOFT reported metric only, never a hard cap). Boundary = strictly >3yr.
+# Ordinary ruble deposit >3yr -> 2.0M; irrevocable savings cert 1-3yr -> 2.0M, >3yr -> 2.8M.
+ASV_RAISED_TIER_2M = Decimal(2_000_000)
+ASV_RAISED_TIER_2_8M = Decimal(2_800_000)
