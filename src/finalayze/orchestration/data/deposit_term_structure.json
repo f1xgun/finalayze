@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-06-25T00:00:00+00:00",
+  "as_of": "2025-04-25",
+  "snapshot_mode": "backtest",
+  "horizon_months": 12,
+  "git_sha": null,
+  "source": "ILLUSTRATIVE operator-curated offered deposit rates anchored to the REALIZED 2025 CBR easing cycle (key rate 21.00% on 2025-04-25, the last hold before the first cut on 2025-06-06; inverted curve pricing the cuts). roll_spread_pp = annual_rate - 21.00 (the as-of key rate). These are NOT live bank quotes -- replace with real offers (snapshot_mode=forward) for a live recommendation. The REALIZED scenario uses the committed CBR meeting calendar (real cut path 21.00 -> 14.50), so the lock-in verdict on this fixture is empirically grounded (N=1).",
+  "offers": [
+    {"term_months": 3,  "annual_rate": "0.200", "roll_spread_pp": "-1.0", "instrument_type": "deposit"},
+    {"term_months": 6,  "annual_rate": "0.195", "roll_spread_pp": "-1.5", "instrument_type": "deposit"},
+    {"term_months": 12, "annual_rate": "0.190", "roll_spread_pp": "-2.0", "instrument_type": "deposit"},
+    {"term_months": 36, "annual_rate": "0.170", "roll_spread_pp": "-4.0", "instrument_type": "deposit"}
+  ],
+  "key_rate_scenarios": {
+    "REALIZED": "use_committed_cbr_calendar",
+    "FAST_CUTS": [["2025-04-25", "21.00"], ["2025-06-06", "19.00"], ["2025-07-25", "16.00"], ["2025-09-12", "14.00"], ["2025-12-19", "12.00"]],
+    "SLOW_CUTS": [["2025-04-25", "21.00"], ["2025-07-25", "20.00"], ["2025-10-24", "19.00"], ["2026-02-13", "18.00"]],
+    "HOLD": [["2025-04-25", "21.00"]]
+  }
+}
