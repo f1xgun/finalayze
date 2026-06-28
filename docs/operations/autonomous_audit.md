@@ -40,10 +40,29 @@ Times are the **host's local timezone**.
 
 Install with `crontab -e` (paste the two lines). Verify with `crontab -l`.
 
+### Billing — subscription vs API (read this)
+
+`claude -p` is a known billing footgun. Which account pays depends on the credential:
+
+- **`CLAUDE_CODE_OAUTH_TOKEN`** (from `claude setup-token`) → draws on your **Max/Pro
+  subscription** quota. This is what `.env` + the runner use.
+- **`ANTHROPIC_API_KEY`** present in the environment → `claude -p` **silently** bills
+  **pay-per-token API**, bypassing the subscription (claude-code #37686: one Max user hit
+  **$1,800 in two days**; #43333: some versions route `-p` through API even with OAuth).
+
+The runner defends against this: it `unset`s `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` and
+**refuses to run without `CLAUDE_CODE_OAUTH_TOKEN`**. After the **first** run, confirm usage
+landed on the **claude.ai subscription** dashboard, *not* platform.claude.com (API). Also note:
+on the subscription, a full weekly multi-agent audit (~dozens of agents, millions of tokens) eats
+your interactive Max rate limits — consider a cheaper model for the audit agents, a smaller daily
+fan-out, or deliberately using an API key with a **Console spend limit** if you want isolated,
+predictable pipeline billing instead.
+
 ### Prerequisites
 
 1. **Auth (headless):** `.env` must contain `CLAUDE_CODE_OAUTH_TOKEN` (already used by the Docker
-   stack). The runner sources `.env`.
+   stack). The runner sources `.env`, drops any `ANTHROPIC_API_KEY`, and fails closed if the OAuth
+   token is missing (so it can never silently fall back to API billing).
 2. **Tools on PATH:** the runner prepends common locations; override with `AUTONOMOUS_AUDIT_PATH`
    if `claude` / `uv` / `gh` / `docker` live elsewhere. `gh` must be authenticated (`gh auth status`).
 3. **Telegram (optional but recommended):** `FINALAYZE_TELEGRAM_BOT_TOKEN` +
