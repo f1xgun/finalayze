@@ -29,6 +29,19 @@ export PATH="${AUTONOMOUS_AUDIT_PATH:-/opt/homebrew/bin:/usr/local/bin:$HOME/.lo
 # Load .env so CLAUDE_CODE_OAUTH_TOKEN + FINALAYZE_TELEGRAM_* are available headless.
 if [[ -f .env ]]; then set -a; . ./.env; set +a; fi
 
+# ── Billing safety (claude-code issues #37686, #43333) ───────────────────────
+# `claude -p` bills to the pay-per-token API account whenever ANTHROPIC_API_KEY is
+# set in the environment -- silently bypassing the Max/Pro subscription (one user
+# hit $1,800 in two days). Force subscription (OAuth) billing: drop any inherited
+# API key and REQUIRE the OAuth token. (Verify the first run lands on the
+# claude.ai subscription dashboard, not platform.claude.com -- #43333 reports some
+# versions still route -p through API even with OAuth.)
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
+if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+  echo "CLAUDE_CODE_OAUTH_TOKEN not set -- refusing to run (would risk pay-per-token API billing)" >&2
+  exit 78
+fi
+
 LOG_DIR="results/auto-audit"
 mkdir -p "$LOG_DIR"
 STAMP="$(date +%Y-%m-%d_%H%M)"
