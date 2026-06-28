@@ -154,13 +154,22 @@ def compute_fundamental_features(
     moex_data: MoexMarketData | None,
     *,
     as_of: datetime | None = None,
+    symbol: str | None = None,
     sector_peers: tuple[FundamentalSnapshot, ...] | None = None,
 ) -> dict[str, float]:
-    """Compute look-ahead-safe fundamental features for the snapshot's symbol.
+    """Compute look-ahead-safe fundamental features for ``symbol``.
 
     Keys: earnings_yield, pe_zscore_vs_sector, revenue_growth_yoy, net_margin_trend,
     dividend_yield_z. Returns the all-0.0 ``_DEFAULT`` when no usable snapshot exists.
     Every branch falls back to the default — NaN is never returned.
+
+    ``symbol`` is the ticker actually being scored. ``moex_data.fundamentals`` is
+    SEGMENT-WIDE (every symbol's snapshots), so the target MUST be selected by
+    ``symbol``; the peer universe still uses the full segment window. When
+    ``symbol`` is None the legacy behaviour applies — the target is the
+    globally-latest snapshot across the segment — which silently attributes one
+    symbol's fundamentals to every other symbol (audit 2026-06-28, MEDIUM
+    cross-symbol contamination). Always pass ``symbol`` in production.
 
     ``sector_peers`` is an optional test/override hook. In production it is ``None`` and
     the peer universe is resolved internally from ``config/segments.py`` (BLOCKER 2).
@@ -172,9 +181,16 @@ def compute_fundamental_features(
     if not in_window:
         return dict(_DEFAULT)
 
-    # The target symbol is read from the latest in-window snapshot (NOT a param).
-    target = max(in_window, key=lambda s: s.as_of)
-    symbol = target.symbol
+    # Select the target snapshot for the symbol being scored. Without an explicit
+    # symbol fall back to the globally-latest snapshot (legacy, contamination-prone).
+    if symbol is not None:
+        own = [s for s in in_window if s.symbol == symbol]
+        if not own:
+            return dict(_DEFAULT)
+        target = max(own, key=lambda s: s.as_of)
+    else:
+        target = max(in_window, key=lambda s: s.as_of)
+        symbol = target.symbol
 
     features = dict(_DEFAULT)
     features["earnings_yield"] = _earnings_yield(target)

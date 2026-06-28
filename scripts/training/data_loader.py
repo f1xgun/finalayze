@@ -313,8 +313,12 @@ def fetch_symbol_candles(
 ) -> list[Candle]:
     """Fetch candles for a single symbol: DB first, then API fallback.
 
-    For MOEX segments, tries Tinkoff API before yfinance. Uses segment-aware
-    lookback (2 years for MOEX, 5 years for US).
+    MOEX = Tinkoff gRPC ONLY (hard invariant): for MOEX symbols the fallback is
+    Tinkoff and NOTHING else. yfinance cannot price MOEX tickers (and using it
+    would silently corrupt MOEX training/inference data), so on a MOEX miss we
+    fail closed -- return [] and log loudly -- never fall through to yfinance
+    (audit 2026-06-28, HIGH data-integrity). US segments keep the yfinance
+    fallback. Uses segment-aware lookback (2 years for MOEX, 5 years for US).
     """
     candles = asyncio.run(fetch_from_db(symbol, market_id, settings))
     if candles:
@@ -322,13 +326,18 @@ def fetch_symbol_candles(
 
     lookback = get_lookback_days(segment_id) if segment_id else LOOKBACK_DAYS
 
-    # For MOEX segments, try Tinkoff first
-    if segment_id and is_moex_segment(segment_id):
+    # MOEX path: Tinkoff only, fail closed (never yfinance for ru_* tickers).
+    is_moex = market_id == "moex" or (segment_id is not None and is_moex_segment(segment_id))
+    if is_moex:
         tinkoff_candles = fetch_tinkoff_candles(symbol)
-        if tinkoff_candles:
-            return tinkoff_candles
+        if not tinkoff_candles:
+            print(
+                f"  [error] MOEX {symbol}: no DB/Tinkoff candles; refusing yfinance "
+                f"fallback (Tinkoff-gRPC-only invariant). Returning no data."
+            )
+        return tinkoff_candles
 
-    # Fallback to yfinance
+    # US segments only: yfinance fallback.
     end = datetime.now(tz=UTC)
     start = end - timedelta(days=lookback)
     fetcher = YFinanceFetcher(market_id=market_id)
