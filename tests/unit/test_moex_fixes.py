@@ -9,6 +9,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
+from scripts.run_iteration import _normalize_snapshots_to_usd, _normalize_trades_to_usd
 
 from finalayze.core.schemas import Candle, PortfolioState, TradeResult
 
@@ -115,47 +116,11 @@ class TestEngineMinPosIntegration:
 # ---------------------------------------------------------------------------
 # 4. Currency-aware metrics aggregation (Fix 2)
 # ---------------------------------------------------------------------------
-
-
-def _normalize_trades_to_usd(
-    trades: list[TradeResult],
-    segment: str,
-) -> list[TradeResult]:
-    """Replicate the normalize function from run_iteration.py."""
-    if not segment.startswith("ru_"):
-        return trades
-    return [
-        TradeResult(
-            signal_id=t.signal_id,
-            symbol=t.symbol,
-            side=t.side,
-            quantity=t.quantity,
-            entry_price=t.entry_price / _FALLBACK_USDRUB,
-            exit_price=t.exit_price / _FALLBACK_USDRUB,
-            pnl=t.pnl / _FALLBACK_USDRUB,
-            pnl_pct=t.pnl_pct,
-            hold_bars=t.hold_bars,
-        )
-        for t in trades
-    ]
-
-
-def _normalize_snapshots_to_usd(
-    snapshots: list[PortfolioState],
-    segment: str,
-) -> list[PortfolioState]:
-    """Replicate the normalize function from run_iteration.py."""
-    if not segment.startswith("ru_"):
-        return snapshots
-    return [
-        PortfolioState(
-            timestamp=s.timestamp,
-            equity=s.equity / _FALLBACK_USDRUB,
-            cash=s.cash / _FALLBACK_USDRUB,
-            positions=s.positions,
-        )
-        for s in snapshots
-    ]
+# Import the REAL production normalizers (audit 2026-06-28): these used to be
+# re-implemented here and had DRIFTED (the shipped code switched to
+# ``model_copy(update=...)`` which also normalizes coupon_income and carries
+# future fields, while this copy did not), so the test no longer guarded the
+# shipped behavior. Test the real functions directly instead.
 
 
 def _make_trade(

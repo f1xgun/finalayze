@@ -522,11 +522,16 @@ async def get_stop_history(
 
 @router.get("/positions/{symbol}", response_model=PositionDetail)
 async def get_position(symbol: str, request: Request) -> PositionDetail:
-    """Return detail for a single open position. Returns 404 if not found."""
-    broker_router: Any = getattr(request.app.state, "broker_router", None)
-    if broker_router is None:
-        raise HTTPException(status_code=404, detail=f"Position {symbol!r} not found")
-    # TODO: wire to real broker_router
+    """Return detail for a single open position. Returns 404 if not found.
+
+    Reuses the list endpoint's broker enrichment (audit 2026-06-28: this was a
+    permanent stub that always 404'd) and filters to ``symbol`` so the detail and
+    list views can never diverge.
+    """
+    all_positions = await get_positions(request)
+    for pos in all_positions.positions:
+        if pos.symbol == symbol:
+            return pos
     raise HTTPException(status_code=404, detail=f"Position {symbol!r} not found")
 
 
