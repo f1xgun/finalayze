@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     import uuid
 
     from config.settings import Settings
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
     from finalayze.analysis.news_impact_analyzer import NewsImpactResult
     from finalayze.core.schemas import FundamentalSnapshot, NewsArticle
@@ -81,6 +81,11 @@ class TradingPersistence:
         # the uvicorn loop (REST trigger) and the background trading loop
         # (APScheduler cron trigger)).
         self._bg_session_factories: dict[int, async_sessionmaker[AsyncSession]] = {}
+        # Engines tracked alongside the factories so dispose_all() can close the
+        # pools. Without this the engines were unreachable and never disposed,
+        # so every loop recreation orphaned a 5-7 connection pool -> PostgreSQL
+        # "too many clients" after weeks of uptime (audit 2026-06-28, HIGH).
+        self._bg_engines: dict[int, AsyncEngine] = {}
 
     def _get_bg_session_factory(self) -> async_sessionmaker[AsyncSession]:
         """Return a session factory for the CURRENT running event loop.
@@ -118,10 +123,29 @@ class TradingPersistence:
                 pool_timeout=30,
                 pool_recycle=1800,
             )
+            self._bg_engines[loop_id] = engine
             self._bg_session_factories[loop_id] = _async_sessionmaker(
                 engine, class_=_AsyncSession, expire_on_commit=False
             )
         return self._bg_session_factories[loop_id]
+
+    async def dispose_all(self) -> None:
+        """Dispose every per-loop engine's pool and clear the caches.
+
+        Closes the underlying asyncpg connections so they are returned to
+        PostgreSQL. Call this on the background loop from ``TradingLoop.stop()``
+        BEFORE the loop is torn down, so the engine bound to that loop is
+        disposed cleanly (audit 2026-06-28, HIGH connection leak). Each
+        ``dispose()`` is best-effort so one failure cannot block the rest, and
+        the method is safe to call when no engine was ever created.
+        """
+        for loop_id, engine in list(self._bg_engines.items()):
+            try:
+                await engine.dispose()
+            except Exception:
+                _log.debug("bg_engine_dispose_failed", loop_id=loop_id, exc_info=True)
+        self._bg_engines.clear()
+        self._bg_session_factories.clear()
 
     def _run_async(self, coro: Any, *, timeout: int = 30) -> Any:
         """Execute a coroutine on the background event loop.

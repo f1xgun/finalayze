@@ -906,6 +906,17 @@ class TradingLoop:
                     ).result(timeout=5)
                 except Exception:
                     _log.debug("Failed to close FXRateService on shutdown")
+            # Dispose the per-loop DB engine on its OWN loop before that loop is
+            # torn down, so its asyncpg pool is returned to PostgreSQL instead of
+            # being orphaned on every stop/start (audit 2026-06-28, HIGH leak).
+            persistence = getattr(self, "_persistence", None)
+            if persistence is not None:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        persistence.dispose_all(), self._async_loop
+                    ).result(timeout=5)
+                except Exception:
+                    _log.debug("Failed to dispose persistence engines on shutdown")
         # Shut down both event loops via AsyncRuntime's public method
         assert self._async_runtime is not None
         self._async_runtime.shutdown()

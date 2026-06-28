@@ -27,6 +27,7 @@ __all__ = [
     "AsyncSession",
     "async_sessionmaker",
     "create_async_engine",
+    "dispose_engines",
     "get_async_session_factory",
     "get_db",
     "reset_engine",
@@ -74,11 +75,34 @@ async_session_factory = get_async_session_factory
 
 
 def reset_engine() -> None:
-    """Clear cached engines and factories.
+    """Clear cached engines and factories WITHOUT disposing (sync test teardown).
 
     Intended for test teardown so that each test can inject a fresh
     ``database_url`` via env-var overrides without hitting a stale cache.
+
+    WARNING: this drops Python references but does NOT close the underlying
+    asyncpg pools. In a long-lived process always prefer the async
+    :func:`dispose_engines` so connections are returned to the server; clearing
+    alone orphans the pool (audit 2026-06-28, HIGH connection leak).
     """
+    _engine_cache.clear()
+    _factory_cache.clear()
+
+
+async def dispose_engines() -> None:
+    """Dispose every cached engine's connection pool, then clear the caches.
+
+    Closes the underlying asyncpg connections (unlike :func:`reset_engine`) so
+    they are returned to PostgreSQL. Call from the FastAPI lifespan shutdown.
+    Each ``dispose()`` is best-effort so one bad engine cannot block the rest.
+    """
+    for url, engine in list(_engine_cache.items()):
+        try:
+            await engine.dispose()
+        except Exception:
+            from structlog import get_logger  # noqa: PLC0415
+
+            get_logger().debug("engine_dispose_failed", url=url, exc_info=True)
     _engine_cache.clear()
     _factory_cache.clear()
 

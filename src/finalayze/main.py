@@ -289,6 +289,16 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:  # noqa: PLR09
             except Exception:
                 log.debug("bot_handler_alerter_close_failed", exc_info=True)
 
+    # Dispose the app's DB engine pool (uvicorn loop) so asyncpg connections are
+    # returned to PostgreSQL on shutdown (audit 2026-06-28, HIGH connection leak).
+    try:
+        from finalayze.core.db import dispose_engines  # noqa: PLC0415
+
+        await dispose_engines()
+        log.info("db_engines_disposed")
+    except Exception:
+        log.debug("db_engines_dispose_failed", exc_info=True)
+
 
 def create_app() -> FastAPI:
     """Construct and configure the FastAPI application."""
