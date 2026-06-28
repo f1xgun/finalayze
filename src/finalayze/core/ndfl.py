@@ -82,7 +82,12 @@ class YtdTaxAccumulator:
 
 
 def ndfl_on_deposit_interest(
-    gross: Decimal, ytd_deposit_gross_before: Decimal, running_floor: Decimal
+    gross: Decimal,
+    ytd_deposit_gross_before: Decimal,
+    running_floor: Decimal,
+    *,
+    tax_acc: YtdTaxAccumulator | None = None,
+    year: int | None = None,
 ) -> Decimal:
     """Tax only the portion of YTD deposit interest above the running-max floor.
 
@@ -91,8 +96,18 @@ def ndfl_on_deposit_interest(
     floor -- it monotonically rises and never uses a future month, so the result
     is look-ahead-safe (R-2). A higher (later) floor can only reduce the taxable
     excess for the same gross, never increase it.
+
+    The taxable excess (above the floor) is charged the progressive 13/15% band
+    when a cross-sleeve ``tax_acc`` + ``year`` are supplied, so deposit interest
+    stacks on the same single YTD as dividends/coupons (audit 2026-06-28: deposit
+    interest was charged a flat 13%, inconsistent with the dividend path). Below
+    the 2.4M RUB threshold the marginal band == flat 13%, so realistic budgets are
+    byte-identical. Without an accumulator it falls back to flat 13% (back-compat).
     """
     ytd_after = ytd_deposit_gross_before + gross
     taxable_before = max(Decimal(0), ytd_deposit_gross_before - running_floor)
     taxable_after = max(Decimal(0), ytd_after - running_floor)
-    return (taxable_after - taxable_before) * NDFL_RATE
+    taxable_delta = taxable_after - taxable_before
+    if tax_acc is not None and year is not None:
+        return tax_acc.tax(taxable_delta, year)
+    return taxable_delta * NDFL_RATE
