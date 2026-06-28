@@ -15,6 +15,7 @@ See docs/architecture/DEPENDENCY_LAYERS.md for layering rules.
 from __future__ import annotations
 
 import contextlib
+import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -30,6 +31,21 @@ if TYPE_CHECKING:
     from finalayze.risk.circuit_breaker import CircuitBreaker
 
 _log = structlog.get_logger()
+
+
+def _default_flag_path() -> Path:
+    """Durable default location for the kill flag (audit 2026-06-28).
+
+    The kill flag must survive a process restart so a killed system stays killed.
+    ``/tmp`` is cleared on reboot (and on tmpfs, on restart) on many systems, so it
+    is not durable. Honour ``FINALAYZE_KILL_FLAG_PATH`` when set; otherwise default
+    to ``~/.finalayze/killed`` (the container home is a persistent path, unlike
+    ``/tmp``). The parent directory is created on write.
+    """
+    override = os.environ.get("FINALAYZE_KILL_FLAG_PATH")
+    if override:
+        return Path(override)
+    return Path.home() / ".finalayze" / "killed"
 
 
 @dataclass(frozen=True)
@@ -62,7 +78,7 @@ class KillSwitch:
         self._trading_loop = trading_loop
         self._circuit_breakers = circuit_breakers
         self._alerter = alerter
-        self._flag_path = flag_path or Path("/tmp/finalayze_killed")  # noqa: S108
+        self._flag_path = flag_path or _default_flag_path()
 
     def activate(self, reason: str = "manual") -> KillSwitchResult:
         """Execute full emergency shutdown sequence.
