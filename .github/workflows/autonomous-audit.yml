@@ -1,0 +1,112 @@
+name: Autonomous Audit
+
+# Subscription-only autonomous audit (Sense -> Diagnose -> Decide -> Act -> Report).
+# Runs `claude -p` with ONLY CLAUDE_CODE_OAUTH_TOKEN (Max/Pro subscription billing).
+# ANTHROPIC_API_KEY is deliberately never set, so claude -p cannot fall back to
+# pay-per-token API billing (claude-code #37686/#43333). See
+# docs/operations/autonomous_audit.md.
+#
+# Cloud limitation: the GitHub runner cannot reach the operator's local Docker
+# stack, so live log/metric SENSING is unavailable here -- this run does code
+# audit + gates + fix PRs. Run the host cron (scripts/run_autonomous_audit.sh)
+# if you also want live-ops sensing.
+
+on:
+  schedule:
+    - cron: "13 20 * * 1-5"   # weekdays ~20:13 UTC (~23:13 MSK, after MOEX close) -> daily
+    - cron: "27 7 * * 6"      # Saturday 07:27 UTC (~10:27 MSK) -> weekly full sweep
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Audit depth"
+        type: choice
+        options: [daily, weekly]
+        default: daily
+
+# The audit opens PRs and merges the safe class; it needs write + PR scope.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: autonomous-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Configure git author
+        run: |
+          git config user.name "finalayze-audit-bot"
+          git config user.email "audit-bot@users.noreply.github.com"
+
+      - name: Resolve audit mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ github.event.inputs.mode }}"
+          elif [ "${{ github.event.schedule }}" = "27 7 * * 6" ]; then
+            MODE="weekly"
+          else
+            MODE="daily"
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Audit mode: $MODE"
+
+      - name: Run autonomous audit (SUBSCRIPTION billing only)
+        env:
+          # Subscription auth. ANTHROPIC_API_KEY is intentionally absent so claude -p
+          # bills the Max/Pro subscription, never pay-per-token API.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Prefer a PAT so bot PRs trigger CI (GITHUB_TOKEN-created PRs do not);
+          # falls back to the built-in token (safe-class PRs still merge after in-job gates).
+          GH_TOKEN: ${{ secrets.AUDIT_GH_PAT || github.token }}
+          # Optional escalation channel.
+          FINALAYZE_TELEGRAM_BOT_TOKEN: ${{ secrets.FINALAYZE_TELEGRAM_BOT_TOKEN }}
+          FINALAYZE_TELEGRAM_CHAT_ID: ${{ secrets.FINALAYZE_TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not set -- refusing to run (would risk API billing)."
+            echo "Add it with:  gh secret set CLAUDE_CODE_OAUTH_TOKEN  (value from: claude setup-token)"
+            exit 78
+          fi
+          unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
+          claude -p "Run the autonomous-audit skill with mode=${{ steps.mode.outputs.mode }}. \
+            CONTEXT: this is GitHub Actions (cloud) -- the operator's live Docker stack and its \
+            logs/metrics are NOT reachable, so SKIP live-ops sensing (note it as unavailable in the \
+            report) and do code audit + gates + fixes only. Follow the skill's safety rules exactly: \
+            auto-merge ONLY the safe class (docs/tests/uv.lock) on green CI, open PRs + \
+            Telegram-escalate everything risky, never trade live." \
+            --dangerously-skip-permissions
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autonomous-audit-${{ steps.mode.outputs.mode }}-${{ github.run_id }}
+          path: docs/audit/auto/**
+          if-no-files-found: ignore
+          retention-days: 30

@@ -86,8 +86,54 @@ tail -f results/auto-audit/*_daily.log
 Start by reviewing a few `daily` runs' reports under `docs/audit/auto/` before relying on the
 unattended auto-merge.
 
+## GitHub Actions (recommended: subscription-only, always-on)
+
+`.github/workflows/autonomous-audit.yml` runs the same skill in the cloud on a schedule —
+**reliable timing** (no sleeping laptop) and **subscription billing** (`CLAUDE_CODE_OAUTH_TOKEN`
+only; `ANTHROPIC_API_KEY` is never set, so `claude -p` can't fall back to pay-per-token API).
+
+**Cloud limitation:** the runner cannot reach your local Docker stack, so **live log/metric
+sensing is unavailable** there — the Actions run does code audit + gates + fix PRs. Use the host
+cron (above) if you also want live-ops sensing.
+
+### One-time setup
+
+```bash
+# 1) Generate a subscription OAuth token (uses your Max/Pro plan, NOT API billing):
+claude setup-token            # prints a token
+
+# 2) Add it as a repo secret (this is what makes Actions bill the subscription):
+gh secret set CLAUDE_CODE_OAUTH_TOKEN     # paste the token
+
+# 3) (Recommended) a PAT so bot PRs trigger CI + can auto-merge. A GITHUB_TOKEN-created
+#    PR does NOT trigger other workflows, so without this the "merge on green CI" step
+#    can't see CI. Scope: repo (contents + pull_requests).
+gh secret set AUDIT_GH_PAT                 # paste a fine-grained PAT
+
+# 4) (Optional) Telegram escalation:
+gh secret set FINALAYZE_TELEGRAM_BOT_TOKEN
+gh secret set FINALAYZE_TELEGRAM_CHAT_ID
+```
+
+Do **NOT** add `ANTHROPIC_API_KEY` as a secret/env — its mere presence flips `claude -p` to API
+billing.
+
+### Schedule + manual run
+
+Cron in Actions is **UTC** (unlike the host crontab). The workflow ships with weekdays 20:13 UTC
+(≈23:13 MSK) `daily` and Saturday 07:27 UTC (≈10:27 MSK) `weekly`. Trigger on demand to test:
+
+```bash
+gh workflow run "Autonomous Audit" -f mode=daily
+gh run watch
+```
+
+After the first run, **confirm billing landed on the claude.ai subscription dashboard, not
+platform.claude.com** (#43333 caveat).
+
 ## Files
 
+- `.github/workflows/autonomous-audit.yml` — scheduled cloud run (subscription-only).
 - `.claude/workflows/nightly-audit.js` — the R&D diagnosis workflow (agent team + verify).
 - `.claude/skills/autonomous-audit.md` — the orchestration playbook (the brain).
 - `scripts/audit_triage.py` — the default-risky safe/risky classifier (the safety core).
