@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -65,6 +66,23 @@ _STALENESS_THRESHOLD_HOURS: float = 72.0  # 3x daily; covers weekends + calendar
 _MARKET_CURRENCY: dict[str, str] = {"us": "USD", "moex": "RUB"}
 
 _log = structlog.get_logger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _symbol_segment_map() -> dict[str, str]:
+    """Map each configured symbol to its segment id (for same-sector exposure).
+
+    Built once from ``config.segments.DEFAULT_SEGMENTS``. A symbol listed in more
+    than one segment resolves to the first; symbols absent from every segment are
+    simply not in the map (excluded from sector concentration).
+    """
+    from config.segments import DEFAULT_SEGMENTS  # noqa: PLC0415
+
+    mapping: dict[str, str] = {}
+    for seg in DEFAULT_SEGMENTS:
+        for sym in seg.symbols:
+            mapping.setdefault(sym, seg.segment_id)
+    return mapping
 
 
 # ── Stage hand-off contexts (Phase 3) ──────────────────────────────────────
@@ -455,6 +473,7 @@ class SignalExecutor:
             cross_exposure=cross_exposure,
             max_exposure=max_exposure,
             is_day_trade=is_day_trade,
+            level=level,
         )
 
         if not pre_result.passed:
@@ -946,16 +965,6 @@ class SignalExecutor:
         broker = self._broker_router.route(market_id)
         return side == "SELL" and broker.has_position(symbol)
 
-    def _get_circuit_breaker_level(self, market_id: str) -> Any:  # noqa: ARG002
-        """Get current circuit breaker level for market.
-
-        Imported from TradingLoop which has _circuit_breakers dict.
-        Returns CircuitLevel or None if market not found.
-        """
-        # This should be passed in from TradingLoop or from a shared circuit_breakers dict
-        # For now, return None (check will skip)
-        return None
-
     def _get_market_equity(self, market_id: str) -> Decimal | None:
         """Return current portfolio equity for market, or None on failure.
 
@@ -969,16 +978,20 @@ class SignalExecutor:
             return None
 
     def _compute_sector_exposure(self, portfolio: PortfolioState, seg_id: str) -> Decimal | None:
-        """Sum value of all open positions using each one's last known price (SIZE-02).
+        """Sum value of open positions IN THE SAME SECTOR as ``seg_id`` (SIZE-02).
 
-        Returns None when no segment context is supplied — caller signals
-        ``sector_exposure_value=None`` to the pre-trade check.
+        Sector concentration must measure same-sector exposure only. Summing every
+        open position (the prior behaviour) over-stated concentration and could
+        over-block on a diversified book (audit 2026-06-28). Positions whose symbol
+        maps to a different segment -- or to no known segment -- are excluded.
+        Returns None when no segment context is supplied (check skips).
         """
         if not seg_id:
             return None
+        symbol_segment = _symbol_segment_map()
         total = _ZERO
         for pos_symbol, qty in portfolio.positions.items():
-            if qty > _ZERO:
+            if qty > _ZERO and symbol_segment.get(pos_symbol) == seg_id:
                 total += qty * self._get_last_price(pos_symbol)
         return total
 
@@ -996,12 +1009,16 @@ class SignalExecutor:
         cross_exposure: Decimal,
         max_exposure: Decimal,
         is_day_trade: bool,
+        level: CircuitLevel,
     ) -> Any:
         """Gather the 14 pre-trade fields and invoke the checker.
 
         Centralises the parameter assembly that previously lived inline in
         ``process_instrument``. Each field is fetched from the appropriate
-        sub-component; the call site stays focused on flow control.
+        sub-component; the call site stays focused on flow control. ``level`` is
+        the market's live circuit-breaker level threaded from ``process_instrument``
+        (previously this field was hardcoded None, so the pre-trade circuit-breaker
+        check never fired -- audit 2026-06-28).
         """
         open_positions = [s for s, q in portfolio.positions.items() if q > _ZERO]
         ctx = CheckContext(
@@ -1011,7 +1028,7 @@ class SignalExecutor:
             open_position_count=open_position_count,
             market_id=market_id,
             dt=now,
-            circuit_breaker_level=self._get_circuit_breaker_level(market_id),
+            circuit_breaker_level=level,
             stop_loss_price=self._position_tracker.get_stop_loss_price(symbol),
             require_stop_loss=self._position_tracker.has_stop(symbol),
             has_pending_order=self._has_pending_order(symbol, market_id),
