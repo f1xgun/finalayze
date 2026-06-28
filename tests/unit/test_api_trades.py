@@ -44,7 +44,20 @@ def test_trades_analytics_returns_empty_without_db() -> None:
     assert data["period_days"] == 30  # noqa: PLR2004
 
 
-def test_trade_detail_returns_500_without_db() -> None:
+def test_trade_detail_returns_404_for_unknown_trade() -> None:
+    # Audit 2026-06-28: the old test asserted 500 "without db", but the test env
+    # HAS a reachable DB, so an unknown id is simply not-found -> 404 (the honest
+    # behavior; the 404 branch was previously uncovered).
+    resp = TestClient(create_app()).get(f"/api/v1/trades/{uuid.uuid4()}", headers=_auth())
+    assert resp.status_code == 404
+
+
+def test_trade_detail_returns_500_on_db_error(monkeypatch) -> None:
+    # A genuine DB failure (not a missing row) must surface as 500, not 404.
+    def _boom() -> None:
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr("finalayze.core.db.get_async_session_factory", _boom)
     resp = TestClient(create_app()).get(f"/api/v1/trades/{uuid.uuid4()}", headers=_auth())
     assert resp.status_code == 500
 
