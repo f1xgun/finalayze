@@ -63,22 +63,25 @@ def earnings_yield_gate(
     moex_data: MoexMarketData | None,
     *,
     as_of: datetime | None = None,
+    symbol: str | None = None,
     threshold: float = DEFAULT_EARNINGS_YIELD_THRESHOLD,
 ) -> FundamentalGateVerdict:
     """Rule-based ``earnings_yield`` gate (INTG-02, D-01).
 
-    Reads ``compute_fundamental_features(moex_data, as_of=as_of)['earnings_yield']``
+    Reads ``compute_fundamental_features(moex_data, as_of=as_of, symbol=symbol)``
     DIRECTLY (no ``compute_features``/ML path) and returns a :class:`FundamentalGateVerdict`:
 
     - ``earnings_yield >= threshold`` (cheap) -> ``passed=True``, ``scale=BOOST_SCALE``.
     - ``earnings_yield <  threshold`` (or missing) -> ``passed=False``, ``scale=NEUTRAL_SCALE``.
 
-    Look-ahead: the ``as_of <= D`` filter is enforced inside ``compute_fundamental_features``
-    (``_filter_as_of``), so a snapshot dated after ``as_of`` cannot influence the verdict.
-    Degrades gracefully: no usable snapshot yields the all-``0.0`` default -> neutral
-    passthrough (no raise, never NaN).
+    ``symbol`` is the ticker being gated; pass it so segment-wide fundamentals are
+    attributed to the right symbol rather than the globally-latest snapshot
+    (audit 2026-06-28). Look-ahead: the ``as_of <= D`` filter is enforced inside
+    ``compute_fundamental_features`` (``_filter_as_of``), so a snapshot dated after
+    ``as_of`` cannot influence the verdict. Degrades gracefully: no usable snapshot
+    yields the all-``0.0`` default -> neutral passthrough (no raise, never NaN).
     """
-    features = compute_fundamental_features(moex_data, as_of=as_of)
+    features = compute_fundamental_features(moex_data, as_of=as_of, symbol=symbol)
     earnings_yield = features["earnings_yield"]
     if earnings_yield >= threshold:
         return FundamentalGateVerdict(passed=True, scale=BOOST_SCALE, earnings_yield=earnings_yield)

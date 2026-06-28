@@ -187,7 +187,11 @@ def compute_features(
     fx_features = compute_fx_features(_moex)
     commodity_features = compute_commodity_features(_moex)
     macro_features = compute_macro_features(_moex, candle_timestamps=candle_timestamps)
-    fundamental_features = compute_fundamental_features(_moex, as_of=candles[-1].timestamp)
+    # Pass the symbol being scored so segment-wide fundamentals are attributed to
+    # the right ticker, not the globally-latest snapshot (audit 2026-06-28).
+    fundamental_features = compute_fundamental_features(
+        _moex, as_of=candles[-1].timestamp, symbol=candles[-1].symbol
+    )
     turnover_features = compute_turnover_features(_moex)
     cbr_features = compute_cbr_features(_moex, candle_timestamps=candle_timestamps)
     fx_return_features = compute_fx_return_features(_moex)
