@@ -85,12 +85,16 @@ number) is strictly forbidden.
 
 ## Enforcement
 
-- **Static analysis:** A custom ruff rule or `import-linter` configuration
-  will enforce these boundaries in CI.
+- **Tests (active):** `tests/test_architecture.py` enforces the invariant in CI.
+  It maps each package to its layer from `.agents/manifest.jsonl`, scans every
+  module-level import (excluding `TYPE_CHECKING` and function-local deferred
+  imports), and FAILS on any upward import outside a small documented baseline
+  (the four backward-compat `sys.modules` shims in `core/`). New upward imports
+  break the build — move the dependency down, defer it, or invert it.
 - **Code review:** Every PR must be checked for layer violations (see
   [WORKFLOW.md](../../WORKFLOW.md) review checklist).
-- **Tests:** An architectural test in `tests/test_architecture.py` can
-  programmatically verify no upward imports exist.
+- **Static analysis (future):** an `import-linter` config could add a second,
+  redundant gate, but the architectural test above is the source of truth.
 
 ## Common Pitfalls
 
