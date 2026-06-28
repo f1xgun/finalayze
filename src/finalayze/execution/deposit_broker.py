@@ -47,6 +47,8 @@ from finalayze.execution.simulated_broker import SimulatedBroker
 if TYPE_CHECKING:
     from datetime import date
 
+    from finalayze.core.ndfl import YtdTaxAccumulator
+
 
 _TRADING_DAYS = Decimal(252)
 _ZERO_SPREAD_PP = Decimal(0)  # raw key-rate fraction for the running-max floor
@@ -87,7 +89,7 @@ class DepositSimulatedBroker(SimulatedBroker):
         # timeframe, >1 bar per day) must NOT compound the deposit twice in one day.
         self._processed_accrual_dates: set[date] = set()
 
-    def accrue(self, current_date: date) -> Decimal:
+    def accrue(self, current_date: date, *, tax_acc: YtdTaxAccumulator | None = None) -> Decimal:
         """Accrue one bar of net-of-NDFL interest for every live tranche.
 
         Daily-compounding convention (codebase-wide,
@@ -132,7 +134,13 @@ class DepositSimulatedBroker(SimulatedBroker):
             # True compounding: the accrued net stays in the deposit and earns
             # interest, so the base is (principal + accrued_net), not flat principal.
             gross = (tranche.principal + tranche.accrued_net) * daily
-            tax = ndfl_on_deposit_interest(gross, self._ytd_deposit_gross, running_floor)
+            tax = ndfl_on_deposit_interest(
+                gross,
+                self._ytd_deposit_gross,
+                running_floor,
+                tax_acc=tax_acc,
+                year=current_date.year,
+            )
             net = gross - tax
             # Mark-only (CR-01): fold net into the tranche mark; do NOT sweep to
             # self._cash. deposit_value() already carries accrued_net, so sweeping

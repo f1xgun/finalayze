@@ -837,7 +837,11 @@ class BacktestEngine:
                     ts.date(), dividend_schedule, ytd_accumulator=ytd_tax_accumulator
                 )
             if deposit_ladder is not None:
-                deposit_ladder.accrue(ts.date())
+                # Deposit interest stacks on the SAME cross-sleeve progressive 13/15%
+                # YTD band as dividends (audit 2026-06-28: it was flat 13%). Below the
+                # 2.4M RUB threshold marginal == flat 13%, so sub-threshold runs stay
+                # byte-identical.
+                deposit_ladder.accrue(ts.date(), tax_acc=ytd_tax_accumulator)
 
             # Update correlation cache every N bars (portfolio mode only)
             if ts_index % self._correlation_update_interval == 0 and len(symbols) > 1:
