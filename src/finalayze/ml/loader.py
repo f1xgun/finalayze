@@ -122,9 +122,7 @@ def _load_segment(segment_id: str, segment_dir: Path) -> EnsembleModel:  # noqa:
     calibrator: EnsembleCalibrator | None = None
     calibrator_path = segment_dir / "calibrator.pkl"
     if calibrator_path.exists():
-        import joblib  # noqa: PLC0415
-
-        loaded_cal = joblib.load(calibrator_path)
+        loaded_cal = _verified_joblib_load(calibrator_path)
         if isinstance(loaded_cal, EnsembleCalibrator) and loaded_cal.is_fitted:
             calibrator = loaded_cal
             _log.debug("Loaded fitted calibrator for segment %s", segment_id)
@@ -259,6 +257,26 @@ def _get_hmac_key() -> str:
         return getattr(get_settings(), "ml_model_hmac_key", "")
     except Exception:
         return ""
+
+
+def _verified_joblib_load(path: Path) -> object:
+    """``joblib.load`` with key-gated HMAC integrity verification.
+
+    joblib/pickle deserialization executes arbitrary code, so when an HMAC key
+    is configured the file's digest is verified BEFORE loading -- the same
+    key-gating the boosting models' ``load_from`` uses. Without a key it loads
+    unverified (back-compat). Use this for EVERY ``.pkl`` load (calibrator,
+    meta-learner) so no artifact bypasses the integrity check (audit 2026-06-28,
+    HIGH: calibrator.pkl/meta_learner.pkl were loaded with bare joblib.load).
+    """
+    import joblib  # noqa: PLC0415
+
+    key = _get_hmac_key()
+    if key:
+        from finalayze.ml.integrity import verify_model  # noqa: PLC0415
+
+        verify_model(path, key.encode())
+    return joblib.load(path)
 
 
 def _atomic_save(model: object, target: Path) -> None:

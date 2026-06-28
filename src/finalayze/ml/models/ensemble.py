@@ -280,9 +280,13 @@ class EnsembleModel:
         path:
             Source file path containing the joblib-serialized LogisticRegression.
         """
-        import joblib  # noqa: PLC0415
+        # Key-gated HMAC verification before deserializing (audit 2026-06-28, HIGH:
+        # the meta-learner pickle was loaded with bare joblib.load, bypassing the
+        # integrity check the boosting models enforce). Function-local import keeps
+        # the loader<->ensemble dependency one-directional.
+        from finalayze.ml.loader import _verified_joblib_load  # noqa: PLC0415
 
-        self._meta_learner = joblib.load(path)
+        self._meta_learner = _verified_joblib_load(path)
         _log.info("meta_learner_loaded", path=str(path))
 
     @property

@@ -11,6 +11,8 @@ Requires .streamlit/secrets.toml with:
 
 from __future__ import annotations
 
+import hmac
+
 import streamlit as st
 
 from finalayze.dashboard.api_client import ApiClient
@@ -34,7 +36,9 @@ if not st.session_state["authenticated"]:
         st.stop()
     pwd = st.text_input("Password", type="password")
     if st.button("Login"):
-        if pwd == _PASSWORD:
+        # Constant-time comparison to avoid leaking the password via timing
+        # (audit 2026-06-28). _PASSWORD is guaranteed non-empty above.
+        if hmac.compare_digest(pwd, _PASSWORD):
             st.session_state["authenticated"] = True
             st.rerun()
         else:
