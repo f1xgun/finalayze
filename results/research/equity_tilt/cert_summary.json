@@ -1,0 +1,266 @@
+{
+ "window": {
+  "start": "2022-01-03",
+  "end": "2026-06-28",
+  "n_bars": 1224,
+  "n_rebalances": 19,
+  "universe_size": 45,
+  "regime_boundary": {
+   "high_rate": [
+    "2022-01-03",
+    "2025-06-05"
+   ],
+   "early_cut": [
+    "2025-06-06",
+    "2026-06-28"
+   ]
+  }
+ },
+ "risk_free_annual_pct": 15.0,
+ "baseline": "cap_proxy_baseline",
+ "arms": {
+  "cap_proxy_baseline": {
+   "windows": {
+    "full_window": {
+     "metrics": {
+      "sharpe": -0.46381727110948723,
+      "sortino": -0.5735869206094992,
+      "maxdd_pct": 57.71186762956093,
+      "total_return_pct": -24.368484271426492,
+      "n_bars": 1224
+     },
+     "verdict": null
+    },
+    "high_rate": {
+     "range": [
+      "2022-01-03",
+      "2025-06-05"
+     ],
+     "metrics": {
+      "sharpe": -0.21213162099152066,
+      "sortino": -0.2609969588546413,
+      "maxdd_pct": 57.71186762956093,
+      "total_return_pct": -0.8251576800601401,
+      "n_bars": 871
+     },
+     "verdict": null,
+     "n1_caveat": false
+    },
+    "early_cut": {
+     "range": [
+      "2025-06-06",
+      "2026-06-28"
+     ],
+     "metrics": {
+      "sharpe": -1.6952819172244207,
+      "sortino": -2.2274745269278684,
+      "maxdd_pct": 28.21732127200025,
+      "total_return_pct": -21.52794364278312,
+      "n_bars": 353
+     },
+     "verdict": null,
+     "n1_caveat": true
+    }
+   },
+   "total_cost": "31584.67269286911044212458048",
+   "total_tax": "21106.06824197057467297260046",
+   "dividend_gross": "162354.3710920813436382507727",
+   "cost_drag_pct_of_initial": "3.158467269286911044212458048"
+  },
+  "equal_weight": {
+   "windows": {
+    "full_window": {
+     "metrics": {
+      "sharpe": -0.5407957844047525,
+      "sortino": -0.6723378514402184,
+      "maxdd_pct": 41.887905176809255,
+      "total_return_pct": -15.928844897997385,
+      "n_bars": 1224
+     },
+     "verdict": {
+      "beats_sharpe": false,
+      "beats_sortino": false,
+      "dd_within_baseline": true,
+      "passed": false
+     }
+    },
+    "high_rate": {
+     "range": [
+      "2022-01-03",
+      "2025-06-05"
+     ],
+     "metrics": {
+      "sharpe": -0.23213188868149284,
+      "sortino": -0.2870402276979465,
+      "maxdd_pct": 41.887905176809255,
+      "total_return_pct": 10.462688194128077,
+      "n_bars": 871
+     },
+     "verdict": {
+      "beats_sharpe": false,
+      "beats_sortino": false,
+      "dd_within_baseline": true,
+      "passed": false
+     },
+     "n1_caveat": false
+    },
+    "early_cut": {
+     "range": [
+      "2025-06-06",
+      "2026-06-28"
+     ],
+     "metrics": {
+      "sharpe": -1.8341144673779404,
+      "sortino": -2.3947779933172066,
+      "maxdd_pct": 31.20411955857392,
+      "total_return_pct": -21.763377207745105,
+      "n_bars": 353
+     },
+     "verdict": {
+      "beats_sharpe": false,
+      "beats_sortino": false,
+      "dd_within_baseline": false,
+      "passed": false
+     },
+     "n1_caveat": true
+    }
+   },
+   "total_cost": "17388.30070248573487096149600",
+   "total_tax": "21744.17943042512045853986263",
+   "dividend_gross": "167262.9186955778496810758667",
+   "cost_drag_pct_of_initial": "1.738830070248573487096149600"
+  },
+  "low_vol": {
+   "windows": {
+    "full_window": {
+     "metrics": {
+      "sharpe": -0.5688579008010569,
+      "sortino": -0.7021166965127623,
+      "maxdd_pct": 42.21653658283007,
+      "total_return_pct": -15.720479687796029,
+      "n_bars": 1224
+     },
+     "verdict": {
+      "beats_sharpe": false,
+      "beats_sortino": false,
+      "dd_within_baseline": true,
+      "passed": false
+     }
+    },
+    "high_rate": {
+     "range": [
+      "2022-01-03",
+      "2025-06-05"
+     ],
+     "metrics": {
+      "sharpe": -0.2711354538951647,
+      "sortino": -0.3327869556027346,
+      "maxdd_pct": 42.21653658283007,
+      "total_return_pct": 8.287907737510626,
+      "n_bars": 871
+     },
+     "verdict": {
+      "beats_sharpe": false,
+      "beats_sortino": false,
+      "dd_within_baseline": true,
+      "passed": false
+     },
+     "n1_caveat": false
+    },
+    "early_cut": {
+     "range": [
+      "2025-06-06",
+      "2026-06-28"
+     ],
+     "metrics": {
+      "sharpe": -1.8498492080400932,
+      "sortino": -2.405701841266807,
+      "maxdd_pct": 29.09016517711624,
+      "total_return_pct": -20.146760648929362,
+      "n_bars": 353
+     },
+     "verdict": {
+      "beats_sharpe": false,
+      "beats_sortino": false,
+      "dd_within_baseline": false,
+      "passed": false
+     },
+     "n1_caveat": true
+    }
+   },
+   "total_cost": "22812.55557232406190897921458",
+   "total_tax": "23458.57156024210647147463894",
+   "dividend_gross": "180450.5504634008190113433764",
+   "cost_drag_pct_of_initial": "2.281255557232406190897921458"
+  },
+  "dividend_yield": {
+   "windows": {
+    "full_window": {
+     "metrics": {
+      "sharpe": -0.4976383260085898,
+      "sortino": -0.6218061145781727,
+      "maxdd_pct": 42.89332980089222,
+      "total_return_pct": -8.820296819088359,
+      "n_bars": 1224
+     },
+     "verdict": {
+      "beats_sharpe": false,
+      "beats_sortino": false,
+      "dd_within_baseline": true,
+      "passed": false
+     }
+    },
+    "high_rate": {
+     "range": [
+      "2022-01-03",
+      "2025-06-05"
+     ],
+     "metrics": {
+      "sharpe": -0.22401302820695754,
+      "sortino": -0.27803507146754114,
+      "maxdd_pct": 42.89332980089222,
+      "total_return_pct": 12.992180622015216,
+      "n_bars": 871
+     },
+     "verdict": {
+      "beats_sharpe": false,
+      "beats_sortino": false,
+      "dd_within_baseline": true,
+      "passed": false
+     },
+     "n1_caveat": false
+    },
+    "early_cut": {
+     "range": [
+      "2025-06-06",
+      "2026-06-28"
+     ],
+     "metrics": {
+      "sharpe": -1.6409093371122667,
+      "sortino": -2.1787608955588644,
+      "maxdd_pct": 27.570899671497745,
+      "total_return_pct": -17.227212279859717,
+      "n_bars": 353
+     },
+     "verdict": {
+      "beats_sharpe": true,
+      "beats_sortino": true,
+      "dd_within_baseline": true,
+      "passed": true
+     },
+     "n1_caveat": true
+    }
+   },
+   "total_cost": "25981.41958574397270859476587",
+   "total_tax": "27584.36975607080072037189238",
+   "dividend_gross": "212187.4596620830824643991729",
+   "cost_drag_pct_of_initial": "2.598141958574397270859476587"
+  }
+ },
+ "binding": {
+  "passers": [],
+  "verdict": "HARD_FAIL",
+  "finding": "no tilt beats the cap-proxy baseline on full_window+high_rate (deposit-anchor / passive-sleeve conclusion holds for the equity sleeve)",
+  "n1_caveat": true
+ }
+}
