@@ -390,6 +390,91 @@ class MoexISSFetcher(BaseFetcher):
 
         return closes
 
+    def fetch_currency_close_history(
+        self,
+        secid: str,
+        start: datetime,
+        end: datetime,
+        board: str = "CETS",
+    ) -> list[tuple[date, Decimal]]:
+        """Fetch daily CLOSE for a MOEX currency-market instrument (e.g. GLDRUB_TOM).
+
+        Reads ``history/engines/currency/markets/selt/boards/{board}/securities/{SECID}.json``
+        — the currency/selt engine (gold spot, FX pairs), a DIFFERENT engine from the
+        index path :meth:`fetch_candles` uses (``.../markets/index/...``), so gold and
+        FX series need this dedicated method. ``CETS`` is the live system board; the other
+        currency boards (CNGD/LICU/SPEC) report all-zero rows and are not queried.
+
+        Like the index series this is an unauthenticated ISS REST read (NO token/cert —
+        the "MOEX data = Tinkoff gRPC only" invariant governs INSTRUMENT candles, not the
+        public ISS index/currency statistics). Rows with a None or non-positive CLOSE
+        (holiday / no-trade sessions on the currency board) are skipped, never fabricated.
+
+        Args:
+            secid: MOEX currency-market id (e.g. "GLDRUB_TOM", "CNYRUB_TOM").
+            start: Start of the date range (inclusive, UTC-aware).
+            end: End of the date range (exclusive, UTC-aware).
+            board: Currency board id (default "CETS", the live system board).
+
+        Returns:
+            List of ``(TRADEDATE, CLOSE)`` tuples in ISS order (ascending).
+
+        Raises:
+            DataFetchError: On HTTP errors or timeouts.
+        """
+        url = (
+            f"{_BASE_URL}/history/engines/currency/markets/selt/boards/"
+            f"{board}/securities/{secid}.json"
+        )
+        # §19-M1: ISS `till` is INCLUSIVE — subtract 1 day from the exclusive `end`.
+        from_str = start.strftime("%Y-%m-%d")
+        till_str = (end - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        closes: list[tuple[date, Decimal]] = []
+        offset = 0
+
+        while True:
+            params: dict[str, Any] = {
+                "from": from_str,
+                "till": till_str,
+                "start": offset,
+                "iss.meta": "off",
+            }
+            data = self._get_json(url, params=params)
+            block = data.get("history", {})
+            columns: list[str] = block.get("columns", [])
+            rows: list[list[Any]] = block.get("data", [])
+
+            if not columns or not rows:
+                break
+
+            col = {name: idx for idx, name in enumerate(columns)}
+            try:
+                date_idx = col["TRADEDATE"]
+                close_idx = col["CLOSE"]
+            except KeyError:
+                break
+
+            for row in rows:
+                raw_date = row[date_idx]
+                raw_close = row[close_idx]
+                if not raw_date or raw_close is None:
+                    continue
+                try:
+                    trade_date = date.fromisoformat(str(raw_date))
+                except ValueError:
+                    continue
+                close = Decimal(str(raw_close))
+                if close <= 0:  # holiday / no-trade row on the currency board — skip
+                    continue
+                closes.append((trade_date, close))
+
+            if len(rows) < _PAGE_SIZE:
+                break
+            offset += len(rows)
+
+        return closes
+
     @staticmethod
     def reconstruct_market_cap(close: Decimal, issuesize: int | None) -> Decimal | None:
         """Reconstruct an APPROXIMATE market_cap as ``CLOSE * ISSUESIZE``.
