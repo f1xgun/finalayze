@@ -56,6 +56,22 @@ def test_fetch_currency_close_history_parses_cets_and_skips_holidays() -> None:
     assert out[1] == (date(2022, 2, 24), _EXPECTED_CLOSE_1)
 
 
+def test_fetch_close_history_uses_board_param() -> None:
+    # ETFs (e.g. LQDT money-market) live on TQTF, not the default TQBR shares board.
+    fetcher = MoexISSFetcher()
+    captured: dict[str, str] = {}
+
+    def _fake_get(url: str, params: object = None) -> dict[str, object]:
+        captured["url"] = url
+        return {"history": {"columns": ["TRADEDATE", "CLOSE"], "data": [["2023-01-03", 1.2]]}}
+
+    with patch.object(fetcher, "_get_json", side_effect=_fake_get):
+        out = fetcher.fetch_close_history("LQDT", _START, _END, board="TQTF")
+    fetcher.close()
+    assert "boards/TQTF/" in captured["url"]
+    assert out == [(date(2023, 1, 3), Decimal("1.2"))]
+
+
 def test_fetch_currency_close_history_paginates() -> None:
     fetcher = MoexISSFetcher()
     # First page full (_PAGE_SIZE rows) triggers a second fetch; empty page stops.

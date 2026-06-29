@@ -60,10 +60,24 @@ HARD STOP.
 |---|---|---|---|---|---|
 | A | Gold (GLDRUB) | high / hedge | ISS CETS GLDRUB_TOM | REJECT (de-risk at a cost) | #302 ✅ |
 | B | ЗО (RURPLRUBTR) | medium / diversifier | ISS index RURPLRUBTR | PROBATION (FX-linked, tail untested) | #303 ✅ |
-| 0 | **Integration Gate framework** | — | — | building | this PR |
-| 1 | RGBITR fixed-coupon OFZ | medium / carry | ISS index RGBITR | queued (regression vs Phase 76 REJECT) | — |
-| 2 | LQDT money-market | low / cash | ISS index LQDT | queued (corr to deposit ~0.95 → REJECT) | — |
-| 3 | RUCBITR corporate bonds | medium / carry | ISS index RUCBITR | queued (credit-correlated in stress) | — |
-| 4 | CNYRUB carry | high / diversifier | ISS CETS CNYRUB_TOM | queued (dominated by gold) | — |
+| 0 | **Integration Gate framework** | — | — | built (gold→REJECT, ЗО→PROBATION validated) | #304 ✅ |
+| 1a | RGBITR fixed-coupon OFZ | medium / carry | ISS index RGBITR | **REJECT** — redundant (corr 0.61 to rate/bond factor); confirms Phase 76 | this PR |
+| 1b | RUCBITR corporate IG | medium / carry | ISS index RUCBITR | **REJECT** — tested & worsens risk-adj (ΔSortino −0.13); data ends 2023-05 | this PR |
+| 1c | RUCBHYTR corporate HY (ВДО) | high / carry | ISS index RUCBHYTR | **REJECT** — HY credit too equity-correlated (0.48) to diversify | this PR |
+| 1d | LQDT money-market | low / cash | ISS shares TQTF | **REJECT** — no material benefit (cash-like, ~flat marginal effect) | this PR |
+| 1e | CNYRUB FX | high / diversifier | ISS CETS CNYRUB_TOM | **REJECT** — uncorrelated but big zero-carry drag (ΔSortino −0.33), tail tested & failed | this PR |
+
+**Iteration 1 finding (instrument battery):** all 5 candidates REJECT, each for a distinct honest
+reason — the gate is discriminating, not a rubber stamp. Nothing clears the deposit+equity core;
+the "no easy edge" pattern holds across every risk tier (cash, OFZ duration, IG/HY credit, FX).
+ЗО (PROBATION) remains the only non-REJECT — a structurally-sound but unproven FX-tail hedge.
+
+### Candidate hypotheses still open (appended as discovered)
+- **OFZ-IN inflation linkers** (low-medium / inflation-hedge) — hedge the inflation that erodes the
+  deposit; check linker TR index availability on ISS.
+- **TGLD / SBGD gold ETF** vs spot GLDRUB (does the ETF wrapper change the gold verdict — likely not).
+- **Equal-weight / risk-parity blend of the deposit + ЗО PROBATION leg** — does combining the one
+  sound hedge at its toe-hold with the anchor improve the frozen SAA at all?
+- **A multi-hedge PROBATION basket** (ЗО + gold small) under the aggregate 5% probation cap.
 
 Next instruments are pulled from this ledger top-down; new hypotheses appended as discovered.
