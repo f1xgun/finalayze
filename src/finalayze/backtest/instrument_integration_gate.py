@@ -302,11 +302,17 @@ def run_integration_gate(
     and equity dates, look-ahead-clamped). ``equity_curve`` is MCFTRR net (already net). The verdict
     is computed entirely from the real blended curves — no hook, no pre-baked literal.
     """
+    # Evaluate ONLY over the candidate's real data overlap with equity: clamp BOTH ends to the
+    # candidate window. Without the end clamp a discontinued/short candidate (e.g. an index that
+    # stopped in 2023) is forward-filled FLAT to _BINDING_END, turning dead trailing data into a
+    # phantom drag that fakes a REJECT. A too-short real overlap falls to INSUFFICIENT_DATA via the
+    # bar precondition — "cannot judge", not "failed".
     start = max(candidate.net_curve[0][0], equity_curve[0][0])
+    end = min(candidate.net_curve[-1][0], equity_curve[-1][0], _BINDING_END)
     axis = [
         d
         for d in master_axis({_CAND: candidate.net_curve, _EQUITY: equity_curve})
-        if start <= d <= _BINDING_END
+        if start <= d <= end
     ]
     deposit_curve = accrue_real_risk_free_leg(
         axis, Decimal(1), spread_pp=_DEPOSIT_SPREAD_PP, tax_acc=YtdTaxAccumulator()

@@ -30,16 +30,16 @@
    "tier": "REJECT",
    "proposed_weight": "0",
    "carved_from": "equity",
-   "n1_caveat": false,
+   "n1_caveat": true,
    "scorecard": {
-    "window_bars": 1107,
-    "regimes_covered": 2,
+    "window_bars": 336,
+    "regimes_covered": 1,
     "tail_backtestable": true,
-    "marginal_sharpe_delta": -0.1075,
-    "marginal_sortino_delta": -0.1266,
+    "marginal_sharpe_delta": -0.0685,
+    "marginal_sortino_delta": -0.0739,
     "marginal_maxdd_delta_pp": 4.6713,
     "crash_year_maxdd_delta_pp": -4.6713,
-    "toehold_sortino_delta": -0.0343,
+    "toehold_sortino_delta": -0.0205,
     "corr_to_legs": {
      "deposit": 0.0697,
      "equity": 0.5932
@@ -47,7 +47,7 @@
     "max_corr_to_existing_legs": 0.5932
    },
    "reasons": [
-    "tail tested & materially worsens risk-adjusted return (\u0394Sortino -0.13)"
+    "no measurable net benefit over the deposit+equity core"
    ]
   },
   {

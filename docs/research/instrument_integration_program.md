@@ -61,23 +61,43 @@ HARD STOP.
 | A | Gold (GLDRUB) | high / hedge | ISS CETS GLDRUB_TOM | REJECT (de-risk at a cost) | #302 ✅ |
 | B | ЗО (RURPLRUBTR) | medium / diversifier | ISS index RURPLRUBTR | PROBATION (FX-linked, tail untested) | #303 ✅ |
 | 0 | **Integration Gate framework** | — | — | built (gold→REJECT, ЗО→PROBATION validated) | #304 ✅ |
-| 1a | RGBITR fixed-coupon OFZ | medium / carry | ISS index RGBITR | **REJECT** — redundant (corr 0.61 to rate/bond factor); confirms Phase 76 | this PR |
-| 1b | RUCBITR corporate IG | medium / carry | ISS index RUCBITR | **REJECT** — tested & worsens risk-adj (ΔSortino −0.13); data ends 2023-05 | this PR |
-| 1c | RUCBHYTR corporate HY (ВДО) | high / carry | ISS index RUCBHYTR | **REJECT** — HY credit too equity-correlated (0.48) to diversify | this PR |
-| 1d | LQDT money-market | low / cash | ISS shares TQTF | **REJECT** — no material benefit (cash-like, ~flat marginal effect) | this PR |
-| 1e | CNYRUB FX | high / diversifier | ISS CETS CNYRUB_TOM | **REJECT** — uncorrelated but big zero-carry drag (ΔSortino −0.33), tail tested & failed | this PR |
+| 1a | RGBITR fixed-coupon OFZ | medium / carry | ISS index RGBITR | **REJECT** — redundant (corr 0.61 to rate/bond factor); confirms Phase 76 | #305 ✅ |
+| 1b | RUCBITR corporate IG | medium / carry | ISS index RUCBITR | **REJECT** — corr 0.59 too high to diversify + regime-limited (data ends 2023-05; ΔSortino −0.07 after the iter-2 clamp fix) | #305 ✅ |
+| 1c | RUCBHYTR corporate HY (ВДО) | high / carry | ISS index RUCBHYTR | **REJECT** — HY credit too equity-correlated (0.48) to diversify | #305 ✅ |
+| 1d | LQDT money-market | low / cash | ISS shares TQTF | **REJECT** — no material benefit (cash-like, ~flat marginal effect) | #305 ✅ |
+| 1e | CNYRUB FX | high / diversifier | ISS CETS CNYRUB_TOM | **REJECT** — uncorrelated but big zero-carry drag (ΔSortino −0.33), tail tested & failed | #305 ✅ |
 
 **Iteration 1 finding (instrument battery):** all 5 candidates REJECT, each for a distinct honest
 reason — the gate is discriminating, not a rubber stamp. Nothing clears the deposit+equity core;
 the "no easy edge" pattern holds across every risk tier (cash, OFZ duration, IG/HY credit, FX).
 ЗО (PROBATION) remains the only non-REJECT — a structurally-sound but unproven FX-tail hedge.
 
+| # | Instrument / test | verdict | PR |
+|---|---|---|---|
+| GATE-FIX | window-end clamp (a discontinued candidate was forward-filled flat to 2026 → phantom-drag artifact) | fixed + regression-tested; corrected RUCBITR ΔSortino −0.13→−0.07 (tier unchanged) | this PR |
+| 2a | INFLTR inflation-linker OFZ (medium / inflation-hedge) | **INSUFFICIENT_DATA** — only 279 real bars (index discontinued ~2023); "cannot judge", not a fake REJECT | this PR |
+| 2b | gold + CNY multi-hedge basket (3%+3%) | **does NOT help** — cuts crash MaxDD <1pp but drags full-window ΔSortino −0.14; combining two REJECTED hedges doesn't rescue diversification | this PR |
+
+**Iteration 2 finding:** the inflation linker is un-judgeable (discontinued index → INSUFFICIENT_DATA,
+honestly distinguished from "failed"); and a *combination* of the two crash-covering zero-carry
+hedges (gold+CNY) does not produce the diversification neither gave alone. The gate-fix (clamp the
+eval window to the candidate's real data) is an honesty correction — a short/discontinued series
+can no longer fake a REJECT via flat-fill drag.
+
+### META-FINDING (after 2 iterations / 9 instrument-tests)
+The single-instrument universe for a sanctioned-RU deposit-anchored book is **effectively
+exhausted**: every RUB fixed-income leg (OFZ duration, IG/HY credit, money-market, linkers) is
+**redundant with the rate factor** (corr ≥ 0.4 → REJECT), and every genuinely-uncorrelated asset
+(gold, CNY, ЗО) is a **zero-carry drag** that can't beat the ~16-21% near-vol-free deposit on
+risk-adjusted return (REJECT), or an **unprovable-tail hedge** (ЗО → PROBATION). Combining hedges
+doesn't rescue it. The deposit anchor genuinely dominates; this is the honest structural truth,
+now enforced by a reusable pre-registered gate rather than asserted.
+
 ### Candidate hypotheses still open (appended as discovered)
-- **OFZ-IN inflation linkers** (low-medium / inflation-hedge) — hedge the inflation that erodes the
-  deposit; check linker TR index availability on ISS.
+- **ЗО PROBATION integration** — wire the geo-risk overlay (PR #300) to rotate into a small ЗО
+  toe-hold (the one structurally-sound hedge) as forward-looking insurance (config-only).
 - **TGLD / SBGD gold ETF** vs spot GLDRUB (does the ETF wrapper change the gold verdict — likely not).
-- **Equal-weight / risk-parity blend of the deposit + ЗО PROBATION leg** — does combining the one
-  sound hedge at its toe-hold with the anchor improve the frozen SAA at all?
-- **A multi-hedge PROBATION basket** (ЗО + gold small) under the aggregate 5% probation cap.
+- **Regime-conditional hedging** — hold the hedges ONLY when the geo-risk/rate regime flags stress,
+  flat otherwise (avoids the calm-time carry drag that sinks every static hedge here).
 
 Next instruments are pulled from this ledger top-down; new hypotheses appended as discovered.
