@@ -1,0 +1,243 @@
+{
+ "window": {
+  "start": "2023-01-03",
+  "end": "2026-06-10",
+  "n_bars": 874
+ },
+ "weights": {
+  "deposit": "0.4",
+  "equity_base": "0.6",
+  "zo_sweep": [
+   "0.05",
+   "0.10",
+   "0.15"
+  ]
+ },
+ "risk_free_annual_pct": 15.0,
+ "structural_limit": "ZO (RURPLRUBTR) + RUCNYTR start 2023 \u2014 postdate the 2022 crash; the acute tail is UN-backtestable. The only 2022-spanning eurobond index (RUCEU) shows the Euroclear freeze slamming shut, a survivorship trap, not a hedge payoff.",
+ "fx_linkage": {
+  "zo_vs_usdrub_presanction": {
+   "beta": 0.4005,
+   "corr": 0.4062,
+   "n": 365
+  },
+  "zo_vs_cnyrub": {
+   "beta": 0.3301,
+   "corr": 0.3844,
+   "n": 873
+  },
+  "cnybond_vs_cnyrub": {
+   "beta": 0.0633,
+   "corr": 0.2268,
+   "n": 873
+  },
+  "zo_vs_equity": {
+   "beta": 0.035,
+   "corr": 0.0521,
+   "n": 873
+  }
+ },
+ "corr_zo_vs_deposit": -0.0595,
+ "controls": {
+  "zo_zero_reproduces_baseline": true
+ },
+ "windows": {
+  "full_2023_26": {
+   "range": [
+    "2023-01-03",
+    "2026-06-10"
+   ],
+   "baseline": {
+    "sharpe": -0.1670627519390993,
+    "sortino": -0.23927903310213502,
+    "maxdd_pct": 14.455337704801346,
+    "total_return_pct": 48.5514512695808,
+    "n_bars": 874
+   },
+   "variants": {
+    "0.05": {
+     "metrics": {
+      "sharpe": -0.2584557527838872,
+      "sortino": -0.3675177739248444,
+      "maxdd_pct": 13.561030201795084,
+      "total_return_pct": 44.94972075122465,
+      "n_bars": 874
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 0.894307503006262,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.10": {
+     "metrics": {
+      "sharpe": -0.36492989090697286,
+      "sortino": -0.5145250415645622,
+      "maxdd_pct": 12.911276752621195,
+      "total_return_pct": 41.405834595217605,
+      "n_bars": 874
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.544060952180151,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.15": {
+     "metrics": {
+      "sharpe": -0.4887895902437837,
+      "sortino": -0.6822537486404179,
+      "maxdd_pct": 12.26102285607935,
+      "total_return_pct": 37.91951899036543,
+      "n_bars": 874
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.194314848721996,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": true
+  },
+  "high_rate_2024_25": {
+   "range": [
+    "2024-01-01",
+    "2025-06-05"
+   ],
+   "baseline": {
+    "sharpe": -0.519757800598657,
+    "sortino": -0.7470116460758294,
+    "maxdd_pct": 14.455337704801346,
+    "total_return_pct": 9.21864939341923,
+    "n_bars": 363
+   },
+   "variants": {
+    "0.05": {
+     "metrics": {
+      "sharpe": -0.6327926362229399,
+      "sortino": -0.9018532312058153,
+      "maxdd_pct": 13.561030201795084,
+      "total_return_pct": 8.170437202170966,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 0.894307503006262,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.10": {
+     "metrics": {
+      "sharpe": -0.7648485377918722,
+      "sortino": -1.0790495473056918,
+      "maxdd_pct": 12.911276752621195,
+      "total_return_pct": 7.117842627609283,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.544060952180151,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.15": {
+     "metrics": {
+      "sharpe": -0.9194374054254169,
+      "sortino": -1.2813326654591137,
+      "maxdd_pct": 12.26102285607935,
+      "total_return_pct": 6.060997707950211,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.194314848721996,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": false
+  },
+  "easing_2025_26": {
+   "range": [
+    "2025-06-06",
+    "2026-06-10"
+   ],
+   "baseline": {
+    "sharpe": -0.9402106000870184,
+    "sortino": -1.2984133401110969,
+    "maxdd_pct": 9.705462519324495,
+    "total_return_pct": 3.312936101186481,
+    "n_bars": 257
+   },
+   "variants": {
+    "0.05": {
+     "metrics": {
+      "sharpe": -1.0612263369352584,
+      "sortino": -1.4560499546153924,
+      "maxdd_pct": 9.07051260083854,
+      "total_return_pct": 2.950738624845184,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 0.634949918485955,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.10": {
+     "metrics": {
+      "sharpe": -1.1995074651654936,
+      "sortino": -1.63305198187651,
+      "maxdd_pct": 8.431678032794268,
+      "total_return_pct": 2.5868717724860435,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.273784486530227,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.15": {
+     "metrics": {
+      "sharpe": -1.3571463916842872,
+      "sortino": -1.8301818599814974,
+      "maxdd_pct": 7.7889329121133235,
+      "total_return_pct": 2.221352169695212,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.9165296072111715,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": true
+  }
+ },
+ "binding": {
+  "verdict": "FX_LINKED_DIVERSIFIER_TAIL_UNTESTED",
+  "finding": "ZO (RURPLRUBTR) is FX-LINKED: daily-return beta vs CNYRUB (durable daily proxy)=0.330, vs USDRUB=0.401 (pre-Jun-2024-sanction window only; the exchange USD series then halts). It is a genuine, non-redundant diversifier \u2014 corr vs equity=0.052 (<0.5) and corr vs the deposit leg=-0.059 (not >=0.9). The CNY-bond index RUCNYTR is by contrast only WEAKLY FX-linked (CNY beta 0.063) \u2014 RURPL is the FX-linked one. Verdict: FX_LINKED_DIVERSIFIER_TAIL_UNTESTED. CRITICAL: THE 2022 TAIL BENEFIT IS UN-BACKTESTABLE \u2014 ZO postdates the crash (index starts 2023), so the hedge is a forward-structural argument, NOT measured. In-window (2023-2026, NO crash) ZO is INSURANCE WITH A COST: it modestly cuts MaxDD (~1-2pp) but LOWERS total return (full 49%->38% at 15%) and worsens Sortino \u2014 there was no crash in-sample to reward it. Not alpha; a forward-looking FX-tail insurance leg whose payoff is structurally sound but unproven (N=1, no in-window crash).",
+  "tail_backtestable": false
+ }
+}
