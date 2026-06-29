@@ -150,6 +150,7 @@ def blend_portfolio(
     per_side_cost: Decimal = _RETAIL_PER_SIDE_COST,
     free_legs: set[str],
     initial_nav: Decimal = _ONE,
+    weight_schedule: dict[date, dict[str, Decimal]] | None = None,
 ) -> list[tuple[date, Decimal]]:
     """Simulate a fixed-weight, quarterly-rebalanced multi-sleeve portfolio NAV.
 
@@ -161,6 +162,13 @@ def blend_portfolio(
     NAV and the post-cost NAV re-scaled across legs. The opening allocation on
     ``dates[0]`` is cost-free (the initial buy-in is not part of the rebalance drag).
 
+    ``weight_schedule`` (optional) maps a rebalance date to the target-weight vector to
+    use ON THAT date — the seam for a CONDITIONAL / regime-dependent overlay (e.g. hold a
+    hedge leg only when a trailing stress flag is on). A date absent from the schedule (or
+    ``weight_schedule=None``) falls back to the static ``target_weights``; a leg absent from
+    a schedule vector is targeted at 0. ``names`` (the tradeable leg set) is always
+    ``target_weights`` keys, so a conditionally-held leg must appear there (at weight 0).
+
     A single 100%-weight leg with no other leg reproduces that leg's net return path
     to ~26 significant digits (turnover 0 -> cost is exactly 0; the only deviation is
     sub-1e-26 Decimal-context rounding from the reset round-trip): the data-correctness
@@ -169,7 +177,14 @@ def blend_portfolio(
     """
     names = list(target_weights)
     rebal = set(rebalance_dates)
-    holdings = {n: initial_nav * target_weights[n] for n in names}
+
+    def _targets(d: date) -> dict[str, Decimal]:
+        if weight_schedule is not None and d in weight_schedule:
+            return weight_schedule[d]
+        return target_weights
+
+    init_tw = _targets(dates[0])
+    holdings = {n: initial_nav * init_tw.get(n, _ZERO) for n in names}
     out: list[tuple[date, Decimal]] = [(dates[0], initial_nav)]
 
     for i in range(1, len(dates)):
@@ -181,9 +196,10 @@ def blend_portfolio(
         nav = sum(holdings.values(), _ZERO)
 
         if dates[i] in rebal and nav > _ZERO:
+            tw = _targets(dates[i])
             total_cost = _ZERO
             for n in names:
-                target = nav * target_weights[n]
+                target = nav * tw.get(n, _ZERO)
                 if n not in free_legs:
                     total_cost += abs(target - holdings[n]) * per_side_cost
                 holdings[n] = target

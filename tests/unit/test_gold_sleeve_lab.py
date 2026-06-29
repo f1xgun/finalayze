@@ -33,6 +33,9 @@ _PER_SIDE = Decimal("0.0055")  # 0.55%/side retail
 _HALF = Decimal("0.5")
 _ONE = Decimal(1)
 _NAV1 = Decimal(1)
+_ZERO = Decimal(0)
+_D3 = date(2022, 1, 6)
+_UP_33 = Decimal("133.1")
 _MAXDD_CUT_MIN_PP = Decimal("3.0")
 _PLACES = Decimal("0.000001")
 
@@ -127,6 +130,31 @@ def test_blend_charges_cost_on_traded_legs_but_not_free_legs() -> None:
         initial_nav=_NAV1,
     )
     assert charged[-1][1] < free[-1][1]
+
+
+def test_blend_weight_schedule_overrides_targets_on_a_rebalance_date() -> None:
+    # leg "a" grows +10%/day, "b" is flat. A schedule that switches fully to b on d2 caps growth
+    # vs the static all-a run (the conditional/regime-overlay seam).
+    axis = [_D0, _D1, _D2, _D3]
+    legs = {"a": [_HUNDRED, _UP_10, _UP_21, _UP_33], "b": [_HUNDRED, _HUNDRED, _HUNDRED, _HUNDRED]}
+    static = blend_portfolio(
+        legs=legs,
+        dates=axis,
+        target_weights={"a": _ONE, "b": _ZERO},
+        rebalance_dates=axis,
+        free_legs=set(),
+        initial_nav=_NAV1,
+    )
+    scheduled = blend_portfolio(
+        legs=legs,
+        dates=axis,
+        target_weights={"a": _ONE, "b": _ZERO},
+        rebalance_dates=axis,
+        free_legs=set(),
+        initial_nav=_NAV1,
+        weight_schedule={_D2: {"a": _ZERO, "b": _ONE}},
+    )
+    assert scheduled[-1][1] < static[-1][1]
 
 
 def test_diversification_verdict_requires_maxdd_cut_and_sortino_improvement() -> None:

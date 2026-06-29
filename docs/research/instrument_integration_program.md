@@ -74,9 +74,9 @@ the "no easy edge" pattern holds across every risk tier (cash, OFZ duration, IG/
 
 | # | Instrument / test | verdict | PR |
 |---|---|---|---|
-| GATE-FIX | window-end clamp (a discontinued candidate was forward-filled flat to 2026 → phantom-drag artifact) | fixed + regression-tested; corrected RUCBITR ΔSortino −0.13→−0.07 (tier unchanged) | this PR |
-| 2a | INFLTR inflation-linker OFZ (medium / inflation-hedge) | **INSUFFICIENT_DATA** — only 279 real bars (index discontinued ~2023); "cannot judge", not a fake REJECT | this PR |
-| 2b | gold + CNY multi-hedge basket (3%+3%) | **does NOT help** — cuts crash MaxDD <1pp but drags full-window ΔSortino −0.14; combining two REJECTED hedges doesn't rescue diversification | this PR |
+| GATE-FIX | window-end clamp (a discontinued candidate was forward-filled flat to 2026 → phantom-drag artifact) | fixed + regression-tested; corrected RUCBITR ΔSortino −0.13→−0.07 (tier unchanged) | #306 ✅ |
+| 2a | INFLTR inflation-linker OFZ (medium / inflation-hedge) | **INSUFFICIENT_DATA** — only 279 real bars (index discontinued ~2023); "cannot judge", not a fake REJECT | #306 ✅ |
+| 2b | gold + CNY multi-hedge basket (3%+3%) | **does NOT help** — cuts crash MaxDD <1pp but drags full-window ΔSortino −0.14; combining two REJECTED hedges doesn't rescue diversification | #306 ✅ |
 
 **Iteration 2 finding:** the inflation linker is un-judgeable (discontinued index → INSUFFICIENT_DATA,
 honestly distinguished from "failed"); and a *combination* of the two crash-covering zero-carry
@@ -84,20 +84,35 @@ hedges (gold+CNY) does not produce the diversification neither gave alone. The g
 eval window to the candidate's real data) is an honesty correction — a short/discontinued series
 can no longer fake a REJECT via flat-fill drag.
 
-### META-FINDING (after 2 iterations / 9 instrument-tests)
-The single-instrument universe for a sanctioned-RU deposit-anchored book is **effectively
-exhausted**: every RUB fixed-income leg (OFZ duration, IG/HY credit, money-market, linkers) is
-**redundant with the rate factor** (corr ≥ 0.4 → REJECT), and every genuinely-uncorrelated asset
-(gold, CNY, ЗО) is a **zero-carry drag** that can't beat the ~16-21% near-vol-free deposit on
-risk-adjusted return (REJECT), or an **unprovable-tail hedge** (ЗО → PROBATION). Combining hedges
-doesn't rescue it. The deposit anchor genuinely dominates; this is the honest structural truth,
-now enforced by a reusable pre-registered gate rather than asserted.
+| # | Instrument / test | verdict | PR |
+|---|---|---|---|
+| 3 | regime-CONDITIONAL gold hedging (hold gold only on a trailing-stress quarter) | **NO** — DOMINATED by the no-hedge core (worse Sortino −0.79 vs −0.67, MaxDD 31.6 vs 30.3, TR 11.9 vs 17.0) | this PR |
 
-### Candidate hypotheses still open (appended as discovered)
-- **ЗО PROBATION integration** — wire the geo-risk overlay (PR #300) to rotate into a small ЗО
-  toe-hold (the one structurally-sound hedge) as forward-looking insurance (config-only).
+**Iteration 3 finding:** the idea that should have rescued the hedges — hold them ONLY under stress —
+*fails*. A look-ahead-safe trailing-drawdown flag fired 13/19 quarters (MOEX was in drawdown most
+of 2022-2025) and **mis-timed the rotation**: it buys gold AFTER drawdowns and sells AFTER
+recoveries (buy-high-sell-low) plus pays switching turnover, while the 2022 acute gap is too fast
+for a quarterly flag. So conditional gold is *dominated* by the plain core — even SMART use of the
+hedge does not beat the deposit anchor. (Reusable: `blend_portfolio` gained a `weight_schedule=`
+seam for any regime/conditional overlay.)
+
+### META-FINDING (after 3 iterations / 10 instrument-tests + a timing overlay)
+The diversification space for a sanctioned-RU deposit-anchored book is **effectively exhausted at
+the static AND the conditional level**: every RUB fixed-income leg (OFZ duration, IG/HY credit,
+money-market, linkers) is **redundant with the rate factor** (corr ≥ 0.4 → REJECT); every
+genuinely-uncorrelated asset (gold, CNY, ЗО) is a **zero-carry drag** that can't beat the ~16-21%
+near-vol-free deposit on risk-adjusted return (REJECT), or an **unprovable-tail hedge** (ЗО →
+PROBATION); combining hedges (gold+CNY) doesn't rescue it; and **timing** the hedge (conditional)
+mis-fires and is dominated by the plain core. The deposit anchor genuinely dominates — now proven
+across the static, combination, AND conditional axes, enforced by a reusable pre-registered gate.
+
+**Implication for the loop:** further single-instrument / hedge-timing iterations have low expected
+value — the honest answer is converging. The remaining constructive moves are forward-looking
+INTEGRATIONS of what little is sound, not new REJECT candidates:
+- **ЗО PROBATION integration** — wire the geo-risk overlay (PR #300) to rotate a small ЗО toe-hold
+  (the one structurally-sound hedge) as forward-looking insurance (config-only; real money = stop).
 - **TGLD / SBGD gold ETF** vs spot GLDRUB (does the ETF wrapper change the gold verdict — likely not).
-- **Regime-conditional hedging** — hold the hedges ONLY when the geo-risk/rate regime flags stress,
-  flat otherwise (avoids the calm-time carry drag that sinks every static hedge here).
+- A **leading** (not trailing) stress signal — the rate-regime/CBR or geo-risk sentiment flag — if a
+  backtestable leading proxy can be found (the trailing-DD flag here lagged fatally).
 
 Next instruments are pulled from this ledger top-down; new hypotheses appended as discovered.

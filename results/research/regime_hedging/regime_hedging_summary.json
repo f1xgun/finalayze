@@ -1,0 +1,103 @@
+{
+ "stress_dd_threshold": "0.10",
+ "gold_weight_when_on": "0.10",
+ "n_rebalances": 19,
+ "n_stress_quarters": 13,
+ "stress_dates": [
+  "2022-03-31",
+  "2022-06-30",
+  "2022-09-30",
+  "2022-12-30",
+  "2023-03-31",
+  "2023-06-30",
+  "2024-09-30",
+  "2024-12-30",
+  "2025-06-30",
+  "2025-09-30",
+  "2025-12-30",
+  "2026-03-31",
+  "2026-06-10"
+ ],
+ "metrics": {
+  "core": {
+   "full": {
+    "sharpe": -0.5414,
+    "sortino": -0.6723,
+    "maxdd_pct": 30.3126,
+    "tr_pct": 16.9725
+   },
+   "crash_2022": {
+    "sharpe": -1.2193,
+    "sortino": -1.4163,
+    "maxdd_pct": 30.3126,
+    "tr_pct": -21.6858
+   },
+   "high_rate": {
+    "sharpe": -0.4585,
+    "sortino": -0.5641,
+    "maxdd_pct": 30.3126,
+    "tr_pct": 14.8487
+   },
+   "early_cut": {
+    "sharpe": -0.9402,
+    "sortino": -1.2984,
+    "maxdd_pct": 9.7055,
+    "tr_pct": 3.3129
+   }
+  },
+  "static_gold": {
+   "full": {
+    "sharpe": -0.6669,
+    "sortino": -0.8315,
+    "maxdd_pct": 28.9251,
+    "tr_pct": 18.6015
+   },
+   "crash_2022": {
+    "sharpe": -1.471,
+    "sortino": -1.708,
+    "maxdd_pct": 28.9251,
+    "tr_pct": -19.7812
+   },
+   "high_rate": {
+    "sharpe": -0.5674,
+    "sortino": -0.7012,
+    "maxdd_pct": 28.9251,
+    "tr_pct": 16.6928
+   },
+   "early_cut": {
+    "sharpe": -1.1058,
+    "sortino": -1.5017,
+    "maxdd_pct": 7.7733,
+    "tr_pct": 2.9006
+   }
+  },
+  "conditional_gold": {
+   "full": {
+    "sharpe": -0.649,
+    "sortino": -0.7929,
+    "maxdd_pct": 31.6029,
+    "tr_pct": 11.9441
+   },
+   "crash_2022": {
+    "sharpe": -1.3414,
+    "sortino": -1.5432,
+    "maxdd_pct": 31.6029,
+    "tr_pct": -22.8807
+   },
+   "high_rate": {
+    "sharpe": -0.5717,
+    "sortino": -0.6925,
+    "maxdd_pct": 31.6029,
+    "tr_pct": 9.8466
+   },
+   "early_cut": {
+    "sharpe": -1.0537,
+    "sortino": -1.4357,
+    "maxdd_pct": 7.7733,
+    "tr_pct": 3.374
+   }
+  }
+ },
+ "verdict": "NO",
+ "finding": "Conditional hedging verdict: NO. Stress flagged on 13/19 quarters (the trailing-DD flag is ON most of the volatile 2022-2025 window). Full-window Sortino core=-0.6723 conditional=-0.7929 static=-0.8315; MaxDD core=30.3126 conditional=31.6029 static=28.9251; TR core=16.9725 conditional=11.9441. Conditional hedging is DOMINATED by the core (worse Sortino, MaxDD AND total return): the lagging quarterly flag mis-times the rotation \u2014 it buys gold AFTER drawdowns and sells AFTER recoveries (buy-high-sell-low) and pays the switching turnover, while the 2022 acute gap is too fast to catch. Even SMART (conditional) use of the hedge does not beat the deposit-anchored core."
+}
