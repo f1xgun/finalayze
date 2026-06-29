@@ -1,0 +1,63 @@
+{
+ "verdicts": [
+  {
+   "name": "GLDRUB_gold",
+   "tier": "REJECT",
+   "proposed_weight": "0",
+   "carved_from": "equity",
+   "n1_caveat": false,
+   "scorecard": {
+    "window_bars": 1126,
+    "regimes_covered": 2,
+    "tail_backtestable": true,
+    "marginal_sharpe_delta": -0.1255,
+    "marginal_sortino_delta": -0.1591,
+    "marginal_maxdd_delta_pp": 1.3875,
+    "crash_year_maxdd_delta_pp": -1.3875,
+    "toehold_sortino_delta": -0.0458,
+    "corr_to_legs": {
+     "deposit": -0.0444,
+     "equity": -0.0782
+    },
+    "max_corr_to_existing_legs": 0.0782
+   },
+   "reasons": [
+    "tail tested & materially worsens risk-adjusted return (\u0394Sortino -0.16)"
+   ]
+  },
+  {
+   "name": "RURPLRUBTR_zo",
+   "tier": "PROBATION",
+   "proposed_weight": "0.03",
+   "carved_from": "equity",
+   "n1_caveat": true,
+   "scorecard": {
+    "window_bars": 874,
+    "regimes_covered": 2,
+    "tail_backtestable": false,
+    "marginal_sharpe_delta": -0.1979,
+    "marginal_sortino_delta": -0.2752,
+    "marginal_maxdd_delta_pp": 1.5441,
+    "crash_year_maxdd_delta_pp": 0.0,
+    "toehold_sortino_delta": -0.0748,
+    "corr_to_legs": {
+     "deposit": -0.0595,
+     "equity": 0.0512
+    },
+    "max_corr_to_existing_legs": 0.0595
+   },
+   "reasons": [
+    "structurally-sound uncorrelated hedge; tail un-backtestable -> 3% forward toe-hold"
+   ]
+  }
+ ],
+ "expected": {
+  "GLDRUB_gold": "REJECT",
+  "RURPLRUBTR_zo": "PROBATION"
+ },
+ "validation_pass": {
+  "GLDRUB_gold": true,
+  "RURPLRUBTR_zo": true
+ },
+ "all_ok": true
+}
