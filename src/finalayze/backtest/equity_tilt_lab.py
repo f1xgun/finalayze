@@ -61,6 +61,8 @@ _DIV_YIELD_LOOKBACK_DAYS = 365  # trailing-12m realized (paid) dividends
 _DIV_TILT_K = Decimal("0.5")  # pre-registered tilt strength (NOT fitted)
 _DIV_CLIP_LO = Decimal("0.5")  # weight floor as a multiple of 1/N
 _DIV_CLIP_HI = Decimal("2.0")  # weight ceiling as a multiple of 1/N
+# Low-vol BLEND (step 3): FINAL = (1-lambda)*cap_weight + lambda*inverse_vol(lowest-vol half).
+_DEFAULT_LOWVOL_LAMBDA = Decimal("0.25")
 _QUARTER_LEN = 3
 _PERCENT = Decimal(100)
 
@@ -150,21 +152,95 @@ def inverse_vol_weights(
     rebalance (held at 0). This is the classic low-vol anomaly expressed as a pure
     inverse-vol weighting — no cap-weight blend, so it needs no constituent panel.
     """
-    inv: dict[str, Decimal] = {}
+    vols = _trailing_vols(asof, panel, lookback)
+    inv = {s: Decimal(1) / Decimal(str(v)) for s, v in vols.items()}
+    total = sum(inv.values(), Decimal(0))
+    if total <= 0:
+        return equal_weights(asof, panel)
+    return {s: v / total for s, v in inv.items()}
+
+
+def _trailing_vols(
+    asof: date, panel: dict[str, list[PricePoint]], lookback: int
+) -> dict[str, float]:
+    """Trailing realized vol (stdev of daily log returns) per available name, as-of."""
+    vols: dict[str, float] = {}
     for s in _available(asof, panel):
         closes = [float(close) for d, close, _ in panel[s] if d <= asof][-(lookback + 1) :]
         rets = [
             math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes)) if closes[i - 1] > 0
         ]
-        if len(rets) < _MIN_VOL_RETURNS:
-            continue
-        vol = statistics.stdev(rets)
-        if vol > 0:
-            inv[s] = Decimal(1) / Decimal(str(vol))
-    total = sum(inv.values(), Decimal(0))
-    if total <= 0:
-        return equal_weights(asof, panel)
-    return {s: v / total for s, v in inv.items()}
+        if len(rets) >= _MIN_VOL_RETURNS:
+            vol = statistics.stdev(rets)
+            if vol > 0:
+                vols[s] = vol
+    return vols
+
+
+def make_index_cap_weight_policy(
+    weights_by_date: dict[date, dict[str, Decimal]],
+) -> WeightPolicy:
+    """REAL cap-weight policy from the committed IMOEX index-weight panel (step 3).
+
+    As-of: at rebalance date ``d`` it takes the latest snapshot date ``<= d``,
+    restricts to constituents that have a candle available as-of ``d`` (de-listed/
+    renamed names without candles drop out), and RENORMALIZES over the covered set.
+    The per-date coverage (share of index weight retained) is the honesty metric
+    reported alongside the cert. Falls back to equal-weight if no snapshot/coverage.
+    """
+    sorted_dates = sorted(weights_by_date)
+
+    def policy(asof: date, panel: dict[str, list[PricePoint]]) -> dict[str, Decimal]:
+        prior = [wd for wd in sorted_dates if wd <= asof]
+        if not prior:
+            return equal_weights(asof, panel)
+        raw = weights_by_date[prior[-1]]
+        avail = set(_available(asof, panel))
+        covered = {t: w for t, w in raw.items() if t in avail}
+        total = sum(covered.values(), Decimal(0))
+        if total <= 0:
+            return equal_weights(asof, panel)
+        return {t: w / total for t, w in covered.items()}
+
+    return policy
+
+
+def make_low_vol_blend_policy(
+    weights_by_date: dict[date, dict[str, Decimal]],
+    *,
+    lam: Decimal = _DEFAULT_LOWVOL_LAMBDA,
+    vol_lookback: int = _DEFAULT_VOL_LOOKBACK,
+) -> WeightPolicy:
+    """Low-vol BLEND overlay on the real cap-weight (step 3, pre-registered lambda).
+
+    ``FINAL_i = (1-lambda)*cap_weight_i + lambda*inverse_vol_i`` where the
+    inverse-vol leg spans only the LOWEST-VOL HALF of the cap-weight constituents
+    (the rest get 0 on the tilt leg). ``lambda`` and the lookback are fixed a priori.
+    At ``lambda == 0`` this returns the cap-weight vector byte-for-byte (the
+    data-correctness control: the tilt must reduce to the baseline).
+    """
+    cap_policy = make_index_cap_weight_policy(weights_by_date)
+
+    def policy(asof: date, panel: dict[str, list[PricePoint]]) -> dict[str, Decimal]:
+        cap = cap_policy(asof, panel)
+        if lam == 0 or not cap:
+            return cap
+        vols = _trailing_vols(asof, {s: panel[s] for s in cap if s in panel}, vol_lookback)
+        if not vols:
+            return cap
+        ranked = sorted(vols, key=lambda s: vols[s])
+        half = ranked[: max(1, len(ranked) // 2)]  # lowest-vol half = the tilt set L
+        inv = {s: Decimal(1) / Decimal(str(vols[s])) for s in half}
+        inv_total = sum(inv.values(), Decimal(0))
+        w_iv = {s: v / inv_total for s, v in inv.items()}
+        blended = {
+            t: (Decimal(1) - lam) * cap.get(t, Decimal(0)) + lam * w_iv.get(t, Decimal(0))
+            for t in cap
+        }
+        total = sum(blended.values(), Decimal(0))
+        return {t: v / total for t, v in blended.items()} if total > 0 else cap
+
+    return policy
 
 
 def make_dividend_yield_policy(
