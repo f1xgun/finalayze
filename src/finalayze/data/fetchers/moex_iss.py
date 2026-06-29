@@ -321,18 +321,22 @@ class MoexISSFetcher(BaseFetcher):
         secid: str,
         start: datetime,
         end: datetime,
+        board: str = "TQBR",
     ) -> list[tuple[date, Decimal]]:
-        """Fetch daily CLOSE prices for a MOEX share from the TQBR board.
+        """Fetch daily CLOSE prices for a MOEX share/ETF from a shares board.
 
-        Reads ``history/.../boards/TQBR/securities/{SECID}.json`` (the shares
-        board), which carries a ``CLOSE`` column but NO capitalization column —
+        Reads ``history/.../boards/{board}/securities/{SECID}.json`` (the shares
+        engine), which carries a ``CLOSE`` column but NO capitalization column —
         so market_cap must be reconstructed via :meth:`reconstruct_market_cap`.
-        Used as the SmartLab market_cap cross-check / gap-fill (BACKFILL-H-03).
+        Used as the SmartLab market_cap cross-check / gap-fill (BACKFILL-H-03), and
+        for ETFs on other boards (e.g. ``board="TQTF"`` for the LQDT money-market
+        fund — the instrument-integration battery).
 
         Args:
-            secid: MOEX security id (e.g. "SBER").
+            secid: MOEX security id (e.g. "SBER", "LQDT").
             start: Start of the date range (inclusive, UTC-aware).
             end: End of the date range (exclusive, UTC-aware).
+            board: Shares-engine board id (default "TQBR" shares; "TQTF" for ETFs).
 
         Returns:
             List of ``(TRADEDATE, CLOSE)`` tuples; rows with a None CLOSE are
@@ -342,7 +346,8 @@ class MoexISSFetcher(BaseFetcher):
             DataFetchError: On HTTP errors or timeouts.
         """
         url = (
-            f"{_BASE_URL}/history/engines/stock/markets/shares/boards/TQBR/securities/{secid}.json"
+            f"{_BASE_URL}/history/engines/stock/markets/shares/boards/{board}"
+            f"/securities/{secid}.json"
         )
         # §19-M1: ISS `till` is INCLUSIVE — subtract 1 day from the exclusive `end`.
         from_str = start.strftime("%Y-%m-%d")

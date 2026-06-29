@@ -1,0 +1,139 @@
+{
+ "verdicts": [
+  {
+   "name": "RGBITR_ofz_fixed",
+   "tier": "REJECT",
+   "proposed_weight": "0",
+   "carved_from": "equity",
+   "n1_caveat": false,
+   "scorecard": {
+    "window_bars": 1111,
+    "regimes_covered": 2,
+    "tail_backtestable": true,
+    "marginal_sharpe_delta": -0.0828,
+    "marginal_sortino_delta": -0.0947,
+    "marginal_maxdd_delta_pp": 4.2472,
+    "crash_year_maxdd_delta_pp": -4.2472,
+    "toehold_sortino_delta": -0.0262,
+    "corr_to_legs": {
+     "deposit": 0.1209,
+     "equity": 0.6139
+    },
+    "max_corr_to_existing_legs": 0.6139
+   },
+   "reasons": [
+    "redundant factor: max |corr| 0.61 > 0.6"
+   ]
+  },
+  {
+   "name": "RUCBITR_corp_ig",
+   "tier": "REJECT",
+   "proposed_weight": "0",
+   "carved_from": "equity",
+   "n1_caveat": false,
+   "scorecard": {
+    "window_bars": 1107,
+    "regimes_covered": 2,
+    "tail_backtestable": true,
+    "marginal_sharpe_delta": -0.1075,
+    "marginal_sortino_delta": -0.1266,
+    "marginal_maxdd_delta_pp": 4.6713,
+    "crash_year_maxdd_delta_pp": -4.6713,
+    "toehold_sortino_delta": -0.0343,
+    "corr_to_legs": {
+     "deposit": 0.0697,
+     "equity": 0.5932
+    },
+    "max_corr_to_existing_legs": 0.5932
+   },
+   "reasons": [
+    "tail tested & materially worsens risk-adjusted return (\u0394Sortino -0.13)"
+   ]
+  },
+  {
+   "name": "RUCBHYTR_corp_hy",
+   "tier": "REJECT",
+   "proposed_weight": "0",
+   "carved_from": "equity",
+   "n1_caveat": false,
+   "scorecard": {
+    "window_bars": 1107,
+    "regimes_covered": 2,
+    "tail_backtestable": true,
+    "marginal_sharpe_delta": -0.0548,
+    "marginal_sortino_delta": -0.0607,
+    "marginal_maxdd_delta_pp": 3.6412,
+    "crash_year_maxdd_delta_pp": -3.6412,
+    "toehold_sortino_delta": -0.0171,
+    "corr_to_legs": {
+     "deposit": -0.0128,
+     "equity": 0.4797
+    },
+    "max_corr_to_existing_legs": 0.4797
+   },
+   "reasons": [
+    "no measurable net benefit over the deposit+equity core"
+   ]
+  },
+  {
+   "name": "LQDT_money_market",
+   "tier": "REJECT",
+   "proposed_weight": "0",
+   "carved_from": "deposit",
+   "n1_caveat": true,
+   "scorecard": {
+    "window_bars": 989,
+    "regimes_covered": 2,
+    "tail_backtestable": false,
+    "marginal_sharpe_delta": 0.0077,
+    "marginal_sortino_delta": 0.0106,
+    "marginal_maxdd_delta_pp": 0.0505,
+    "crash_year_maxdd_delta_pp": 0.0,
+    "toehold_sortino_delta": 0.0032,
+    "corr_to_legs": {
+     "deposit": 0.4645,
+     "equity": 0.0157
+    },
+    "max_corr_to_existing_legs": 0.4645
+   },
+   "reasons": [
+    "no measurable net benefit over the deposit+equity core"
+   ]
+  },
+  {
+   "name": "CNYRUB_fx",
+   "tier": "REJECT",
+   "proposed_weight": "0",
+   "carved_from": "equity",
+   "n1_caveat": false,
+   "scorecard": {
+    "window_bars": 1126,
+    "regimes_covered": 2,
+    "tail_backtestable": true,
+    "marginal_sharpe_delta": -0.2614,
+    "marginal_sortino_delta": -0.3253,
+    "marginal_maxdd_delta_pp": 1.2169,
+    "crash_year_maxdd_delta_pp": -1.2169,
+    "toehold_sortino_delta": -0.0878,
+    "corr_to_legs": {
+     "deposit": -0.0623,
+     "equity": -0.2232
+    },
+    "max_corr_to_existing_legs": 0.2232
+   },
+   "reasons": [
+    "tail tested & materially worsens risk-adjusted return (\u0394Sortino -0.33)"
+   ]
+  }
+ ],
+ "tiers": {
+  "RGBITR_ofz_fixed": "REJECT",
+  "RUCBITR_corp_ig": "REJECT",
+  "RUCBHYTR_corp_hy": "REJECT",
+  "LQDT_money_market": "REJECT",
+  "CNYRUB_fx": "REJECT"
+ },
+ "integrate": [],
+ "probation": [],
+ "finding": "0 INTEGRATE, 0 PROBATION, 5 REJECT/INSUFFICIENT against the deposit+equity core"
+}
