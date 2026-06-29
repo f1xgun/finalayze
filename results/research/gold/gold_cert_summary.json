@@ -1,0 +1,398 @@
+{
+ "window": {
+  "start": "2022-01-03",
+  "end": "2026-06-10",
+  "n_bars": 1126,
+  "n_rebalances": 19
+ },
+ "weights": {
+  "deposit": "0.4",
+  "equity_base": "0.6",
+  "gold_sweep": [
+   "0.05",
+   "0.10",
+   "0.15"
+  ]
+ },
+ "risk_free_annual_pct": 15.0,
+ "metric_caveat": "RUONIA-excess Sharpe/Sortino use a FIXED 15% basis apt only for the high-rate era; over the 2022-2023 low-rate era the deposit underperforms it, so the deposit-anchor point is made on basis-free TOTAL RETURN and the gold verdict on the baseline-vs-+gold MaxDD/Sortino DELTA (common basis cancels).",
+ "controls": {
+  "gold_zero_reproduces_baseline": true,
+  "gold_RAW_price_acute_return_pct": -12.85,
+  "gold_RAW_price_crash_year_return_pct": -17.09,
+  "gold_NET_leg_acute_return_pct": -20.9,
+  "gold_NET_leg_crash_year_return_pct": -35.13,
+  "gold_vs_equity_crash_return_corr": -0.1274
+ },
+ "windows": {
+  "full_window": {
+   "range": [
+    "2022-01-03",
+    "2026-06-10"
+   ],
+   "deposit": {
+    "sharpe": -12.760033476622901,
+    "sortino": -10.050428364494525,
+    "maxdd_pct": 0.0,
+    "total_return_pct": 60.92721210963445,
+    "n_bars": 1126
+   },
+   "baseline": {
+    "sharpe": -0.5414146552475002,
+    "sortino": -0.6723416908797843,
+    "maxdd_pct": 30.312604609650517,
+    "total_return_pct": 16.97251883465809,
+    "n_bars": 1126
+   },
+   "variants": {
+    "0.05": {
+     "metrics": {
+      "sharpe": -0.6040546233290031,
+      "sortino": -0.7496670550225798,
+      "maxdd_pct": 29.60167912024,
+      "total_return_pct": 17.83741461282591,
+      "n_bars": 1126
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 0.710925489410517,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.10": {
+     "metrics": {
+      "sharpe": -0.6668723718451557,
+      "sortino": -0.8314664709355458,
+      "maxdd_pct": 28.925116104436622,
+      "total_return_pct": 18.601529568801144,
+      "n_bars": 1126
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.387488505213895,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.15": {
+     "metrics": {
+      "sharpe": -0.7251926132697606,
+      "sortino": -0.9145877946132108,
+      "maxdd_pct": 28.28346747450043,
+      "total_return_pct": 19.2640437509098,
+      "n_bars": 1126
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.029137135150087,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": false
+  },
+  "acute_crash_2022": {
+   "range": [
+    "2022-02-21",
+    "2022-04-30"
+   ],
+   "deposit": {
+    "sharpe": -3.546149948775584,
+    "sortino": -3.5739006434039364,
+    "maxdd_pct": 0.0,
+    "total_return_pct": 2.4622186394209766,
+    "n_bars": 48
+   },
+   "baseline": {
+    "sharpe": -1.1477040997969727,
+    "sortino": -1.3325044612673085,
+    "maxdd_pct": 18.198222823468356,
+    "total_return_pct": -10.399780276588666,
+    "n_bars": 48
+   },
+   "variants": {
+    "0.05": {
+     "metrics": {
+      "sharpe": -1.3864707576522641,
+      "sortino": -1.5966564732135942,
+      "maxdd_pct": 16.003002415156693,
+      "total_return_pct": -10.488455146879538,
+      "n_bars": 48
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.195220408311663,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.10": {
+     "metrics": {
+      "sharpe": -1.6310328130582057,
+      "sortino": -1.886244762963478,
+      "maxdd_pct": 15.248462049704237,
+      "total_return_pct": -10.585527536746442,
+      "n_bars": 48
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.949760773764119,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.15": {
+     "metrics": {
+      "sharpe": -1.85840177799156,
+      "sortino": -2.198868505344847,
+      "maxdd_pct": 15.444346442257087,
+      "total_return_pct": -10.690608394256573,
+      "n_bars": 48
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.753876381211269,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": true
+  },
+  "crash_year_2022": {
+   "range": [
+    "2022-02-21",
+    "2022-12-30"
+   ],
+   "deposit": {
+    "sharpe": -25.989020960414244,
+    "sortino": -13.579127533006513,
+    "maxdd_pct": 0.0,
+    "total_return_pct": 7.110459363337895,
+    "n_bars": 217
+   },
+   "baseline": {
+    "sharpe": -0.8041193016813614,
+    "sortino": -0.9441510500531775,
+    "maxdd_pct": 20.78804192316327,
+    "total_return_pct": -10.513013357796952,
+    "n_bars": 217
+   },
+   "variants": {
+    "0.05": {
+     "metrics": {
+      "sharpe": -0.9510705491246028,
+      "sortino": -1.1111168112978305,
+      "maxdd_pct": 21.297246016876105,
+      "total_return_pct": -10.931061289911991,
+      "n_bars": 217
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": -0.509204093712835,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.10": {
+     "metrics": {
+      "sharpe": -1.1027090172593117,
+      "sortino": -1.2936908018081807,
+      "maxdd_pct": 21.826485070224088,
+      "total_return_pct": -11.374403709439285,
+      "n_bars": 217
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": -1.038443147060818,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.15": {
+     "metrics": {
+      "sharpe": -1.2482151823712706,
+      "sortino": -1.4893211667383623,
+      "maxdd_pct": 23.174276132512034,
+      "total_return_pct": -11.84275328051374,
+      "n_bars": 217
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": -2.386234209348764,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": true
+  },
+  "high_rate_2024_25": {
+   "range": [
+    "2024-01-01",
+    "2025-06-05"
+   ],
+   "deposit": {
+    "sharpe": 0.9405188461818634,
+    "sortino": 1.3882189977975052,
+    "maxdd_pct": 0.0,
+    "total_return_pct": 22.40962006678904,
+    "n_bars": 363
+   },
+   "baseline": {
+    "sharpe": -0.5197578005986561,
+    "sortino": -0.7470116460758277,
+    "maxdd_pct": 14.455337704801341,
+    "total_return_pct": 9.21864939341923,
+    "n_bars": 363
+   },
+   "variants": {
+    "0.05": {
+     "metrics": {
+      "sharpe": -0.5419732328330591,
+      "sortino": -0.7786154727287146,
+      "maxdd_pct": 13.054409236489231,
+      "total_return_pct": 9.930625023223127,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.40092846831211,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.10": {
+     "metrics": {
+      "sharpe": -0.5634882839829185,
+      "sortino": -0.8099059491020705,
+      "maxdd_pct": 11.89533759975897,
+      "total_return_pct": 10.633605266860236,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.560000105042371,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.15": {
+     "metrics": {
+      "sharpe": -0.5824247195392945,
+      "sortino": -0.838173768534646,
+      "maxdd_pct": 10.733050350825193,
+      "total_return_pct": 11.327589797524439,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 3.722287353976148,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": false
+  },
+  "easing_2025_26": {
+   "range": [
+    "2025-06-06",
+    "2026-06-10"
+   ],
+   "deposit": {
+    "sharpe": -17.04390208452881,
+    "sortino": -11.94077170140895,
+    "maxdd_pct": 0.0,
+    "total_return_pct": 13.699834128255128,
+    "n_bars": 257
+   },
+   "baseline": {
+    "sharpe": -0.9402106000870178,
+    "sortino": -1.2984133401110955,
+    "maxdd_pct": 9.705462519324492,
+    "total_return_pct": 3.312936101186481,
+    "n_bars": 257
+   },
+   "variants": {
+    "0.05": {
+     "metrics": {
+      "sharpe": -1.0275714502881508,
+      "sortino": -1.4101667825558166,
+      "maxdd_pct": 8.209806850969674,
+      "total_return_pct": 3.1140040540648117,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.495655668354818,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.10": {
+     "metrics": {
+      "sharpe": -1.10575087774908,
+      "sortino": -1.501703375884864,
+      "maxdd_pct": 7.773296905733797,
+      "total_return_pct": 2.9005648769895753,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.932165613590695,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "0.15": {
+     "metrics": {
+      "sharpe": -1.165613649761641,
+      "sortino": -1.5616106263518217,
+      "maxdd_pct": 8.785940769376602,
+      "total_return_pct": 2.6727524124681157,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 0.91952174994789,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": true
+  }
+ },
+ "binding": {
+  "deposit_anchor_holds_raw_return": true,
+  "crash_classification": "NO",
+  "diversifying_weights": {
+   "acute_crash_2022": [],
+   "crash_year_2022": []
+  },
+  "derisking_weights": {
+   "acute_crash_2022": [],
+   "crash_year_2022": []
+  },
+  "finding": "Deposit anchor holds on raw total return (high-rate + full): True. Gold crash de-risking (pre-registered >=3.0pp MaxDD cut in a crash window): NO \u2014 the best acute-crash cut is ~3pp (just under the bar) and gold INCREASES MaxDD in the crash YEAR (the give-back). Gold DOES shave MaxDD modestly in the calm/acute regimes (full, acute, high-rate, easing all lower in the table) but ALWAYS worsens risk-adjusted return (Sortino) \u2014 the zero-yield drag. Its 2022 RUB hedge was a ~2-week flash: raw price round-tripped -17% over the crash year (spike then capital-controlled ruble recovery); the net leg ended -35% after the conservative daily-mark NDFL + TER haircut. Net: gold is at most a MARGINAL drawdown-reducer at a risk-adjusted cost \u2014 not a diversifier, not a reliable crash hedge, not alpha (N=1).",
+  "n1_caveat": true
+ }
+}
