@@ -1,0 +1,45 @@
+{
+ "part_a_linker": {
+  "name": "INFLTR_inflation_linker",
+  "tier": "INSUFFICIENT_DATA",
+  "reasons": [
+   "cannot judge: window_bars=279 (<300) or anti-hollow failed"
+  ],
+  "window_bars": 279,
+  "regimes_covered": 1,
+  "marginal_sortino_delta": -0.0149,
+  "max_corr_to_existing_legs": 0.4065
+ },
+ "part_b_hedge_basket": {
+  "full_core": {
+   "sharpe": -0.5414146552475002,
+   "sortino": -0.6723416908797843,
+   "maxdd_pct": 30.312604609650517,
+   "tr_pct": 16.97251883465809
+  },
+  "full_basket": {
+   "sharpe": -0.6543882704190326,
+   "sortino": -0.8117760762752606,
+   "maxdd_pct": 29.514989957351712,
+   "tr_pct": 15.68943333634223
+  },
+  "crash_core": {
+   "sharpe": -1.2192909815150337,
+   "sortino": -1.416314224991556,
+   "maxdd_pct": 30.312604609650517,
+   "tr_pct": -21.685795044560162
+  },
+  "crash_basket": {
+   "sharpe": -1.404024123423515,
+   "sortino": -1.6215646685144183,
+   "maxdd_pct": 29.514989957351712,
+   "tr_pct": -20.75147875896014
+  },
+  "full_maxdd_cut_pp": 0.7976,
+  "full_sortino_delta": -0.1394,
+  "crash_maxdd_cut_pp": 0.7976,
+  "crash_sortino_delta": -0.2053,
+  "combination_helps": false,
+  "finding": "the gold+CNY hedge basket cuts crash MaxDD but still drags full-window risk-adjusted return (zero-carry) \u2014 combining two REJECTED hedges does not rescue the diversification"
+ }
+}

@@ -8,20 +8,25 @@ via scripts/research/run_instrument_gate.py (an integration cert, not a unit tes
 from __future__ import annotations
 
 import dataclasses
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from finalayze.backtest.instrument_integration_gate import (
     _PROBATION_NOMINAL_CAP,
     _TIER_NOMINAL_CAPS,
+    Candidate,
     Scorecard,
     classify,
     daily_returns,
     leg_correlations,
     propose_weight,
+    run_integration_gate,
 )
 
 _PLACES = Decimal("0.0001")
+_CAND_LEN = 400
+_EQUITY_LEN = 1200
+_CLAMP_CEIL = 600
 
 
 def _sound_integrate_scorecard() -> Scorecard:
@@ -145,6 +150,26 @@ def test_daily_returns_basic() -> None:
     rets = daily_returns(curve)
     assert len(rets) == 1
     assert abs(rets[0] - 0.10) < float(_PLACES)
+
+
+def test_run_gate_clamps_window_to_short_candidate_end() -> None:
+    # A discontinued candidate (ends early) must NOT be forward-filled flat to the equity end —
+    # the eval window is clamped to the candidate's real data overlap (no phantom-drag artifact).
+    base = date(2022, 1, 3)
+    cand_curve = [
+        (base + timedelta(days=i), Decimal(100) + Decimal(i) / Decimal(10))
+        for i in range(_CAND_LEN)
+    ]
+    equity_curve = [
+        (base + timedelta(days=i), Decimal(100) + Decimal(i) / Decimal(5))
+        for i in range(_EQUITY_LEN)
+    ]
+    candidate = Candidate(
+        name="short_cand", net_curve=cand_curve, risk_tier="medium", intended_role="diversifier"
+    )
+    verdict = run_integration_gate(candidate, equity_curve)
+    # window_bars reflects the candidate overlap (~400), NOT the 1200-bar equity span.
+    assert verdict.scorecard.window_bars < _CLAMP_CEIL
 
 
 def test_leg_correlations_perfectly_correlated_leg() -> None:
