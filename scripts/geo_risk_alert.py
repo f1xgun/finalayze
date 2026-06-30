@@ -44,7 +44,10 @@ async def _assess() -> tuple[GeoRiskAssessment, str]:
     except Exception as exc:
         return (
             GeoRiskAssessment(
-                level=GeoRiskLevel.NORMAL, score=0.0, recommended_equity_trim_pct=Decimal(0)
+                level=GeoRiskLevel.NORMAL,
+                score=0.0,
+                recommended_equity_trim_pct=Decimal(0),
+                recommended_fx_hedge_pct=Decimal(0),
             ),
             f"no live sentiment data ({type(exc).__name__}); reporting NORMAL",
         )
@@ -81,7 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     level = assessment.level
     body = (
         f"level={level.value} score={assessment.score:.2f} "
-        f"recommended_equity_trim={assessment.recommended_equity_trim_pct}\n"
+        f"recommended_equity_trim={assessment.recommended_equity_trim_pct} "
+        f"recommended_zo_fx_hedge={assessment.recommended_fx_hedge_pct}\n"
         f"drivers: {'; '.join(assessment.drivers) or 'none'}\n"
         f"{assessment.disclaimer}"
     )

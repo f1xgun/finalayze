@@ -23,6 +23,7 @@ def test_calm_market_is_normal_no_trim() -> None:
     a = assess_geopolitical_risk(GeoRiskInputs(mean_sentiment=0.2, article_volume=5))
     assert a.level is GeoRiskLevel.NORMAL
     assert a.recommended_equity_trim_pct == _ZERO
+    assert a.recommended_fx_hedge_pct == _ZERO  # no ZO rotation when calm
     assert a.disclaimer  # always present
 
 
@@ -37,6 +38,8 @@ def test_severe_negative_sentiment_with_sanctions_is_high() -> None:
     )
     assert a.level is GeoRiskLevel.HIGH
     assert a.recommended_equity_trim_pct == Decimal("0.50")
+    assert a.recommended_fx_hedge_pct == Decimal("0.03")  # full PROBATION toe-hold
+    assert any("ZO" in d for d in a.drivers)  # surfaces the FX-hedge rotation
     assert a.drivers  # explains why
 
 
@@ -46,6 +49,7 @@ def test_moderate_stress_is_elevated() -> None:
     )
     assert a.level is GeoRiskLevel.ELEVATED
     assert a.recommended_equity_trim_pct == Decimal("0.25")
+    assert a.recommended_fx_hedge_pct == Decimal("0.015")  # half toe-hold at elevated
 
 
 def test_score_is_monotonic_in_badness() -> None:
