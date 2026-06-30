@@ -108,11 +108,24 @@ across the static, combination, AND conditional axes, enforced by a reusable pre
 
 **Implication for the loop:** further single-instrument / hedge-timing iterations have low expected
 value — the honest answer is converging. The remaining constructive moves are forward-looking
-INTEGRATIONS of what little is sound, not new REJECT candidates:
-- **ЗО PROBATION integration** — wire the geo-risk overlay (PR #300) to rotate a small ЗО toe-hold
-  (the one structurally-sound hedge) as forward-looking insurance (config-only; real money = stop).
+INTEGRATIONS of what little is sound, not new REJECT candidates.
+
+| # | Constructive integration | status | PR |
+|---|---|---|---|
+| 4 | **ЗО PROBATION → geo-risk overlay rotation** — on elevated/high geo-risk the overlay now recommends rotating a small ЗО FX-linked toe-hold (≤3% PROBATION cap; 1.5% elevated / 3% high) INSTEAD of trimming only into more ruble deposit/OFZ. Forward-only advisory; config weight, never an order. | DONE | this PR |
+
+**Iteration 4 (constructive):** the one hedge that survived the gate (ЗО, PROBATION — FX-linked +
+uncorrelated) is now operationalized exactly where it belongs. The geo-risk overlay (#300) already
+trims equity on sanctions stress but only toward ruble assets (which don't hedge devaluation); it
+now also surfaces `recommended_fx_hedge_pct` — a small ЗО rotation, the structurally-sound (but
+tail-unproven, hence toe-hold-capped) destination. `geopolitical_risk.py` brain + the alert
+surface it; real money stays a hard stop.
+
+### Still open (low priority — the edge question is answered)
 - **TGLD / SBGD gold ETF** vs spot GLDRUB (does the ETF wrapper change the gold verdict — likely not).
 - A **leading** (not trailing) stress signal — the rate-regime/CBR or geo-risk sentiment flag — if a
-  backtestable leading proxy can be found (the trailing-DD flag here lagged fatally).
+  backtestable leading proxy can be found (the trailing-DD flag in iter-3 lagged fatally).
+- Re-test ЗО / linkers when their indices accumulate more history + a future easing/crash cycle
+  (the N=1 / short-window caveats would lift).
 
 Next instruments are pulled from this ledger top-down; new hypotheses appended as discovered.

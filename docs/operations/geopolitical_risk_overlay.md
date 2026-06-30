@@ -39,9 +39,16 @@ and never crashes the cron.
 
 ## Scoring (transparent, not fitted)
 `score = 0.5*bearish_sentiment + 0.4*sanctions/geo-event_intensity + 0.1*news_volume`
-(volume only counts when sentiment is negative). Bands: `<0.33 normal` (trim 0%),
-`0.33-0.66 elevated` (trim 25%), `>=0.66 high` (trim 50%). The trim is a
-*recommendation* toward the deposit/OFZ anchor — applied only by the operator.
+(volume only counts when sentiment is negative). Bands: `<0.33 normal` (trim 0% /
+ZO 0%), `0.33-0.66 elevated` (trim 25% / ZO 1.5%), `>=0.66 high` (trim 50% / ZO 3%).
+The trim is a *recommendation* toward the deposit/OFZ anchor — applied only by the operator.
+
+**ZO FX-hedge rotation (`recommended_fx_hedge_pct`):** because deposit/OFZ are ruble-denominated
+and do NOT hedge a ruble devaluation, the overlay also recommends rotating a small
+replacement-bond (ЗО) FX-linked toe-hold on elevated/high risk — the one structurally-sound
+(FX-linked + uncorrelated) hedge the instrument-integration program found. Its crash payoff is
+unproven (the instrument postdates the 2022 crash), so it is **capped at the gate's PROBATION
+toe-hold (≤3%)** and is advisory only.
 
 ## Honest limitations
 - Cannot be validated on history → treat as a judgment aid, not a proven edge.
