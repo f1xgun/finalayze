@@ -1,0 +1,25 @@
+{
+ "candidate": {
+  "name": "div_runup",
+  "risk_tier": "high",
+  "intended_role": "growth"
+ },
+ "verdict": "REJECT",
+ "proposed_weight": "0",
+ "carved_from": "equity",
+ "n1_caveat": false,
+ "reasons": [
+  "redundant factor: max |corr| 1.00 > 0.6"
+ ],
+ "scorecard": {
+  "window_bars": 1363,
+  "regimes_covered": 2,
+  "tail_backtestable": true,
+  "marginal_sharpe_delta": -0.011282520780104499,
+  "marginal_sortino_delta": -0.013669529404621628,
+  "marginal_maxdd_delta_pp": 0.1783433040459883,
+  "crash_year_maxdd_delta_pp": -0.10741716945349467,
+  "max_corr_to_existing_legs": 0.9972986106921593,
+  "anti_hollow_ok": true
+ }
+}

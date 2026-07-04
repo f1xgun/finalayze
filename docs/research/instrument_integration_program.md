@@ -96,15 +96,20 @@ for a quarterly flag. So conditional gold is *dominated* by the plain core — e
 hedge does not beat the deposit anchor. (Reusable: `blend_portfolio` gained a `weight_schedule=`
 seam for any regime/conditional overlay.)
 
-### META-FINDING (after 3 iterations / 10 instrument-tests + a timing overlay)
+### META-FINDING (after 3 iterations / 10 instrument-tests + a timing overlay + an event-timing study)
 The diversification space for a sanctioned-RU deposit-anchored book is **effectively exhausted at
-the static AND the conditional level**: every RUB fixed-income leg (OFZ duration, IG/HY credit,
-money-market, linkers) is **redundant with the rate factor** (corr ≥ 0.4 → REJECT); every
-genuinely-uncorrelated asset (gold, CNY, ЗО) is a **zero-carry drag** that can't beat the ~16-21%
-near-vol-free deposit on risk-adjusted return (REJECT), or an **unprovable-tail hedge** (ЗО →
-PROBATION); combining hedges (gold+CNY) doesn't rescue it; and **timing** the hedge (conditional)
-mis-fires and is dominated by the plain core. The deposit anchor genuinely dominates — now proven
-across the static, combination, AND conditional axes, enforced by a reusable pre-registered gate.
+the static, the conditional, AND the event-timing level**: every RUB fixed-income leg (OFZ duration,
+IG/HY credit, money-market, linkers) is **redundant with the rate factor** (corr ≥ 0.4 → REJECT);
+every genuinely-uncorrelated asset (gold, CNY, ЗО) is a **zero-carry drag** that can't beat the
+~16-21% near-vol-free deposit on risk-adjusted return (REJECT), or an **unprovable-tail hedge** (ЗО →
+PROBATION); combining hedges (gold+CNY) doesn't rescue it; **timing** the hedge (conditional)
+mis-fires and is dominated by the plain core; and **event-timing** distribution dates (iter-6) is a
+non-edge in both directions — the equity dividend run-up has no tradeable drift (net-negative at short
+horizons, only equity beta by k=20) and its k5 overlay REJECTs as a redundant equity factor
+(corr 0.997), while the bond coupon "run-up" is confirmed to be the НКД
+(ACCINT) accounting artifact, not alpha. The deposit anchor genuinely dominates — now proven across
+the static, combination, conditional, AND event-timing axes, enforced by a reusable pre-registered
+gate.
 
 **Implication for the loop:** further single-instrument / hedge-timing iterations have low expected
 value — the honest answer is converging. The remaining constructive moves are forward-looking
@@ -145,6 +150,120 @@ does NOT *lock* today's 15-16% for the future; if the curve un-inverts and a fix
 above the falling deposit, locking that carry is a real forward call the floater can't make (with
 duration risk). Components exist (`ru_ofz_pd.yaml`, `bond_duration_rotation.py`) but the fixed-coupon
 yield-lock is not wired into the SAA. Diagnostic only; not advice.
+
+### Iteration 6 — event-timing: dividend run-up (equities) + coupon "run-up" (bonds)
+
+Hypothesis (self-chosen): is there a monetizable **event-timing** edge around cash-distribution
+dates — buy shares into a *known, announced* dividend record date and capture the pre-payout
+"run-up"; and, as the honesty control, does the pre-**coupon** rise in a bond's dirty price carry
+any alpha? Both are the classic efficient-market dividend/coupon question. This is the one
+event-study where **look-ahead is NOT cheating** — `registryclosedate`/`value` are public ex-ante
+(ISS `securities/{SECID}/dividends.json`), so a buy-N-days-before / sell-before-ex trade uses only
+information available at trade time. That keeps the door open a crack; the honest prior is still
+REJECT.
+
+Ran `scripts/research/run_dividend_event_study.py` on token-free MOEX ISS-REST: 21-name blue-chip
+universe, **139 dividend events**, 2021-01-04..2026-06-10 (1363-bar axis), MCFTRR-net as the equity
+benchmark. **Ex-date is DETECTED per event from the price series** (the session near `registryclosedate`
+whose drop best matches −dividend/price), with a settlement-convention fallback (T+2 → ex = record−1
+trading day through 2023; T+1 → ex = record from 2024, MOEX's T+1 migration); the run-up window ends at
+LDD = the trading day *before* the detected gap, so the ex-gap is EXCLUDED (see the methodology note —
+the first pass hard-coded T+1 for all years and contaminated the run-up with the gap; this is the
+corrected re-run). 2022 halt window excluded (0 halt-void events fell in it); cancelled declarations
+record-date-void; faded payers (GAZP-zero-post-2022 etc.) KEPT in-panel (anti-survivorship). Per-year:
+2021=40, 2022=22, 2023=27, 2024=31, 2025=19; no 2026 events in-window yet.
+
+**Two arms, both NET of 2×0.55% = 1.10% round trip:**
+
+| arm | k=1 | k=3 | k=5 | k=10 | k=20 |
+|---|---:|---:|---:|---:|---:|
+| **A — run-up** (buy LDD−k close, sell LDD close, gap EXCLUDED) mean % | −1.08 | −0.52 | −0.40 | +0.40 | +1.78 |
+| A t-stat | −7.45 | −2.28 | −1.23 | +0.89 | +2.40 |
+| A hit-rate | 21% | 41% | 44% | 50% | 58% |
+| **B — collect-and-hold** (hold through ex, +div net-13% NDFL) mean % | −0.62 | — | +0.07 | — | — |
+
+**Run-up (arm A), with the ex-gap now correctly EXCLUDED, has no tradeable edge.** At the short
+horizons where a "run-up" would actually be traded it is **net-negative** (k=1 −1.08%, t=−7.4; k=3
+−0.52%; k=5 −0.40%) — the 1.10% round-trip alone dominates — and the hit-rate is ≤50% until k=20. It
+only turns positive at k=10–20 (k=20 +1.78%, t=+2.4, hit 58%), but that is **~4–6 weeks of ordinary
+equity beta** over a rising 2021-2025 tape (the window mostly holds non-event days), not a
+dividend-specific drift. Ex-gap check (now isolated on the true ex-session): the price **drops ~by the
+dividend** — ex_gap mean **−4.68%**, median −3.77%, **97.1% negative** ≈ the gross dividend yield. So
+**collect-and-hold (arm B)** leaves nothing after 13% NDFL + 1.10% cost: k=1 −0.62%, k=5 +0.07% (flat).
+**No mispricing to harvest** in either arm.
+
+**Two gate lenses (both on MCFTRR-net, both `anti_hollow_ok=true`, 1363 bars, 2 regimes):**
+
+| sleeve | tier | Δexcess-Sharpe | Δexcess-Sortino | ΔMaxDD pp | max-corr | reason |
+|---|---|---:|---:|---:|---:|---|
+| runup_only (k5 nav, growth) | **REJECT** | −0.147 | −0.180 | **+4.60** | 0.129 | uncorrelated (0.13) but loses money and worsens drawdown +4.6pp / Sortino −0.18 |
+| equity_overlay (k5, 20% tilt on MCFTRR) | **REJECT** | −0.011 | −0.014 | +0.18 | **0.997** | redundant factor (corr ≈1.00 > 0.60) — it *is* the equity leg |
+
+The **overlay** is a realistic unlevered **20%-tilt** on MCFTRR (`DEPLOY_FRACTION=0.20`): full-window TR
+**+0.60% vs MCFTRR +7.75%** (alpha **−7.15pp**) at corr **0.997** — the gate REJECTs it as a **redundant
+equity factor**, not a diversifier (the timing tilt just shaves ~7pp off buy-and-hold). The
+**runup_only** timing stream is genuinely uncorrelated (corr 0.13) but is a standalone money-loser
+(sleeve TR **−5.69%**) that **worsens the book's drawdown by +4.6pp** (Δexcess-Sortino −0.18), so the
+gate REJECTs it on downside risk. **Both sleeves REJECT, weight 0.** (An earlier draft reported the
+overlay at −88% TR / −96pp alpha — a *levered* toy construction that multiplied the whole book by each
+event's single-name factor; the corrected convex-blend 20%-tilt above replaces it.)
+
+**Bond coupon "run-up" = НКД (ACCINT) accounting artifact — CONFIRMED, not alpha.** Empirically
+verified on 3 real bonds via ISS bond history (ACCINT column) + `bondization` coupon dates: ACCINT
+accretes ~linearly each trading day and **resets to ~0 on the coupon date**, with the dirty price
+dropping by ~the coupon — the buyer *pre-pays the seller* that accrual, so it nets to zero.
+- SU26238RMFS4 (OFZ, TQOB): coupon 2023-12-06 = 35.40 rub; ACCINT reset 35.21 → 0.00 (≈ the coupon).
+- SU26246RMFS7 (OFZ, TQOB): coupon 2025-09-24 = 59.84 rub; ACCINT reset 59.51 → 0.00.
+- RU000A106HB4 (corp, TQCB): coupon 2025-01-02 = 29.42 rub; ACCINT reset 28.45 → ~0 (the +91-rub
+  pre-coupon dirty move there is a genuine clean-price re-rating, which *reinforces* the point: any
+  dirty "gain" beyond ACCINT is market repricing, and the accrual part telescopes to zero).
+
+Net of 13% coupon tax + 1.10% round trip, buy-before-coupon is ≤0 by construction — the a-priori
+accounting null holds, exactly as the equity ex-gap eats the dividend.
+
+**Adversarial review (3/3 skeptics refute any positive edge):** *survivorship/look-ahead* — the biases
+all cut the SAME way (toward REJECT); the faded-payer drop that would flip k=20 run-up to ≈flat is a
+survivorship *inflation*, and CLOSE-mark + naive-T+1 mis-timing make the arm *more* negative, never
+positive; the ex-gap already fully prices the dividend so correcting the anchor moves toward flat, not
+alpha. *cost/tax realism* — higher (more realistic) per-side cost strengthens REJECT; the lone k=20
+capture positive dies at ~150 bps/side (t=−0.14); run-up is negative even GROSS of cost for k≤10.
+*regime/crash robustness* — every "positive" is one-season / one-name noise (2023-dependent, RTKM
+outlier, easing n=12), while the core NEGATIVE survives excluding 2022 (k1 −2.90%/t=−11.3).
+
+**Methodology note — a dating bug was caught and FIXED (why the run-up numbers moved).** The first
+pass hard-coded LDD = record − 1 trading day / ex = record (T+1 settlement) for ALL years. But MOEX
+equities settled **T+2 through 2023** (ex = record − 1) and only moved to **T+1 in 2024** (ex = record).
+So for 2021-2023 events the naive "LDD" was actually the true ex-gap session, and the run-up window
+ended *on* the gap — it was measuring the −4%-style ex-drop, not the pre-ex drift (this inflated the
+old arm-A means to −3.46%..−0.92% and shrank the reported ex-gap to −2.09%). Caught via a raw-price
+spot-check (SBER 2021: the −4.07% drop sits on 2021-05-11, which the code had labelled "LDD"). Fixed by
+DETECTING the ex-date per event from the price gap (with a T+2/T+1 settlement fallback by date) so the
+run-up window ends the session *before* the gap; re-ran end-to-end. The verdict is **unchanged
+(REJECT)** but the numbers are now honest: the gap is isolated (ex-gap −4.68%, 97.1% negative ≈ the
+dividend), and the run-up is ~flat-to-mildly-negative net of cost rather than a spurious −3.46%.
+
+| # | Instrument / test | verdict | PR |
+|---|---|---|---|
+| 6a | Dividend **run-up** (buy N days pre-LDD, sell LDD, gap excluded) — 139 events, net 1.10% | **REJECT** — no tradeable drift; net-negative at short k (k1 −1.08%, t=−7.4; k5 −0.40%), hit-rate ≤50% until k20; k20 +1.78% is equity beta | this PR (diagnostic) |
+| 6b | Dividend **collect-and-hold** (through ex, +div net-13% NDFL) | **REJECT** — ex-gap ≈ gross dividend (mean −4.68%, 97.1% neg); nothing left after NDFL+cost (k5 +0.07%, flat) | this PR (diagnostic) |
+| 6c | `runup_only` sleeve → gate (MCFTRR-net) | **REJECT** — Δexcess-Sortino −0.18, worsens drawdown +4.6pp, weight 0 | this PR |
+| 6d | `equity_overlay` (k5, 20% tilt) sleeve → gate (MCFTRR-net) | **REJECT** — redundant factor (corr 0.997 > 0.60); alpha −7.15pp vs buy-and-hold | this PR |
+| 6e | Bond coupon "run-up" (НКД / ACCINT) — 3 real bonds | **REJECT (accounting null CONFIRMED)** — ACCINT resets to 0 on coupon date; dirty "run-up" is pre-paid accrued interest, a wash | this PR (control) |
+
+**Iteration 6 finding — REJECT the event-timing edge (both equities and bonds); prior held on real
+ISS data.** There is **no net-of-retail MOEX dividend edge** in either the run-up-and-exit arm (the
+pre-ex drift is ~flat-to-negative and never beats the 1.10% round-trip at tradeable horizons) or the
+collect-and-hold arm (the ex-gap ≈ the gross dividend, so 13% NDFL + 1.10% cost leaves nothing; the one
+positive is 4–6-week equity beta, not a dividend mechanic). Both sleeves fail the pre-registered gate —
+`runup_only` on downside risk (Sortino −0.18, drawdown +4.6pp), the k5 20%-tilt overlay as a
+**redundant equity factor** (corr 0.997, alpha −7.15pp). The bond
+coupon "run-up" is empirically the **НКД (ACCINT) accounting artifact** — accrued interest the buyer
+pre-pays, resetting to zero on the coupon date — not alpha. This is diagnostic-only: it authorizes
+**nothing** — no order, no config weight, real money remains a HARD STOP. **The deposit-anchor pivot
+stands**, now confirmed on the event-timing axis too. Caveat: the crash-2022 and easing sub-windows
+are each effectively N=1; the full-window gate verdict (2 regimes, 1363 bars) carries no
+`n1_caveat`, but the per-regime positives are not robust. The one legitimate pro (no look-ahead)
+does not rescue the hypothesis — a public, announced distribution is already priced by the ex-drop.
 
 ### Still open (low priority — the edge question is answered)
 - **TGLD / SBGD gold ETF** vs spot GLDRUB (does the ETF wrapper change the gold verdict — likely not).
