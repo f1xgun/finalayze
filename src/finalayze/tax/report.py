@@ -290,7 +290,10 @@ def _dividend_action_item(dividend_ytd: Decimal) -> list[ActionItem]:
             description=(
                 f"Dividend base (separate, own 2.4M threshold): ~{dividend_ytd} RUB YTD -> "
                 f"~{tax} RUB NDFL. Dividends are NEVER netted or harvested and are not "
-                f"LDV/IIS-B exempt. Figure is an ESTIMATE (payment is net of withholding)."
+                f"LDV/IIS-B exempt. Figure is an ESTIMATE that UNDER-states the base: the "
+                f"payment is already net of withholding but is taxed here as the gross "
+                f"base, so both the base and the NDFL are structurally LOW -- reconcile "
+                f"the gross figure against the 2-NDFL statement before filing (IN-01)."
             ),
             savings_estimate=Decimal(0),
             confidence="confirmed",

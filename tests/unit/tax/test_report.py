@@ -425,6 +425,32 @@ def test_report_dividend_base_ignores_tax_row() -> None:
     assert report.dividend_ytd == DIVIDEND_100K
 
 
+def test_dividend_action_item_discloses_estimate_understates_direction() -> None:
+    """IN-01: the dividend figure is net-of-withholding -> it UNDER-states the base.
+
+    The dividend NDFL is computed on the already-net payment as if it were gross, so
+    the number is structurally LOW. Disclose the direction (under-stated), not just
+    that it is an estimate.
+    """
+    report = build_report(
+        today=TODAY,
+        year=YEAR,
+        open_lots=[_lot()],
+        realized_ytd=[],
+        coupons_ytd=[],
+        dividends_ytd=[_dividend(DIVIDEND_100K)],
+        forward_income=[],
+        harvest_candidates=[],
+        history_truncated=False,
+    )
+    div_items = [a for a in report.action_items if a.category == "DIVIDEND"]
+    assert div_items
+    desc = div_items[0].description.lower()
+    assert "net of withholding" in desc
+    # the direction of the estimate must be disclosed (under-states the base)
+    assert "under" in desc
+
+
 def test_report_documents_ndfl_accumulator_defect() -> None:
     report = build_report(
         today=TODAY,
