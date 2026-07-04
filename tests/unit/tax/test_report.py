@@ -380,6 +380,51 @@ def test_report_dividend_tax_never_harvestable() -> None:
             assert "dividend" not in item.description.lower() or "never" in item.description.lower()
 
 
+def test_report_dividend_base_ignores_mis_bucketed_coupon() -> None:
+    """WR-04: a COUPON row fed into dividends_ytd must NOT enter the dividend base.
+
+    Base isolation is invariant #1 -- a mis-bucketed COUPON/TAX row must never
+    corrupt the dividend base (which realized_ytd_base_a already guards on its side).
+    """
+    report = build_report(
+        today=TODAY,
+        year=YEAR,
+        open_lots=[_lot()],
+        realized_ytd=[],
+        coupons_ytd=[],
+        dividends_ytd=[_dividend(DIVIDEND_100K), _coupon(COUPON_50K)],
+        forward_income=[],
+        harvest_candidates=[],
+        history_truncated=False,
+    )
+    # only the genuine dividend counts; the mis-bucketed coupon is excluded
+    assert report.dividend_ytd == DIVIDEND_100K
+
+
+def test_report_dividend_base_ignores_tax_row() -> None:
+    """WR-04: a signed TAX row in dividends_ytd must NOT corrupt the dividend base."""
+    tax_row = Operation(
+        op_type=OperationType.TAX,
+        op_date=TODAY,
+        figi=FIGI,
+        ticker=TICKER,
+        payment=Decimal(-9_999),
+        currency=CCY_RUB,
+    )
+    report = build_report(
+        today=TODAY,
+        year=YEAR,
+        open_lots=[_lot()],
+        realized_ytd=[],
+        coupons_ytd=[],
+        dividends_ytd=[_dividend(DIVIDEND_100K), tax_row],
+        forward_income=[],
+        harvest_candidates=[],
+        history_truncated=False,
+    )
+    assert report.dividend_ytd == DIVIDEND_100K
+
+
 def test_report_documents_ndfl_accumulator_defect() -> None:
     report = build_report(
         today=TODAY,

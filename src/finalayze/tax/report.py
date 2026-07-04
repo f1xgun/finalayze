@@ -26,6 +26,7 @@ from finalayze.core.ndfl import ndfl_marginal
 from finalayze.tax.baskets import TaxBase, realized_ytd_base_a
 from finalayze.tax.harvest import harvestable
 from finalayze.tax.ldv import LdvHeadroom, ldv_eligible, ldv_headroom
+from finalayze.tax.lots import OperationType
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -346,8 +347,10 @@ def build_report(
     """
     base_a_ytd = realized_ytd_base_a(realized_ytd, coupons_ytd)
     positive_ytd_base_a = max(Decimal(0), base_a_ytd)
+    # WR-04: guard on op_type like realized_ytd_base_a so a mis-bucketed
+    # COUPON/TAX row can never corrupt the dividend base (base isolation, INV 1).
     dividend_ytd = sum(
-        (op.payment for op in dividends_ytd),
+        (op.payment for op in dividends_ytd if op.op_type is OperationType.DIVIDEND),
         Decimal(0),
     )
 
