@@ -133,7 +133,8 @@ def project_tax_drag(
     already-realized YTD position (WR-01) so forward income above the 2.4M
     threshold is taxed at 15%, not silently re-started at the bottom of the 13%
     band (which would UNDER-state the drag -- a cost -- the non-conservative
-    direction, design section 0 / 2.5 "по маржинальной ставке базы").
+    direction, design section 0 / 2.5 "po marginalnoy stavke bazy" -- at the
+    base's marginal rate from its current YTD position).
     """
     projected = Decimal(0)
     flags: list[DegradationFlag] = []
