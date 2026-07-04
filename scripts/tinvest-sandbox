@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Safe readonly/sandbox launcher for the vendored t-invest side-car.
+#
+# This is the ONLY sanctioned entry point for the t-invest skill in finalayze. It strips ALL
+# live-trading capability from the environment before launching the bundled CLI, so real-money
+# orders are PHYSICALLY IMPOSSIBLE regardless of the ambient environment:
+#   - T_INVEST_TOKEN_FULL     (a full/trading token) -> unset, so no live account is reachable;
+#   - T_INVEST_ALLOW_TRADING  (the env money gate)   -> unset, so paths.ts throws
+#                                                        APP_TINVEST_TRADING_DISABLED on any order;
+#   - T_INVEST_STONKS_MODE    (autonomous-trade)     -> unset, so it can never activate.
+#
+# Live real-money execution stays EXCLUSIVELY on scripts/run_rebalance.py (operator-gated,
+# sandbox/live triple-gated). This side-car is readonly/sandbox analytics only and NEVER places
+# live orders. Provide ONLY T_INVEST_TOKEN_SANDBOX (and optionally T_INVEST_TOKEN_READONLY) in
+# ~/.config/tinvest/.env. See docs/operations/t-invest-skill-sidecar.md.
+#
+#   scripts/tinvest-sandbox --mode sandbox session status --json
+#   scripts/tinvest-sandbox --mode readonly bond screen ...
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+bundle="$repo_root/.claude/skills/t-invest/scripts/tinvest.cjs"
+
+if [[ ! -f "$bundle" ]]; then
+  echo "t-invest side-car bundle not found: $bundle" >&2
+  exit 1
+fi
+
+exec env -u T_INVEST_TOKEN_FULL -u T_INVEST_ALLOW_TRADING -u T_INVEST_STONKS_MODE \
+  node "$bundle" "$@"
