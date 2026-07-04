@@ -44,6 +44,7 @@ ABOVE_THRESHOLD_YTD = NDFL_PROGRESSIVE_THRESHOLD + Decimal(500_000)
 
 def _lot(
     *,
+    figi: str = FIGI,
     acquire: date = date(2021, 1, 1),
     russian: bool = True,
     on_iis: bool = False,
@@ -51,7 +52,7 @@ def _lot(
     currency: str = CCY_RUB,
 ) -> TaxLot:
     return TaxLot(
-        figi=FIGI,
+        figi=figi,
         ticker=TICKER,
         acquire_date=acquire,
         quantity=Decimal(100),
@@ -286,11 +287,77 @@ def test_report_ldv_action_item_has_ruble_estimate() -> None:
         forward_income=[],
         harvest_candidates=[],
         history_truncated=False,
-        ldv_hypothetical={FIGI: LdvHoldingItem(positive_finrez=Decimal(500_000), full_years=6)},
+        ldv_hypothetical={FIGI: [LdvHoldingItem(positive_finrez=Decimal(500_000), full_years=6)]},
     )
     ldv_items = [a for a in report.action_items if a.category == "LDV"]
     assert ldv_items
     assert all(isinstance(a.savings_estimate, Decimal) for a in ldv_items)
+
+
+def test_report_ldv_dedupes_multiple_lots_of_same_figi() -> None:
+    """WR-02: two open lots of the SAME figi produce ONE LDV item, not two."""
+    ldv_finrez_500k = Decimal(500_000)
+    report = build_report(
+        today=TODAY,
+        year=YEAR,
+        open_lots=[
+            _lot(acquire=date(2020, 1, 1)),
+            _lot(acquire=date(2019, 1, 1)),  # same FIGI, second open lot
+        ],
+        realized_ytd=[],
+        coupons_ytd=[],
+        dividends_ytd=[],
+        forward_income=[],
+        harvest_candidates=[],
+        history_truncated=False,
+        ldv_hypothetical={
+            FIGI: [LdvHoldingItem(positive_finrez=ldv_finrez_500k, full_years=6)],
+        },
+    )
+    ldv_items = [a for a in report.action_items if a.category == "LDV"]
+    assert len(ldv_items) == 1
+
+
+def test_report_ldv_blends_kcb_across_mixed_holding_periods() -> None:
+    """WR-03: a figi with lots at DIFFERENT holding periods yields a Kcb-blended cap.
+
+    Two qualifying lots (3M @ 3y, 3M @ 9y) whose blended total (6M) exceeds a
+    single-period cap must be exempted only up to the Kcb-blended cap, NOT the
+    naive full_years * 3M of one lot. Kcb = (3M*3 + 3M*9)/6M = 6, cap = 6*3M = 18M,
+    so all 6M is exempt -- and the description must carry the blended Kcb (6), which
+    a single-item call could never produce.
+    """
+    finrez_3m = Decimal(3_000_000)
+    expected_kcb = (finrez_3m * 3 + finrez_3m * 9) / (finrez_3m + finrez_3m)
+    report = build_report(
+        today=TODAY,
+        year=YEAR,
+        open_lots=[_lot(acquire=date(2020, 1, 1))],
+        realized_ytd=[],
+        coupons_ytd=[],
+        dividends_ytd=[],
+        forward_income=[],
+        harvest_candidates=[],
+        history_truncated=False,
+        ldv_hypothetical={
+            FIGI: [
+                LdvHoldingItem(positive_finrez=finrez_3m, full_years=3),
+                LdvHoldingItem(positive_finrez=finrez_3m, full_years=9),
+            ],
+        },
+    )
+    ldv_items = [a for a in report.action_items if a.category == "LDV"]
+    assert len(ldv_items) == 1
+    # blended Kcb must appear (single-item call would give full_years=3 or 9, never 6)
+    assert f"Kcb={expected_kcb}" in ldv_items[0].description
+    # total finrez 6M is below the 18M cap -> all exempt; relieved at the marginal
+    # 13/15% band from a zero base-A YTD (2.4M @ 13% + 3.6M @ 15%)
+    total_finrez = finrez_3m + finrez_3m
+    expected_savings = (
+        NDFL_PROGRESSIVE_THRESHOLD * NDFL_RATE
+        + (total_finrez - NDFL_PROGRESSIVE_THRESHOLD) * NDFL_RATE_HIGH
+    )
+    assert ldv_items[0].savings_estimate == expected_savings
 
 
 def test_report_dividend_tax_never_harvestable() -> None:

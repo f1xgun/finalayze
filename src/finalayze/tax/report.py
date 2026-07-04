@@ -207,19 +207,31 @@ def _lot_flags(lots: Iterable[TaxLot], *, history_truncated: bool) -> list[Degra
 def _ldv_action_items(
     open_lots: Iterable[TaxLot],
     today: date,
-    ldv_hypothetical: dict[str, LdvHoldingItem] | None,
+    ldv_hypothetical: dict[str, list[LdvHoldingItem]] | None,
     positive_ytd_base_a: Decimal,
 ) -> list[ActionItem]:
+    """One aggregated LDV action item PER figi (WR-02 dedupe / WR-03 Kcb blend).
+
+    ``ldv_hypothetical`` maps a figi to ALL its LDV-qualifying disposal lots. A
+    figi's headroom is computed ONCE over the full list, so the Kcb coefficient
+    blends across mixed holding periods (design 2.3) and a figi with several open
+    lots emits a single item -- never a per-lot double count off the same figi.
+    """
     if not ldv_hypothetical:
         return []
     items: list[ActionItem] = []
+    seen_figis: set[str] = set()
     for lot in open_lots:
+        if lot.figi in seen_figis:
+            continue
         if not ldv_eligible(lot, today):
             continue
-        hyp = ldv_hypothetical.get(lot.figi)
-        if hyp is None:
+        hyps = ldv_hypothetical.get(lot.figi)
+        if not hyps:
             continue
-        hr: LdvHeadroom = ldv_headroom([hyp])
+        seen_figis.add(lot.figi)
+        hr: LdvHeadroom = ldv_headroom(hyps)
+        total_finrez = sum((h.positive_finrez for h in hyps), Decimal(0))
         # exempt result relieves tax at the marginal rate ABOVE the current base-A YTD
         rate = _effective_rate(positive_ytd_base_a, hr.exempt_amount)
         savings = hr.exempt_amount * rate
@@ -227,8 +239,8 @@ def _ldv_action_items(
             ActionItem(
                 category="LDV",
                 description=(
-                    f"{lot.ticker}: held {hyp.full_years} full years; a disposal would "
-                    f"realize ~{hyp.positive_finrez} RUB finrez, of which ~{hr.exempt_amount} "
+                    f"{lot.ticker}: {len(hyps)} qualifying lot(s); a disposal would "
+                    f"realize ~{total_finrez} RUB finrez, of which ~{hr.exempt_amount} "
                     f"RUB is LDV-exempt (Kcb={hr.kcb}, cap={hr.cap}) -> tax saved "
                     f"~{savings} RUB. Consider holding to preserve / using the relief on sale."
                 ),
@@ -324,7 +336,7 @@ def build_report(
     forward_income: list[ForwardIncome],
     harvest_candidates: list[HarvestCandidate],
     history_truncated: bool,
-    ldv_hypothetical: dict[str, LdvHoldingItem] | None = None,
+    ldv_hypothetical: dict[str, list[LdvHoldingItem]] | None = None,
 ) -> TaxReport:
     """Assemble the decision-support report.
 

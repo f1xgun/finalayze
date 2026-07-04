@@ -166,10 +166,14 @@ def main() -> None:
 
     base_a_via_helper = realized_ytd_base_a(realized, coupons)
 
-    # LDV hypothetical finrez (what a full disposal would realize) per figi
+    # LDV hypothetical finrez (what a full disposal would realize) per figi.
+    # The value is the LIST of qualifying disposal lots for that figi so the Kcb
+    # coefficient blends across mixed holding periods (design 2.3).
     lkoh_full_years = full_years_held(lkoh_lot.acquire_date, TODAY)
     ldv_hyp = {
-        "F-LKOH": LdvHoldingItem(positive_finrez=Decimal(500_000), full_years=lkoh_full_years),
+        "F-LKOH": [
+            LdvHoldingItem(positive_finrez=Decimal(500_000), full_years=lkoh_full_years),
+        ],
     }
 
     harvest_candidates = [
