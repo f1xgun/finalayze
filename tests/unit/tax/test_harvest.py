@@ -10,9 +10,12 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from finalayze.core.constants import NDFL_RATE, NDFL_RATE_HIGH
 from finalayze.tax.harvest import (
     HarvestCandidate,
+    HarvestError,
     HarvestResult,
     harvestable,
 )
@@ -97,6 +100,42 @@ def test_ldv_clock_reset_warning_emitted() -> None:
     assert any("LDV" in w for w in res.warnings)
 
 
+def test_ldv_clock_warning_does_not_misattribute_sold_lot_date() -> None:
+    """IN-05: the warning must NOT claim the reset lot was 'acquired {sold-lot date}'.
+
+    The FIFO sale of the loss lot resets ANOTHER lot's LDV clock; naming the sold
+    loss lot's own acquire date as the affected lot's date misleads the operator
+    about which position is affected (design 2.4).
+    """
+    candidate = _candidate(LOSS_300K, resets_ldv=True)
+    res = harvestable(YTD_POSITIVE_500K, [candidate])
+    ldv_warnings = [w for w in res.warnings if "LDV" in w]
+    assert ldv_warnings
+    # the sold loss lot's own acquire date must not be presented as the reset lot's
+    assert f"acquired {candidate.lot.acquire_date}" not in ldv_warnings[0]
+    # but the sold ticker (the lot being harvested) should still be named
+    assert candidate.lot.ticker in ldv_warnings[0]
+
+
 def test_no_ldv_warning_when_clock_not_broken() -> None:
     res = harvestable(YTD_POSITIVE_500K, [_candidate(LOSS_300K, resets_ldv=False)])
     assert not any("LDV" in w for w in res.warnings)
+
+
+def test_positive_pnl_candidate_rejected() -> None:
+    """IN-03: a candidate carrying a GAIN (positive P&L) is not harvestable -> raise.
+
+    Passing a positive value would inflate offset_used via abs(); a gain is not a
+    harvestable loss, so it must raise rather than silently over-count savings.
+    """
+    gain = Decimal(100_000)
+    bad_candidate = _candidate(gain)
+    with pytest.raises(HarvestError):
+        harvestable(YTD_POSITIVE_500K, [bad_candidate])
+
+
+def test_zero_pnl_candidate_is_ignored_not_an_error() -> None:
+    """IN-03: a zero-loss candidate contributes nothing and is not an error."""
+    res = harvestable(YTD_POSITIVE_500K, [_candidate(Decimal(0))])
+    assert res.offset_used == Decimal(0)
+    assert res.savings_estimate == Decimal(0)

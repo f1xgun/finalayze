@@ -23,6 +23,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from finalayze.core.ndfl import ndfl_marginal
+from finalayze.tax.lots import TaxError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -30,13 +31,20 @@ if TYPE_CHECKING:
     from finalayze.tax.lots import TaxLot
 
 
+class HarvestError(TaxError):
+    """Raised when a harvest candidate is not actually a harvestable loss (IN-03)."""
+
+
 @dataclass(frozen=True)
 class HarvestCandidate:
     """An open lot carrying an unrealized loss that could be harvested.
 
-    ``unrealized_loss`` is the (negative or magnitude) loss on the lot; the engine
-    uses its absolute value. ``breaks_ldv_clock`` flags that harvesting this lot's
-    SELL would (via FIFO) reset another lot's LDV holding clock.
+    ``unrealized_loss`` is the SIGNED loss on the lot: a genuine loss is <= 0 (e.g.
+    ``Decimal(-40_000)``); the engine harvests its magnitude. A STRICTLY POSITIVE
+    value is a GAIN, which is NOT harvestable and is rejected (IN-03) -- passing a
+    positive P&L must never silently inflate ``offset_used``. ``breaks_ldv_clock``
+    flags that harvesting this lot's SELL would (via FIFO) reset another lot's LDV
+    holding clock.
     """
 
     lot: TaxLot
@@ -64,6 +72,14 @@ def harvestable(
     2.4M threshold is valued at 15% and below at 13%.
     """
     candidate_list = list(candidates)
+    for c in candidate_list:
+        if c.unrealized_loss > 0:
+            msg = (
+                f"harvest candidate {c.lot.ticker} carries a POSITIVE P&L "
+                f"({c.unrealized_loss}) -- a gain is not a harvestable loss; "
+                f"pass the signed loss (<= 0)"
+            )
+            raise HarvestError(msg)
     total_loss = sum(
         (abs(c.unrealized_loss) for c in candidate_list),
         Decimal(0),
@@ -76,11 +92,18 @@ def harvestable(
     tax_after, _ = ndfl_marginal(positive_ytd - offset_used, Decimal(0))
     savings = tax_before - tax_after
 
+    # IN-05: a FIFO harvest SELL of the loss lot closes the OLDEST open lot of the
+    # position first, which can reset a DIFFERENT lot's LDV clock. We must NOT
+    # attribute that reset to the sold loss lot's own acquire date (which would
+    # mislead the operator about which position is affected, design 2.4). The
+    # engine does not know the specific affected lot here, so name only the
+    # harvested ticker and describe the FIFO effect without a fabricated date.
     warnings: list[str] = [
         (
-            f"harvest SELL of {c.lot.ticker} (FIFO) would RESET the LDV holding "
-            f"clock on the affected lot (acquired {c.lot.acquire_date}); "
-            f"3-year relief would restart"
+            f"harvest SELL of {c.lot.ticker} closes the FIFO-OLDEST open lot of this "
+            f"position first, which may RESET the 3-year LDV holding clock on a "
+            f"DIFFERENT (earlier-acquired) lot of the same position; verify which lot "
+            f"is affected before harvesting"
         )
         for c in candidate_list
         if c.breaks_ldv_clock
