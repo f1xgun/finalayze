@@ -1,0 +1,73 @@
+{
+ "windows": {
+  "full": [
+   "2022-12-30",
+   "2026-06-10"
+  ],
+  "hiking_2023_24": [
+   "2023-08-01",
+   "2024-12-31"
+  ],
+  "easing_2025_26_LIVE": [
+   "2025-06-06",
+   "2026-06-10"
+  ]
+ },
+ "metrics_tr_ann_maxdd": {
+  "deposit_key_minus_1pp": {
+   "full": {
+    "tr_pct": 50.24,
+    "ann_pct": 12.44,
+    "maxdd_pct": 0.0
+   },
+   "hiking_2023_24": {
+    "tr_pct": 19.57,
+    "ann_pct": 13.13,
+    "maxdd_pct": 0.0
+   },
+   "easing_2025_26_LIVE": {
+    "tr_pct": 13.7,
+    "ann_pct": 13.42,
+    "maxdd_pct": 0.0
+   }
+  },
+  "ofz_floater": {
+   "full": {
+    "tr_pct": 44.18,
+    "ann_pct": 11.11,
+    "maxdd_pct": 4.34
+   },
+   "hiking_2023_24": {
+    "tr_pct": 11.44,
+    "ann_pct": 7.77,
+    "maxdd_pct": 3.99
+   },
+   "easing_2025_26_LIVE": {
+    "tr_pct": 16.67,
+    "ann_pct": 16.32,
+    "maxdd_pct": 0.18
+   }
+  },
+  "ofz_fixed_duration": {
+   "full": {
+    "tr_pct": 9.09,
+    "ann_pct": 2.54,
+    "maxdd_pct": 18.56
+   },
+   "hiking_2023_24": {
+    "tr_pct": -9.3,
+    "ann_pct": -6.52,
+    "maxdd_pct": 17.7
+   },
+   "easing_2025_26_LIVE": {
+    "tr_pct": 12.25,
+    "ann_pct": 12.0,
+    "maxdd_pct": 6.22
+   }
+  }
+ },
+ "fixed_beats_deposit_in_easing": false,
+ "fixed_loses_in_hiking": true,
+ "finding": "The operator's intuition is RIGHT and mostly ALREADY CAPTURED \u2014 but via the FLOATER, not duration. EASING (live regime 2025-06-06->2026-06-10): the OFZ FLOATER (RUFLBITR, which the SAA HOLDS as its OFZ_PK leg) returned 16.67% vs the deposit's 13.7% \u2014 it OUT-carries the deposit by ~3.0pp (a bond at ~key beats a deposit at key-1pp). So 'bonds beat the deposit' shows up in the system through the floater. HOWEVER fixed-coupon OFZ (duration) returned only 12.25% \u2014 it did NOT beat the deposit or the floater in this easing, because the curve was INVERTED (short rates > long yields), so locking a lower long yield gave up carry AND took a 6.22% duration drawdown. HIKING (2023-24): fixed OFZ TR=-9.3% vs deposit 19.57% \u2014 fixed LOSES badly (price losses as rates rose). So the iter-1 gate's fixed-OFZ REJECT HOLDS even per-regime \u2014 locking duration was not the winning trade. THE GENUINE GAP: the system's floater FALLS with the key, so it does NOT LOCK today's 15-16% for the future. IF you can now buy a FIXED 15-16% bond above the 14%-and-falling deposit AND the curve has un-inverted, locking that carry is a real forward call the floater can't make \u2014 but it carries duration risk and, on the realized easing here, the floater's high short carry beat it. Not advice; diagnostic only.",
+ "system_gap": "the live SAA holds the FLOATER (RUFLBITR/OFZ-PK), not fixed-coupon OFZ-PD; the ru_ofz_pd.yaml preset + bond_duration_rotation.py classifier exist but are not wired into the allocation, so the easing yield-lock is not active."
+}
