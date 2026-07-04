@@ -65,8 +65,13 @@ def _parse_op(row: dict[str, Any]) -> Operation:
 
     quantity = _to_decimal(row.get("quantity"))
     price = _to_decimal(row.get("price"))
-    commission = _to_decimal(row.get("commission")) or Decimal(0)
-    payment = _to_decimal(row.get("payment")) or Decimal(0)
+    # IN-04: `... or Decimal(0)` collapses a legitimate parsed Decimal("0") (falsy)
+    # to the same value -- no live bug for money, but the idiom would hide a
+    # meaningful zero if semantics changed. Use an explicit None check instead.
+    commission_parsed = _to_decimal(row.get("commission"))
+    commission = commission_parsed if commission_parsed is not None else Decimal(0)
+    payment_parsed = _to_decimal(row.get("payment"))
+    payment = payment_parsed if payment_parsed is not None else Decimal(0)
 
     is_input = op_type is OperationType.INPUT_SECURITIES
     return Operation(

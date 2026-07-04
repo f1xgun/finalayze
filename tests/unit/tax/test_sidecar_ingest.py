@@ -66,3 +66,21 @@ def test_parse_json_string_matches_file() -> None:
     raw = FIXTURE.read_text(encoding="utf-8")
     ops = parse_operations_json(raw)
     assert len(ops) == EXPECTED_OP_COUNT
+
+
+def test_explicit_zero_payment_and_commission_survive() -> None:
+    """IN-04: an explicitly-present zero payment/commission parses to Decimal(0).
+
+    Guards the ``x if x is not None else Decimal(0)`` idiom (a falsy Decimal("0")
+    must not be re-derived by a truthiness collapse) -- a legitimate parsed zero
+    survives as Decimal(0), and None-vs-zero stay distinguishable at the boundary.
+    """
+    raw = (
+        '[{"operationType": "OPERATION_TYPE_COUPON", "date": "2026-05-01T00:00:00Z", '
+        '"figi": "F-OFZ", "ticker": "SU26240", "currency": "RUB", '
+        '"payment": "0", "commission": "0"}]'
+    )
+    ops = parse_operations_json(raw)
+    assert len(ops) == 1
+    assert ops[0].payment == Decimal(0)
+    assert ops[0].commission == Decimal(0)
