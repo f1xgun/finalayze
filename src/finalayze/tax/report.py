@@ -118,17 +118,26 @@ def _effective_rate(ytd_before: Decimal, amount: Decimal) -> Decimal:
 def project_tax_drag(
     forward_income: Iterable[ForwardIncome],
     year: int,  # noqa: ARG001 - year documents the projection window; band is per-event here
+    *,
+    div_ytd_before: Decimal = Decimal(0),
+    sec_ytd_before: Decimal = Decimal(0),
 ) -> TaxDragProjection:
     """Project tax on forward coupons/dividends (design section 2.5).
 
     Dividends are taxed at the full 13/15% band (never harvested). Base-A coupons
     at 13/15%. A foreign-currency event yields an FX_NOT_COMPUTED flag AND is not
     silently taxed (the FX revaluation is not computed in the first slice).
+
+    ``div_ytd_before`` / ``sec_ytd_before`` seed each base's marginal band from the
+    already-realized YTD position (WR-01) so forward income above the 2.4M
+    threshold is taxed at 15%, not silently re-started at the bottom of the 13%
+    band (which would UNDER-state the drag -- a cost -- the non-conservative
+    direction, design section 0 / 2.5 "по маржинальной ставке базы").
     """
     projected = Decimal(0)
     flags: list[DegradationFlag] = []
-    div_ytd = Decimal(0)
-    sec_ytd = Decimal(0)
+    div_ytd = div_ytd_before
+    sec_ytd = sec_ytd_before
     for fwd in forward_income:
         if fwd.currency != _RUB:
             flags.append(
@@ -332,7 +341,14 @@ def build_report(
 
     flags = _lot_flags(open_lots, history_truncated=history_truncated)
 
-    drag = project_tax_drag(forward_income, year)
+    # WR-01: seed each base's marginal band from the real realized YTD so forward
+    # income above 2.4M is taxed at 15%, not re-started at the 13% band bottom.
+    drag = project_tax_drag(
+        forward_income,
+        year,
+        div_ytd_before=max(Decimal(0), dividend_ytd),
+        sec_ytd_before=positive_ytd_base_a,
+    )
     flags.extend(drag.flags)
 
     action_items: list[ActionItem] = []

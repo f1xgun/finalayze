@@ -10,11 +10,15 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from finalayze.core.constants import NDFL_RATE
+from finalayze.core.constants import (
+    NDFL_PROGRESSIVE_THRESHOLD,
+    NDFL_RATE,
+    NDFL_RATE_HIGH,
+)
 from finalayze.tax.baskets import TaxBase
 from finalayze.tax.harvest import HarvestCandidate
 from finalayze.tax.ldv import LdvHoldingItem
-from finalayze.tax.lots import Operation, OperationType, TaxLot
+from finalayze.tax.lots import Operation, OperationType, RealizedResult, TaxLot
 from finalayze.tax.report import (
     ActionItem,
     DegradationFlag,
@@ -35,6 +39,7 @@ YEAR = 2026
 
 DIVIDEND_100K = Decimal(100_000)
 COUPON_50K = Decimal(50_000)
+ABOVE_THRESHOLD_YTD = NDFL_PROGRESSIVE_THRESHOLD + Decimal(500_000)
 
 
 def _lot(
@@ -80,6 +85,67 @@ def test_project_tax_drag_fx_bond_flagged_not_computed() -> None:
     fwd = [ForwardIncome(kind=TaxBase.SECURITIES, amount=COUPON_50K, currency=CCY_USD)]
     proj = project_tax_drag(fwd, YEAR)
     assert any(f.reason is FlagReason.FX_NOT_COMPUTED for f in proj.flags)
+
+
+def test_project_tax_drag_starts_from_current_ytd_band_securities() -> None:
+    """WR-01: forward base-A coupon above the 2.4M YTD is taxed at 15%, not 13%."""
+    fwd = [ForwardIncome(kind=TaxBase.SECURITIES, amount=COUPON_50K, currency=CCY_RUB)]
+    proj = project_tax_drag(fwd, YEAR, sec_ytd_before=ABOVE_THRESHOLD_YTD)
+    assert proj.projected_tax == COUPON_50K * NDFL_RATE_HIGH
+
+
+def test_project_tax_drag_starts_from_current_ytd_band_dividends() -> None:
+    """WR-01: forward dividend above the 2.4M dividend-base YTD is taxed at 15%."""
+    fwd = [ForwardIncome(kind=TaxBase.DIVIDENDS, amount=DIVIDEND_100K, currency=CCY_RUB)]
+    proj = project_tax_drag(fwd, YEAR, div_ytd_before=ABOVE_THRESHOLD_YTD)
+    assert proj.projected_tax == DIVIDEND_100K * NDFL_RATE_HIGH
+
+
+def test_project_tax_drag_defaults_to_zero_ytd() -> None:
+    """WR-01: with no YTD context the band still starts at the bottom (13%)."""
+    fwd = [ForwardIncome(kind=TaxBase.SECURITIES, amount=COUPON_50K, currency=CCY_RUB)]
+    proj = project_tax_drag(fwd, YEAR)
+    assert proj.projected_tax == COUPON_50K * NDFL_RATE
+
+
+def test_build_report_threads_realized_ytd_into_drag_projection() -> None:
+    """WR-01: build_report seeds the drag band from the real base-A / dividend YTD.
+
+    A realized base-A result already above 2.4M means a forward coupon is taxed at
+    15%, so the projected drag must exceed the naive 13% figure.
+    """
+    realized = [
+        RealizedResult(
+            figi=FIGI,
+            ticker=TICKER,
+            acquire_date=date(2020, 1, 1),
+            dispose_date=TODAY,
+            quantity=Decimal(1),
+            proceeds=ABOVE_THRESHOLD_YTD,
+            matched_cost=Decimal(0),
+            buy_commission_share=Decimal(0),
+            sell_commission_share=Decimal(0),
+        )
+    ]
+    report = build_report(
+        today=TODAY,
+        year=YEAR,
+        open_lots=[_lot()],
+        realized_ytd=realized,
+        coupons_ytd=[],
+        dividends_ytd=[],
+        forward_income=[ForwardIncome(kind=TaxBase.SECURITIES, amount=COUPON_50K)],
+        harvest_candidates=[],
+        history_truncated=False,
+    )
+    drag_items = [a for a in report.action_items if a.category == "TAX_DRAG"]
+    assert drag_items
+    # the drag description carries the projected figure; it must reflect the 15%
+    # band, i.e. strictly more than the naive all-13% projection
+    naive = COUPON_50K * NDFL_RATE
+    correct = COUPON_50K * NDFL_RATE_HIGH
+    assert f"{correct}" in drag_items[0].description
+    assert f"{naive}" not in drag_items[0].description
 
 
 # ---------- step 9: honest degradation flags ----------
