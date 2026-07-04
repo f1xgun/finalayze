@@ -1,0 +1,74 @@
+{
+  "operations": [
+    {
+      "id": "op-1",
+      "date": "2021-03-01T10:00:00Z",
+      "operationType": "OPERATION_TYPE_BUY",
+      "description": "Buy SBER",
+      "instrumentName": "Sberbank",
+      "ticker": "SBER",
+      "figi": "BBG004730N88",
+      "payment": -200100.0,
+      "currency": "RUB",
+      "commission": 100.0,
+      "quantity": 1000,
+      "price": 200.0
+    },
+    {
+      "id": "op-2",
+      "date": "2026-04-01T10:00:00Z",
+      "operationType": "OPERATION_TYPE_SELL",
+      "description": "Sell SBER",
+      "instrumentName": "Sberbank",
+      "ticker": "SBER",
+      "figi": "BBG004730N88",
+      "payment": 249800.0,
+      "currency": "RUB",
+      "commission": 200.0,
+      "quantity": 1000,
+      "price": 250.0
+    },
+    {
+      "id": "op-3",
+      "date": "2026-05-15T10:00:00Z",
+      "operationType": "OPERATION_TYPE_COUPON",
+      "description": "Coupon OFZ",
+      "instrumentName": "OFZ 26240",
+      "ticker": "SU26240RMFS0",
+      "figi": "BBG00RJT2GD2",
+      "payment": 34500.0,
+      "currency": "RUB",
+      "commission": null,
+      "quantity": null,
+      "price": null
+    },
+    {
+      "id": "op-4",
+      "date": "2026-06-01T10:00:00Z",
+      "operationType": "OPERATION_TYPE_DIVIDEND",
+      "description": "Dividend LKOH",
+      "instrumentName": "Lukoil",
+      "ticker": "LKOH",
+      "figi": "BBG004731032",
+      "payment": 87000.0,
+      "currency": "RUB",
+      "commission": null,
+      "quantity": null,
+      "price": null
+    },
+    {
+      "id": "op-5",
+      "date": "2023-08-10T10:00:00Z",
+      "operationType": "OPERATION_TYPE_INPUT_SECURITIES",
+      "description": "Transfer in GMKN",
+      "instrumentName": "Nornickel",
+      "ticker": "GMKN",
+      "figi": "BBG004731489",
+      "payment": 0.0,
+      "currency": "RUB",
+      "commission": null,
+      "quantity": 30,
+      "price": null
+    }
+  ]
+}
