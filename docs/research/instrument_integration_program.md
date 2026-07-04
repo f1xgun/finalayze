@@ -112,7 +112,7 @@ INTEGRATIONS of what little is sound, not new REJECT candidates.
 
 | # | Constructive integration | status | PR |
 |---|---|---|---|
-| 4 | **ЗО PROBATION → geo-risk overlay rotation** — on elevated/high geo-risk the overlay now recommends rotating a small ЗО FX-linked toe-hold (≤3% PROBATION cap; 1.5% elevated / 3% high) INSTEAD of trimming only into more ruble deposit/OFZ. Forward-only advisory; config weight, never an order. | DONE | this PR |
+| 4 | **ЗО PROBATION → geo-risk overlay rotation** — on elevated/high geo-risk the overlay now recommends rotating a small ЗО FX-linked toe-hold (≤3% PROBATION cap; 1.5% elevated / 3% high) INSTEAD of trimming only into more ruble deposit/OFZ. Forward-only advisory; config weight, never an order. | DONE | #308 ✅ |
 
 **Iteration 4 (constructive):** the one hedge that survived the gate (ЗО, PROBATION — FX-linked +
 uncorrelated) is now operationalized exactly where it belongs. The geo-risk overlay (#300) already
@@ -120,6 +120,31 @@ trims equity on sanctions stress but only toward ruble assets (which don't hedge
 now also surfaces `recommended_fx_hedge_pct` — a small ЗО rotation, the structurally-sound (but
 tail-unproven, hence toe-hold-capped) destination. `geopolitical_risk.py` brain + the alert
 surface it; real money stays a hard stop.
+
+### Iteration 5 — operator question: "bonds at 15-16% vs a 14% deposit — is it captured?" (PER-REGIME)
+
+Operator (2026-07-04) challenged the "deposit dominates" conclusion: bonds currently yield 15-16%
+while the best 3-month deposit is ~14%. This surfaced a **regime-blind spot**: the iter-1 gate
+REJECTED fixed-coupon OFZ on a **2022-2026 full-window average dominated by the rate-HIKING era**
+(where fixed bonds lose price) — it never isolated the current EASING regime. `run_duration_regimes.py`
+compares deposit vs floater vs fixed-coupon OFZ per regime (raw total return):
+
+| arm | full TR% | hiking 2023-24 | **easing 2025-26 (LIVE)** |
+|---|---:|---:|---:|
+| deposit (key−1pp) | 50.2 | 19.6 | 13.7 |
+| **ОФЗ floater (SAA holds this)** | 44.2 | 11.4 | **16.7** |
+| ОФЗ fixed-coupon (duration) | 9.1 | −9.3 | 12.3 (MaxDD 6.2) |
+
+**Finding — the intuition is RIGHT and mostly ALREADY CAPTURED, via the FLOATER not duration.** In
+the live easing regime the OFZ **floater** (the SAA's `OFZ_PK` leg) returned **16.7% vs the deposit's
+13.7%** — a bond at ~key out-carries a deposit at key−1pp by ~3pp. So "bonds beat the deposit" DOES
+show up in the system. But **fixed-coupon DURATION did NOT win** (12.3%): the curve was inverted
+(short > long yields), so locking a lower long yield gave up carry + took a duration drawdown — the
+iter-1 fixed-OFZ REJECT holds even per-regime. **Genuine gap:** the floater FALLS with the key, so it
+does NOT *lock* today's 15-16% for the future; if the curve un-inverts and a fixed 15-16% bond sits
+above the falling deposit, locking that carry is a real forward call the floater can't make (with
+duration risk). Components exist (`ru_ofz_pd.yaml`, `bond_duration_rotation.py`) but the fixed-coupon
+yield-lock is not wired into the SAA. Diagnostic only; not advice.
 
 ### Still open (low priority — the edge question is answered)
 - **TGLD / SBGD gold ETF** vs spot GLDRUB (does the ETF wrapper change the gold verdict — likely not).
