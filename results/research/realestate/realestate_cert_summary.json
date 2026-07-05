@@ -1,0 +1,518 @@
+{
+ "window": {
+  "start": "2022-01-05",
+  "end": "2026-06-10",
+  "n_bars": 1109
+ },
+ "weights": {
+  "deposit": "0.4",
+  "equity_base": "0.6",
+  "re_sweep": [
+   "0.05",
+   "0.10",
+   "0.15"
+  ],
+  "rent_net_base_pct": "4.0",
+  "rent_net_sweep_pct": [
+   "3.0",
+   "4.0",
+   "6.0"
+  ],
+  "re_wrapper_ter_pct": "2.0"
+ },
+ "risk_free_annual_pct": 15.0,
+ "structural_limits": {
+  "smoothed": true,
+  "re_bars_per_year": 52.4,
+  "equity_bars_per_year": 249.7,
+  "smoothing_note": "MREDC updates ~weekly and is a transaction/appraisal index \u2014 measured volatility/drawdown are structurally understated; the investable rental-ZPIF wrapper carries the market vol + illiquidity + 1-3%/yr fees MREDC hides.",
+  "policy_note": "The ~+8.5%/yr residential appreciation was largely subsidised-mortgage (lgotnaya ipoteka) driven \u2014 a policy now wound down, so the historical price rise is NOT a forward-looking expectation.",
+  "income_note": "MREDC is PRICE-only; rent is overlaid as a labelled NET assumption (post-cost, post-NDFL), swept 3/4/6% \u2014 never a measured number."
+ },
+ "correlations": {
+  "re_vs_equity": {
+   "corr": 0.0041,
+   "n": 1108
+  },
+  "re_vs_deposit": {
+   "corr": 0.0419
+  }
+ },
+ "deposit_dominance": {
+  "deposit_only_tr_pct": 59.68,
+  "re_price_only_tr_pct": 19.86,
+  "re_wrapper_ter_charged_pct": "2.0",
+  "re_plus_rent_tr_pct_by_yield": {
+   "3.0": 36.9,
+   "4.0": 43.1,
+   "6.0": 56.35
+  },
+  "best_re_tr_pct": 56.35,
+  "price_beats_deposit": false,
+  "base_rent_beats_deposit": false,
+  "generous_rent_beats_deposit": false,
+  "tax_exempt_bound": {
+   "note": "The daily-mark NDFL OVER-taxes real estate (a >3yr LDV / primary-residence hold is often price-gain-exempt) \u2014 the assumption that cuts hardest against it. This is the most favourable defensible arm: price WITHOUT NDFL (wrapper TER still charged) + generous 6% rent.",
+   "re_price_taxfree_tr_pct": 32.6,
+   "re_taxfree_plus_generous_rent_tr_pct": 72.96,
+   "taxfree_generous_beats_deposit": true
+  }
+ },
+ "controls": {
+  "re_zero_reproduces_baseline": true
+ },
+ "windows": {
+  "full_window": {
+   "range": [
+    "2022-01-05",
+    "2026-06-10"
+   ],
+   "baseline": {
+    "sharpe": -0.5299222836626842,
+    "sortino": -0.6580415509499743,
+    "maxdd_pct": 30.19037324049255,
+    "total_return_pct": 17.116534568467113,
+    "n_bars": 1109
+   },
+   "variants": {
+    "price_0.05": {
+     "metrics": {
+      "sharpe": -0.5751786684296494,
+      "sortino": -0.7127138005635655,
+      "maxdd_pct": 27.73742303822178,
+      "total_return_pct": 18.95975275256574,
+      "n_bars": 1109
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.45295020227077,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "price_0.10": {
+     "metrics": {
+      "sharpe": -0.6281950282774746,
+      "sortino": -0.776697197614731,
+      "maxdd_pct": 25.234908664460242,
+      "total_return_pct": 20.740208028948736,
+      "n_bars": 1109
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 4.955464576032308,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    },
+    "price_0.15": {
+     "metrics": {
+      "sharpe": -0.6915142021516776,
+      "sortino": -0.853013836164105,
+      "maxdd_pct": 22.682314332980315,
+      "total_return_pct": 22.45670334082277,
+      "n_bars": 1109
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 7.508058907512235,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    },
+    "total_0.05": {
+     "metrics": {
+      "sharpe": -0.5621680733234042,
+      "sortino": -0.6968769609163874,
+      "maxdd_pct": 27.62319837017436,
+      "total_return_pct": 20.023770421454266,
+      "n_bars": 1109
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.56717487031819,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "total_0.10": {
+     "metrics": {
+      "sharpe": -0.5993976587251348,
+      "sortino": -0.7417698105022853,
+      "maxdd_pct": 25.001147310770104,
+      "total_return_pct": 22.907538799993034,
+      "n_bars": 1109
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 5.189225929722446,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    },
+    "total_0.15": {
+     "metrics": {
+      "sharpe": -0.6432749899240933,
+      "sortino": -0.7947358255451479,
+      "maxdd_pct": 22.323617913800824,
+      "total_return_pct": 25.76491318062921,
+      "n_bars": 1109
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 7.866755326691726,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": true
+  },
+  "crash_year_2022": {
+   "range": [
+    "2022-02-21",
+    "2022-12-30"
+   ],
+   "baseline": {
+    "sharpe": -0.8121915538104751,
+    "sortino": -0.9538241113025042,
+    "maxdd_pct": 21.113933733965855,
+    "total_return_pct": -10.87780416520776,
+    "n_bars": 203
+   },
+   "variants": {
+    "price_0.05": {
+     "metrics": {
+      "sharpe": -0.874724059521109,
+      "sortino": -1.0238834501341656,
+      "maxdd_pct": 19.30711269420647,
+      "total_return_pct": -9.885855287059064,
+      "n_bars": 203
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.806821039759385,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "price_0.10": {
+     "metrics": {
+      "sharpe": -0.9466672015178051,
+      "sortino": -1.104584129586151,
+      "maxdd_pct": 17.488179132958614,
+      "total_return_pct": -8.9216968735381,
+      "n_bars": 203
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 3.625754601007241,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    },
+    "price_0.15": {
+     "metrics": {
+      "sharpe": -1.0313739572607532,
+      "sortino": -1.1996991130552768,
+      "maxdd_pct": 15.657015111269432,
+      "total_return_pct": -7.985450833801034,
+      "n_bars": 203
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 5.456918622696423,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    },
+    "total_0.05": {
+     "metrics": {
+      "sharpe": -0.8667598231923215,
+      "sortino": -1.0147544594654796,
+      "maxdd_pct": 19.200696029412022,
+      "total_return_pct": -9.725767871646706,
+      "n_bars": 203
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.913237704553833,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "total_0.10": {
+     "metrics": {
+      "sharpe": -0.9289995454029435,
+      "sortino": -1.084439279939972,
+      "maxdd_pct": 17.272899709200406,
+      "total_return_pct": -8.599685700822878,
+      "n_bars": 203
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 3.841034024765449,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    },
+    "total_0.15": {
+     "metrics": {
+      "sharpe": -1.00169995754569,
+      "sortino": -1.1660522707868946,
+      "maxdd_pct": 15.330425356965474,
+      "total_return_pct": -7.499737809565543,
+      "n_bars": 203
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 5.783508377000381,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": true
+  },
+  "high_rate_2024_25": {
+   "range": [
+    "2024-01-01",
+    "2025-06-05"
+   ],
+   "baseline": {
+    "sharpe": -0.5197578005986458,
+    "sortino": -0.7470116460758134,
+    "maxdd_pct": 14.455337704801341,
+    "total_return_pct": 9.21864939341923,
+    "n_bars": 363
+   },
+   "variants": {
+    "price_0.05": {
+     "metrics": {
+      "sharpe": -0.5767552377538938,
+      "sortino": -0.8258106530074515,
+      "maxdd_pct": 13.124332979503231,
+      "total_return_pct": 9.271233351357111,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.33100472529811,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "price_0.10": {
+     "metrics": {
+      "sharpe": -0.6437897270390269,
+      "sortino": -0.9177600701694923,
+      "maxdd_pct": 11.888678272819494,
+      "total_return_pct": 9.320483689230263,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.566659431981847,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "price_0.15": {
+     "metrics": {
+      "sharpe": -0.7239095795483262,
+      "sortino": -1.0266374951425836,
+      "maxdd_pct": 10.711934129278992,
+      "total_return_pct": 9.367061389913589,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 3.743403575522349,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    },
+    "total_0.05": {
+     "metrics": {
+      "sharpe": -0.5609084238802876,
+      "sortino": -0.8037655332197752,
+      "maxdd_pct": 13.018184079069883,
+      "total_return_pct": 9.579712276490348,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.437153625731458,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "total_0.10": {
+     "metrics": {
+      "sharpe": -0.6088467142646928,
+      "sortino": -0.869486192940684,
+      "maxdd_pct": 11.77667534149473,
+      "total_return_pct": 9.939047320999439,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.678662363306611,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "total_0.15": {
+     "metrics": {
+      "sharpe": -0.6656314364061474,
+      "sortino": -0.9467798427520376,
+      "maxdd_pct": 10.54296902143895,
+      "total_return_pct": 10.296735347979947,
+      "n_bars": 363
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 3.912368683362391,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    }
+   },
+   "n1_caveat": false
+  },
+  "easing_2025_26": {
+   "range": [
+    "2025-06-06",
+    "2026-06-10"
+   ],
+   "baseline": {
+    "sharpe": -0.9402106000870144,
+    "sortino": -1.298413340111092,
+    "maxdd_pct": 9.705462519324497,
+    "total_return_pct": 3.312936101186481,
+    "n_bars": 257
+   },
+   "variants": {
+    "price_0.05": {
+     "metrics": {
+      "sharpe": -0.9467699483758019,
+      "sortino": -1.305037243383124,
+      "maxdd_pct": 8.681707417739226,
+      "total_return_pct": 4.240807842449401,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.023755101585271,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "price_0.10": {
+     "metrics": {
+      "sharpe": -0.9533236647488009,
+      "sortino": -1.3112570212979708,
+      "maxdd_pct": 7.646769988874569,
+      "total_return_pct": 5.172234553724686,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.058692530449928,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": false
+     }
+    },
+    "price_0.15": {
+     "metrics": {
+      "sharpe": -0.959617977082644,
+      "sortino": -1.3167216936715775,
+      "maxdd_pct": 6.6005015223261605,
+      "total_return_pct": 6.107226322855697,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 3.1049609969983365,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": false
+     }
+    },
+    "total_0.05": {
+     "metrics": {
+      "sharpe": -0.926470490478041,
+      "sortino": -1.278299963338633,
+      "maxdd_pct": 8.642343660877778,
+      "total_return_pct": 4.456545334059836,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 1.063118858446719,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": true
+     }
+    },
+    "total_0.10": {
+     "metrics": {
+      "sharpe": -0.9087229219466525,
+      "sortino": -1.2525741285296002,
+      "maxdd_pct": 7.5676645069112665,
+      "total_return_pct": 5.607128206648593,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": false,
+      "maxdd_cut_pp": 2.1377980124132305,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": false,
+      "sortino_ok": true
+     }
+    },
+    "total_0.15": {
+     "metrics": {
+      "sharpe": -0.8854771208439486,
+      "sortino": -1.2192777591982793,
+      "maxdd_pct": 6.48127905729867,
+      "total_return_pct": 6.764714422057838,
+      "n_bars": 257
+     },
+     "diversification": {
+      "diversifies": true,
+      "maxdd_cut_pp": 3.224183462025827,
+      "maxdd_cut_min_pp": 3.0,
+      "maxdd_ok": true,
+      "sortino_ok": true
+     }
+    }
+   },
+   "n1_caveat": true
+  }
+ },
+ "binding": {
+  "verdict": "SMOOTHED_ILLIQUID_DIVERSIFIER_DEPOSIT_DOMINATED",
+  "finding": "Real estate (MREDC) is the STRONGEST of the three candidates \u2014 the only income-payer, and a genuine equity DIVERSIFIER (corr vs equity=0.004<0.5, vs deposit leg=0.042); over 2022-2026 residential price even BEAT equity (MCFTRR net was negative). BUT it is NOT a robust deposit-beater. Charging the investable rental-ZPIF wrapper fee (2.0%/yr, which the bare index hides), the MEASURED price-only investable form returns 19.9% vs the 100%-deposit 59.7% -> price_beats_deposit=False (deposit-dominated). A realistic 4% net rent -> 43.1% (does NOT close the gap); a generous 6% commercial-grade net rent -> 56.3% (does NOT close the gap) \u2014 and even that generous case rests on TWO fragile props: (1) MREDC is SMOOTHED (52 bars/yr ~weekly vs equity 250 ~daily) so its near-zero correlation and low drawdown are partly APPRAISAL ARTIFACTS an illiquid ZPIF would expose; (2) the ~+8.5%/yr appreciation was largely SUBSIDISED-MORTGAGE (lgotnaya ipoteka) driven, a policy now wound down -> NOT a forward expectation. Verdict: SMOOTHED_ILLIQUID_DIVERSIFIER_DEPOSIT_DOMINATED. Same family conclusion as gold/ZO: in the 16-21% rate regime the deposit anchor holds; real estate is a policy-driven, illiquid, smoothed income-diversifier, NOT a robust deposit-beater (N=1 easing cycle, one atypical sticky-price crash)."
+ }
+}
