@@ -1,0 +1,274 @@
+{
+ "binding": {
+  "verdict": "NEWS_REACTION__REACTIVE_ALPHA_BELOW_FRICTIONS__UNCAPTURABLE_NET",
+  "finding": "On 4.0 coin-years of real 1-minute BTC/ETH data, 1218 up-shocks and 1206 down-shocks at >=6-sigma (~605.6/yr). This tests the operator's question directly: after a large 1-minute move fires, is our news pipeline's failure a LATENCY problem or is there simply no edge? A reactive bot enters the ALREADY-STARTED move, so the honest metric is the forward path from the shock bar's close. The MEAN up-shock path is mildly positive (-1.09bps at t+1min, 1.39bps at t+5, 6.56bps at t+30) \u2014 but the outlier-robust MEDIAN is NEGATIVE at every horizon (-1.53/-2.02/-4.49bps) and the reactive long win-rate is 49.4%. So the positive mean is a FAT-TAIL ARTIFACT: the typical shock reverses, and a few big-continuation shocks drag the average up (same lottery character as crypto TSMOM) \u2014 continuation half-life 12 min. That alone makes it un-harvestable, and cost buries it regardless: the maximally reactive entry (t+1min, best exit) captures only 7.64bps TRUE gross (no cost/no tax; even zero trading-cost but post-NDFL is 6.65bps); net of a realistic 20bps round-trip + 13% NDFL it is -12.36bps, our-pipeline latency (t+5min) -14.84bps, slow (t+15min) -16.96bps \u2014 negative at EVERY latency and every non-zero cost tier. So the answer to 'are we slow, or is there no edge?' is BOTH-but-latency-is-second-order: the ladder confirms faster captures more gross (a real decay), yet even zero-latency zero-cost yields single-digit bps that frictions erase, so we cannot win this race. VERDICT **REACTIVE_ALPHA_BELOW_FRICTIONS__UNCAPTURABLE_NET**. HONEST LIMITS: a 1-minute move is a PROXY for a news event (most 6-sigma moves in liquid BTC/ETH are info-driven, but some are liquidations/microstructure); this measures continuation available to a reactor regardless of cause, which is exactly the reactive-capturability question. Down-shocks are reported sign-aligned but are SHORT-only (not spot-retail-capturable). Minute-close sampling understates intra-minute slippage during a shock (conservative against any edge); true sub-second colocated HFT is a different regime this 1-minute panel cannot resolve and an LLM/RSS pipeline can never reach. Deposit context (honest): annualising the zero-cost net over ~304.3 up-shocks/coin-yr gives a frictionless UPPER BOUND of ~20.2%/yr \u2014 SAME ORDER as the 16-21%/yr deposit, NOT a rounding error. But that ceiling is unreachable on two counts: you cannot harvest the mean (median reverses, win-rate < 50%), and any realistic cost turns every ladder cell deeply negative. So the deposit anchor holds via COST + fat-tail-unharvestability, not a negligible magnitude."
+ },
+ "analysis": {
+  "window": {
+   "start": "2024-01-01",
+   "end_exclusive": "2026-01-01"
+  },
+  "coverage": {
+   "BTCUSDT": {
+    "bars": 1052641,
+    "first": "2024-01-01T00:00:00+00:00",
+    "last": "2026-01-01T00:00:00+00:00",
+    "shocks": 2368
+   },
+   "ETHUSDT": {
+    "bars": 1052641,
+    "first": "2024-01-01T00:00:00+00:00",
+    "last": "2026-01-01T00:00:00+00:00",
+    "shocks": 2307
+   }
+  },
+  "coin_years": 4.0,
+  "params": {
+   "primary_z": 6,
+   "z_sweep": [
+    5,
+    6,
+    8
+   ],
+   "entry_latencies_min": [
+    1,
+    2,
+    5,
+    15
+   ],
+   "exit_horizons_min": [
+    30,
+    60,
+    120
+   ],
+   "primary_cost_bps": 20,
+   "ndfl_rate": "0.13",
+   "vol_window_min": 60
+  },
+  "by_z": {
+   "5": {
+    "n_up": 2387,
+    "n_down": 2288,
+    "shocks_per_year": 1167.9,
+    "up_decay_mean_bps": {
+     "t+1": -0.33,
+     "t+5": 1.31,
+     "t+15": 1.94,
+     "t+30": 3.27,
+     "t+60": 2.24,
+     "t+120": 4.76
+    },
+    "up_decay_median_bps": {
+     "t+1": -1.19,
+     "t+5": -1.46,
+     "t+15": -2.69,
+     "t+30": -3.3,
+     "t+60": -4.32,
+     "t+120": -3.92
+    },
+    "down_aligned_decay_mean_bps": {
+     "t+1": -4.15,
+     "t+5": -5.15,
+     "t+15": -3.6,
+     "t+30": -3.06,
+     "t+60": -5.01,
+     "t+120": -4.57
+    },
+    "pooled_aligned_decay_mean_bps": {
+     "t+1": -2.2,
+     "t+5": -1.85,
+     "t+15": -0.77,
+     "t+30": 0.17,
+     "t+60": -1.31,
+     "t+120": 0.19
+    },
+    "up_continuation_half_life_min": 25,
+    "pooled_continuation_half_life_min": 30,
+    "up_reactive_win_rate": 0.473
+   },
+   "6": {
+    "n_up": 1218,
+    "n_down": 1206,
+    "shocks_per_year": 605.6,
+    "up_decay_mean_bps": {
+     "t+1": -1.09,
+     "t+5": 1.39,
+     "t+15": 3.52,
+     "t+30": 6.56,
+     "t+60": 5.42,
+     "t+120": 6.33
+    },
+    "up_decay_median_bps": {
+     "t+1": -1.53,
+     "t+5": -1.6,
+     "t+15": -2.41,
+     "t+30": -2.02,
+     "t+60": -3.42,
+     "t+120": -4.49
+    },
+    "down_aligned_decay_mean_bps": {
+     "t+1": -6.95,
+     "t+5": -8.23,
+     "t+15": -7.23,
+     "t+30": -6.63,
+     "t+60": -9.77,
+     "t+120": -9.2
+    },
+    "pooled_aligned_decay_mean_bps": {
+     "t+1": -4.0,
+     "t+5": -3.4,
+     "t+15": -1.82,
+     "t+30": -0.0,
+     "t+60": -2.14,
+     "t+120": -1.4
+    },
+    "up_continuation_half_life_min": 12,
+    "pooled_continuation_half_life_min": null,
+    "up_reactive_win_rate": 0.494
+   },
+   "8": {
+    "n_up": 443,
+    "n_down": 402,
+    "shocks_per_year": 211.1,
+    "up_decay_mean_bps": {
+     "t+1": -1.25,
+     "t+5": 3.34,
+     "t+15": 6.97,
+     "t+30": 8.7,
+     "t+60": 10.98,
+     "t+120": 8.38
+    },
+    "up_decay_median_bps": {
+     "t+1": -1.66,
+     "t+5": -2.87,
+     "t+15": -1.62,
+     "t+30": -1.15,
+     "t+60": -1.87,
+     "t+120": -3.92
+    },
+    "down_aligned_decay_mean_bps": {
+     "t+1": -14.79,
+     "t+5": -15.95,
+     "t+15": -14.97,
+     "t+30": -17.04,
+     "t+60": -12.88,
+     "t+120": -13.93
+    },
+    "pooled_aligned_decay_mean_bps": {
+     "t+1": -7.69,
+     "t+5": -5.84,
+     "t+15": -3.47,
+     "t+30": -3.55,
+     "t+60": -0.37,
+     "t+120": -2.23
+    },
+    "up_continuation_half_life_min": 10,
+    "pooled_continuation_half_life_min": null,
+    "up_reactive_win_rate": 0.503
+   }
+  },
+  "primary_up_ladder_net_bps": {
+   "cost0bps": {
+    "entry1": {
+     "exit30": 6.65,
+     "exit60": 5.66,
+     "exit120": 6.45
+    },
+    "entry2": {
+     "exit30": 6.26,
+     "exit60": 5.27,
+     "exit120": 6.05
+    },
+    "entry5": {
+     "exit30": 4.49,
+     "exit60": 3.48,
+     "exit120": 4.24
+    },
+    "entry15": {
+     "exit30": 2.65,
+     "exit60": 1.63,
+     "exit120": 2.37
+    }
+   },
+   "cost10bps": {
+    "entry1": {
+     "exit30": -2.36,
+     "exit60": -3.5,
+     "exit120": -2.59
+    },
+    "entry2": {
+     "exit30": -2.81,
+     "exit60": -3.95,
+     "exit120": -3.05
+    },
+    "entry5": {
+     "exit30": -4.84,
+     "exit60": -6.0,
+     "exit120": -5.12
+    },
+    "entry15": {
+     "exit30": -6.96,
+     "exit60": -8.12,
+     "exit120": -7.28
+    }
+   },
+   "cost20bps": {
+    "entry1": {
+     "exit30": -12.36,
+     "exit60": -13.5,
+     "exit120": -12.59
+    },
+    "entry2": {
+     "exit30": -12.81,
+     "exit60": -13.95,
+     "exit120": -13.05
+    },
+    "entry5": {
+     "exit30": -14.84,
+     "exit60": -16.0,
+     "exit120": -15.12
+    },
+    "entry15": {
+     "exit30": -16.96,
+     "exit60": -18.12,
+     "exit120": -17.28
+    }
+   },
+   "cost30bps": {
+    "entry1": {
+     "exit30": -22.36,
+     "exit60": -23.5,
+     "exit120": -22.59
+    },
+    "entry2": {
+     "exit30": -22.81,
+     "exit60": -23.95,
+     "exit120": -23.05
+    },
+    "entry5": {
+     "exit30": -24.84,
+     "exit60": -26.0,
+     "exit120": -25.12
+    },
+    "entry15": {
+     "exit30": -26.96,
+     "exit60": -28.12,
+     "exit120": -27.28
+    }
+   }
+  },
+  "money_numbers_bps": {
+   "reactive_t1_best_net": -12.36,
+   "reactive_t1_best_exit_min": 30,
+   "reactive_t1_true_gross_best": 7.64,
+   "reactive_t1_zero_cost_net_best": 6.65,
+   "our_pipeline_t5_best_net": -14.84,
+   "slow_t15_best_net": -16.96,
+   "up_continuation_half_life_min": 12,
+   "up_shocks_per_year": 304.3,
+   "frictionless_annualised_upper_bound_pct": 20.2
+  },
+  "verdict": "REACTIVE_ALPHA_BELOW_FRICTIONS__UNCAPTURABLE_NET"
+ },
+ "disclaimer": "Measurement only on public read-only data. Authorises no order; real-money execution is a hard stop. A 1-minute shock is a proxy for a news event; sub-second colocated HFT is out of scope and unreachable for an LLM/RSS pipeline."
+}
