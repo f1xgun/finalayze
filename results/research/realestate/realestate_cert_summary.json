@@ -511,6 +511,27 @@
    "n1_caveat": true
   }
  },
+ "integration_gate": {
+  "tier": "REJECT",
+  "proposed_weight": "0",
+  "carved_from": "equity",
+  "n1_caveat": false,
+  "reasons": [
+   "no measurable net benefit over the deposit+equity core"
+  ],
+  "scorecard": {
+   "window_bars": 1109,
+   "regimes_covered": 2,
+   "tail_backtestable": true,
+   "marginal_sharpe_delta": -0.0695,
+   "marginal_sortino_delta": -0.0837,
+   "marginal_maxdd_delta_pp": 5.189,
+   "crash_year_maxdd_delta_pp": -5.189,
+   "toehold_sortino_delta": -0.0227,
+   "max_corr_to_existing_legs": 0.0425,
+   "anti_hollow_ok": true
+  }
+ },
  "binding": {
   "verdict": "SMOOTHED_ILLIQUID_DIVERSIFIER_DEPOSIT_DOMINATED",
   "finding": "Real estate (MREDC) is the STRONGEST of the three candidates \u2014 the only income-payer, and a genuine equity DIVERSIFIER (corr vs equity=0.004<0.5, vs deposit leg=0.042); over 2022-2026 residential price even BEAT equity (MCFTRR net was negative). BUT it is NOT a robust deposit-beater. Charging the investable rental-ZPIF wrapper fee (2.0%/yr, which the bare index hides), the MEASURED price-only investable form returns 19.9% vs the 100%-deposit 59.7% -> price_beats_deposit=False (deposit-dominated). A realistic 4% net rent -> 43.1% (does NOT close the gap); a generous 6% commercial-grade net rent -> 56.3% (does NOT close the gap) \u2014 and even that generous case rests on TWO fragile props: (1) MREDC is SMOOTHED (52 bars/yr ~weekly vs equity 250 ~daily) so its near-zero correlation and low drawdown are partly APPRAISAL ARTIFACTS an illiquid ZPIF would expose; (2) the ~+8.5%/yr appreciation was largely SUBSIDISED-MORTGAGE (lgotnaya ipoteka) driven, a policy now wound down -> NOT a forward expectation. Verdict: SMOOTHED_ILLIQUID_DIVERSIFIER_DEPOSIT_DOMINATED. Same family conclusion as gold/ZO: in the 16-21% rate regime the deposit anchor holds; real estate is a policy-driven, illiquid, smoothed income-diversifier, NOT a robust deposit-beater (N=1 easing cycle, one atypical sticky-price crash)."

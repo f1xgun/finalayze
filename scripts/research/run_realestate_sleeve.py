@@ -47,6 +47,7 @@ from finalayze.backtest.gold_sleeve_lab import (
     forward_align_legs,
     master_axis,
 )
+from finalayze.backtest.instrument_integration_gate import Candidate, run_integration_gate
 from finalayze.backtest.realestate_sleeve_lab import accrue_rental_yield, bars_per_year
 from finalayze.core.ndfl import YtdTaxAccumulator
 
@@ -283,6 +284,41 @@ def main() -> None:  # noqa: PLR0915 — single linear cert script
         f"NOT a robust deposit-beater (N=1 easing cycle, one atypical sticky-price crash)."
     )
 
+    # ── Canonical Instrument Integration Gate (battery-comparable) ─────────────────
+    # Run real estate through the SAME pre-registered gate the beyond-edge battery used
+    # (gold -> REJECT, ZO -> PROBATION) so the verdict is directly comparable. Candidate = the
+    # INVESTABLE net curve (price + wrapper TER + base rent). MREDC spans the 2022 crash, so its
+    # tail IS backtestable -> unlike ZO it is held to the strict INTEGRATE bar and CANNOT take the
+    # PROBATION tail-untestable toe-hold. Real estate is a medium-risk diversifier (carved from
+    # equity). No hook, no pre-baked literal — the gate scores the real blended curves.
+    gate_candidate = Candidate(
+        name="real_estate_mredc",
+        net_curve=re_total_curve,
+        risk_tier="medium",
+        intended_role="diversifier",
+    )
+    gate_verdict = run_integration_gate(gate_candidate, equity_raw)
+    sc = gate_verdict.scorecard
+    gate = {
+        "tier": gate_verdict.tier,
+        "proposed_weight": str(gate_verdict.proposed_weight),
+        "carved_from": gate_verdict.carved_from,
+        "n1_caveat": gate_verdict.n1_caveat,
+        "reasons": gate_verdict.reasons,
+        "scorecard": {
+            "window_bars": sc.window_bars,
+            "regimes_covered": sc.regimes_covered,
+            "tail_backtestable": sc.tail_backtestable,
+            "marginal_sharpe_delta": round(sc.marginal_sharpe_delta, 4),
+            "marginal_sortino_delta": round(sc.marginal_sortino_delta, 4),
+            "marginal_maxdd_delta_pp": round(sc.marginal_maxdd_delta_pp, 3),
+            "crash_year_maxdd_delta_pp": round(sc.crash_year_maxdd_delta_pp, 3),
+            "toehold_sortino_delta": round(sc.toehold_sortino_delta, 4),
+            "max_corr_to_existing_legs": round(sc.max_corr_to_existing_legs, 4),
+            "anti_hollow_ok": sc.anti_hollow_ok,
+        },
+    }
+
     summary = {
         "window": {"start": axis[0].isoformat(), "end": axis[-1].isoformat(), "n_bars": len(axis)},
         "weights": {
@@ -340,6 +376,7 @@ def main() -> None:  # noqa: PLR0915 — single linear cert script
         },
         "controls": {"re_zero_reproduces_baseline": zero_ok},
         "windows": rows,
+        "integration_gate": gate,
         "binding": {"verdict": verdict, "finding": finding},
     }
     _DIR.mkdir(parents=True, exist_ok=True)
@@ -365,6 +402,25 @@ def main() -> None:  # noqa: PLR0915 — single linear cert script
         f"## BINDING VERDICT: **{verdict}**",
         "",
         finding,
+        "",
+        "## Canonical Instrument Integration Gate (battery-comparable)",
+        "Same pre-registered gate as the beyond-edge battery (gold -> REJECT, ZO -> PROBATION). "
+        "MREDC's tail IS backtestable, so real estate is held to the strict INTEGRATE bar and "
+        "cannot take ZO's tail-untestable PROBATION toe-hold.",
+        "",
+        f"**GATE TIER: `{gate['tier']}`** (proposed weight {gate['proposed_weight']}, carved from "
+        f"{gate['carved_from']}) — {'; '.join(gate['reasons'])}",  # type: ignore[arg-type]
+        "",
+        "| scorecard | value |",
+        "| --- | ---: |",
+        f"| window bars / regimes | {sc.window_bars} / {sc.regimes_covered} |",
+        f"| tail backtestable | {sc.tail_backtestable} |",
+        f"| Δ Sharpe (10% eval) | {sc.marginal_sharpe_delta:+.3f} |",
+        f"| Δ Sortino (10% eval) | {sc.marginal_sortino_delta:+.3f} |",
+        f"| Δ MaxDD pp (+ = cut) | {sc.marginal_maxdd_delta_pp:+.2f} |",
+        f"| crash-year Δ MaxDD pp (+ = raised) | {sc.crash_year_maxdd_delta_pp:+.2f} |",
+        f"| toe-hold Δ Sortino (3%) | {sc.toehold_sortino_delta:+.3f} |",
+        f"| max \\|corr\\| to existing legs | {sc.max_corr_to_existing_legs:.3f} |",
         "",
         "## Correlation & deposit anchor",
         "| measure | value |",
@@ -409,6 +465,11 @@ def main() -> None:  # noqa: PLR0915 — single linear cert script
     (_DIR / "realestate_cert_report.md").write_text("\n".join(md), encoding="utf-8")
 
     print(f"BINDING VERDICT: {verdict}")
+    print(
+        f"  INTEGRATION GATE TIER: {gate['tier']} (weight {gate['proposed_weight']}) — "
+        f"dSharpe={sc.marginal_sharpe_delta:+.3f} dSortino={sc.marginal_sortino_delta:+.3f} "
+        f"dMaxDD={sc.marginal_maxdd_delta_pp:+.2f}pp tail_bt={sc.tail_backtestable}"
+    )
     print(
         f"  corr_eq={_f(corr_eq)} corr_dep={_f(corr_dep)} smoothed={smoothed} "
         f"re_freq={re_freq:.0f}/yr eq_freq={eq_freq:.0f}/yr"

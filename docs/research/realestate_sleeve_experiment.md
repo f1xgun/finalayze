@@ -1,13 +1,15 @@
 # Real-Estate Sleeve Experiment — beyond-MOEX-edge R&D, Phase C
 
-**Status:** complete · **Verdict:** `SMOOTHED_ILLIQUID_DIVERSIFIER_DEPOSIT_DOMINATED` —
+**Status:** complete · **Verdict:** `SMOOTHED_ILLIQUID_DIVERSIFIER_DEPOSIT_DOMINATED` ·
+**Canonical Instrument Integration Gate = `REJECT`** (same as gold; ЗО got PROBATION) —
 real estate (index `MREDC`) is the **strongest of the three "new asset class" candidates**
-(the only income-payer, and a genuine equity diversifier that *beat* equity 2022–2026) but it
-is **NOT a robust deposit-beater**: once the investable rental-ЗПИФ wrapper fee is charged its
-price-only return is crushed by the deposit, and even a generous rental assumption fails to
-close the gap. Its low measured risk is partly a **weekly-smoothing artifact** and its
-appreciation was largely a **subsidised-mortgage (льготная ипотека) policy** now wound down. ·
-**Deposit anchor holds.** · diagnostic / backtest-only — no real money touched.
+(the only income-payer, a genuine equity diversifier that *beat* equity 2022–2026, and the
+biggest de-risker — it cuts book MaxDD **+5.19pp**, more than gold) but it is **NOT a robust
+deposit-beater**: once the investable rental-ЗПИФ wrapper fee is charged its price-only return
+is crushed by the deposit, and even a generous rental assumption fails to close the gap. Its
+low measured risk is partly a **weekly-smoothing artifact** and its appreciation was largely a
+**subsidised-mortgage (льготная ипотека) policy** now wound down. · **Deposit anchor holds.** ·
+diagnostic / backtest-only — no real money touched.
 
 ## Why this experiment
 
@@ -72,6 +74,23 @@ The pre-registered question is **diversification + income, never alpha**:
 | **price beats deposit? / base rent? / generous rent?** | **False / False / False** | deposit-dominated |
 
 Full per-window blend table: `results/research/realestate/realestate_cert_report.md`.
+
+### Canonical integration gate (battery-comparable)
+
+Real estate was also run through the **same pre-registered `instrument_integration_gate`** the
+beyond-edge battery used, so its verdict sits directly alongside the others:
+
+| candidate | gate tier | why |
+| --- | --- | --- |
+| gold | REJECT | worsens Sortino; MaxDD cut under the bar in the crash year |
+| ЗО (RURPLRUBTR) | PROBATION | uncorrelated FX hedge, tail **un-backtestable** → 3% forward toe-hold |
+| **real estate (MREDC)** | **REJECT** | cuts MaxDD **+5.19pp** (the biggest de-risker) but Δ Sortino **−0.084**; tail **IS** backtestable → held to the strict INTEGRATE bar, no PROBATION escape |
+
+The gate scorecard (10% eval weight): Δ Sharpe −0.069, Δ Sortino −0.084, Δ MaxDD **+5.19pp**
+(cut), crash-year Δ MaxDD −3.8pp (also cut), max |corr| to existing legs 0.04. Real estate is
+the **strongest de-risker of the three** — but a zero-real-yield-relative Sortino drag against
+the deposit basis, plus a fully backtestable tail (so no toe-hold), lands it in REJECT with gold.
+The proposed config weight is therefore **0**.
 
 **Blend nuance (honest, both directions):** within the deposit40/equity60 frame, adding real
 estate *did* help the equity sleeve — it **cut portfolio MaxDD 3–7.5pp** (full 30.2%→22.7% at

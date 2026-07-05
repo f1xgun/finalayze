@@ -9,6 +9,22 @@ Base = deposit 0.4 / equity 0.6; real estate (MREDC) carved from equity (sweep [
 
 Real estate (MREDC) is the STRONGEST of the three candidates — the only income-payer, and a genuine equity DIVERSIFIER (corr vs equity=0.004<0.5, vs deposit leg=0.042); over 2022-2026 residential price even BEAT equity (MCFTRR net was negative). BUT it is NOT a robust deposit-beater. Charging the investable rental-ZPIF wrapper fee (2.0%/yr, which the bare index hides), the MEASURED price-only investable form returns 19.9% vs the 100%-deposit 59.7% -> price_beats_deposit=False (deposit-dominated). A realistic 4% net rent -> 43.1% (does NOT close the gap); a generous 6% commercial-grade net rent -> 56.3% (does NOT close the gap) — and even that generous case rests on TWO fragile props: (1) MREDC is SMOOTHED (52 bars/yr ~weekly vs equity 250 ~daily) so its near-zero correlation and low drawdown are partly APPRAISAL ARTIFACTS an illiquid ZPIF would expose; (2) the ~+8.5%/yr appreciation was largely SUBSIDISED-MORTGAGE (lgotnaya ipoteka) driven, a policy now wound down -> NOT a forward expectation. Verdict: SMOOTHED_ILLIQUID_DIVERSIFIER_DEPOSIT_DOMINATED. Same family conclusion as gold/ZO: in the 16-21% rate regime the deposit anchor holds; real estate is a policy-driven, illiquid, smoothed income-diversifier, NOT a robust deposit-beater (N=1 easing cycle, one atypical sticky-price crash).
 
+## Canonical Instrument Integration Gate (battery-comparable)
+Same pre-registered gate as the beyond-edge battery (gold -> REJECT, ZO -> PROBATION). MREDC's tail IS backtestable, so real estate is held to the strict INTEGRATE bar and cannot take ZO's tail-untestable PROBATION toe-hold.
+
+**GATE TIER: `REJECT`** (proposed weight 0, carved from equity) — no measurable net benefit over the deposit+equity core
+
+| scorecard | value |
+| --- | ---: |
+| window bars / regimes | 1109 / 2 |
+| tail backtestable | True |
+| Δ Sharpe (10% eval) | -0.069 |
+| Δ Sortino (10% eval) | -0.084 |
+| Δ MaxDD pp (+ = cut) | +5.19 |
+| crash-year Δ MaxDD pp (+ = raised) | -5.19 |
+| toe-hold Δ Sortino (3%) | -0.023 |
+| max \|corr\| to existing legs | 0.043 |
+
 ## Correlation & deposit anchor
 | measure | value |
 | --- | ---: |
