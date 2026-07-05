@@ -1,0 +1,363 @@
+{
+  "verdict": "JUMP_UNCAPTURABLE__POST_SHOCK_LONG_DRIFT_NOT_SYSTEMATICALLY_CAPTURABLE",
+  "jump_finding": "JUMP_UNCAPTURABLE",
+  "drift_finding": "POST_SHOCK_LONG_DRIFT_NOT_SYSTEMATICALLY_CAPTURABLE",
+  "params": {
+    "horizons": [
+      1,
+      3,
+      5,
+      10
+    ],
+    "primary_horizon": 5,
+    "per_side_cost": "0.0055",
+    "ndfl": "0.13",
+    "deposit_ref_pct": 0.3
+  },
+  "events": [
+    {
+      "key": "gazp_div_cancel_2022",
+      "label": "GAZP 2021 dividend cancelled (AGM)",
+      "anchor": "2022-06-30",
+      "direction": -1,
+      "entry_mode": "intraday",
+      "note": "Shareholders voted down the record 2021 dividend intraday; single-name shock.",
+      "retail_long_accessible": false,
+      "per_ticker": [
+        {
+          "ticker": "GAZP",
+          "reaction_raw_pct": -30.455232655803798,
+          "reaction_abn_pct": -23.152464162393947,
+          "prediction_correct": true,
+          "confounded": false,
+          "retail_long_accessible": false,
+          "missed_jump_pct": 25.05076152662831,
+          "jump_share_realistic": 0.9237159162751334,
+          "jump_share_aggressive": 0.8537185436482572,
+          "drift_net_by_h_pct": {
+            "1": 2.81162042207499,
+            "3": 1.5356244989015468,
+            "5": 1.2699131774277201,
+            "10": 0.6132990833865941
+          },
+          "beats_deposit_by_h": {
+            "1": false,
+            "3": false,
+            "5": false,
+            "10": false
+          },
+          "deposit_carry_h5_pct": 0.12156164383561643
+        }
+      ],
+      "median_missed_jump_pct": 25.05076152662831,
+      "median_drift_net_h5_pct": 1.2699131774277201,
+      "prediction_correct_count": "1/1"
+    },
+    {
+      "key": "fuel_export_ban_2023",
+      "label": "Gasoline/diesel export ban",
+      "anchor": "2023-09-21",
+      "direction": -1,
+      "entry_mode": "intraday",
+      "note": "Government banned fuel exports (operator's fuel example); DIRECTION AMBIGUOUS.",
+      "retail_long_accessible": false,
+      "per_ticker": [
+        {
+          "ticker": "ROSN",
+          "reaction_raw_pct": -4.03324832341551,
+          "reaction_abn_pct": -2.4384762294826836,
+          "prediction_correct": true,
+          "confounded": false,
+          "retail_long_accessible": false,
+          "missed_jump_pct": 1.7559104714403937,
+          "jump_share_realistic": null,
+          "jump_share_aggressive": null,
+          "drift_net_by_h_pct": {
+            "1": -0.5651972226400144,
+            "3": -1.2378896772904644,
+            "5": -2.854102268195138,
+            "10": -1.8817316253849834
+          },
+          "beats_deposit_by_h": {
+            "1": false,
+            "3": false,
+            "5": false,
+            "10": false
+          },
+          "deposit_carry_h5_pct": 0.17161643835616439
+        },
+        {
+          "ticker": "LKOH",
+          "reaction_raw_pct": -0.6850381441693912,
+          "reaction_abn_pct": 0.9097339497634347,
+          "prediction_correct": false,
+          "confounded": false,
+          "retail_long_accessible": false,
+          "missed_jump_pct": -1.494720727971503,
+          "jump_share_realistic": 0.6910394232271235,
+          "jump_share_aggressive": 0.4205882825936448,
+          "drift_net_by_h_pct": {
+            "1": -1.3240427755163626,
+            "3": 0.3954241279616496,
+            "5": -1.7121854826315925,
+            "10": -2.1087665542969734
+          },
+          "beats_deposit_by_h": {
+            "1": false,
+            "3": false,
+            "5": false,
+            "10": false
+          },
+          "deposit_carry_h5_pct": 0.17161643835616439
+        },
+        {
+          "ticker": "SIBN",
+          "reaction_raw_pct": -3.315164638243859,
+          "reaction_abn_pct": -1.7203925443110328,
+          "prediction_correct": true,
+          "confounded": false,
+          "retail_long_accessible": false,
+          "missed_jump_pct": 1.1169851623403,
+          "jump_share_realistic": null,
+          "jump_share_aggressive": null,
+          "drift_net_by_h_pct": {
+            "1": -1.506884020295723,
+            "3": -1.8551961896951914,
+            "5": -3.9540454916342016,
+            "10": -6.617296651695708
+          },
+          "beats_deposit_by_h": {
+            "1": false,
+            "3": false,
+            "5": false,
+            "10": false
+          },
+          "deposit_carry_h5_pct": 0.17161643835616439
+        },
+        {
+          "ticker": "TATN",
+          "reaction_raw_pct": -2.3210199411572408,
+          "reaction_abn_pct": -0.7262478472244149,
+          "prediction_correct": true,
+          "confounded": true,
+          "retail_long_accessible": false,
+          "missed_jump_pct": 0.5195752112958723,
+          "jump_share_realistic": null,
+          "jump_share_aggressive": null,
+          "drift_net_by_h_pct": {
+            "1": -2.0950805505294614,
+            "3": -0.7758257369638312,
+            "5": -1.5810997895519219,
+            "10": -3.188257249756843
+          },
+          "beats_deposit_by_h": {
+            "1": false,
+            "3": false,
+            "5": false,
+            "10": false
+          },
+          "deposit_carry_h5_pct": 0.17161643835616439
+        },
+        {
+          "ticker": "SNGS",
+          "reaction_raw_pct": -2.5513698630136985,
+          "reaction_abn_pct": -0.9565977690808727,
+          "prediction_correct": true,
+          "confounded": true,
+          "retail_long_accessible": false,
+          "missed_jump_pct": 0.5491141420056127,
+          "jump_share_realistic": null,
+          "jump_share_aggressive": null,
+          "drift_net_by_h_pct": {
+            "1": -0.4164990484693982,
+            "3": -0.5835860534752985,
+            "5": -3.217213385493716,
+            "10": -15.285573560219106
+          },
+          "beats_deposit_by_h": {
+            "1": false,
+            "3": false,
+            "5": false,
+            "10": false
+          },
+          "deposit_carry_h5_pct": 0.17161643835616439
+        },
+        {
+          "ticker": "GAZP",
+          "reaction_raw_pct": -1.92773934125717,
+          "reaction_abn_pct": -0.3329672473243439,
+          "prediction_correct": true,
+          "confounded": true,
+          "retail_long_accessible": false,
+          "missed_jump_pct": -0.13143604701782427,
+          "jump_share_realistic": null,
+          "jump_share_aggressive": 0.3254225917910854,
+          "drift_net_by_h_pct": {
+            "1": -0.15419513336719953,
+            "3": 0.6411231252362871,
+            "5": 0.06077031499613893,
+            "10": 2.561279897880511
+          },
+          "beats_deposit_by_h": {
+            "1": false,
+            "3": false,
+            "5": false,
+            "10": false
+          },
+          "deposit_carry_h5_pct": 0.17161643835616439
+        }
+      ],
+      "median_missed_jump_pct": 0.5343446766507425,
+      "median_drift_net_h5_pct": -2.2831438754133653,
+      "prediction_correct_count": "5/6"
+    },
+    {
+      "key": "vk_appstore_2022",
+      "label": "VK apps pulled from Apple App Store",
+      "anchor": "2022-09-26",
+      "direction": -1,
+      "entry_mode": "intraday",
+      "note": "Operator's VK example; CONFOUNDED by the 21 Sep mobilisation crash.",
+      "retail_long_accessible": false,
+      "per_ticker": [
+        {
+          "ticker": "VKCO",
+          "reaction_raw_pct": -21.343496903287278,
+          "reaction_abn_pct": -13.854035836330961,
+          "prediction_correct": true,
+          "confounded": false,
+          "retail_long_accessible": false,
+          "missed_jump_pct": 12.578090086972843,
+          "jump_share_realistic": null,
+          "jump_share_aggressive": null,
+          "drift_net_by_h_pct": {
+            "1": -11.852249155430206,
+            "3": -6.108849487225091,
+            "5": -12.278334023883009,
+            "10": -15.788251107183395
+          },
+          "beats_deposit_by_h": {
+            "1": false,
+            "3": false,
+            "5": false,
+            "10": false
+          },
+          "deposit_carry_h5_pct": 0.09295890410958904
+        }
+      ],
+      "median_missed_jump_pct": 12.578090086972843,
+      "median_drift_net_h5_pct": -12.278334023883009,
+      "prediction_correct_count": "1/1"
+    },
+    {
+      "key": "sber_div_reco_2023",
+      "label": "SBER record dividend recommended",
+      "anchor": "2023-03-17",
+      "direction": 1,
+      "entry_mode": "intraday",
+      "note": "Supervisory board recommended a record dividend; positive single-name shock.",
+      "retail_long_accessible": true,
+      "per_ticker": [
+        {
+          "ticker": "SBER",
+          "reaction_raw_pct": 10.339127956682816,
+          "reaction_abn_pct": 7.480239097315703,
+          "prediction_correct": true,
+          "confounded": false,
+          "retail_long_accessible": true,
+          "missed_jump_pct": 8.198794961793222,
+          "jump_share_realistic": 0.8098346204528112,
+          "jump_share_aggressive": 0.7388593834216344,
+          "drift_net_by_h_pct": {
+            "1": 0.24635429458189276,
+            "3": -0.0018990226805121922,
+            "5": 0.3833366107102332,
+            "10": 3.9263382473356216
+          },
+          "beats_deposit_by_h": {
+            "1": true,
+            "3": false,
+            "5": true,
+            "10": true
+          },
+          "deposit_carry_h5_pct": 0.061972602739726025
+        }
+      ],
+      "median_missed_jump_pct": 8.198794961793222,
+      "median_drift_net_h5_pct": 0.3833366107102332,
+      "prediction_correct_count": "1/1"
+    },
+    {
+      "key": "wagner_mutiny_2023",
+      "label": "Wagner mutiny weekend",
+      "anchor": "2023-06-26",
+      "direction": -1,
+      "entry_mode": "overnight",
+      "note": "Broke Fri night / Sat 24 Jun; market first trades Mon 26 Jun -> pure open gap.",
+      "retail_long_accessible": false,
+      "per_ticker": [
+        {
+          "ticker": "IMOEX",
+          "reaction_raw_pct": -1.3570370582384637,
+          "reaction_abn_pct": -1.3570370582384637,
+          "prediction_correct": true,
+          "confounded": false,
+          "retail_long_accessible": false,
+          "missed_jump_pct": 0.8422001674382661,
+          "jump_share_realistic": null,
+          "jump_share_aggressive": null,
+          "drift_net_by_h_pct": {
+            "1": -1.2793278091985625,
+            "3": -1.9851866283663837,
+            "5": -1.896686634861015,
+            "10": -4.138805421934534
+          },
+          "beats_deposit_by_h": {
+            "1": false,
+            "3": false,
+            "5": false,
+            "10": false
+          },
+          "deposit_carry_h5_pct": 0.10845205479452055
+        }
+      ],
+      "median_missed_jump_pct": 0.8422001674382661,
+      "median_drift_net_h5_pct": -1.896686634861015,
+      "prediction_correct_count": "1/1"
+    }
+  ],
+  "base_rate": [
+    {
+      "threshold_pct": 3.0,
+      "horizon": 5,
+      "pos_shock_n": 115,
+      "pos_chase_median_net_pct": -0.8317274179792766,
+      "neg_shock_n": 64,
+      "neg_dip_buy_median_net_pct": -1.6765739194894005
+    },
+    {
+      "threshold_pct": 3.0,
+      "horizon": 10,
+      "pos_shock_n": 114,
+      "pos_chase_median_net_pct": -1.2895006620999723,
+      "neg_shock_n": 64,
+      "neg_dip_buy_median_net_pct": -1.1258918196914163
+    },
+    {
+      "threshold_pct": 5.0,
+      "horizon": 5,
+      "pos_shock_n": 32,
+      "pos_chase_median_net_pct": -0.8359341942377525,
+      "neg_shock_n": 20,
+      "neg_dip_buy_median_net_pct": -3.6817094925097513
+    },
+    {
+      "threshold_pct": 5.0,
+      "horizon": 10,
+      "pos_shock_n": 32,
+      "pos_chase_median_net_pct": -1.81900217250302,
+      "neg_shock_n": 20,
+      "neg_dip_buy_median_net_pct": -2.2449247581489202
+    }
+  ]
+}
