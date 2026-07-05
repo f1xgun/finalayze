@@ -1,0 +1,986 @@
+{
+  "verdict": "PEAD_DRIFT_DEPOSIT_DOMINATED",
+  "gate_tier": "REJECT",
+  "gate_reasons": [
+    "no measurable net benefit over the deposit+equity core"
+  ],
+  "gate_n1_caveat": true,
+  "alpha_positive": false,
+  "drift_beats_deposit_base": false,
+  "median_deposit_carry_primary_pct": 3.494941253303791,
+  "sleeve_tr_raw_pct": -18.45429497180603,
+  "deposit_tr_pct": 40.240733809646905,
+  "imoex_tr_pct": -28.349035054932067,
+  "params": {
+    "horizons": [
+      20,
+      40,
+      60
+    ],
+    "primary_w": 60,
+    "per_side_cost": "0.0055",
+    "ndfl": "0.13",
+    "surprise_strong_pct": 2.0,
+    "n_events": 40,
+    "n_issuers": 10,
+    "noise_band_frac": 0.275,
+    "window": {
+      "from": "2024-01-01",
+      "till": "2026-07-05"
+    }
+  },
+  "base_rate": {
+    "20": {
+      "pos_n": 18,
+      "pos_raw_drift_median_pct": -0.4031953279634515,
+      "pos_abn_drift_median_pct": -1.499463014027533,
+      "pos_beats_deposit_frac": 0.3333333333333333,
+      "strong_pos_n": 7,
+      "strong_pos_abn_drift_median_pct": 1.6649681549871733,
+      "neg_n": 22,
+      "neg_dip_raw_drift_median_pct": -3.819550843807587
+    },
+    "40": {
+      "pos_n": 18,
+      "pos_raw_drift_median_pct": -3.3085609561048077,
+      "pos_abn_drift_median_pct": -3.923522455504834,
+      "pos_beats_deposit_frac": 0.2777777777777778,
+      "strong_pos_n": 7,
+      "strong_pos_abn_drift_median_pct": -4.626537848346263,
+      "neg_n": 22,
+      "neg_dip_raw_drift_median_pct": -4.23630132944329
+    },
+    "60": {
+      "pos_n": 18,
+      "pos_raw_drift_median_pct": -4.055336406915649,
+      "pos_abn_drift_median_pct": -3.7930495870241954,
+      "pos_beats_deposit_frac": 0.2222222222222222,
+      "strong_pos_n": 7,
+      "strong_pos_abn_drift_median_pct": -11.42304854993521,
+      "neg_n": 22,
+      "neg_dip_raw_drift_median_pct": -4.856269345806431
+    }
+  },
+  "events": [
+    {
+      "symbol": "SBER",
+      "anchor": "2024-08-08",
+      "surprise_pct": 0.5320496332103528,
+      "abs_surprise_pct": 0.5320496332103528,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -8.050626570894858,
+        "40": -7.660011528197829,
+        "60": -15.81366066269347
+      },
+      "abn_drift_by_w_pct": {
+        "20": -1.5624431110864687,
+        "40": -5.219029257208334,
+        "60": -7.427281380759321
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.469259660304073
+    },
+    {
+      "symbol": "SBER",
+      "anchor": "2024-10-31",
+      "surprise_pct": -0.2241851762964746,
+      "abs_surprise_pct": 0.2241851762964746,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -4.7294734140233725,
+        "40": 13.349461101429466,
+        "60": 13.816319704413607
+      },
+      "abn_drift_by_w_pct": {
+        "20": -1.911217882641995,
+        "40": 4.498129746870779,
+        "60": 2.8235000529243917
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": true,
+        "60": true
+      },
+      "deposit_carry_primary_pct": 3.849067390366007
+    },
+    {
+      "symbol": "SBER",
+      "anchor": "2025-02-27",
+      "surprise_pct": 2.4549948561456523,
+      "abs_surprise_pct": 2.4549948561456523,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -2.292382143671608,
+        "40": -0.30433306646033553,
+        "60": -1.1936386504316665
+      },
+      "abn_drift_by_w_pct": {
+        "20": 4.385489356979385,
+        "40": 6.2970282990342445,
+        "60": 9.493143680835768
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.849067390366007
+    },
+    {
+      "symbol": "SBER",
+      "anchor": "2025-04-28",
+      "surprise_pct": 0.10920292974040685,
+      "abs_surprise_pct": 0.10920292974040685,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -0.5089550657894737,
+        "40": 2.0144576407894736,
+        "60": -1.9131338157894737
+      },
+      "abn_drift_by_w_pct": {
+        "20": 0.8510968397200338,
+        "40": 2.7461631421356882,
+        "60": 1.7676707312767783
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.7198965704456652
+    },
+    {
+      "symbol": "SBER",
+      "anchor": "2025-07-29",
+      "surprise_pct": 0.2806569798661612,
+      "abs_surprise_pct": 0.2806569798661612,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": 0.35007913221571,
+        "40": -5.656598430797944,
+        "60": -6.880701880259323
+      },
+      "abn_drift_by_w_pct": {
+        "20": -4.992399132755339,
+        "40": -4.813404106924822,
+        "60": 0.4444986479807324
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.2094126153275098
+    },
+    {
+      "symbol": "SBER",
+      "anchor": "2025-10-28",
+      "surprise_pct": 1.3153787239632349,
+      "abs_surprise_pct": 1.3153787239632349,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": 1.408660347917511,
+        "40": 0.9261723439146737,
+        "60": 2.6730114427442238
+      },
+      "abn_drift_by_w_pct": {
+        "20": -3.0554299808631082,
+        "40": -6.646807314995161,
+        "60": -6.298017697418685
+      },
+      "beats_deposit_by_w": {
+        "20": true,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 2.9899283627279183
+    },
+    {
+      "symbol": "SBER",
+      "anchor": "2026-02-26",
+      "surprise_pct": -2.6842053230648997,
+      "abs_surprise_pct": 2.6842053230648997,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -0.8951192183812743,
+        "40": 0.7578734175808406,
+        "60": 1.4932592619905607
+      },
+      "abn_drift_by_w_pct": {
+        "20": 1.4048128408500555,
+        "40": 5.351548926957179,
+        "60": 9.29900377233402
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 2.7341861598768618
+    },
+    {
+      "symbol": "GAZP",
+      "anchor": "2025-04-30",
+      "surprise_pct": -2.0876684498342213,
+      "abs_surprise_pct": 2.0876684498342213,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -5.011458794100207,
+        "40": -6.279634255484732,
+        "60": -10.150135085606285
+      },
+      "abn_drift_by_w_pct": {
+        "20": -8.4934233516824,
+        "40": -9.28155186981158,
+        "60": -9.85958035679384
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.7017649373836545
+    },
+    {
+      "symbol": "VTBR",
+      "anchor": "2025-02-25",
+      "surprise_pct": -5.04330631517062,
+      "abs_surprise_pct": 5.04330631517062,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -8.47663660242724,
+        "40": -3.0419159343746487,
+        "60": 3.4934338182099114
+      },
+      "abn_drift_by_w_pct": {
+        "20": -3.0900127709684257,
+        "40": 2.5645168076220046,
+        "60": 15.948273678445917
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.849067390366007
+    },
+    {
+      "symbol": "VTBR",
+      "anchor": "2025-04-25",
+      "surprise_pct": 13.325232700552037,
+      "abs_surprise_pct": 13.325232700552037,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -4.650985138603696,
+        "40": 6.837443577874743,
+        "60": -19.181809448151952
+      },
+      "abn_drift_by_w_pct": {
+        "20": -1.4364829169685973,
+        "40": 9.088156647666047,
+        "60": -12.65741516730403
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": true,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.7289635757698583
+    },
+    {
+      "symbol": "VTBR",
+      "anchor": "2025-07-31",
+      "surprise_pct": -3.7542906915449517,
+      "abs_surprise_pct": 3.7542906915449517,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -4.813393440384865,
+        "40": -12.34910695618255,
+        "60": -12.426264432453516
+      },
+      "abn_drift_by_w_pct": {
+        "20": -6.968531877421397,
+        "40": -8.793554732521919,
+        "60": -2.1399889852794844
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.200216874766217
+    },
+    {
+      "symbol": "VTBR",
+      "anchor": "2025-10-24",
+      "surprise_pct": 3.1166120552586647,
+      "abs_surprise_pct": 3.1166120552586647,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": 3.3150714933206107,
+        "40": 3.4413862786259544,
+        "60": 5.108741444656489
+      },
+      "abn_drift_by_w_pct": {
+        "20": -2.731104519772409,
+        "40": -4.626537848346263,
+        "60": -5.135154182833797
+      },
+      "beats_deposit_by_w": {
+        "20": true,
+        "40": true,
+        "60": true
+      },
+      "deposit_carry_primary_pct": 2.9930137629814353
+    },
+    {
+      "symbol": "VTBR",
+      "anchor": "2026-02-25",
+      "surprise_pct": -1.3052749445914098,
+      "abs_surprise_pct": 1.3052749445914098,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -5.091792235327963,
+        "40": 5.39261103098389,
+        "60": -8.705337740218642
+      },
+      "abn_drift_by_w_pct": {
+        "20": -4.30356400325715,
+        "40": 8.159418242069576,
+        "60": -0.19457477580604501
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": true,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 2.7372976437450705
+    },
+    {
+      "symbol": "ROSN",
+      "anchor": "2024-11-29",
+      "surprise_pct": 3.619183739860563,
+      "abs_surprise_pct": 3.619183739860563,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": 17.527819617230488,
+        "40": 4.043187292846953,
+        "60": 7.5151732489300995
+      },
+      "abn_drift_by_w_pct": {
+        "20": 7.688086151618489,
+        "40": -10.468427670844079,
+        "60": -15.032838160120345
+      },
+      "beats_deposit_by_w": {
+        "20": true,
+        "40": true,
+        "60": true
+      },
+      "deposit_carry_primary_pct": 3.849067390366007
+    },
+    {
+      "symbol": "ROSN",
+      "anchor": "2026-03-27",
+      "surprise_pct": -1.4416954265932274,
+      "abs_surprise_pct": 1.4416954265932274,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -11.310570752654591,
+        "40": -19.876812351655214,
+        "60": -34.20879348844472
+      },
+      "abn_drift_by_w_pct": {
+        "20": -6.634931771724827,
+        "40": -13.20477297219578,
+        "60": -16.88976124516568
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 2.6828296050391063
+    },
+    {
+      "symbol": "NVTK",
+      "anchor": "2025-07-30",
+      "surprise_pct": -0.26335703821289635,
+      "abs_surprise_pct": 0.26335703821289635,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": 16.511509886925793,
+        "40": 5.852932416519435,
+        "60": -0.33976691696113076
+      },
+      "abn_drift_by_w_pct": {
+        "20": 11.671574928929212,
+        "40": 7.399923465276766,
+        "60": 7.77746718076498
+      },
+      "beats_deposit_by_w": {
+        "20": true,
+        "40": true,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.204814642627169
+    },
+    {
+      "symbol": "GMKN",
+      "anchor": "2024-08-23",
+      "surprise_pct": -5.216118865132836,
+      "abs_surprise_pct": 5.216118865132836,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -0.04500167966672576,
+        "40": -8.688715795071795,
+        "60": -5.076940728594221
+      },
+      "abn_drift_by_w_pct": {
+        "20": -3.6823251706291686,
+        "40": -8.877484152357525,
+        "60": -0.2642534160676614
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.5687992066298517
+    },
+    {
+      "symbol": "GMKN",
+      "anchor": "2025-02-10",
+      "surprise_pct": 2.0803936077058762,
+      "abs_surprise_pct": 2.0803936077058762,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": 2.1268951454766767,
+        "40": -11.42688101931836,
+        "60": -11.085139767551437
+      },
+      "abn_drift_by_w_pct": {
+        "20": 4.912825250152872,
+        "40": 2.3743183148511067,
+        "60": -2.0149976276236004
+      },
+      "beats_deposit_by_w": {
+        "20": true,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.849067390366007
+    },
+    {
+      "symbol": "GMKN",
+      "anchor": "2025-08-04",
+      "surprise_pct": 1.6372346290454194,
+      "abs_surprise_pct": 1.6372346290454194,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -0.29743559013742926,
+        "40": -2.935915642683913,
+        "60": 1.1324296097413096
+      },
+      "abn_drift_by_w_pct": {
+        "20": -1.6104233340946938,
+        "40": 3.6344975823866545,
+        "60": 9.58423110710472
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.1910219535259756
+    },
+    {
+      "symbol": "GMKN",
+      "anchor": "2026-02-11",
+      "surprise_pct": -2.990421617864747,
+      "abs_surprise_pct": 2.990421617864747,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -1.4681173039596274,
+        "40": -15.5203328125,
+        "60": -14.458097942546583
+      },
+      "abn_drift_by_w_pct": {
+        "20": -3.665119861795502,
+        "40": -13.181611012100934,
+        "60": -11.028492272517353
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 2.76530523955348
+    },
+    {
+      "symbol": "MGNT",
+      "anchor": "2024-08-30",
+      "surprise_pct": -0.9916129156628477,
+      "abs_surprise_pct": 0.9916129156628477,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": 7.370219984381778,
+        "40": -5.430686724511931,
+        "60": -9.614220319956615
+      },
+      "abn_drift_by_w_pct": {
+        "20": -0.3847318333380458,
+        "40": -8.38991009991557,
+        "60": -7.763439919862106
+      },
+      "beats_deposit_by_w": {
+        "20": true,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.6140761053195427
+    },
+    {
+      "symbol": "SNGS",
+      "anchor": "2024-07-11",
+      "surprise_pct": 1.964610952548948,
+      "abs_surprise_pct": 1.964610952548948,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -2.3649625,
+        "40": -15.081065714285714,
+        "60": -5.5530453571428575
+      },
+      "abn_drift_by_w_pct": {
+        "20": -1.367107683596431,
+        "40": -6.84638763415531,
+        "60": -1.2890827522183548
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.3174122179023104
+    },
+    {
+      "symbol": "SNGS",
+      "anchor": "2024-08-22",
+      "surprise_pct": -3.1236004719309522,
+      "abs_surprise_pct": 3.1236004719309522,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -1.096975,
+        "40": -2.5155044422310757,
+        "60": -3.796121299800797
+      },
+      "abn_drift_by_w_pct": {
+        "20": -4.213004276570985,
+        "40": -1.4835772821263433,
+        "60": 1.448328039600964
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.559746201360587
+    },
+    {
+      "symbol": "SNGS",
+      "anchor": "2024-11-19",
+      "surprise_pct": 1.7157124797374916,
+      "abs_surprise_pct": 1.7157124797374916,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -2.6758607859189523,
+        "40": 12.077512121469505,
+        "60": 15.634863249897666
+      },
+      "abn_drift_by_w_pct": {
+        "20": -3.4602356852565284,
+        "40": 0.4095501073118219,
+        "60": -6.700430473697564
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": true,
+        "60": true
+      },
+      "deposit_carry_primary_pct": 3.849067390366007
+    },
+    {
+      "symbol": "SNGS",
+      "anchor": "2025-03-05",
+      "surprise_pct": -0.6807471792244706,
+      "abs_surprise_pct": 0.6807471792244706,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -17.5808125,
+        "40": -16.958780896226415,
+        "60": -18.11136886792453
+      },
+      "abn_drift_by_w_pct": {
+        "20": -2.4065808552841723,
+        "40": -4.5504711695290885,
+        "60": -6.211279657767084
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.849067390366007
+    },
+    {
+      "symbol": "SNGS",
+      "anchor": "2025-05-21",
+      "surprise_pct": -0.6950290853094983,
+      "abs_surprise_pct": 0.6950290853094983,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": 0.6387051606857143,
+        "40": 2.0744379876,
+        "60": 5.240917236
+      },
+      "abn_drift_by_w_pct": {
+        "20": 0.35029072562606034,
+        "40": -0.8630933397406224,
+        "60": -2.286503876633355
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": true
+      },
+      "deposit_carry_primary_pct": 3.583986558024574
+    },
+    {
+      "symbol": "SNGS",
+      "anchor": "2025-08-19",
+      "surprise_pct": -1.674619733704966,
+      "abs_surprise_pct": 1.674619733704966,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -6.4716701604103015,
+        "40": -10.637598537756439,
+        "60": -11.349907534919248
+      },
+      "abn_drift_by_w_pct": {
+        "20": -1.8441084468009774,
+        "40": -5.086514240335394,
+        "60": 0.7887979320281167
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.1404645288065938
+    },
+    {
+      "symbol": "SNGS",
+      "anchor": "2025-11-13",
+      "surprise_pct": 1.3739066283956654,
+      "abs_surprise_pct": 1.3739066283956654,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": 8.903286649514563,
+        "40": 5.561708717475728,
+        "60": 4.162422958434466
+      },
+      "abn_drift_by_w_pct": {
+        "20": -0.3257890140286558,
+        "40": -3.220507062663405,
+        "60": -6.105311760230586
+      },
+      "beats_deposit_by_w": {
+        "20": true,
+        "40": true,
+        "60": true
+      },
+      "deposit_carry_primary_pct": 2.968319714766525
+    },
+    {
+      "symbol": "SNGS",
+      "anchor": "2026-03-05",
+      "surprise_pct": -0.33001343514741915,
+      "abs_surprise_pct": 0.33001343514741915,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -8.23408373605948,
+        "40": -16.04164814126394,
+        "60": -17.23116626394052
+      },
+      "abn_drift_by_w_pct": {
+        "20": -5.1391684642074225,
+        "40": -7.304232405878153,
+        "60": -7.426833632603078
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 2.7186301539866022
+    },
+    {
+      "symbol": "TRNFP",
+      "anchor": "2024-10-21",
+      "surprise_pct": -1.6694708434751597,
+      "abs_surprise_pct": 1.6694708434751597,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -18.488978641509433,
+        "40": -31.178423358490566,
+        "60": -12.778728518867924
+      },
+      "abn_drift_by_w_pct": {
+        "20": -12.87959237432276,
+        "40": -20.042825484515156,
+        "60": -20.466754879755023
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.849067390366007
+    },
+    {
+      "symbol": "TRNFP",
+      "anchor": "2025-02-03",
+      "surprise_pct": -0.7891235795642939,
+      "abs_surprise_pct": 0.7891235795642939,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -0.49169332925336595,
+        "40": 8.614616151643643,
+        "60": 6.733919531823745
+      },
+      "abn_drift_by_w_pct": {
+        "20": -8.695046170220003,
+        "40": 11.590461863850178,
+        "60": 10.374421139142399
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": true,
+        "60": true
+      },
+      "deposit_carry_primary_pct": 3.849067390366007
+    },
+    {
+      "symbol": "TRNFP",
+      "anchor": "2025-04-22",
+      "surprise_pct": -2.605867268377619,
+      "abs_surprise_pct": 2.605867268377619,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -2.887144233446782,
+        "40": 4.676402515818379,
+        "60": 1.801115316251547
+      },
+      "abn_drift_by_w_pct": {
+        "20": 4.034613775497368,
+        "40": 9.653327102591827,
+        "60": 5.3145632166207095
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": true,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.7500975767642375
+    },
+    {
+      "symbol": "TRNFP",
+      "anchor": "2025-07-21",
+      "surprise_pct": -2.3885486928343296,
+      "abs_surprise_pct": 2.3885486928343296,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -3.0035037245965333,
+        "40": -7.821553059623431,
+        "60": -4.481432968469814
+      },
+      "abn_drift_by_w_pct": {
+        "20": -4.59907357803521,
+        "40": -6.283142108754423,
+        "60": 3.073417164673061
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.2293065329447326
+    },
+    {
+      "symbol": "TRNFP",
+      "anchor": "2026-02-03",
+      "surprise_pct": 1.0640728270986255,
+      "abs_surprise_pct": 1.0640728270986255,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -0.14193300908832718,
+        "40": -3.681206269525703,
+        "60": -2.557627456688441
+      },
+      "abn_drift_by_w_pct": {
+        "20": -5.3821172682733325,
+        "40": -5.178813797056113,
+        "60": 0.878783698724296
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 2.790166586565114
+    },
+    {
+      "symbol": "IRAO",
+      "anchor": "2025-02-28",
+      "surprise_pct": 1.4047742507592875,
+      "abs_surprise_pct": 1.4047742507592875,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -6.199984498371336,
+        "40": -9.09942171335505,
+        "60": -8.558193433224755
+      },
+      "abn_drift_by_w_pct": {
+        "20": 2.9931299525928736,
+        "40": 0.680795061752624,
+        "60": 3.5304680319523287
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.849067390366007
+    },
+    {
+      "symbol": "IRAO",
+      "anchor": "2025-04-30",
+      "surprise_pct": 4.937061165028722,
+      "abs_surprise_pct": 4.937061165028722,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": 4.694277320083682,
+        "40": -9.13079451738566,
+        "60": -11.713603278747655
+      },
+      "abn_drift_by_w_pct": {
+        "20": 1.6649681549871733,
+        "40": -12.132712131712507,
+        "60": -11.42304854993521
+      },
+      "beats_deposit_by_w": {
+        "20": true,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.7017649373836545
+    },
+    {
+      "symbol": "IRAO",
+      "anchor": "2025-05-30",
+      "surprise_pct": 3.7406250697583148,
+      "abs_surprise_pct": 3.7406250697583148,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -14.647721479875322,
+        "40": -17.073720602385148,
+        "60": -15.036417471879659
+      },
+      "abn_drift_by_w_pct": {
+        "20": -13.572884446179502,
+        "40": -12.838128113701169,
+        "60": -17.058580247072697
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.5206228463035094
+    },
+    {
+      "symbol": "IRAO",
+      "anchor": "2025-07-31",
+      "surprise_pct": 0.7965606418690041,
+      "abs_surprise_pct": 0.7965606418690041,
+      "positive": true,
+      "raw_drift_by_w_pct": {
+        "20": -1.190721943127962,
+        "40": -5.456207855450237,
+        "60": -12.737220438388626
+      },
+      "abn_drift_by_w_pct": {
+        "20": -3.3458603801644937,
+        "40": -1.9006556317896044,
+        "60": -2.4509449912145933
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 3.200216874766217
+    },
+    {
+      "symbol": "IRAO",
+      "anchor": "2025-10-30",
+      "surprise_pct": -1.252951805028281,
+      "abs_surprise_pct": 1.252951805028281,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": 3.183942532894737,
+        "40": 9.664693381578948,
+        "60": 23.813031378947368
+      },
+      "abn_drift_by_w_pct": {
+        "20": -0.2365072462966271,
+        "40": 2.9412833866089345,
+        "60": 17.024570187576966
+      },
+      "beats_deposit_by_w": {
+        "20": true,
+        "40": true,
+        "60": true
+      },
+      "deposit_carry_primary_pct": 2.986843054904891
+    },
+    {
+      "symbol": "IRAO",
+      "anchor": "2026-02-13",
+      "surprise_pct": -3.316072598101522,
+      "abs_surprise_pct": 3.316072598101522,
+      "positive": false,
+      "raw_drift_by_w_pct": {
+        "20": -4.635597963018641,
+        "40": -2.3161644242333135,
+        "60": -4.635597963018641
+      },
+      "abn_drift_by_w_pct": {
+        "20": -8.206296408407262,
+        "40": -1.320354954818141,
+        "60": 0.1676670012169095
+      },
+      "beats_deposit_by_w": {
+        "20": false,
+        "40": false,
+        "60": false
+      },
+      "deposit_carry_primary_pct": 2.7590806696102907
+    }
+  ]
+}
