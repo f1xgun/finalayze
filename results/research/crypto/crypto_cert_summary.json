@@ -1,0 +1,218 @@
+{
+ "risk_free_annual_pct": 15.0,
+ "arbitrage": {
+  "rounds": 45,
+  "venues": [
+   "binance",
+   "bybit",
+   "coinbase",
+   "kraken",
+   "okx"
+  ],
+  "gross_spread_bps": {
+   "median": 2.605,
+   "p90": 3.242,
+   "max": 4.236
+  },
+  "net_edge_per_trip_bps": {
+   "vip_0.02pct": {
+    "median": "-6.39bps",
+    "p90": "-5.76bps",
+    "max": "-4.76bps"
+   },
+   "mid_0.075pct": {
+    "median": "-17.39bps",
+    "p90": "-16.76bps",
+    "max": "-15.76bps"
+   },
+   "retail_0.20pct": {
+    "median": "-42.39bps",
+    "p90": "-41.76bps",
+    "max": "-40.76bps"
+   }
+  },
+  "withdrawal_amortised_bps": 5.0,
+  "best_case_net_edge_bps": -4.764,
+  "trips_per_year_to_match_deposit_at_zero_fees": 354.1,
+  "any_tier_positive": false,
+  "verdict": "ARB_INFEASIBLE_FEES_AND_CARRY_DOMINATE"
+ },
+ "trend_sleeve": {
+  "window": {
+   "start": "2021-01-05",
+   "end": "2026-06-10",
+   "n_bars": 1983
+  },
+  "symbols": [
+   "BTCUSDT",
+   "ETHUSDT"
+  ],
+  "params": {
+   "primary_lookback": 90,
+   "lookback_sweep": [
+    30,
+    90,
+    180
+   ],
+   "per_side_cost_bps": 10.0,
+   "ndfl_rate": "0.13",
+   "deposit_w": "0.4",
+   "equity_base_w": "0.6"
+  },
+  "total_return_vs_deposit": {
+   "deposit_only_tr_pct": 98.38,
+   "buyhold_basket_net_tr_pct": 51.53,
+   "buyhold_basket_maxdd_pct": 82.44,
+   "buyhold_tr_by_family": {
+    "basket": 51.53,
+    "BTCUSDT": 65.74,
+    "ETHUSDT": 37.32
+   },
+   "any_holding_beats_deposit": false,
+   "sleeve_primary_tr_pct": 66.34,
+   "sleeve_beats_deposit": false,
+   "buyhold_beats_deposit": false,
+   "risk_adjusted_reject": true
+  },
+  "lookback_stability": {
+   "basket_min_tr_pct": 66.34,
+   "basket_max_tr_pct": 607.68,
+   "max_min_ratio": 9.16,
+   "unstable": true,
+   "primary_long_day_share": 0.547
+  },
+  "sleeve_tr_by_family_lookback": {
+   "basket": {
+    "30": 607.68,
+    "90": 66.34,
+    "180": 70.45
+   },
+   "BTCUSDT": {
+    "30": 310.65,
+    "90": 70.5,
+    "180": 205.56
+   },
+   "ETHUSDT": {
+    "30": 901.71,
+    "90": 40.49,
+    "180": 52.89
+   }
+  },
+  "regimes": {
+   "full_window": {
+    "range": [
+     "2021-01-05",
+     "2026-06-10"
+    ],
+    "sleeve": {
+     "sharpe": 0.001267612598077901,
+     "sortino": 0.0017596444869772934,
+     "maxdd_pct": 79.01751790906471,
+     "total_return_pct": 66.34185501159686,
+     "n_bars": 1983
+    },
+    "deposit": {
+     "sharpe": -15.047709489457123,
+     "sortino": -10.966070032735319,
+     "maxdd_pct": 0.0,
+     "total_return_pct": 98.38008590856182,
+     "n_bars": 1983
+    },
+    "sleeve_beats_deposit": false,
+    "n1_caveat": true
+   },
+   "crash_year_2022": {
+    "range": [
+     "2022-02-21",
+     "2022-12-30"
+    ],
+    "sleeve": {
+     "sharpe": -2.134292837830431,
+     "sortino": -2.4410334392856305,
+     "maxdd_pct": 62.554868195410705,
+     "total_return_pct": -51.44258709616629,
+     "n_bars": 313
+    },
+    "deposit": {
+     "sharpe": -25.76575082035171,
+     "sortino": -13.544871434918974,
+     "maxdd_pct": 0.0,
+     "total_return_pct": 10.501841271120217,
+     "n_bars": 313
+    },
+    "sleeve_beats_deposit": false,
+    "n1_caveat": true
+   },
+   "high_rate_2024_25": {
+    "range": [
+     "2024-01-01",
+     "2025-06-05"
+    ],
+    "sleeve": {
+     "sharpe": 0.458242354807466,
+     "sortino": 0.701097017952925,
+     "maxdd_pct": 30.006685429014556,
+     "total_return_pct": 64.48522451216373,
+     "n_bars": 522
+    },
+    "deposit": {
+     "sharpe": 0.9149395956333176,
+     "sortino": 1.348609388503618,
+     "maxdd_pct": 0.0,
+     "total_return_pct": 33.77169685331911,
+     "n_bars": 522
+    },
+    "sleeve_beats_deposit": true,
+    "n1_caveat": false
+   },
+   "easing_2025_26": {
+    "range": [
+     "2025-06-06",
+     "2026-06-10"
+    ],
+    "sleeve": {
+     "sharpe": -0.19189304473476865,
+     "sortino": -0.26975967904793297,
+     "maxdd_pct": 31.879246559260828,
+     "total_return_pct": 7.412709093452063,
+     "n_bars": 370
+    },
+    "deposit": {
+     "sharpe": -17.10604548482594,
+     "sortino": -11.95841718139256,
+     "maxdd_pct": 0.0,
+     "total_return_pct": 20.31860736416171,
+     "n_bars": 370
+    },
+    "sleeve_beats_deposit": false,
+    "n1_caveat": true
+   }
+  },
+  "integration_gate": {
+   "tier": "REJECT",
+   "proposed_weight": "0",
+   "carved_from": "equity",
+   "n1_caveat": false,
+   "reasons": [
+    "tail tested & FAILED: raised crash-year MaxDD by 1.12pp"
+   ],
+   "scorecard": {
+    "window_bars": 1983,
+    "regimes_covered": 2,
+    "tail_backtestable": true,
+    "marginal_sharpe_delta": 0.0059,
+    "marginal_sortino_delta": 0.0037,
+    "marginal_maxdd_delta_pp": -1.999,
+    "crash_year_maxdd_delta_pp": 1.122,
+    "max_corr_to_existing_legs": 0.0024,
+    "anti_hollow_ok": true
+   }
+  },
+  "verdict": "CRYPTO_TREND_GATE_REJECT"
+ },
+ "binding": {
+  "verdict": "CRYPTO_ARB_INFEASIBLE__CRYPTO_TREND_GATE_REJECT",
+  "finding": "Cross-exchange SPOT top-of-book arbitrage is INFEASIBLE for a RUB retail investor: across 45 real polls of 5 venues the best realisable top-of-book spread is a median 2.605bps (max 4.236bps) \u2014 below round-trip taker fees at every tier, so the net per-trip edge is negative (best case -4.764bps incl. a generous 5.0bps withdrawal). Even at ZERO fees the capital-lockup carry would demand ~354.1 profitable cross-venue round trips a year (each a multi-minute on-chain transfer) merely to match the deposit. On the TREND side the gate returns REJECT (risk-adjusted, crash-inclusive). Over this window NO simple crypto holding beat the deposit net of NDFL: buy-and-hold basket 51.53% (BTC-only 65.74%, ETH-only 37.32%) vs the deposit 98.38%, and the basket carried an 82.44% drawdown the deposit never takes. The 90-day TSMOM sleeve returned 66.34% \u2014 also below the deposit. Crucially the trend 'edge' is a LOOKBACK-LOTTERY: the basket sleeve TR ranges 66.34%..607.68% across 30/90/180-day lookbacks (x9.16) though all hold long ~55% of days \u2014 a handful of fat-tail days dominate, so which lookback 'wins' is NOT knowable ex-ante. The gate REJECTs (tail tested & FAILED): crypto's 2022 crash is in-window and the sleeve RAISED the blended crash-year drawdown (delta +1.122pp) \u2014 and the REJECT is over-determined: even setting that veto aside it fails the INTEGRATE bar on marginal Sharpe (+0.0059 vs +0.10) and on full-window MaxDD (delta -1.999pp \u2014 RAISED, not the +3pp cut). Same family conclusion as gold/ZO/real estate: risk-adjusted, the deposit anchor holds. HONEST LIMITS: raw crypto TR is highly START-DATE-SENSITIVE (BTC began this window 2021 mid-cycle; a 2023-bottom start flips the raw-return read AND roughly halves the drawdown). Crypto carries 33-82% drawdowns under every start tested (82% in this 2021 window, ~33-66% from a 2023 bottom) \u2014 an order of magnitude beyond the deposit's 0%; the magnitude is start-dependent but the deposit-dominant risk gap is not. Arb infeasibility and the 9x lookback fragility are structural. N=1 easing cycle; only SPOT top-of-book arb was measured (funding/basis + triangular are out of scope, but the capital-lockup carry applies to any capital-locking cross-venue play); arb poll is a within-session snapshot; the deposit leg is floored at 0% pre-2022-02-28 so its 98% is a conservative lower bound; and custody/exchange/RU regulatory-access + USDT/P2P acquisition premium are uncosted and one-directional against crypto."
+ },
+ "disclaimer": "Measurement only on public read-only data. Authorises no order; real-money execution is a hard stop. Crypto carries custody, exchange-counterparty and RU regulatory/access risk that no backtest captures."
+}
