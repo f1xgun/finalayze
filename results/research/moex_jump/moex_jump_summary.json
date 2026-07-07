@@ -1,0 +1,692 @@
+{
+ "binding": {
+  "verdict": "MOEX_NEWS_REACTION__MOEX_REACTIVE_UNCAPTURABLE_NET",
+  "finding": "Ported the crypto reactive-news cert to the real RUB universe via Tinkoff readonly 1-min candles (2024-01-01..2026-01-01), per instrument class, long-only up-shocks (no single-name MOEX shorting). OVERALL **MOEX_REACTIVE_UNCAPTURABLE_NET** \u2014 the same 'edge is allocation, not signal' family as the crypto cert and the slow-regime news study, only sharper. STOCKS (2465 up-shocks at >=6-sigma): the intraday shock is priced ALMOST COMPLETELY by the time you can act \u2014 the mean forward path is flat noise around zero (-0.8/0.44/-0.76bps t+1/5/30, no continuation half-life), the median REVERSES (-1.43/-3.79/-6.62bps) and win-rate is 44.9%. Best-case reactive t+1 is only 0.52bps TRUE gross; net of a realistic 30bps round-trip + 13% NDFL it is -29.48bps and negative at every latency (t+5 -30.73, t+15 -30.47). OFZ (1090 up-shocks): even STRONGER \u2014 the mean forward REVERSES at every horizon (-3.47..-6.37bps), so the reactive true gross is NEGATIVE (-2.17bps) \u2192 verdict REACTIVE_ALPHA_ABSENT (no REACTIVE edge even frictionless/tax-free; the mean reverses and any barely-positive cell sits at a non-reactive latency and is << friction; bond shocks mean-revert). FX is THIN (only 15 up-shocks at z6 \u2014 too few for a firm intraday verdict). OVERNIGHT-GAP DECOMPOSITION (MOEX-specific; the metric is SELECTION-DEPENDENT, reported honestly): the gap's share of the daily move depends on which days you condition on. For stocks it is 12% on the biggest-TOTAL-move days (those are intraday-dominated) but 51% on the biggest-GAP days \u2014 so 'the gap is small' is NOT a general claim. What IS robust: the reactive INTRADAY alpha above is ~0/reverting regardless of selection, so it is the binding channel. For FX the gap dominates under EVERY selection (97% on news days, mean gap 57.58bps vs intraday 13.34bps) \u2014 the reactive intraday trader is downstream of a wall that IS the whole move. LIMITS: latency axis is bars (=minutes for liquid stocks ~930 bars/day; approximate for thin OFZ/FX). Universe is 10 currently-listed liquid names (survivorship is directionally SAFE \u2014 survivors are the hardest names to find reactive edge in). Evening-session shocks (lower liquidity) are included (conservative \u2014 thinner = harder to capture). No single-name shorting \u2192 only up-shocks are retail-capturable. Deposit 16-21%/yr is the anchor. ETFs dropped (registry FIGIs return no 1-min candles; index ETFs have no idiosyncratic shock)."
+ },
+ "analysis": {
+  "window": {
+   "start": "2024-01-01",
+   "end_exclusive": "2026-01-01"
+  },
+  "coverage": {
+   "SBER": {
+    "cls": "stock",
+    "bars": 487706,
+    "days": 521,
+    "shocks": 975
+   },
+   "GAZP": {
+    "cls": "stock",
+    "bars": 486635,
+    "days": 521,
+    "shocks": 894
+   },
+   "LKOH": {
+    "cls": "stock",
+    "bars": 479520,
+    "days": 521,
+    "shocks": 1102
+   },
+   "GMKN": {
+    "cls": "stock",
+    "bars": 463818,
+    "days": 517,
+    "shocks": 978
+   },
+   "ROSN": {
+    "cls": "stock",
+    "bars": 487430,
+    "days": 521,
+    "shocks": 1055
+   },
+   "NVTK": {
+    "cls": "stock",
+    "bars": 477864,
+    "days": 521,
+    "shocks": 908
+   },
+   "TATN": {
+    "cls": "stock",
+    "bars": 476174,
+    "days": 521,
+    "shocks": 1174
+   },
+   "PLZL": {
+    "cls": "stock",
+    "bars": 452592,
+    "days": 518,
+    "shocks": 971
+   },
+   "MGNT": {
+    "cls": "stock",
+    "bars": 452193,
+    "days": 521,
+    "shocks": 969
+   },
+   "MTSS": {
+    "cls": "stock",
+    "bars": 449975,
+    "days": 521,
+    "shocks": 937
+   },
+   "SU26238RMFS4": {
+    "cls": "ofz",
+    "bars": 424411,
+    "days": 506,
+    "shocks": 1644
+   },
+   "SU26230RMFS1": {
+    "cls": "ofz",
+    "bars": 338217,
+    "days": 506,
+    "shocks": 886
+   },
+   "SU26240RMFS0": {
+    "cls": "ofz",
+    "bars": 349535,
+    "days": 506,
+    "shocks": 1062
+   },
+   "SU26243RMFS4": {
+    "cls": "ofz",
+    "bars": 370342,
+    "days": 506,
+    "shocks": 1353
+   },
+   "SU26221RMFS0": {
+    "cls": "ofz",
+    "bars": 236681,
+    "days": 506,
+    "shocks": 226
+   },
+   "USD000UTSTOM": {
+    "cls": "fx",
+    "bars": 72215,
+    "days": 470,
+    "shocks": 106
+   }
+  },
+  "params": {
+   "primary_z": 6,
+   "z_sweep": [
+    5,
+    6,
+    8
+   ],
+   "entry_latencies_min": [
+    1,
+    2,
+    5,
+    15
+   ],
+   "exit_horizons_min": [
+    30,
+    60,
+    120
+   ],
+   "cost_levels_bps": [
+    0,
+    15,
+    30,
+    50
+   ],
+   "primary_cost_bps": 30,
+   "ndfl_rate": "0.13"
+  },
+  "by_class": {
+   "stock": {
+    "cls": "stock",
+    "n_primary": 2465,
+    "low_n": false,
+    "by_z": {
+     "5": {
+      "n_up": 4717,
+      "n_down": 5246,
+      "up_decay_mean_bps": {
+       "t+1": -0.56,
+       "t+5": 0.56,
+       "t+15": 0.16,
+       "t+30": -0.83,
+       "t+60": -1.15,
+       "t+120": -1.73
+      },
+      "up_decay_median_bps": {
+       "t+1": -1.08,
+       "t+5": -2.3,
+       "t+15": -2.89,
+       "t+30": -3.33,
+       "t+60": -4.31,
+       "t+120": -6.03
+      },
+      "up_continuation_half_life_min": null,
+      "up_reactive_win_rate": 0.451
+     },
+     "6": {
+      "n_up": 2465,
+      "n_down": 2845,
+      "up_decay_mean_bps": {
+       "t+1": -0.8,
+       "t+5": 0.44,
+       "t+15": 0.2,
+       "t+30": -0.76,
+       "t+60": -1.02,
+       "t+120": -0.27
+      },
+      "up_decay_median_bps": {
+       "t+1": -1.43,
+       "t+5": -2.98,
+       "t+15": -3.85,
+       "t+30": -3.79,
+       "t+60": -4.55,
+       "t+120": -6.62
+      },
+      "up_continuation_half_life_min": null,
+      "up_reactive_win_rate": 0.449
+     },
+     "8": {
+      "n_up": 950,
+      "n_down": 1077,
+      "up_decay_mean_bps": {
+       "t+1": -1.36,
+       "t+5": -0.58,
+       "t+15": -2.68,
+       "t+30": -4.92,
+       "t+60": -5.09,
+       "t+120": -2.57
+      },
+      "up_decay_median_bps": {
+       "t+1": -1.52,
+       "t+5": -3.16,
+       "t+15": -3.85,
+       "t+30": -5.7,
+       "t+60": -5.84,
+       "t+120": -9.68
+      },
+      "up_continuation_half_life_min": null,
+      "up_reactive_win_rate": 0.443
+     }
+    },
+    "primary_up_ladder_net_bps": {
+     "cost0bps": {
+      "entry1": {
+       "exit30": 0.03,
+       "exit60": -0.23,
+       "exit120": 0.45
+      },
+      "entry2": {
+       "exit30": -0.5,
+       "exit60": -0.76,
+       "exit120": -0.01
+      },
+      "entry5": {
+       "exit30": -1.22,
+       "exit60": -1.48,
+       "exit120": -0.73
+      },
+      "entry15": {
+       "exit30": -0.96,
+       "exit60": -1.22,
+       "exit120": -0.47
+      }
+     },
+     "cost15bps": {
+      "entry1": {
+       "exit30": -14.97,
+       "exit60": -15.23,
+       "exit120": -14.48
+      },
+      "entry2": {
+       "exit30": -15.5,
+       "exit60": -15.76,
+       "exit120": -15.01
+      },
+      "entry5": {
+       "exit30": -16.22,
+       "exit60": -16.48,
+       "exit120": -15.73
+      },
+      "entry15": {
+       "exit30": -15.96,
+       "exit60": -16.22,
+       "exit120": -15.47
+      }
+     },
+     "cost30bps": {
+      "entry1": {
+       "exit30": -29.97,
+       "exit60": -30.23,
+       "exit120": -29.48
+      },
+      "entry2": {
+       "exit30": -30.5,
+       "exit60": -30.76,
+       "exit120": -30.01
+      },
+      "entry5": {
+       "exit30": -31.22,
+       "exit60": -31.48,
+       "exit120": -30.73
+      },
+      "entry15": {
+       "exit30": -30.96,
+       "exit60": -31.22,
+       "exit120": -30.47
+      }
+     },
+     "cost50bps": {
+      "entry1": {
+       "exit30": -49.97,
+       "exit60": -50.23,
+       "exit120": -49.48
+      },
+      "entry2": {
+       "exit30": -50.5,
+       "exit60": -50.76,
+       "exit120": -50.01
+      },
+      "entry5": {
+       "exit30": -51.22,
+       "exit60": -51.48,
+       "exit120": -50.73
+      },
+      "entry15": {
+       "exit30": -50.96,
+       "exit60": -51.22,
+       "exit120": -50.47
+      }
+     }
+    },
+    "money_numbers_bps": {
+     "reactive_t1_true_gross_best": 0.52,
+     "reactive_t1_zero_cost_net_best": 0.45,
+     "reactive_t1_best_net": -29.48,
+     "reactive_t1_best_exit_min": 120,
+     "our_pipeline_t5_best_net": -30.73,
+     "slow_t15_best_net": -30.47,
+     "up_continuation_half_life_min": null
+    },
+    "verdict": "REACTIVE_ALPHA_BELOW_FRICTIONS"
+   },
+   "ofz": {
+    "cls": "ofz",
+    "n_primary": 1090,
+    "low_n": false,
+    "by_z": {
+     "5": {
+      "n_up": 2012,
+      "n_down": 3159,
+      "up_decay_mean_bps": {
+       "t+1": -3.05,
+       "t+5": -3.74,
+       "t+15": -4.37,
+       "t+30": -4.59,
+       "t+60": -4.37,
+       "t+120": -4.67
+      },
+      "up_decay_median_bps": {
+       "t+1": -0.16,
+       "t+5": -0.58,
+       "t+15": -1.42,
+       "t+30": -1.76,
+       "t+60": -2.54,
+       "t+120": -2.68
+      },
+      "up_continuation_half_life_min": null,
+      "up_reactive_win_rate": 0.468
+     },
+     "6": {
+      "n_up": 1090,
+      "n_down": 1934,
+      "up_decay_mean_bps": {
+       "t+1": -3.47,
+       "t+5": -4.44,
+       "t+15": -5.8,
+       "t+30": -5.88,
+       "t+60": -5.63,
+       "t+120": -6.37
+      },
+      "up_decay_median_bps": {
+       "t+1": -0.17,
+       "t+5": -0.91,
+       "t+15": -1.97,
+       "t+30": -2.73,
+       "t+60": -3.24,
+       "t+120": -3.71
+      },
+      "up_continuation_half_life_min": null,
+      "up_reactive_win_rate": 0.452
+     },
+     "8": {
+      "n_up": 446,
+      "n_down": 894,
+      "up_decay_mean_bps": {
+       "t+1": -3.09,
+       "t+5": -4.18,
+       "t+15": -6.08,
+       "t+30": -6.37,
+       "t+60": -6.87,
+       "t+120": -7.88
+      },
+      "up_decay_median_bps": {
+       "t+1": -0.14,
+       "t+5": -1.06,
+       "t+15": -2.0,
+       "t+30": -2.44,
+       "t+60": -3.94,
+       "t+120": -4.82
+      },
+      "up_continuation_half_life_min": null,
+      "up_reactive_win_rate": 0.453
+     }
+    },
+    "primary_up_ladder_net_bps": {
+     "cost0bps": {
+      "entry1": {
+       "exit30": -2.41,
+       "exit60": -2.17,
+       "exit120": -2.9
+      },
+      "entry2": {
+       "exit30": -2.18,
+       "exit60": -1.94,
+       "exit120": -2.67
+      },
+      "entry5": {
+       "exit30": -1.44,
+       "exit60": -1.2,
+       "exit120": -1.94
+      },
+      "entry15": {
+       "exit30": -0.08,
+       "exit60": 0.14,
+       "exit120": -0.58
+      }
+     },
+     "cost15bps": {
+      "entry1": {
+       "exit30": -17.41,
+       "exit60": -17.17,
+       "exit120": -17.9
+      },
+      "entry2": {
+       "exit30": -17.18,
+       "exit60": -16.94,
+       "exit120": -17.67
+      },
+      "entry5": {
+       "exit30": -16.44,
+       "exit60": -16.2,
+       "exit120": -16.94
+      },
+      "entry15": {
+       "exit30": -15.08,
+       "exit60": -14.84,
+       "exit120": -15.58
+      }
+     },
+     "cost30bps": {
+      "entry1": {
+       "exit30": -32.41,
+       "exit60": -32.17,
+       "exit120": -32.9
+      },
+      "entry2": {
+       "exit30": -32.18,
+       "exit60": -31.94,
+       "exit120": -32.67
+      },
+      "entry5": {
+       "exit30": -31.44,
+       "exit60": -31.2,
+       "exit120": -31.94
+      },
+      "entry15": {
+       "exit30": -30.08,
+       "exit60": -29.84,
+       "exit120": -30.58
+      }
+     },
+     "cost50bps": {
+      "entry1": {
+       "exit30": -52.41,
+       "exit60": -52.17,
+       "exit120": -52.9
+      },
+      "entry2": {
+       "exit30": -52.18,
+       "exit60": -51.94,
+       "exit120": -52.67
+      },
+      "entry5": {
+       "exit30": -51.44,
+       "exit60": -51.2,
+       "exit120": -51.94
+      },
+      "entry15": {
+       "exit30": -50.08,
+       "exit60": -49.84,
+       "exit120": -50.58
+      }
+     }
+    },
+    "money_numbers_bps": {
+     "reactive_t1_true_gross_best": -2.17,
+     "reactive_t1_zero_cost_net_best": -2.17,
+     "reactive_t1_best_net": -32.17,
+     "reactive_t1_best_exit_min": 60,
+     "our_pipeline_t5_best_net": -31.2,
+     "slow_t15_best_net": -29.84,
+     "up_continuation_half_life_min": null
+    },
+    "verdict": "REACTIVE_ALPHA_ABSENT"
+   },
+   "fx": {
+    "cls": "fx",
+    "n_primary": 15,
+    "low_n": true,
+    "by_z": {
+     "5": {
+      "n_up": 51,
+      "n_down": 55,
+      "up_decay_mean_bps": {
+       "t+1": -0.81,
+       "t+5": -0.17,
+       "t+15": -0.88,
+       "t+30": -1.97,
+       "t+60": -2.18,
+       "t+120": 0.17
+      },
+      "up_decay_median_bps": {
+       "t+1": -0.57,
+       "t+5": -0.81,
+       "t+15": -1.64,
+       "t+30": -4.27,
+       "t+60": -2.71,
+       "t+120": 0.55
+      },
+      "up_continuation_half_life_min": 120,
+      "up_reactive_win_rate": 0.431
+     },
+     "6": {
+      "n_up": 15,
+      "n_down": 19,
+      "up_decay_mean_bps": {
+       "t+1": -0.74,
+       "t+5": 1.53,
+       "t+15": 1.67,
+       "t+30": 0.35,
+       "t+60": -2.43,
+       "t+120": -6.57
+      },
+      "up_decay_median_bps": {
+       "t+1": -0.54,
+       "t+5": 0.82,
+       "t+15": 3.79,
+       "t+30": 1.13,
+       "t+60": -2.71,
+       "t+120": -1.59
+      },
+      "up_continuation_half_life_min": null,
+      "up_reactive_win_rate": 0.467
+     },
+     "8": {
+      "n_up": 3,
+      "n_down": 7,
+      "up_decay_mean_bps": {
+       "t+1": -0.42,
+       "t+5": 0.54,
+       "t+15": 2.64,
+       "t+30": -9.24,
+       "t+60": -8.14,
+       "t+120": -7.65
+      },
+      "up_decay_median_bps": {
+       "t+1": 1.08,
+       "t+5": 0.82,
+       "t+15": 6.43,
+       "t+30": -18.41,
+       "t+60": -16.46,
+       "t+120": -13.22
+      },
+      "up_continuation_half_life_min": null,
+      "up_reactive_win_rate": 0.333
+     }
+    },
+    "primary_up_ladder_net_bps": {
+     "cost0bps": {
+      "entry1": {
+       "exit30": 0.95,
+       "exit60": -1.68,
+       "exit120": -5.82
+      },
+      "entry2": {
+       "exit30": -0.1,
+       "exit60": -2.88,
+       "exit120": -7.01
+      },
+      "entry5": {
+       "exit30": -1.18,
+       "exit60": -3.95,
+       "exit120": -8.09
+      },
+      "entry15": {
+       "exit30": -1.32,
+       "exit60": -4.1,
+       "exit120": -8.23
+      }
+     },
+     "cost15bps": {
+      "entry1": {
+       "exit30": -13.9,
+       "exit60": -16.68,
+       "exit120": -20.82
+      },
+      "entry2": {
+       "exit30": -15.1,
+       "exit60": -17.88,
+       "exit120": -22.01
+      },
+      "entry5": {
+       "exit30": -16.18,
+       "exit60": -18.95,
+       "exit120": -23.09
+      },
+      "entry15": {
+       "exit30": -16.32,
+       "exit60": -19.1,
+       "exit120": -23.23
+      }
+     },
+     "cost30bps": {
+      "entry1": {
+       "exit30": -28.9,
+       "exit60": -31.68,
+       "exit120": -35.82
+      },
+      "entry2": {
+       "exit30": -30.1,
+       "exit60": -32.88,
+       "exit120": -37.01
+      },
+      "entry5": {
+       "exit30": -31.18,
+       "exit60": -33.95,
+       "exit120": -38.09
+      },
+      "entry15": {
+       "exit30": -31.32,
+       "exit60": -34.1,
+       "exit120": -38.23
+      }
+     },
+     "cost50bps": {
+      "entry1": {
+       "exit30": -48.9,
+       "exit60": -51.68,
+       "exit120": -55.82
+      },
+      "entry2": {
+       "exit30": -50.1,
+       "exit60": -52.88,
+       "exit120": -57.01
+      },
+      "entry5": {
+       "exit30": -51.18,
+       "exit60": -53.95,
+       "exit120": -58.09
+      },
+      "entry15": {
+       "exit30": -51.32,
+       "exit60": -54.1,
+       "exit120": -58.23
+      }
+     }
+    },
+    "money_numbers_bps": {
+     "reactive_t1_true_gross_best": 1.1,
+     "reactive_t1_zero_cost_net_best": 0.95,
+     "reactive_t1_best_net": -28.9,
+     "reactive_t1_best_exit_min": 30,
+     "our_pipeline_t5_best_net": -31.18,
+     "slow_t15_best_net": -31.32,
+     "up_continuation_half_life_min": null
+    },
+    "verdict": "THIN_N_INCONCLUSIVE"
+   }
+  },
+  "overnight_gap": {
+   "stock": {
+    "n_days": 5193,
+    "mean_abs_overnight_gap_bps": 33.03,
+    "mean_abs_intraday_bps": 137.41,
+    "mean_gap_share": 0.22,
+    "gap_share_on_news_days": 0.125,
+    "gap_share_on_gap_days": 0.51,
+    "gap_share_on_intraday_days": 0.093,
+    "frac_days_gap_dominates": 0.135
+   },
+   "ofz": {
+    "n_days": 2525,
+    "mean_abs_overnight_gap_bps": 10.31,
+    "mean_abs_intraday_bps": 57.46,
+    "mean_gap_share": 0.166,
+    "gap_share_on_news_days": 0.074,
+    "gap_share_on_gap_days": 0.486,
+    "gap_share_on_intraday_days": 0.073,
+    "frac_days_gap_dominates": 0.101
+   },
+   "fx": {
+    "n_days": 469,
+    "mean_abs_overnight_gap_bps": 57.58,
+    "mean_abs_intraday_bps": 13.34,
+    "mean_gap_share": 0.802,
+    "gap_share_on_news_days": 0.972,
+    "gap_share_on_gap_days": 0.995,
+    "gap_share_on_intraday_days": 0.137,
+    "frac_days_gap_dominates": 0.768
+   }
+  },
+  "verdict": "MOEX_REACTIVE_UNCAPTURABLE_NET"
+ },
+ "disclaimer": "Measurement only on Tinkoff readonly MOEX data. Authorises no order; real-money execution is a hard stop. A 1-minute shock is a proxy for a news event; sub-second colocated HFT is out of scope and unreachable for an LLM/RSS pipeline."
+}
