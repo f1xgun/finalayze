@@ -19,6 +19,7 @@ from finalayze.backtest.jump_response_lab import (
     half_life_bars,
     mean_path,
     net_after_cost,
+    split_runs_on_gaps,
     trailing_stdev,
 )
 
@@ -27,6 +28,23 @@ _TOL = Decimal("0.000001")
 
 def _close(a: Decimal, b: Decimal) -> bool:
     return abs(a - b) <= _TOL
+
+
+# ── split_runs_on_gaps (intraday session continuity) ─────────────────────────
+def test_split_runs_on_gaps_breaks_on_large_gap() -> None:
+    # 60s-spaced bars, then a 3600s (session-break) jump, then two more 60s bars
+    stamps = [0, 60, 120, 3720, 3780]
+    levels = [Decimal(x) for x in (100, 101, 102, 200, 201)]
+    runs = split_runs_on_gaps(stamps, levels, max_gap_s=300)
+    assert runs == [[Decimal(100), Decimal(101), Decimal(102)], [Decimal(200), Decimal(201)]]
+
+
+def test_split_runs_on_gaps_tolerates_small_gaps() -> None:
+    # a single 120s gap (one missing minute) is within max_gap -> stays one run
+    stamps = [0, 60, 180, 240]
+    levels = [Decimal(x) for x in (100, 101, 102, 103)]
+    runs = split_runs_on_gaps(stamps, levels, max_gap_s=300)
+    assert len(runs) == 1
 
 
 # ── bar_returns ──────────────────────────────────────────────────────────────

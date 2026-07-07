@@ -32,6 +32,31 @@ _ONE = Decimal(1)
 _TWO = Decimal(2)
 
 
+def split_runs_on_gaps(
+    stamps: list[int], levels: list[Decimal], max_gap_s: int
+) -> list[list[Decimal]]:
+    """Split a timestamped series into contiguous level-runs, breaking on large time gaps.
+
+    ``stamps`` are epoch-seconds (ascending, aligned to ``levels``). A gap of more than
+    ``max_gap_s`` between consecutive bars (an intraday-market session break or overnight/weekend)
+    starts a new run. Returns the ``levels`` of each run in order. Used so shock detection and the
+    forward path never straddle a non-tradeable gap — the intraday-market analog of the 24/7 crypto
+    series, where every bar was contiguous.
+    """
+    if len(stamps) != len(levels):
+        raise ValueError("stamps and levels must share one length")
+    runs: list[list[Decimal]] = []
+    cur: list[Decimal] = []
+    for i, lv in enumerate(levels):
+        if i > 0 and stamps[i] - stamps[i - 1] > max_gap_s:
+            runs.append(cur)
+            cur = []
+        cur.append(lv)
+    if cur:
+        runs.append(cur)
+    return runs
+
+
 def bar_returns(levels: list[Decimal]) -> list[Decimal]:
     """Simple 1-bar returns aligned to ``levels``; ``returns[0] == 0`` (bar 0 has no prior)."""
     out = [_ZERO]
