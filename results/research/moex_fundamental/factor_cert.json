@@ -1,8 +1,9 @@
 {
   "study": "moex_fundamental_factor",
-  "bar": "CBR key-rate deposit opened at entry (real steps)",
+  "bar": "deposit REINVESTED at the moving CBR key rate over each hold (real steps to 2026-07, current 14.25% and easing); frozen-entry-rate bar kept as *_frozen",
   "hold_days": 365,
   "caveats": [
+    "The deposit bar is a MOVING TARGET: it peaked at 16-21% (the regime that dominates this 2022-2025 panel) and has since EASED to ~14.25% (CBR, 2026-07) and falling. The 'deposit unbeatable' finding is REGIME-CONDITIONAL on the peak; as the bar drops toward neutral the equity/factor case mechanically strengthens",
     "N=4 annual waves: spread hit-rates ~0.5/0.5/0.0 are coin-flip — the TOP_BELOW_DEPOSIT label is NOT statistically distinguishable from zero; read it as directional hypothesis-refutation, not a proven factor verdict",
     "MARKET/BETA verdict more than a factor verdict: the whole equal-weight universe also trailed the deposit in the 3 losing waves (2022 +5.7% vs 20%, 2025 -8.3% vs 21%); the one win (2023) was the low-rate 7.5% post-crash rebound",
     "ISS closes back-adjusted for splits (PLZL 1:10.18, GMKN 1:98.4, VTBR reverse); dividends are NOT split-adjusted (minor residual); pre-fix GP/A was -12.6%, split-corrected ~-8.4% — label unchanged, magnitude was inflated by the bug",
@@ -18,7 +19,7 @@
       "n_years": 4,
       "mean_ls_spread": -0.04482038079265198,
       "spread_hit_rate": 0.5,
-      "mean_top_excess_over_deposit": -0.08346402465165473,
+      "mean_top_excess_over_deposit": -0.06915923013110678,
       "caveat": "THIN/SHORT/POST-2022 — hypothesis, not edge"
     },
     "ev_ebitda_cheap": {
@@ -26,7 +27,7 @@
       "n_years": 4,
       "mean_ls_spread": 0.0027219251128219723,
       "spread_hit_rate": 0.25,
-      "mean_top_excess_over_deposit": -0.03872726341516388,
+      "mean_top_excess_over_deposit": -0.024083427798725535,
       "caveat": "THIN/SHORT/POST-2022 — hypothesis, not edge"
     },
     "roa": {
@@ -34,7 +35,7 @@
       "n_years": 4,
       "mean_ls_spread": -0.10792357684591185,
       "spread_hit_rate": 0.25,
-      "mean_top_excess_over_deposit": -0.044198875025450224,
+      "mean_top_excess_over_deposit": -0.02955503940901188,
       "caveat": "THIN/SHORT/POST-2022 — hypothesis, not edge"
     }
   },
@@ -51,8 +52,10 @@
           "n_with_forward": 19,
           "ls_spread": 0.08385355997500278,
           "top_mean_return": -0.05405274213899548,
-          "deposit_return": 0.2,
-          "top_excess_over_deposit": -0.2540527421389955
+          "deposit_return": 0.10317808219178082,
+          "deposit_return_frozen": 0.2,
+          "top_excess_over_deposit": -0.15723082433077631,
+          "top_excess_over_frozen": -0.2540527421389955
         },
         {
           "report_year": 2023,
@@ -63,8 +66,10 @@
           "n_with_forward": 14,
           "ls_spread": -0.3628735063940247,
           "top_mean_return": 0.25337548174171065,
-          "deposit_return": 0.075,
-          "top_excess_over_deposit": 0.17837548174171064
+          "deposit_return": 0.11761643835616438,
+          "deposit_return_frozen": 0.075,
+          "top_excess_over_deposit": 0.13575904338554626,
+          "top_excess_over_frozen": 0.17837548174171064
         },
         {
           "report_year": 2024,
@@ -75,8 +80,10 @@
           "n_with_forward": 19,
           "ls_spread": -0.1703063148278928,
           "top_mean_return": 0.004627800049519656,
-          "deposit_return": 0.16,
-          "top_excess_over_deposit": -0.15537219995048035
+          "deposit_return": 0.18545205479452054,
+          "deposit_return_frozen": 0.16,
+          "top_excess_over_deposit": -0.18082425474500088,
+          "top_excess_over_frozen": -0.15537219995048035
         },
         {
           "report_year": 2025,
@@ -87,8 +94,10 @@
           "n_with_forward": 21,
           "ls_spread": 0.2700447380763068,
           "top_mean_return": 0.1071933617411463,
-          "deposit_return": 0.21,
-          "top_excess_over_deposit": -0.10280663825885371
+          "deposit_return": 0.18153424657534248,
+          "deposit_return_frozen": 0.21,
+          "top_excess_over_deposit": -0.07434088483419617,
+          "top_excess_over_frozen": -0.10280663825885371
         }
       ]
     },
@@ -104,8 +113,10 @@
           "n_with_forward": 24,
           "ls_spread": -0.10977289064228171,
           "top_mean_return": -0.02246048850402929,
-          "deposit_return": 0.2,
-          "top_excess_over_deposit": -0.2224604885040293
+          "deposit_return": 0.10283561643835616,
+          "deposit_return_frozen": 0.2,
+          "top_excess_over_deposit": -0.12529610494238547,
+          "top_excess_over_frozen": -0.2224604885040293
         },
         {
           "report_year": 2023,
@@ -116,8 +127,10 @@
           "n_with_forward": 19,
           "ls_spread": 0.29774422198492567,
           "top_mean_return": 0.5856483815693211,
-          "deposit_return": 0.075,
-          "top_excess_over_deposit": 0.5106483815693211
+          "deposit_return": 0.11761643835616438,
+          "deposit_return_frozen": 0.075,
+          "top_excess_over_deposit": 0.4680319432131567,
+          "top_excess_over_frozen": 0.5106483815693211
         },
         {
           "report_year": 2024,
@@ -128,8 +141,10 @@
           "n_with_forward": 25,
           "ls_spread": -0.11670498953964707,
           "top_mean_return": -0.018710430588246067,
-          "deposit_return": 0.16,
-          "top_excess_over_deposit": -0.17871043058824607
+          "deposit_return": 0.18504109589041096,
+          "deposit_return_frozen": 0.16,
+          "top_excess_over_deposit": -0.20375152647865702,
+          "top_excess_over_frozen": -0.17871043058824607
         },
         {
           "report_year": 2025,
@@ -140,8 +155,10 @@
           "n_with_forward": 31,
           "ls_spread": -0.060378641351709,
           "top_mean_return": -0.05438651613770127,
-          "deposit_return": 0.21,
-          "top_excess_over_deposit": -0.26438651613770126
+          "deposit_return": 0.18093150684931505,
+          "deposit_return_frozen": 0.21,
+          "top_excess_over_deposit": -0.23531802298701635,
+          "top_excess_over_frozen": -0.26438651613770126
         }
       ]
     },
@@ -157,8 +174,10 @@
           "n_with_forward": 27,
           "ls_spread": -0.4215857166604292,
           "top_mean_return": -0.11285573461559863,
-          "deposit_return": 0.2,
-          "top_excess_over_deposit": -0.3128557346155986
+          "deposit_return": 0.10283561643835616,
+          "deposit_return_frozen": 0.2,
+          "top_excess_over_deposit": -0.2156913510539548,
+          "top_excess_over_frozen": -0.3128557346155986
         },
         {
           "report_year": 2023,
@@ -169,8 +188,10 @@
           "n_with_forward": 19,
           "ls_spread": -0.005465077004234072,
           "top_mean_return": 0.5443004966964549,
-          "deposit_return": 0.075,
-          "top_excess_over_deposit": 0.4693004966964549
+          "deposit_return": 0.11761643835616438,
+          "deposit_return_frozen": 0.075,
+          "top_excess_over_deposit": 0.4266840583402905,
+          "top_excess_over_frozen": 0.4693004966964549
         },
         {
           "report_year": 2024,
@@ -181,8 +202,10 @@
           "n_with_forward": 28,
           "ls_spread": -0.09272886058600213,
           "top_mean_return": 0.0327651994637652,
-          "deposit_return": 0.16,
-          "top_excess_over_deposit": -0.1272348005362348
+          "deposit_return": 0.18504109589041096,
+          "deposit_return_frozen": 0.16,
+          "top_excess_over_deposit": -0.15227589642664577,
+          "top_excess_over_frozen": -0.1272348005362348
         },
         {
           "report_year": 2025,
@@ -193,8 +216,10 @@
           "n_with_forward": 34,
           "ls_spread": 0.088085346867018,
           "top_mean_return": 0.003994538353577612,
-          "deposit_return": 0.21,
-          "top_excess_over_deposit": -0.2060054616464224
+          "deposit_return": 0.18093150684931505,
+          "deposit_return_frozen": 0.21,
+          "top_excess_over_deposit": -0.17693696849573745,
+          "top_excess_over_frozen": -0.2060054616464224
         }
       ]
     }
