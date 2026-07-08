@@ -66,7 +66,12 @@ _KEY_RATE_STEPS: list[tuple[date, Decimal]] = [
     (date(2025, 6, 9), Decimal("20.0")),
     (date(2025, 7, 28), Decimal("18.0")),
     (date(2025, 9, 15), Decimal("17.0")),
-    (date(2025, 10, 27), Decimal("16.0")),
+    (date(2025, 10, 27), Decimal("16.5")),
+    (date(2025, 12, 22), Decimal("16.0")),
+    (date(2026, 2, 16), Decimal("15.5")),
+    (date(2026, 3, 23), Decimal("15.0")),
+    (date(2026, 4, 27), Decimal("14.5")),
+    (date(2026, 6, 22), Decimal("14.25")),  # current (CBR, fetched 2026-07-08) — easing continues
 ]
 
 
@@ -78,6 +83,29 @@ def _key_rate(d: date) -> Decimal:
         else:
             break
     return rate
+
+
+def realized_deposit(entry: date, days: int) -> Decimal:
+    """Deposit total return over the hold, REINVESTED at the changing CBR key rate.
+
+    The honest bar: an investor who opens a deposit at ``entry`` earns the key rate
+    as it MOVES over the year, not the frozen entry rate. In an easing cycle this is
+    materially LOWER than the entry rate (a 2025-03 entry at 21% earns less as CBR
+    cuts through the year); in a hiking cycle it is higher. Piecewise ACT/365.
+    """
+    total = Decimal(0)
+    cur = entry
+    end = entry + timedelta(days=days)
+    while cur < end:
+        rate = _key_rate(cur)
+        nxt = end
+        for eff, _ in _KEY_RATE_STEPS:
+            if cur < eff < nxt:
+                nxt = eff
+        seg = (nxt - cur).days
+        total += (rate / Decimal(100)) * (Decimal(seg) / Decimal(365))
+        cur = nxt
+    return total
 
 
 def _parse_asof(s: str) -> date | None:
@@ -188,9 +216,13 @@ def _run_factor(panel: dict, factor: str) -> dict:
         spread = long_short_spread(labels, fwd)
         top_rets = [fwd[t] for t, lab in labels.items() if lab == "top" and t in fwd]
         top_mean = sum(top_rets, Decimal(0)) / Decimal(len(top_rets)) if top_rets else None
-        # deposit opened at the median entry date of this cross-section
+        # deposit opened at the median entry date of this cross-section.
+        # dep_frozen = old (too-hard) bar: entry rate held flat 1yr.
+        # dep_real  = honest bar: reinvested at the CBR key rate as it MOVES (in an
+        #             easing cycle this is lower than the frozen entry rate).
         med_entry = sorted(entry_dates[t] for t, _ in cross)[len(cross) // 2]
-        dep = deposit_accrual(_key_rate(med_entry), _HOLD_DAYS)
+        dep_frozen = deposit_accrual(_key_rate(med_entry), _HOLD_DAYS)
+        dep_real = realized_deposit(med_entry, _HOLD_DAYS)
         per_year.append(
             {
                 "report_year": fy,
@@ -201,9 +233,15 @@ def _run_factor(panel: dict, factor: str) -> dict:
                 "n_with_forward": len(fwd),
                 "ls_spread": float(spread) if spread is not None else None,
                 "top_mean_return": float(top_mean) if top_mean is not None else None,
-                "deposit_return": float(dep),
+                "deposit_return": float(dep_real),  # PRIMARY = realized reinvested
+                "deposit_return_frozen": float(dep_frozen),
                 "top_excess_over_deposit": (
-                    float(excess_over_deposit(top_mean, dep)) if top_mean is not None else None
+                    float(excess_over_deposit(top_mean, dep_real)) if top_mean is not None else None
+                ),
+                "top_excess_over_frozen": (
+                    float(excess_over_deposit(top_mean, dep_frozen))
+                    if top_mean is not None
+                    else None
                 ),
             }
         )
@@ -263,9 +301,14 @@ def main() -> None:
     summary = _verdict(results)
     cert = {
         "study": "moex_fundamental_factor",
-        "bar": "CBR key-rate deposit opened at entry (real steps)",
+        "bar": "deposit REINVESTED at the moving CBR key rate over each hold (real steps to "
+        "2026-07, current 14.25% and easing); frozen-entry-rate bar kept as *_frozen",
         "hold_days": _HOLD_DAYS,
         "caveats": [
+            "The deposit bar is a MOVING TARGET: it peaked at 16-21% (the regime that "
+            "dominates this 2022-2025 panel) and has since EASED to ~14.25% (CBR, 2026-07) "
+            "and falling. The 'deposit unbeatable' finding is REGIME-CONDITIONAL on the peak; "
+            "as the bar drops toward neutral the equity/factor case mechanically strengthens",
             "N=4 annual waves: spread hit-rates ~0.5/0.5/0.0 are coin-flip — the "
             "TOP_BELOW_DEPOSIT label is NOT statistically distinguishable from zero; "
             "read it as directional hypothesis-refutation, not a proven factor verdict",
