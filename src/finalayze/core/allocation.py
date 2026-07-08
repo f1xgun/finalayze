@@ -16,6 +16,51 @@ from finalayze.core.schemas import AssetClass
 
 _DEFAULT_TIGHTEN_STEP = Decimal("0.05")  # 5pp equity->deposit per step (D-05, parameter-free)
 _ZERO = Decimal(0)
+_ONE = Decimal(1)
+
+
+def graded_regime_weights(
+    high_rate: dict[AssetClass, Decimal],
+    easing: dict[AssetClass, Decimal],
+    current_rate: Decimal,
+    peak_rate: Decimal,
+    neutral_rate: Decimal,
+) -> dict[AssetClass, Decimal]:
+    """Interpolate high_rate<->easing weights by how far the key rate has fallen (graded regime).
+
+    The shipped Phase-76 tilt is a BINARY switch: full ``high_rate`` until the first CBR
+    cut, then a full jump to ``easing`` regardless of how far rates actually fall. This
+    grades that response to the DEPTH of easing:
+
+        t = clamp((peak_rate - current_rate) / (peak_rate - neutral_rate), 0, 1)
+        weights = high_rate * (1 - t) + easing * t
+
+    At/above the cycle ``peak_rate`` -> full ``high_rate`` (deposit-anchored). At/below the
+    ``neutral_rate`` anchor -> full ``easing``. In between the shift is proportional to how
+    far the rate has travelled toward neutral, so a shallow early cut moves the book only a
+    little and conviction builds as rates approach neutral.
+
+    Pure, monotone, parameter-light: ``peak_rate`` and ``neutral_rate`` are ECONOMIC anchors
+    (cycle peak, long-run neutral), NOT free parameters fitted to a verdict (Pitfall 8). The
+    result is a convex combination of two vectors that each sum to 1.0 and are non-negative,
+    so it also sums to 1.0 and is non-negative -- no renormalization, no solver. The binary
+    Phase-76 switch is the ``t in {0, 1}`` special case of this rule.
+
+    Raises:
+        ValueError: if ``peak_rate <= neutral_rate`` (a non-positive easing span) or the two
+            weight vectors do not carry the same asset classes.
+    """
+    if peak_rate <= neutral_rate:
+        msg = f"peak_rate {peak_rate} must exceed neutral_rate {neutral_rate}"
+        raise ValueError(msg)
+    if set(high_rate) != set(easing):
+        msg = "high_rate and easing must carry the same asset classes"
+        raise ValueError(msg)
+
+    t = (peak_rate - current_rate) / (peak_rate - neutral_rate)
+    t = max(_ZERO, min(_ONE, t))
+    one_minus = _ONE - t
+    return {cls: high_rate[cls] * one_minus + easing[cls] * t for cls in high_rate}
 
 
 def tighten(
