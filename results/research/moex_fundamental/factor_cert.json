@@ -1,0 +1,202 @@
+{
+  "study": "moex_fundamental_factor",
+  "bar": "CBR key-rate deposit opened at entry (real steps)",
+  "hold_days": 365,
+  "caveats": [
+    "N=4 annual waves: spread hit-rates ~0.5/0.5/0.0 are coin-flip — the TOP_BELOW_DEPOSIT label is NOT statistically distinguishable from zero; read it as directional hypothesis-refutation, not a proven factor verdict",
+    "MARKET/BETA verdict more than a factor verdict: the whole equal-weight universe also trailed the deposit in the 3 losing waves (2022 +5.7% vs 20%, 2025 -8.3% vs 21%); the one win (2023) was the low-rate 7.5% post-crash rebound",
+    "ISS closes back-adjusted for splits (PLZL 1:10.18, GMKN 1:98.4, VTBR reverse); dividends are NOT split-adjusted (minor residual); pre-fix GP/A was -12.6%, split-corrected ~-8.4% — label unchanged, magnitude was inflated by the bug",
+    "GP/A cross-section excludes BOTH banks (no COGS/empty MSFO) AND oil majors (GAZP/LKOH/NVTK/SNGS have no SmartLab MSFO revenue/cost) -> ~40% metals&mining; the GP/A top-tercile return is largely a metals-cohort proxy, and 2022 reflects the war-shock hit to that cohort as much as the GP/A signal itself",
+    "SmartLab is survivor-biased (no delisted tickers): survivors have upward-biased returns, so a no-edge verdict is CONSERVATIVE (true edge <= measured)",
+    "SmartLab IFRS depth ~5-6 fiscal years -> panel is short, post-2022-dominated; serves possibly-restated values (only the disclosure date is frozen)",
+    "entry = disclosure date 'Дата отчёта' (look-ahead-safe); ~18 of the 2022-wave entries fall in the MOEX halt (2022-02-28..03-23) and use stale ISS carry-forward quotes — correcting to the Mar-24 reopen makes the deposit gap slightly WIDER",
+    "deposit bar uses the wave-median entry key rate held simple ACT/365 (uncompounded) — conservative in 3 of 4 waves"
+  ],
+  "summary": {
+    "gp_a": {
+      "verdict": "TOP_BELOW_DEPOSIT",
+      "n_years": 4,
+      "mean_ls_spread": -0.04482038079265198,
+      "spread_hit_rate": 0.5,
+      "mean_top_excess_over_deposit": -0.08346402465165473,
+      "caveat": "THIN/SHORT/POST-2022 — hypothesis, not edge"
+    },
+    "ev_ebitda_cheap": {
+      "verdict": "TOP_BELOW_DEPOSIT",
+      "n_years": 4,
+      "mean_ls_spread": 0.0027219251128219723,
+      "spread_hit_rate": 0.25,
+      "mean_top_excess_over_deposit": -0.03872726341516388,
+      "caveat": "THIN/SHORT/POST-2022 — hypothesis, not edge"
+    },
+    "roa": {
+      "verdict": "TOP_BELOW_DEPOSIT",
+      "n_years": 4,
+      "mean_ls_spread": -0.10792357684591185,
+      "spread_hit_rate": 0.25,
+      "mean_top_excess_over_deposit": -0.044198875025450224,
+      "caveat": "THIN/SHORT/POST-2022 — hypothesis, not edge"
+    }
+  },
+  "detail": [
+    {
+      "factor": "gp_a",
+      "per_year": [
+        {
+          "report_year": 2022,
+          "fiscal_year_approx": 2021,
+          "entry": "2022-03-03",
+          "key_rate_pct": 20.0,
+          "n_names": 23,
+          "n_with_forward": 19,
+          "ls_spread": 0.08385355997500278,
+          "top_mean_return": -0.05405274213899548,
+          "deposit_return": 0.2,
+          "top_excess_over_deposit": -0.2540527421389955
+        },
+        {
+          "report_year": 2023,
+          "fiscal_year_approx": 2022,
+          "entry": "2023-03-20",
+          "key_rate_pct": 7.5,
+          "n_names": 18,
+          "n_with_forward": 14,
+          "ls_spread": -0.3628735063940247,
+          "top_mean_return": 0.25337548174171065,
+          "deposit_return": 0.075,
+          "top_excess_over_deposit": 0.17837548174171064
+        },
+        {
+          "report_year": 2024,
+          "fiscal_year_approx": 2023,
+          "entry": "2024-03-18",
+          "key_rate_pct": 16.0,
+          "n_names": 22,
+          "n_with_forward": 19,
+          "ls_spread": -0.1703063148278928,
+          "top_mean_return": 0.004627800049519656,
+          "deposit_return": 0.16,
+          "top_excess_over_deposit": -0.15537219995048035
+        },
+        {
+          "report_year": 2025,
+          "fiscal_year_approx": 2024,
+          "entry": "2025-03-14",
+          "key_rate_pct": 21.0,
+          "n_names": 21,
+          "n_with_forward": 21,
+          "ls_spread": 0.2700447380763068,
+          "top_mean_return": 0.1071933617411463,
+          "deposit_return": 0.21,
+          "top_excess_over_deposit": -0.10280663825885371
+        }
+      ]
+    },
+    {
+      "factor": "ev_ebitda_cheap",
+      "per_year": [
+        {
+          "report_year": 2022,
+          "fiscal_year_approx": 2021,
+          "entry": "2022-03-04",
+          "key_rate_pct": 20.0,
+          "n_names": 30,
+          "n_with_forward": 24,
+          "ls_spread": -0.10977289064228171,
+          "top_mean_return": -0.02246048850402929,
+          "deposit_return": 0.2,
+          "top_excess_over_deposit": -0.2224604885040293
+        },
+        {
+          "report_year": 2023,
+          "fiscal_year_approx": 2022,
+          "entry": "2023-03-20",
+          "key_rate_pct": 7.5,
+          "n_names": 25,
+          "n_with_forward": 19,
+          "ls_spread": 0.29774422198492567,
+          "top_mean_return": 0.5856483815693211,
+          "deposit_return": 0.075,
+          "top_excess_over_deposit": 0.5106483815693211
+        },
+        {
+          "report_year": 2024,
+          "fiscal_year_approx": 2023,
+          "entry": "2024-03-15",
+          "key_rate_pct": 16.0,
+          "n_names": 30,
+          "n_with_forward": 25,
+          "ls_spread": -0.11670498953964707,
+          "top_mean_return": -0.018710430588246067,
+          "deposit_return": 0.16,
+          "top_excess_over_deposit": -0.17871043058824607
+        },
+        {
+          "report_year": 2025,
+          "fiscal_year_approx": 2024,
+          "entry": "2025-03-18",
+          "key_rate_pct": 21.0,
+          "n_names": 31,
+          "n_with_forward": 31,
+          "ls_spread": -0.060378641351709,
+          "top_mean_return": -0.05438651613770127,
+          "deposit_return": 0.21,
+          "top_excess_over_deposit": -0.26438651613770126
+        }
+      ]
+    },
+    {
+      "factor": "roa",
+      "per_year": [
+        {
+          "report_year": 2022,
+          "fiscal_year_approx": 2021,
+          "entry": "2022-03-04",
+          "key_rate_pct": 20.0,
+          "n_names": 33,
+          "n_with_forward": 27,
+          "ls_spread": -0.4215857166604292,
+          "top_mean_return": -0.11285573461559863,
+          "deposit_return": 0.2,
+          "top_excess_over_deposit": -0.3128557346155986
+        },
+        {
+          "report_year": 2023,
+          "fiscal_year_approx": 2022,
+          "entry": "2023-03-20",
+          "key_rate_pct": 7.5,
+          "n_names": 25,
+          "n_with_forward": 19,
+          "ls_spread": -0.005465077004234072,
+          "top_mean_return": 0.5443004966964549,
+          "deposit_return": 0.075,
+          "top_excess_over_deposit": 0.4693004966964549
+        },
+        {
+          "report_year": 2024,
+          "fiscal_year_approx": 2023,
+          "entry": "2024-03-15",
+          "key_rate_pct": 16.0,
+          "n_names": 33,
+          "n_with_forward": 28,
+          "ls_spread": -0.09272886058600213,
+          "top_mean_return": 0.0327651994637652,
+          "deposit_return": 0.16,
+          "top_excess_over_deposit": -0.1272348005362348
+        },
+        {
+          "report_year": 2025,
+          "fiscal_year_approx": 2024,
+          "entry": "2025-03-18",
+          "key_rate_pct": 21.0,
+          "n_names": 34,
+          "n_with_forward": 34,
+          "ls_spread": 0.088085346867018,
+          "top_mean_return": 0.003994538353577612,
+          "deposit_return": 0.21,
+          "top_excess_over_deposit": -0.2060054616464224
+        }
+      ]
+    }
+  ]
+}

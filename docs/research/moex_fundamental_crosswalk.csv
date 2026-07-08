@@ -1,0 +1,59 @@
+# MOEX fundamental crosswalk — ticker -> issuer INN (holdings mapped to operating subsidiary) + data-source routing.
+# Built 2026-07-07. INNs web-resolved (rusprofile/cbonds/e-disclosure/CBR, confidence=high) then VALIDATED against
+# RFSD (irlspbru/RFSD) partitions 2019/2020/2021: presence + real revenue/GP + OKVED. Bank REGN from CBR coinfo.
+# data_source: rfsd = FTS RAS via RFSD (GP/A computable); rfsd_partial = numbers in some years only;
+#   cbr = bank form 101/102 (ROA/ROE, NOT GP/A); issuer_ifrs = RFSD NULL/absent -> needs issuer IFRS or e-disclosure.
+# rfsd_usable: TRUE if chosen_key has real revenue+assets in >=1 of 2019-2021 (GP/A harvestable).
+# CRITICAL FINDING: the entire metals-&-mining sector + Rosneft/Surgut/Rostelecom are SYSTEMATICALLY NULL in RFSD
+#   (крупнейшие-налогоплательщики file via inter-regional FTS inspectorates, excluded from the public ГИР БО).
+# columns: ticker,imoex_weight_pct,listed_inn,is_holding,operating_inn,chosen_key,data_source,rfsd_usable,notes
+#
+# --- data_source = rfsd (GP/A computable on standalone RAS) ---
+GAZP,9.21,7736050003,no,,7736050003,rfsd,yes,oil&gas parent; GP/A ~0.10-0.18 across 2019-2021
+LKOH,15.57,7708004767,no,,7708004767,rfsd,yes,GP/A ~0.18-0.40
+TATN,4.56,1644003838,no,,1644003838,rfsd,yes,GP/A ~0.22-0.39
+NVTK,4.05,6316031581,no,,6316031581,rfsd,yes,GP/A ~0.17-0.26
+MTSS,1.2,7740000076,no,,7740000076,rfsd,yes,GP/A ~0.20-0.23
+AFLT,0.54,7712040126,no,,7712040126,rfsd,yes,operating airline; GP/A negative in 2020 (covid) — real
+MSNG,0.18,7705035012,no,,7705035012,rfsd,yes,GP/A ~0.05-0.06
+UGLD,0.24,7424024375,no,,7424024375,rfsd,yes,GP/A ~0.14-0.17
+PHOR,0.58,7736216869,partial,5103070023,7736216869,rfsd,yes,listed PAO files real RAS (GP/A 0.28-0.64); opco Апатит is NULL — use listed
+X5,2.58,9722079341,yes,7825706086,7825706086,rfsd,yes,opco АО Агроторг (Пятёрочка); GP/A 0.87-1.04; listed MKPAO is redomiciled shell
+YDEX,6.3,3900019850,yes,7736207543,7736207543,rfsd,yes,opco ООО Яндекс; GP/A ~0.31-0.32
+VKCO,0.31,3900015862,yes,7842349892,7842349892,rfsd,yes,opco; GP/A 0.73-1.19
+LENT,0.34,3906399157,yes,7814148471,7814148471,rfsd,yes,opco ООО Лента; GP/A 0.44-0.57
+MDMG,0.39,3900026494,yes,7706219750,7706219750,rfsd,yes,opco (Мать и дитя / МД Медикал); GP/A ~0.13-0.19
+HEAD,1.12,3900016369,yes,7718620740,7718620740,rfsd,yes,opco (HH); GP/A 0.56-2.08
+CNRU,0.27,3900031141,yes,7718935772,7718935772,rfsd,yes,opco ООО Айриэлтор (Циан); GP/A 2.2-3.1 (asset-light)
+RAGR,0.26,5003077160,yes,7728278043,7728278043,rfsd,yes,opco (Русагро); GP/A ~0.0 — low-margin agri; usable but weak
+#
+# --- data_source = rfsd_partial (numbers only in some years) ---
+OZON,3.16,3900045916,yes,7704217370,7704217370,rfsd_partial,partial,opco has numbers 2021 only (NULL 2019-2020); GP/A 0.42 (2021)
+POSI,0.25,9718077239,partial,7718668887,9718077239,rfsd_partial,partial,listed holding has small RAS (2020-2021 GP/A ~0.95); opco NULL
+#
+# --- data_source = cbr (bank forms 101/102; ROA/ROE not GP/A) ---
+SBER,13.63,7707083893,no,,REGN:1481,cbr,no,bank; net income=form102 sym 01000-03000; assets=form101 ITGAP
+VTBR,3.01,7702070139,no,,REGN:1000,cbr,no,bank; heavily redacted post-2022
+T,4.94,2540283195,yes,7710140679,REGN:2673,cbr,no,TCS/Т-Технологии holding; operating АО ТБанк REGN 2673 (CBR)
+SVCB,0.54,4401116480,no,,REGN:963,cbr,no,bank Совкомбанк
+CBOM,0.77,7734202860,no,,REGN:1978,cbr,no,bank МКБ
+BSPB,0.32,7831000027,no,,REGN:436,cbr,no,bank Банк Санкт-Петербург (verify REGN on coinfo)
+DOMRF,0.68,7729355614,no,,REGN:2312,cbr,no,development bank (ex-АИЖК); files CBR
+#
+# --- data_source = issuer_ifrs (RFSD NULL/absent; needs issuer IFRS or e-disclosure) ---
+GMKN,4.26,8401005730,no,,8401005730,issuer_ifrs,no,METALS&MINING HOLE — RFSD NULL all years (крупнейший налогоплательщик)
+PLZL,3.86,7703389295,yes,2434000335,,issuer_ifrs,no,gold; listed + opco both NULL in RFSD
+ROSN,2.46,7706107510,no,,7706107510,issuer_ifrs,no,oil; RFSD NULL all years (крупнейший налогоплательщик)
+SNGS,1.66,8602060555,no,,8602060555,issuer_ifrs,no,oil; RFSD NULL all years
+RUAL,0.86,3906394938,yes,3803100054,,issuer_ifrs,no,aluminium; listed+opco NULL; redomiciled holding
+CHMF,0.75,3528000597,no,,3528000597,issuer_ifrs,no,steel; RFSD NULL all years
+NLMK,0.64,4823006703,no,,4823006703,issuer_ifrs,no,steel; RFSD NULL all years
+MAGN,0.39,7414003633,no,,7414003633,issuer_ifrs,no,steel (MMK); RFSD NULL all years
+ALRS,0.35,1433000147,no,,1433000147,issuer_ifrs,no,diamonds; RFSD NULL all years
+IRAO,0.98,2320109650,no,,2320109650,issuer_ifrs,no,power; RFSD has assets but revenue NULL -> GP/A not computable
+RTKM,0.48,7707049388,no,,7707049388,issuer_ifrs,no,telecom; RFSD NULL all years
+ENPG,0.44,3906382033,yes,3906394938,,issuer_ifrs,no,En+ holding shell (GP/A 0.005-0.009); opco RUSAL NULL
+FLOT,0.34,7702060116,yes,,,issuer_ifrs,no,shipping; no single opco (ship SPVs); RFSD NULL
+AFKS,0.34,7703104630,yes,7740000076,,issuer_ifrs,no,conglomerate (Система); standalone shell; MTS is only one asset — no valid single proxy
+MOEX,1.18,7702077840,no,,7702077840,issuer_ifrs,no,exchange (НФО); absent from RFSD despite FTS-RAS expectation -> issuer IFRS
+RENI,0.2,7725497022,no,,7725497022,issuer_ifrs,no,insurer (НФО); absent from RFSD -> issuer IFRS / CBR XBRL
